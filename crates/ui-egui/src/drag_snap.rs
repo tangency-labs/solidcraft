@@ -4,11 +4,12 @@
 //! a midpoint or a curve adds the matching constraint; lining up adds none. The suppress-snap
 //! chord is configurable (default Ctrl/Cmd or Alt/Option; see `prefs::suppress_sketch_snap`).
 
+use solidcraft_engine::geom::prelude::*;
 use std::cell::{Cell, RefCell};
 
 use egui::{Align2, FontId, Stroke};
 use serde_json::{Value, json};
-use solidcraft_engine::geom::Vec2;
+use solidcore_record::Vec2;
 use solidcraft_engine::sketch::{ConstraintKind, CurveKind, Sketch};
 
 use crate::SolveApp;
@@ -248,7 +249,7 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         return;
     }
     let Some(s) = current() else { return };
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let Some(ss) = app.session.active_sketch.and_then(|i| st.sketch(i)) else { return };
     let to = |p: Vec2| proj.to_screen(ss.plane.to_world(p));
     let tk = Tokens::get();

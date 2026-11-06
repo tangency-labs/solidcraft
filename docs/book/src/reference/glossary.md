@@ -303,6 +303,14 @@ component changes every copy. The browser names occurrences with a number, such 
 - **Elsewhere:** occurrence, instance, component instance.
 - **For translators:** not a *pattern instance*.
 
+### opaque path lighting
+
+Indirect diffuse and specular illumination computed by tracing finite light paths between opaque surfaces. Shown as **Indirect lighting (opaque surfaces)** in Sampling.
+
+- **In SolidCraft:** optional CPU `job.options.path` / runtime `raytrace.path`, enabled explicitly in Sampling.
+- **Don't use:** ambient occlusion, glass, full optical parity.
+- **For translators:** this describes light transport; it is unrelated to a modelling path or physical material density.
+
 ### part number
 
 A design property that holds the identifier an organisation gives a design.
@@ -311,6 +319,13 @@ A design property that holds the identifier an organisation gives a design.
   `document.metadata.set`.
 - **Don't use:** part number for a standard part's size.
 - **For translators:** see *Words with more than one meaning*, "part".
+
+### path depth
+
+The maximum number of shaded surfaces in a rendering path, starting with the first visible surface. A depth of 1 uses direct lighting only; higher values allow more light bounces. This does not count CAD mesh vertices.
+
+- **In SolidCraft:** CPU `path.max_depth` is 1–16; longer paths are truncated.
+- **For translators:** a count, not a geometric depth in millimetres or timeline depth.
 
 ### pattern instance
 
@@ -439,6 +454,18 @@ The ordered list of a design's features, which SolidCraft computes from first to
 - **Don't use:** feature history, history (for the timeline).
 - **Elsewhere:** timeline, history, feature tree.
 - **For translators:** not the undo history.
+
+### turn (of two rounds)
+
+How two rounds of a fillet continue where they turn round a sharp corner edge between them, such
+as the rounds along a boss's base at its upright edges: in a mitre, or swept round the corner
+edge as a torus.
+
+- **In SolidCraft:** the `turn` parameter of `solid.fillet` and its design-file key, `mitre`
+  (the default) or `swept`; the Fillet dialog's Turns row.
+- **Don't use:** corner (that is what fills a corner where three rounded edges meet, `corner`).
+- **Elsewhere:** mitred corner, swept corner, corner sweep.
+- **For translators:** "Mitre" and "Swept" name the two shapes, not a direction of travel.
 
 ### view angles
 

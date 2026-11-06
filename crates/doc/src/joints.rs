@@ -14,10 +14,12 @@
 //! linkage, a slider-crank) are met by moving the values of the other joints around the loop;
 //! those that still disagree are reported.
 
+use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Aabb3, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_geom::Aabb3;
 
 use solidcraft_sketch::linalg;
 
@@ -1974,6 +1976,15 @@ pub fn solve_holding_with_analysis(doc: &Document, st: &ModelState, held: &Held,
         dof.clear();
     }
     placed.remove(&0);
+    // A placement that is not a rigid motion within range (values that ran off to infinity, say)
+    // is not applied: the joints placing that occurrence report it.
+    let bad: Vec<u64> = placed.iter().filter(|(_, m)| !crate::is_placement(m)).map(|(occ, _)| *occ).collect();
+    for occ in bad {
+        placed.remove(&occ);
+        for j in asm.joints.iter().filter(|j| !j.suppressed && (j.a.occurrence == occ || j.b.occurrence == occ)) {
+            sol.errors.push((j.id, j.name.clone(), format!("it would place occurrence {occ} outside a rigid placement within 1e9 mm")));
+        }
+    }
     sol.world = placed;
     sol.dof = dof;
     sol

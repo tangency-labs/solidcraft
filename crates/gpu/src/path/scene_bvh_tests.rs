@@ -1,5 +1,5 @@
 use super::{MAX_BVH_DEPTH, Node, Triangle, build};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 use solidcraft_render::{job::CancelToken, surface::OpaqueSurface};
 
 // Triangle centres spread over 60 decades: a sixteen-bin SAH split on the
@@ -16,6 +16,7 @@ fn decades(count: usize) -> Vec<Triangle> {
                 surface,
                 transmission: None,
                 medium: 0,
+                scalar_face: false,
             }
         })
         .collect()

@@ -1,4 +1,5 @@
 //! Selection-following appearance editor. All mutations use the appearance registry.
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{SolveApp, dialogs_appearance, ui_kit};
 use serde_json::{Value, json};
 use solidcraft_engine::{
@@ -76,7 +77,7 @@ fn step_index(step: LookStep) -> usize {
 }
 pub(super) fn targets(app: &SolveApp, step: LookStep) -> Targets {
     let mut targets = Targets::default();
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     for selection in &app.session.selection {
         let body = match selection {
             Sel::Body { name } | Sel::Face { body: name, .. } => state.body(name),
@@ -269,7 +270,7 @@ pub(in crate::render_workspace) fn footer(app: &mut SolveApp, ui: &mut egui::Ui)
     ui.horizontal(|ui| {
         let enabled = !app.session.selection.is_empty();
         if ui_kit::icon_label_action(ui, app.tr("render.inspector_save_library"), Some("plus"), enabled, false)
-            .on_hover_text(app.tr_label("Export design library..."))
+            .backing_on_hover_text(app.tr_label("Export design library..."))
             .clicked()
         {
             app.start("library.export");
@@ -391,7 +392,7 @@ fn draw(app: &mut SolveApp, ui: &mut egui::Ui, view: &mut View, selected: &Targe
                     selected.items.get(index).filter(|_| !matches!(view.inspected, Some(LookStep::Component | LookStep::Material))).and_then(|item| {
                         match item {
                             Sel::Body { name } | Sel::Face { body: name, .. } => {
-                                app.session.world_state().body(name).and_then(|body| app.session.doc.model_display_look(body))
+                                crate::open_meshing::session_world(&app.session).body(name).and_then(|body| app.session.doc.model_display_look(body))
                             }
                             _ => None,
                         }

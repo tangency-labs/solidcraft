@@ -11,6 +11,10 @@ mod palettes;
 use egui::{Color32, Stroke};
 use serde::{Deserialize, Serialize};
 
+/// Expanded Wide hosts compose controls and content in one total row below
+/// this logical height. Independent of pixel density and user UI scaling.
+pub const PANEL_INLINE_MAX_HEIGHT: f32 = 88.0;
+
 thread_local! {
     /// Theme state belongs to the UI thread drawing the frame. Concurrent app/test renderers
     /// must not change one another's palette while a frame or icon texture is being built.
@@ -199,6 +203,7 @@ impl Fade {
 
 #[derive(Clone, Default)]
 struct TabThemeState {
+    blur: BlurIntent,
     prepared: Option<PreparedTheme>,
     environment: Option<Environment>,
     targets: BTreeMap<String, TabTarget>,
@@ -220,6 +225,19 @@ struct TabTarget {
 
 const TAB_STATE: &str = "sc_tab_theme_state";
 
+/// Only authored/effective intent is cached. Runtime OS/device availability is never stored
+/// here. Reuse prepare_tabs' borrowed full-content/raw comparison, including followed reloads.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct BlurIntent {
+    pub offered: bool,
+    pub radius: f32,
+    pub revision: u64,
+}
+
+pub(crate) fn blur_intent(ctx: &egui::Context) -> BlurIntent {
+    ctx.data_mut(|data| data.get_temp_mut_or_default::<TabThemeState>(egui::Id::unique(TAB_STATE)).blur)
+}
+
 /// Cache the authored theme and raw saved values before any effective-value normalization.
 /// Followed-file reloads use full content equality, including edits that keep the same id/base.
 /// The caller supplies its existing normalization contract only on a cache miss.
@@ -230,15 +248,20 @@ pub(crate) fn prepare_tabs(
     values: impl FnOnce() -> BTreeMap<String, crate::theme_files::OptionValue>,
 ) -> Option<Custom> {
     ctx.data_mut(|data| {
-        let state = data.get_temp_mut_or_default::<TabThemeState>(egui::Id::new(TAB_STATE));
+        let state = data.get_temp_mut_or_default::<TabThemeState>(egui::Id::unique(TAB_STATE));
         let same = match (&state.prepared, file) {
             (Some(old), Some(file)) => old.file == *file && old.raw.as_ref() == raw,
             (None, None) => true,
             _ => false,
         };
         if !same {
+            state.blur = BlurIntent { revision: state.blur.revision.wrapping_add(1), ..Default::default() };
             state.prepared = file.map(|file| {
                 let values = values();
+                state.blur.offered = crate::theme_options::declares_blur(file);
+                if state.blur.offered {
+                    state.blur.radius = crate::theme_options::blur_radius(file, &values, crate::theme_options::Availability::Available);
+                }
                 let (enabled, fade_ms) = crate::theme_options::tab_settings(file, &values);
                 let base = Custom { dark: file.base.is_dark(), tokens: crate::theme_files::resolve_with(file, &values) };
                 PreparedTheme { file: file.clone(), raw: raw.cloned(), values, base, enabled, fade_ms }
@@ -384,7 +407,7 @@ impl Bevel {
             let mut rounding: egui::epaint::CornerRadiusF32 = radius.into();
             rounding -= inset;
             let mut path = Vec::new();
-            egui::epaint::tessellator::path::rounded_rectangle(&mut path, edge, rounding);
+            egui::epaint::tessellator::path::rounded_rectangle(&mut path, egui::epaint::RoundedRect::new(edge, rounding));
             if let Some(first) = path.first().copied() {
                 path.push(first);
             }
@@ -657,17 +680,17 @@ impl TabAccent {
     }
 
     pub fn current(ctx: &egui::Context) -> Self {
-        ctx.data(|d| d.get_temp::<Self>(egui::Id::new("sc_tab_accent"))).unwrap_or_else(|| Self::for_tab(&Tokens::get(), "MODEL"))
+        ctx.data(|d| d.get_temp::<Self>(egui::Id::unique("sc_tab_accent"))).unwrap_or_else(|| Self::for_tab(&Tokens::get(), "MODEL"))
     }
 
     pub fn current_icon_accent(ctx: &egui::Context) -> Option<&'static str> {
-        ctx.data(|d| d.get_temp::<Option<&'static str>>(egui::Id::new("sc_tab_icon_accent"))).flatten()
+        ctx.data(|d| d.get_temp::<Option<&'static str>>(egui::Id::unique("sc_tab_icon_accent"))).flatten()
     }
 
     pub fn publish(app: &crate::SolveApp, ctx: &egui::Context) {
         let now = ctx.input(|i| i.time);
         let (published, accent, fading, style_surfaces) = ctx.data_mut(|data| {
-            let state = data.get_temp_mut_or_default::<TabThemeState>(egui::Id::new(TAB_STATE));
+            let state = data.get_temp_mut_or_default::<TabThemeState>(egui::Id::unique(TAB_STATE));
             let (published, accent, fading) = state.publish(&app.ui.tab, now);
             let style_surfaces = published.tab_surfaces || state.styled_surfaces;
             state.styled_surfaces = published.tab_surfaces;
@@ -690,18 +713,18 @@ impl TabAccent {
             ctx.request_repaint();
         }
         ctx.data_mut(|d| {
-            d.insert_temp(egui::Id::new("sc_tab_accent"), accent);
-            d.insert_temp(egui::Id::new("sc_tab_icon_accent"), icon_accent_for_tab(&app.ui.tab));
-            d.insert_temp(egui::Id::new("sc_sketch_open"), app.session.active_sketch.is_some());
-            d.insert_temp(egui::Id::new("sc_tool_accent"), app.tool.is_some() || app.dialog.is_some());
+            d.insert_temp(egui::Id::unique("sc_tab_accent"), accent);
+            d.insert_temp(egui::Id::unique("sc_tab_icon_accent"), icon_accent_for_tab(&app.ui.tab));
+            d.insert_temp(egui::Id::unique("sc_sketch_open"), app.session.active_sketch.is_some());
+            d.insert_temp(egui::Id::unique("sc_tool_accent"), app.tool.is_some() || app.dialog.is_some());
         });
     }
 
     /// Paint only the focused numeric editor, without changing sibling buttons or checkboxes.
     pub fn number_focus(ui: &egui::Ui, response: &egui::Response) {
-        let active = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new("sc_tool_accent"))).unwrap_or(false);
+        let active = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_tool_accent"))).unwrap_or(false);
         let t = Tokens::get();
-        let sketch = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new("sc_sketch_open"))).unwrap_or(false);
+        let sketch = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_sketch_open"))).unwrap_or(false);
         let color = if sketch { t.sketch_accent } else { Self::current(ui.ctx()).color };
         if active && response.has_focus() && color != t.accent {
             ui.painter().rect_stroke(response.rect, t.radius_sm, Stroke::new(1.0, color), egui::StrokeKind::Inside);
@@ -1072,7 +1095,7 @@ pub struct Tokens {
     pub timeline: Color32,
     pub hover: Color32,
     // ---- viewport selection feedback ----
-    /// Selected face (flat fill).
+    /// Selected face (shaded fill).
     pub sel_face: Color32,
     /// Selected edge core and its lighter rim.
     pub sel_edge: Color32,
@@ -1160,6 +1183,9 @@ pub struct Tokens {
     pub chip: Color32,
     /// Inside of bodies cut by a section.
     pub section_cap: Color32,
+    /// The section hatch's other colours by part, after `section_cap` (Preferences > Graphics >
+    /// Section hatch): of its family and lightness, so a cut stays calm.
+    pub section_hatch: [Color32; 2],
     /// Closed sketch profiles (translucent fill).
     pub profile_fill: Color32,
     /// Constraint glyph boxes.
@@ -1260,6 +1286,10 @@ pub struct Tokens {
     pub bend_down: Color32,
     /// Interference: the clash fill, before its shading.
     pub interference: Color32,
+    /// Curvature Comb: the envelope through the teeth tips (purple) and the teeth, the scaled
+    /// normals (orange).
+    pub comb_envelope: Color32,
+    pub comb_teeth: Color32,
     /// Continuity Analysis seams, best to worst as `inspect.continuity` judges them: smooth (G2),
     /// tangent with a curvature jump (G1), a crease (G0) and a gap. Bluish green, blue, yellow
     /// and reddish purple stay apart in every colour vision mode, so no mode changes them.
@@ -1342,11 +1372,90 @@ impl Tokens {
         }
         let scale = percent.clamp(40.0, 100.0) / 100.0;
         let body_inks = [self.text, self.form_ink, self.dialog_label];
-        for fill in [&mut self.panel, &mut self.panel_header, &mut self.dialog_bg, &mut self.dialog_body, &mut self.dialog_footer, &mut self.overlay]
-        {
-            *fill = readable_fill(*fill, &body_inks, scale);
+        let all_inks = [self.text, self.form_ink, self.dialog_label, self.text_dim, self.form_dim];
+        for fill in [
+            &mut self.panel,
+            &mut self.panel_header,
+            &mut self.toolbar,
+            &mut self.timeline,
+            &mut self.dialog_bg,
+            &mut self.dialog_body,
+            &mut self.dialog_footer,
+            &mut self.overlay,
+        ] {
+            let protected = readable_fill(*fill, &all_inks, scale);
+            // Some authored dim inks cannot meet the target without an opaque fill.
+            // Keep the existing primary-text floor in that case so opacity still works.
+            *fill = if protected.a() < 255 { protected } else { readable_fill(*fill, &body_inks, scale) };
         }
         self.nav_tip = readable_fill(self.nav_tip, &[self.nav_tip_ink], scale);
+    }
+
+    /// Scale neutral backing colours before opacity protection; semantic ink stays authored.
+    pub(crate) fn apply_surface_brightness(&mut self, percent: f32) {
+        if !percent.is_finite() || percent == 100.0 {
+            return;
+        }
+        let scale = percent.clamp(60.0, 120.0) / 100.0;
+        let adjust = |color: &mut Color32| {
+            let [r, g, b, a] = color.to_srgba_unmultiplied();
+            if a > 0 {
+                let channel = |v: u8| (f32::from(v) * scale).round().clamp(0.0, 255.0) as u8;
+                *color = Color32::from_rgba_unmultiplied(channel(r), channel(g), channel(b), a);
+            }
+        };
+        for color in [
+            &mut self.panel,
+            &mut self.panel_header,
+            &mut self.toolbar,
+            &mut self.timeline,
+            &mut self.timeline_item,
+            &mut self.dialog_bg,
+            &mut self.dialog_body,
+            &mut self.dialog_footer,
+            &mut self.overlay,
+            &mut self.field,
+            &mut self.control_fill,
+            &mut self.app_bar,
+            &mut self.app_bar_tab_active,
+            &mut self.nav_tip,
+            &mut self.nav_field,
+            &mut self.nav_viewport,
+            &mut self.glyph_bg,
+            &mut self.cube_face,
+            &mut self.viewport_top,
+            &mut self.viewport_bottom,
+            &mut self.grid,
+            &mut self.grid_major,
+            &mut self.border,
+            &mut self.dialog_border,
+            &mut self.dialog_rule,
+            &mut self.control_border,
+            &mut self.app_bar_separator,
+            &mut self.nav_tip_key_border,
+            &mut self.cube_border,
+            &mut self.file_background,
+            &mut self.file_surface,
+            &mut self.file_border,
+            &mut self.file_recovery_well,
+        ] {
+            adjust(color);
+        }
+        for stroke in [
+            &mut self.borders.primary,
+            &mut self.borders.secondary,
+            &mut self.borders.tertiary,
+            &mut self.borders.container,
+            &mut self.borders.control,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            adjust(&mut stroke.color);
+        }
+        if let Some(inset) = &mut self.borders.primary_inset {
+            adjust(&mut inset.stroke.color);
+        }
     }
 
     /// These tokens with the 3D view's background one flat colour (#7688), or as they are for `None`.
@@ -1412,6 +1521,7 @@ impl Tokens {
             sketch_point: view.sketch_point,
             sketch_point_free: view.sketch_point_free,
             section_cap: view.section_cap,
+            section_hatch: view.section_hatch,
             profile_fill: view.profile_fill,
             glyph_bg: view.glyph_bg,
             glyph_edge: view.glyph_edge,
@@ -1426,6 +1536,8 @@ impl Tokens {
             bend_up: view.bend_up,
             bend_down: view.bend_down,
             interference: view.interference,
+            comb_envelope: view.comb_envelope,
+            comb_teeth: view.comb_teeth,
             continuity: view.continuity,
             analysis: view.analysis,
             ..self
@@ -1650,6 +1762,51 @@ mod tests {
     }
 
     #[test]
+    fn blur_intent_cache_resolves_only_when_theme_or_raw_values_change() {
+        let ctx = egui::Context::default();
+        let source: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/theme-blur.json")).unwrap();
+        let mut file = crate::theme_files::from_value(&source).unwrap();
+        let resolutions = Cell::new(0);
+        let prepare = |file: Option<&crate::theme_files::ThemeFile>, raw: Option<&BTreeMap<String, serde_json::Value>>| {
+            prepare_tabs(&ctx, file, raw, || {
+                resolutions.set(resolutions.get() + 1);
+                let saved = raw.into_iter().flatten().map(|(k, v)| (k.clone(), serde_json::from_value(v.clone()).unwrap())).collect();
+                file.map_or_else(BTreeMap::new, |file| crate::theme_files::effective_values(file, &saved).0)
+            });
+        };
+        for _ in 0..100 {
+            prepare(None, None);
+        }
+        assert_eq!(resolutions.get(), 0, "builtins do not normalize option tables");
+        prepare(Some(&file), None);
+        let zero = blur_intent(&ctx);
+        assert!(zero.offered);
+        assert_eq!(zero.radius, 0.0);
+        for _ in 0..100 {
+            prepare(Some(&file), None);
+        }
+        assert_eq!(resolutions.get(), 1, "offered zero is a borrowed cache hit");
+        assert_eq!(blur_intent(&ctx).revision, zero.revision);
+        let raw = BTreeMap::from([("blur".into(), serde_json::json!(18.25))]);
+        prepare(Some(&file), Some(&raw));
+        assert_eq!(blur_intent(&ctx).radius, 18.25);
+        assert_ne!(blur_intent(&ctx).revision, zero.revision);
+        for _ in 0..100 {
+            prepare(Some(&file), Some(&raw));
+        }
+        assert_eq!(resolutions.get(), 2);
+        // Followed reload keeps id/base, but content changes: it must invalidate.
+        file.options.retain(|o| o.id != "blur");
+        prepare(Some(&file), Some(&raw));
+        assert!(!blur_intent(&ctx).offered);
+        assert_eq!(blur_intent(&ctx).radius, 0.0);
+        for _ in 0..100 {
+            prepare(Some(&file), Some(&raw));
+        }
+        assert_eq!(resolutions.get(), 3, "undeclared themes also reuse the borrowed identity");
+    }
+
+    #[test]
     fn tabs_cache_invalidates_for_theme_values_vision_and_viewport_overrides() {
         let ctx = egui::Context::default();
         let mut file = crate::theme_files::tab_fixture("dark");
@@ -1663,7 +1820,7 @@ mod tests {
             set_dark(file.base.is_dark());
             set_custom(custom);
         };
-        let publish = || ctx.data_mut(|d| d.get_temp_mut_or_default::<TabThemeState>(egui::Id::new(TAB_STATE)).publish("SKETCH", 1.0));
+        let publish = || ctx.data_mut(|d| d.get_temp_mut_or_default::<TabThemeState>(egui::Id::unique(TAB_STATE)).publish("SKETCH", 1.0));
         set_vision(ColorVision::Off);
         set_viewport_dark(None);
         set_viewport_background(None);
@@ -1698,7 +1855,7 @@ mod tests {
         let ctx = crate::fonts::test_context();
         let mut state = tabs_state("dark", BTreeMap::new());
         state.publish("MODEL", 0.0);
-        ctx.data_mut(|d| d.insert_temp(egui::Id::new(TAB_STATE), state));
+        ctx.data_mut(|d| d.insert_temp(egui::Id::unique(TAB_STATE), state));
         app.ui.tab = "SKETCH".into();
         let frame = |time| {
             let mut out = ctx.run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |ui| {
@@ -1725,7 +1882,7 @@ mod tests {
             frame(time);
         }
         assert_eq!(frame(2.0), std::time::Duration::MAX);
-        let (end, _, _) = ctx.data_mut(|d| d.get_temp_mut_or_default::<TabThemeState>(egui::Id::new(TAB_STATE)).publish("SKETCH", 2.0));
+        let (end, _, _) = ctx.data_mut(|d| d.get_temp_mut_or_default::<TabThemeState>(egui::Id::unique(TAB_STATE)).publish("SKETCH", 2.0));
         assert_eq!(Tokens::get(), end.tokens);
         let mut instant = tabs_state("dark", BTreeMap::from([("tab_fade_ms".into(), OptionValue::Num(0.0))]));
         instant.publish("MODEL", 0.0);
@@ -1746,14 +1903,15 @@ mod tests {
             let actual = visuals(dark);
             let original = if dark { egui::Visuals::dark() } else { egui::Visuals::light() };
             assert_eq!(actual.menu_corner_radius, original.menu_corner_radius);
+            // egui 0.37 rounds its widgets 4 points; ours keep the 2 and 3 points egui used before.
             for (a, b) in [
-                (actual.widgets.noninteractive, original.widgets.noninteractive),
-                (actual.widgets.inactive, original.widgets.inactive),
-                (actual.widgets.hovered, original.widgets.hovered),
-                (actual.widgets.active, original.widgets.active),
-                (actual.widgets.open, original.widgets.open),
+                (actual.widgets.noninteractive, 2),
+                (actual.widgets.inactive, 2),
+                (actual.widgets.hovered, 3),
+                (actual.widgets.active, 2),
+                (actual.widgets.open, 2),
             ] {
-                assert_eq!(a.corner_radius, b.corner_radius);
+                assert_eq!(a.corner_radius, egui::CornerRadius::same(b));
             }
             let tokens = Tokens { radius_sm: 0, radius_md: 0, ..Tokens::dark() };
             set_custom(Some(Custom { dark, tokens }));

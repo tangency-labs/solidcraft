@@ -11,10 +11,11 @@
 
 use egui::{Color32, Pos2, Stroke, vec2};
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_engine::doc::HoleReference;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::doc::hole_reference::{ReferenceFrame, on_reference_face, reference_frame};
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::{Sel, Session};
 
 use crate::SolveApp;
@@ -73,12 +74,12 @@ struct Framed {
 
 /// The reference edge inputs a Single hole's dialog has after its face input.
 pub(crate) fn inputs() -> [SelInput; 2] {
-    REFERENCES.map(|label| SelInput::new(label, EDGES, false))
+    REFERENCES.map(|label| SelInput::new(label, EDGES, false).tip("dialog.reference_edge_tip"))
 }
 
 /// The Cylinder window's inputs: where it stands (a face, or a vertex), then the reference edges.
 pub(crate) fn cylinder_inputs() -> Vec<SelInput> {
-    let mut v = vec![SelInput::new("Face", PLANAR_FACES | FACES | VERTICES, false)];
+    let mut v = vec![SelInput::new("Face", PLANAR_FACES | FACES | VERTICES, false).tip("dialog.cylinder_face_tip")];
     v.extend(inputs());
     v
 }
@@ -168,7 +169,7 @@ fn direction(s: &Session, d: &Dialog, at: Vec3) -> Option<Vec3> {
     if let Kind::Primitive { at: Some((_, normal)), .. } = &d.kind {
         return normal.map(|n| -n);
     }
-    d.extra.get("direction").and_then(vec3).or_else(|| solidcraft_engine::doc::hole_direction_at(&s.world_state(), at))
+    d.extra.get("direction").and_then(vec3).or_else(|| solidcraft_engine::doc::hole_direction_at(&crate::open_meshing::session_world(s), at, &[]))
 }
 
 /// The face's frame at the place for the picked edges (and which reference inputs they are), found
@@ -189,7 +190,7 @@ fn frame(s: &Session, d: &mut Dialog) -> Option<(ReferenceFrame, Vec<usize>)> {
     let picked: Vec<(usize, Vec3)> = edges.iter().enumerate().filter_map(|(k, e)| e.map(|p| (k, p))).collect();
     let found = direction(s, d, at).and_then(|dir| {
         let pts: Vec<(Vec3, Option<&str>)> = picked.iter().map(|(_, p)| (*p, None)).collect();
-        reference_frame(&s.world_state(), at, dir, &pts, true).ok().map(|f| (f, picked.iter().map(|(k, _)| *k).collect()))
+        reference_frame(&crate::open_meshing::session_world(s), at, dir, &pts, true).ok().map(|f| (f, picked.iter().map(|(k, _)| *k).collect()))
     });
     if let Some(refs) = refs_mut(d) {
         refs.frame = Some(Framed { revision: s.revision, place: at, edges, frame: found.clone() });
@@ -222,7 +223,9 @@ pub(crate) fn sync(s: &Session, d: &mut Dialog, decimals: u8) {
             Some(sn) if sn.distance != refs.distance => {
                 let values: Option<Vec<f64>> =
                     picked.iter().map(|k| model_text(refs, *k).and_then(|e| s.doc.eval(e, ValueKind::Length).ok())).collect();
-                if let Some(c) = values.and_then(|v| f.place(at, &v).ok()).filter(|c| on_reference_face(&s.world_state(), f, *c)) {
+                if let Some(c) =
+                    values.and_then(|v| f.place(at, &v).ok()).filter(|c| on_reference_face(&crate::open_meshing::session_world(s), f, *c))
+                {
                     to = c;
                 }
             }
@@ -310,7 +313,7 @@ pub(crate) fn restore(s: &Session, d: &mut Dialog, references: &[HoleReference],
         return;
     }
     let Some(at) = place(d) else { return };
-    let st = s.world_state();
+    let st = crate::open_meshing::session_world(s);
     let edges: Vec<(Vec3, Option<&str>)> = references.iter().enumerate().map(|(k, r)| (r.edge.0, names.get(k).map(String::as_str))).collect();
     let found = direction(s, d, at).and_then(|dir| reference_frame(&st, at, dir, &edges, false).ok());
     let mesh = found.as_ref().and_then(|f| st.body(&f.body)).map(|b| b.mesh());
@@ -370,7 +373,7 @@ pub(crate) fn restore(s: &Session, d: &mut Dialog, references: &[HoleReference],
 /// found as it was made: OK then reports why).
 fn nearest_edge(s: &Session, at: Vec3, p: Vec3) -> Option<Sel> {
     let Some(Sel::Face { body, .. }) = crate::dialogs::face_sel(s, at) else { return None };
-    let st = s.world_state();
+    let st = crate::open_meshing::session_world(s);
     let m = st.body(&body)?.mesh();
     let to = |e: &Vec<Vec3>| e.windows(2).map(|w| p.dist_to_segment(w[0], w[1])).fold(f64::INFINITY, f64::min);
     let index = m.edges.iter().enumerate().map(|(i, e)| (to(e), i)).filter(|(d, _)| d.is_finite()).min_by(|a, b| a.0.total_cmp(&b.0))?.1;
@@ -410,7 +413,7 @@ pub(crate) fn canvas(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter,
         let at = box_beyond(a, b);
         let r = crate::canvas::value_box_in(
             ui,
-            (egui::Id::new(("sc_hole_ref_area", *k)), egui::Id::new(("sc_hole_ref", *k))),
+            (egui::Id::unique(("sc_hole_ref_area", *k)), egui::Id::unique(("sc_hole_ref", *k))),
             label,
             value,
             at,

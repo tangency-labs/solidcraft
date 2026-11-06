@@ -223,7 +223,8 @@ impl Evaluation {
         if !due {
             return;
         }
-        let world = Arc::new(crate::world_state(doc, state));
+        // A world that cannot be placed is shown with the evaluation's own error, at its end.
+        let Ok(world) = crate::world_state(doc, state).map(Arc::new) else { return };
         if let Ok(mut p) = progress.partial.lock() {
             *p = (Some(Partial { features, world }), Some(web_time::Instant::now()));
         }
@@ -292,7 +293,7 @@ mod tests {
     fn partial_models_go_only_to_a_watcher_that_wants_them() {
         let mut doc = crate::Document::new("partial");
         let block = crate::FeatureKind::Box {
-            corner: crate::point_expr(solidcraft_geom::Vec3::ZERO),
+            corner: crate::point_expr(solidcore_record::Vec3::ZERO),
             length: "2 mm".into(),
             width: "3 mm".into(),
             height: "4 mm".into(),

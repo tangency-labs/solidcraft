@@ -1,0 +1,24 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#881",
+  "tangency-labs/solidcraft#956"
+ ],
+ "what": "a ruled loft between two 18-vertex zig-zag sections with the same start vertex and winding, whose first-vertex direction is ambiguous from the section centroid",
+ "source": "analytic",
+ "method": "vertex i of the bottom section is joined to vertex i of the top, so the solid is ruled and the section at height t is the polygon of the interpolated vertices; its area is quadratic in t, so Simpson is exact: V = h/6 (A0 + 4 Am + A1) with h = 90 and Am the shoelace area of the polygon of averaged vertices. Faces: 18 ruled sides + 2 planar caps.",
+ "body_count": 1,
+ "volume_mm3": 17914.43472,
+ "faces": 20,
+ "bbox": {
+  "min": [
+   -26,
+   0,
+   0
+  ],
+  "max": [
+   26,
+   14.97217,
+   90
+  ]
+ }
+}

@@ -2,7 +2,8 @@
 //! 40 × 30 × 20 box at the origin, a cylinder, a sphere and a torus.
 
 use serde_json::{Value, json};
-use solidcraft_geom::{Plane, Vec3};
+use solidcore_record::{Plane, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::Session;
 use crate::view::{construction_axes, construction_planes, construction_points};
@@ -344,6 +345,24 @@ fn point_along_a_path() {
     run(&mut s, "construct.point.along_path", json!({"path": {"edge": [20, 0, 0]}, "t": 0.25, "name": "P"}));
     let p = point(&s, "P");
     assert!(near(p, Vec3::new(10.0, 0.0, 0.0)) || near(p, Vec3::new(30.0, 0.0, 0.0)), "{p:?}");
+    // On an arc it is the arc's own point by arc length, to rounding: a third of a quarter turn
+    // of radius 10 is 30° round. A t past either end is refused, not moved onto it.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Round"}));
+    let arc = run(&mut s, "sketch.arc.center_point", json!({"center": [0, 0], "start": [10, 0], "end": [0, 10]}))["created"]["curves"][0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    let path = json!({"sketch": "Round", "curve": arc});
+    run(&mut s, "construct.point.along_path", json!({"path": path, "t": "1/3", "name": "Third"}));
+    let third = point(&s, "Third");
+    let want = Vec3::new(10.0 * (std::f64::consts::PI / 6.0).cos(), 5.0, 0.0);
+    assert!(third.dist(want) < 1e-12, "{third:?} is {:e} off", third.dist(want));
+    for t in [json!(1.5), json!(-0.25), json!("2")] {
+        let e = s.execute("construct.point.along_path", &json!({"path": path, "t": t})).unwrap_err();
+        assert!(e.to_string().contains("0 (its start) to 1 (its end)"), "t {t}: {e}");
+        assert!(s.execute("construct.plane.along_path", &json!({"path": path, "t": t})).is_err(), "plane at t {t}");
+    }
 }
 
 #[test]
@@ -686,6 +705,82 @@ fn disambiguated_top_plane_pocket_survives_undo_and_cold_reopen() {
     let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
     let measured = run(&mut reopened, "inspect.measure", json!({}));
     assert!((measured["total"]["volume_mm3"].as_f64().unwrap() - expected).abs() < 1e-6, "{measured}");
+}
+
+/// Plane at Angle with "use axis direction only": the axis direction is projected onto the base
+/// and the plane turns about a pivot on that plane (#12041).
+#[test]
+fn plane_at_angle_direction_only_projects_the_axis_and_pivots() {
+    let mut s = Session::default();
+    // An axis that does not lie on XY: only its in-plane direction is used, about the origin.
+    run(
+        &mut s,
+        "construct.plane.at_angle",
+        json!({
+            "base": "XY",
+            "axis": {"origin": [10, 0, 5], "dir": [0, 1, 1]},
+            "angle": "90 deg",
+            "direction_only": true,
+            "name": "AboutY"
+        }),
+    );
+    let about_y = plane(&s, "AboutY");
+    assert!(near(about_y.origin, Vec3::ZERO), "{about_y:?}");
+    assert!(parallel(about_y.normal(), Vec3::X), "{about_y:?}");
+    assert!(on_plane(&about_y, Vec3::Y * 10.0), "{about_y:?}");
+
+    // Same skewed axis without the option still turns about the full line (origin moves).
+    run(
+        &mut s,
+        "construct.plane.at_angle",
+        json!({
+            "base": "XY",
+            "axis": {"origin": [10, 0, 5], "dir": [0, 1, 1]},
+            "angle": "90 deg",
+            "name": "AboutLine"
+        }),
+    );
+    let about_line = plane(&s, "AboutLine");
+    assert!(!near(about_line.origin, Vec3::ZERO), "{about_line:?}");
+
+    // An explicit pivot: turn about Y through (5, 0, 0).
+    run(
+        &mut s,
+        "construct.plane.at_angle",
+        json!({
+            "base": "XY",
+            "axis": {"origin": [10, 0, 5], "dir": [0, 1, 1]},
+            "angle": "90 deg",
+            "direction_only": true,
+            "pivot": {"point": [5, 0, 0]},
+            "name": "Pivoted"
+        }),
+    );
+    let pivoted = plane(&s, "Pivoted");
+    assert!(near(pivoted.origin, Vec3::new(5.0, 0.0, 5.0)), "{pivoted:?}");
+    assert!(parallel(pivoted.normal(), Vec3::X), "{pivoted:?}");
+
+    // A direction square to the base has no in-plane component.
+    let before = s.doc.to_json();
+    let error = s
+        .execute("construct.plane.at_angle", &json!({"base": "XY", "axis": "Z", "angle": "30 deg", "direction_only": true}))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("square to the plane") || error.contains("no direction"), "{error}");
+    assert_eq!(s.doc.to_json(), before);
+
+    // A pivot without the option is refused.
+    let error = s
+        .execute("construct.plane.at_angle", &json!({"base": "XY", "axis": "Y", "angle": "10 deg", "pivot": {"point": [1, 0, 0]}}))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("direction_only"), "{error}");
+    assert_eq!(s.doc.to_json(), before);
+
+    // Saved fields reopen and keep the pivot.
+    let saved = s.doc.to_json();
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+    assert!(near(plane(&reopened, "Pivoted").origin, Vec3::new(5.0, 0.0, 5.0)));
 }
 
 /// A construction plane named like an origin plane, as an older saved design can hold.

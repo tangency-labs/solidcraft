@@ -10,6 +10,8 @@
 //!   of it first
 //! - `engine.commands`: every command with tab, panel, params and enablement
 //! - `document.inspect {measure?}`: the design (parameters, timeline, bodies, sketches)
+//! - `document.export`, `document.import {text, name?}`, `document.saved {revision}`: the design
+//!   for a host that keeps the files itself (#8517)
 //! - `ui.inspect`: UI state, viewport rect, camera, tool and dialog
 //! - `ui.drag {x0, y0, x1, y1, button?, shift?, ctrl?, steps?, hold?}` (box selection, navigation;
 //!   `hold` keeps the button down that many frames before moving);
@@ -25,6 +27,8 @@
 //!   section the viewport shows (no window needed); the ground grid and the origin's axes as the
 //!   window shows them, unless `grid` or `axes` says
 //! - `ui.icon_audit {reset?, stop?}`: collect/drain requested icon names, resolved masters and placeholder flags;
+//! - `ui.panel_fixture {enabled?, preset?}`: opt-in synthetic content in the real panel host;
+//!   `{}` observes the current host, probe and Session without ticking or model commands
 //! - `ui.menu {x?, y?, target?, close?}`: open a context menu at a point (the viewport's marking
 //!   menu, or a browser menu with `target: {type: body|sketch|component, …}`); without a point,
 //!   the open menu and its items. `ui.menuPick {item}` runs an item by id or label;
@@ -41,6 +45,7 @@
 //!   and replies once the command has run (`"animate": false` skips that one call)
 //! - `ui.resize {width, height}`, `app.quit`
 
+use solidcraft_engine::geom::prelude::*;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
@@ -175,7 +180,12 @@ fn ok(v: Value) -> Outcome {
     Outcome::Done(json!({"ok": true, "result": v}))
 }
 fn err(e: impl std::fmt::Display) -> Outcome {
-    Outcome::Done(json!({"ok": false, "error": e.to_string()}))
+    let text = e.to_string();
+    let mut reply = json!({"ok": false, "error": text});
+    if let Some(reason) = solidcraft_engine::panels::commands::structured_error(&text) {
+        reply["panel_error"] = reason;
+    }
+    Outcome::Done(reply)
 }
 fn wrap(r: Result<Value, String>) -> Outcome {
     match r {
@@ -265,6 +275,10 @@ fn key_from(name: &str) -> Option<egui::Key> {
 /// Run one command as `engine.execute` does: through `app.run`, then the first-body fit and the
 /// camera the command asked for.
 fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String> {
+    if solidcraft_engine::panels::commands::is_command(id) {
+        // No first-body meshing, camera-follow or fit tail for application layout.
+        return app.run(id, params);
+    }
     // User bindings live in the UI. A bridged agent needs the same key the menus show,
     // including null for a cleared binding; the standalone engine keeps its defaults.
     if id == "engine.commands" {
@@ -284,39 +298,52 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
     if id == "view.pick" {
         return crate::view_pick::pick_command(app, &params);
     }
+    // Eligibility follows the same case-insensitive IDs as the engine.
+    let fit_id = solidcraft_engine::find_command(id).map_or(id, |spec| spec.id);
+    let fit_command = !matches!(
+        fit_id,
+        "view.fit"
+            | "view.home"
+            | "view.tool"
+            | "view.tool.zoom"
+            | "view.spin"
+            | "view.visual_style"
+            | "view.grid"
+            | "view.ground_shadow"
+            | "view.navigation_bar"
+            | "view.ribbon_tabs_only"
+            | "view.next_tab"
+            | "view.previous_tab"
+            | "view.layout"
+            | "view.navigate"
+            | "view.ambient_occlusion"
+            | "view.perspective"
+            | "view.angle_readout"
+            | "view.graphics_preset"
+            | "view.history_layout"
+            | "timeline.play"
+            | "browser.expand_all"
+            | "browser.collapse_all"
+    ) && !fit_id.starts_with("settings.");
+    // History changes and session swaps can return to the first-body fitting window.
+    let history_may_fit = app.session.undo.len() <= 2
+        || SWITCHES_DESIGN.contains(&fit_id)
+        || matches!(fit_id, "edit.undo" | "edit.restore_checkpoint" | "doc.open" | "doc.recover" | "sketch.finish");
+    // Placement failure does not establish an empty model. Keep its camera and
+    // let the existing placement diagnostic explain the unavailable world.
+    let was_empty = fit_command && history_may_fit && app.session.world_state().is_ok_and(|world| world.bodies.is_empty());
     let r = app.run(id, params);
     // Update Links in a part edited in place reads the assembly around it too, as its button does.
     if r.is_ok() && is_command(Some(id), "component.update_links") && app.edit_in_place.active.is_some() {
         crate::edit_in_place::refresh(app);
     }
     if r.is_ok()
-        && !matches!(
-            id,
-            "view.fit"
-                | "view.home"
-                | "view.tool"
-                | "view.spin"
-                | "view.visual_style"
-                | "view.grid"
-                | "view.ground_shadow"
-                | "view.navigation_bar"
-                | "view.next_tab"
-                | "view.previous_tab"
-                | "view.layout"
-                | "view.navigate"
-                | "view.ambient_occlusion"
-                | "view.perspective"
-                | "view.angle_readout"
-                | "view.graphics_preset"
-                | "view.history_layout"
-                | "timeline.play"
-                | "browser.expand_all"
-                | "browser.collapse_all"
-        )
-        && !id.starts_with("settings.")
+        && was_empty
         && app.session.active_sketch.is_none()
-        && app.session.world_state().bodies.len() == 1
+        // Cheap test first: placing the world (`world_state`) after every step of a batch in a
+        // design with components placed every component's bodies again once per step.
         && app.session.undo.len() <= 2
+        && crate::open_meshing::session_world(&app.session).bodies.len() == 1
     {
         app.fit_view();
     }
@@ -378,6 +405,38 @@ fn batch(app: &mut SolveApp, p: &Value) -> Outcome {
     let Some(steps) = p.get("commands").and_then(Value::as_array).filter(|s| s.len() <= MAX_BATCH) else {
         return err(format!("engine.batch: commands must be an array of at most {MAX_BATCH} steps"));
     };
+    let panels = steps.iter().filter(|step| command(step).is_some_and(solidcraft_engine::panels::commands::is_command)).count();
+    if panels > 0 {
+        if let Some(why) = batch_refusal(steps) {
+            return err(why);
+        }
+        if let Some(refusal) = solidcraft_engine::batch_preflight::check(steps, app.session.param_check, &["view.pick"]) {
+            return ok(refusal.reply(steps.len()));
+        }
+        let rollback = p.get("rollback").and_then(Value::as_bool).unwrap_or(true);
+        if rollback {
+            if panels != steps.len() {
+                return err(solidcraft_engine::panels::commands::error_text(solidcraft_engine::panels::error(
+                    solidcraft_engine::panels::Rule::Capability,
+                    "atomic mixed document/layout batches are unavailable; use rollback:false or separate transactions",
+                )));
+            }
+            return wrap(app.run_panel_batch(steps).map_err(solidcraft_engine::panels::commands::error_text));
+        }
+        // Explicit sequential mode has per-command atomicity and no document
+        // checkpoint; previous application changes are truthfully retained.
+        let mut results = Vec::new();
+        for (i, step) in steps.iter().enumerate() {
+            let result = command(step)
+                .ok_or_else(|| "missing command".to_string())
+                .and_then(|id| execute(app, id, step.get("params").cloned().filter(|p| !p.is_null()).unwrap_or(json!({}))));
+            match result {
+                Ok(result) => results.push(result),
+                Err(error) => return ok(solidcraft_engine::panels::commands::sequential_failure(i, command(step), error, results)),
+            }
+        }
+        return ok(json!({"completed":results.len(),"results":results,"undone":0}));
+    }
     // (With the agent cursor shown, the pointer has already acted out a short summary of the
     // batch: `agent_cursor::intercept`.)
     if let Some(why) = batch_refusal(steps) {
@@ -474,7 +533,7 @@ pub fn request_scope(app: &SolveApp, params: &Value) -> Result<Option<vfs::PathS
 /// What a picture of the view shows: the model as the window shows it (theme and colour vision
 /// mode, the section the viewport shows: an open Section Analysis dialog's preview, a sketch's
 /// Slice), with the grid and the origin's axes as `guides` says.
-pub(crate) fn view_scene(app: &SolveApp, guides: solidcraft_engine::view::Guides) -> solidcraft_engine::render::Scene {
+pub(crate) fn view_scene(app: &SolveApp, guides: solidcraft_engine::view::Guides) -> Result<solidcraft_engine::render::Scene, String> {
     let mut palette = crate::viewport::scene_palette(app.viewport_dark(), app.preferences.color_vision);
     // The view's own background colour (#7688).
     if let Some([r, g, b]) = app.preferences.viewport_background {
@@ -488,9 +547,13 @@ pub(crate) fn view_scene(app: &SolveApp, guides: solidcraft_engine::view::Guides
         &palette,
         guides,
         app.preferences.cosmetic_threads,
-    );
+    )
+    .map_err(|e| e.to_string())?;
     scene.plain_cap = !crate::viewport::section_hatch(app);
-    scene
+    if app.preferences.section_hatch == crate::prefs::SectionHatch::One {
+        scene.part_hatch = None;
+    }
+    Ok(scene)
 }
 
 /// The grid and the origin's axes as the window shows them (the Grid and Origin switches).
@@ -504,7 +567,7 @@ pub(crate) fn window_guides(app: &SolveApp) -> solidcraft_engine::view::Guides {
 /// A picture of the view as the window shows it, RGBA, drawn on the GPU with the viewport's
 /// pipelines (the renderer the app installs).
 pub(crate) fn view_rgba(app: &SolveApp, w: u32, h: u32) -> Result<Vec<u8>, String> {
-    solidcraft_engine::capture::rgba(&view_scene(app, window_guides(app)), &app.cam, w, h).map(|p| p.rgba)
+    solidcraft_engine::capture::rgba(&view_scene(app, window_guides(app))?, &app.cam, w, h).map(|p| p.rgba)
 }
 
 /// [`view_rgba`] as PNG.
@@ -607,8 +670,8 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         "ui.blur" => {
             // Internal rendering harness; deliberately no saved preference or product UI.
             let radius = if let Some(radius) = p.get("radius_px") {
-                let Some(radius) = radius.as_f64().filter(|v| v.is_finite() && (0.0..=40.0).contains(v)) else {
-                    return err("radius_px must be finite and between 0 and 40");
+                let Some(radius) = radius.as_f64().filter(|v| v.is_finite() && (0.0..=60.0).contains(v)) else {
+                    return err("radius_px must be finite and between 0 and 60");
                 };
                 Some(radius as f32)
             } else {
@@ -627,19 +690,78 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             } else {
                 None
             };
+            // Explicit, labelled evidence fixtures only. They can force a failure, never fake
+            // real renderer support. All validation precedes mutation, including old fields.
+            let fixture = if let Some(fixture) = p.get("fixture") {
+                let Some(fixture) =
+                    fixture.as_str().filter(|s| matches!(*s, "clear" | "gpu-software" | "reduce-transparency" | "web-unsupported" | "guard-60"))
+                else {
+                    return err("unknown blur evidence fixture");
+                };
+                Some(fixture)
+            } else {
+                None
+            };
             if let Some(radius) = radius {
                 if let Err(error) = app.blur.set_radius(radius) {
                     return err(error);
                 }
+                app.blur_session.harness_radius = Some(radius);
                 ctx.request_repaint();
             }
             if let Some(alpha) = alpha {
                 app.blur.set_surface_alpha(alpha);
                 ctx.request_repaint();
             }
+            if let Some(fixture) = fixture {
+                match fixture {
+                    "clear" => {
+                        app.blur_session.harness_unavailable = None;
+                        app.blur_session.harness_radius = None;
+                        app.blur_session.evidence_fixture = None;
+                    }
+                    "gpu-software" => {
+                        app.blur_session.harness_unavailable = Some("prefs.blur_software");
+                        app.blur_session.evidence_fixture = Some("gpu-software");
+                    }
+                    "reduce-transparency" => {
+                        app.blur_session.harness_unavailable = Some("prefs.blur_reduce_transparency");
+                        app.blur_session.evidence_fixture = Some("reduce-transparency");
+                    }
+                    "web-unsupported" => {
+                        app.blur_session.harness_unavailable = Some("prefs.blur_web");
+                        app.blur_session.evidence_fixture = Some("web-unsupported");
+                    }
+                    "guard-60" => {
+                        let radius = app.blur.radius();
+                        for _ in 0..60 {
+                            app.blur_session.guard.observe(radius, 23.0, true);
+                        }
+                        app.blur_session.evidence_fixture = Some("guard-60");
+                    }
+                    _ => {}
+                }
+                ctx.request_repaint();
+            }
+            let availability = crate::prefs::blur_availability(app);
+            let reason = match availability {
+                crate::theme_options::Availability::Unavailable(reason) => Some(app.tr(reason)),
+                crate::theme_options::Availability::Available => None,
+            };
             ok(
-                json!({"radius_px":app.blur.radius(), "max_radius_px":40, "capability":app.blur.capability_for(ctx.viewport_id()), "counters":app.blur.counters()}),
+                json!({"radius_px":app.blur.radius(), "max_radius_px":60, "capability":app.blur.capability_for(ctx.viewport_id()), "counters":app.blur.counters(),
+                    "available": availability == crate::theme_options::Availability::Available, "reason": reason,
+                    "evidence_fixture": app.blur_session.evidence_fixture,
+                    "guard": {"tier_cap": app.blur_session.guard.cap, "streak": app.blur_session.guard.streak,
+                        "notice": app.blur_session.guard.notice, "opted_out": app.blur_session.guard.opted_out}}),
             )
+        }
+        "ui.panel_fixture" => {
+            let result = crate::panel_runtime::control_specimen(app, p);
+            if result.is_ok() && (p.get("enabled").is_some() || p.get("preset").is_some()) {
+                ctx.request_repaint();
+            }
+            wrap(result)
         }
         "ui.status_fixture" => wrap(crate::viewport_status_fixture::control(app, p)),
         "ui.workspace" => {
@@ -679,6 +801,30 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             if let Some(c) = steps.and_then(|steps| steps.iter().find_map(switches_design)) {
                 return err(format!("engine.script unavailable: {c} switches to another design (send it on its own)"));
             }
+            if let Some(steps) =
+                steps.filter(|steps| steps.iter().any(|step| command(step).is_some_and(solidcraft_engine::panels::commands::is_command)))
+            {
+                if steps.len() > 100_000 {
+                    return err("script too long");
+                }
+                let mut results = Vec::new();
+                for (i, step) in steps.iter().enumerate() {
+                    let result = command(step)
+                        .ok_or_else(|| "missing command".to_string())
+                        .and_then(|id| execute(app, id, step.get("params").cloned().filter(|p| !p.is_null()).unwrap_or(json!({}))));
+                    match result {
+                        Ok(result) => results.push(result),
+                        Err(error) => {
+                            let mut reply = json!({"ok":false,"error":error,"step":i + 1});
+                            if let Some(reason) = solidcraft_engine::panels::commands::structured_error(&error) {
+                                reply["panel_error"] = reason;
+                            }
+                            return Outcome::Done(reply);
+                        }
+                    }
+                }
+                return ok(json!(results));
+            }
             let mut replaced = false;
             let r = app
                 .session
@@ -699,6 +845,10 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         "engine.commands" => wrap(execute(app, "engine.commands", json!({}))),
         "document.inspect" => wrap(app.session.execute("document.inspect", p).map_err(|e| e.to_string())),
         "document.revision" => wrap(app.session.execute("document.revision", p).map_err(|e| e.to_string())),
+        // A host that keeps the files itself (an editing embed, #8517).
+        "document.export" => wrap(crate::documents::export(app)),
+        "document.import" => wrap(crate::documents::import(app, p)),
+        "document.saved" => wrap(crate::documents::saved(app, p)),
         // The connection already counts as subscribed (`DesignWatch::join`), and its events start
         // from this answer: published first, so no event repeats it and none older follows.
         "control.subscribe" => {
@@ -706,6 +856,8 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             DESIGN_WATCH.publish(&app.session.document_id, revision);
             ok(json!({"document_id": app.session.document_id, "revision": revision}))
         }
+        // What the MCP server bridged to this app shapes its output with (Preferences › AI).
+        "mcp.options" => ok(json!({"compact": app.preferences.mcp_compact})),
         "ui.messages" => ok(crate::messages::control(app, p)),
         "ui.inspect" => ok(json!({
             "render": crate::render_workspace::inspect_state(app),
@@ -739,11 +891,15 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         })),
         "ui.file" => {
             let Some(path) = s("path") else { return err("path is required") };
-            if p.get("insert").and_then(Value::as_bool).unwrap_or(false) {
-                app.insert_path_async(path);
-            } else {
-                app.open_path_async(path);
+            // A control call never meets the unit dialog an STL or OBJ file asks a person: it names
+            // `units` itself, or the file is in millimetres.
+            let kind =
+                if p.get("insert").and_then(Value::as_bool).unwrap_or(false) { crate::file_load::Kind::Insert } else { crate::file_load::Kind::Open };
+            let mut request = crate::file_load::Request::new(path, kind);
+            if let Some(units) = p.get("units").filter(|u| !u.is_null()) {
+                request.options.insert("units".into(), units.clone());
             }
+            let _ = crate::file_load::begin_request(app, request);
             ok(json!({"busy": app.file_load.busy()}))
         }
         "ui.documents" => ok(crate::documents::control(app, p)),
@@ -752,6 +908,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                 Some(true) => {
                     let rev = app.session.revision;
                     app.home.show(rev);
+                    crate::panel_runtime::hide_app_host(app);
                 }
                 Some(false) => app.home.open = false,
                 None => {}
@@ -1057,13 +1214,10 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             let proj = crate::viewport::projection(app, rect);
             let num = |v: &Value, i: usize| v.get(i).and_then(Value::as_f64).unwrap_or(0.0);
             let world = if let Some(w) = p.get("world") {
-                Some(solidcraft_engine::geom::Vec3::new(num(w, 0), num(w, 1), num(w, 2)))
+                Some(solidcore_record::Vec3::new(num(w, 0), num(w, 1), num(w, 2)))
             } else if let Some(s) = p.get("sketch") {
-                let st = app.session.world_state();
-                app.session
-                    .active_sketch
-                    .and_then(|id| st.sketch(id))
-                    .map(|ss| ss.plane.to_world(solidcraft_engine::geom::Vec2::new(num(s, 0), num(s, 1))))
+                let st = crate::open_meshing::session_world(&app.session);
+                app.session.active_sketch.and_then(|id| st.sketch(id)).map(|ss| ss.plane.to_world(solidcore_record::Vec2::new(num(s, 0), num(s, 1))))
             } else if let Some(n) = p.get("plane").and_then(Value::as_str) {
                 crate::viewport::origin_plane_target(app, &proj, n)
             } else if let Some(n) = p.get("axis").and_then(Value::as_str) {
@@ -1073,7 +1227,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             } else if let Some(n) = p.get("gizmo").and_then(Value::as_str) {
                 // A handle of the move triad ("x", "xy", "rz", "ball"), moved `by` [x,y,z] mm or
                 // turned `turn` degrees (rings).
-                let by = p.get("by").map(|b| solidcraft_engine::geom::Vec3::new(num(b, 0), num(b, 1), num(b, 2))).unwrap_or_default();
+                let by = p.get("by").map(|b| solidcore_record::Vec3::new(num(b, 0), num(b, 1), num(b, 2))).unwrap_or_default();
                 crate::gizmo::handle_point(n, by, p.get("turn").and_then(Value::as_f64).unwrap_or(0.0))
             } else {
                 None
@@ -1094,14 +1248,14 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                 .take(1000)
                 .map(|v| {
                     let c = |i: usize| v.get(i).and_then(Value::as_f64).unwrap_or(0.0);
-                    proj.to_screen(solidcraft_engine::geom::Vec3::new(c(0), c(1), c(2))).map_or(Value::Null, |q| json!([q.x, q.y]))
+                    proj.to_screen(solidcore_record::Vec3::new(c(0), c(1), c(2))).map_or(Value::Null, |q| json!([q.x, q.y]))
                 })
                 .collect();
             ok(json!(pts))
         }
         "ui.sketchToScreen" => {
             // Screen points of active-sketch coordinates (for driving sketch interaction).
-            let st = app.session.world_state();
+            let st = crate::open_meshing::session_world(&app.session);
             let (Some(rect), Some(ss)) = (app.viewport.rect, app.session.active_sketch.and_then(|s| st.sketch(s))) else {
                 return err("no active sketch in a drawn viewport");
             };
@@ -1114,7 +1268,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                 .take(1000)
                 .map(|v| {
                     let c = |i: usize| v.get(i).and_then(Value::as_f64).unwrap_or(0.0);
-                    let q = solidcraft_engine::geom::Vec2::new(c(0), c(1));
+                    let q = solidcore_record::Vec2::new(c(0), c(1));
                     proj.to_screen(ss.plane.to_world(q)).map_or(Value::Null, |p| json!([p.x, p.y]))
                 })
                 .collect();
@@ -1152,7 +1306,13 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             if explicit {
                 app.synthetic.push(egui::Event::ModifiersChanged(modifiers));
             }
-            app.synthetic.push(egui::Event::MouseWheel { unit, delta: egui::vec2(0.0, delta), modifiers, phase: egui::TouchPhase::Move });
+            app.synthetic.push(egui::Event::MouseWheel {
+                source: egui::MouseWheelSource::Unknown,
+                unit,
+                delta: egui::vec2(0.0, delta),
+                modifiers,
+                phase: egui::TouchPhase::Move,
+            });
             if explicit {
                 app.synthetic.push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
             }
@@ -1209,6 +1369,10 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                     },
                     None => crate::context_menu::Target::Viewport,
                 };
+                // A right-click opens a menu only on something that is there.
+                if let Err(e) = crate::context_menu::check_target(app, &target) {
+                    return err(e);
+                }
                 crate::context_menu::request_open(app, egui::pos2(x as f32, y as f32), target);
                 return ok(json!({"pending": true}));
             }
@@ -1301,7 +1465,10 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             if let Some(Err(e)) = s("path").map(vfs::check) {
                 return err(e);
             }
-            let scene = view_scene(app, guides);
+            let scene = match view_scene(app, guides) {
+                Ok(scene) => scene,
+                Err(e) => return err(e),
+            };
             let png = match solidcraft_engine::capture::png(&scene, &app.cam, w, h) {
                 Ok(png) => png,
                 Err(e) => return err(format!("render failed: {e}")),
@@ -1461,10 +1628,177 @@ pub(crate) fn write_screenshot(image: &egui::ColorImage, path: &str) -> Result<(
 
 #[cfg(test)]
 mod tests {
+    fn panel_command_app() -> crate::SolveApp {
+        use crate::panel_runtime::*;
+        let h = PanelMountHarness::new(false).unwrap();
+        let catalogue = solidcraft_engine::panels::fixture_command_catalogue(h.runtime.layout().registry()).unwrap();
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        app.enable_panel_runtime(h.runtime, Box::<FakeAppPanelServices>::default()).unwrap();
+        app.panel_runtime_mut().unwrap().set_command_adapters(Box::new(catalogue), Box::new(FakeNativeAdapter::new(false))).unwrap();
+        app.enable_universal_panel_host(HostOptions::default()).unwrap();
+        prepare_panel_commands(&mut app);
+        app
+    }
+    fn prepare_panel_commands(app: &mut crate::SolveApp) {
+        use solidcraft_engine::panels::{LogicalRect, Point, Size};
+        let capacity = LogicalRect { origin: Point { x: 0.0, y: 0.0 }, size: Size { width: 1400.0, height: 1000.0 } };
+        app.panel_runtime.as_mut().unwrap().prepare_host(&app.session, capacity).unwrap();
+    }
+    fn panel_control(app: &mut crate::SolveApp, method: &str, params: serde_json::Value) -> serde_json::Value {
+        let (request, _) = super::ControlRequest::new(method, params);
+        match super::handle(app, &egui::Context::default(), &request) {
+            super::Outcome::Done(reply) => reply,
+            _ => panic!("unexpected screenshot"),
+        }
+    }
+    fn panel_steps() -> Vec<serde_json::Value> {
+        vec![
+            json!({"command":"panel.open","params":{"kind":"fixture.log","instance":"log","destination":{"type":"new_section","section":"logs","index":0,
+            "location":{"type":"dock","zone":"left"},"size":{"width":280,"height":240}}}}),
+            json!({"command":"panel.collapse","params":{"target":{"type":"instance","id":"log"},"collapsed":true}}),
+        ]
+    }
+    #[test]
+    fn panel_control_single_atomic_batch_and_script_share_live_runtime_without_geometry_or_camera_work() {
+        use solidcraft_engine::panels::ActionSink;
+        let mut single = panel_command_app();
+        let mut batch = panel_command_app();
+        let mut script = panel_command_app();
+        // A one-body design with a deliberately different camera exercises the
+        // old first-body-fit condition, rather than making it vacuously false.
+        for app in [&mut single, &mut batch, &mut script] {
+            app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+            app.cam.distance *= 1.5;
+            app.session.mark_saved();
+        }
+        let doc = single.session.doc.clone();
+        let model = single.session.model.state();
+        let camera = single.cam;
+        let meshes: Vec<_> = model.bodies.iter().map(|body| body.cached_mesh()).collect();
+        let invariant = (single.session.document_id.clone(), single.session.revision, single.session.undo.len(), single.session.is_dirty());
+        for step in panel_steps() {
+            assert_eq!(panel_control(&mut single, "engine.execute", step)["ok"], true);
+        }
+        assert_eq!(panel_control(&mut batch, "engine.batch", json!({"commands":panel_steps(),"param_check":"strict"}))["ok"], true);
+        assert_eq!(panel_control(&mut script, "engine.script", json!({"commands":panel_steps(),"param_check":"strict"}))["ok"], true);
+        let live = single.panel_runtime().unwrap().layout().inspect();
+        assert_eq!(batch.panel_runtime().unwrap().layout().layout(), &live.layout);
+        assert_eq!(script.panel_runtime().unwrap().layout().layout(), &live.layout);
+        assert_eq!(panel_control(&mut single, "engine.execute", json!({"command":"layout.get"}))["result"]["state"]["revision"], live.revision);
+        assert!(crate::agent_cursor::picks(&single, "panel.open", &panel_steps()[0]["params"]).is_empty());
+        assert_eq!(single.cam, camera);
+        assert_eq!((single.session.document_id.clone(), single.session.revision, single.session.undo.len(), single.session.is_dirty()), invariant);
+        assert!(std::sync::Arc::ptr_eq(&doc, &single.session.doc));
+        assert!(std::sync::Arc::ptr_eq(&model, &single.session.model.state()));
+        for (old, new) in meshes.iter().zip(single.session.model.state().bodies.iter().map(|body| body.cached_mesh())) {
+            match (old, new) {
+                (Some(a), Some(b)) => assert!(std::sync::Arc::ptr_eq(a, &b)),
+                (None, None) => {}
+                _ => panic!("layout changed tessellation cache"),
+            }
+        }
+    }
+    #[test]
+    fn panel_control_reports_structured_missing_capability_unknown_fields_and_lifecycle_batch_errors() {
+        use solidcraft_engine::panels::ActionSink;
+        let mut disabled = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let reply = panel_control(&mut disabled, "engine.execute", json!({"command":"layout.get"}));
+        assert_eq!(reply["ok"], false);
+        assert_eq!(reply["panel_error"]["rule"], "capability");
+        let mut app = panel_command_app();
+        for check in ["off", "warn", "strict"] {
+            let reply = panel_control(&mut app, "engine.execute", json!({"command":"panel.list","params":{"unknown":true},"param_check":check}));
+            assert_eq!(reply["ok"], false);
+            assert_eq!(reply["panel_error"]["rule"], "schema");
+            assert_eq!(reply["param_check"], check);
+        }
+        assert_eq!(panel_control(&mut app, "engine.execute", panel_steps()[0].clone())["ok"], true);
+        let before = app.panel_runtime().unwrap().layout().inspect();
+        let reply = panel_control(
+            &mut app,
+            "engine.batch",
+            json!({"commands":[
+            {"command":"panel.close","params":{"target":{"type":"instance","id":"log"}}},
+            {"command":"panel.open","params":{"kind":"fixture.log","instance":"log"}}]}),
+        );
+        assert_eq!(reply["ok"], false);
+        assert_eq!(reply["panel_error"]["rule"], "lifecycle");
+        assert_eq!(app.panel_runtime().unwrap().layout().inspect(), before);
+    }
+    #[test]
+    fn panel_control_catalogue_batches_and_scripts_retain_memory_and_refuse_unsupported_atomic_domains() {
+        let mut app = panel_command_app();
+        assert_eq!(panel_control(&mut app, "engine.execute", panel_steps()[0].clone())["ok"], true);
+        let reply = panel_control(
+            &mut app,
+            "engine.batch",
+            json!({"commands":[
+            {"command":"layout.save","params":{"name":"Control saved"}},
+            {"command":"layout.reset"}, {"command":"layout.apply","params":{"name":"Control saved"}}, {"command":"layout.get"}]}),
+        );
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(reply["result"]["completed"], 4);
+        assert_eq!(reply["result"]["results"][3]["state"]["layout"]["instances"][0]["id"], "log");
+        let mixed = json!({"commands":[{"command":"layout.get"},{"command":"file.new"}]});
+        let before = app.session.document_id.clone();
+        let reply = panel_control(&mut app, "engine.batch", mixed);
+        assert_eq!(reply["panel_error"]["rule"], "capability");
+        assert_eq!(app.session.document_id, before);
+        let reply = panel_control(
+            &mut app,
+            "engine.script",
+            json!({"commands":[
+            {"command":"layout.workspace.select","params":{"workspace":"fixture.other"}},
+            {"command":"layout.apply","params":{"name":"Control saved"}}, {"command":"layout.get"}]}),
+        );
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(reply["result"][2]["state"]["layout"]["workspace"], "fixture.other");
+    }
+
+    #[test]
+    fn null_panel_params_match_single_atomic_sequential_and_script_routes() {
+        let mut app = panel_command_app();
+        let expected = app.run("panel.list", json!({})).unwrap();
+        assert_eq!(app.run("panel.list", serde_json::Value::Null).unwrap(), expected);
+        let single = panel_control(&mut app, "engine.execute", json!({"command":"panel.list","params":null}));
+        assert_eq!(single["result"], expected);
+        for (method, rollback) in [("engine.batch", true), ("engine.batch", false), ("engine.script", false)] {
+            let reply = panel_control(
+                &mut app,
+                method,
+                json!({"rollback":rollback,"commands":[
+                    {"command":"panel.list","params":null},{"command":"layout.get","params":null},
+                ]}),
+            );
+            assert_eq!(reply["ok"], true, "{method}: {reply}");
+            let results = if method == "engine.script" { &reply["result"] } else { &reply["result"]["results"] };
+            assert_eq!(results[0], expected, "{method}");
+            assert_eq!(results[1]["state"], expected["state"]);
+        }
+    }
+
+    #[test]
+    fn null_normal_document_params_remain_accepted_in_panel_containing_sequences() {
+        for method in ["engine.batch", "engine.script"] {
+            let mut app = panel_command_app();
+            let previous = app.session.document_id.clone();
+            let reply = panel_control(
+                &mut app,
+                method,
+                json!({"rollback":false,"commands":[
+                    {"command":"file.new","params":null},{"command":"panel.list","params":null},{"command":"parameters.list","params":null},
+                ]}),
+            );
+            assert_eq!(reply["ok"], true, "{reply}");
+            assert!(reply["result"].get("failed").is_none(), "{reply}");
+            assert_ne!(app.session.document_id, previous);
+            assert_eq!(app.panel_runtime().unwrap().environment().document.as_ref().unwrap().0, app.session.document_id);
+        }
+    }
     #[test]
     fn blur_control_validates_before_mutation_and_reports_no_gpu() {
         let mut h = crate::scenario::Harness::new();
-        for invalid in [json!(-1), json!(41), json!("18"), json!(null)] {
+        for invalid in [json!(-1), json!(61), json!("18"), json!(null)] {
             let reply = h.call("ui.blur", json!({"radius_px":invalid}));
             assert_eq!(reply["ok"], false, "{reply}");
             assert_eq!(h.app.blur.radius(), 0.0);
@@ -1482,11 +1816,209 @@ mod tests {
         assert_eq!(h.app.blur.radius(), 0.0);
     }
 
+    #[test]
+    fn blur_evidence_fixtures_are_atomic_transient_and_never_fake_support() {
+        let mut h = crate::scenario::Harness::new();
+        let source: Value = serde_json::from_str(include_str!("../tests/fixtures/theme-blur.json")).unwrap();
+        assert_eq!(h.call("ui.prefs", json!({"theme_import":source,"theme_options":{"blur-review":{"blur":40}}}))["ok"], true);
+        h.frames(2);
+        let saved = h.app.preferences.theme_options.clone();
+        let revision = h.app.session.revision;
+        for invalid in [json!(null), json!([]), json!("available"), json!("unknown")] {
+            assert_eq!(h.call("ui.blur", json!({"fixture":invalid,"radius_px":8}))["ok"], false);
+            assert_eq!(h.app.blur.radius(), 40.0);
+            assert_eq!(h.app.blur_session.harness_radius, None);
+        }
+        for fixture in ["gpu-software", "reduce-transparency", "web-unsupported"] {
+            let reply = h.call("ui.blur", json!({"fixture":fixture}));
+            assert_eq!(reply["result"]["evidence_fixture"], fixture);
+            assert_eq!(reply["result"]["available"], false);
+            h.frames(2);
+            assert_eq!(h.app.blur.counters().textures_created, 0);
+            assert_eq!(h.app.blur.counters().markers_emitted, 0);
+            assert_eq!(h.app.preferences.theme_options, saved);
+        }
+        h.call("ui.blur", json!({"fixture":"clear"}));
+        h.call("ui.blur", json!({"fixture":"guard-60"}));
+        assert_eq!((h.app.blur_session.guard.cap, h.app.blur_session.guard.notice), (4, true));
+        assert_eq!(h.app.blur_session.evidence_fixture, Some("guard-60"));
+        h.app.blur_session.guard.undo();
+        assert_eq!((h.app.blur_session.guard.cap, h.app.blur_session.guard.opted_out), (5, true));
+        h.call("ui.blur", json!({"fixture":"guard-60"}));
+        assert_eq!(h.app.blur_session.guard.cap, 5);
+        assert_eq!(h.app.session.revision, revision, "quality actions never enter document undo");
+        assert_eq!(h.app.preferences.theme_options, saved);
+        h.call("ui.blur", json!({"fixture":"clear"}));
+        assert!(h.app.blur_session.evidence_fixture.is_none());
+        assert!(matches!(h.app.blur.capability(), crate::blur::Capability::Unavailable(_)), "clearing a fixture cannot manufacture a GPU");
+    }
+
     use serde_json::json;
+    use solidcraft_engine::panels::ActionSink;
     use solidcraft_engine::{Sel, Session};
 
     use super::*;
     use crate::Services;
+
+    #[test]
+    fn panel_fixture_validates_whole_request_before_activation() {
+        let mut app = SolveApp::new(Session::default(), Services::default());
+        let doc = app.session.doc.clone();
+        let model = app.session.model.state();
+        let camera = app.cam;
+        for params in [
+            Value::Null,
+            json!([]),
+            json!({"enabled":null}),
+            json!({"enabled":"true"}),
+            json!({"preset":false}),
+            json!({"preset":"unknown"}),
+            json!({"preset":"x".repeat(4096)}),
+            json!({"enabled":false,"preset":"docks"}),
+            json!({"enabled":true,"unknown":0}),
+        ] {
+            assert!(crate::panel_runtime::control_specimen(&mut app, &params).is_err(), "{params}");
+            assert!(app.panel_runtime().is_none());
+            assert!(!app.universal_panel_host_enabled());
+            assert!(std::sync::Arc::ptr_eq(&doc, &app.session.doc));
+            assert!(std::sync::Arc::ptr_eq(&model, &app.session.model.state()));
+            assert_eq!(app.cam, camera);
+        }
+        let reply = crate::panel_runtime::control_specimen(&mut app, &json!({})).unwrap();
+        assert_eq!(reply["enabled"], false);
+        assert!(reply["host"].is_null());
+    }
+
+    #[test]
+    fn panel_fixture_presets_mount_retained_content_and_inspection_does_not_tick() {
+        let mut h = crate::scenario::Harness::new();
+        for (name, count) in [
+            ("docks", 4),
+            ("tabs", 4),
+            ("collapsed", 4),
+            ("floating", 4),
+            ("overflow", 24),
+            ("pinned", 4),
+            ("columns", 3),
+            ("stack_tabs", 4),
+            ("content_fill", 2),
+            ("inline", 1),
+        ] {
+            let before = crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap()["session"].clone();
+            h.step(&json!({"panel_fixture":{"enabled":true,"preset":name}})).unwrap();
+            h.frames(2);
+            assert!(h.app.universal_panel_host_enabled());
+            assert!(h.app.universal_panel_frame().is_some());
+            let first = crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap();
+            let second = crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap();
+            assert_eq!(first, second, "inspection itself must not tick or dispatch");
+            assert_eq!(first["runtime"]["probe"]["preset"], name);
+            assert_eq!(first["runtime"]["controller_count"], count);
+            assert_eq!(first["session"], before, "host-only work changed Session for {name}");
+            assert_eq!(first["runtime"]["probe"]["content_command_calls"], 0);
+            let takeover = crate::panel_runtime::control_specimen(&mut h.app, &json!({"enabled":true,"preset":"tabs"}));
+            assert!(takeover.is_err());
+            assert_eq!(crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap(), second);
+            h.step(&json!({"panel_fixture":{"enabled":false}})).unwrap();
+            assert!(h.app.panel_runtime().is_none());
+            assert!(!h.app.universal_panel_host_enabled());
+        }
+    }
+
+    #[test]
+    fn panel_fixture_teardown_honors_live_editor_guard_atomically() {
+        fn click_visible_guard(h: &mut crate::scenario::Harness, guard: &str) {
+            for _ in 0..16 {
+                let body =
+                    h.app.universal_panel_frame().unwrap().layout.sections.iter().find(|section| section.instance.0 == "specimen-0").unwrap().body;
+                let body = crate::panel_runtime::egui_rect(body.expect("expanded specimen body"));
+                let checkbox = h
+                    .output
+                    .accesskit_update
+                    .as_ref()
+                    .unwrap()
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| node.role() == egui::accesskit::Role::CheckBox && node.label() == Some(guard))
+                    .and_then(|(_, node)| node.bounds())
+                    .map(|bounds| {
+                        egui::Rect::from_min_max(egui::pos2(bounds.x0 as f32, bounds.y0 as f32), egui::pos2(bounds.x1 as f32, bounds.y1 as f32))
+                    });
+                if let Some(checkbox) = checkbox.filter(|bounds| body.contains(bounds.center())) {
+                    assert!(checkbox.intersect(body).is_positive(), "the real checkbox must be visible inside its actual Body clip");
+                    let at = checkbox.center();
+                    h.frame_with(vec![egui::Event::PointerMoved(at)]);
+                    for pressed in [true, false] {
+                        h.frame_with(vec![
+                            egui::Event::PointerMoved(at),
+                            egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE },
+                        ]);
+                    }
+                    return;
+                }
+                // The specimen owns this ScrollArea. Accessibility also lists
+                // clipped content, so reveal the real checkbox before clicking.
+                let at = egui::pos2(body.center().x, body.top() + 4.0);
+                h.frame_with(vec![
+                    egui::Event::PointerMoved(at),
+                    egui::Event::MouseWheel {
+                        source: egui::MouseWheelSource::Unknown,
+                        unit: egui::MouseWheelUnit::Point,
+                        delta: egui::vec2(0.0, -120.0),
+                        modifiers: egui::Modifiers::NONE,
+                        phase: egui::TouchPhase::Move,
+                    },
+                ]);
+                for _ in 0..120 {
+                    if !h.ctx.input(|input| input.is_scrolling()) {
+                        break;
+                    }
+                    h.frame();
+                }
+                assert!(!h.ctx.input(|input| input.is_scrolling()), "the checkbox click requires a settled Body scroll");
+            }
+            panic!("the actual specimen guard checkbox was never revealed in its Body");
+        }
+        let mut h = crate::scenario::Harness::new();
+        h.step(&json!({"panel_fixture":{"preset":"docks"}})).unwrap();
+        let guard = h.app.tr("ui.panel_fixture.guard").to_string();
+        click_visible_guard(&mut h, &guard);
+        let before = crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap();
+        let editor = &before["runtime"]["probe"]["controllers"][0];
+        assert_eq!(editor["reject_cancel"], true);
+        assert_eq!(editor["transaction_live"], true);
+        assert!(crate::panel_runtime::control_specimen(&mut h.app, &json!({"enabled":false})).is_err());
+        assert_eq!(crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap(), before);
+        click_visible_guard(&mut h, &guard);
+        h.step(&json!({"panel_fixture":{"enabled":false}})).unwrap();
+        assert!(h.app.panel_runtime().is_none());
+    }
+
+    #[test]
+    fn panel_fixture_rejects_takeover_and_teardown_of_unrelated_runtime() {
+        let harness = crate::panel_runtime::PanelMountHarness::new(false).unwrap();
+        #[derive(Default)]
+        struct Provider {
+            models: crate::panel_runtime::FakeModels,
+            commands: crate::panel_runtime::FakeContentCommands,
+            local: crate::panel_runtime::FakeLocalServices,
+        }
+        impl crate::panel_runtime::AppPanelServices for Provider {
+            fn refresh_read_only(&mut self, _: &Session) -> solidcraft_engine::panels::PanelResult<()> {
+                Ok(())
+            }
+            fn services(&mut self) -> crate::panel_runtime::ContentServices<'_> {
+                crate::panel_runtime::ContentServices { models: &self.models, commands: &mut self.commands, local: &mut self.local }
+            }
+        }
+        let mut app = SolveApp::new(Session::default(), Services::default());
+        app.panel_runtime = Some(crate::panel_runtime::AppPanelRuntime::new(harness.runtime, Box::<Provider>::default()).unwrap());
+        let before = app.panel_runtime().unwrap().layout().inspect();
+        for params in [json!({"enabled":true}), json!({"enabled":false})] {
+            assert!(crate::panel_runtime::control_specimen(&mut app, &params).is_err());
+            assert_eq!(app.panel_runtime().unwrap().layout().inspect(), before);
+        }
+    }
 
     #[test]
     fn viewport_status_fixture_rejects_hostile_presets_without_mutating_the_session() {
@@ -1843,7 +2375,7 @@ mod tests {
             app.preferences.cosmetic_threads = cosmetic_threads;
             for hatch in [false, true] {
                 app.session.section_hatch = hatch;
-                assert_eq!(view_scene(&app, Default::default()).plain_cap, !hatch);
+                assert_eq!(view_scene(&app, Default::default()).unwrap().plain_cap, !hatch);
                 app.session.selection = vec![Sel::Plane { name: "XZ".into() }];
                 app.start("inspect.section");
                 let Some(crate::dialogs::Kind::Section { hatch: preview_hatch, .. }) = app.dialog.as_mut().map(|d| &mut d.kind) else {
@@ -1851,7 +2383,7 @@ mod tests {
                 };
                 *preview_hatch = !hatch;
                 assert_eq!(
-                    view_scene(&app, Default::default()).plain_cap,
+                    view_scene(&app, Default::default()).unwrap().plain_cap,
                     hatch,
                     "the preview's hatch overrides the session with cosmetic_threads={cosmetic_threads}"
                 );
@@ -1959,6 +2491,68 @@ mod tests {
             serde_json::Value::Object(o) => o.iter().filter(|(k, _)| *k != "ms").map(|(k, v)| (k.clone(), without_timings(v))).collect(),
             serde_json::Value::Array(a) => a.iter().map(without_timings).collect(),
             v => v.clone(),
+        }
+    }
+
+    /// A step of a long design leaves its components unplaced: the first-body fit's check
+    /// (`execute`) looks at the undo history before placing the world, which used to place
+    /// every component's bodies after every step of a batch.
+    #[test]
+    fn a_step_does_not_place_the_world_for_the_first_body_fit() {
+        let mut h = crate::scenario::Harness::new();
+        // The harness call settles frames, which legitimately place the world for drawing.
+        let Outcome::Done(v) = super::batch(
+            &mut h.app,
+            &json!({"commands": [
+                {"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10, "body_name": "Cube"}},
+                {"command": "component.from_bodies", "params": {"bodies": ["Cube"]}},
+                {"command": "occurrence.copy", "params": {"component": "Cube", "translate": [0, 40, 0]}},
+            ]}),
+        ) else {
+            panic!("a command batch cannot be a screenshot");
+        };
+        assert!(v["result"].get("failed").is_none(), "{v}");
+        assert!(h.app.session.undo.len() > 2, "past the first-body fit");
+        // Straight to `execute`, with no frame: drawing places the world too.
+        assert!(h.app.session.cached_world_state().is_none());
+        let camera = h.app.cam;
+        let document = h.app.session.doc.clone();
+        let history = (h.app.session.undo.len(), h.app.session.redo.len());
+        let r = super::execute(&mut h.app, "select.clear", json!({}));
+        assert!(r.is_ok(), "{r:?}");
+        assert!(h.app.session.cached_world_state().is_none(), "clearing selection placed the components before the command");
+        assert_eq!(h.app.cam, camera);
+        assert!(std::sync::Arc::ptr_eq(&document, &h.app.session.doc));
+        assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+        let r = super::execute(&mut h.app, "solid.sphere", json!({"radius": 3, "center": [80, 0, 0], "operation": "new"}));
+        assert!(r.is_ok(), "{r:?}");
+        assert!(h.app.session.cached_world_state().is_none(), "the step placed the components again");
+        assert_eq!(crate::open_meshing::session_world(&h.app.session).bodies.len(), 3);
+    }
+
+    #[test]
+    fn excluded_control_view_commands_leave_a_cold_component_world_unplaced() {
+        for id in ["view.grid", "VIEW.GRID", "view.tool.zoom", "VIEW.TOOL.ZOOM"] {
+            let mut saved = Session::default();
+            saved.execute("solid.box", &json!({"length":10,"width":10,"height":10,"body_name":"Cube"})).unwrap();
+            saved.execute("component.from_bodies", &json!({"bodies":["Cube"]})).unwrap();
+            let mut h = crate::scenario::Harness::new();
+            h.app.session = Session::opened((*saved.doc).clone(), None);
+            assert_eq!(h.app.session.undo.len(), 0, "history permits fitting, so only the command exclusion can prevent placement");
+            assert!(!h.app.session.doc.occurrences.is_empty());
+            assert!(h.app.session.cached_world_state().is_none());
+            let camera = h.app.cam;
+            let document = h.app.session.doc.clone();
+            let r = super::execute(&mut h.app, id, json!({"on":false}));
+            assert!(r.is_ok(), "{r:?}");
+            assert_eq!(r.unwrap()["on"], false, "the engine accepted {id}");
+            if id == "view.grid" {
+                assert!(!h.app.ui.show_grid);
+            }
+            assert!(h.app.session.cached_world_state().is_none(), "{id} placed a world it cannot fit");
+            assert_eq!(h.app.cam, camera);
+            assert!(std::sync::Arc::ptr_eq(&document, &h.app.session.doc));
+            assert!(h.app.session.undo.is_empty() && h.app.session.redo.is_empty());
         }
     }
 
@@ -2288,6 +2882,156 @@ mod tests {
         assert_eq!(a.app.cam, b.app.cam, "the first-body fit must happen as for engine.execute");
     }
 
+    #[test]
+    fn existing_single_body_control_queries_keep_the_current_camera_and_history() {
+        let mut saved = Session::default();
+        saved.execute("solid.box", &json!({"length":80,"width":50,"height":12,"body_name":"Subject"})).unwrap();
+        let mut h = crate::scenario::Harness::new();
+        crate::documents::open_tab(&mut h.app, Session::opened((*saved.doc).clone(), None)).unwrap();
+        h.call("ui.resize", json!({"width":1440,"height":1000}));
+        h.frames(4);
+        crate::render_workspace::enter(&mut h.app, true).unwrap();
+        h.frames(4);
+        h.app.cancel_view_animation();
+        h.app.cam.distance = 321.0;
+        h.app.cam.yaw = 0.3;
+        let camera = h.app.cam;
+        let document = h.app.session.doc.clone();
+        let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
+        assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 1);
+        assert_eq!(h.app.session.undo.len(), 0, "a freshly opened one-body design exercises the old refit heuristic");
+        for command in ["appearance.library", "render.settings.get", "render.scene"] {
+            let reply = h.call("engine.execute", json!({"command":command,"params":{}}));
+            assert_eq!(reply["ok"], true, "{command}: {reply}");
+            h.frames(4);
+            assert_eq!(h.app.cam, camera, "read-only {command} must keep the product framing");
+            assert!(h.app.pending_fit.is_none());
+            assert!(std::sync::Arc::ptr_eq(&document, &h.app.session.doc));
+            assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), history);
+        }
+        let reply = h.call(
+            "engine.batch",
+            json!({"commands":[
+                {"command":"appearance.library","params":{}}, {"command":"render.scene","params":{}}
+            ]}),
+        );
+        assert_eq!(reply["ok"], true, "{reply}");
+        h.frames(4);
+        assert_eq!(h.app.cam, camera);
+        assert!(std::sync::Arc::ptr_eq(&document, &h.app.session.doc));
+        assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), history);
+    }
+
+    #[test]
+    fn control_undo_from_three_steps_to_two_still_fits_the_first_body() {
+        for id in ["edit.undo", "EDIT.UNDO"] {
+            let mut h = crate::scenario::Harness::new();
+            h.frames(4);
+            h.app.run("solid.box", json!({"length":80,"width":50,"height":12,"body_name":"Subject"})).unwrap();
+            h.app.run("appearance.assign", json!({"bodies":["Subject"],"color":"#204080"})).unwrap();
+            let feature = h.app.session.doc.features[0].id;
+            h.app.run("timeline.delete", json!({"feature":feature})).unwrap();
+            assert_eq!(h.app.session.undo.len(), 3);
+            assert!(h.app.session.world_state().unwrap().bodies.is_empty());
+            h.app.cancel_view_animation();
+            h.app.cam.distance = 10_000.0;
+            assert!(h.app.pending_fit.is_none());
+            let r = super::execute(&mut h.app, id, json!({}));
+            assert!(r.is_ok(), "{r:?}");
+            assert_eq!(h.app.session.undo.len(), 2);
+            assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 1);
+            assert!(h.app.pending_fit.is_some(), "Undo crossing the early-history boundary must retain the measured first-body fit");
+            h.frames(4);
+            assert!(h.app.pending_fit.is_none());
+            assert!(h.app.cam.distance < 1000.0);
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn control_finish_edit_from_a_long_empty_part_still_fits_the_returned_assembly() {
+        for id in ["component.finish_edit", "COMPONENT.FINISH_EDIT"] {
+            let mut h = crate::scenario::Harness::new();
+            h.frames(4);
+            let part_path = h.dir.join("part.sc");
+            let assembly_path = h.dir.join("assembly.sc");
+            let mut part = Session::default();
+            part.execute("solid.box", &json!({"length":80,"width":50,"height":12,"body_name":"Subject"})).unwrap();
+            part.execute("file.save", &json!({"path":part_path})).unwrap();
+            let component = h.app.run("component.insert_design", json!({"path":part_path})).unwrap()["component"].as_u64().unwrap();
+            h.app.run("file.save", json!({"path":assembly_path})).unwrap();
+            h.settle();
+            h.app.cancel_view_animation();
+            h.app.cam.distance = 10_000.0;
+            let assembly_camera = h.app.cam;
+            let assembly = h.app.session.doc.clone();
+            let assembly_history = (h.app.session.undo.len(), h.app.session.redo.len());
+            assert_eq!(assembly_history, (1, 0));
+            assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 1);
+
+            h.app.run("component.edit_in_place", json!({"component":component})).unwrap();
+            h.settle();
+            assert!(h.app.edit_in_place.active.is_some());
+            assert_eq!(h.app.session.path.as_deref(), part_path.to_str());
+            assert!(h.app.session.undo.is_empty());
+            h.app.run("appearance.assign", json!({"bodies":["Subject"],"color":"#204080"})).unwrap();
+            h.app.run("parameters.add", json!({"name":"clearance","expression":"1 mm"})).unwrap();
+            let feature = h.app.session.doc.features[0].id;
+            h.app.run("timeline.delete", json!({"feature":feature})).unwrap();
+            h.app.run("file.save", json!({})).unwrap();
+            assert_eq!(h.app.session.undo.len(), 3);
+            assert!(!h.app.session.is_dirty());
+            assert!(h.app.session.world_state().unwrap().bodies.is_empty());
+            assert!(h.app.pending_fit.is_none());
+
+            // Finish switches synchronously to the assembly's own saved history and
+            // last loaded one-body model, before any background link refresh lands.
+            let r = super::execute(&mut h.app, id, json!({}));
+            assert!(r.is_ok(), "{id}: {r:?}");
+            assert!(h.app.edit_in_place.active.is_none());
+            assert_eq!(h.app.session.path.as_deref(), assembly_path.to_str());
+            assert!(std::sync::Arc::ptr_eq(&assembly, &h.app.session.doc));
+            assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), assembly_history);
+            assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 1);
+            assert_eq!(
+                (h.app.cam.yaw, h.app.cam.pitch, h.app.cam.roll, h.app.cam.fov, h.app.cam.up),
+                (assembly_camera.yaw, assembly_camera.pitch, assembly_camera.roll, assembly_camera.fov, assembly_camera.up),
+                "returning to the tab restores its orientation and projection while fitting its body"
+            );
+            assert!(h.app.pending_fit.is_some(), "{id}: a session swap must retain the measured first-body fit");
+            h.settle();
+            assert!(h.app.pending_fit.is_none());
+            assert!(h.app.cam.distance < 1000.0);
+            assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), assembly_history);
+        }
+    }
+
+    #[test]
+    fn control_first_body_creation_still_fits_but_later_appearance_edits_do_not() {
+        let mut h = crate::scenario::Harness::new();
+        h.frames(4);
+        h.app.cancel_view_animation();
+        h.app.cam.distance = 10_000.0;
+        let (request, _receiver) =
+            ControlRequest::new("engine.execute", json!({"command":"solid.box","params":{"length":80,"width":50,"height":12,"body_name":"Subject"}}));
+        let Outcome::Done(reply) = handle(&mut h.app, &h.ctx, &request) else { panic!("a command reply cannot be a screenshot") };
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert!(h.app.pending_fit.is_some(), "the first actual body must request the measured fit");
+        h.frames(4);
+        assert!(h.app.pending_fit.is_none());
+        assert!(h.app.cam.distance < 1000.0);
+        h.app.cam.yaw = 0.7;
+        h.app.cam.distance = 321.0;
+        let camera = h.app.cam;
+        let undo = h.app.session.undo.len();
+        let reply = h.call("engine.execute", json!({"command":"appearance.assign","params":{"bodies":["Subject"],"color":"#204080"}}));
+        assert_eq!(reply["ok"], true, "{reply}");
+        h.frames(4);
+        assert_eq!(h.app.cam, camera);
+        assert!(h.app.pending_fit.is_none());
+        assert_eq!(h.app.session.undo.len(), undo + 1);
+    }
+
     /// A request carrying `allow_paths` (from an MCP server, #205) reaches files only inside
     /// those folders; the same request without it, like the user's own dialogs, is unconfined.
     #[test]
@@ -2316,12 +3060,23 @@ mod tests {
             assert_eq!(call("ui.render", json!({"path": at(&root, "a.png"), "width": 32, "height": 32}), true)["ok"], true);
         }
         assert_eq!(call("ui.screenshot", json!({"path": at(&root, "b.png")}), true)["ok"], true);
+        // Settings profiles are read and written by the app, not the engine, and stay inside too (#11362).
+        let profile = |id: &str, params: Value| json!({"command": id, "params": params});
+        let poc = json!({"format": "solidcraft-profile/1", "name": "scope-poc"});
+        assert_eq!(call("engine.execute", profile("settings.profile.import", json!({"profile": poc})), true)["ok"], true);
+        let inside = json!({"name": "scope-poc", "path": at(&root, "p.json")});
+        assert_eq!(call("engine.execute", profile("settings.profile.export", inside), true)["ok"], true);
+        assert_eq!(call("engine.execute", profile("settings.profile.import", json!({"path": at(&root, "p.json")})), true)["ok"], true);
+        std::fs::write(at(&base, "p.json"), poc.to_string()).unwrap();
         for (method, params) in [
             ("engine.execute", export(at(&out, "a.step"))),
             ("engine.execute", export(at(&root, "../out/a.step"))),
             ("engine.script", json!({"commands": [{"command": "file.export", "params": {"path": at(&out, "a.step")}}]})),
             ("ui.render", json!({"path": at(&out, "a.png"), "width": 32, "height": 32})),
             ("ui.screenshot", json!({"path": at(&out, "b.png")})),
+            ("engine.execute", profile("settings.profile.export", json!({"name": "scope-poc", "path": at(&out, "p.json")}))),
+            ("engine.execute", profile("settings.profile.import", json!({"path": at(&base, "p.json")}))),
+            ("engine.execute", profile("settings.profile.import", json!({"path": at(&out, "missing.json")}))),
         ] {
             let v = call(method, params, true);
             assert!(v["ok"] == false && v.to_string().contains("outside the folders this agent may use"), "{method}: {v}");
@@ -2594,8 +3349,7 @@ mod tests {
         );
 
         // What is under the pointer is a selection-like item, not the viewport's Debug text.
-        h.app.viewport.hover =
-            Some(crate::viewport::Hit::Face { body: "Body1".into(), index: 2, point: solidcraft_engine::geom::Vec3::new(1.0, 2.0, 3.0) });
+        h.app.viewport.hover = Some(crate::viewport::Hit::Face { body: "Body1".into(), index: 2, point: solidcore_record::Vec3::new(1.0, 2.0, 3.0) });
         let hover = json!({"type": "face", "body": "Body1", "index": 2, "point": [1.0, 2.0, 3.0]});
         assert_eq!(h.call("ui.selection", json!({}))["result"]["hover"], hover);
     }

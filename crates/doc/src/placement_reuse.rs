@@ -63,7 +63,7 @@ fn local_plane(plane: &PlaneRef, depth: usize) -> bool {
         PlaneRef::Origin { name: _ } | PlaneRef::Custom { plane: _ } | PlaneRef::Placed { origin: _, x_dir: _, y_dir: _ } => true,
         PlaneRef::Offset { base, distance: _ }
         | PlaneRef::Flipped { base, about_y: _ }
-        | PlaneRef::AtAngle { base, axis_origin: _, axis_dir: _, angle: _, line: None } => local_plane(base, depth + 1),
+        | PlaneRef::AtAngle { base, axis_origin: _, axis_dir: _, angle: _, line: None, pivot: None, .. } => local_plane(base, depth + 1),
         _ => false,
     }
 }
@@ -106,10 +106,12 @@ pub(super) fn local_geometry(f: &Feature, components: &std::collections::HashMap
                 distance2: _,
                 start_offset: _,
                 through_all,
+                second_follows_first: _,
                 taper: _,
                 to,
                 to_offset: _,
                 from,
+                corner: _,
                 to_body_apart: _,
             } = extent;
             to.is_none() && from.is_none() && !through_all && components.get(&sketch.0) == Some(&f.component)
@@ -122,6 +124,7 @@ pub(super) fn local_geometry(f: &Feature, components: &std::collections::HashMap
 /// Assembly records do not feed any of the feature kinds accepted by `local_geometry`.
 fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
     let Document {
+        newer_file: _,
         render,
         format,
         format_pending,
@@ -210,6 +213,7 @@ fn same_feature(a: &Feature, b: &Feature) -> bool {
         edge_names,
         face_names,
         participants,
+        touching,
         shell_piece_order,
         kernel_piece_order,
         inserted,
@@ -226,6 +230,7 @@ fn same_feature(a: &Feature, b: &Feature) -> bool {
         && *edge_names == b.edge_names
         && *face_names == b.face_names
         && *participants == b.participants
+        && *touching == b.touching
         && *shell_piece_order == b.shell_piece_order
         && *kernel_piece_order == b.kernel_piece_order
         && *inserted == b.inserted

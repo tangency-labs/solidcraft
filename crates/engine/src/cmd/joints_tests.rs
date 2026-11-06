@@ -1,7 +1,8 @@
+use solidcraft_geom::prelude::*;
 use std::f64::consts::FRAC_PI_2;
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use crate::Session;
 
@@ -123,6 +124,27 @@ fn revolute_hinge_turns_about_the_knuckle() {
     assert!(near(place(&s, "LeafB", p), Vec3::new(20.0, 29.0, 37.0)));
 }
 
+/// A joint value too large says so, rather than that it is not a number (#9625).
+#[test]
+fn a_joint_value_out_of_range_says_so() {
+    let mut s = Session::default();
+    leaf(&mut s, "LeafA");
+    leaf(&mut s, "LeafB");
+    let o = occ(&s, "LeafA");
+    run(&mut s, "occurrence.ground", json!({"occurrence": o, "grounded": true}));
+    let hinge = json!({"type": "revolute", "a": {"occurrence": "LeafA", "circle": [1, 37, 4]}, "b": {"occurrence": "LeafB", "circle": [1, 37, 4]}, "flip": true, "name": "Hinge"});
+    run(&mut s, "joint.create", hinge);
+    for value in [json!(1e9), json!(-5e15)] {
+        let e = s.execute("joint.drive", &json!({"joint": "Hinge", "value": value})).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(
+            e.contains("a joint value must be a number between -1e9 and 1e9") && !e.contains("a joint value must be a number or"),
+            "{value}: {e}"
+        );
+    }
+    let e = s.execute("joint.drive", &json!({"joint": "Hinge", "value": true})).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("a joint value must be a number or an expression") && !e.contains("between"), "{e}");
+}
+
 /// Two 10 mm cubes in components A (grounded) and B.
 fn two_cubes() -> Session {
     let mut s = Session::default();
@@ -238,21 +260,40 @@ fn interference_finds_a_peg_overlapping_a_small_rib() {
     assert!((lo[0].as_f64().unwrap_or(0.0) - 19.7).abs() < 1e-6 && (hi[0].as_f64().unwrap_or(0.0) - 19.85).abs() < 1e-6, "{i}");
 }
 
-/// An arc revolved up to a post ends on the post's wall, where the two bodies can't be
-/// intersected: the pair is listed as unchecked instead of passing as clear.
+/// A pair interference can't check is listed as unchecked, with its reason, instead of passing
+/// as clear. Truck could not intersect an arc revolved up to a post's wall; SMLib does, exactly,
+/// so the pair that can't be checked is now an imported mesh beside a solid.
 #[test]
 fn interference_lists_a_pair_it_could_not_check() {
+    // A quarter ring revolved round z through the post, brought in as an imported mesh (an STL
+    // of it): a mesh body has no exact surfaces to intersect, so its pair with the post is listed
+    // as not checked, with the reason, rather than read as clear.
+    let dir = std::env::temp_dir().join(format!("solidcraft-unchecked-pair-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("arc.stl");
+    let mut source = Session::default();
+    run(&mut source, "sketch.create", json!({"name": "Profile", "plane": "XZ"}));
+    run(&mut source, "sketch.rectangle.two_point", json!({"p0": [10, 0], "p1": [15, 5]}));
+    run(&mut source, "sketch.finish", json!({}));
+    run(
+        &mut source,
+        "solid.revolve",
+        json!({"sketch": "Profile", "axis": {"origin": [0, 0, 0], "dir": [0, 0, 1]}, "angle": "90 deg", "body_name": "Arc"}),
+    );
+    run(&mut source, "file.export", json!({"path": stl.to_string_lossy()}));
     let mut s = Session::default();
     run(&mut s, "solid.cylinder", json!({"base": [0, 14, -5], "radius": 4, "height": 15, "body_name": "Post"}));
-    run(&mut s, "sketch.create", json!({"name": "Profile", "plane": "XZ"}));
-    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 0], "p1": [15, 5]}));
-    run(&mut s, "sketch.finish", json!({}));
-    run(&mut s, "solid.revolve", json!({"sketch": "Profile", "axis": {"origin": [0, 0, 0], "dir": [0, 0, 1]}, "to": [4, 14, 2], "body_name": "Arc"}));
+    run(&mut s, "file.insert_mesh", json!({"path": stl.to_string_lossy()}));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mesh: Vec<String> = s.world_state().unwrap().bodies.iter().filter(|b| b.body.is_mesh()).map(|b| b.name.clone()).collect();
+    assert_eq!(mesh.len(), 1, "{mesh:?}");
     let i = run(&mut s, "inspect.interference", json!({}));
     assert_eq!(i["count"], 0, "{i}");
     let unchecked = i["unchecked"].as_array().cloned().unwrap_or_default();
     assert_eq!(unchecked.len(), 1, "{i}");
-    assert!(unchecked[0]["reason"].as_str().is_some_and(|r| r.starts_with("not verified") && !r.contains("displacement")), "{i}");
+    assert_eq!(unchecked[0]["a"].as_str(), mesh.first().map(String::as_str), "{i}");
+    assert_eq!(unchecked[0]["reason"], "mesh body: not checked", "{i}");
     // Bodies that are clear of each other, or overlap plainly, leave the list empty.
     let mut s = two_cubes();
     let i = run(&mut s, "inspect.interference", json!({}));
@@ -2285,10 +2326,9 @@ mod motion_analysis;
 mod motion_sweep;
 
 /// A pin through a hole of its own radius whose axis is a hair off the hole's (parts placed from
-/// rounded coordinates): the walls are all but tangent along two lines, which the boolean can't
-/// intersect. Each offset gets a checked answer: clear on the axis and within the kernel's
-/// same-surface tolerance, and otherwise the crescent the pin shares with the plate, against
-/// the textbook lens of two circles. The pin is chamfered, so it is not a plain prism.
+/// rounded coordinates): the walls are all but tangent along two lines. Each offset gets a
+/// checked answer: clear on the axis and within the kernel's same-surface tolerance, and
+/// otherwise the crescent the pin shares with the plate, against the textbook lens of two circles. The pin is chamfered, so it is not a plain prism.
 #[test]
 fn interference_of_a_pin_a_hair_off_its_hole() {
     let crescent = |r: f64, e: f64| std::f64::consts::PI * r * r - (2.0 * r * r * (e / (2.0 * r)).acos() - e / 2.0 * (4.0 * r * r - e * e).sqrt());
@@ -2308,7 +2348,6 @@ fn interference_of_a_pin_a_hair_off_its_hole() {
         let want = 5.0 * crescent(3.0, offset);
         let got = i["interferences"][0]["volume_mm3"].as_f64().unwrap_or(0.0);
         assert!((got - want).abs() < 1e-6 * want, "{offset}: {got} against {want}: {i}");
-        assert!((i["interferences"][0]["near_coaxial"]["offset_mm"].as_f64().unwrap_or(0.0) - offset).abs() < 1e-9, "{i}");
     }
 }
 
@@ -2329,7 +2368,6 @@ fn interference_of_a_headed_pin_a_hair_off_a_bush_of_its_heads_radius() {
     let want = 5.0 * crescent(3.0, offset);
     let got = i["interferences"][0]["volume_mm3"].as_f64().unwrap_or(0.0);
     assert!((got - want).abs() < 1e-6 * want, "{got} against {want}: {i}");
-    assert!(i["interferences"][0]["near_coaxial"].is_object(), "{i}");
 }
 
 /// A headed pin made before the plate it sits in, a hair off the plate's hole: the crescent
@@ -2680,4 +2718,47 @@ fn driving_an_angle_reports_the_number_a_person_would_read() {
     // Only what is reported is rounded: the stored value keeps full precision.
     let j = s.doc.assembly.joints.iter().find(|j| j.name == "Turn").unwrap();
     assert_ne!(j.values[0].to_degrees(), 30.0, "the stored angle keeps its bits");
+}
+
+#[test]
+fn new_joints_generate_type_prefixed_names_or_keep_custom_name() {
+    let mut s = two_cubes();
+    let (a, b) = (occ(&s, "A"), occ(&s, "B"));
+
+    // 1. Without name: revolute joint defaults to "Revolute Joint1"
+    let r1 = run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "revolute",
+            "a": {"occurrence": a, "face": [5, 5, 10]},
+            "b": {"occurrence": b, "face": [25, 5, 0]}
+        }),
+    );
+    assert_eq!(r1["name"], "Revolute Joint1");
+
+    // 2. Without name: slider joint defaults to "Slider Joint1"
+    let r2 = run(
+        &mut s,
+        "joint.as_built",
+        json!({
+            "type": "slider",
+            "a": "A",
+            "b": "B"
+        }),
+    );
+    assert_eq!(r2["name"], "Slider Joint1");
+
+    // 3. With custom name: preserves custom name exactly
+    let r3 = run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "rigid",
+            "name": "CustomRigid",
+            "a": {"occurrence": a, "face": [5, 5, 10]},
+            "b": {"occurrence": b, "face": [25, 5, 0]}
+        }),
+    );
+    assert_eq!(r3["name"], "CustomRigid");
 }

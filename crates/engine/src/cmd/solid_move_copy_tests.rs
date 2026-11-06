@@ -198,7 +198,7 @@ fn component_of(s: &Session, occurrence: u64) -> u64 {
 /// The lowest corner of the first body a placement shows, in the world.
 fn world_min(s: &Session, path: &[u64]) -> Vec3 {
     let names = s.occurrence_bodies(path, true).unwrap();
-    s.world_state().body(&names[0]).unwrap().mesh().bounds().min
+    s.world_state().unwrap().body(&names[0]).unwrap().mesh().bounds().min
 }
 
 #[test]

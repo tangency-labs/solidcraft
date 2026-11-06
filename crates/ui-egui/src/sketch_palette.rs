@@ -9,6 +9,7 @@
 //! The line type is also a drawing mode: with nothing selected, Construction (or X) makes what
 //! is drawn next construction geometry until it is switched back.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use std::cell::Cell;
 
 use serde_json::{Value, json};
@@ -168,7 +169,7 @@ fn selected_linetypes(app: &SolveApp) -> [bool; 4] {
     if curves.is_empty() {
         return types;
     }
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return types };
     for c in curves.iter().filter_map(|id| ss.sketch.curve_index(id).and_then(|i| ss.sketch.curves.get(i))) {
         let k = if c.infinite {
@@ -196,7 +197,7 @@ pub fn set_linetype(app: &mut SolveApp, kind: u8) {
         return;
     }
     let lines: Vec<String> = {
-        let st = app.session.world_state();
+        let st = crate::open_meshing::session_world(&app.session);
         let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return };
         curves
             .iter()
@@ -253,7 +254,7 @@ fn viewport(app: &SolveApp, ctx: &egui::Context) -> egui::Rect {
 
 /// Is a sketch being edited? That is the palette's own condition.
 pub fn editing(app: &SolveApp) -> bool {
-    app.session.active_sketch.and_then(|s| app.session.world_state().sketch(s).map(|_| ())).is_some()
+    app.session.active_sketch.and_then(|s| crate::open_meshing::session_world(&app.session).sketch(s).map(|_| ())).is_some()
 }
 
 /// Has the viewport room for the palette and a command dialog side by side? A narrow view has
@@ -329,7 +330,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let (opts, name, remaining, solved, total, geometry, open_ends, untied_ends) = {
-        let st = app.session.world_state();
+        let st = crate::open_meshing::session_world(&app.session);
         let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else { return };
         (
             ss.sketch.view.clone(),
@@ -376,14 +377,16 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let selected_types = if has_curves { selected_linetypes(app) } else { std::array::from_fn(|i| mode(app) == i as u8) };
     let panel = crate::ui_kit::Panel::new(
         app.tr_label("ui.palette_sketch_options"),
-        egui::Id::new("sc_sketch_palette"),
+        egui::Id::unique("sc_sketch_palette"),
         anchor,
         vp,
         crate::frame::Side::Right,
         frame,
     )
     .width(width(vp));
+    let mut painted = false;
     let response = panel.window(ctx).show(ctx, |ui| {
+        painted = ui.is_visible() && !ui.is_sizing_pass();
         panel.palette(ui, bottom, top, |ui, part| match part {
             crate::ui_kit::Part::Header => {
                 let status = if !solved || !geometry || remaining == 0 {
@@ -407,14 +410,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 let t = crate::theme::Tokens::get();
                 if open_ends > 0 {
                     let text = crate::i18n::format("sketch.open_ends", &[("count", &open_ends.to_string())]);
-                    ui.label(egui::RichText::new(text).size(t.font_small).color(t.warning)).on_hover_text(app.tr("ui.open_ends_tip"));
+                    ui.label(egui::RichText::new(text).size(t.font_small).color(t.warning)).backing_on_hover_text(app.tr("ui.open_ends_tip"));
                 }
                 if untied_ends > 0 {
                     ui.horizontal(|ui| {
                         let text = crate::i18n::format("sketch.untied_ends", &[("count", &untied_ends.to_string())]);
-                        ui.label(egui::RichText::new(text).size(t.font_small).color(t.warning)).on_hover_text(app.tr("ui.untied_ends_tip"));
-                        let button =
-                            crate::ui_kit::button(ui, app.tr("ui.tie_ends"), crate::ui_kit::Button::Normal).on_hover_text(app.tr("ui.tie_ends_tip"));
+                        ui.label(egui::RichText::new(text).size(t.font_small).color(t.warning)).backing_on_hover_text(app.tr("ui.untied_ends_tip"));
+                        let button = crate::ui_kit::button(ui, app.tr("ui.tie_ends"), crate::ui_kit::Button::Normal)
+                            .backing_on_hover_text(app.tr("ui.tie_ends_tip"));
                         crate::scenario::publish_handle("sketch_palette:tie_ends", button.rect.center());
                         tie = button.clicked();
                     });
@@ -507,7 +510,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
         });
     });
-    app.viewport.palette_rect = response.map(|r| r.response.rect.expand(frame.stroke.width));
+    app.viewport.palette_rect =
+        response.filter(|_| !app.universal_panel_host_enabled() || painted).map(|r| r.response.rect.expand(frame.stroke.width));
     if let Some(rect) = app.viewport.palette_rect {
         crate::scenario::publish_rect("sketch_palette:outer", rect);
     }
@@ -537,6 +541,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         app.set_status(error, true);
     }
     if look {
+        if app.universal_panel_host_enabled() {
+            app.viewport.host_windows = crate::ui_kit::Container::host_window_regions(ctx);
+            crate::viewport::refresh_layout(app, ctx);
+        }
         crate::dialogs::look_at_sketch_again(app);
     }
     if finish {
@@ -597,7 +605,7 @@ mod tests {
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         h.app.run("sketch.circle.center", json!({"center":[10,10],"radius":5})).unwrap();
         h.settle();
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let sketch = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
         assert_eq!(unconstrained_total(&sketch.sketch), 3);
         assert_eq!(sketch.report.dof, 3);
@@ -660,12 +668,12 @@ mod tests {
             assert_eq!(after.dims.iter().map(|d| &d.value).collect::<Vec<_>>(), before.dims.iter().map(|d| &d.value).collect::<Vec<_>>());
             assert_eq!(h.app.session.undo.len(), history);
             h.step(&json!({"click":{"sketch":[20,10]}})).unwrap();
-            let state = h.app.session.world_state();
+            let state = h.app.session.world_state().unwrap();
             let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
             assert!(!sketch.curves.is_empty(), "{command}");
             assert!(sketch.curves.iter().all(|c| c.construction), "{command}");
             h.app.run("edit.undo", json!({})).unwrap();
-            assert!(h.app.session.world_state().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.is_empty());
+            assert!(h.app.session.world_state().unwrap().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.is_empty());
             set_mode(&mut h.app, 0);
         }
     }
@@ -694,7 +702,7 @@ mod tests {
             let history = h.app.session.undo.len();
             let r = h.app.run("sketch.project", json!({"refs":[{"sketch":1,"curve":"l1"},{"sketch":1,"curve":"c1"}]})).unwrap();
             assert_eq!(r["links"].as_array().map(Vec::len), Some(2), "mode {m}: {r}");
-            let state = h.app.session.world_state();
+            let state = crate::open_meshing::session_world(&h.app.session);
             let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
             let kind = |line: bool| {
                 sketch
@@ -708,7 +716,10 @@ mod tests {
             assert_eq!(kind(false), circle, "mode {m}: the circle");
             assert_eq!(h.app.session.undo.len(), history + 1, "mode {m}: one undo step");
             h.app.run("edit.undo", json!({})).unwrap();
-            assert!(h.app.session.world_state().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.is_empty(), "mode {m}");
+            assert!(
+                crate::open_meshing::session_world(&h.app.session).sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.is_empty(),
+                "mode {m}"
+            );
             set_mode(&mut h.app, 0);
         }
     }
@@ -739,7 +750,7 @@ mod tests {
             assert!(options.contains(egui::pos2(x as f32, y as f32)), "lower option must be visible after scrolling");
             h.call("ui.click", json!({"x":x,"y":y}));
             h.settle();
-            assert!(h.app.session.world_state().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.view.three_d);
+            assert!(h.app.session.world_state().unwrap().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.view.three_d);
             assert_eq!(h.app.session.undo.len(), undo + 1);
             h.app.run("edit.undo", json!({})).unwrap();
             assert_eq!(h.app.session.doc.to_json(), baseline);
@@ -915,7 +926,7 @@ mod tests {
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         h.settle();
         let active = h.app.session.active_sketch.unwrap();
-        let slice_on = |h: &mut crate::scenario::Harness| h.app.session.world_state().sketch(active).unwrap().sketch.view.slice;
+        let slice_on = |h: &mut crate::scenario::Harness| h.app.session.world_state().unwrap().sketch(active).unwrap().sketch.view.slice;
         assert!(!slice_on(&mut h));
         // Clicking the row's label (not just the checkbox) toggles the option, same as before
         // the checkbox and the label became separate widgets in their own column.
@@ -1044,7 +1055,7 @@ mod tests {
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         h.settle();
         let line = |h: &crate::scenario::Harness| {
-            let st = h.app.session.world_state();
+            let st = h.app.session.world_state().unwrap();
             let ss = h.app.session.active_sketch.and_then(|s| st.sketch(s)).unwrap();
             dof_text(ss.report.dof, ss.report.ok(), has_geometry(&ss.sketch))
         };

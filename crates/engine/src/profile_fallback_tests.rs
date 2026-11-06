@@ -18,7 +18,7 @@ fn run(s: &mut Session, id: &str, p: Value) -> Value {
 }
 
 fn volume(s: &Session) -> f64 {
-    s.model.state().bodies.iter().map(|b| b.body.tessellate(1e-3).unwrap().measure().volume).sum()
+    s.model.state().bodies.iter().map(|b| b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-3)).unwrap().measure().volume).sum()
 }
 
 fn result(s: &Session, name: &str) -> (Option<String>, Option<String>) {

@@ -1,4 +1,5 @@
 //! Small deterministic material previews; no textures, jobs or graphics device.
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{scenario, theme::Tokens};
 use egui::{Color32, Mesh, Rect, Response, Sense, Ui, pos2, vec2};
 use std::{collections::VecDeque, sync::Arc};
@@ -120,7 +121,7 @@ pub(super) fn paint_sphere(ui: &Ui, rect: Rect, sphere: Sphere) {
     }
     let t = Tokens::get();
     let key = sphere.key(rect.width());
-    let mesh = ui.ctx().data_mut(|data| data.get_temp_mut_or_default::<SphereCache>(egui::Id::new("ui_kit:spheres")).mesh(key, &t));
+    let mesh = ui.ctx().data_mut(|data| data.get_temp_mut_or_default::<SphereCache>(egui::Id::unique("ui_kit:spheres")).mesh(key, &t));
     if sphere.kind == FinishKind::Glass {
         // A bounded four-by-four checker remains visible through the sphere.
         for y in 0..4 {
@@ -208,7 +209,7 @@ pub(crate) fn sphere_preview_with_source<R>(
                         .truncate()
                         .halign(egui::Align::Min),
                 )
-                .on_hover_text(name);
+                .backing_on_hover_text(name);
                 let (line, _) = ui.allocate_exact_size(vec2(text_width, t.control_height), Sense::hover());
                 let usage_width = (ui.painter().layout_no_wrap(usage.to_owned(), egui::FontId::proportional(t.font_caption), t.form_ink).size().x
                     + t.space_12)
@@ -293,11 +294,11 @@ impl SphereTile<'_> {
         scenario::publish_rect(&format!("{}:label", self.id), label);
         scenario::publish_rect(&format!("{}:galley", self.id), galley.rect.translate(label_pos.to_vec2()));
         ui.painter().with_clip_rect(ui.clip_rect().intersect(label)).galley(label_pos, galley, t.form_ink);
-        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), self.selected, self.name));
+        response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), self.selected, self.name));
         scenario::publish_target(self.id, rect);
         let mut tip = egui::Tooltip::for_enabled(&response);
         tip.popup = tip.popup.frame(super::Container::new(ui.ctx(), super::Surface::Toast).tooltip_frame(ui.ctx()));
-        tip.show(|ui| {
+        crate::ui_kit::Container::show_tooltip(response.id, tip, |ui| {
             ui.label(self.tip);
         });
         response
@@ -310,7 +311,7 @@ pub(crate) fn sphere_cursor(ui: &mut egui::Ui, sphere: Sphere) {
         let t = Tokens::get();
         let rect = Rect::from_min_size(pointer + vec2(t.space_12, t.space_12), vec2(t.control_height, t.control_height));
         let mut ghost =
-            ui.new_child(egui::UiBuilder::new().layer_id(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("sphere_cursor"))).max_rect(rect));
+            ui.new_child(egui::UiBuilder::new().layer_id(egui::LayerId::new(egui::Order::Tooltip, egui::Id::unique("sphere_cursor"))).max_rect(rect));
         ghost.set_clip_rect(ui.ctx().content_rect());
         paint_sphere(&ghost, rect, sphere);
     }

@@ -1,16 +1,19 @@
 //! The timeline (bottom): features in order, the rollback marker, errors and warnings.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Edge, Status, Surface};
 use egui::{Rect, Sense, UiBuilder, pos2, vec2};
 use serde_json::{Value, json};
 use solidcraft_engine::doc::{
-    FeatureKind, PlaneRef, SketchId,
+    FeatureKind, FeatureResult, PlaneRef, SketchId,
     construct::{AxisDef, PointDef},
+    kernel::{ImportReport, IssueKind},
 };
 
 use solidcraft_engine::schema::edit::PlaybackAction;
 
 use crate::SolveApp;
+use crate::context_menu::Item;
 use crate::theme::Tokens;
 
 /// Apply transport actions from the current marker; endpoints stay bounded, including an
@@ -66,7 +69,7 @@ pub(crate) fn transport_items(app: &SolveApp) -> Vec<crate::context_menu::Item> 
 /// that made the body.
 fn geometry_feature(app: &SolveApp, body: &str, face: Option<usize>) -> Option<u64> {
     face.and_then(|index| crate::context_menu::face_feature(app, body, index))
-        .or_else(|| app.session.world_state().body(body).map(|b| b.feature))
+        .or_else(|| crate::open_meshing::session_world(&app.session).body(body).map(|b| b.feature))
         .filter(|id| app.session.doc.feature(*id).is_some())
 }
 
@@ -91,13 +94,16 @@ pub(crate) fn picked_feature(app: &SolveApp) -> Option<u64> {
 /// A new face or edge picked in the view scrolls the history shown to the feature that made it,
 /// once per pick; the history stays where it is while the pick does not change.
 pub(crate) fn follow_view_pick(app: &mut SolveApp) {
+    crate::browser::sync_reveals(app);
     let picked = picked_feature(app);
     if picked == app.tree.view_pick {
         return;
     }
     app.tree.view_pick = picked;
-    if picked.is_some() && app.ui.show_timeline {
-        app.tree.timeline_reveal = picked;
+    if app.ui.show_timeline
+        && let Some(id) = picked
+    {
+        crate::browser::request_timeline_reveal(app, id);
     }
 }
 
@@ -343,15 +349,19 @@ pub(crate) fn menu_targets(app: &SolveApp, id: u64) -> Vec<u64> {
     if selected.contains(&id) { selected } else { vec![id] }
 }
 
+/// Delete's label in a feature's menu: how many features it deletes when that is more than one.
+fn delete_label(count: usize) -> String {
+    match count {
+        1 => crate::i18n::tr_label("Delete").to_string(),
+        n => crate::i18n::format("timeline.delete_many", &[("count", &n.to_string())]),
+    }
+}
+
 /// Delete in a feature's menu, in both timelines: the selected features when the right-clicked
 /// one is among them, labelled with how many, else that feature alone (#5005).
 pub(crate) fn delete_button(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) {
     let targets = menu_targets(app, id);
-    let label = match targets.len() {
-        1 => crate::i18n::tr_label("Delete").to_string(),
-        n => crate::i18n::format("timeline.delete_many", &[("count", &n.to_string())]),
-    };
-    if crate::context_menu::button(ui, &label, "delete").clicked() {
+    if crate::context_menu::button(ui, &delete_label(targets.len()), "delete").clicked() {
         delete_features(app, targets);
         ui.close();
     }
@@ -365,22 +375,74 @@ fn features_from(app: &SolveApp, from: usize, shown: Option<&[usize]>) -> Vec<u6
 }
 
 /// In the menu of a feature after the history marker (feature `id` at design position
-/// `index`, `marker` a design position too): delete every feature after the marker, only the
-/// `shown` ones when the timeline is filtered to a component, labelled with how many, in one
-/// delete through [`delete_features`] so the confirmation still lists what would fail. Not
-/// offered before the marker, nor when the menu acts on several selected features: an entry
-/// that acts partly on the selection and partly beyond it is hard to read.
-pub(crate) fn delete_after_marker_button(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, index: usize, marker: usize, shown: Option<&[usize]>) {
+/// `index`, `marker` a design position too): every feature after the marker, only the `shown`
+/// ones when the timeline is filtered to a component, with the entry's label, for one delete
+/// through [`delete_features`] so the confirmation still lists what would fail. Not offered
+/// before the marker, nor when the menu acts on several selected features: an entry that acts
+/// partly on the selection and partly beyond it is hard to read.
+fn after_marker(app: &SolveApp, id: u64, index: usize, marker: usize, shown: Option<&[usize]>) -> Option<(String, Vec<u64>)> {
     if index < marker || menu_targets(app, id).len() > 1 {
-        return;
+        return None;
     }
     let ids = features_from(app, marker, shown);
+    // A feature the bar's filter leaves out has nothing shown after the marker to delete.
+    if ids.is_empty() {
+        return None;
+    }
     let key = if ids.len() == 1 { "timeline.delete_after_marker_one" } else { "timeline.delete_after_marker_other" };
-    let label = crate::i18n::format(key, &[("count", &ids.len().to_string())]);
+    Some((crate::i18n::format(key, &[("count", &ids.len().to_string())]), ids))
+}
+
+/// The [`after_marker`] entry as a button.
+pub(crate) fn delete_after_marker_button(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, index: usize, marker: usize, shown: Option<&[usize]>) {
+    let Some((label, ids)) = after_marker(app, id, index, marker, shown) else { return };
     if crate::context_menu::button(ui, &label, "delete").clicked() {
         delete_features(app, ids);
         ui.close();
     }
+}
+
+/// A History bar feature's menu (`Target::Timeline`): edit, rename, suppress, roll back, find,
+/// the clipboard and delete.
+pub(crate) fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
+    let doc = &app.session.doc;
+    let (Some(feature), Some(index)) = (doc.feature(id), doc.feature_index(id)) else { return Vec::new() };
+    let mut v = vec![Item::action("ui.editFeature", "Edit Feature", "edit").with(json!({ "feature": id }))];
+    if matches!(feature.kind, FeatureKind::Sketch { .. }) {
+        v.extend(
+            crate::context_menu::items(app, &crate::context_menu::Target::Sketch { id }).into_iter().filter(|item| item.id == "ui.redefineSketch"),
+        );
+    }
+    if let Some(sketch) = TimelineKind::of(&feature.kind).profile_sketch() {
+        v.push(Item::action("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({ "sketch": sketch.0 })));
+    }
+    // Its own message, not a literal: no catalog held the literal, so the item stayed English
+    // in every language (#8301).
+    let suppress = if feature.suppressed { "timeline.unsuppress_features" } else { "timeline.suppress_features" };
+    v.extend([
+        Item::action("ui.rename", "Rename", "rename").with(json!({ "feature": id, "dialog": true })),
+        Item::action("timeline.suppress", crate::i18n::tr(suppress), "suppress").with(json!({ "feature": id })),
+        Item::action("timeline.roll_to", "Roll History Marker Here", "rollback").with(json!({ "feature": id })),
+        Item::action("ui.findBrowser", "Find in Browser", "list").with(json!({ "feature": id })),
+        Item::sep(),
+        Item::action("timeline.copy", "Copy", "copy").with(json!({ "features": menu_targets(app, id) })),
+        Item::action("timeline.paste", "Paste", "paste").with(json!({})).on_if(!app.session.clipboard.is_empty()),
+    ]);
+    if feature_message(app, id).is_some() {
+        let failed = app.session.model.result(id).is_some_and(|r| r.error.is_some());
+        let label = if failed { "Copy Error Message" } else { "Copy Warning Message" };
+        v.push(Item::action("ui.copyMessage", label, "copy").with(json!({ "feature": id })));
+    }
+    let targets = menu_targets(app, id);
+    v.push(Item::sep());
+    v.push(Item::action("ui.deleteFeatures", &delete_label(targets.len()), "delete").with(json!({ "features": targets })));
+    let marker = doc.marker.unwrap_or(doc.features.len());
+    let shown = shown_feature_indices(doc, timeline_component(app, app.tree.history_show_all), app.tree.history_show_hidden);
+    if let Some((label, ids)) = after_marker(app, id, index, marker, Some(&shown)) {
+        // Its own id, so `ui.menuPick` can tell it from Delete.
+        v.push(Item::action("ui.deleteAfterMarker", &label, "delete").with(json!({ "features": ids })));
+    }
+    v
 }
 
 /// The timeline anchor of a feature: the last one clicked, where a Shift+click range starts.
@@ -398,6 +460,21 @@ pub(crate) fn clipboard_buttons(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) 
     if crate::context_menu::button_enabled(ui, crate::i18n::tr_label("Paste"), "paste", !app.session.clipboard.is_empty()).clicked() {
         let _ = app.run("timeline.paste", json!({}));
         ui.close();
+    }
+}
+
+/// A feature tooltip's (and its copied message's) name, type, error and warning: an import's
+/// summary as it is (the mark already says it is a warning), any other warning labelled.
+pub(crate) fn feature_status_text(name: &str, ty: &str, result: Option<&FeatureResult>) -> String {
+    let error = result.and_then(|r| r.error.as_deref());
+    match result.and_then(|r| r.import_report.as_deref()).filter(|r| !r.issues.is_empty()) {
+        Some(report) => {
+            let mut text = status_text(name, ty, error, None);
+            text.push('\n');
+            text.push_str(&import_summary(report));
+            text
+        }
+        None => status_text(name, ty, error, result.and_then(|r| r.warning.as_deref())),
     }
 }
 
@@ -463,14 +540,95 @@ pub(crate) fn worst_status(app: &SolveApp, ids: &[u64]) -> (Option<Status>, Opti
 }
 
 /// What a feature's error or warning mark says, as its tooltip shows it (name and type, then
-/// the error and the warning), for the clipboard. `None` when it has neither.
+/// the error and the warning), for the clipboard, and an import's every warning as the kernel
+/// words them. `None` when it has neither.
 pub(crate) fn feature_message(app: &SolveApp, id: u64) -> Option<String> {
     let result = app.session.model.result(id)?;
     if result.error.is_none() && result.warning.is_none() {
         return None;
     }
     let feature = app.session.doc.features.iter().find(|f| f.id == id)?;
-    Some(status_text(&feature.name, feature.kind.type_name(), result.error.as_deref(), result.warning.as_deref()))
+    let mut text = feature_status_text(&feature.name, feature.kind.type_name(), Some(result));
+    if let Some(report) = result.import_report.as_ref().filter(|r| !r.issues.is_empty()) {
+        text.push_str("\n\n");
+        text.push_str(crate::i18n::tr("import_report.details"));
+        for issue in &report.issues {
+            text.push('\n');
+            text.push_str(&issue.detail);
+        }
+    }
+    Some(text)
+}
+
+/// What a feature's warning mark says: an import's warnings summed up in words, else the
+/// feature's warning.
+pub(crate) fn warning_text(result: &FeatureResult) -> Option<String> {
+    match result.import_report.as_deref().filter(|r| !r.issues.is_empty()) {
+        Some(report) => Some(import_summary(report)),
+        None => result.warning.clone(),
+    }
+}
+
+/// The status line after an open or an import with warnings: their summary. The import made
+/// the reply's `feature`; a STEP file opened as a design is the design's one import. `None`
+/// without an import's warnings.
+pub(crate) fn import_status(app: &SolveApp, reply: &Value) -> Option<String> {
+    let reported = |r: &&FeatureResult| r.import_report.as_deref().is_some_and(|r| !r.issues.is_empty());
+    let result = match reply.get("feature").and_then(Value::as_u64) {
+        Some(id) => app.session.model.result(id).filter(reported)?,
+        // Only when the open says it has warnings: a design opened with an import in it does not.
+        None if reply.get("warnings").and_then(Value::as_array).is_some_and(|w| !w.is_empty()) => {
+            let mut imports = app.session.model.results.iter().filter(reported);
+            match (imports.next(), imports.next()) {
+                (Some(only), None) => only,
+                _ => return None,
+            }
+        }
+        None => return None,
+    };
+    result.import_report.as_deref().map(import_summary)
+}
+
+/// An import's warnings for a person who uses CAD: how many of the file's parts came in as
+/// solids, then what happened to the others, by kind, counted by part (faces for the faces left
+/// out or not drawn), and what may help. Entity numbers and the kernel's wording stay in the
+/// details ([`feature_message`]).
+pub(crate) fn import_summary(report: &ImportReport) -> String {
+    let mut parts: std::collections::BTreeMap<IssueKind, std::collections::BTreeSet<Option<u64>>> = Default::default();
+    let mut faces: std::collections::BTreeMap<IssueKind, usize> = Default::default();
+    let mut file = 0usize;
+    for issue in &report.issues {
+        if issue.kind == IssueKind::File {
+            file += 1;
+            continue;
+        }
+        parts.entry(issue.kind).or_default().insert(issue.item);
+        *faces.entry(issue.kind).or_default() += issue.faces;
+    }
+    let parts_of = |kind| parts.get(&kind).map_or(0, std::collections::BTreeSet::len);
+    let faces_of = |kind| faces.get(&kind).copied().unwrap_or(0);
+    let counted = |key: &str, n: usize| crate::i18n::format(&format!("{key}_{}", if n == 1 { "one" } else { "other" }), &[("count", &n.to_string())]);
+    let mut out = Vec::new();
+    if report.parts > 1 && report.solids < report.parts {
+        out.push(crate::i18n::format("import_report.solids", &[("solids", &report.solids.to_string()), ("parts", &report.parts.to_string())]));
+    }
+    let sentences = [
+        ("import_report.not_imported", parts_of(IssueKind::NotImported)),
+        ("import_report.refused", parts_of(IssueKind::Refused)),
+        ("import_report.surfaces", parts_of(IssueKind::ImportedAsSurfaces)),
+        ("import_report.left_out", faces_of(IssueKind::FaceLeftOut)),
+        ("import_report.open", parts_of(IssueKind::OpenBody)),
+        ("import_report.not_shown", faces_of(IssueKind::FacesNotShown)),
+        ("import_report.needs_repair", parts_of(IssueKind::NeedsRepair)),
+        ("import_report.repaired", parts_of(IssueKind::Repaired)),
+        ("import_report.file", file),
+    ];
+    out.extend(sentences.iter().filter(|(_, n)| *n > 0).map(|(key, n)| counted(key, *n)));
+    let lost = [IssueKind::NotImported, IssueKind::Refused, IssueKind::ImportedAsSurfaces, IssueKind::FaceLeftOut, IssueKind::OpenBody];
+    if lost.iter().any(|k| parts.contains_key(k)) {
+        out.push(crate::i18n::tr("import_report.hint").to_string());
+    }
+    out.join(" ")
 }
 
 /// Copy Error Message (or Copy Warning Message) in the menu of a feature that has one.
@@ -674,6 +832,7 @@ pub(crate) fn tick_playback(app: &mut SolveApp, ctx: &egui::Context) {
 }
 
 pub fn timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
+    crate::browser::sync_reveals(app);
     let t = Tokens::get();
     app.shell.history_dock_space = Some(ui.available_rect_before_wrap());
     if Container::for_layout(app.ui.layout, Surface::Panel).floating() {
@@ -778,7 +937,7 @@ fn folder_tile(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter, x: f32,
     let br = Rect::from_min_size(pos2(x, r.top() + 6.0), vec2(28.0, 28.0));
     let key = format!("timeline_group:{id}");
     let open = !app.tree.collapsed.contains(&key);
-    let resp = ui.interact(br, ui.id().with(("folder", id)), Sense::click());
+    let resp = ui.interact(br, ui.scope_id().with(("folder", id)), Sense::click());
     p.rect(
         br,
         t.radius_sm.saturating_sub(1),
@@ -809,7 +968,7 @@ fn folder_tile(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter, x: f32,
             app.tree.collapsed.remove(&key);
         }
     }
-    resp.on_hover_text(format!("{} ({count})", group.name));
+    resp.backing_on_hover_text(format!("{} ({count})", group.name));
     x + 32.0
 }
 
@@ -834,7 +993,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
         drag_rect = drag_rect.union(title_rect);
         x += heading.width();
     }
-    let response = ui.interact(drag_rect, egui::Id::new("sc_history_dock_grip"), Sense::drag());
+    let response = ui.interact(drag_rect, egui::Id::unique("sc_history_dock_grip"), Sense::drag());
     crate::scenario::publish_handle("history:grip", drag_rect.center());
     crate::timeline_left::dock_drag(app, ui, &response);
     let controls = crate::ui_kit::HistoryTransport::shown(app.preferences.history_play_button);
@@ -855,8 +1014,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
             let mut x = ui.max_rect().left();
             let origin = x;
             // In an assembly, only the active (or picked) component's features (#2880).
-            let show_all_id = ui.id().with("tl_show_all");
-            let show_all = ui.data(|d| d.get_temp::<bool>(show_all_id)).unwrap_or(false);
+            let show_all = app.tree.history_show_all;
             let only = timeline_component(app, show_all);
             let filtering = only.is_some() || show_all;
             let shown = shown_feature_indices(&app.session.doc, only, app.tree.history_show_hidden);
@@ -869,7 +1027,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                 let galley = ui.painter().layout_no_wrap(label.clone(), egui::FontId::proportional(t.font_label), t.text);
                 let br = Rect::from_min_size(pos2(x, r.top() + 9.0), vec2(galley.size().x + 12.0, 22.0));
                 crate::scenario::publish_handle("timeline:components", br.center());
-                let resp = ui.interact(br, ui.id().with("tl_components"), Sense::click());
+                let resp = ui.interact(br, ui.scope_id().with("tl_components"), Sense::click());
                 p.rect(br, 3.0, if resp.hovered() { t.hover } else { t.timeline_item }, egui::Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
                 p.galley(br.left_center() + vec2(6.0, -galley.size().y * 0.5), galley, t.text);
                 let tip = if show_all {
@@ -879,12 +1037,11 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                 } else {
                     "Activate or pick a component in the browser to show only its features"
                 };
-                if resp.on_hover_text(tip).clicked() && (only.is_some() || show_all) {
-                    ui.data_mut(|d| d.insert_temp(show_all_id, !show_all));
+                if resp.backing_on_hover_text(tip).clicked() && (only.is_some() || show_all) {
+                    app.tree.history_show_all = !show_all;
                 }
                 x = br.right() + 8.0;
             }
-            let design_marker = marker;
             let marker = shown.iter().position(|i| *i >= marker).unwrap_or(shown.len());
             let feats: Vec<_> = shown
                 .iter()
@@ -893,10 +1050,10 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                 .collect();
             let order: Vec<u64> = feats.iter().map(|f| f.0).collect();
             // Find in Timeline: scroll the found feature into the strip on this frame (#5850).
-            let reveal = app.tree.timeline_reveal.take();
+            let reveal = app.tree.timeline_reveal;
             // The feature that made what is under the cursor or picked in the viewport.
             let from_view = [hovered_feature(app), picked_feature(app)];
-            let drag_id = ui.id().with("tl_drag");
+            let drag_id = ui.scope_id().with("tl_drag");
             let mut drag: Option<Drag> = ui.data(|d| d.get_temp(drag_id));
             let pointer = ui.input(|i| i.pointer.hover_pos());
             let mut xs: Vec<f32> = vec![x; feats.len()];
@@ -963,14 +1120,14 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                     *slot = x;
                 }
                 let br = Rect::from_min_size(pos2(x, r.top() + 6.0), vec2(28.0, 28.0));
-                if reveal == Some(*id) {
-                    ui.scroll_to_rect(br, Some(egui::Align::Center));
+                if reveal == Some(*id) && crate::semantic_content::scroll_acknowledged(ui, br) {
+                    app.tree.timeline_reveal = None;
                 }
                 crate::scenario::publish_handle(&format!("timeline:{name}"), br.center());
                 // A chip scrolled out of the strip is neither drawn nor interactive: a long
                 // history drew every chip each frame. Its slot above still places the marker and drops.
                 // One being dragged or focused, or under an open menu, stays alive until that ends.
-                let chip_id = ui.id().with(("feat", *id));
+                let chip_id = ui.scope_id().with(("feat", *id));
                 if !ui.clip_rect().intersects(br)
                     && drag != Some(Drag::Feature(*id))
                     && !ui.memory(|m| m.has_focus(chip_id))
@@ -985,7 +1142,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                 let res =
                     results.get(id).and_then(|k| app.session.model.results.get(*k).filter(|r| r.id == *id).or_else(|| app.session.model.result(*id)));
                 let err = res.and_then(|r| r.error.clone());
-                let warn = res.and_then(|r| r.warning.clone());
+                let warn = res.and_then(warning_text);
                 let rolled = i >= marker;
                 let sel = picked.contains(id);
                 if resp.hovered() {
@@ -1015,8 +1172,8 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                     drag = Some(Drag::Feature(*id));
                 }
                 // The tip is written only while it shows (as `on_hover_text` would lay it out).
-                let resp = resp.on_hover_ui(|ui| {
-                    let mut tip = status_text(name, ty, err.as_deref(), warn.as_deref());
+                let resp = resp.backing_on_hover_ui(|ui| {
+                    let mut tip = feature_status_text(name, ty, res);
                     // Greyed out says only "not shown": say why (#8100).
                     if rolled {
                         tip.push('\n');
@@ -1049,45 +1206,11 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                 if resp.double_clicked() {
                     edit = Some(*id);
                 }
-                let sketch_of = kind.profile_sketch();
-                crate::ui_kit::Menu::context(&resp, |ui| {
-                    if crate::context_menu::button(ui, crate::i18n::tr_label("Edit Feature"), "edit").clicked() {
-                        edit = Some(*id);
-                        ui.close();
-                    }
-                    sketch_plane_button(app, ui, *id);
-                    if let Some(sk) = sketch_of
-                        && crate::context_menu::button(ui, crate::i18n::tr_label("Edit Profile Sketch"), "sketch").clicked()
-                    {
-                        app.edit_sketch(sk.0);
-                        ui.close();
-                    }
-                    if crate::context_menu::button(ui, crate::i18n::tr_label("Rename"), "rename").clicked() {
-                        app.dialog = Some(crate::dialogs::Dialog::rename(*id, name));
-                        ui.close();
-                    }
-                    // Its own message, not a literal: no catalog held the literal, so the item
-                    // stayed English in every language (#8301).
-                    let suppress = if *suppressed { "timeline.unsuppress_features" } else { "timeline.suppress_features" };
-                    if crate::context_menu::button(ui, crate::i18n::tr(suppress), "suppress").clicked() {
-                        let _ = app.run_heavy("timeline.suppress", json!({"feature": id}));
-                        ui.close();
-                    }
-                    if crate::context_menu::button(ui, crate::i18n::tr_label("Roll History Marker Here"), "rollback").clicked() {
-                        let _ = app.run_heavy("timeline.roll_to", json!({ "feature": id }));
-                        ui.close();
-                    }
-                    if crate::context_menu::button(ui, crate::i18n::tr_label("Find in Browser"), "list").clicked() {
-                        find_in_browser(app, *id);
-                        ui.close();
-                    }
-                    ui.separator();
-                    clipboard_buttons(app, ui, *id);
-                    message_button(app, ui, *id);
-                    ui.separator();
-                    delete_button(app, ui, *id);
-                    delete_after_marker_button(app, ui, *id, design_position(&shown, i, n), design_marker, Some(&shown));
-                });
+                // The same menu as the browser's, so the control channel reports it (#10745).
+                if resp.secondary_clicked() {
+                    let at = resp.interact_pointer_pos().unwrap_or(br.center());
+                    crate::context_menu::open_for(app, at, crate::context_menu::Target::Timeline { feature: *id });
+                }
                 x += 32.0;
             }
             let mut previous = origin;
@@ -1102,7 +1225,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
             // The history marker: drag it to roll the model back or forward.
             if let Some(mr) = marker_rect {
                 crate::scenario::publish_rect("history:marker", mr);
-                let resp = ui.interact(mr.expand2(vec2(3.0, 0.0)), ui.id().with("tl_marker"), Sense::drag());
+                let resp = ui.interact(mr.expand2(vec2(3.0, 0.0)), ui.scope_id().with("tl_marker"), Sense::drag());
                 if resp.drag_started() {
                     drag = Some(Drag::Marker);
                 }
@@ -1110,7 +1233,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                 }
                 crate::ui_kit::history_marker(&p, mr, false, accent);
-                resp.on_hover_text(crate::i18n::tr("ui.history_marker_tip"));
+                resp.backing_on_hover_text(crate::i18n::tr("ui.history_marker_tip"));
             }
             let content_end = crate::dialogs_assembly::timeline_joints(app, ui, &p, end + 10.0, r);
             // The scroll range follows the drawn content (the buttons don't take layout space themselves).
@@ -1185,12 +1308,23 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
     });
 }
 
-/// Select what a feature made, so the browser shows it.
-fn find_in_browser(app: &mut SolveApp, id: u64) {
-    let st = app.session.world_state();
-    let bodies: Vec<serde_json::Value> = st.bodies.iter().filter(|b| b.feature == id).map(|b| json!({"type": "body", "name": b.name})).collect();
-    let items = if bodies.is_empty() { vec![json!({"type": "feature", "id": id})] } else { bodies };
+/// Select what a feature made, so the browser shows it. While the browser's rows start closed
+/// (Preferences › Layout), its first body is also found there, as Find in Browser on a body
+/// does: the rows down to it open.
+pub(crate) fn find_in_browser(app: &mut SolveApp, id: u64) {
+    let st = crate::open_meshing::session_world(&app.session);
+    let bodies: Vec<String> = st.bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect();
+    let items: Vec<serde_json::Value> = if bodies.is_empty() {
+        vec![json!({"type": "feature", "id": id})]
+    } else {
+        bodies.iter().map(|name| json!({"type": "body", "name": name})).collect()
+    };
     let _ = app.run("select.set", json!({ "items": items }));
+    if !crate::browser::rows_start_open(app)
+        && let Some(first) = bodies.first()
+    {
+        crate::browser::reveal_body(app, first);
+    }
 }
 
 #[cfg(test)]
@@ -1255,7 +1389,7 @@ mod tests {
         assert!(handle_at("timeline:CopyBox").is_some() && handle_at("timeline:PartBox").is_some(), "both parts' features start in the bar");
         // The Browser menu offers to hide the copy's History, and running it leaves its entries out.
         let copy = h.app.session.doc.components.iter().find(|c| c.name == "Copy").unwrap().id;
-        let menu = context_menu::items(&h.app, &Target::Component { id: copy });
+        let menu = context_menu::entries(&h.app, &Target::Component { id: copy });
         let hide = menu.iter().find(|i| i.id == "component.hide_history").expect("the component menu offers Hide its History");
         context_menu::run_item(&mut h.app, hide, egui::Pos2::ZERO);
         h.frames(4);
@@ -1275,7 +1409,7 @@ mod tests {
         h.frames(4);
         assert!(handle_at("timeline:CopyBox").is_none(), "and hides them again");
         // The component menu now offers to show its History back.
-        let menu = context_menu::items(&h.app, &Target::Component { id: copy });
+        let menu = context_menu::entries(&h.app, &Target::Component { id: copy });
         assert!(menu.iter().any(|i| i.id == "component.show_history"), "the menu flips to Show its History");
     }
 
@@ -1320,6 +1454,53 @@ mod tests {
         );
         let _english = crate::i18n::scope("en");
         assert_eq!(super::status_text("Box", "BoxFeature", Some("error"), Some("warning")), "Box  (BoxFeature)\nError: error\nWarning: warning");
+    }
+
+    /// An import's warnings read as a summary for a CAD user: parts counted by what became of
+    /// them, faces counted, no entity numbers or kernel wording (those stay in the details).
+    #[test]
+    fn an_import_summary_counts_parts_and_faces_in_plain_words() {
+        use solidcraft_engine::doc::kernel::{ImportIssue, ImportReport, IssueKind};
+        let _english = crate::i18n::scope("en");
+        let issue =
+            |kind, item: Option<u64>, faces, detail: &str| ImportIssue { kind, item, part: String::new(), faces, times: 1, detail: detail.into() };
+        let report = ImportReport {
+            parts: 43,
+            solids: 40,
+            issues: vec![
+                issue(
+                    IssueKind::Refused,
+                    Some(7),
+                    0,
+                    "solid #7: not imported: pcurves failed on 1 of 122 faces; first: face #9: SMLib pcurves: an edge lies 13.73370504071075 mm off the face's surface",
+                ),
+                issue(
+                    IssueKind::FaceLeftOut,
+                    Some(7),
+                    1,
+                    "solid #7: not shown: face #9: SMLib pcurves: SMLib rejected the input (SM_ERR_INVALID_INPUT)",
+                ),
+                issue(IssueKind::ImportedAsSurfaces, Some(8), 0, "solid #8: imported as surfaces: …"),
+                issue(IssueKind::FaceLeftOut, Some(8), 1, "solid #8: left out: face #11: …"),
+                issue(IssueKind::FaceLeftOut, Some(8), 1, "solid #8: left out: face #12: …"),
+                issue(IssueKind::NotImported, Some(5), 0, "solid #5: not imported: …"),
+                issue(IssueKind::Repaired, Some(3), 0, "solid #3: 2 seam edges added to faces that wind around their surface"),
+                issue(IssueKind::Repaired, Some(4), 0, "solid #4: 1 faces turned over: their loops disagree with their same_sense"),
+                issue(IssueKind::File, None, 0, "component placement #77: … (placed at the origin)"),
+            ],
+        };
+        let summary = super::import_summary(&report);
+        assert_eq!(
+            summary,
+            "Imported 40 of 43 parts as solids. 1 part couldn't be imported. 1 part couldn't be made into a solid and was not imported. \
+             1 part couldn't be made into a solid and came in as surfaces. 3 faces couldn't be repaired and are missing. \
+             Small flaws were repaired in 2 parts. There was 1 other problem with the file. \
+             Exporting these parts again from the program that made them may fix this. Copy Warning Message has the details."
+        );
+        assert!(!summary.contains('#') && !summary.contains("SMLib"), "{summary}");
+        // Only repairs: no advice, and a part alone has no "of" count.
+        let repaired = ImportReport { parts: 1, solids: 1, issues: vec![issue(IssueKind::Repaired, Some(3), 0, "solid #3: …")] };
+        assert_eq!(super::import_summary(&repaired), "Small flaws were repaired in 1 part.");
     }
 
     #[test]
@@ -1378,11 +1559,11 @@ mod tests {
 
     #[test]
     fn construction_history_matches_the_tool_that_created_it() {
+        use solidcore_record::Vec3;
         use solidcraft_engine::doc::{
             FeatureKind, PlaneRef,
             construct::{AxisDef, GeoRef, PointDef},
         };
-        use solidcraft_engine::geom::Vec3;
         let point = || GeoRef::Point { p: Vec3::ZERO };
         let reference = || Box::new(point());
         let mut cases = Vec::new();
@@ -1613,9 +1794,12 @@ mod tests {
         // Model a rebuild that held the window thread for ten seconds. Its first visible
         // frame must still show the first feature; elapsed compute time is not playback.
         let time = h.ctx.input(|i| i.time) + 10.0;
-        let _ = h.ctx.run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |ui| {
-            super::tick_playback(&mut h.app, ui.ctx());
-        });
+        h.ctx
+            .run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |ui| {
+                super::tick_playback(&mut h.app, ui.ctx());
+            })
+            .textures_delta
+            .clear();
         assert_eq!(h.app.session.doc.marker, Some(1));
         assert_eq!(h.app.session.model.state().bodies.len(), 1);
     }
@@ -1865,14 +2049,14 @@ mod tests {
             let shown = |h: &Harness| h.app.shell.history.unwrap().contains(crate::scenario::handle_at("timeline:Hole").unwrap());
             assert!(!shown(&h), "left={left}: the hole starts outside the timeline");
 
-            let state = h.app.session.world_state();
+            let state = crate::open_meshing::session_world(&h.app.session);
             let body = state.bodies.first().unwrap();
             let names = solidcraft_engine::doc::naming::face_names(body);
             let index = names.iter().position(|name| solidcraft_engine::doc::persistent_name::made_by(name) == Some(hole)).unwrap();
             let plate = body.name.clone();
-            h.app.viewport.hover = Some(crate::viewport::Hit::Face { body: plate.clone(), index, point: solidcraft_engine::geom::Vec3::ZERO });
+            h.app.viewport.hover = Some(crate::viewport::Hit::Face { body: plate.clone(), index, point: solidcore_record::Vec3::ZERO });
             assert_eq!(crate::timeline::hovered_feature(&h.app), Some(hole), "left={left}: hovering the hole's face finds the hole");
-            h.app.viewport.hover = Some(crate::viewport::Hit::Vertex { body: plate.clone(), point: solidcraft_engine::geom::Vec3::ZERO });
+            h.app.viewport.hover = Some(crate::viewport::Hit::Vertex { body: plate.clone(), point: solidcore_record::Vec3::ZERO });
             assert_eq!(crate::timeline::hovered_feature(&h.app), Some(block), "left={left}: a vertex finds the feature that made its body");
             h.app.viewport.hover = None;
 
@@ -1980,12 +2164,17 @@ mod tests {
     #[test]
     fn each_chip_finds_its_own_result() {
         let mut h = two_boxes(false);
-        h.app.run("solid.fillet", json!({"edges": [[5, 0, 10]], "radius": 20, "fit": "reduce", "body": "One"})).unwrap();
+        // Too large for the box: R6 on its four vertical edges is reduced to the full round (5),
+        // and the feature warns that it was.
+        let edges = json!([[0, 0, 5], [10, 0, 5], [10, 10, 5], [0, 10, 5]]);
+        h.app.run("solid.fillet", json!({"edges": edges, "radius": 6, "fit": "reduce", "body": "One"})).unwrap();
         h.frames(2);
         let model = &h.app.session.model;
         let index = super::result_index(&model.results);
         let ids: Vec<u64> = h.app.session.doc.features.iter().map(|f| f.id).collect();
         assert!(ids.len() >= 3 && model.results.iter().any(|r| r.warning.is_some()), "a warned feature among others");
+        let warning = ids.last().and_then(|id| model.result(*id)).and_then(|r| r.warning.clone()).unwrap_or_default();
+        assert!(warning.contains("reduced"), "the fillet is the warned feature: {warning}");
         for id in &ids {
             let found = index.get(id).and_then(|k| model.results.get(*k));
             assert!(found.is_some_and(|r| std::ptr::eq(r, model.result(*id).unwrap())), "feature {id}");
@@ -2056,8 +2245,11 @@ mod tests {
     fn the_feature_menu_copies_a_warning_message() {
         for left in [false, true] {
             let mut h = two_boxes(left);
-            // Too large for the box: reduced to what fits, which the feature's warning says.
-            h.app.run("solid.fillet", json!({"edges": [[5, 0, 10]], "radius": 20, "fit": "reduce", "body": "One"})).unwrap();
+            // Too large for the box: R6 on its four vertical edges would cross on the 10 mm faces,
+            // so it is reduced to what fits (a full round, 5), which the feature's warning says.
+            h.app
+                .run("solid.fillet", json!({"edges": [[0, 0, 5], [10, 0, 5], [10, 10, 5], [0, 10, 5]], "radius": 6, "fit": "reduce", "body": "One"}))
+                .unwrap();
             h.frames(4);
             let id = h.app.session.doc.features.last().map(|f| f.id).unwrap();
             let name = h.app.session.doc.features.last().map(|f| f.name.clone()).unwrap();

@@ -18,7 +18,7 @@ fn independent_plane(plane: &PlaneRef, depth: usize) -> Result<()> {
     }
     match plane {
         PlaneRef::Origin { .. } | PlaneRef::Custom { .. } | PlaneRef::Placed { .. } => Ok(()),
-        PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } | PlaneRef::AtAngle { base, line: None, .. } => {
+        PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } | PlaneRef::AtAngle { base, line: None, pivot: None, .. } => {
             independent_plane(base, depth + 1)
         }
         _ => Err(bad(CMD, "the copied sketch's plane depends on model geometry; convert it to a fixed plane before pasting into another design")),
@@ -32,7 +32,7 @@ fn independent_links(sketch: &solidcraft_sketch::Sketch, features: &BTreeSet<u64
             L::Text { .. } | L::SketchAxis { .. } => true,
             L::SketchCurve { sketch, .. } | L::SketchPoint { sketch, .. } => features.contains(sketch),
             L::Origin | L::Axis { .. } => !moved,
-            L::Plane { name } => !moved && solidcraft_geom::Plane::named(name).is_some(),
+            L::Plane { name } => !moved && solidcore_record::Plane::named(name).is_some(),
             _ => false,
         };
         if !supported {

@@ -1,0 +1,13 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#5158",
+  "tangency-labs/solidcraft#4782"
+ ],
+ "what": "a convex r10.01 round on an edge whose top face is 10 mm deep, 0.01 past it: it must build by subtraction (the round on the extended faces cut from the body), not be refused",
+ "source": "analytic",
+ "method": "box 40x10x20, the top front edge (y=0, z=20) rounded r = 10.01: axis at (y, z) = (10.01, 9.99), tangent to the front face at z = 9.99 and to the top face's plane at y = 10.01, past the back face y = 10. Convex blends overflow by subtraction (owner, 2026-10-25): the section removed is A = integral over y in [0, 10] of (r - sqrt(r^2 - (r - y)^2)) = r (r - 0.01) - [F(r) - F(0.01)], F(u) = (u sqrt(r^2 - u^2) + r^2 asin(u / r)) / 2, = 21.5031255 (midpoint rule, 2e5 steps: the same). V = 40 (200 - A) = 7139.874981. The round meets the back face at z = 9.99 + sqrt(r^2 - 0.01^2) = 19.999995 (the top face is used up); area = front 40*9.99 + back 40*19.999995 + bottom 400 + round 40 r (pi - acos(-0.01 / r)) + ends 2 (200 - A) = 2585.1404. Faces: front, back, bottom, two ends, the round = 6",
+ "body_count": 1,
+ "volume_mm3": 7139.874981155627,
+ "area_mm2": 2585.1403984396748,
+ "faces": 6
+}

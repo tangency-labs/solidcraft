@@ -160,8 +160,12 @@ pub struct ModelThread {
     pub pitch: f64,
     /// Whether it is cut into a hole rather than on a shaft.
     pub internal: bool,
+    /// Its form.
+    pub form: ThreadForm,
     /// Which way it turns.
-    pub handedness: ThreadHand,
+    pub hand: ThreadHand,
+    /// How many starts it has.
+    pub starts: u32,
     /// A point on the axis, which `start` and `end` are measured from.
     pub axis_point: [f64; 3],
     /// The axis direction, a unit vector.
@@ -174,14 +178,34 @@ pub struct ModelThread {
 
 /// Which way a thread turns.
 #[derive(Clone, Copy, Debug, Serialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum ThreadHand {
     Right,
     Left,
+    /// A right- and a left-handed groove crossing on one face (a reversing screw).
+    Both,
+}
+
+/// A thread form: ISO metric 60°, metric trapezoidal 30°, Acme 29°, metric buttress 3°/30°,
+/// buttress inch 7°/45°, square, and the 55° and 60° pipe threads.
+#[derive(Clone, Copy, Debug, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ThreadForm {
+    Metric,
+    Trapezoidal,
+    Acme,
+    Buttress,
+    ButtressAsme,
+    Square,
+    Bspp,
+    Rp,
+    Bspt,
+    Npt,
 }
 
 impl From<&solidcraft_doc::ThreadInfo> for ModelThread {
     fn from(t: &solidcraft_doc::ThreadInfo) -> Self {
+        use solidcraft_doc::thread_forms::{ThreadForm as Form, ThreadHand as Hand};
         ModelThread {
             feature: t.feature,
             body: t.body.clone(),
@@ -190,12 +214,26 @@ impl From<&solidcraft_doc::ThreadInfo> for ModelThread {
             radius: t.radius,
             pitch: t.pitch,
             internal: t.internal,
-            handedness: match t.handedness {
-                solidcraft_doc::ThreadHandedness::Right => ThreadHand::Right,
-                solidcraft_doc::ThreadHandedness::Left => ThreadHand::Left,
+            form: match t.form {
+                Form::Metric => ThreadForm::Metric,
+                Form::Trapezoidal => ThreadForm::Trapezoidal,
+                Form::Acme => ThreadForm::Acme,
+                Form::Buttress => ThreadForm::Buttress,
+                Form::ButtressAsme => ThreadForm::ButtressAsme,
+                Form::Square => ThreadForm::Square,
+                Form::Bspp => ThreadForm::Bspp,
+                Form::Rp => ThreadForm::Rp,
+                Form::Bspt => ThreadForm::Bspt,
+                Form::Npt => ThreadForm::Npt,
             },
+            hand: match t.hand {
+                Hand::Right => ThreadHand::Right,
+                Hand::Left => ThreadHand::Left,
+                Hand::Both => ThreadHand::Both,
+            },
+            starts: t.starts,
             axis_point: t.axis_point.into(),
-            axis: solidcraft_geom::Vec3::from(t.axis).into(),
+            axis: solidcore_record::Vec3::from(t.axis).into(),
             start: t.start,
             end: t.end,
         }

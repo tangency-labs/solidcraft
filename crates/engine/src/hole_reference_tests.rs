@@ -3,11 +3,12 @@
 //! when the part changes (also after the design is saved and reopened), and a bad reference is
 //! refused with an error. A cylinder takes the same references for its base (#6380).
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::PI;
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::FeatureKind;
-use solidcraft_geom::Vec3;
 
 use crate::{EngineError, Session};
 
@@ -19,7 +20,7 @@ fn run(s: &mut Session, id: &str, p: Value) -> Value {
 }
 
 fn solid_at(s: &Session, p: Vec3) -> bool {
-    s.model.state().bodies.iter().any(|b| b.body.contains(p))
+    s.model.state().bodies.iter().any(|b| b.body.classify_point(p).unwrap() == solidcraft_kernel::PointClass::Inside)
 }
 
 /// The bore (5 mm across, 4 mm deep, down from the top face at z = `top`) is about (x, y):

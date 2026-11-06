@@ -131,7 +131,7 @@ impl<'de> Deserialize<'de> for BoundaryContinuity {
                 .map(|x| x.as_str().and_then(Continuity::parse))
                 .collect::<Option<Vec<_>>>()
                 .map(BoundaryContinuity)
-                .ok_or_else(|| D::Error::custom(whole("`continuity` entries must be g0, g1, g2 or g3"))),
+                .ok_or_else(|| D::Error::custom(whole("a `continuity` entry must be g0, g1, g2 or g3"))),
             _ => Err(D::Error::custom(whole("`continuity` must be one word, or one per curve"))),
         }
     }
@@ -191,10 +191,7 @@ fn network(key: &str, v: Value) -> Result<(), String> {
                 curves = params::string_list(CMD, item, "curves").map_err(message)?.len();
             }
             if let Some(g) = o.get("continuity").filter(|v| !v.is_null()) {
-                let g = g.as_str().and_then(Continuity::parse).ok_or_else(|| format!("{name}.continuity must be g0, g1 or g2"))?;
-                if g == Continuity::G3 {
-                    return Err(format!("not supported yet: G3 on {name} (a curve network holds up to g2)"));
-                }
+                let g = params::continuity(CMD, Some(g), &format!("{name}.continuity"), solidcraft_kernel::Construction::Network).map_err(message)?;
                 if g != Continuity::G0 && !on_body {
                     return Err(format!("{name}: g1 and g2 apply to a curve on a body's edges (a surface's open edges)"));
                 }

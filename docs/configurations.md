@@ -35,6 +35,10 @@ face appearances keep their existing priority. Physical material changes affect 
 `delete` to remove it. Names must be unique. To remove a style column, use
 `config.column` with `material` or `appearance` set to the target body and `delete: true`.
 
+Suppression cells accept `true`/`false`, `yes`/`no`, and `1`/`0`, ignoring case and surrounding
+whitespace. Creating, copying, or editing a row checks its final suppression values before saving.
+An invalid value leaves the table and undo history unchanged; accepted text keeps its spelling.
+
 Body style columns target body names. Assignments remain stored when a row suppresses the
 feature that produces that body, and become visible when it returns.
 

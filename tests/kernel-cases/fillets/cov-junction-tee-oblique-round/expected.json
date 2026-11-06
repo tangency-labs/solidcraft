@@ -1,0 +1,10 @@
+{
+ "sources": [],
+ "what": "pipe tee oblique: main R8, branch R5 offset 0 tilted 30, intersection rounded 1",
+ "source": "invariants",
+ "method": "no closed form for the round on these quadrics' intersection: one valid closed body whose round meets its faces G1",
+ "body_count": 1,
+ "continuity": {
+  "order": "g1"
+ }
+}

@@ -2,14 +2,15 @@ use crate::scenario::Harness;
 use serde_json::json;
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::{FeatureKind, PlaneRef};
+use solidcraft_engine::geom::prelude::*;
 
 fn tool(h: &Harness) -> Option<&str> {
     h.app.tool.as_ref().map(|t| t.cmd)
 }
 
-fn normal(h: &Harness) -> solidcraft_engine::geom::Vec3 {
+fn normal(h: &Harness) -> solidcore_record::Vec3 {
     let active = h.app.session.active_sketch;
-    h.app.session.world_state().sketches.iter().find(|s| Some(s.feature) == active).map(|s| s.plane.normal()).unwrap_or_default()
+    h.app.session.world_state().unwrap().sketches.iter().find(|s| Some(s.feature) == active).map(|s| s.plane.normal()).unwrap_or_default()
 }
 
 fn press(h: &mut Harness, key: &str) {
@@ -79,7 +80,7 @@ fn sketch_keys_outside_a_sketch_sketch_on_the_selected_plane_and_start_their_too
         h.app.session.selection = vec![Sel::Plane { name: "XZ".into() }];
         press(&mut h, key);
         assert!(h.app.session.active_sketch.is_some(), "{key}: no sketch opened");
-        assert_eq!(h.app.session.world_state().sketches.len(), 1, "{key}");
+        assert_eq!(h.app.session.world_state().unwrap().sketches.len(), 1, "{key}");
         assert!(normal(&h).y.abs() > 0.999, "{key}: not on XZ: {:?}", normal(&h));
         if cmd == "sketch.project" {
             assert!(h.app.preferences.project_options_dialog, "{key}: options are enabled by default");
@@ -190,7 +191,7 @@ fn construction_key_outside_a_sketch_opens_nothing_and_keys_in_a_sketch_keep_it(
     assert!(h.app.session.active_sketch.is_none());
     h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
     press(&mut h, "C");
-    assert_eq!(h.app.session.world_state().sketches.len(), 1);
+    assert_eq!(h.app.session.world_state().unwrap().sketches.len(), 1);
     assert_eq!(tool(&h), Some("sketch.circle.center"));
 }
 
@@ -501,7 +502,7 @@ fn a_line_starts_on_a_curve_or_midpoint_and_keeps_that_snap_after_undo() {
                     assert!((actual[0] - expected[0]).abs() < 1e-5 && (actual[1] - expected[1]).abs() < 1e-5, "{actual:?}, expected {expected:?}");
                 }
                 let sid = h.app.session.active_sketch.unwrap();
-                let state = h.app.session.world_state();
+                let state = h.app.session.world_state().unwrap();
                 let sketch = &state.sketch(sid).unwrap().sketch;
                 let guide = sketch.curve_index("guide").unwrap();
                 assert!(
@@ -536,7 +537,7 @@ fn a_line_starts_at_a_curve_crossing_and_keeps_it_after_undo() {
         let drawn = lines(&h);
         assert_eq!(drawn.len(), 3, "{:?}", h.app.status);
         assert_line(drawn[2], [-20.0, 10.0], end);
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         assert_eq!(
             sketch.constraints.iter().filter(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::PointOnCurve { .. })).count(),
@@ -546,6 +547,64 @@ fn a_line_starts_at_a_curve_crossing_and_keeps_it_after_undo() {
         h.app.run("edit.undo", json!({})).unwrap();
         h.settle();
         assert_eq!(lines(&h).len(), 2);
+    }
+}
+
+/// The Line tool's first click on an existing shape starts the line there and ties it to the shape,
+/// as its last click does: a line's midpoint and a circle's centre (#11171, #11186), a circle's
+/// edge (#11272), a rectangle's edge (#11291) and a point part-way along a line (#11223).
+#[test]
+fn a_line_starts_on_a_snap_point_of_an_existing_shape() {
+    use solidcraft_engine::sketch::{ConstraintKind, CurveKind};
+    let edge = [25.0 + 10.0 * std::f64::consts::FRAC_1_SQRT_2, -15.0 + 10.0 * std::f64::consts::FRAC_1_SQRT_2];
+    for (case, shape, start, end) in [
+        ("line midpoint", "guide", [-10.0, 10.0], [-5.0, 30.0]),
+        ("circle centre", "round", [25.0, -15.0], [45.0, 5.0]),
+        ("circle edge", "round", edge, [45.0, 15.0]),
+        ("rectangle edge", "box", [-35.0, -28.0], [-50.0, -5.0]),
+        ("part-way along a line", "guide", [-22.0, 10.0], [-17.0, 30.0]),
+    ] {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[-30,10],[10,10]],"ids":["guide"],"infer":false})).unwrap();
+        h.app.run("sketch.circle.center", json!({"center":[25,-15],"radius":10})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[-35,-40],"p1":[-15,-25]})).unwrap();
+        h.call("ui.camera", json!({"target":[0,-10,0],"distance":200}));
+        h.settle();
+        let before = lines(&h).len();
+        h.step(&json!({"start":"sketch.line"})).unwrap();
+        h.step(&json!({"click":{"sketch":start}})).unwrap();
+        h.step(&json!({"click":{"sketch":end}})).unwrap();
+        h.settle();
+        let drawn = lines(&h);
+        assert_eq!(drawn.len(), before + 1, "{case}: no line from the first click; {:?}", h.app.status);
+        let near = |a: [f64; 2], b: [f64; 2], tol: f64| (a[0] - b[0]).abs() < tol && (a[1] - b[1]).abs() < tol;
+        let line = drawn[before];
+        assert!(near(line.0, start, 1e-3) && near(line.1, end, 1.0), "{case}: {line:?}, expected {start:?} to {end:?}");
+        let sid = h.app.session.active_sketch.unwrap();
+        let state = h.app.session.world_state().unwrap();
+        let sketch = &state.sketch(sid).unwrap().sketch;
+        let Some(CurveKind::Line { a, .. }) = sketch.curves.last().map(|c| c.kind.clone()) else { panic!("{case}: no new line") };
+        // The rectangle's left edge is the one at x = -35.
+        let target = match shape {
+            "box" => (0..sketch.curves.len())
+                .find(|&c| matches!(sketch.shape(c), Some(solidcraft_engine::sketch::Shape::Line { a, b }) if a.x == -35.0 && b.x == -35.0))
+                .unwrap(),
+            "round" => sketch.curves.iter().position(|c| matches!(c.kind, CurveKind::Circle { .. })).unwrap(),
+            id => sketch.curve_index(id).unwrap(),
+        };
+        let centre = match sketch.curves[target].kind {
+            CurveKind::Circle { c, .. } if case == "circle centre" => Some(c),
+            _ => None,
+        };
+        let tied = centre == Some(a)
+            || sketch.constraints.iter().any(|c| match c.kind {
+                ConstraintKind::Coincident { p, q } => centre.is_some_and(|m| (p, q) == (a, m) || (p, q) == (m, a)),
+                ConstraintKind::PointOnCurve { p, c } => p == a && c == target,
+                ConstraintKind::Midpoint { p, l } => p == a && l == target,
+                _ => false,
+            });
+        assert!(tied, "{case}: the line's start is not tied to the {shape}");
     }
 }
 

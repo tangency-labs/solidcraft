@@ -305,12 +305,15 @@ fn write_token_file_with(path: &Path, token: &str, restrict: impl FnOnce(&Path) 
         std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
         opts.mode(0o600);
     }
-    let mut f = opts.open(path)?;
-    if let Err(e) = restrict(path) {
-        drop(f);
-        let _ = std::fs::remove_file(path);
-        return Err(e);
-    }
+    let opened = opts.open(path)?;
+    // On a refusal the file goes with the closure, so it is closed before it is removed.
+    let mut f = match restrict(path).map(|()| opened) {
+        Ok(f) => f,
+        Err(e) => {
+            let _ = std::fs::remove_file(path);
+            return Err(e);
+        }
+    };
     f.write_all(token.as_bytes())?;
     f.write_all(b"\n")?;
     f.sync_all()?;

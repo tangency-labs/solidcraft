@@ -93,6 +93,38 @@ fn an_empty_pixel_shows_the_background_code_unchanged() {
 }
 
 #[test]
+fn png_and_linear_master_publication_fit_the_existing_metadata_allowance() {
+    let (host, source, _, _) = fixture(true);
+    let frame = source.frame().unwrap().unwrap();
+    let (_, master) = frame.exr.as_ref().unwrap();
+    let metadata = std::mem::size_of::<Running>()
+        + std::mem::size_of::<RenderFrame>()
+        + frame.info.png_sha256.capacity()
+        + master.sha256.capacity()
+        + 2 * crate::MAX_RENDER_ID_BYTES
+        + 32;
+    assert!(metadata <= FRAME_METADATA_BYTES as usize, "actual PNG+EXR metadata {metadata} exceeds {}", FRAME_METADATA_BYTES);
+    assert_eq!(frame.info.png_sha256, format!("{:x}", Sha256::digest(frame.png())));
+    assert_eq!(master.sha256, format!("{:x}", Sha256::digest(frame.linear_exr().unwrap())));
+    let image_bytes = frame.png.capacity() as u64 + frame.exr.as_ref().unwrap().0.capacity() as u64 + FRAME_METADATA_BYTES;
+    let options = source.0.options().unwrap();
+    assert!(options.linear_exr, "the fixture retains explicit nondefault output intent");
+    let slot = source.0.options.as_ref().unwrap();
+    assert_eq!(slot.0.capacity(), 1);
+    let option_bytes = std::mem::size_of::<JobOptions>() as u64;
+    assert_eq!(options.retained_bytes().unwrap(), option_bytes);
+    assert_eq!(
+        host.admitted_bytes(),
+        image_bytes + option_bytes + ImageRequest::fixed_cpu_metadata_bytes(),
+        "the source record owns its separately prepaid options slot and fixed request header"
+    );
+    drop(source);
+    assert_eq!(host.admitted_bytes(), image_bytes, "the held frame retains PNG/raw metadata, not request options");
+    drop(frame);
+    assert_eq!(host.admitted_bytes(), 0);
+}
+
+#[test]
 fn regrade_is_exact_nondestructive_geometry_free_and_flattens_repeated_master_ownership() {
     let (host, source, begins, settings) = fixture(true);
     let original = source.frame().unwrap().unwrap();
@@ -166,6 +198,53 @@ fn regrade_rejects_foreign_missing_or_invalid_masters_and_cancellation_never_pub
         assert_eq!(host.admitted_bytes(), before);
     }
     assert_eq!(begins.load(Ordering::Relaxed), 1);
+    drop(source);
+    assert_eq!(host.admitted_bytes(), 0);
+}
+
+#[test]
+fn fixed_cpu_volume_request_header_is_prepaid_on_completed_and_cancelled_regrades_until_the_last_handle() {
+    let header = ImageRequest::fixed_cpu_metadata_bytes();
+    assert_eq!(
+        header,
+        (std::mem::size_of::<Option<super::super::volume::HomogeneousVolume>>()
+            + std::mem::size_of::<Option<Box<super::super::Sun>>>()
+            + std::mem::size_of::<Option<Box<super::super::CpuSky>>>()) as u64
+    );
+    assert!(header > 0);
+    let (host, source, _, presentation) = fixture(true);
+    let before = host.admitted_bytes();
+    for (serial, cancel) in [(980, true), (981, false)] {
+        let job = host.submit_regrade(identity(serial), &source, presentation).unwrap();
+        let own = job.0.presentation.as_ref().unwrap();
+        let bytes = header
+            + job.0.options().unwrap().retained_bytes().unwrap()
+            + (std::mem::size_of::<RetainedPresentation>() + own.info.master_sha256.capacity() + 32) as u64;
+        if cancel {
+            job.cancel().unwrap();
+            for _ in 0..128 {
+                host.pump(1).unwrap();
+                if job.work_released() {
+                    break;
+                }
+            }
+        } else {
+            finish(&host, &job);
+            let frame = job.frame().unwrap().unwrap();
+            assert!(frame.linear_exr().is_some());
+            job.0.data.lock().unwrap().frame = None;
+            drop(frame);
+        }
+        assert!(job.work_released());
+        assert_eq!(job.status().unwrap().progress.phase, if cancel { Phase::Cancelled } else { Phase::Completed });
+        assert!(job.frame().unwrap().is_none());
+        assert_eq!(host.admitted_bytes(), before + bytes, "fixed request metadata stays prepaid even with no published frame or running work");
+        let clone = job.clone();
+        drop(job);
+        assert_eq!(host.admitted_bytes(), before + bytes, "a retained status handle still owns the request layout");
+        drop(clone);
+        assert_eq!(host.admitted_bytes(), before);
+    }
     drop(source);
     assert_eq!(host.admitted_bytes(), 0);
 }

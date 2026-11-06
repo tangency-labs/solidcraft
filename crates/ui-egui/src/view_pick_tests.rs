@@ -3,7 +3,7 @@
 
 use serde_json::json;
 
-use solidcraft_engine::geom::Vec3;
+use solidcore_record::Vec3;
 use solidcraft_engine::render::Camera;
 
 use crate::scenario::Harness;
@@ -81,7 +81,7 @@ fn world_rays_pick_without_a_pixel() {
 #[test]
 fn a_hidden_body_is_not_picked() {
     let mut h = top_view();
-    let name = h.app.session.world_state().bodies[0].name.clone();
+    let name = crate::open_meshing::session_world(&h.app.session).bodies[0].name.clone();
     h.app.session.visibility.hidden_bodies.push(name);
     let r = pick(&mut h, json!({"pixels": [[480, 300]]}));
     assert_eq!(r["hits"][0], serde_json::Value::Null);

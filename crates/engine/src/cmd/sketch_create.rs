@@ -2,7 +2,8 @@
 //! arc slots.
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{ConstraintKind, CurveKind, LinkKind, LinkSource, Shape, Sketch, TextAlign, TextExprs, TextStyle};
 
 /// The style parameters of `sketch.text` and `sketch.edit_text`.
@@ -67,7 +68,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .params(concat!("center, start: centre arc start, end: direction of the centre arc end (counter-clockwise) or sweep: degrees (0 < sweep < 360), width; returns centre_arc", created_doc!())),
     CommandSpec::new("sketch.ellipse", "Ellipse", ellipse).at("SKETCH", "CREATE").icon("ellipse").enabled(in_sketch).params(concat!(
-        "center, major: end of the major axis [x,y], minor: a point the ellipse passes through on the minor side [x,y] | minor_radius",
+        "center, major: end of the major axis [x,y], minor: a point the ellipse passes through on the minor side [x,y] | minor_radius. Also adds its major and minor axes as construction lines through the centre (their ends: the major end and the point opposite it, and the two ends of the minor axis on the ellipse), held by midpoint, perpendicular and point-on-curve constraints, so a half-axis is the distance from the centre to an axis end and an axis line's length is a full axis; axes?: bool (default true; false: the ellipse alone, as the Ellipse tool draws it with Draw ellipses with their axes off)",
         created_doc!()
     )),
     CommandSpec::new("sketch.spline.fit_point", "Fit Point Spline", spline_fit)
@@ -458,14 +459,8 @@ fn end_of(sk: &Sketch, pi: usize) -> Option<(usize, Vec2)> {
 fn blend_order(p: &Value, cmd: &str) -> Result<usize> {
     match p.get("continuity") {
         None | Some(Value::Null) => Ok(1),
-        Some(Value::String(v)) => match v.trim().to_ascii_lowercase().as_str() {
-            "" | "g1" => Ok(1),
-            "g2" => Ok(2),
-            "g3" => Ok(3),
-            "g4" => Ok(4),
-            _ => Err(bad(cmd, "`continuity` must be g1, g2, g3 or g4")),
-        },
-        Some(_) => Err(bad(cmd, "`continuity` must be g1, g2, g3 or g4")),
+        Some(Value::String(v)) if v.trim().is_empty() => Ok(1),
+        given => Ok(crate::params::continuity(cmd, given, "`continuity`", solidcraft_kernel::Construction::BlendCurve)?.order()),
     }
 }
 
@@ -529,7 +524,7 @@ fn blend(s: &mut Session, p: &Value) -> Result<Value> {
         let (sp, cons) = if order <= 1 {
             let c1 = sk.add_point(qa + ta * (l / 3.0), None)?;
             let c2 = sk.add_point(qb + tb * (l / 3.0), None)?;
-            let sp = sk.add_curve(CurveKind::Spline { pts: vec![pa, c1, c2, pb], control: true, degree: 3, periodic: false }, None)?;
+            let sp = sk.add_curve(CurveKind::Spline { pts: vec![pa, c1, c2, pb], control: true, degree: 3, periodic: false, nurbs: None }, None)?;
             let cons = vec![add_c(sk, ConstraintKind::Tangent { a: ca, b: sp })?, add_c(sk, ConstraintKind::Tangent { a: cb, b: sp })?];
             (sp, cons)
         } else {
@@ -551,7 +546,7 @@ fn blend(s: &mut Session, p: &Value) -> Result<Value> {
                 });
             }
             let degree = u8::try_from(cps.len().saturating_sub(1)).map_err(|_| bad(cmd, "the blend curve needs too many control points"))?;
-            let sp = sk.add_curve(CurveKind::Spline { pts, control: true, degree, periodic: false }, None)?;
+            let sp = sk.add_curve(CurveKind::Spline { pts, control: true, degree, periodic: false, nurbs: None }, None)?;
             (sp, Vec::new())
         };
         solve_new_only(sk, first_new);
@@ -631,12 +626,38 @@ fn ellipse(s: &mut Session, p: &Value) -> Result<Value> {
     if !(r > 1e-9 && r < 1e8) {
         return Err(bad(cmd, "the minor radius must be positive"));
     }
+    let axes = match p.get("axes") {
+        None | Some(Value::Null) => true,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => return Err(bad(cmd, "`axes` must be true or false")),
+    };
     let (out, info) = edit(s, p, cmd, false, |sk, _| {
         let ci = sk.add_point(c, None)?;
         let mi = sk.add_point(m, None)?;
         let e = sk.add_curve(CurveKind::Ellipse { c: ci, m: mi, r }, None)?;
         mark_construction(sk, &[e], p);
-        Ok((ids_of(sk, &[e]), Vec::new()))
+        if !axes {
+            return Ok((ids_of(sk, &[e]), Vec::new()));
+        }
+        // Its major and minor axes, construction lines through the centre that bisects both:
+        // the major one ends at the major end, the minor one is perpendicular to it and ends
+        // on the ellipse. Six new coordinates, six equations: the ellipse keeps its 5 degrees
+        // of freedom, and each half-axis is a plain distance from the centre to an end.
+        let n = u.perp() * r;
+        let (m2, n1, n2) = (sk.add_point(c * 2.0 - m, None)?, sk.add_point(c + n, None)?, sk.add_point(c - n, None)?);
+        let (major, minor) = (sk.add_line_pts(m2, mi, None)?, sk.add_line_pts(n2, n1, None)?);
+        for l in [major, minor] {
+            if let Some(cu) = sk.curves.get_mut(l) {
+                cu.construction = true;
+            }
+        }
+        let cons = vec![
+            add_c(sk, ConstraintKind::Midpoint { p: ci, l: major })?,
+            add_c(sk, ConstraintKind::Midpoint { p: ci, l: minor })?,
+            add_c(sk, ConstraintKind::Perpendicular { a: minor, b: major })?,
+            add_c(sk, ConstraintKind::PointOnCurve { p: n1, c: e })?,
+        ];
+        Ok((ids_of(sk, &[e]), cons))
     })?;
     Ok(result(out, info))
 }
@@ -679,7 +700,7 @@ fn spline(s: &mut Session, p: &Value, cmd: &str, control: bool, degree: u8) -> R
         {
             pts.push(*pts.first().ok_or_else(|| bad(cmd, "missing first point"))?);
         }
-        let c = sk.add_curve(CurveKind::Spline { pts, control, degree, periodic }, None)?;
+        let c = sk.add_curve(CurveKind::Spline { pts, control, degree, periodic, nurbs: None }, None)?;
         mark_construction(sk, &[c], p);
         Ok((ids_of(sk, &[c]), Vec::new()))
     })?;
@@ -1159,7 +1180,8 @@ pub(super) fn solve_new_only(sk: &mut Sketch, first_new: usize) {
 #[cfg(test)]
 mod blend_tests {
     use serde_json::{Value, json};
-    use solidcraft_geom::{Seg2, Vec2};
+    use solidcore_record::{Seg2, Vec2};
+    use solidcraft_geom::prelude::*;
     use solidcraft_sketch::CurveKind;
 
     use crate::Session;
@@ -1191,7 +1213,7 @@ mod blend_tests {
     }
 
     /// The derivatives 1…`order` of exact piece `seg` at its end (`at_end`), from the piece's own
-    /// geometry: what a blend must match, computed here independently of `Seg2::derivatives`.
+    /// geometry: what a blend must match, computed here independently of `Seg2Geom::derivatives`.
     fn piece_derivatives(seg: &Seg2, at_end: bool, order: usize) -> Vec<Vec2> {
         let t = if at_end { 1.0 } else { 0.0 };
         let p = seg.point_at(t);
@@ -1475,13 +1497,13 @@ mod blend_tests {
         let mut broken = solidcraft_sketch::Sketch::new();
         let p0 = broken.add_point(Vec2::new(1.0, 1.0), None).unwrap();
         let p1 = broken.add_point(Vec2::ZERO, None).unwrap();
-        let l = broken.add_curve(CurveKind::Spline { pts: vec![p1, p0], control: true, degree: 1, periodic: false }, None).unwrap();
+        let l = broken.add_curve(CurveKind::Spline { pts: vec![p1, p0], control: true, degree: 1, periodic: false, nurbs: None }, None).unwrap();
         broken.points[p0].pos = Vec2::new(f64::NAN, 4.0);
         assert!(super::joint_derivatives(&broken, l, p1, 2, true, "a", "sketch.blend_curve").is_err(), "non-finite geometry");
         let mut flat = solidcraft_sketch::Sketch::new();
         let q0 = flat.add_point(Vec2::new(3.0, 3.0), None).unwrap();
         let q1 = flat.add_point(Vec2::new(3.0, 3.0), None).unwrap();
-        let d = flat.add_curve(CurveKind::Spline { pts: vec![q0, q1], control: true, degree: 1, periodic: false }, None).unwrap();
+        let d = flat.add_curve(CurveKind::Spline { pts: vec![q0, q1], control: true, degree: 1, periodic: false, nurbs: None }, None).unwrap();
         let e = super::joint_derivatives(&flat, d, q0, 2, true, "a", "sketch.blend_curve").unwrap_err().to_string();
         assert!(e.contains("no tangent"), "{e}");
         assert!(solidcraft_geom::hermite_bezier(Vec2::ZERO, Vec2::X, &[Vec2::Y; 5], &[Vec2::Y; 5]).is_none(), "no order above g4");
