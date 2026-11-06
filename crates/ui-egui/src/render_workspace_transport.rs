@@ -1,4 +1,4 @@
-//! Shared numerical editors for bounded GPU transport extensions.
+//! Shared numerical editors for bounded camera sampling and GPU transport extensions.
 use crate::{SolveApp, ui_kit};
 
 /// Pilot allocation and conditional transmission sampling share portable intent.
@@ -13,7 +13,16 @@ pub(super) fn adaptive_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     let response = ui_kit::checkbox(ui, app.tr("render.adaptive_enable"), &mut enabled);
     crate::scenario::publish_target("render:adaptive-enable", response.rect);
     if response.changed() {
-        app.render_workspace.view.studio.adaptive = enabled.then(Default::default);
+        app.render_workspace.view.studio.adaptive = enabled.then(|| {
+            let mut options = solidcraft_engine::render::job::adaptive::AdaptiveSampling::default();
+            if app.render_workspace.view.method == super::ImageMethod::CpuRaytrace {
+                // Explicitly enabling the option does not silently raise the saved
+                // production cap, change the image size or choose a larger profile.
+                options.pilot_samples = 16;
+                options.min_samples = 16;
+            }
+            options
+        });
     }
     let mut options = app.render_workspace.view.studio.adaptive.unwrap_or_default();
     if !enabled {
@@ -47,6 +56,10 @@ pub(super) fn adaptive_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     app.render_workspace.view.dirty |= before != app.render_workspace.view.studio.adaptive;
 }
 pub(super) fn glass_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
+    if app.render_workspace.view.method == super::ImageMethod::CpuRaytrace {
+        cpu_glass_controls(app, ui);
+        return;
+    }
     let before = (app.render_workspace.view.studio.nested_media, app.render_workspace.view.studio.transmission_samples);
     let mut strata = match before.1 {
         2 => 1,
@@ -68,4 +81,38 @@ pub(super) fn glass_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::text(ui, app.tr("render.nested_help"), ui_kit::Text::Note("render.nested_help"));
     app.render_workspace.view.dirty |=
         before != (app.render_workspace.view.studio.nested_media, app.render_workspace.view.studio.transmission_samples);
+}
+
+/// CPU has one progressive Fresnel event per film ordinal. GPU strata and its
+/// nested-media flag are deliberately absent from this method's controls.
+fn cpu_glass_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
+    ui_kit::text(ui, app.tr("render.material_cpu_optics_limits"), ui_kit::Text::Note("render.cpu_glass_limits"));
+    if app.render_workspace.view.raytrace.progressive.is_none() {
+        let reason = super::cpu::progressive_adoption_reason(app);
+        let button = ui_kit::button(ui, app.tr("render.cpu_progressive_adopt"), ui_kit::Button::Enabled(reason.is_none()));
+        crate::scenario::publish_target("render:cpu-glass-adopt-progressive", button.rect);
+        if button.clicked()
+            && let Err(error) = super::cpu::adopt_progressive(app)
+        {
+            app.set_status(error, true);
+        }
+        if let Some(reason) = reason {
+            ui_kit::text(ui, &reason, ui_kit::Text::Note("render.cpu_glass_adoption_reason"));
+        }
+    }
+    if let Some(path) = app.render_workspace.view.raytrace.path {
+        ui_kit::row(ui, app.tr("render.cpu_path_depth"), |ui| ui_kit::text(ui, &path.max_depth.to_string(), ui_kit::Text::Inline));
+    } else {
+        let reason = super::cpu::path_reason(app);
+        let button = ui_kit::button(ui, app.tr("render.cpu_glass_enable_path"), ui_kit::Button::Enabled(reason.is_none()));
+        crate::scenario::publish_target("render:cpu-glass-enable-path", button.rect);
+        if button.clicked() {
+            app.render_workspace.view.raytrace.path = Some(Default::default());
+            app.render_workspace.view.dirty = true;
+        }
+        if let Some(reason) = reason {
+            ui_kit::text(ui, &reason, ui_kit::Text::Note("render.cpu_glass_path_reason"));
+        }
+    }
+    ui_kit::text(ui, app.tr("render.cpu_path_help"), ui_kit::Text::Note("render.cpu_glass_path_help"));
 }

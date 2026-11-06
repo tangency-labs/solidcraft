@@ -63,7 +63,7 @@ fn local_plane(plane: &PlaneRef, depth: usize) -> bool {
         PlaneRef::Origin { name: _ } | PlaneRef::Custom { plane: _ } | PlaneRef::Placed { origin: _, x_dir: _, y_dir: _ } => true,
         PlaneRef::Offset { base, distance: _ }
         | PlaneRef::Flipped { base, about_y: _ }
-        | PlaneRef::AtAngle { base, axis_origin: _, axis_dir: _, angle: _, line: None } => local_plane(base, depth + 1),
+        | PlaneRef::AtAngle { base, axis_origin: _, axis_dir: _, angle: _, line: None, pivot: None, .. } => local_plane(base, depth + 1),
         _ => false,
     }
 }

@@ -17,6 +17,10 @@ pub const MAX_TRIANGLES: u64 = 262_144;
 pub const MAX_GEOMETRY_BYTES: u64 = 128 * 1024 * 1024;
 pub const MAX_JOB_BYTES: u64 = 384 * 1024 * 1024;
 pub const MAX_PIXEL_TESTS: u64 = 128_000_000;
+// Existing source/task/host fixed preparation allowance. Cursor backing is
+// charged separately; this value is unchanged by prepared submission metadata.
+pub(crate) const PREPARATION_METADATA_BYTES: u64 = 262_144;
+
 const MAX_STEP: usize = 16_384;
 const SS: usize = 2;
 
@@ -53,6 +57,18 @@ fn add_bytes(sum: &mut u64, count: usize, size: usize, maximum: u64) -> Result<(
 /// counted even when another owner already holds them. Allocator and codec internals are estimates.
 /// Includes the CPU raster work estimate and its 384 MiB per-job check.
 pub fn admit(scene: &ProductScene, request: &ImageRequest) -> Result<Admission> {
+    admit_inner(scene, request, true)
+}
+
+/// Internal byte/header estimate, never a successful public preflight. A host
+/// must finish the strict certificate under its reserved envelope before use.
+pub(crate) fn admit_layout(scene: &ProductScene, request: &ImageRequest) -> Result<Admission> {
+    admit_inner(scene, request, false)
+}
+
+fn admit_inner(scene: &ProductScene, request: &ImageRequest, certify: bool) -> Result<Admission> {
+    #[cfg(not(feature = "raytrace-cpu"))]
+    let _ = certify;
     if request.environment.is_some() || (request.textures.is_some() && request.integrator != super::Integrator::Raytrace) {
         return Err(JobError::new(ErrorCode::InvalidRequest, "captured GPU environments and raster textures require a registered image executor"));
     }
@@ -72,7 +88,11 @@ pub fn admit(scene: &ProductScene, request: &ImageRequest) -> Result<Admission> 
                 let defaults = super::RaytraceOptions::default();
                 let options = request.raytrace.as_ref().unwrap_or(&defaults);
                 options.validate()?;
-                crate::raytrace::image::admit(scene, request, options)
+                if certify {
+                    crate::raytrace::image::admit(scene, request, options)
+                } else {
+                    crate::raytrace::image::admit_layout(scene, request, options)
+                }
             }
             #[cfg(not(feature = "raytrace-cpu"))]
             {
@@ -114,11 +134,15 @@ fn admit_source(scene: &ProductScene, request: &ImageRequest, max_triangles: u64
 #[cfg(feature = "raytrace-cpu")]
 pub(crate) fn admit_raytrace_source(scene: &ProductScene, request: &ImageRequest, budget: super::CpuBudget) -> Result<Admission> {
     budget.validate_execution()?;
-    budget.validate_image(request.width, request.height, request.raytrace.as_ref().and_then(|o| o.progressive))?;
+    budget.validate_image(
+        request.width,
+        request.height,
+        request.raytrace.as_ref().map(super::RaytraceOptions::camera_sampling).transpose()?.flatten(),
+    )?;
     let source = admit_source_with_budget(scene, request, budget.limits().max_triangles, budget)?;
     let mut a = source.admission;
     a.pixel_scratch_bytes = source.raster_scratch_bytes;
-    a.preparation_bytes = 262_144;
+    a.preparation_bytes = PREPARATION_METADATA_BYTES;
     a.estimated_total_bytes = a
         .geometry_bytes
         .checked_add(a.pixel_scratch_bytes)
@@ -257,7 +281,7 @@ fn admit_raster(source: Source) -> Result<Admission> {
         .triangles
         .checked_mul(48)
         .and_then(|n| a.face_appearances.checked_mul(160).and_then(|f| n.checked_add(f)))
-        .and_then(|n| n.checked_add(source.bodies * 128 + 262_144))
+        .and_then(|n| n.checked_add(source.bodies * 128 + PREPARATION_METADATA_BYTES))
         .ok_or_else(|| limit("work list size overflow"))?;
     let total = a
         .geometry_bytes

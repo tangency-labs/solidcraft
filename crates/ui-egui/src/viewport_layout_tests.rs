@@ -152,10 +152,22 @@ fn navigator_render_keeps_classic_probe_and_host_authored_lens_and_picture() {
             assert_ne!(h.app.view_fov(), fov);
             let layout = h.app.viewport.layout.as_ref().unwrap();
             let picture = crate::render_workspace::picture_layout(&h.app, layout);
-            assert!(picture.viewport.width() < layout.viewport.width(), "the portrait frame must exercise a distinct projection");
+            let outer = h.app.viewport.rect.unwrap();
+            assert!(picture.viewport.width() < outer.width(), "the portrait frame must exercise a distinct projection");
             for up in [solidcraft_engine::render::UpAxis::Z, solidcraft_engine::render::UpAxis::Y] {
                 assert_navigator_shared_zoom(&h.app, Camera { up, fov, ..Default::default() });
             }
+        }
+        if measured {
+            h.app.run("view.render_stage", json!({"stage":"look"})).unwrap();
+            h.frames(4);
+            assert!(!crate::render_workspace::shot::overlay_visible(&h.app));
+            let layout = h.app.viewport.layout.as_ref().unwrap();
+            let usable = crate::shell::host_usable(&h.app).unwrap();
+            let picture = crate::render_workspace::host_picture_layout(&h.app, layout, &usable).unwrap();
+            let painted = crate::scenario::rect_of("render:product:frame").unwrap();
+            assert!(painted.width() < h.app.viewport.rect.unwrap().width());
+            assert_eq!(picture.viewport, painted, "host Fit and Centre must use the painted portrait even without guides");
         }
     }
 }
