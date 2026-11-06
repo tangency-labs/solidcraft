@@ -40,6 +40,49 @@ impl PendingFeatureEdit {
 }
 
 impl SolveApp {
+    /// A face of `body` double-clicked in the view at `point`: the dialog of the feature that made
+    /// it opens, as a double-click on that feature's row does (a fillet's or chamfer's arrow sits
+    /// by the face clicked). A face of a component other than the active one, or one no feature
+    /// made (imported or lost), leaves everything as it was. Whether an editor was started.
+    pub(crate) fn edit_feature_of_face(&mut self, body: &str, index: usize, point: solidcore_record::Vec3) -> bool {
+        if self.pending_feature_edit.is_some() || self.session.active_sketch.is_some() {
+            return false;
+        }
+        let component = self.session.world_state().ok().and_then(|st| st.body(body).map(|b| b.component));
+        if component != Some(self.session.active_component) {
+            return false;
+        }
+        // Another placement of the component than the active one is activated first, not edited.
+        if let Some(path) = self.session.active_occurrence_path.clone()
+            && self.session.occurrence_bodies(&path, true).is_ok_and(|bodies| !bodies.iter().any(|b| b == body))
+        {
+            return false;
+        }
+        // The pick is in the world, the history's meshes in the component's own frame: a point of
+        // a placed occurrence is taken back through where it is shown (a move not captured yet
+        // included) first.
+        let path = self.session.active_occurrence_path.clone().unwrap_or_else(|| self.session.doc.first_path(self.session.active_component));
+        let at = self
+            .session
+            .occurrence_placement(&path)
+            .ok()
+            .and_then(|placed| solidcraft_engine::doc::mat_inverse(&placed.world))
+            .map_or(point, |to_model| solidcraft_engine::doc::apply_point(&to_model, point));
+        let Some(feature) =
+            crate::dialogs::blend_feature(&self.session, body, index).or_else(|| crate::dialogs::feature_of_face(&self.session, body, index, at))
+        else {
+            return false;
+        };
+        // An imported body has no editor of its own: nothing to open.
+        if self.session.doc.feature(feature).is_none_or(|f| {
+            matches!(f.kind, solidcraft_engine::doc::FeatureKind::Import { .. } | solidcraft_engine::doc::FeatureKind::MeshImport { .. })
+        }) {
+            return false;
+        }
+        self.edit_feature_at(feature, Some(point));
+        true
+    }
+
     pub(crate) fn prepare_feature_edit(&mut self, feature: u64, index: usize, marker: Option<usize>) {
         let source = self.session.scratch();
         let mut original = source.scratch();

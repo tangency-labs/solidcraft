@@ -2666,7 +2666,7 @@ thread_local! {
 
 /// The feature that made a face: the latest feature before which the face's point lay on no
 /// face of the model.
-fn feature_of_face(s: &Session, body: &str, index: usize, p: Vec3) -> Option<u64> {
+pub(crate) fn feature_of_face(s: &Session, body: &str, index: usize, p: Vec3) -> Option<u64> {
     let key = (body.to_string(), index);
     if let Some(hit) = FACE_FEATURE.with(|c| {
         let c = c.borrow();
