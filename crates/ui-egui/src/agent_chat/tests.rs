@@ -4056,6 +4056,11 @@ fn the_picker_puts_a_pill_into_the_text_where_the_caret_is() {
     let reply = h.call("ui.agent_chat", json!({"pick": true, "pick_at": 4}));
     assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::ChatContext)));
     assert_eq!(reply["result"]["pills"].as_array().map(Vec::len), Some(1));
+    // `picked` still lists what the box carries, one item after another, as before the pills.
+    let items: Vec<Value> =
+        h.app.agent_chat.pills.iter().flat_map(|p| &p.context.items).map(|i| json!({"label": i.label, "detail": i.detail})).collect();
+    assert!(!items.is_empty());
+    assert_eq!(reply["result"]["picked"], Value::Array(items));
     assert_eq!(h.app.agent_chat.pick_at, Some(4));
     crate::dialogs::cancel(&mut h.app);
     // While another dialog is open, the button does nothing.

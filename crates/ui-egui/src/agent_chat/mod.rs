@@ -2782,6 +2782,9 @@ pub fn status(app: &SolveApp) -> Value {
         // What the box holds, and what the pill marks in it stand for.
         state.insert("input".into(), json!(c.input));
         state.insert("pills".into(), Value::Array(c.pills.iter().map(|p| json!({"id": p.id, "label": p.label, "items": p.context.items.iter().map(|i| json!({"label": i.label, "detail": i.detail})).collect::<Vec<_>>()})).collect::<Vec<_>>()));
+        // The same items as one list, as `picked` gave them before the pills (for scripts that read it).
+        let picked: Vec<Value> = c.pills.iter().flat_map(|p| &p.context.items).map(|i| json!({"label": i.label, "detail": i.detail})).collect();
+        state.insert("picked".into(), Value::Array(picked));
     }
     state
 }
