@@ -2070,6 +2070,31 @@ fn the_first_dimension_measuring_to_a_sketch_axis_endpoint_uses_its_fixed_positi
     assert_eq!(pt(&s, &end), end_pos);
 }
 
+/// #11043: a centre rectangle drawn away from the origin, with nothing tying it there, keeps
+/// its centre when its first dimension scales it; it does not run off along the line from the
+/// origin. `scale_about_origin` keeps the scaling about the origin, as before.
+#[test]
+fn the_first_dimension_scales_a_free_shape_about_its_own_centre() {
+    for about_origin in [false, true] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.rectangle.center", json!({"center": [100, 100], "corner": [105, 105]}));
+        let before = sketch(&s);
+        let out = run(
+            &mut s,
+            "sketch.dimension",
+            json!({"entities": ["l1"], "value": "500 mm", "scale_sketch": true, "scale_about_origin": about_origin}),
+        );
+        assert_eq!(out["scaled"], 50.0, "{out}");
+        assert_eq!(out["measured"], 500.0, "{out}");
+        let after = sketch(&s);
+        let anchor = if about_origin { v(0.0, 0.0) } else { v(100.0, 100.0) };
+        for (p, q) in before.points.iter().zip(&after.points) {
+            let want = if p.fixed { p.pos } else { anchor + (p.pos - anchor) * 50.0 };
+            assert!(q.pos.dist(want) < 1e-6, "about origin {about_origin}, {}: {:?} -> {:?}, expected {want:?}", p.id, p.pos, q.pos);
+        }
+    }
+}
+
 #[test]
 fn the_first_dimension_does_not_scale_a_sketch_that_has_a_size() {
     // A sketch with projected or fixed geometry, or another length dimension, already has a
