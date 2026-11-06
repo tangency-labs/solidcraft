@@ -286,7 +286,10 @@ fn editing_a_hole_drags_it_to_a_new_place() {
 #[test]
 fn snaps_and_moves_are_off_by_default_and_picks_behave_as_before() {
     let mut h = block_as_installed();
-    assert!(!h.app.preferences.hole_snaps && !h.app.preferences.hole_moves, "a new installation places holes as it always did");
+    assert!(
+        !h.app.preferences.hole_snaps && !h.app.preferences.hole_moves && !h.app.preferences.hole_group,
+        "a new installation places holes as it always did"
+    );
     h.step(&json!({"start": "solid.hole"})).unwrap();
     // Beside the middle: no snap.
     let at = off(&mut h, MIDDLE, 5.0, -4.0);
@@ -465,6 +468,50 @@ fn editing_a_hole_replaces_its_face_instead_of_adding_one() {
     let (again, position) = last_hole(&h);
     assert_eq!(again, hole, "the same feature");
     assert!(position.dist(on_top) < 1e-3, "OK uses the new face: {position:?}");
+}
+
+/// Single holes on the block's top and front faces, made with OK; the new Hole features' ids.
+fn holes_on_two_faces(h: &mut Harness) -> Vec<u64> {
+    let before = h.app.session.doc.features.len();
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    for p in [Vec3::new(30.0, 20.0, 20.0), Vec3::new(25.0, 0.0, 10.0)] {
+        let at = screen(h, p);
+        h.step(&json!({"click": at})).unwrap();
+    }
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().map(|d| &d.error));
+    h.app.session.doc.features[before..].iter().filter(|f| matches!(f.kind, FeatureKind::Hole { .. })).map(|f| f.id).collect()
+}
+
+#[test]
+fn holes_made_together_share_a_closed_folder_when_preferences_say_so() {
+    let mut h = block_as_installed();
+    h.step(&json!({"call": "ui.view", "params": {"view": "iso"}})).unwrap();
+    h.settle();
+    // Off (the default): each hole is its own entry in History, as before.
+    assert_eq!(holes_on_two_faces(&mut h).len(), 2);
+    assert!(h.app.session.doc.timeline_groups.is_empty(), "no folder");
+    // On: the two holes go into one folder, closed at first.
+    crate::prefs::set(&mut h.app, &json!({"hole_group": true})).unwrap();
+    let made = holes_on_two_faces(&mut h);
+    assert_eq!(made.len(), 2);
+    let [folder] = h.app.session.doc.timeline_groups.as_slice() else { panic!("one folder: {:?}", h.app.session.doc.timeline_groups) };
+    assert_eq!((folder.name.as_str(), &folder.features, folder.parent), ("Holes", &made, None));
+    assert!(!crate::timeline_folders::is_open(&h.app, folder.id, true), "closed at first, in both Histories");
+    // One hole alone, or a hole edited, stays out of any new folder.
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    let at = screen(&mut h, Vec3::new(5.0, 25.0, 20.0));
+    h.step(&json!({"click": at})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().map(|d| &d.error));
+    h.step(&json!({"call": "ui.editFeature", "params": {"feature": made[0]}})).unwrap();
+    h.frames(4);
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    h.settle();
+    assert_eq!(h.app.session.doc.timeline_groups.len(), 1, "still the one folder");
+    assert_eq!(h.app.session.doc.timeline_groups[0].features, made, "holding the same holes");
 }
 
 /// Single holes on two faces with the depth typed as `ScrewDepth = 5`: OK runs one command per
