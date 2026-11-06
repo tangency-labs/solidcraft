@@ -271,6 +271,35 @@ fn from_round(a: &Shape, b: &Shape) -> Option<Centre> {
     (c.distance.is_finite() && c.from.is_finite() && c.to.is_finite()).then_some(c)
 }
 
+/// The distance between two planes, `from` on the first and `to` on the second.
+///
+/// Parallel planes (normals within 1e-6 rad, as [`parallel`] counts axes) are the
+/// perpendicular gap between them (#11833), measured from `anchor` (a point of the first item,
+/// so the dimension is drawn on it) moved onto the first plane. Planes at an angle meet: only
+/// when both run on for ever (datum planes, `meet`) is that a distance of zero on their line of
+/// intersection; a face ends, so its distance is left to its own points (`None`).
+pub(crate) fn plane_plane(p1: Vec3, n1: UnitVec3, p2: Vec3, n2: UnitVec3, anchor: Vec3, meet: bool) -> Option<(f64, Vec3, Vec3)> {
+    let (v1, v2) = (n1.vec(), n2.vec());
+    let across = v1.cross(v2);
+    if across.len() < 1e-6 {
+        let from = anchor - v1 * (anchor - p1).dot(v1);
+        let h = (from - p2).dot(v1);
+        return Some((h.abs(), from, from - v1 * h));
+    }
+    if !meet {
+        return None;
+    }
+    // The point of both planes nearest the first plane's point: on the line through
+    // `c1·n1 + c2·n2` along `n1 × n2`.
+    let k = v1.dot(v2);
+    let (d1, d2) = (v1.dot(p1), v2.dot(p2));
+    let det = 1.0 - k * k;
+    let base = v1 * ((d1 - d2 * k) / det) + v2 * ((d2 - d1 * k) / det);
+    let dir = across.normalized()?;
+    let p = base + dir * (p1 - base).dot(dir);
+    Some((0.0, p, p))
+}
+
 /// A slot's sizes: width (the ends' diameter), the distance between the ends' centres and the
 /// overall length, with the two centres.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -503,5 +532,33 @@ mod tests {
         let skew = [(Vec2::new(0.0, -3.0), Vec2::new(20.0, -2.0)), (Vec2::new(20.0, 3.0), Vec2::new(0.0, 3.0))];
         assert!(slot_outline(&arcs, &skew).is_none());
         assert!(slot_outline(&[(Vec2::new(0.0, 0.0), 3.0, PI), (Vec2::new(20.0, 0.0), 4.0, PI)], &lines).is_none());
+    }
+
+    /// Two walls of a box whose normals are parallel only to rounding (#11833): the gap between
+    /// the planes, from the picked point on the first to its foot on the second, never NaN.
+    #[test]
+    fn nearly_parallel_planes_measure_the_gap_between_them() {
+        let tilt = UnitVec3::new(Vec3::new(1e-8, 0.0, 1.0)).unwrap();
+        for (n2, gap) in [(UnitVec3::Z, 20.0), (-UnitVec3::Z, 20.0), (tilt, 20.0)] {
+            let anchor = Vec3::new(7.0, 3.0, 0.5);
+            let (d, from, to) = plane_plane(Vec3::new(100.0, -50.0, 0.0), UnitVec3::Z, Vec3::new(-4.0, 9.0, gap), n2, anchor, false).unwrap();
+            assert!((d - gap).abs() < 1e-6, "{n2:?}: {d}");
+            assert!(from.is_finite() && to.is_finite());
+            assert!(from.dist(Vec3::new(7.0, 3.0, 0.0)) < 1e-12, "from lies on the first plane under the pick: {from:?}");
+            assert!((to.z - gap).abs() < 1e-6 && (to - from).cross(Vec3::Z).len() < 1e-6, "to lies on the second plane: {to:?}");
+        }
+    }
+
+    /// Planes at an angle: datum planes meet (zero, on both planes); faces end, so their
+    /// distance is left to their points.
+    #[test]
+    fn planes_at_an_angle_meet_only_when_they_run_on() {
+        let (p1, p2) = (Vec3::new(0.0, 0.0, 5.0), Vec3::new(3.0, 0.0, 0.0));
+        let n2 = UnitVec3::new(Vec3::new(1.0, 0.0, 1.0)).unwrap();
+        let (d, from, to) = plane_plane(p1, UnitVec3::Z, p2, n2, p1, true).unwrap();
+        assert_eq!((d, from), (0.0, to));
+        assert!(from.is_finite() && (from.z - 5.0).abs() < 1e-12 && (from - p2).dot(n2.vec()).abs() < 1e-12, "{from:?}");
+        assert!(plane_plane(p1, UnitVec3::Z, p2, n2, p1, false).is_none());
+        assert!(plane_plane(p1, UnitVec3::Z, p2, UnitVec3::X, p1, true).is_some_and(|(_, p, _)| p.is_finite()));
     }
 }
