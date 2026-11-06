@@ -160,6 +160,7 @@
   "render.background_workflow": "Choose the background you intend: a camera-only colour/gradient, a physical stage that receives light, or HDR illumination. They are independent. Live Preview is a modelling view; render a new image or regrade a retained master to see camera finishing.",
   "render.base_color": "Base colour · sRGB",
   "render.bloom_help": "Creative output-only glow from positive linear highlights, spread with three normalised box passes. Radius is in output pixels. Added in linear display light before sRGB; not a lens, volumetric effect or convergence improvement. The raw EXR is unchanged.",
+  "render.check_media_remaining": "Density grids, displacement, full spectral integration and propagated polarisation remain unavailable.",
   "render.chromatic_offset": "Chromatic edge offset",
   "render.cpu_area_editor_help": "Full side vectors in millimeters; U cross V points towards the emitting side. This differs from GPU half-edge vectors.",
   "render.cpu_light_help": "Up to eight directional lights. An empty custom list turns them off; selecting a preset restores its lights. Colours are linear RGB and intensity is relative, not watts.",

@@ -3191,7 +3191,7 @@
   "render.category_wood": "Gỗ",
   "render.check_glass_cpu": "CPU hỗ trợ các tấm kính phẳng và hộp thẳng theo trục đã được kiểm chứng. Lưới kín tổng quát, cấu trúc lồng nhau và tán xạ bên trong cần Chiếu sáng gián tiếp. Chưa hỗ trợ bóng truyền qua kính kín.",
   "render.check_glass_gpu": "GPU hỗ trợ các khối kính tách rời đã được kiểm chứng hoặc cấu trúc lồng nhau được kiểm chứng và bật rõ ràng. Cấu trúc lồng nhau cần lớp bao lồi, vật thể con nằm hoàn toàn bên trong và các ranh giới không chạm nhau.",
-  "render.check_media_remaining": "Chưa hỗ trợ kính nhám, lưới mật độ, dịch chuyển bề mặt và truyền sáng quang phổ.",
+  "render.check_media_remaining": "Lưới mật độ, dịch chuyển bề mặt, tích phân toàn phổ và truyền trạng thái phân cực vẫn chưa được hỗ trợ.",
   "render.check_media_scope": "Tán xạ bên trong đang hoạt động cần môi trường kính kín, tắt truyền tia bóng thẳng và tắt Khử nhiễu. GPU cũng cần một tầng Fresnel. Không thể kết hợp Khí quyển bên ngoài đang hoạt động với kính hoặc Khử nhiễu bề mặt.",
   "render.check_opaque": "Độ trong suốt: chỉ bề mặt đục; hỗ trợ alpha của phông nền.",
   "render.check_sorted_alpha": "Độ trong suốt: xấp xỉ alpha có sắp thứ tự.",

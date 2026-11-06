@@ -3191,7 +3191,7 @@
   "render.category_wood": "Wood",
   "render.check_glass_cpu": "CPU supports certified planar Glass sheets and axis-aligned boxes. General closed meshes, nesting and interior scattering require Indirect lighting. Closed transmitted shadows remain unsupported.",
   "render.check_glass_gpu": "GPU supports certified disjoint Glass or explicit certified nesting. Nesting requires convex parents, strictly contained children and no touching boundaries.",
-  "render.check_media_remaining": "Rough Glass, density grids, displacement and spectral transport remain unavailable.",
+  "render.check_media_remaining": "Density grids, displacement, full spectral integration and propagated polarization remain unavailable.",
   "render.check_media_scope": "Active interior scattering needs a closed Glass medium, straight shadow transmission off and Denoise off. GPU also needs one Fresnel stratum. Active exterior Atmosphere cannot combine with Glass or surface Denoise.",
   "render.check_opaque": "Transparency: opaque surfaces only; background alpha is supported.",
   "render.check_sorted_alpha": "Transparency: sorted alpha approximation.",
