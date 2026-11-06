@@ -1642,6 +1642,10 @@ preference_settings! {
     /// Opening or editing a sketch turns the view to face it (the default). Off: the view stays as
     /// it is, and Look At faces the sketch when asked.
     sketch_open_look_at: bool = true, PAGE_SKETCH;
+    /// Two quick presses of Esc in a sketch, with nothing left to cancel, finish it (the default,
+    /// as before). Off: Esc only cancels the tool, dialog or selection and the sketch stays open;
+    /// Finish Sketch ends it (#12069).
+    escape_twice_finishes_sketch: bool = true, PAGE_SKETCH;
     /// A sketch started on a face of a body in another component than the active one activates
     /// that component first, so the sketch belongs to it (`sketch.create` `activate_part`,
     /// #10215). Off (the default): the sketch belongs to the active component, as before.
@@ -7728,6 +7732,7 @@ mod tests {
                 ("project_options_dialog", "prefs.sketch.project_options"),
                 ("sketch_face_activates_part", "prefs.sketch_face_activates_part"),
                 ("sketch_open_look_at", "prefs.sketch_open_look_at"),
+                ("escape_twice_finishes_sketch", "prefs.sketch.escape_twice_finishes"),
                 ("selection_shift_add_only", "prefs.shift_add_ctrl_toggle"),
                 ("prefer_free_sketch_points", "prefs.sketch.prefer_free_points"),
                 ("select_other_hidden", "prefs.sketch.select_other_hidden"),

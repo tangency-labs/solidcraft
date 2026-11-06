@@ -3696,9 +3696,10 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                     continue;
                 }
                 // Two quick presses in a sketch finish it (keeping it, like Finish Sketch);
-                // the first one has already cancelled whatever was active.
+                // the first one has already cancelled whatever was active. A preference turns
+                // this off, so Esc never leaves the sketch (#12069).
                 let now = ctx.input(|i| i.time);
-                let again = app.last_escape.is_some_and(|t| now - t <= ESCAPE_TWICE_S);
+                let again = app.preferences.escape_twice_finishes_sketch && app.last_escape.is_some_and(|t| now - t <= ESCAPE_TWICE_S);
                 app.last_escape = Some(now);
                 // Not while a tool is still out (its first Esc only ended a chain): this press
                 // puts it down, and the next quick one finishes.

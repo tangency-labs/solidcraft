@@ -755,6 +755,7 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
         "dialog_buttons",
         "dialog_place",
         "direct_interaction",
+        "escape_twice_finishes_sketch",
         "free_orbit",
         "free_orbit_upright",
         "hidden_toolbar_tabs",
@@ -848,7 +849,7 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
     ];
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
-    assert_eq!(expected.len(), 102);
+    assert_eq!(expected.len(), 103);
     assert_eq!(actual, expected);
 }
 
