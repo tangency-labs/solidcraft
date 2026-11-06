@@ -1,20 +1,5 @@
 [
   {
-    "case": "fillets/1080-fillet-equal-slope-basin-1-mm-rim-loop-4",
-    "issue": "tangency-labs/solidcore#2947",
-    "reason": "continuity_order: got {'body': 'Slab', 'edges': 'blend', 'order': 'g0',  want >= g1 at every blend seam"
-  },
-  {
-    "case": "fillets/1080-fillet-sloped-basin-1-mm-rim-r4-2-edges",
-    "issue": "tangency-labs/solidcore#2947",
-    "reason": "continuity_order: got {'body': 'Slab', 'edges': 'blend', 'order': 'g0',  want >= g1 at every blend seam"
-  },
-  {
-    "case": "fillets/1080-fillet-sloped-basin-1-mm-rim-r4-4-edges",
-    "issue": "tangency-labs/solidcore#2947",
-    "reason": "continuity_order: got {'body': 'Slab', 'edges': 'blend', 'order': 'g0',  want >= g1 at every blend seam"
-  },
-  {
     "case": "fillets/12034-round-loft-square-to-circle-circular-rim",
     "issue": "solidcore#2844",
     "reason": "the round of the loft's circular rim is not a closed solid"
