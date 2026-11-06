@@ -227,10 +227,20 @@ pub(super) fn read_imports_with<R: Read + Seek>(reader: &mut PackageReader<R>) -
     }
     let imports = manifest.get("imports").and_then(Value::as_object).filter(|i| i.len() <= MAX_IMPORTS).ok_or_else(|| invalid("cached imports"))?;
     let mut records = HashMap::with_capacity(imports.len());
+    // Each stored body belongs to one body of one import: a slice named twice would be decoded once
+    // per use, so a small file could ask for up to MAX_IMPORTS × MAX_BODIES decodings.
+    let mut used = vec![false; slices.len()];
     for (digest, record) in imports {
         let bodies = record.get("bodies").and_then(Value::as_array).filter(|b| b.len() <= MAX_BODIES).ok_or_else(|| invalid("cached import"))?;
-        if digest.len() != 64 || bodies.iter().any(|b| b.get("slice").and_then(Value::as_u64).is_none_or(|i| i as usize >= slices.len())) {
+        if digest.len() != 64 {
             return Err(invalid("cached import"));
+        }
+        for body in bodies {
+            let slot = body.get("slice").and_then(Value::as_u64).and_then(|i| usize::try_from(i).ok()).and_then(|i| used.get_mut(i));
+            match slot {
+                Some(seen) if !*seen => *seen = true,
+                _ => return Err(invalid("cached import slice")),
+            }
         }
         records.insert(digest.clone(), record.clone());
     }

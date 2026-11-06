@@ -1913,6 +1913,19 @@ mod tests {
         let mut entries = original.clone();
         entries.insert("cache/imports.json".into(), serde_json::to_vec(&m).unwrap());
         assert!(imports(&package(&entries)).unwrap().import(&key).is_none());
+        // A save gives each body its own slice, and a file whose bodies share one (decoded once per
+        // use, so a small file could ask for many decodings) or name one past the end is a miss.
+        let given: Vec<u64> =
+            manifest(&original)["imports"][&key]["bodies"].as_array().unwrap().iter().map(|b| b["slice"].as_u64().unwrap()).collect();
+        assert!(given.len() > 1);
+        assert_eq!(given, (0..given.len() as u64).collect::<Vec<_>>());
+        for slice in [json!(0), json!(given.len()), json!(u64::MAX)] {
+            let mut m = manifest(&original);
+            m["imports"][&key]["bodies"][1]["slice"] = slice.clone();
+            let mut entries = original.clone();
+            entries.insert("cache/imports.json".into(), serde_json::to_vec(&m).unwrap());
+            assert!(imports(&package(&entries)).is_none(), "slice {slice}");
+        }
     }
 
     #[test]
