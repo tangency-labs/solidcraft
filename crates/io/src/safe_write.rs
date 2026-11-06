@@ -30,16 +30,43 @@ fn write_synced(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 /// Flush a written file to the disk. On Apple systems `sync_all` asks the drive itself to flush
 /// (`F_FULLFSYNC`), which a network share refuses (an SMB share: "Operation not supported", os
 /// error 45), so a save there failed before it replaced anything. The plain `fsync` the share
-/// does offer is used then, as SQLite and git do.
+/// does offer is used then, as SQLite and git do. A Linux file chooser gives a document-portal
+/// path for a network folder, and that portal refuses `fsync` itself (os error 95, #12731). The
+/// bytes are already written, so the save continues; the portal keeps them when it can.
 fn flush(f: &fs::File) -> std::io::Result<()> {
     flush_with(f, fs::File::sync_all)
 }
 
+/// A flush the file system does not offer. Apple reports that as os error 45; Linux, including
+/// the document portal a Save As to a network folder goes through, as os error 95.
+fn flush_unsupported(error: &std::io::Error) -> bool {
+    error.kind() == std::io::ErrorKind::Unsupported
+        || error.raw_os_error() == Some(95)
+        || (cfg!(target_vendor = "apple") && error.raw_os_error() == Some(45))
+}
+
 fn flush_with(f: &fs::File, full: impl FnOnce(&fs::File) -> std::io::Result<()>) -> std::io::Result<()> {
-    match full(f) {
-        #[cfg(target_vendor = "apple")]
-        Err(e) if e.kind() == std::io::ErrorKind::Unsupported || e.raw_os_error() == Some(45) => rustix::fs::fsync(f).map_err(std::io::Error::from),
-        r => r,
+    let Err(error) = full(f) else { return Ok(()) };
+    if !flush_unsupported(&error) {
+        return Err(error);
+    }
+    // Apple's full flush was refused; try the plain one. If that is refused too, or this is
+    // not Apple and the plain flush was the one refused, the write itself has finished.
+    #[cfg(target_vendor = "apple")]
+    {
+        let _ = error;
+        match rustix::fs::fsync(f) {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                let error = std::io::Error::from(error);
+                if flush_unsupported(&error) { Ok(()) } else { Err(error) }
+            }
+        }
+    }
+    #[cfg(not(target_vendor = "apple"))]
+    {
+        let _ = (f, error);
+        Ok(())
     }
 }
 
@@ -585,9 +612,10 @@ mod tests {
         d
     }
 
-    /// A network share (SMB on macOS) refuses the drive flush `sync_all` asks for with "Operation
-    /// not supported" (os error 45). The file is then flushed the plain way and the save goes on;
-    /// any other failure still fails the save.
+    /// A network share refuses the flush. macOS refuses the drive flush `sync_all` asks for
+    /// (os error 45) and the plain fsync is used. A Linux file chooser hands a document-portal
+    /// path for an SMB folder, and that portal refuses fsync itself (os error 95, #12731); the
+    /// bytes are already written, so the save goes on. Any other failure still fails the save.
     #[test]
     fn a_share_that_refuses_the_full_flush_gets_a_plain_one() {
         let d = dir("flush");
@@ -598,9 +626,11 @@ mod tests {
         #[cfg(target_vendor = "apple")]
         flush_with(&f, refused).unwrap();
         #[cfg(not(target_vendor = "apple"))]
-        assert!(flush_with(&f, refused).is_err(), "elsewhere sync_all is the plain flush already");
+        assert!(flush_with(&f, refused).is_err(), "os error 45 is not a refused flush off Apple");
+        let portal = |_: &fs::File| Err(std::io::Error::from_raw_os_error(95));
+        flush_with(&f, portal).unwrap();
         let unsupported = |_: &fs::File| Err(std::io::Error::from(std::io::ErrorKind::Unsupported));
-        assert_eq!(flush_with(&f, unsupported).is_ok(), cfg!(target_vendor = "apple"));
+        flush_with(&f, unsupported).unwrap();
         let broken = |_: &fs::File| Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
         assert_eq!(flush_with(&f, broken).unwrap_err().kind(), std::io::ErrorKind::PermissionDenied);
         flush_with(&f, |_| Ok(())).unwrap();
