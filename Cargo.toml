@@ -42,6 +42,9 @@ solidcore = { git = "https://github.com/tangency-labs/solidcore", rev = "8ddce90
 solidcore-record = { git = "https://github.com/tangency-labs/solidcore", rev = "f5e8e9a29e0c9b7cf6c4040a5bc8878382b3c62f" }
 # test tooling: a dev-dependency only (xtask/src/layers.rs)
 solidcraft-testkit = { path = "crates/testkit" }
+# SolidBOM: the portable wire contract, then the service-only direct-cost calculator.
+solidbom-contract = { path = "crates/solidbom-contract" }
+solidbom-costing = { path = "crates/solidbom-costing" }
 
 # foundation
 thiserror = "2"
@@ -51,6 +54,10 @@ proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["full"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
+# SolidBOM wire values (MIT OR Apache-2.0): exact money and measurements as decimal strings, and
+# identity as UUIDs written as strings. Both build for the browser.
+rust_decimal = { version = "1.43", default-features = false, features = ["serde-str", "std"] }
+uuid = { version = "1", features = ["serde"] }
 # command parameter and result schemas
 schemars = "1.2"
 serde_path_to_error = "0.1"

@@ -3,8 +3,8 @@
 <!-- ANCHOR: architecture -->
 | Layer | Crates | Role |
 |---|---|---|
-| L0 | `geom` | vectors, planes, profiles, meshes and their measures |
-| L1 | `sketch`, `kernel`, `render`, `dynamics` | constraint solver and profiles; the B-rep kernel boundary (truck); view math and the headless scene description; multibody dynamics (rigid bodies, joints, forces, time integration) |
+| L0 | `geom`, `solidbom-contract` | vectors, planes, profiles, meshes and their measures; SolidBOM's portable wire types |
+| L1 | `sketch`, `kernel`, `render`, `dynamics`, `solidbom-costing` | constraint solver and profiles; the B-rep kernel boundary (truck); view math and the headless scene description; multibody dynamics (rigid bodies, joints, forces, time integration); SolidBOM's direct-cost arithmetic, used by the separate service |
 | L2 | `doc` | parameters, expressions, the feature timeline and its incremental evaluation |
 | L3 | `io` | design files, STL/OBJ/STEP/3MF export, STEP and 3MF/STL/OBJ/glTF import features |
 | L4 | `engine` | the session and the command registry (everything is a command) |

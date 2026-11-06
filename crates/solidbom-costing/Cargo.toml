@@ -1,0 +1,18 @@
+[package]
+name = "solidbom-costing"
+description = "SolidBOM: pure deterministic direct-cost arithmetic for the desktop prototype"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+solidbom-contract = { workspace = true }
+rust_decimal = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+uuid = { workspace = true }

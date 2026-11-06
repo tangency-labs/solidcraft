@@ -1,0 +1,19 @@
+[package]
+name = "solidbom-contract"
+description = "SolidBOM: portable wire types shared by the desktop app, the calculator and the service"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+rust_decimal = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

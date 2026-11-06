@@ -38,6 +38,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("geom", Class::Layer(0)),
     // 3D mouse descriptors and reports (no workspace dependencies; the apps read the device)
     ("space-mouse", Class::Layer(0)),
+    // SolidBOM's portable wire types (no workspace dependencies; the desktop and the service share them)
+    ("solidbom-contract", Class::Layer(0)),
     // the derive macros (proc-macro, no workspace dependencies)
     ("derive", Class::Standalone),
     // the 3Dconnexion driver's client API on macOS (no workspace dependencies)
@@ -53,6 +55,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("render", Class::Layer(1)),
     // multibody dynamics (rigid bodies, joints, forces, time integration; geom only)
     ("dynamics", Class::Layer(1)),
+    // SolidBOM's direct-cost arithmetic (the service's pure calculator; contract only)
+    ("solidbom-costing", Class::Layer(1)),
     ("doc", Class::Layer(2)),
     ("io", Class::Layer(3)),
     ("engine", Class::Layer(4)),
