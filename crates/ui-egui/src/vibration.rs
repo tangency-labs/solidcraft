@@ -533,8 +533,13 @@ mod tests {
             .zip(&mesh.tri_face)
             .find_map(|(tri, &face)| mesh.tri(tri).filter(|p| p.iter().all(|v| v.x.abs() < 1e-7)).map(|_| face as usize))
             .unwrap();
+        h.app.start("solid.shell");
+        assert!(h.app.dialog.as_ref().is_some_and(|dialog| dialog.wants_picks()));
+        h.app.home.open = true;
         h.app.session.selection = vec![Sel::Face { body: "Beam".into(), index, point: Vec3::new(0.0, 9.0, 6.0) }];
         h.app.start(COMMAND);
+        assert!(!h.app.home.open);
+        assert!(h.app.dialog.is_none());
         h.frames(3);
         assert_eq!(h.app.vibration.as_ref().unwrap().anchors.len(), 1);
         h.step(&json!({"click":{"handle":"vibration:run"}})).unwrap();
