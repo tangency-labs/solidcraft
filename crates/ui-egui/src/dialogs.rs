@@ -3865,7 +3865,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let panel = if let Some(column) = column {
         panel.width(column.width()).joined(crate::ui_kit::DockEdges { left: true, top: true, ..Default::default() })
     } else if wide && side == crate::frame::Side::Left {
-        let available = app.viewport.palette_rect.map_or(vp.width(), |r| (r.left() - vp.left() - t.space_8).max(0.0));
+        let available = crate::sketch_palette::room_left_of(app, ctx, vp);
         panel.width(card_width(&d).min(available))
     } else if manager {
         panel.width(card_width(&d))
