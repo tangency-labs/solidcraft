@@ -1248,7 +1248,8 @@ fn drag_arrow_to(
         if !signed {
             v = v.max(if free { 1e-3 } else { step });
         }
-        *value = if free { format_len(doc, v) } else { format_len_drag(doc, v, step, decimals) };
+        // A stop on a face keeps its exact depth, not a rounded one.
+        *value = if free || stopped.is_some() { format_len(doc, v) } else { format_len_drag(doc, v, step, decimals) };
         ts = tip(v)?;
     }
     // Paint the value just read from this frame's pointer, including the value box anchor.
