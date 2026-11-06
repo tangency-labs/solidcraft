@@ -5,7 +5,7 @@ use crate::schema::render_bindings::{OpticsBindParams, OpticsBindingSaved, Optic
 use crate::{Result, Session, params::bad};
 use serde_json::{Value, json};
 use solidcraft_doc::{
-    render_optics::{OpticalBindings, SavedOptics},
+    render_optics::{OpticalBindings, OpticalMaterial, SavedOptics},
     render_settings::RenderJob,
 };
 use solidcraft_render::ProductScene;
