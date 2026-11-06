@@ -351,7 +351,8 @@ and a fresh CI run:
   length. `cargo xtask lists` rejects non-test const/static arrays with more than ten lines
   of entries, except fixed standard or algorithm tables listed with reasons in `xtask/src/lists.rs`.
   Built-in themes need only a JSON file in `crates/look/themes/`, with a unique nonnegative
-  integer `order` (the picker order) and its own `provenance` line; keep existing order values.
+  integer `order` and its own `provenance` line. Keep existing order values. The Theme list in
+  Preferences sorts by name.
 - **Message catalogs** (`assets/locales/*.json`): one message per line, sorted by id. Add your
   message anywhere and run `cargo xtask lists --fix`; `cargo xtask lists` (in `cargo xtask ci`
   and the Lists workflow) fails on an unsorted catalog or an id that appears twice.
