@@ -484,9 +484,9 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
                 .features
                 .iter()
                 .filter(|f| matches!(f.kind, FeatureKind::Sketch { .. }))
-                .map(|f| act("ui.editSketch", &f.name, "sketch").with(json!({"sketch": f.id})))
+                .map(|f| act("ui.editSketch", &f.name, "sketch_edit").with(json!({"sketch": f.id})))
                 .collect();
-            if items.is_empty() { vec![act("ui.editSketch", app.tr("ui.edit_sketch_empty"), "sketch").on(false)] } else { items }
+            if items.is_empty() { vec![act("ui.editSketch", app.tr("ui.edit_sketch_empty"), "sketch_edit").on(false)] } else { items }
         }
         Target::VisualStyle => crate::navigation_bar::VISUAL_STYLES
             .iter()
@@ -657,7 +657,7 @@ fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let suppressed = feature.is_some_and(|f| f.suppressed);
     vec![
         act("ui.editFeature", "Edit Feature", "edit").with(json!({"feature":id})).on(exists),
-        act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({"sketch": sketch.map(|s| s.0)})).on(sketch.is_some()),
+        act("ui.editSketch", "Edit Profile Sketch", "sketch_edit").with(json!({"sketch": sketch.map(|s| s.0)})).on(sketch.is_some()),
         act("ui.rename", "Rename", "rename").key("F2").with(json!({"feature":id})).on(exists),
         act("timeline.suppress", if suppressed { "Unsuppress" } else { "Suppress" }, "suppress")
             .with(json!({"feature":id, "suppressed": !suppressed}))
@@ -725,7 +725,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
             v.push(cmd(app, "occurrence.move", "Move"));
         }
         v.push(act("ui.editFeature", "Edit Feature", "edit").with(json!({ "feature": feature })).on(feature.is_some()));
-        v.push(act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({ "sketch": sketch })).on(sketch.is_some()));
+        v.push(act("ui.editSketch", "Edit Profile Sketch", "sketch_edit").with(json!({ "sketch": sketch })).on(sketch.is_some()));
         let planar =
             sel.iter().any(|s| matches!(s, Sel::Face { body, index, .. } if crate::dialogs::planar_face(&app.session, body, *index).is_some()));
         v.push(act("ui.lookAt", "Look At", "lookat").on(planar));
@@ -887,7 +887,7 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let mut items = vec![
         act("ui.extrudeSketch", "Extrude", "extrude").key("E").with(json!({ "sketch": id })).on(has_profiles && !editing),
         Item::sep(),
-        act("ui.editSketch", "Edit Sketch", "sketch").with(json!({ "sketch": id })).on(!editing),
+        act("ui.editSketch", "Edit Sketch", "sketch_edit").with(json!({ "sketch": id })).on(!editing),
         act("ui.redefineSketch", "Redefine Sketch Plane", "plane").with(json!({ "sketch": id })),
         replace_sketch_item(app, id).on(!editing),
         act("ui.exportDxf", "Export DXF…", "export").with(json!({ "sketch": id })),

@@ -267,6 +267,7 @@ sketch_chamfer_two	false
 sketch_chamfer_two_distances	false
 sketch_circ_pattern	false
 sketch_dxf	false
+sketch_edit	false
 sketch_fillet	false
 sketch_mirror	false
 sketch_move	false
