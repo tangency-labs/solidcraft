@@ -10,19 +10,24 @@ mod projection;
 #[path = "view_dxf_sketch.rs"]
 pub(super) mod sketch;
 
-use serde_json::{Value, json};
+use serde_json::Value;
 use solidcore_record::Vec2;
 use solidcraft_io::{DxfEntity, DxfLayer, DxfLinetype, DxfShape};
 use solidcraft_render::Camera;
 
 use super::CommandSpec;
 use crate::params::{bad, str_};
+use crate::schema::silhouette::{DxfOutput, DxfProjection, DxfUnits, ExportViewDxfParams, ViewDxfResult, ViewDxfStats};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
 const CMD: &str = "file.export_view_dxf";
-pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Export Current View as DXF", export)
+const CONTRACT: TypedContract<ExportViewDxfParams> = TypedContract::new();
+pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Export Current View as DXF", crate::checked!("file.export_view_dxf", export))
     .icon("export")
     .noundo()
+    .contract(&CONTRACT)
+    .output(output_schema_for::<ViewDxfResult>)
     .params("camera: Camera (current view); hidden?: omit|dashed (default omit); tolerance?: 0.0001..1 mm (curve chord tolerance, default 0.01); path?: .dxf file (else returns dxf text). Visible placed bodies and shown sketches' profile curves (no construction geometry, points, dimensions or constraints); 2D LINE/LWPOLYLINE entities on VISIBLE/HIDDEN layers (sketch curves on SKETCH), mm; finished sketches are hidden behind bodies, the active sketch is drawn on top; perspective projected onto the camera target plane; no viewport crop or overlays.")];
 
 fn export(s: &mut Session, p: &Value) -> Result<Value> {
@@ -63,8 +68,8 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let drawing = projection::drawing(&meshes, &sketch::parts(s, tolerance).map_err(|e| bad(CMD, e))?, &cam).map_err(|e| bad(CMD, e))?;
     let writing = progress::Stage::new("dxf_write", 1);
     writing.check().map_err(|e| bad(CMD, e))?;
-    let mut visible = 0;
-    let mut hidden = 0;
+    let mut visible = 0usize;
+    let mut hidden = 0usize;
     let mut entities = Vec::new();
     for line in drawing.lines {
         if line.hidden && !dashed {
@@ -90,18 +95,37 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let text = solidcraft_io::write_dxf_drawing(&layers, &entities)?;
     writing.check().map_err(|e| bad(CMD, e))?;
-    let mut result = json!({"visible":visible,"hidden":hidden,"sketch":sketch,"units":"mm","tolerance":tolerance,"projection":if cam.fov > 0.0 {"perspective"} else {"orthographic"}});
-    result["stats"] = json!({"bodies":meshes.placements.len(),"shared_meshes":meshes.meshes.len(),"triangles":meshes.triangles,
-        "mesh_bytes":meshes.bytes,"worker_limit":meshes::WORKERS,"segments":drawing.segments,"occlusion_work":drawing.work,
-        "prepare_ms":prepare_ms,"projection_ms":drawing.projection_ms,"occlusion_ms":drawing.occlusion_ms});
-    if let Some(path) = path {
+    let stats = ViewDxfStats {
+        bodies: meshes.placements.len(),
+        shared_meshes: meshes.meshes.len(),
+        triangles: meshes.triangles,
+        mesh_bytes: meshes.bytes,
+        worker_limit: meshes::WORKERS,
+        segments: drawing.segments,
+        occlusion_work: drawing.work,
+        prepare_ms,
+        projection_ms: drawing.projection_ms,
+        occlusion_ms: drawing.occlusion_ms,
+    };
+    let output = if let Some(path) = path {
         solidcraft_io::vfs::check(path).map_err(|e| crate::EngineError::Other(e.to_string()))?;
         solidcraft_io::write_atomic(std::path::Path::new(path), text.as_bytes(), false).map_err(|e| crate::EngineError::Other(e.to_string()))?;
-        result["path"] = json!(path);
+        DxfOutput::File { path: path.to_string() }
     } else {
-        result["dxf"] = json!(text);
-    }
-    Ok(result)
+        DxfOutput::Text { dxf: text }
+    };
+    let reply = ViewDxfResult {
+        visible,
+        hidden,
+        sketch,
+        units: DxfUnits::Millimetres,
+        tolerance,
+        projection: if cam.fov > 0.0 { DxfProjection::Perspective } else { DxfProjection::Orthographic },
+        stats,
+        output,
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| bad(CMD, e.to_string()))
 }
 
 /// Sketch runs as entities: visible ones on SKETCH, hidden ones dashed on HIDDEN or omitted.

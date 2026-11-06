@@ -30,7 +30,6 @@ explode.show
 expr.evaluate
 face.delete
 file.export
-file.export_view_dxf
 file.insert_mesh
 file.insert_step
 file.new
@@ -44,7 +43,6 @@ frame.profile.list
 frame.profile.properties
 inspect.interference
 inspect.measure
-inspect.silhouette
 joint.as_built
 joint.cam
 joint.create
