@@ -560,8 +560,10 @@ fn complete(s: &mut Session, p: &Value) -> Result<Value> {
     let lower = word.to_ascii_lowercase();
     let starts = |n: &str| word.is_empty() || n.to_ascii_lowercase().starts_with(&lower);
     // A parameter matches wherever the word appears in its name (`side` finds
-    // `cab_side_thickness`, #2757); functions, constants and units match from the start.
-    let within = |n: &str| word.is_empty() || n.to_ascii_lowercase().contains(&lower);
+    // `cab_side_thickness`, #2757) or by the starts of its words in order (`toodia` finds
+    // `tooth_outward_flange_diameter`, #11978); functions, constants and units match from the
+    // start.
+    let within = |n: &str| word.is_empty() || n.to_ascii_lowercase().contains(&lower) || solidcraft_doc::name_words_match(n, &word);
     let mut out: Vec<Value> = Vec::new();
     let mut rows: Vec<solidcraft_doc::ParamRow> = s.doc.param_rows().into_iter().filter(|r| within(&r.name)).collect();
     // Names that start with the word, then the rest; within each, favourites, then user
