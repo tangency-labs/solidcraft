@@ -82,7 +82,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "CREATE")
         .icon("rect_rounded")
         .enabled(in_sketch)
-        .params(concat!("p0, p1: opposite corners [x,y] (a coordinate may be an expression over the design's parameters: the corner follows them, as in `sketch.rectangle.two_point`); radius: expr (the corner radius, less than half the shorter side); construction?. A 2-point rectangle whose four corners are filleted alike: one radius dimension (`param`), the other arcs equal to it. Returns sides {bottom, right, top, left} (line ids) and arcs (the corner arcs: bottom-left, bottom-right, top-right, top-left)", connect_doc!(), created_doc!())),
+        .params(concat!("p0, p1: opposite corners [x,y] (a coordinate may be an expression over the design's parameters: the corner follows them, as in `sketch.rectangle.two_point`); radius: expr (the corner radius, less than half the shorter side); construction?. A 2-point rectangle whose four corners are filleted alike: one radius dimension (`param`), the other arcs equal to it. Returns sides {bottom, right, top, left} (line ids) and arcs (the corner arcs: bottom-left, bottom-right, top-right, top-left), diagonal (construction, between the bottom-left and top-right arc centres) and centre (the point held at its midpoint)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.rectangle.center", "Center Rectangle", rect_center)
         .at("SKETCH", "CREATE")
         .icon("rect_center")
@@ -1466,10 +1466,28 @@ fn rect_rounded(s: &mut Session, p: &Value) -> Result<Value> {
         fillet["sketch"] = sketch.clone();
     }
     let rounded = scratch.execute("sketch.fillet", &fillet)?;
+    let arcs = rounded.get("curves").cloned().unwrap_or_else(|| json!([]));
+    // Its centre (#7908): a point held at the midpoint of a construction diagonal between the
+    // bottom-left and top-right arc centres, so it stays in the middle however the rectangle is
+    // edited or dragged. Two coordinates, two equations: the centre adds no freedom.
+    let corner = |k: usize| arcs.get(k).and_then(Value::as_str).map(str::to_string);
+    let (bl, tr) = corner(0).zip(corner(2)).ok_or_else(|| bad(cmd, "the corner arcs are missing"))?;
+    let ((diagonal, centre, centre_con), info) = edit(&mut scratch, p, cmd, false, |sk, _| {
+        let k0 = sk.curve_index(&bl).and_then(|a| arc_centre(sk, a));
+        let k1 = sk.curve_index(&tr).and_then(|a| arc_centre(sk, a));
+        let (k0, k1) = k0.zip(k1).ok_or_else(|| bad(cmd, "the corner arcs lost their centres"))?;
+        let at = sk.point(k0).zip(sk.point(k1)).map(|(a, b)| (a + b) * 0.5).ok_or_else(|| bad(cmd, "the corner arcs lost their centres"))?;
+        let diagonal = sk.add_line_pts(k0, k1, None)?;
+        if let Some(c) = sk.curves.get_mut(diagonal) {
+            c.construction = true;
+        }
+        let centre = sk.add_point(at, None)?;
+        let con = add_c(sk, ConstraintKind::Midpoint { p: centre, l: diagonal })?;
+        Ok((sk.curves.get(diagonal).map(|c| c.id.clone()), sk.points.get(centre).map(|q| q.id.clone()), con))
+    })?;
     // Session::execute records the wrapper's before snapshot. Nested history must not leak.
     scratch.undo.clear();
     s.accept_computed(scratch);
-    let arcs = rounded.get("curves").cloned().unwrap_or_else(|| json!([]));
     if let Some(o) = out.as_object_mut() {
         // The sharp corners are gone (the lines end at the arcs now).
         o.remove("corners");
@@ -1478,10 +1496,15 @@ fn rect_rounded(s: &mut Session, p: &Value) -> Result<Value> {
         }
         if let (Some(Value::Array(cons)), Some(Value::Array(extra))) = (o.get_mut("constraints"), rounded.get("constraints")) {
             cons.extend(extra.iter().cloned());
+            cons.push(json!(centre_con));
         }
         o.insert("arcs".into(), arcs);
         o.insert("param".into(), rounded.get("param").cloned().unwrap_or(Value::Null));
-        if let Some(info) = rounded.get("sketch") {
+        o.insert("diagonal".into(), json!(diagonal));
+        o.insert("centre".into(), json!(centre));
+        if !info.is_null() {
+            o.insert("sketch".into(), info);
+        } else if let Some(info) = rounded.get("sketch") {
             o.insert("sketch".into(), info.clone());
         }
     }

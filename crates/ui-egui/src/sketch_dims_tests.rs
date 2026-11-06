@@ -312,7 +312,8 @@ fn rounded_rectangle_takes_typed_width_height_and_radius() {
     let sketch = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     let kinds: Vec<_> = sketch.sketch.curves.iter().map(|c| matches!(c.kind, solidcraft_engine::sketch::CurveKind::Arc { .. })).collect();
     assert_eq!(kinds.iter().filter(|arc| **arc).count(), 4, "four corner arcs");
-    assert_eq!(kinds.len(), 8);
+    assert_eq!(kinds.len(), 9, "four sides, four arcs and the centre's construction diagonal");
+    assert_eq!(sketch.sketch.curves.iter().filter(|c| c.construction).count(), 1, "only the diagonal is construction");
     assert_eq!(sketch.profiles.len(), 1);
     let want = 30.0 * 16.0 - (4.0 - std::f64::consts::PI) * 16.0;
     assert!((sketch.profiles[0].area - want).abs() < 1e-6, "area {} want {want}", sketch.profiles[0].area);
