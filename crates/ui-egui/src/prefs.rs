@@ -1384,6 +1384,10 @@ preference_settings! {
     /// A History folder whose features are all of one kind (Holes, say) shows their icon instead of
     /// the folder icon, in both Histories. Off by default: every folder shows the folder icon.
     history_folder_kind_icon: bool = false, PAGE_LAYOUT;
+    /// The History controls (First, Back, Forward, Last) step through the features the bottom bar
+    /// shows: one component's while it shows one (#11430). Off: they step through every feature of
+    /// the design, as they did before.
+    history_steps_component: bool = true, PAGE_LAYOUT;
     /// On, two or more joints show as one button with their count in the History, and a click
     /// shows each one (#8884). Off, the default, shows each joint as the History always has.
     history_group_joints: bool = false, PAGE_LAYOUT;
