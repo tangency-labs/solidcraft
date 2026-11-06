@@ -546,6 +546,9 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | | an open end in the sketch continuity legend | open end | the sketch continuity legend |
 | Clearance | the Clearance command | clearance check | `inspect.clearance` |
 | | a minimum distance field | clearance | the Interference and plastic rules dialogs |
+| | a hole sized for a bolt to pass through | clearance (hole) | the Hole dialog's Hole Tap Type, `ui.hole_clearance` |
+| Fit | fit the view to the model | fit (view) | the view's Fit action, `ui.fit` |
+| | how much room a clearance hole leaves around the bolt | clearance fit | the Hole dialog's Fit, `ui.clearance_fit` |
 | Flat | a hole's flat bottom | flat bottom | the Hole dialog's tip |
 | | a hem that lies flat on the sheet | flat hem | the Hem dialog's type |
 | Round | a round relief or corner shape | round (shape) | relief shapes, plastic rests, ruled surface corners |
