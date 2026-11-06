@@ -4,6 +4,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::f64::consts::TAU;
 
+use fieldcraft_fem::contact::{Grid, bounds};
+use fieldcraft_fem::mortar::integrate;
 use fieldcraft_fem::{Formulation, Solid};
 use fieldcraft_mesh::tet::QualityMesh;
 pub use fieldcraft_model::progress::{Progress, scoped as with_progress};
@@ -41,6 +43,7 @@ const DAMPING: f64 = 0.02;
 const BASE_ACCELERATION: f64 = 9.80665;
 const MM_TO_M: f64 = 0.001;
 const BOND_GAP_MM: f64 = 0.005;
+const BOND_GAP_M: f64 = BOND_GAP_MM * MM_TO_M;
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -269,6 +272,42 @@ fn append_body(
     Ok(faces)
 }
 
+fn linear_face_points(model: &Model, face: ElementFace) -> Result<[[f64; 3]; 3]> {
+    let element = model.element(face.element).ok_or_else(|| error("invalid bond element"))?;
+    let indices = face.face.checked_sub(1).and_then(|index| element.kind.faces().get(usize::from(index))).copied();
+    let Some([a, b, c]) = indices else { return Err(error("expected a triangular bond face")) };
+    let xyz = |&slot: &usize| element.nodes.get(slot).and_then(|&id| model.node(id)).map(|node| node.xyz).ok_or_else(|| error("invalid bond node"));
+    Ok([xyz(a)?, xyz(b)?, xyz(c)?])
+}
+
+fn mortar_overlap(model: &Model, primary: &[ElementFace], secondary: &[ElementFace]) -> Result<bool> {
+    let main = primary.iter().map(|&face| linear_face_points(model, face)).collect::<Result<Vec<_>>>()?;
+    let boxes: Vec<_> = main.iter().map(|points| bounds(points, BOND_GAP_M)).collect();
+    let grid = Grid::new(&boxes, 4 * boxes.len() + 64);
+    let mut candidates = Vec::new();
+    for &face in secondary {
+        fieldcraft_model::progress::check().map_err(error)?;
+        let points = linear_face_points(model, face)?;
+        grid.candidates_in(&bounds(&points, 0.0), &mut candidates);
+        for &candidate in &candidates {
+            let Some(main) = main.get(candidate as usize) else { continue };
+            let (mut area, mut gap) = (0.0, 0.0);
+            let mut interior = false;
+            // Use the solver's overlap and mean normal gap. A sample strictly inside both
+            // triangles excludes edge-only contact even when clipping round-off leaves a sliver.
+            let _ = integrate(&points, main, |sample| {
+                area += sample.weight;
+                gap += sample.weight * sample.gap().abs();
+                interior |= sample.secondary.iter().take(3).chain(sample.main.iter().take(3)).all(|&w| w > 64.0 * f64::EPSILON);
+            });
+            if interior && area > 0.0 && gap / area <= BOND_GAP_M {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
 fn bond(model: &mut Model, bodies: &[BodyMesh], faces: &[FaceSets]) -> Result<()> {
     let mut order: Vec<_> = bodies.iter().zip(faces).enumerate().collect();
     order.sort_by_key(|(_, (body, _))| body.fixed.is_empty());
@@ -287,6 +326,7 @@ fn bond(model: &mut Model, bodies: &[BodyMesh], faces: &[FaceSets]) -> Result<()
                     for (main_tag, main_face) in &main.planes {
                         if opposing_planes(face, main_face)
                             && let (Some(secondary), Some(primary)) = (map.get(tag), main_map.get(main_tag))
+                            && mortar_overlap(model, primary, secondary)?
                         {
                             contacts.push((format!("Bond{i}_{j}_{tag}_{main_tag}"), primary.clone(), secondary.clone()));
                         }
@@ -308,7 +348,7 @@ fn bond(model: &mut Model, bodies: &[BodyMesh], faces: &[FaceSets]) -> Result<()
             model.add_set(&a, Set { faces: primary, ..Set::default() }).map_err(error)?;
             model.add_set(&b, Set { faces: secondary, ..Set::default() }).map_err(error)?;
             let mut tie = Tie::new(&a, &b);
-            tie.position_tolerance = Some(BOND_GAP_MM * MM_TO_M);
+            tie.position_tolerance = Some(BOND_GAP_M);
             model.add_tie(&name, tie).map_err(error)?;
         }
         if let Some(v) = connected.get_mut(index) {

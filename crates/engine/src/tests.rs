@@ -5578,3 +5578,19 @@ fn vibration_bonds_touching_bodies_with_separate_supports() {
     let cantilever = 1.87510407_f64.powi(2) / (2.0 * PI * 0.06_f64.powi(2)) * (200e9_f64 / 7850.0 * 0.012_f64.powi(2) / 12.0).sqrt();
     assert!(first > 1.25 * cantilever, "first mode {first:.1} Hz, unbonded cantilever {cantilever:.1} Hz");
 }
+
+#[test]
+fn vibration_rejects_disjoint_planar_footprints_with_overlapping_bounds() {
+    let mut s = Session::default();
+    // The opposing caps at z=8 have overlapping boxes, but x+y<=20 and x+y>=24 never meet.
+    for (name, offset, points) in [("Base", 0, [[0, 0], [20, 0], [0, 20]]), ("Floating", 8, [[20, 20], [4, 20], [20, 4]])] {
+        run(&mut s, "sketch.create", json!({"plane":"XY","offset":offset,"name":format!("{name} sketch")}));
+        run(&mut s, "sketch.line", json!({"points":points,"closed":true}));
+        run(&mut s, "solid.extrude", json!({"distance":8,"body_name":name,"operation":"new"}));
+    }
+    vibration_steel(&mut s, &["Base", "Floating"]);
+    let fixed = vibration_support(&s, "Base", |p| p.z);
+    let params = json!({"supports":[{"body":"Base","face":fixed}],"start_hz":100.0,"end_hz":4500.0});
+    let error = s.execute(vibration::COMMAND, &params).unwrap_err().to_string();
+    assert!(error.contains("No bonded planar interface") && error.contains("Floating"), "{error}");
+}

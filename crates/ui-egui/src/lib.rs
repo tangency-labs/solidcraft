@@ -2068,6 +2068,10 @@ impl SolveApp {
             return;
         }
         if id == solidcraft_engine::vibration::COMMAND {
+            if let Some(pending) = &mut self.pending_feature_edit {
+                pending.then_start(id);
+                return;
+            }
             if self.dialog.is_some() {
                 dialogs::cancel(self);
             }
