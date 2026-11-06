@@ -54,7 +54,7 @@ use serde_json::Value;
 use solidcore_ops::blend::{
     blend, chamfer_sides_ordered, edge_faces_along_ordered, Blend, ChamferSecond, Corners,
 };
-use solidcore_ops::boolean::{boolean, BooleanOp};
+use solidcore_ops::boolean::{boolean, union_all, BooleanOp};
 use solidcore_ops::stitch::stitch;
 use solidcore_ops::sweep::{extrude, loft, revolve, Curve, DraftCorner};
 use solidcore_ops::untrim::{untrim_face, Holes};
@@ -77,6 +77,7 @@ const PORTED: &[&str] = &[
     "thicken",
     "untrim_face",
     "boolean",
+    "union_all",
     "extrude",
     "revolve",
     "loft",
@@ -398,6 +399,18 @@ fn call_with_copy(
             let sym = p["symmetric"].as_bool().ok_or_else(|| bad("symmetric"))?;
             let r = offset::thicken(&s.body, t, sym);
             in_place(Slot { order: None, ..s }, r)
+        }
+        "union_all" => {
+            let bodies = ins
+                .iter()
+                .map(|s| {
+                    let copied = copy_for_edit(s)?;
+                    Arc::try_unwrap(copied.body).map_err(|_| {
+                        Stop::Fail("copy before union_all: the copy is shared".to_owned())
+                    })
+                })
+                .collect::<Result<Vec<_>, Stop>>()?;
+            made(union_all(bodies))
         }
         "untrim_face" => {
             let holes = p.get("holes").ok_or_else(|| bad("holes"))?;
@@ -1366,6 +1379,85 @@ fn loft_parameters_are_required_and_refused_degrees_are_not_defaulted() {
             "degree {degree}"
         );
     }
+}
+
+#[test]
+fn union_all_replays_an_odd_operand_list_without_consuming_inputs() {
+    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let mut inputs: Vec<Slot> = (0..3)
+        .map(|x| Slot {
+            body: Arc::new(solidcore_ops::make_box([f64::from(x), 0.0, 0.0], [2.0; 3]).unwrap()),
+            order: None,
+        })
+        .collect();
+    let before: Vec<_> = inputs
+        .iter()
+        .map(|s| s.body.to_record().unwrap().0)
+        .collect();
+    let step = serde_json::json!({"op": "union_all", "params": {}});
+    let output = call(&step, &mut inputs).unwrap().unwrap();
+    assert!((output.body.volume(1e-9).unwrap() - 16.0).abs() <= 16.0e-9);
+    for (input, record) in inputs.iter().zip(before) {
+        assert_eq!(input.body.to_record().unwrap().0, record);
+        assert!((input.body.volume(1e-9).unwrap() - 8.0).abs() <= 8.0e-9);
+    }
+}
+
+/// Replay every captured union-all trace against its recorded geometric expectations.
+#[test]
+#[ignore = "the 17 captured unions are slow; also covered by the full kernel rig"]
+fn union_all_replays_captured_cases() {
+    let fixes: Vec<String> =
+        serde_json::from_str(&std::fs::read_to_string(corpus().join("fixes.json")).unwrap())
+            .unwrap();
+    session::set_fixes(fixes.iter().map(String::as_str)).unwrap();
+    let mut files = Vec::new();
+    entries(&corpus(), &mut files);
+    files.sort();
+    let listed = known_failing();
+    let mut checked = 0;
+    for entry in files {
+        let e: Value = serde_json::from_str(&std::fs::read_to_string(&entry).unwrap()).unwrap();
+        if !e["calls"].as_array().is_some_and(|calls| {
+            calls
+                .iter()
+                .any(|call| call["op"].as_str() == Some("union_all"))
+        }) {
+            continue;
+        }
+        let result = grade(&entry, &listed, Duration::from_secs(180));
+        assert_eq!(
+            result.kind,
+            Kind::Pass,
+            "{}: {}",
+            entry.display(),
+            result.note
+        );
+        checked += 1;
+    }
+    assert!(
+        checked > 0,
+        "the union-all capture corpus must remain covered"
+    );
+}
+
+#[test]
+fn union_all_preparation_failure_is_not_an_operation_refusal() {
+    let input = Slot {
+        body: Arc::new(solidcore_ops::make_box([0.0; 3], [1.0; 3]).unwrap()),
+        order: None,
+    };
+    let step = serde_json::json!({"op": "union_all", "params": {}, "error": "refused"});
+    let copies = std::cell::Cell::new(0);
+    let result = call_with_copy(&step, &mut [input.clone(), input], |slot| {
+        copies.set(copies.get() + 1);
+        if copies.get() == 2 {
+            Ok(Err("second operand copy failed".to_owned()))
+        } else {
+            slot.copied()
+        }
+    });
+    assert!(matches!(result, Err(Stop::Fail(why)) if why.contains("second operand copy failed")));
 }
 
 #[test]
