@@ -54,12 +54,17 @@ use serde_json::Value;
 use solidcore_ops::blend::{
     blend, chamfer_sides_ordered, edge_faces_along_ordered, Blend, ChamferSecond, Corners,
 };
-use solidcore_ops::boolean::{boolean, union_all, BooleanOp};
-use solidcore_ops::stitch::stitch;
-use solidcore_ops::sweep::{extrude, loft, revolve, Curve, DraftCorner};
+use solidcore_ops::boolean::{boolean, BooleanOp};
+use solidcore_ops::extend::{extend_sheet, Continuation};
+use solidcore_ops::split::{split_faces, Tool};
+use solidcore_ops::stitch::{merge_faces, stitch};
+use solidcore_ops::sweep::{
+    extrude, loft, revolve, screw_sweep, sweep_placed, sweep_stations, Affine, Curve, DraftCorner,
+    Ends, SweepFrame,
+};
 use solidcore_ops::untrim::{untrim_face, Holes};
 use solidcore_ops::{make_sphere, offset, session, Body, Order};
-use solidcore_record::brep::Brep as Record;
+use solidcore_record::brep::{Brep as Record, Frame, Surface as RecordSurface};
 
 fn corpus() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../solidcore/tests/kernel_cases")
@@ -74,7 +79,8 @@ const PORTED: &[&str] = &[
     "make_sphere",
     "shell",
     "offset_faces",
-    "draft",
+    "split_faces",
+    "extend_sheet",
     "thicken",
     "untrim_face",
     "boolean",
@@ -82,10 +88,15 @@ const PORTED: &[&str] = &[
     "extrude",
     "revolve",
     "loft",
+    "sweep_stations",
+    "sweep",
+    "screw_sweep",
     "blend_dropping",
     "chamfer_sides",
     "stitch",
     "split_body_by_sheet",
+    "split_body",
+    "merge_faces",
 ];
 
 /// The relative tolerance the rig grades volume and area with when a case states none.
@@ -294,8 +305,80 @@ fn made(b: solidcore_ops::Result<Body>) -> Result<Slot, String> {
     .map_err(|e| e.to_string())
 }
 
+/// Converts the trace's planar or cylindrical tool to record parameters; angles alone
+/// change units from the trace's degrees to the record's radians.
+fn split_tool(t: &Value) -> Result<Tool, Stop> {
+    let bad = |field: &str| Stop::Fail(format!("split: tool parameter {field}"));
+    let object = t.as_object().ok_or_else(|| bad("object"))?;
+    if object.len() != 1 {
+        return Err(bad("exactly one named kind"));
+    }
+    let kind = object.keys().next().ok_or_else(|| bad("kind"))?;
+    if kind.is_empty() {
+        return Err(bad("kind name"));
+    }
+    let v3 = |p: &Value, key: &str| f64s::<3>(&p[key]).ok_or_else(|| bad(key));
+    let v2 = |p: &Value, key: &str| f64s::<2>(&p[key]).ok_or_else(|| bad(key));
+    if let Some(p) = t.get("plane") {
+        return Ok(Tool {
+            surface: RecordSurface::Plane {
+                origin: v3(p, "origin")?,
+                u_axis: v3(p, "xaxis")?,
+                v_axis: v3(p, "yaxis")?,
+            },
+            domain: [v2(p, "u")?, v2(p, "v")?],
+        });
+    }
+    if let Some(c) = t.get("cylinder") {
+        return Ok(Tool {
+            surface: RecordSurface::Cylinder {
+                frame: Frame {
+                    origin: v3(c, "origin")?,
+                    x_axis: v3(c, "xaxis")?,
+                    y_axis: v3(c, "yaxis")?,
+                },
+                radius: c["radius"].as_f64().ok_or_else(|| bad("radius"))?,
+            },
+            domain: [
+                v2(c, "angle_deg")?.map(|angle| angle * (std::f64::consts::PI / 180.0)),
+                v2(c, "height")?,
+            ],
+        });
+    }
+    Err(Stop::Unsupported(format!(
+        "split: tool kind {kind} not ported"
+    )))
+}
+
+/// Converts either split operation's ordered pair without aliasing the two outputs.
+fn made_parts(
+    result: solidcore_ops::Result<Option<(Body, Body)>>,
+    no_split: &str,
+) -> Result<Vec<Slot>, String> {
+    let (back, front) = result
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| no_split.to_owned())?;
+    Ok([back, front]
+        .into_iter()
+        .map(|body| Slot {
+            body: Arc::new(body),
+            order: None,
+        })
+        .collect())
+}
+
 /// Runs a traced call in output order, keeping a split's two bodies distinct.
 fn call_outputs(c: &Value, ins: &mut [Slot]) -> Result<Result<Vec<Slot>, String>, Stop> {
+    if c["op"].as_str() == Some("split_body") {
+        if ins.len() != 1 {
+            return Err(Stop::Fail("split_body: requires one body".to_owned()));
+        }
+        let tool = split_tool(&c["params"]["tool"])?;
+        return Ok(made_parts(
+            solidcore_ops::split::split_body(&ins[0].body, &tool),
+            "tool does not divide the body",
+        ));
+    }
     if c["op"].as_str() != Some("split_body_by_sheet") {
         return call(c, ins).map(|r| r.map(|out| vec![out]));
     }
@@ -320,19 +403,10 @@ fn call_outputs(c: &Value, ins: &mut [Slot]) -> Result<Result<Vec<Slot>, String>
     if order.faces.get(face).is_none() {
         return Err(bad("face outside sheet record order"));
     }
-    Ok(
-        match solidcore_ops::split::split_body_by_sheet(&body[0].body, &sheet.body, order, face) {
-            Ok(Some((back, front))) => Ok([back, front]
-                .into_iter()
-                .map(|body| Slot {
-                    body: Arc::new(body),
-                    order: None,
-                })
-                .collect()),
-            Ok(None) => Err("sheet does not divide the body".to_owned()),
-            Err(e) => Err(e.to_string()),
-        },
-    )
+    Ok(made_parts(
+        solidcore_ops::split::split_body_by_sheet(&body[0].body, &sheet.body, order, face),
+        "sheet does not divide the body",
+    ))
 }
 
 /// Runs one traced call: its output, or the operation's error as text.
@@ -340,8 +414,7 @@ fn call(c: &Value, ins: &mut [Slot]) -> Result<Result<Slot, String>, Stop> {
     call_with_copy(c, ins, Slot::copied)
 }
 
-/// Dispatches a single-output call with an injectable preparation copy; replay failures
-/// remain separate from a traced operation refusal.
+/// Dispatches a single-output call while keeping preparation failures separate from refusals.
 fn call_with_copy(
     c: &Value,
     ins: &mut [Slot],
@@ -386,6 +459,91 @@ fn call_with_copy(
             let t = p["thickness"].as_f64().ok_or_else(|| bad("thickness"))?;
             let r = offset::shell(&s.body, &order, &open, t);
             in_place(Slot { order: None, ..s }, r)
+        }
+        "extend_sheet" => {
+            if ins.len() != 1 {
+                return Err(bad("one input"));
+            }
+            let mut source = first()?;
+            if source.order.is_none() {
+                let (_, order) = source
+                    .body
+                    .to_record()
+                    .map_err(|e| Stop::Fail(format!("order before extend_sheet: {e}")))?;
+                source.order = Some(order);
+            }
+            // Map the source record's indices through the preparation copy.
+            let s = copy_for_edit(&source)?;
+            let order = s
+                .order
+                .as_ref()
+                .ok_or_else(|| Stop::Fail("extend_sheet: missing copied order".to_owned()))?;
+            if p["edge"]["kind"].as_str() != Some("edge") {
+                return Err(bad("edge pick kind"));
+            }
+            let picked = p["edge"]["picked"]
+                .as_array()
+                .ok_or_else(|| bad("edge picked"))?;
+            let [pick] = picked.as_slice() else {
+                return Err(bad("exactly one edge"));
+            };
+            let edge = pick["index"]
+                .as_u64()
+                .and_then(|i| usize::try_from(i).ok())
+                .ok_or_else(|| bad("edge index"))?;
+            if order.edges.get(edge).is_none() {
+                return Err(bad("edge outside record order"));
+            }
+            let distance = p["distance"].as_f64().ok_or_else(|| bad("distance"))?;
+            let how = match p["how"].as_str().ok_or_else(|| bad("how"))? {
+                "natural" => Continuation::Natural,
+                "tangent" => Continuation::Tangent,
+                "curvature" => Continuation::Curvature,
+                how => {
+                    return Err(Stop::Unsupported(format!(
+                        "extend_sheet: continuation {how} not ported"
+                    )))
+                }
+            };
+            made(extend_sheet(&s.body, order, edge, distance, how))
+        }
+        "split_faces" => {
+            if ins.len() != 1 {
+                return Err(bad("one input"));
+            }
+            let mut s = first()?;
+            let picked = p["faces"]
+                .as_array()
+                .ok_or_else(|| bad("faces"))?
+                .iter()
+                .map(|i| {
+                    i.as_u64()
+                        .and_then(|i| usize::try_from(i).ok())
+                        .ok_or_else(|| bad("face index"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let tools = p["tools"]
+                .as_array()
+                .ok_or_else(|| bad("tools"))?
+                .iter()
+                .map(split_tool)
+                .collect::<Result<Vec<_>, _>>()?;
+            if s.order.is_none() {
+                let (_, order) = s
+                    .body
+                    .to_record()
+                    .map_err(|e| Stop::Fail(format!("order before split_faces: {e}")))?;
+                s.order = Some(order);
+            }
+            let order = s.order.as_ref().unwrap();
+            if picked.iter().any(|&i| order.faces.get(i).is_none()) {
+                return Err(bad("face outside record order"));
+            }
+            match split_faces(&s.body, order, &picked, &tools) {
+                Ok(Some((body, _))) => made(Ok(body)),
+                Ok(None) => Err("tools do not split any selected face".to_owned()),
+                Err(e) => Err(e.to_string()),
+            }
         }
         "offset_faces" => {
             let mut s = copy_for_edit(&first()?)?;
@@ -506,6 +664,84 @@ fn call_with_copy(
                 Err(e) => Err(e.to_string()),
             }
         }
+        "sweep" => {
+            if !ins.is_empty() {
+                return Err(bad("no inputs"));
+            }
+            let curves = profile(&p["profile"]).ok_or_else(|| bad("profile"))?;
+            let path = profile(&p["path"]).ok_or_else(|| bad("path"))?;
+            let cap = p["cap"].as_bool().ok_or_else(|| bad("cap"))?;
+            let frame = match p["frame"].as_str().ok_or_else(|| bad("frame"))? {
+                "follow" => SweepFrame::Follow,
+                "translate" => SweepFrame::Translate,
+                other => return Err(Stop::Unsupported(format!("sweep frame {other}"))),
+            };
+            // The trace binds the body; placements and route are diagnostics, not outputs.
+            made(sweep_placed(&curves, &path, frame, cap).map(|(body, _, _)| body))
+        }
+        "screw_sweep" => {
+            if !ins.is_empty() {
+                return Err(bad("no inputs"));
+            }
+            let curves = profile(&p["profile"]).ok_or_else(|| bad("profile"))?;
+            let origin = f64s::<3>(&p["origin"]).ok_or_else(|| bad("origin"))?;
+            let direction = f64s::<3>(&p["direction"]).ok_or_else(|| bad("direction"))?;
+            let pitch = p["pitch"].as_f64().ok_or_else(|| bad("pitch"))?;
+            let turns = p["turns"].as_f64().ok_or_else(|| bad("turns"))?;
+            let tolerance = p["tolerance"].as_f64().ok_or_else(|| bad("tolerance"))?;
+            let law = match p.get("law") {
+                None => None,
+                Some(v) => Some(
+                    v.as_array()
+                        .ok_or_else(|| bad("law"))?
+                        .iter()
+                        .map(|pair| {
+                            let [turn, offset] = f64s::<2>(pair)?;
+                            Some((turn, offset))
+                        })
+                        .collect::<Option<Vec<_>>>()
+                        .ok_or_else(|| bad("law"))?,
+                ),
+            };
+            made(screw_sweep(
+                &curves,
+                origin,
+                direction,
+                pitch,
+                turns,
+                law.as_deref(),
+                tolerance,
+            ))
+        }
+        "sweep_stations" => {
+            if !ins.is_empty() {
+                return Err(bad("no inputs"));
+            }
+            let curves = profile(&p["profile"]).ok_or_else(|| bad("profile"))?;
+            let stations = p["stations"]
+                .as_array()
+                .ok_or_else(|| bad("stations"))?
+                .iter()
+                .map(|s| {
+                    let m = s["m"].as_array()?;
+                    let [x, y, z] = m.as_slice() else {
+                        return None;
+                    };
+                    Some(Affine {
+                        m: [f64s::<3>(x)?, f64s::<3>(y)?, f64s::<3>(z)?],
+                        t: f64s::<3>(&s["t"])?,
+                    })
+                })
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(|| bad("stations"))?;
+            let ends = match p["ends"].as_str().ok_or_else(|| bad("ends"))? {
+                "open" => Ends::Open,
+                "capped" => Ends::Capped,
+                "joined" => Ends::Joined,
+                other => return Err(Stop::Unsupported(format!("sweep_stations ends {other}"))),
+            };
+            made(sweep_stations(&curves, &stations, ends))
+        }
         "loft" => {
             let sections = p["sections"]
                 .as_array()
@@ -618,6 +854,42 @@ fn call_with_copy(
             }
             let r = blend(&s.body, kind, &unique, &each, &[], Corners::Filled).map(|_| ());
             in_place(Slot { order: None, ..s }, r)
+        }
+        "merge_faces" => {
+            if ins.len() != 1 {
+                return Err(bad("one input"));
+            }
+            let mut s = copy_for_edit(&first()?)?;
+            let selection = &p["keep"];
+            if selection["kind"].as_str() != Some("edge") {
+                return Err(bad("keep must select edges"));
+            }
+            let keep = selection["picked"]
+                .as_array()
+                .ok_or_else(|| bad("keep picked"))?
+                .iter()
+                .map(|pick| {
+                    pick["index"]
+                        .as_u64()
+                        .and_then(|i| usize::try_from(i).ok())
+                        .ok_or_else(|| bad("keep edge index"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            if s.order.is_none() {
+                let (_, order) = s
+                    .body
+                    .to_record()
+                    .map_err(|e| Stop::Fail(format!("order before merge_faces: {e}")))?;
+                s.order = Some(order);
+            }
+            let order = s.order.as_ref().unwrap();
+            if keep.iter().any(|&i| order.edges.get(i).is_none()) {
+                return Err(bad("keep edge outside record order"));
+            }
+            let body = Arc::try_unwrap(s.body).map_err(|_| {
+                Stop::Fail("copy before merge_faces: the copy is shared".to_owned())
+            })?;
+            made(merge_faces(body, order, &keep))
         }
         "stitch" => {
             let s = copy_for_edit(&first()?)?;
@@ -1342,6 +1614,388 @@ fn untrim_point_holes_do_not_hide_missing_required_parameters() {
     }
 }
 
+fn sweep_replay_fixture(name: &str, op: &str) -> (PathBuf, Value, Value) {
+    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let entry = corpus().join(format!("{name}.json"));
+    let e: Value = serde_json::from_str(&std::fs::read_to_string(&entry).unwrap()).unwrap();
+    let step = e["calls"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["op"] == op)
+        .unwrap()
+        .clone();
+    (entry, e, step)
+}
+
+#[test]
+fn sweep_replay_runs_all_eleven_captured_paths_and_coils() {
+    let names = [
+        ("ladder/04-spline-profiles/003-pipe-along-bezier", "sweep"),
+        (
+            "ladder/04-spline-profiles/004-sweep-square-along-bezier",
+            "sweep",
+        ),
+        ("surfaces/cov-sweep-line-along-a-line-plane", "sweep"),
+        (
+            "sweeps/1269-sweep-parallel-orientation-oblique-cylinder",
+            "sweep",
+        ),
+        ("sweeps/2820-pipe-hollow-with-a-wall-along-a-bend", "sweep"),
+        (
+            "sweeps/3345-sweep-profile-mid-line-round-a-rounded-rectangle",
+            "sweep",
+        ),
+        (
+            "sweeps/3862-coil-square-wire-outside-the-diameter",
+            "screw_sweep",
+        ),
+        (
+            "sweeps/5323-sweep-circle-along-polyline-turning-in-two-planes",
+            "sweep",
+        ),
+        (
+            "sweeps/5324-sweep-square-round-closed-path-from-mid-edge",
+            "sweep",
+        ),
+        (
+            "sweeps/757-surface-sweep-slanted-line-round-a-quarter-arc",
+            "sweep",
+        ),
+        ("sweeps/96-sweep-rectangle-round-a-mitred-corner", "sweep"),
+    ];
+    let mut failures = Vec::new();
+    for (name, op) in names {
+        let (entry, e, _) = sweep_replay_fixture(name, op);
+        assert_eq!(e["rig"]["status"], "pass", "{name}");
+        assert!(e["calls"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|c| c["error"].is_null()));
+        match run_case(&entry, &e) {
+            Ok(deviation) => println!("{name}: pass, relative volume deviation {deviation:?}"),
+            Err(why) => failures.push(format!("{name}: {why:?}")),
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn sweep_replay_keeps_follow_and_translate_frames_distinct() {
+    let (_, _, mut step) = sweep_replay_fixture(
+        "sweeps/757-surface-sweep-slanted-line-round-a-quarter-arc",
+        "sweep",
+    );
+    for follow in [true, false] {
+        step["params"]["frame"] = serde_json::json!(if follow { "follow" } else { "translate" });
+        let output = call(&step, &mut []).unwrap().unwrap();
+        assert!(output.order.is_none());
+        assert_eq!(output.body.counts().unwrap(), [1, 4, 4]);
+        assert_eq!(output.body.volume(1e-9).unwrap(), 0.0);
+        let record = output.body.to_record().unwrap().0;
+        let ends = [
+            [20.0, 0.0, 0.0],
+            [30.0, 0.0, 10.0],
+            [0.0, 20.0, 0.0],
+            if follow {
+                [0.0, 30.0, 10.0]
+            } else {
+                [10.0, 20.0, 10.0]
+            },
+        ];
+        for want in ends {
+            assert!(
+                record.vertices.iter().any(|v| v
+                    .point
+                    .iter()
+                    .zip(want)
+                    .all(|(a, b)| (a - b).abs() < 1e-9)),
+                "frame follow={follow}, missing {want:?}"
+            );
+        }
+        if follow {
+            let area = 125.0 * std::f64::consts::SQRT_2 * std::f64::consts::PI;
+            assert!((output.body.area(1e-9).unwrap() - area).abs() <= area * 1e-9);
+        }
+    }
+}
+
+#[test]
+fn sweep_replay_forwards_oblique_path_and_caps() {
+    let (_, _, mut step) = sweep_replay_fixture(
+        "sweeps/1269-sweep-parallel-orientation-oblique-cylinder",
+        "sweep",
+    );
+    for (x, z) in [(20.0, 20.0), (8.0, 12.0)] {
+        step["params"]["path"] = serde_json::json!([{"line": {"start": [0,0,0], "end": [x,0,z]}}]);
+        for cap in [true, false] {
+            step["params"]["cap"] = serde_json::json!(cap);
+            let output = call(&step, &mut []).unwrap().unwrap();
+            assert_eq!(output.body.counts().unwrap()[0], if cap { 3 } else { 1 });
+            let want = if cap {
+                25.0 * std::f64::consts::PI * z
+            } else {
+                0.0
+            };
+            let got = output.body.volume(1e-9).unwrap();
+            assert!(
+                (got - want).abs() <= want * 1e-9,
+                "{x}, {z}, cap={cap}: {got}"
+            );
+            let (lo, hi) = output.body.bounds().unwrap();
+            for (a, b) in lo
+                .into_iter()
+                .zip([-5.0, -5.0, 0.0])
+                .chain(hi.into_iter().zip([x + 5.0, 5.0, z]))
+            {
+                assert!((a - b).abs() < 1e-8, "bound {a} != {b}");
+            }
+        }
+    }
+}
+
+fn sweep_replay_screw_step() -> Value {
+    let corners = [[27, -11, 1], [31, -11, 1], [31, -11, 5], [27, -11, 5]];
+    let profile: Vec<_> = (0..4)
+        .map(|i| serde_json::json!({"line": {"start": corners[i], "end": corners[(i+1)%4]}}))
+        .collect();
+    serde_json::json!({"op": "screw_sweep", "inputs": [], "params": {
+        "profile": profile, "origin": [7,-11,3], "direction": [0,0,1],
+        "pitch": 8, "turns": 1, "tolerance": 1e-4
+    }})
+}
+
+/// For a radial/axial rectangle the volume is integral r dr dz dtheta, independent of
+/// the axial lift: area 16 times centroid radius (22 + radial offset) times total angle.
+#[test]
+fn sweep_replay_screw_keeps_axis_pitch_turns_origin_and_radial_law() {
+    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    for (sign, pitch, turns, offset) in [
+        (1.0, 8.0, 1.0, 0.0),
+        (-1.0, 8.0, 0.5, 0.0),
+        (1.0, -8.0, 1.0, 3.0),
+        (-1.0, -8.0, 0.5, 3.0),
+    ] {
+        let mut step = sweep_replay_screw_step();
+        step["params"]["direction"] = serde_json::json!([0, 0, sign]);
+        step["params"]["pitch"] = serde_json::json!(pitch);
+        step["params"]["turns"] = serde_json::json!(turns);
+        if offset != 0.0 {
+            step["params"]["law"] = serde_json::json!([[0, offset], [turns, offset]]);
+        }
+        let output = call(&step, &mut []).unwrap().unwrap();
+        assert!(output.order.is_none());
+        let want = 32.0 * (22.0 + offset) * std::f64::consts::PI * turns;
+        let got = output.body.volume(1e-9).unwrap();
+        assert!(
+            (got - want).abs() <= want * 1e-9,
+            "sign={sign}, pitch={pitch}, turns={turns}, offset={offset}: {got} != {want}"
+        );
+        let rise: f64 = sign * pitch * turns;
+        let (lo, hi) = output.body.bounds().unwrap();
+        assert!((lo[2] - (1.0 + rise.min(0.0))).abs() < 1e-8, "{lo:?}");
+        assert!((hi[2] - (5.0 + rise.max(0.0))).abs() < 1e-8, "{hi:?}");
+    }
+}
+
+#[test]
+fn sweep_replay_metadata_does_not_satisfy_a_refusal() {
+    let (_, _, path) = sweep_replay_fixture("surfaces/cov-sweep-line-along-a-line-plane", "sweep");
+    let screw = sweep_replay_screw_step();
+    for (step, fields) in [
+        (&path, &["profile", "path", "frame", "cap"][..]),
+        (
+            &screw,
+            &[
+                "profile",
+                "origin",
+                "direction",
+                "pitch",
+                "turns",
+                "tolerance",
+            ][..],
+        ),
+    ] {
+        for field in fields {
+            let mut bad = step.clone();
+            bad["params"].as_object_mut().unwrap().remove(*field);
+            assert!(matches!(call(&bad, &mut []), Err(Stop::Fail(_))), "{field}");
+        }
+    }
+    let mut unknown = path.clone();
+    unknown["params"]["frame"] = serde_json::json!("future_frame");
+    assert!(
+        matches!(call(&unknown, &mut []), Err(Stop::Unsupported(why)) if why.contains("future_frame"))
+    );
+    let mut malformed = path.clone();
+    malformed["params"]["path"] = serde_json::json!([{"unknown_curve": {}}]);
+    assert!(matches!(call(&malformed, &mut []), Err(Stop::Fail(_))));
+    for law in [
+        Value::Null,
+        serde_json::json!([[0, 1, 2]]),
+        serde_json::json!("bad"),
+    ] {
+        let mut bad = screw.clone();
+        bad["params"]["law"] = law;
+        assert!(matches!(call(&bad, &mut []), Err(Stop::Fail(_))));
+    }
+    let mut empty_path = path;
+    empty_path["params"]["path"] = serde_json::json!([]);
+    assert!(matches!(call(&empty_path, &mut []), Ok(Err(_))));
+    for (field, value) in [
+        ("pitch", serde_json::json!(0)),
+        ("direction", serde_json::json!([0, 0, 0])),
+        ("tolerance", serde_json::json!(0)),
+        ("law", serde_json::json!([])),
+        ("law", serde_json::json!([[0.5, 0], [0.2, 0]])),
+    ] {
+        let mut refused = screw.clone();
+        refused["params"][field] = value;
+        assert!(matches!(call(&refused, &mut []), Ok(Err(_))), "{field}");
+    }
+}
+
+fn station_sweep_step() -> Value {
+    serde_json::json!({"op": "sweep_stations", "inputs": [], "params": {
+        "profile": [{"arc": {"center": [0,0,0], "axis": [0,0,1],
+            "reference": [1,0,0], "radius": 10, "start": 0,
+            "end": std::f64::consts::TAU}}],
+        "stations": [
+            {"m": [[1,0,0],[0,1,0],[0,0,1]], "t": [7,-11,3]},
+            {"m": [[0.5,0,0],[0,0.5,0],[0,0,1]], "t": [7,-11,23]}
+        ], "ends": "capped"
+    }})
+}
+
+#[test]
+fn station_sweep_replays_all_five_captured_cases() {
+    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let names = [
+        "surfaces/cov-sweep-circle-scaled-half-is-a-frustum",
+        "sweeps/771-sweep-end-scale-cone-frustum",
+        "sweeps/771-sweep-one-guide-rail-cone-frustum",
+        "sweeps/1269-sweep-twisted-square-ninety-degrees",
+        "sweeps/2005-closed-sweep-twisted-new-body",
+    ];
+    let mut failures = Vec::new();
+    for name in names {
+        let entry = corpus().join(format!("{name}.json"));
+        let e: Value = serde_json::from_str(&std::fs::read_to_string(&entry).unwrap()).unwrap();
+        assert_eq!(e["rig"]["status"], "pass", "{name}");
+        assert!(e["calls"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|c| c["error"].is_null()));
+        if let Err(why) = run_case(&entry, &e) {
+            failures.push(format!("{name}: {why:?}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+#[allow(clippy::disallowed_methods)] // Independent closed-form oracle.
+fn station_sweep_forwards_scale_translation_and_end_caps() {
+    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let volume = 3500.0 * std::f64::consts::PI / 3.0;
+    let wall = 15.0 * std::f64::consts::PI * 425.0_f64.sqrt();
+    for capped in [true, false] {
+        let mut step = station_sweep_step();
+        step["params"]["ends"] = serde_json::json!(if capped { "capped" } else { "open" });
+        let output = call(&step, &mut []).unwrap().unwrap();
+        assert!(output.order.is_none());
+        assert_eq!(output.body.counts().unwrap()[0], if capped { 3 } else { 1 });
+        let got = output.body.volume(1e-9).unwrap();
+        if capped {
+            assert!((got - volume).abs() <= volume * 1e-9, "{got}");
+        } else {
+            assert_eq!(got, 0.0);
+        }
+        let want_area = wall
+            + if capped {
+                125.0 * std::f64::consts::PI
+            } else {
+                0.0
+            };
+        let area = output.body.area(1e-9).unwrap();
+        assert!((area - want_area).abs() <= want_area * 1e-9, "{area}");
+    }
+}
+
+#[test]
+fn station_sweep_keeps_affine_axis_images_in_order() {
+    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let mut step = station_sweep_step();
+    let corners = [[0, 0, 0], [2, 0, 0], [2, 3, 0], [0, 3, 0]];
+    step["params"]["profile"] = Value::Array(
+        (0..4)
+            .map(|i| serde_json::json!({"line": {"start": corners[i], "end": corners[(i+1)%4]}}))
+            .collect(),
+    );
+    for station in step["params"]["stations"].as_array_mut().unwrap() {
+        station["m"] = serde_json::json!([[0, 2, 0], [-3, 0, 0], [0, 0, 1]]);
+    }
+    let output = call(&step, &mut []).unwrap().unwrap();
+    assert_eq!(output.body.counts().unwrap(), [6, 12, 8]);
+    assert!((output.body.volume(1e-9).unwrap() - 720.0).abs() <= 720.0e-9);
+    assert!((output.body.area(1e-9).unwrap() - 592.0).abs() <= 592.0e-9);
+    let record = output.body.to_record().unwrap().0;
+    let points: Vec<_> = record.vertices.iter().map(|v| v.point).collect();
+    for (axis, low, high) in [(0, -2.0, 7.0), (1, -11.0, -7.0), (2, 3.0, 23.0)] {
+        let min = points.iter().map(|p| p[axis]).fold(f64::INFINITY, f64::min);
+        let max = points
+            .iter()
+            .map(|p| p[axis])
+            .fold(f64::NEG_INFINITY, f64::max);
+        assert!((min - low).abs() <= 1e-9, "axis {axis}: {min}");
+        assert!((max - high).abs() <= 1e-9, "axis {axis}: {max}");
+    }
+}
+
+#[test]
+fn station_sweep_metadata_is_distinct_from_operation_refusal() {
+    let step = station_sweep_step();
+    for parameter in ["profile", "stations", "ends"] {
+        let mut bad = step.clone();
+        bad["params"].as_object_mut().unwrap().remove(parameter);
+        assert!(
+            matches!(call(&bad, &mut []), Err(Stop::Fail(_))),
+            "{parameter}"
+        );
+    }
+    for matrix in [
+        serde_json::json!([[1, 0, 0], [0, 1, 0]]),
+        serde_json::json!([[1, 0], [0, 1, 0], [0, 0, 1]]),
+        serde_json::json!([[1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 0, 0]]),
+    ] {
+        let mut bad = step.clone();
+        bad["params"]["stations"][0]["m"] = matrix;
+        assert!(matches!(call(&bad, &mut []), Err(Stop::Fail(_))));
+    }
+    for value in [
+        serde_json::json!([1, 2]),
+        serde_json::json!([1, 2, 3, 4]),
+        Value::Null,
+    ] {
+        let mut bad = step.clone();
+        bad["params"]["stations"][0]["t"] = value;
+        assert!(matches!(call(&bad, &mut []), Err(Stop::Fail(_))));
+    }
+    let mut unknown = step.clone();
+    unknown["params"]["ends"] = serde_json::json!("future_end");
+    assert!(
+        matches!(call(&unknown, &mut []), Err(Stop::Unsupported(why)) if why.contains("future_end"))
+    );
+    let mut refused = step.clone();
+    refused["params"]["stations"].as_array_mut().unwrap().pop();
+    assert!(matches!(call(&refused, &mut []), Ok(Err(_))));
+    let mut singular = step;
+    singular["params"]["stations"][0]["m"] = serde_json::json!([[0, 0, 0], [0, 1, 0], [0, 0, 1]]);
+    assert!(matches!(call(&singular, &mut []), Ok(Err(_))));
+}
+
 fn loft_step(name: &str) -> (PathBuf, Value, Value) {
     session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
     let entry = corpus().join(format!("ladder/04-spline-profiles/{name}.json"));
@@ -1516,7 +2170,8 @@ fn a_pre_edit_copy_failure_cannot_count_as_the_edits_refusal() {
         "thicken",
         "chamfer_sides",
         "stitch",
-        "draft",
+        "merge_faces",
+        "extend_sheet",
     ] {
         let step = serde_json::json!({
             "op": op, "error": "expected edit refusal",
@@ -1570,7 +2225,13 @@ fn an_invalid_copy_order_cannot_count_as_an_expected_refusal() {
             "distance": 1, "first": [0,0,1], "second": {"distance": 2}
         }}),
         serde_json::json!({"op": "stitch", "params": {"tolerance": 1e-5}}),
-        serde_json::json!({"op": "draft", "params": {}}),
+        serde_json::json!({"op": "extend_sheet", "params": {
+            "edge": {"kind": "edge", "picked": [{"index": 0}]},
+            "distance": 1, "how": "natural"
+        }}),
+        serde_json::json!({"op": "merge_faces", "params": {
+            "keep": {"kind": "edge", "picked": []}
+        }}),
     ] {
         step["error"] = serde_json::json!("expected refusal");
         match call(&step, &mut [input.clone()]) {
@@ -2001,6 +2662,519 @@ fn grade(entry: &Path, listed: &BTreeMap<String, Listed>, timeout: Duration) -> 
         }
     }
     g
+}
+
+/// Changing the plane position moves the new edge, and a reordered face pick still cuts
+/// the top; the original body record and its volume/area are unchanged.
+#[test]
+fn split_faces_forwards_the_tool_and_record_face_order() {
+    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let body = Arc::new(solidcore_ops::make_box([0.0; 3], [10.0, 20.0, 30.0]).unwrap());
+    let (before, original_order) = body.to_record().unwrap();
+    let top = before
+        .faces
+        .iter()
+        .position(|f| {
+            matches!(f.surface,
+        RecordSurface::Plane { origin, .. } if origin[2] == 30.0)
+        })
+        .unwrap();
+    let selected = original_order.faces[top];
+    for mode in 0..3 {
+        let mut order = original_order.clone();
+        if mode == 1 {
+            order.faces.rotate_left(2);
+        }
+        let pick = order.faces.iter().position(|&f| f == selected).unwrap();
+        for at in [3.0, 7.0] {
+            let mut ins = [Slot {
+                body: Arc::clone(&body),
+                order: (mode != 2).then_some(order.clone()),
+            }];
+            let step = serde_json::json!({"op": "split_faces", "params": {
+                "faces": [pick], "tools": [{"plane": {"origin": [at, 0, 0],
+                    "xaxis": [0, 1, 0], "yaxis": [0, 0, 1], "u": [-1, 21], "v": [-1, 31]}}]
+            }});
+            let output = call(&step, &mut ins).unwrap().unwrap();
+            assert!(output.order.is_none());
+            assert_eq!(output.body.counts().unwrap(), [7, 15, 10]);
+            assert!((output.body.volume(1e-9).unwrap() - 6000.0).abs() < 1e-6);
+            assert!((output.body.area(1e-9).unwrap() - 2200.0).abs() < 1e-6);
+            let result = output.body.to_record().unwrap().0;
+            let added: Vec<_> = result
+                .vertices
+                .iter()
+                .filter(|v| v.point[0] > 1e-7 && v.point[0] < 10.0 - 1e-7)
+                .collect();
+            assert_eq!(added.len(), 2);
+            for v in added {
+                assert!((v.point[0] - at).abs() < 1e-7);
+                assert!((v.point[2] - 30.0).abs() < 1e-7);
+            }
+            assert_eq!(body.to_record().unwrap().0, before);
+        }
+    }
+}
+
+/// Distinct physical faces and finite tool domains change the observed cut, not just picks.
+#[test]
+fn split_faces_distinguishes_faces_and_finite_tool_extents() {
+    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let body = Arc::new(solidcore_ops::make_box([0.0; 3], [10.0, 20.0, 30.0]).unwrap());
+    let (before, order) = body.to_record().unwrap();
+    for (face_axis, face_position, cut_axis, cut_position, origin, xaxis, yaxis, domain) in [
+        (
+            2,
+            30.0,
+            0,
+            3.0,
+            [3, 0, 0],
+            [0, 1, 0],
+            [0, 0, 1],
+            [[-1, 21], [-1, 31]],
+        ),
+        (
+            0,
+            10.0,
+            2,
+            12.0,
+            [0, 0, 12],
+            [1, 0, 0],
+            [0, 1, 0],
+            [[-1, 11], [-1, 21]],
+        ),
+    ] {
+        let pick = before
+            .faces
+            .iter()
+            .position(|face| {
+                matches!(face.surface,
+            RecordSurface::Plane {origin,u_axis,v_axis}
+                if origin[face_axis] == face_position
+                && u_axis[face_axis] == 0.0 && v_axis[face_axis] == 0.0)
+            })
+            .unwrap();
+        for bounds in [domain, [[-100, 100], [-100, 100]]] {
+            let step = serde_json::json!({"op":"split_faces","params":{
+                "faces":[pick],"tools":[{"plane":{"origin":origin,"xaxis":xaxis,
+                    "yaxis":yaxis,"u":bounds[0],"v":bounds[1]}}]
+            }});
+            let out = call(
+                &step,
+                &mut [Slot {
+                    body: Arc::clone(&body),
+                    order: Some(order.clone()),
+                }],
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(out.body.counts().unwrap(), [7, 15, 10]);
+            assert!((out.body.volume(1e-9).unwrap() - 6000.0).abs() < 1e-6);
+            assert!((out.body.area(1e-9).unwrap() - 2200.0).abs() < 1e-6);
+            let result = out.body.to_record().unwrap().0;
+            let added: Vec<_> = result
+                .vertices
+                .iter()
+                .filter(|v| (v.point[cut_axis] - cut_position).abs() < 1e-7)
+                .collect();
+            assert_eq!(added.len(), 2);
+            for v in added {
+                assert!((v.point[face_axis] - face_position).abs() < 1e-7);
+            }
+            assert_eq!(body.to_record().unwrap().0, before);
+        }
+        // The same infinite plane with a domain entirely outside the box cannot cut it.
+        let miss = serde_json::json!({"op":"split_faces","params":{
+            "faces":[pick],"tools":[{"plane":{"origin":origin,"xaxis":xaxis,
+                "yaxis":yaxis,"u":[-10,-5],"v":[-10,-5]}}]
+        }});
+        assert!(
+            matches!(call(&miss,&mut [Slot {body:Arc::clone(&body),order:Some(order.clone())}]),
+            Ok(Err(why)) if why == "tools do not split any selected face")
+        );
+        assert_eq!(body.to_record().unwrap().0, before);
+    }
+}
+
+/// Malformed metadata cannot be counted as unsupported coverage; a named unknown kind can.
+#[test]
+fn split_faces_bad_tool_metadata_is_a_replay_failure() {
+    for tool in [
+        serde_json::json!(null),
+        serde_json::json!([]),
+        serde_json::json!(7),
+        serde_json::json!("plane"),
+        serde_json::json!({}),
+        serde_json::json!({"plane": null}),
+        serde_json::json!({"cylinder": null}),
+        serde_json::json!({"plane": {}, "cylinder": {}}),
+    ] {
+        assert!(matches!(split_tool(&tool), Err(Stop::Fail(_))), "{tool}");
+    }
+    assert!(matches!(split_tool(&serde_json::json!({"sphere": {}})),
+        Err(Stop::Unsupported(why)) if why.contains("sphere")));
+}
+
+/// Non-default cylindrical frame, radius, angular subdomain and height survive trace parsing.
+#[test]
+fn split_faces_cylinder_parameters_keep_their_record_units() {
+    let tool = split_tool(&serde_json::json!({"cylinder": {
+        "origin": [1, 2, 3], "xaxis": [0, 1, 0], "yaxis": [-1, 0, 0],
+        "radius": 7, "angle_deg": [-180, 90], "height": [-2, 8]
+    }}))
+    .unwrap();
+    assert_eq!(
+        tool,
+        Tool {
+            surface: RecordSurface::Cylinder {
+                frame: Frame {
+                    origin: [1.0, 2.0, 3.0],
+                    x_axis: [0.0, 1.0, 0.0],
+                    y_axis: [-1.0, 0.0, 0.0],
+                },
+                radius: 7.0
+            },
+            domain: [
+                [-std::f64::consts::PI, std::f64::consts::FRAC_PI_2],
+                [-2.0, 8.0]
+            ],
+        }
+    );
+}
+
+/// Replays one captured face split through the same loading and grading path as the corpus.
+fn replay_face_split_case(name: &str) {
+    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let entry = corpus().join(format!("booleans/{name}.json"));
+    let e: Value = serde_json::from_str(&std::fs::read_to_string(&entry).unwrap()).unwrap();
+    assert!(run_case(&entry, &e).unwrap().is_some());
+}
+
+/// The circular sketch splits the top face and preserves the block's volume and area.
+#[test]
+fn split_faces_replays_the_sketch_circle() {
+    replay_face_split_case("cov-split-face-by-a-sketch-circle");
+}
+
+/// The cylinder's surface splits the block's face while the cylinder remains a final body.
+#[test]
+fn split_faces_replays_another_bodys_face() {
+    replay_face_split_case("cov-split-face-by-another-bodys-face");
+}
+
+/// A plane's normal orders two unequal parts; both names must bind distinct bodies.
+#[test]
+fn split_body_keeps_distinct_parts_and_preserves_input() {
+    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let body = Arc::new(solidcore_ops::make_box([0.0; 3], [10.0; 3]).unwrap());
+    let (before, order) = body.to_record().unwrap();
+    for reversed in [false, true] {
+        let z = if reversed { -1.0 } else { 1.0 };
+        let step = serde_json::json!({"op": "split_body", "params": {"tool": {
+            "plane": {"origin": [3,0,0], "xaxis": [0,1,0], "yaxis": [0,0,z],
+                "u": [-1,11], "v": [-11,11]}
+        }}});
+        let parts = call_outputs(
+            &step,
+            &mut [Slot {
+                body: Arc::clone(&body),
+                order: Some(order.clone()),
+            }],
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(parts.len(), 2);
+        assert!(!Arc::ptr_eq(&parts[0].body, &parts[1].body));
+        let want = if reversed {
+            [700.0, 300.0]
+        } else {
+            [300.0, 700.0]
+        };
+        for (part, volume) in parts.iter().zip(want) {
+            assert!((part.body.volume(1e-9).unwrap() - volume).abs() < 1e-7);
+            assert_eq!(part.body.counts().unwrap(), [6, 12, 8]);
+            assert!(part.order.is_none());
+        }
+        assert_eq!(body.to_record().unwrap().0, before);
+        for (name, volume) in ["back", "front"].into_iter().zip(want) {
+            let mut traced = step.clone();
+            traced["inputs"] = serde_json::json!(["solid"]);
+            traced["outputs"] = serde_json::json!(["back", "front"]);
+            let entry = serde_json::json!({
+                "bodies": {"solid": {"trusted": true}}, "calls": [traced],
+                "result": [{"made": name}],
+                "expected": {"body_count":1,"volume_mm3":volume,"faces":6,
+                    "edges":12,"vertices":8,"tolerance":{"rel":1e-9}}
+            });
+            let records = serde_json::json!({"solid":before})
+                .as_object()
+                .unwrap()
+                .clone();
+            assert!(run_case_with_records(&entry, || records.clone())
+                .unwrap()
+                .is_some());
+        }
+    }
+}
+
+/// Keeping the new split edge prevents merging only that seam, even after record reordering.
+#[test]
+fn merge_faces_keeps_record_edges_and_preserves_input() {
+    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let body = Arc::new(solidcore_ops::make_box([0.0; 3], [10.0, 20.0, 30.0]).unwrap());
+    let (record, order) = body.to_record().unwrap();
+    let top = record
+        .faces
+        .iter()
+        .position(|f| {
+            matches!(f.surface,
+        RecordSurface::Plane {origin,..} if origin[2]==30.0)
+        })
+        .unwrap();
+    let split = serde_json::json!({"op":"split_faces","params":{
+        "faces":[top],"tools":[{"plane":{"origin":[3,0,0],"xaxis":[0,1,0],
+            "yaxis":[0,0,1],"u":[-1,21],"v":[-1,31]}}]
+    }});
+    let split = call(
+        &split,
+        &mut [Slot {
+            body,
+            order: Some(order),
+        }],
+    )
+    .unwrap()
+    .unwrap();
+    let (before, original_order) = split.body.to_record().unwrap();
+    let seam = before
+        .edges
+        .iter()
+        .position(|edge| {
+            edge.vertices.iter().all(|&i| {
+                let p = before.vertices[i as usize].point;
+                (p[0] - 3.0).abs() < 1e-7 && (p[2] - 30.0).abs() < 1e-7
+            })
+        })
+        .unwrap();
+    let seam_id = original_order.edges[seam];
+    for mode in 0..3 {
+        let mut order = original_order.clone();
+        if mode == 1 {
+            order.edges.rotate_left(5);
+        }
+        let pick = order.edges.iter().position(|&id| id == seam_id).unwrap();
+        for keep_seam in [false, true] {
+            let picked = if keep_seam {
+                serde_json::json!([{"index":pick}])
+            } else {
+                serde_json::json!([])
+            };
+            let step = serde_json::json!({"op":"merge_faces","params":{"keep":{"kind":"edge","picked":picked}}});
+            let out = call(
+                &step,
+                &mut [Slot {
+                    body: Arc::clone(&split.body),
+                    order: (mode != 2).then_some(order.clone()),
+                }],
+            )
+            .unwrap()
+            .unwrap();
+            assert!(out.order.is_none());
+            assert_eq!(
+                out.body.counts().unwrap(),
+                if keep_seam { [7, 15, 10] } else { [6, 12, 8] }
+            );
+            assert!((out.body.volume(1e-9).unwrap() - 6000.0).abs() < 1e-6);
+            assert!((out.body.area(1e-9).unwrap() - 2200.0).abs() < 1e-6);
+            assert_eq!(split.body.to_record().unwrap().0, before);
+        }
+    }
+}
+
+/// Invalid trace data is a replay failure; validly shaped but invalid geometry is a refusal.
+#[test]
+fn split_body_and_merge_faces_metadata_do_not_masquerade_as_refusals() {
+    let body = Arc::new(solidcore_ops::make_box([0.0; 3], [10.0; 3]).unwrap());
+    let input = Slot { body, order: None };
+    for keep in [
+        serde_json::json!(null),
+        serde_json::json!({"kind":"face","picked":[]}),
+        serde_json::json!({"kind":"edge"}),
+        serde_json::json!({"kind":"edge","picked":[{}]}),
+        serde_json::json!({"kind":"edge","picked":[{"index":100000}]}),
+    ] {
+        let step = serde_json::json!({"op":"merge_faces","params":{"keep":keep}});
+        assert!(matches!(
+            call(&step, &mut [input.clone()]),
+            Err(Stop::Fail(_))
+        ));
+    }
+    for tool in [serde_json::json!(null), serde_json::json!({"plane":{}})] {
+        let step = serde_json::json!({"op":"split_body","params":{"tool":tool}});
+        assert!(matches!(
+            call_outputs(&step, &mut [input.clone()]),
+            Err(Stop::Fail(_))
+        ));
+    }
+    let step = serde_json::json!({"op":"split_body","params":{"tool":{"plane":{
+        "origin":[3,0,0],"xaxis":[0,0,0],"yaxis":[0,0,1],"u":[-1,11],"v":[-1,11]
+    }}}});
+    assert!(matches!(call_outputs(&step, &mut [input]), Ok(Err(_))));
+}
+
+/// Captured split followed by merging its redundant faces, with the original grading.
+#[test]
+fn split_body_replays_face_plane() {
+    replay_face_split_case("3447-split-along-plane-of-a-face");
+}
+
+/// The other captured split/merge workflow, using the body's own extended face as tool.
+#[test]
+fn split_body_replays_own_extended_face() {
+    replay_face_split_case("4654-split-body-by-its-own-face-extended");
+}
+
+/// The captured quarter-cylinder sheet and its original record order.
+fn extension_sheet_fixture() -> (PathBuf, Value, Slot) {
+    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    let entry = corpus().join("surfaces/cov-extend-quarter-cylinder-along-its-axis.json");
+    let e: Value = serde_json::from_str(&std::fs::read_to_string(&entry).unwrap()).unwrap();
+    let record: Record = serde_json::from_value(records(&entry, &e)["b2"].clone()).unwrap();
+    let (body, order) = Body::from_record(&record, true).unwrap();
+    (
+        entry,
+        e,
+        Slot {
+            body: Arc::new(body),
+            order: Some(order),
+        },
+    )
+}
+
+fn sheet_extension_step(edge: usize, distance: f64, how: &str) -> Value {
+    serde_json::json!({"op":"extend_sheet","params":{"edge":{"kind":"edge","picked":[{"index":edge}]},"distance":distance,"how":how}})
+}
+
+/// The exact captured extension is graded with its unchanged trace and expectations.
+#[test]
+fn extend_sheet_replays_the_quarter_cylinder() {
+    let (entry, e, _) = extension_sheet_fixture();
+    assert_eq!(e["rig"]["status"], "pass");
+    assert!(e["calls"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|c| c["error"].is_null()));
+    // A zero reference volume has no relative-deviation value; a refusal would error
+    // because none of these calls expects one.
+    assert_eq!(run_case(&entry, &e).unwrap(), None);
+}
+
+/// A picked top/bottom arc and distance determine the new height under any cached record order.
+#[test]
+fn extend_sheet_preserves_edge_order_distance_and_operand() {
+    let (_, _, input) = extension_sheet_fixture();
+    let (before, original_order) = input.body.to_record().unwrap();
+    for top in [false, true] {
+        let z = if top { 20.0 } else { 0.0 };
+        let edge = before
+            .edges
+            .iter()
+            .position(|edge| {
+                edge.vertices.len() == 2
+                    && edge
+                        .vertices
+                        .iter()
+                        .all(|&v| (before.vertices[v as usize].point[2] - z).abs() < 1e-7)
+            })
+            .unwrap();
+        let edge_id = original_order.edges[edge];
+        for mode in 0..3 {
+            let mut order = original_order.clone();
+            if mode == 1 {
+                order.edges.rotate_left(2);
+            }
+            let pick = order.edges.iter().position(|&id| id == edge_id).unwrap();
+            for distance in [5.0, 9.0] {
+                let step = sheet_extension_step(pick, distance, "natural");
+                let out = call(
+                    &step,
+                    &mut [Slot {
+                        body: Arc::clone(&input.body),
+                        order: (mode != 2).then_some(order.clone()),
+                    }],
+                )
+                .unwrap()
+                .unwrap();
+                assert!(out.order.is_none());
+                assert_eq!(out.body.counts().unwrap(), [1, 4, 4]);
+                let want_area = std::f64::consts::PI * 5.0 * (20.0 + distance);
+                let area = out.body.area(1e-9).unwrap();
+                assert!(
+                    (area - want_area).abs() <= 1e-9 * want_area,
+                    "{area} vs {want_area}"
+                );
+                let record = out.body.to_record().unwrap().0;
+                assert!(
+                    matches!(record.faces[0].surface,RecordSurface::Cylinder {radius,..} if (radius-10.0).abs()<1e-10)
+                );
+                let lo = if top { 0.0 } else { -distance };
+                let hi = if top { 20.0 + distance } else { 20.0 };
+                assert!(record
+                    .vertices
+                    .iter()
+                    .all(|v| (v.point[2] - lo).abs() < 1e-7 || (v.point[2] - hi).abs() < 1e-7));
+                assert!(record
+                    .vertices
+                    .iter()
+                    .any(|v| (v.point[2] - lo).abs() < 1e-7));
+                assert!(record
+                    .vertices
+                    .iter()
+                    .any(|v| (v.point[2] - hi).abs() < 1e-7));
+                assert_eq!(input.body.to_record().unwrap().0, before);
+            }
+        }
+    }
+}
+
+/// Trace errors stay replay failures, while a parsed nonpositive distance is an API refusal.
+#[test]
+fn extend_sheet_metadata_and_refusal_are_distinct() {
+    let (_, _, input) = extension_sheet_fixture();
+    let step = sheet_extension_step(3, 5.0, "natural");
+    for field in ["edge", "distance", "how"] {
+        let mut bad = step.clone();
+        bad["params"].as_object_mut().unwrap().remove(field);
+        assert!(matches!(
+            call(&bad, &mut [input.clone()]),
+            Err(Stop::Fail(_))
+        ));
+    }
+    for pick in [
+        serde_json::json!({"kind":"face","picked":[{"index":3}]}),
+        serde_json::json!({"kind":"edge","picked":[]}),
+        serde_json::json!({"kind":"edge","picked":[{}]}),
+        serde_json::json!({"kind":"edge","picked":[{"index":3},{"index":1}]}),
+        serde_json::json!({"kind":"edge","picked":[{"index":100000}]}),
+    ] {
+        let mut bad = step.clone();
+        bad["params"]["edge"] = pick;
+        assert!(matches!(
+            call(&bad, &mut [input.clone()]),
+            Err(Stop::Fail(_))
+        ));
+    }
+    assert!(matches!(
+        call(
+            &sheet_extension_step(3, 5.0, "unported_mode"),
+            &mut [input.clone()]
+        ),
+        Err(Stop::Unsupported(_))
+    ));
+    assert!(matches!(
+        call(&sheet_extension_step(3, 0.0, "natural"), &mut [input]),
+        Ok(Err(_))
+    ));
 }
 
 #[test]
