@@ -1159,7 +1159,9 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
                 .iter()
                 .find(|(m, _, _, _)| m.id == app.agent_chat.model)
                 .map_or_else(|| app.agent_chat.model.clone(), |(_, name, _, _)| name.clone());
-            let width = if providers.is_empty() { t.form_label_width } else { picker_width(ui, &cur) };
+            // One provider used to stay at the short form-label width, so `gpt-5.4-mini` read as
+            // `gpt-` (#11265). Size it like a provider's menu: the name, up to the panel.
+            let width = picker_width(ui, &cur);
             let choices: Vec<ui_kit::SearchChoice<'_>> =
                 list.iter().map(|(m, name, group, tip)| ui_kit::SearchChoice { value: &m.id, label: name, tip, group: group.as_deref() }).collect();
             let custom = custom_models_accepted(app);
@@ -1183,7 +1185,9 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
                     )
                 })
                 .inner;
-            picker.response.backing_on_hover_text(tr("ui.agent_chat_model_tip"));
+            let hint = tr("ui.agent_chat_model_tip");
+            let tip = if cur == app.agent_chat.model { format!("{cur}\n{hint}") } else { format!("{cur}\n{}\n{hint}", app.agent_chat.model) };
+            picker.response.backing_on_hover_text(tip);
             match picker.inner {
                 Some(ui_kit::Picked::Listed(m)) => set_model(app, &m),
                 Some(ui_kit::Picked::Custom(m)) => {
@@ -2537,5 +2541,44 @@ mod tests {
                 assert!(!a.shrink(0.5).intersects(b.shrink(0.5)), "picker overlap: {a:?} {b:?}");
             }
         }
+    }
+
+    /// #11265: one provider used to pin the closed model menu at the form-label width, so a name
+    /// such as `gpt-5.4-mini` was painted as `gpt-`. The default assistant width shows that name.
+    #[test]
+    fn the_closed_model_picker_shows_a_single_providers_model() {
+        let ctx = crate::fonts::test_context();
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.agent_chat.state = Some(State::Ready);
+        app.agent_chat.detection = Some(discover::Detection::default());
+        app.agent_chat.agent_id = Some("fixture".into());
+        app.preferences.agents.push(agents::AgentConfig {
+            id: "fixture".into(),
+            name: "Fixture".into(),
+            command: "fixture".into(),
+            ..Default::default()
+        });
+        let name = "gpt-5.4-mini";
+        app.agent_chat.models = vec![acp::ModelInfo { id: name.into(), name: name.into(), description: String::new() }];
+        app.agent_chat.model = name.into();
+        let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(420.0, 240.0))), ..Default::default() };
+        crate::scenario::clear_handles();
+        let mut output = ctx.run_ui(input, |ui| {
+            ui.set_width(380.0);
+            ui_kit::scope(ui, |ui| switcher(&mut app, ui));
+        });
+        let rect = crate::scenario::rect_of("agent_chat:model").expect("model picker");
+        assert!(rect.left() >= 0.0 && rect.right() <= 420.0, "inside the header: {rect:?}");
+        assert!(rect.width() > Tokens::get().form_label_width, "wider than the old fixed menu: {rect:?}");
+        let mut texts = Vec::new();
+        for clipped in &output.shapes {
+            crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+                if let egui::Shape::Text(text) = shape {
+                    texts.push(text.galley.text().to_string());
+                }
+            });
+        }
+        output.textures_delta.clear();
+        assert!(texts.iter().any(|text| text == name), "the closed menu shows {name}, painted {texts:?}");
     }
 }
