@@ -2448,9 +2448,7 @@ pub(crate) fn axis_point_nearest_ray(a: Vec3, o: Vec3, d: Vec3) -> Vec3 {
 /// [`origin_axis_reach`] for the view as it is now, or `None` when the origin axes are drawn
 /// short (the preference is off).
 fn origin_axes_reach_now(app: &SolveApp) -> Option<f64> {
-    app.preferences
-        .origin_axes_across_view
-        .then(|| origin_axis_reach(&display_proj(app).vp, origin_size(app.cam.half_height()) * AXIS_LEN))
+    app.preferences.origin_axes_across_view.then(|| origin_axis_reach(&display_proj(app).vp, origin_size(app.cam.half_height()) * AXIS_LEN))
 }
 
 /// Construction axes shown, as segments: across the model where the axis passes it (a little
