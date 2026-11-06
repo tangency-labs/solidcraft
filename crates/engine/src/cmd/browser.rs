@@ -126,7 +126,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&FOLD_CONTRACT)
         .output(output_schema_for::<BrowserFoldResult>)
         .params(
-        "path?: [occurrence ids]; component?: id; omit both for the whole tree. The row it starts from (the design row for the whole tree) stays open, so its first level remains visible. \
+        "path?: [occurrence ids] (that placement's branch); component?: id; omit both for the whole tree: every placement, folder and group at every level. The row it starts from (the design row for the whole tree) stays open, so its first level remains visible. \
          Display only; not an undo step → open, open_by_default, closed_by_default",
     ),
 ];
@@ -903,22 +903,36 @@ fn collect_component_keys(s: &Session, prefix: &str, component: u64, root_extras
     }
 }
 
+/// Every placement row from `start` down, at every level, as the browser lists them: a
+/// component's placements under each placement of it, an id already on the path left out. The
+/// walk reads the design's placements only, so one placement whose transform or component is
+/// broken neither stops the fold nor costs a world placement per row (#11866).
 fn walk_fold(s: &Session, start: &[u64], root_extras: bool, keys: &mut FoldKeys, cmd: &str) -> Result<()> {
-    let mut stack = vec![start.to_vec()];
+    let start_component = if start.is_empty() { 0 } else { s.occurrence_placement(start)?.component };
+    let mut children: BTreeMap<u64, Vec<(u64, u64)>> = BTreeMap::new();
+    for o in &s.doc.occurrences {
+        children.entry(o.parent).or_default().push((o.id, o.component));
+    }
+    let mut stack = vec![(start.to_vec(), start_component)];
     let mut count = 0usize;
-    while let Some(path) = stack.pop() {
+    while let Some((path, component)) = stack.pop() {
         count += 1;
         if count > MAX_FOLD_PLACEMENTS {
             return Err(bad(cmd, "expand/collapse exceeds 100000 placements"));
         }
-        let component = if path.is_empty() { 0 } else { s.occurrence_placement(&path)?.component };
         let prefix = if path.is_empty() { "c0".to_string() } else { occurrence_fold_key(&path) };
         collect_component_keys(s, &prefix, component, root_extras && path.is_empty(), keys);
-        for child in s.occurrence_children(&path)? {
-            if child.path.len() > 64 {
+        if path.len() >= 64 {
+            continue;
+        }
+        for (id, child_component) in children.get(&component).into_iter().flatten() {
+            if path.contains(id) {
                 continue;
             }
-            stack.push(child.path);
+            let mut child = Vec::with_capacity(path.len() + 1);
+            child.extend_from_slice(&path);
+            child.push(*id);
+            stack.push((child, *child_component));
         }
     }
     Ok(())
@@ -2965,6 +2979,46 @@ mod tests {
         let open = strs(&only, "open_by_default");
         assert!(open.iter().any(|k| k.starts_with('c') && k != "c0" && !k.starts_with("c0/")), "{open:?}");
         assert!(!open.contains(&format!("o:{occ}")), "{open:?}");
+    }
+
+    /// #11866: Collapse All on the whole tree rolls up every nested level, placements inside
+    /// placements and their folders included, and one placement that cannot be placed doesn't
+    /// stop it.
+    #[test]
+    fn collapse_all_folds_every_nested_placement_and_survives_a_broken_one() {
+        let mut s = Session::default();
+        let a = run(&mut s, "component.create", json!({"name": "A"}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+        let b = run(&mut s, "component.create", json!({"name": "B"}));
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5}));
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        run(&mut s, "sketch.finish", json!({}));
+        let c = run(&mut s, "component.create", json!({"name": "C"}));
+        run(&mut s, "component.activate", json!({"component": 0}));
+        let [a, b, c] = [&a, &b, &c].map(|r| r["occurrence"].as_u64().unwrap());
+        let nested = [
+            format!("o:{a}"),
+            format!("o:{a}/bodies"),
+            format!("o:{a}/{b}"),
+            format!("o:{a}/{b}/bodies"),
+            format!("o:{a}/{b}/sketches"),
+            format!("o:{a}/{b}/{c}"),
+        ];
+
+        let open = strs(&run(&mut s, "browser.collapse_all", json!({})), "open_by_default");
+        for key in &nested {
+            assert!(open.contains(key), "{key} folds: {open:?}");
+        }
+
+        // A placement whose transform went bad still has a row, and so do the ones under it.
+        if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == b) {
+            o.transform[0][0] = f64::NAN;
+        }
+        assert!(s.occurrence_placement(&[a, b]).is_err());
+        let open = strs(&run(&mut s, "browser.collapse_all", json!({})), "open_by_default");
+        for key in &nested {
+            assert!(open.contains(key), "{key} folds with a broken placement: {open:?}");
+        }
     }
 
     #[test]
