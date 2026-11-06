@@ -2189,6 +2189,7 @@ mod capture_credit {
             _worker: None,
         }))
     }
+    #[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
     fn mapped() -> (ProductScene, ImageRequest, Weak<Vec<u8>>) {
         use crate::{
             job::{
@@ -2437,6 +2438,7 @@ mod capture_credit {
         assert!(weak.upgrade().is_none());
         assert_eq!(host.admitted_bytes(), 0);
     }
+    #[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
     #[test]
     fn capture_rechecks_actual_registered_layout_after_admission_before_merging_credit() {
         let (scene, mut image, weak) = mapped();
@@ -2455,6 +2457,7 @@ mod capture_credit {
         assert_eq!(host.admitted_bytes(), 0);
         assert!(host.0.shared.queue.lock().unwrap().is_empty());
     }
+    #[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
     #[test]
     fn capture_registered_factory_failure_releases_source_credit_and_preserves_only_record_summary() {
         let (scene, mut image, weak) = mapped();
