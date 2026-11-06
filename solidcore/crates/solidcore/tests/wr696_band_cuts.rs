@@ -1,6 +1,5 @@
 //! WR-696 (#2273, step 5 of the generic blend; the fork's tangency-labs/smlib#79, 862971f,
-//! e568e45 and aac4288, merged at 5e8c9c1): with `fixes.fillet_gn_section_generator` a
-//! convex blend that would take all of the part between its rails somewhere along its edge
+//! e568e45 and aac4288, merged at 5e8c9c1): a convex blend that would take all of the part between its rails somewhere along its edge
 //! (a round or chamfer through the bridge over a slot) is refused before anything is built
 //! (`SmFilletSolver::BandCutsThePart`), naming the largest size that keeps the part whole and
 //! noting it, less the fit margin, as the fit size ([`FilletSession::fit_size`]).
@@ -36,11 +35,9 @@ use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::EdgeId;
 use solidcore::{Brep, Kernel};
 
-fn kernel(gn: bool) -> Kernel {
+fn kernel() -> Kernel {
     let mut k = Kernel::default();
-    let mut fixes = UpstreamFixes::all();
-    fixes.fillet_gn_section_generator = gn;
-    k.fixes = fixes;
+    k.fixes = UpstreamFixes::all();
     k
 }
 
@@ -99,7 +96,7 @@ fn bridged_block(k: &mut Kernel) -> Brep {
 /// fit 7.8184271464117412 (2.2e-8 over the closed form's).
 #[test]
 fn a_round_through_a_bridge_is_refused_naming_the_radius_that_keeps_it_whole() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     // the round on the continued wall; with `fillet_round_ends_on_outline` it ends on the
     // body's outline (`wr730_round_ends_on_outline.rs`)
     k.fixes.fillet_round_ends_on_outline = false;
@@ -131,7 +128,7 @@ fn a_round_through_a_bridge_is_refused_naming_the_radius_that_keeps_it_whole() {
 /// whole", fit 4.9900000000036382.
 #[test]
 fn a_chamfer_through_a_bridge_is_refused_naming_the_setback_that_keeps_it_whole() {
-    let mut k = kernel(true);
+    let mut k = kernel();
     let mut b = bridged_block(&mut k);
     let refusal = blend(&mut k, &mut b, Point3::new(2.0, 0.0, 10.0), 6.0, 0).expect_err("refused");
     eprintln!("{} fit {:?}", refusal.comment, refusal.fit);
@@ -165,7 +162,7 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 /// Blends the bridged block's top front edge by `r` (`xsect` as [`blend`]): built, a
 /// manifold solid in one piece (the outside and one solid region), its volume.
 fn built_volume(r: f64, xsect: u32) -> f64 {
-    let mut k = kernel(true);
+    let mut k = kernel();
     // the round on the continued wall; with `fillet_round_ends_on_outline` it ends on the
     // body's outline (`wr730_round_ends_on_outline.rs`)
     k.fixes.fillet_round_ends_on_outline = false;
@@ -216,20 +213,4 @@ fn a_chamfer_past_the_rim_over_the_opening_keeps_the_bridge() {
         (v - 480.5).abs() <= 1e-9 * 480.5,
         "{v} vs closed form 480.5"
     );
-}
-
-/// Without the flag the cut is not judged: no refusal names it, and no fit is noted.
-#[test]
-fn without_the_flag_the_cut_is_not_judged() {
-    let mut k = kernel(false);
-    let mut b = bridged_block(&mut k);
-    if let Err(refusal) = blend(&mut k, &mut b, Point3::new(2.0, 0.0, 10.0), 9.0, 1) {
-        assert!(refusal.fit.is_none());
-        assert_ne!(refusal.reason, Some(NoRoomReason::CutsThePart));
-        assert!(
-            !refusal.comment.contains("cut it into pieces"),
-            "{}",
-            refusal.comment
-        );
-    }
 }

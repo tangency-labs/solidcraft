@@ -170,7 +170,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.offset_stitch_at_body_tolerance = true;
     k.fixes.curve_contacts_at_curve_ends = true;
     k.fixes.shell_empty_cavity_fails = true;
-    k.fixes.fillet_refuse_ball_not_fitting = true;
     k.fixes.fillet_trace_reaches_rails = true;
     k.fixes.fillet_rail_end_on_continued_surface = true;
     k.fixes.boolean_lists_virtual_surface_copies = true;
@@ -272,7 +271,6 @@ fn run_memo(nd_fix: bool, memo: Option<bool>) -> (usize, usize, usize, f64, Vec<
     );
     {
         let mut s = FilletSession::new(&mut k, &mut b).unwrap();
-        s.set_blend_curve_at_thirds(false);
         s.prepare_per_edge_constant_radius(
             &mut k,
             &[top, section],

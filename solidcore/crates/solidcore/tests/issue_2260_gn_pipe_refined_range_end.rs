@@ -1,5 +1,5 @@
-//! The #2252 pipe-on-plate G2 round (r 2, order 2, w 0) by WR-685's G^n section
-//! (`fillet_gn_section_generator`) on SolidCraft's flag profile (tangency-labs/solidcraft#8526
+//! The #2252 pipe-on-plate G2 round (r 2, order 2, w 0) by WR-685's G^n section on
+//! SolidCraft's flag profile (tangency-labs/solidcraft#8526
 //! at c494a18, `crates/smlib/src/core.rs` `fixes()`, 292 flags), reported on #2260.
 //!
 //! With `query_statuses_pass_on` (tangency-labs/smlib 8311f8e) `sm_RefineCCSolutions`
@@ -122,7 +122,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "face_tight_box_searches_trim",
     "fillet_3x2_mixed_concave_side_edge",
     "fillet_3x2_tangent_side_edge_roles",
-    "fillet_blend_curve_revolved_on_arc",
     "fillet_chamfer_cone_on_arc",
     "fillet_chamfer_cone_stored_as_cone",
     "fillet_cleanup_keeps_target_faces",
@@ -130,7 +129,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "fillet_cliff_overflow",
     "fillet_corner_ball_center_from_axes",
     "fillet_corner_ball_patch",
-    "fillet_corner_face_curve_halves",
     "fillet_corner_per_vertex_fan",
     "fillet_corner_sphere_from_four_arcs",
     "fillet_corner_statuses",
@@ -151,7 +149,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "fillet_rail_rim_on_face",
     "fillet_rails_meet_at_one_end_point",
     "fillet_rail_trim_at_near_knot",
-    "fillet_refuse_ball_not_fitting",
     "fillet_refuse_crossing_rails",
     "fillet_refuse_face_consuming_blends",
     "fillet_refuse_non_manifold_result",
@@ -328,8 +325,6 @@ fn kernel(names: &[&str]) -> Kernel {
             .flag_mut(name)
             .unwrap_or_else(|| panic!("no flag {name}")) = true;
     }
-    k.fixes.fillet_gn_section_generator = true;
-    k.fixes.fillet_surface_plane_curve_on_plane_equation = true;
     k
 }
 

@@ -65,7 +65,11 @@ fn edge_between(k: &Kernel, b: &Brep, p: Point3, q: Point3) -> (EdgeId, bool) {
 /// The law of degree `degree` through the control radii `r` over `knots` (with their
 /// multiplicities `mult`), its y the law's parameter at the Greville abscissae `g`.
 fn law(degree: usize, r: &[f64], g: &[f64], knots: &[f64], mult: &[usize]) -> FilletLaw {
-    let control: Vec<Vec3> = r.iter().zip(g).map(|(&r, &g)| Vec3::new(r, g, 0.0)).collect();
+    let control: Vec<Vec3> = r
+        .iter()
+        .zip(g)
+        .map(|(&r, &g)| Vec3::new(r, g, 0.0))
+        .collect();
     let curve = BSplineCurve::create_canonical(&CanonicalData {
         dim: 3,
         degree,
@@ -133,7 +137,10 @@ fn a_law_with_corners_is_its_balls_union_on_the_default_kernel() {
     eprintln!("removed {removed}");
     // the corner between the faces less the union of the balls: the radii 2 to 4 take
     // between 0.86 and 3.43 of each unit of the edge (r^2 (1 - pi/4))
-    assert!(removed > 20.0 * 0.858 && removed < 20.0 * 3.434, "{removed}");
+    assert!(
+        removed > 20.0 * 0.858 && removed < 20.0 * 3.434,
+        "{removed}"
+    );
 }
 
 /// The box 10 x 20 x 30's edge x = 10, z = 30 rounded by the cubic law 2, 2, 40, 3, 2 from
@@ -143,6 +150,7 @@ fn a_law_with_corners_is_its_balls_union_on_the_default_kernel() {
 #[test]
 fn folding_balls_are_refused_on_the_default_kernel() {
     let k = &mut Kernel::default();
+    k.fixes.fillet_trace_reaches_rails = true;
     let mut b = create_box(k, Vec3::ZERO, 10.0, 20.0, 30.0).unwrap();
     let cubic = |r: &[f64]| {
         law(
