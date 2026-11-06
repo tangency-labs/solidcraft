@@ -1,7 +1,7 @@
 # geom.local_solve_nd: unconditional correction and current-main goldens (2026-11-06)
 
 - Issue / PR: #2782 / #2791; migration requested in #2816.
-- Base: `1483513fe`; measured kernel: `a4e1ea2da` (rebased correction). Only the N-D default and its forwarding change production behaviour.
+- Base: `1483513fe`; measured production: unchanged at `1d9d097dd` (rebased correction). Only the N-D default and its forwarding change production behaviour.
 - Complete initial check: 283 units, 251 pass / 32 changed, no added/removed/broken case. The main golden is the old value, not the C++ reference.
 - 1332 cases exceed their unchanged comparison threshold. Whole-unit `--bless` also records 66 sub-threshold serialized changes. One additional sub-threshold case is wrong already on main and becomes known failing (#2956), with its golden removed.
 - Every moved case is listed below, including sub-threshold changes. Arrays over 16 entries are the runner's 256-entry block sums, absolute sums and index-weighted sums; these are records of state, not geometric coordinates. The complete old/new values remain in the golden's git diff.
@@ -95,7 +95,7 @@ checker with the existing #1515 repeated-knot pole correction.
 
 ## Validation
 
-Post-bless complete check: **283 units passed, 0 failed**, `--all --goldens --jobs 4` (default per-unit seeds), including both known failures. Strict workspace clippy and wasm pass. The full kernel suite and goldens library tests are still running. The exact nodal-quartic accuracy assertion still exposes #2508 at 1.2302516783080364e-9 against the unchanged 1e-9 bound; no ignore or tolerance change is included.
+Post-bless complete check: **283 units passed, 0 failed**, `--all --goldens --jobs 4` (default per-unit seeds), including both known failures. Strict workspace clippy and wasm pass. Full kernel suite: **5088 passed, 1 failed, 44 existing ignored** across 438 result targets (including doctests). Goldens library: **399 passed, 29 existing ignored**. The operations case target passes 29 tests (1 corpus test normally ignored). Each of the five RC cases added by the final `2d469d13f` rebase was also replayed through that corpus test, with its existing pass/known-failure grading; all five replays pass. Kernel source, golden runners and baseline are unchanged by that data-only main rebase. The exact nodal-quartic accuracy assertion still exposes #2508 at 1.2302516783080364e-9 against the unchanged 1e-9 bound; no ignore or tolerance change is included.
 
 ## `blend.fillet_custom_solver`
 
