@@ -155,7 +155,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("plane_angle")
         .contract(&PLANE_AT_ANGLE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("base: XY|XZ|YZ|plane name, or a planar face {face: [x,y,z], body?, index?, path?}; axis: X|Y|Z|construction axis name (where it is now)|{origin, dir} | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle: expr; name?"),
+        .params("base: XY|XZ|YZ|plane name, or a planar face {face: [x,y,z], body?, index?, path?}; axis: X|Y|Z|construction axis name (where it is now)|{origin, dir} | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); angle: expr; direction_only?: bool (default false: turn about the axis as a line; true: project the axis direction onto base and turn about the line through pivot, or the base origin); pivot?: point ref (only with direction_only; vertex, sketch point, construction point); name?"),
     CommandSpec::new("solid.split_face", "Split Face", split_face)
         .at("SOLID", "MODIFY")
         .icon("split_face")
@@ -1709,7 +1709,13 @@ fn press_pull(s: &mut Session, p: &Value) -> Result<Value> {
         // Another curved face moves along its normal.
         if super::face::face_is_planar(s, fp) == Some(false) {
             let r = super::find_command("solid.offset_face").ok_or_else(|| bad(cmd, "solid.offset_face"))?;
-            return (r.run)(s, &json!({"faces": [face], "distance": distance}));
+            let mut q = json!({"faces": [face], "distance": distance});
+            // The face's body, when given, goes along: found by point alone, a face inside another
+            // part's box (a screw bore in a housing) can be looked for on that part instead.
+            if let Some(body) = p.get("body").filter(|b| b.is_string()) {
+                q["body"] = body.clone();
+            }
+            return (r.run)(s, &q);
         }
     }
     // Pushed in: the extrude cuts the other way by as much (a bare number stays one, so it keeps
@@ -2527,17 +2533,30 @@ fn plane_angle(s: &mut Session, p: &Value) -> Result<Value> {
     let angle = req_expr(cmd, p, "angle")?;
     check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
     let line = line.map(Box::new);
+    let direction_only = crate::params::bool_(p, "direction_only").unwrap_or(false);
+    let pivot = match p.get("pivot").filter(|t| !t.is_null()) {
+        Some(_) if !direction_only => return Err(bad(cmd, "`pivot` needs `direction_only`: true")),
+        Some(t) => Some(Box::new(super::construct::geo(s, Some(t), cmd, "pivot")?)),
+        None => None,
+    };
+    let at_angle = |base: solidcraft_doc::PlaneRef| solidcraft_doc::PlaneRef::AtAngle {
+        base: Box::new(base),
+        axis_origin,
+        axis_dir,
+        angle: angle.clone(),
+        line: line.clone(),
+        direction_only,
+        pivot: pivot.clone(),
+    };
     // A planar body face: attached exactly, as a sketch on that face is, so the plane follows it.
     if let Some(face) = p.get("base").filter(|b| b.get("face").is_some()) {
         let base = super::sketch::face::capture(s, face, cmd)?;
         super::sketch::face::capture_positions(s, &base)?;
-        let plane = solidcraft_doc::PlaneRef::AtAngle { base: Box::new(base), axis_origin, axis_dir, angle, line };
         // The capture is already in the authoring frame.
-        return add_feature_in(s, p, FeatureKind::ConstructionPlane { plane }, false);
+        return add_feature_in(s, p, FeatureKind::ConstructionPlane { plane: at_angle(base) }, false);
     }
     let base = plane_param(s, p.get("base"), cmd)?;
-    let plane = solidcraft_doc::PlaneRef::AtAngle { base: Box::new(base), axis_origin, axis_dir, angle, line };
-    add_feature(s, p, FeatureKind::ConstructionPlane { plane })
+    add_feature(s, p, FeatureKind::ConstructionPlane { plane: at_angle(base) })
 }
 
 fn split_face(s: &mut Session, p: &Value) -> Result<Value> {

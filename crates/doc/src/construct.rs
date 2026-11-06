@@ -937,9 +937,10 @@ impl PlaneRef {
                 refs.push(point.as_mut());
                 refs
             }
-            PlaneRef::AtAngle { base, line, .. } => {
+            PlaneRef::AtAngle { base, line, pivot, .. } => {
                 let mut v = base.refs_mut();
                 v.extend(line.as_deref_mut());
+                v.extend(pivot.as_deref_mut());
                 v
             }
             PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } => base.refs_mut(),

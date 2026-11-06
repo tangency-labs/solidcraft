@@ -1181,6 +1181,12 @@ preference_settings! {
     cut_preview_tint: bool = true, PAGE_GRAPHICS => check_id("prefs.cut_preview_tint");
     /// Restore the previous platform-specific fixed Render preview geometry budget.
     render_previous_geometry_budget: bool = false, PAGE_GRAPHICS => check_id("prefs.render_previous_geometry_budget");
+    /// Restore Raster for new Render setups, fixed CPU sampling and its mode selector.
+    /// Refit on entry and keep shot activation camera-neutral, with the previous preview
+    /// framing, navigation, picking and selection overlays. Disable automatic live feedback
+    /// and automatic result opening; retain the previous result/cancel viewing behavior.
+    /// GPU sample edits round to powers of two.
+    render_legacy_image_defaults: bool = false, PAGE_GRAPHICS => check_id("prefs.render_legacy_image_defaults");
     /// How finely the viewport tessellates curved faces and edges: `coarse`, `normal`, `fine` or
     /// `ultra` (#1287). Only the display plan the viewport draws; never the design or exports.
     display_quality: String = "normal".into(), PAGE_GRAPHICS;
@@ -8509,6 +8515,20 @@ mod tests {
         for bad in ["1.234,5", "1,2,3", ",", "abc", "", "inf", "NaN"] {
             assert_eq!(super::parse_number(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn render_legacy_image_defaults_round_trips_and_resets() {
+        use serde_json::json;
+        let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        assert!(!app.preferences.render_legacy_image_defaults);
+        let out = super::set(&mut app, &json!({"render_legacy_image_defaults":true})).unwrap();
+        assert_eq!(out["render_legacy_image_defaults"], true);
+        let mut restored = crate::SolveApp::new(Default::default(), Default::default());
+        restored.load_prefs(&app.prefs());
+        assert!(restored.preferences.render_legacy_image_defaults);
+        super::defaults(&mut restored, super::PAGE_GRAPHICS);
+        assert!(!restored.preferences.render_legacy_image_defaults);
     }
 
     #[test]

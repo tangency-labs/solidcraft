@@ -411,9 +411,12 @@ impl PlaneRef {
                 base.walk_feature_refs(f, depth + 1);
                 point.walk_feature_refs(f, depth + 1);
             }
-            Self::AtAngle { base, line, .. } => {
+            Self::AtAngle { base, line, pivot, .. } => {
                 base.walk_feature_refs(f, depth + 1);
                 if let Some(g) = line {
+                    g.walk_feature_refs(f, depth + 1);
+                }
+                if let Some(g) = pivot {
                     g.walk_feature_refs(f, depth + 1);
                 }
             }
@@ -452,9 +455,12 @@ impl PlaneRef {
                 base.walk_feature_refs_mut(f, depth + 1);
                 point.walk_feature_refs_mut(f, depth + 1);
             }
-            Self::AtAngle { base, line, .. } => {
+            Self::AtAngle { base, line, pivot, .. } => {
                 base.walk_feature_refs_mut(f, depth + 1);
                 if let Some(g) = line {
+                    g.walk_feature_refs_mut(f, depth + 1);
+                }
+                if let Some(g) = pivot {
                     g.walk_feature_refs_mut(f, depth + 1);
                 }
             }

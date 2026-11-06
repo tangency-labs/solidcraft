@@ -119,9 +119,12 @@ fn remap_plane(p: &mut PlaneRef, ids: &BTreeMap<u64, u64>, bodies: &BTreeMap<Str
             remap_plane(base, ids, bodies, depth + 1)?;
             remap_geo(point, ids, bodies, depth + 1)?;
         }
-        PlaneRef::AtAngle { base, line, .. } => {
+        PlaneRef::AtAngle { base, line, pivot, .. } => {
             remap_plane(base, ids, bodies, depth + 1)?;
             if let Some(g) = line {
+                remap_geo(g, ids, bodies, depth + 1)?;
+            }
+            if let Some(g) = pivot {
                 remap_geo(g, ids, bodies, depth + 1)?;
             }
         }
@@ -323,9 +326,12 @@ fn checked_plane(p: &PlaneRef, depth: usize) -> crate::Result<()> {
     }
     match p {
         PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } => checked_plane(base, depth + 1)?,
-        PlaneRef::AtAngle { base, line, .. } => {
+        PlaneRef::AtAngle { base, line, pivot, .. } => {
             checked_plane(base, depth + 1)?;
             if let Some(g) = line {
+                checked_geo(g, depth + 1)?;
+            }
+            if let Some(g) = pivot {
                 checked_geo(g, depth + 1)?;
             }
         }

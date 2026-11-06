@@ -57,6 +57,7 @@ mod tests;
 pub mod appearance;
 pub mod bom;
 pub mod browser;
+pub mod canvas;
 pub mod clearance;
 pub mod compare;
 pub mod component;

@@ -127,9 +127,10 @@ crate::dialog_descriptor::dialog_descriptors! {
             offset: String = "0 mm".into() => shown_expr(distance, ValueKind::Length),
         } => json!({"offset": offset});
         AnglePlane("construct.plane.at_angle", "PLANE AT ANGLE", [("Plane", PLANES | PLANAR_FACES, false), ("Axis", AXIS_PICKS, false)],
-            FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { angle, .. } }) {
+            FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { angle, direction_only, .. } }) {
             angle: String = "45 deg".into() => shown_expr(angle, ValueKind::Angle),
-        } => json!({"angle": angle});
+            direction_only: bool = false => *direction_only,
+        } => json!({"angle": angle, "direction_only": direction_only});
         // With a reference plane, the plane touches where the face turns towards it (#8822).
         TangentPlane("construct.plane.tangent", "TANGENT PLANE", [("Face", FACES, false), ("Reference plane", PLANES | PLANAR_FACES, false)],
             FeatureKind::ConstructionPlane { plane: PlaneRef::Tangent { angle, .. } }) {
@@ -1464,7 +1465,7 @@ impl Dialog {
             }
             Kind::Pipe { diameter, .. } => ("Diameter", ValueKind::Length, diameter),
             Kind::Stock { margin } => ("Margin", ValueKind::Length, margin),
-            Kind::AnglePlane { angle } => ("Angle", ValueKind::Angle, angle),
+            Kind::AnglePlane { angle, .. } => ("Angle", ValueKind::Angle, angle),
             Kind::Scale { per_axis: true, .. } => return None,
             Kind::Scale { factor, .. } => ("Scale", ValueKind::Unitless, factor),
             Kind::OffsetFaces { distance } => ("Distance", ValueKind::Length, distance),
@@ -4833,6 +4834,26 @@ fn sels(d: &Dialog, i: usize) -> &[Sel] {
     selection::items(&d.inputs, i)
 }
 
+/// The body every picked edge and face lies on, when they all lie on one. A face feature given
+/// it finds its faces there alone; without it, it looks through every body for each point and
+/// takes the one whose box is nearest, which in an assembly can be an enclosing part with no face
+/// there ("no face at …") and meshes every part of a large design (#4555, as Shell names it).
+fn single_body(picks: &[Sel]) -> Option<String> {
+    let mut bodies = picks.iter().filter_map(|x| match x {
+        Sel::Edge { body, .. } | Sel::Face { body, .. } => Some(body),
+        _ => None,
+    });
+    bodies.next().filter(|first| bodies.all(|b| b == *first)).cloned()
+}
+
+/// `p` with the picked faces' or edges' body named ([`single_body`]).
+fn with_single_body(mut p: Value, picks: &[Sel]) -> Value {
+    if let Some(body) = single_body(picks) {
+        p["body"] = json!(body);
+    }
+    p
+}
+
 /// Section Analysis with a section on and no plane picked: OK turns the section off.
 fn section_turns_off(s: &Session, inputs: &[selection::SelInput]) -> bool {
     s.section.is_some() && selection::items(inputs, 0).is_empty()
@@ -5286,7 +5307,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             }
             let edges: Vec<Value> = uniq.into_iter().map(pt).collect();
             if *chamfer {
-                let mut p = json!({"edges": edges, "distance": radius});
+                let mut p = with_single_body(json!({"edges": edges, "distance": radius}), sels(d, 0));
                 match *ctype {
                     1 => p["distance2"] = json!(distance2),
                     2 => p["angle"] = json!(angle),
@@ -5297,7 +5318,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 }
                 ("solid.chamfer", p)
             } else {
-                let mut p = json!({"edges": edges, "radius": radius});
+                let mut p = with_single_body(json!({"edges": edges, "radius": radius}), sels(d, 0));
                 let style = d.extra.get("type").and_then(Value::as_str);
                 if matches!(style, Some("variable" | "spline")) {
                     // The start radius goes at one end of the first edge (Swap Ends: the other).
@@ -5538,14 +5559,18 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 None => ("construct.plane.tangent", json!({"face": face, "angle": null})),
             }
         }
-        Kind::AnglePlane { .. } => {
+        Kind::AnglePlane { direction_only, .. } => {
             need(0, "a plane")?;
             let base = plane_arg(app, sels(d, 0).first())?;
             let axis = match sels(d, 1).first() {
                 Some(x) => axis_param(app, x)?,
                 None => d.extra.get("axis").cloned().ok_or("pick an axis")?,
             };
-            ("construct.plane.at_angle", json!({"base": base, "axis": axis}))
+            let mut p = json!({"base": base, "axis": axis, "direction_only": direction_only});
+            if *direction_only && let Some(pivot) = angle_pivot(d) {
+                p["pivot"] = construct_ref(app, pivot)?;
+            }
+            ("construct.plane.at_angle", p)
         }
         Kind::Rib { web, thickness, depth, flip, normal } => {
             need(0, "open sketch curves")?;
@@ -5571,7 +5596,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::ReplaceFace => {
             need(0, "faces to move")?;
             need(1, "the target")?;
-            let mut p = json!({"faces": face_points(0)});
+            let mut p = with_single_body(json!({"faces": face_points(0)}), sels(d, 0));
             match sels(d, 1).first() {
                 Some(Sel::Plane { name }) => p["target"] = json!(name),
                 Some(Sel::Face { point, .. }) => p["target_face"] = pt(*point),
@@ -5581,7 +5606,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
         Kind::DeleteFaces => {
             need(0, "faces")?;
-            ("face.delete", json!({"faces": face_points(0)}))
+            ("face.delete", with_single_body(json!({"faces": face_points(0)}), sels(d, 0)))
         }
         Kind::Align { flip, components, axes, angle } => {
             need(0, if *components { "components" } else { "bodies" })?;
@@ -5697,7 +5722,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
         Kind::OffsetFaces { .. } => {
             need(0, "faces")?;
-            ("solid.offset_face", json!({"faces": face_points(0)}))
+            ("solid.offset_face", with_single_body(json!({"faces": face_points(0)}), sels(d, 0)))
         }
         Kind::Thread { designation, length, suggested, options, .. } => {
             need(0, "a cylindrical face")?;
@@ -6545,7 +6570,15 @@ pub(crate) fn offset_through_point(d: &Dialog) -> Option<&Sel> {
     sels(d, 1).first()
 }
 
-/// A stored point reference back into a dialog pick: a body vertex or a sketch point.
+/// Pivot pick on Plane at Angle when "Use axis direction only" is on.
+pub(crate) fn angle_pivot(d: &Dialog) -> Option<&Sel> {
+    if !matches!(d.kind, Kind::AnglePlane { direction_only: true, .. }) {
+        return None;
+    }
+    d.inputs.iter().find(|i| i.label == "Pivot").and_then(|i| i.items.first())
+}
+
+/// A stored point reference back into a dialog pick: a body vertex, sketch point or construction point.
 fn point_sel(s: &Session, g: &solidcraft_engine::doc::construct::GeoRef) -> Option<Sel> {
     use solidcraft_engine::doc::construct::GeoRef;
     match g {
@@ -6554,6 +6587,9 @@ fn point_sel(s: &Session, g: &solidcraft_engine::doc::construct::GeoRef) -> Opti
             _ => None,
         },
         GeoRef::SketchPoint { sketch, point } => Some(Sel::SketchPoint { id: format!("{sketch}:{point}") }),
+        GeoRef::ConstructPoint { name } => Some(Sel::ConstructionPoint { name: name.to_string() }),
+        GeoRef::Origin => Some(Sel::Vertex { body: String::new(), point: Vec3::ZERO }),
+        GeoRef::Point { p } => Some(Sel::Vertex { body: String::new(), point: *p }),
         _ => None,
     }
 }
@@ -7437,7 +7473,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { base, axis_origin, axis_dir, line, .. } } => {
+        FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { base, axis_origin, axis_dir, line, direction_only, pivot, .. } } => {
             let mut d = start("construct.plane.at_angle")?;
             d.kind = Kind::simple_restore(&f.kind)?;
             if let Some(inp) = d.inputs.first_mut() {
@@ -7458,6 +7494,13 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 }
                 (None, None) => {
                     d.extra.insert("axis".into(), json!({"origin": pt3(*axis_origin), "dir": pt3(*axis_dir)}));
+                }
+            }
+            if *direction_only {
+                const PIVOT: Accept = selection::VERTICES | selection::POINTS | selection::CONSTRUCTION_POINTS;
+                set_object_accepting(&mut d.inputs, &mut d.active, "Pivot", PIVOT, true);
+                if let Some(inp) = d.inputs.iter_mut().find(|i| i.label == "Pivot") {
+                    inp.items = pivot.as_deref().and_then(|g| point_sel(s, g)).into_iter().collect();
                 }
             }
             d
@@ -7707,7 +7750,7 @@ mod refused_ok_tests {
         let mut dialog = Dialog::for_command(&app, "construct.plane.at_angle").expect("the command has a dialog");
         dialog.inputs[0].items = vec![Sel::Plane { name: "XY".into() }];
         dialog.inputs[1].items = vec![Sel::Axis { name: "X".into() }];
-        if let Kind::AnglePlane { angle } = &mut dialog.kind {
+        if let Kind::AnglePlane { angle, .. } = &mut dialog.kind {
             *angle = "30 deg".into();
         }
 
