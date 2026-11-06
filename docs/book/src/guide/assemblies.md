@@ -557,7 +557,8 @@ Rows are sorted by part number (rows without one come last) and hold `item`, `pa
 `description`, `revision`, `bom_type`, `count`, `definition` (the component names), `components` (their ids)
 and `properties`, with `total_occurrences` beside them. `path` writes them to a `.csv` file
 (the columns item, part_number, description, revision, count and definition, every field
-quoted; children follow their row) or a `.json` file. The window lists the same rows, switches
+quoted, and a field that starts with `=`, `+`, `-` or `@` written with a `'` before it so a
+spreadsheet shows it as text; children follow their row) or a `.json` file. The window lists the same rows, switches
 between the levels and groupings and shows children under their part, edits a picked row's part
 number, description and revision, and exports them. Changing part properties changes no
 geometry, so it doesn't evaluate the model or re-seat joints again.

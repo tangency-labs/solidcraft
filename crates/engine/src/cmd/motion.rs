@@ -880,7 +880,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
                     c += &format!(
                         "{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
                         Value::from(r.step),
-                        at.occurrence.replace(',', " "),
+                        solidcraft_doc::csv::field(&at.occurrence),
                         o[0],
                         o[1],
                         o[2],

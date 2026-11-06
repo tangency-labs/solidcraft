@@ -102,6 +102,8 @@ an unchanged field cannot reinterpret it. Computed sizes and tolerances keep the
 precision when written back into editable fields, independently of display precision.
 
 Parameters export to and import from CSV or JSON (`parameters.export`, `parameters.import`).
+In a CSV, a value that starts with `=`, `+`, `-` or `@` is written with a `'` before it, so a
+spreadsheet shows it as text instead of running it as a formula; the import takes the `'` off again.
 **Configurations** (`config.*`) keep a table of rows, each with its own parameter values and
 suppressed features, physical materials and body appearances, switched with `config.activate`.
 The table's Library picker selects material or appearance values. Choose **Follow material**

@@ -2069,6 +2069,17 @@ fn a_flange_bent_inside_keeps_the_base_sketchs_arcs_in_the_flat_pattern_and_the_
     }
 }
 
+/// A rule or body name that starts as a spreadsheet formula does is written as text (#12728).
+#[test]
+fn bend_table_writes_a_formula_like_name_as_text() {
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "=A1+1", "thickness": 2, "bend_radius": 3, "k_factor": 0.4}));
+    base(&mut s, 100.0, 60.0);
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20}));
+    let text = run(&mut s, "sheet.export_bend_table", json!({}))["text"].as_str().unwrap_or_default().to_string();
+    assert!(text.lines().nth(1).is_some_and(|row| row.contains(",\"'=A1+1\",2.000000000,")), "{text}");
+}
+
 #[test]
 fn bend_table_exports_shop_dimensions_and_tracks_parameter_changes() {
     let mut s = Session::default();
