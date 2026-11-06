@@ -572,9 +572,19 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     // hit test also counts the model as under the pointer a few points past its own edge and
     // inside a window's or a list's edge (#678), so the pointer must be in the viewport too,
     // with no window or menu above it.
-    let lifted = ui.input(|i| i.pointer.hover_pos().is_none());
-    let over = if lifted { resp.clicked() || resp.drag_stopped() } else { resp.contains_pointer() && ui.rect_contains_pointer(rect) };
-    let inside = ui.is_enabled() && over && hover.is_some_and(|p| rect.contains(p) && !axes.contains(p) && !readout.is_some_and(|r| r.contains(p)));
+    let inside = ui.is_enabled()
+        && resp.contains_pointer()
+        && ui.rect_contains_pointer(rect)
+        && hover.is_some_and(|p| !axes.contains(p) && !readout.is_some_and(|r| r.contains(p)));
+    // A touch release can remove hover in the same frame. Its response owns the full input
+    // surface, including letterbox outside the camera's projection rectangle.
+    let inside = if ui.input(|i| i.pointer.hover_pos().is_none()) {
+        ui.is_enabled()
+            && (resp.clicked() || resp.drag_stopped())
+            && hover.is_some_and(|p| resp.rect.contains(p) && !axes.contains(p) && !readout.is_some_and(|r| r.contains(p)))
+    } else {
+        inside
+    };
     // The wheel and trackpad gestures go on under a box anchored to the model (a value box such
     // as Extrude's distance, a dimension's editor): it scrolls nothing, and a pan, orbit or zoom
     // stopped as it crossed one (#10061). Its clicks stay its own. Not while the wheel steps the
@@ -596,7 +606,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
 
     let touch_enabled = app.preferences.touchscreen_navigation && app.tool.is_none() && app.dialog.is_none() && app.viewport.context_menu.is_none();
     let had_touch = app.viewport.touch.owned;
-    let touch = app.viewport.touch.frame(ui, rect, &[axes, readout.unwrap_or(Rect::NOTHING)], inside, touch_enabled, caps.orbit);
+    let touch = app.viewport.touch.frame(ui, resp.rect, &[axes, readout.unwrap_or(Rect::NOTHING)], inside, touch_enabled, caps.orbit);
 
     // ---- navigation ----
     let trackpad_pan = app.preferences.trackpad_pans();
@@ -2687,6 +2697,18 @@ mod tests {
     }
 
     fn touchscreen_frame(app: &mut crate::SolveApp, ctx: &egui::Context, events: Vec<egui::Event>, time: &mut f64, orbit: bool) {
+        let rect = egui::Rect::from_min_max(egui::pos2(100.0, 100.0), egui::pos2(700.0, 500.0));
+        touchscreen_frame_in_rect(app, ctx, events, time, orbit, (rect, rect));
+    }
+
+    fn touchscreen_frame_in_rect(
+        app: &mut crate::SolveApp,
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+        time: &mut f64,
+        orbit: bool,
+        (input_rect, camera_rect): (egui::Rect, egui::Rect),
+    ) -> bool {
         *time += 1.0 / 60.0;
         let raw = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0))),
@@ -2695,13 +2717,64 @@ mod tests {
             events,
             ..Default::default()
         };
+        let mut inside = false;
         let mut out = ctx.run_ui(raw, |ui| {
-            let rect = egui::Rect::from_min_max(egui::pos2(100.0, 100.0), egui::pos2(700.0, 500.0));
-            app.viewport.rect = Some(rect);
-            let response = ui.interact(rect, ui.id().with("touchscreen-test"), egui::Sense::click_and_drag());
-            super::handle(app, ui, rect, &response, super::NavCaps { orbit, pick: true });
+            app.viewport.rect = Some(input_rect);
+            let response = ui.interact(input_rect, ui.id().with("touchscreen-test"), egui::Sense::click_and_drag());
+            inside = super::handle(app, ui, camera_rect, &response, super::NavCaps { orbit, pick: true }).inside;
         });
         out.textures_delta.clear();
+        inside
+    }
+
+    #[test]
+    fn touchscreen_release_uses_full_input_bounds_for_framed_camera() {
+        use egui::TouchPhase::{End, Move, Start};
+        let input_rect = egui::Rect::from_min_max(egui::pos2(100.0, 100.0), egui::pos2(700.0, 500.0));
+        let camera_rect = egui::Rect::from_min_max(egui::pos2(200.0, 200.0), egui::pos2(600.0, 400.0));
+        for (release_x, expected_inside) in [(150.0, true), (750.0, false)] {
+            let mut app = crate::SolveApp::new(Default::default(), Default::default());
+            let ctx = crate::fonts::test_context();
+            let mut time = 0.0;
+            let bounds = (input_rect, camera_rect);
+            touchscreen_frame_in_rect(&mut app, &ctx, pointer(300.0, 300.0, None), &mut time, false, bounds);
+            let mut events = pointer(300.0, 300.0, Some(true));
+            events.push(finger(1, Start, 300.0, 300.0));
+            touchscreen_frame_in_rect(&mut app, &ctx, events, &mut time, false, bounds);
+            let mut events = pointer(340.0, 320.0, None);
+            events.push(finger(1, Move, 340.0, 320.0));
+            touchscreen_frame_in_rect(&mut app, &ctx, events, &mut time, false, bounds);
+            let mut events = pointer(release_x, 320.0, Some(false));
+            events.extend([finger(1, End, release_x, 320.0), egui::Event::PointerGone]);
+            let inside = touchscreen_frame_in_rect(&mut app, &ctx, events, &mut time, false, bounds);
+            assert_eq!(inside, expected_inside, "release uses the input surface, not the framed camera image");
+            assert!(app.viewport.touch.contacts.is_empty());
+        }
+    }
+
+    #[test]
+    fn touchscreen_second_finger_can_pan_in_letterbox_but_not_outside_input() {
+        use egui::TouchPhase::{Move, Start};
+        let input_rect = egui::Rect::from_min_max(egui::pos2(100.0, 100.0), egui::pos2(700.0, 500.0));
+        let camera_rect = egui::Rect::from_min_max(egui::pos2(200.0, 200.0), egui::pos2(600.0, 400.0));
+        for (second_x, expected_owned) in [(150.0, true), (50.0, false)] {
+            let mut app = crate::SolveApp::new(Default::default(), Default::default());
+            let ctx = crate::fonts::test_context();
+            let mut time = 0.0;
+            let bounds = (input_rect, camera_rect);
+            touchscreen_frame_in_rect(&mut app, &ctx, pointer(300.0, 300.0, None), &mut time, false, bounds);
+            let mut events = pointer(300.0, 300.0, Some(true));
+            events.push(finger(1, Start, 300.0, 300.0));
+            touchscreen_frame_in_rect(&mut app, &ctx, events, &mut time, false, bounds);
+            touchscreen_frame_in_rect(&mut app, &ctx, vec![finger(2, Start, second_x, 300.0)], &mut time, false, bounds);
+            assert_eq!(app.viewport.touch.owned, expected_owned);
+            let before = app.cam;
+            let mut events = pointer(320.0, 310.0, None);
+            events.extend([finger(1, Move, 320.0, 310.0), finger(2, Move, second_x + 20.0, 310.0)]);
+            touchscreen_frame_in_rect(&mut app, &ctx, events, &mut time, false, bounds);
+            assert_eq!(app.cam.target != before.target, expected_owned, "letterbox remains a camera navigation surface");
+            assert_eq!((app.cam.yaw, app.cam.pitch, app.cam.distance), (before.yaw, before.pitch, before.distance));
+        }
     }
 
     #[test]
