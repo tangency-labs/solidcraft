@@ -88,6 +88,11 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         }
                     }
                 });
+                // The icons on a ribbon tab in the tab's colour.
+                ui_kit::row(ui, "", |ui| {
+                    let response = ui_kit::checkbox(ui, app.tr("prefs.tab_icons"), &mut app.preferences.tab_colored_icons);
+                    crate::scenario::publish_target("prefs:tab_colored_icons", response.rect);
+                });
                 // A picture of the user's behind the model.
                 let label = app.tr("prefs.background_image");
                 ui_kit::row(ui, label, |ui| {

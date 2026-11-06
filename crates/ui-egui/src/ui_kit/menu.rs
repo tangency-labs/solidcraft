@@ -272,11 +272,25 @@ pub(crate) struct MenuItem<'a> {
     pub swatch: Option<Color32>,
     pub danger: bool,
     pub submenu: bool,
+    /// A ribbon drop-down's command: its icon follows the tab's colour when icons do.
+    pub on_tab: bool,
 }
 
 impl<'a> MenuItem<'a> {
     pub(crate) fn new(id: &'a str, label: &'a str, icon: &'a str) -> Self {
-        Self { id, label, icon, shortcut: "", enabled: true, highlighted: false, checked: None, swatch: None, danger: false, submenu: false }
+        Self {
+            id,
+            label,
+            icon,
+            shortcut: "",
+            enabled: true,
+            highlighted: false,
+            checked: None,
+            swatch: None,
+            danger: false,
+            submenu: false,
+            on_tab: false,
+        }
     }
 
     pub(crate) fn show(&self, ui: &mut Ui) -> Response {
@@ -336,6 +350,8 @@ impl<'a> MenuItem<'a> {
                 icons::paint_danger(&painter, icon, self.icon, 1.0);
             } else if hot {
                 icons::paint_ink(&painter, icon, self.icon, dim);
+            } else if self.on_tab {
+                icons::paint_on_tab(&painter, icon, self.icon, 1.0);
             } else {
                 icons::paint_icon(&painter, icon, self.icon, 1.0);
             }

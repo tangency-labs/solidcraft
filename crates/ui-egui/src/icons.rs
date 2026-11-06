@@ -51,6 +51,22 @@ pub fn paint_icon(p: &Painter, r: Rect, name: &str, opacity: f32) {
     paint_on(p, r, name, None, opacity);
 }
 
+/// A command icon on a ribbon tab or its drop-downs. With icons following their tab's colour
+/// (Preferences, `TabAccent::tab_icons`), it takes the active tab's ramp, unless its own colour
+/// carries a meaning (constraints, construction); otherwise it keeps its own colour.
+pub(crate) fn paint_on_tab(p: &Painter, r: Rect, name: &str, opacity: f32) {
+    match crate::theme::TabAccent::tab_icons(p.ctx()) {
+        Some((ramp, palette)) if !icon_svg::keeps_its_colour(name) => {
+            let resolved = icon_svg::resolve(name);
+            let accent = ramp.and_then(icon_svg::accent_index);
+            let mut look = Look::themed(p.ctx().global_style().visuals.dark_mode, accent, crate::theme::vision());
+            look.palette = Some(palette);
+            paint_resolved(p, r, resolved, look, opacity, Finish::Artwork, Mirror::None);
+        }
+        _ => paint_icon(p, r, name, opacity),
+    }
+}
+
 /// Draw the icon `name` for a surface that is always dark (the application bar), whatever the
 /// theme: `dark: Some(true)`. `None` follows the theme.
 pub fn paint_on(p: &Painter, r: Rect, name: &str, dark: Option<bool>, opacity: f32) {

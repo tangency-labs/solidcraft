@@ -1272,6 +1272,9 @@ preference_settings! {
     theme: String = "dark".into(), PAGE_APPEARANCE;
     /// A picture behind the model in place of the view's background; empty for none.
     background_image: String = String::new(), PAGE_APPEARANCE;
+    /// The icons on a ribbon tab and its drop-downs follow the tab's colour (`icons::paint_on_tab`);
+    /// icons whose colour carries a meaning (constraints, construction) keep theirs.
+    tab_colored_icons: bool = false, PAGE_APPEARANCE;
     /// Theme used when the operating system is light; unknown ids resolve to Light.
     theme_day: String = "light".into(), PAGE_APPEARANCE;
     /// Theme used when the operating system is dark; unknown ids resolve to Dark.
