@@ -2264,6 +2264,8 @@
   "nav.maya.help": "Alt+left drag orbits, Alt+middle pans, Alt+right zooms; middle drag also pans",
   "nav.nx.help": "Middle drag orbits, Shift+middle pans (NX's middle + right), Ctrl+middle zooms (NX's middle + left); right drag leaves the camera",
   "nav.openscad.help": "Left drag on empty space orbits, Shift+left drag box-selects, sketch geometry drags edit; right or middle drag pans, Shift+right or Shift+middle drag zooms",
+  "nav.orbit_cursor_wrap.help": "An orbit drag that reaches the edge of the view moves the cursor to the opposite edge and keeps turning. Off: the drag stops at the edge of the screen. Has no effect on Wayland or in the browser.",
+  "nav.orbit_cursor_wrap.label": "Wrap the cursor while orbiting",
   "nav.perspective.sketch": "Sketch editing uses orthographic view. Finish the sketch to switch perspective.",
   "nav.right_drag_orbits.help": "Off: a right drag leaves the camera alone and the right button only opens the context menu. Picking the SolidWorks mouse mapping turns it off.",
   "nav.right_drag_orbits.label": "Right drag orbits",

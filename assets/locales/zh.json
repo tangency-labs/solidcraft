@@ -2264,6 +2264,8 @@
   "nav.maya.help": "Alt+左键拖动旋转，Alt+中键拖动平移，Alt+右键拖动缩放；中键拖动也可平移",
   "nav.nx.help": "中键拖动旋转，Shift+中键平移（对应 NX 的中键+右键），Ctrl+中键缩放（对应 NX 的中键+左键）；右键拖动不旋转视图",
   "nav.openscad.help": "在空白处左键拖动旋转，Shift+左键拖动框选，拖动草图几何可编辑；右键或中键拖动平移，Shift+右键或 Shift+中键拖动缩放",
+  "nav.orbit_cursor_wrap.help": "旋转拖动到达视图边缘时，光标移到对侧边缘并继续旋转。关闭时，拖动在屏幕边缘停止。在 Wayland 和浏览器中无效。",
+  "nav.orbit_cursor_wrap.label": "旋转时光标循环",
   "nav.perspective.sketch": "编辑草图时使用正交视图。完成草图后才能切换透视。",
   "nav.right_drag_orbits.help": "关闭：右键拖动不会移动相机，右键只打开上下文菜单。选择 SolidWorks 鼠标映射时会关闭此项。",
   "nav.right_drag_orbits.label": "右键拖动旋转",

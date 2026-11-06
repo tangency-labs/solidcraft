@@ -2264,6 +2264,8 @@
   "nav.maya.help": "Alt+kéo chuột trái để xoay, Alt+chuột giữa để trượt, Alt+chuột phải để thu phóng; kéo chuột giữa cũng trượt",
   "nav.nx.help": "Kéo chuột giữa để xoay, Shift+chuột giữa để kéo ngang (NX: giữa + phải), Ctrl+chuột giữa để thu phóng (NX: giữa + trái); kéo chuột phải không di chuyển camera",
   "nav.openscad.help": "Kéo chuột trái trên vùng trống để xoay, Shift + chuột trái để quét chọn vùng, kéo hình học phác thảo để chỉnh sửa; kéo chuột phải hoặc chuột giữa để trượt, Shift + kéo chuột phải hoặc chuột giữa để thu phóng",
+  "nav.orbit_cursor_wrap.help": "Khi thao tác kéo để xoay chạm tới cạnh khung nhìn, con trỏ được chuyển sang cạnh đối diện và tiếp tục xoay. Khi tắt: thao tác kéo dừng lại ở cạnh màn hình. Không có tác dụng trên Wayland hoặc trên trình duyệt.",
+  "nav.orbit_cursor_wrap.label": "Chuyển con trỏ sang cạnh đối diện khi xoay",
   "nav.perspective.sketch": "Chế độ chỉnh sửa phác thảo sử dụng góc nhìn trực giao. Hãy hoàn tất phác thảo để chuyển sang góc nhìn phối cảnh.",
   "nav.right_drag_orbits.help": "Tắt: kéo chuột phải không di chuyển camera, và nút phải chỉ mở menu ngữ cảnh. Chọn kiểu chuột SolidWorks sẽ tắt tùy chọn này.",
   "nav.right_drag_orbits.label": "Kéo chuột phải để xoay",
