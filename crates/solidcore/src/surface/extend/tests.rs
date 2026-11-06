@@ -1487,3 +1487,261 @@ fn a_ball_patch_extends_its_own_net_on_its_sphere_up_to_its_caps() {
         assert!((out.radius() - r).abs() == 0.0 && out.centre() == c);
     }
 }
+
+/// A small plane far from the origin extended far, keeping its parameters: the end cap of a
+/// bar at (147..152, -25.5, 846..852), 5.83 mm square, turned 2 degrees about x by a draft,
+/// extended 547.405 past every side by the draft's local operation (its placement and net as
+/// SolidCraft's draft hands them over). Its net lies on the plane to its rounding, about 1e-13
+/// at this size, and the continuation carries that out about 190 times each way: the
+/// extended net is 6.4e-11 off the plane, where the rounding of the check alone is 8e-12. It
+/// is the plane's own net continued, on the plane within what the source's residual grows
+/// to, and is extended, not refused as not exact.
+#[test]
+fn a_small_tilted_plane_far_from_the_origin_extends_far_on_its_plane() {
+    use crate::surface::implicit::{lies_on, AnalyticSupport, Implicit};
+    let kk = k();
+    let origin = Vec3::new(152.33308696865228, -25.520154849846044, 852.1498844507267);
+    let x_axis = Vec3::new(0.0, 0.03489949670250011, -0.9993908270190959);
+    let y_axis = Vec3::new(-1.0, 1.9539925233402755e-14, 0.0);
+    let (lu, lv) = (5.830273937304582, 5.830273937304639);
+    let rows = [
+        vec![
+            [
+                152.33308696865228,
+                -25.520154849846044,
+                852.1498844507267,
+                1.0,
+            ],
+            [
+                146.50281303134764,
+                -25.52015484984593,
+                852.1498844507267,
+                1.0,
+            ],
+        ],
+        vec![
+            [
+                152.33308696865228,
+                -25.316681223796408,
+                846.323162158776,
+                1.0,
+            ],
+            [
+                146.50281303134764,
+                -25.316681223796287,
+                846.323162158776,
+                1.0,
+            ],
+        ],
+    ];
+    let SurfaceKind::BSpline(form) =
+        spline(&rows, 1, 1, &[0.0, 0.0, lu, lu], &[0.0, 0.0, lv, lv], false)
+            .kind()
+            .clone()
+    else {
+        unreachable!()
+    };
+    let p = Surface::from(Plane::from_stored(
+        Axis2Placement::from_stored(origin, x_axis, y_axis),
+        Vec2::new(1.0000000000000169, 1.0),
+        Extent2d::from_bounds(0.0, 0.0, lu, lv),
+        form.clone(),
+    ));
+    let on = AnalyticSupport::check(&kk, &p).unwrap().implicit();
+    let Implicit::Plane { origin, normal } = on else {
+        panic!("not a plane: {on:?}");
+    };
+    let d = 547.4052982921842;
+    let e = p
+        .extended_sides_keeping_parameters(&kk, &BoxSide::ALL, Continuity::Ruled, d)
+        .unwrap();
+    assert!(
+        e.sides
+            .iter()
+            .all(|x| matches!(x, SideExtension::Extended(_))),
+        "{:?}",
+        e.sides
+    );
+    let SurfaceKind::BSpline(grown) = e.surface.kind() else {
+        panic!("not a B-spline: {:?}", e.surface.kind());
+    };
+    // every control point on the plane to the rounding of building it from the plane's own
+    // origin and axes (the continued net was 6.4e-11 off it), and the plane's own point at
+    // its parameters: the extension is the plane over the larger box
+    let SurfaceKind::Plane(pl) = p.kind() else {
+        unreachable!()
+    };
+    let g = grown.gw_nurb().unwrap();
+    let (u, v) = (g.u_knots(), g.v_knots());
+    assert_eq!((u.len(), v.len()), (4, 4), "one bilinear span");
+    for (i, row) in g.cpts().iter().enumerate() {
+        for (j, c) in row.iter().enumerate() {
+            let x = Vec3::new(c.x, c.y, c.z);
+            let off = normal.dot(x - origin);
+            assert!(off.abs() <= 1e-12, "{c:?}: {off}");
+            let at = Point2::new(u[if i == 0 { 0 } else { 3 }], v[if j == 0 { 0 } else { 3 }]);
+            let own = pl.evaluate_point_fast(at);
+            assert!((x - own).length() <= 1e-9, "{c:?} vs {own:?}");
+        }
+    }
+    assert!(lies_on(grown, &on).unwrap());
+    // the check refuses a net 1e-9 off the plane at a far corner
+    let mut net = g.cpts();
+    let c = &mut net[0][0];
+    let moved = Vec3::new(c.x, c.y, c.z) + normal * 1e-9;
+    *c = CPoint::new(moved.x, moved.y, moved.z, NOW);
+    let off = Net::new(net, 1, 1, u.to_vec(), v.to_vec()).unwrap();
+    assert!(!lies_on(&BSplineSurface::from_gw_nurb(&off), &on).unwrap());
+    for a in e.sides {
+        let SideExtension::Extended(a) = a else {
+            unreachable!()
+        };
+        assert!((a.enclosure.mid() - d).abs() <= 1e-9 * d, "{a:?}");
+    }
+}
+
+/// Every control point of `s`'s net on the analytic `on`, certified (`lies_on`), and the
+/// net's points on a grid over its whole box within `tol` of it by the closed form `off`.
+fn on_its_analytic(
+    s: &BSplineSurface,
+    on: &crate::surface::implicit::Implicit,
+    off: impl Fn(Vec3) -> f64,
+    tol: f64,
+) {
+    use crate::surface::implicit::lies_on;
+    assert!(lies_on(s, on).unwrap());
+    let d = ball::knot_box(s).unwrap();
+    for i in 0..=8 {
+        for j in 0..=8 {
+            let uv = d.evaluate(f64::from(i) / 8.0, f64::from(j) / 8.0);
+            let x = s.evaluate_point(uv).unwrap();
+            assert!(off(x).abs() <= tol, "{uv:?}: {}", off(x));
+        }
+    }
+}
+
+/// A narrow strip of a cylinder far from the origin (5 degrees of radius 3, 2 high, at
+/// (800, -300, 900)) extended far along its rulings and round its axis up to its cap: its
+/// short spans carried 20 times their length past each end. Each new point is built on the
+/// cylinder from its axis and radius, so the result is on it to the rounding of one
+/// evaluation, and is extended, not refused as not exact.
+#[test]
+fn a_narrow_cylinder_far_from_the_origin_extends_far_on_its_cylinder() {
+    use crate::surface::implicit::{AnalyticSupport, Implicit};
+    let kk = k();
+    let o = Vec3::new(800.0, -300.0, 900.0);
+    let pl = Axis2Placement::new(o, Vec3::Z, Vec3::X);
+    let mut c = Cone::create_canonical(&kk, &pl, 3.0, 3.0, 2.0, false, false).unwrap();
+    c.adjust_step_uv_domain(&kk, &Extent2d::from_bounds(0.0, 0.0, 5.0, 2.0))
+        .unwrap();
+    let c = Surface::from(c);
+    let on = AnalyticSupport::check(&kk, &c).unwrap().implicit();
+    let Implicit::Cone { origin, axis, .. } = on else {
+        panic!("not a cone: {on:?}");
+    };
+    let e = c
+        .extended_sides(&kk, &BoxSide::ALL, Continuity::Natural, 40.0)
+        .unwrap();
+    let SurfaceKind::BSpline(grown) = e.surface.kind() else {
+        panic!("not a B-spline: {:?}", e.surface.kind());
+    };
+    let radial = |x: Vec3| {
+        let d = x - origin;
+        (d - axis * axis.dot(d)).length() - 3.0
+    };
+    on_its_analytic(grown, &on, radial, 1e-11);
+    // round the axis a quarter of the 355 degrees left open, along the whole 40
+    for (i, s) in e.sides.iter().enumerate() {
+        match (i < 2, s) {
+            (true, SideExtension::UpToLimit(a)) => {
+                let want = 3.0 * 0.25 * 355f64.to_radians();
+                assert!((a.enclosure.mid() - want).abs() <= 1e-9 * want, "{a:?}");
+            }
+            (false, SideExtension::Extended(a)) => {
+                assert!((a.enclosure.mid() - 40.0).abs() <= 1e-9 * 40.0, "{a:?}");
+            }
+            _ => panic!("{:?}", e.sides),
+        }
+    }
+}
+
+/// A small patch of a sphere far from the origin (4 by 4 degrees of radius 4, from 20 to 24
+/// degrees of latitude) extended 2 past every side: round its axis and along its meridians,
+/// each new row's arc built on the sphere from its centre and radius.
+#[test]
+fn a_small_sphere_patch_far_from_the_origin_extends_on_its_sphere() {
+    use crate::surface::implicit::{AnalyticSupport, Implicit};
+    use crate::surface::sphere::Sphere;
+    let kk = k();
+    let pl = Axis2Placement::new(Vec3::new(800.0, -300.0, 900.0), Vec3::Z, Vec3::X);
+    let mut sp = Sphere::create_canonical(&kk, &pl, 4.0).unwrap();
+    sp.adjust_step_uv_domain(&kk, &Extent2d::from_bounds(0.0, 20.0, 4.0, 24.0))
+        .unwrap();
+    let s = Surface::from(sp);
+    let on = AnalyticSupport::check(&kk, &s).unwrap().implicit();
+    let Implicit::Sphere { centre, radius } = on else {
+        panic!("not a sphere: {on:?}");
+    };
+    let e = s
+        .extended_sides(&kk, &BoxSide::ALL, Continuity::Natural, 2.0)
+        .unwrap();
+    let SurfaceKind::BSpline(grown) = e.surface.kind() else {
+        panic!("not a B-spline: {:?}", e.surface.kind());
+    };
+    on_its_analytic(grown, &on, |x| (x - centre).length() - radius, 1e-11);
+    for s in e.sides {
+        let SideExtension::Extended(a) = s else {
+            panic!("{:?}", e.sides);
+        };
+        assert!((a.enclosure.mid() - 2.0).abs() <= 1e-9 * 2.0, "{a:?}");
+    }
+}
+
+/// A small patch of a torus far from the origin (4 degrees round its axis by 6 of its tube,
+/// radii 6 and 2) extended 1.5 past every side: round its axis and along its tube.
+#[test]
+fn a_small_torus_patch_far_from_the_origin_extends_on_its_torus() {
+    use crate::surface::implicit::{AnalyticSupport, Implicit};
+    use crate::surface::torus::{Torus, TorusOptions};
+    let kk = k();
+    let pl = Axis2Placement::new(Vec3::new(800.0, -300.0, 900.0), Vec3::Z, Vec3::X);
+    let t = Torus::create_canonical(
+        &kk,
+        &pl,
+        6.0,
+        2.0,
+        TorusOptions::default(),
+        Some(&Extent2d::from_bounds(0.0, 30.0, 4.0, 36.0)),
+    )
+    .unwrap();
+    let s = Surface::from(t);
+    let on = AnalyticSupport::check(&kk, &s).unwrap().implicit();
+    let Implicit::Torus {
+        centre,
+        axis,
+        major,
+        minor,
+    } = on
+    else {
+        panic!("not a torus: {on:?}");
+    };
+    let e = s
+        .extended_sides(&kk, &BoxSide::ALL, Continuity::Natural, 1.5)
+        .unwrap();
+    let SurfaceKind::BSpline(grown) = e.surface.kind() else {
+        panic!("not a B-spline: {:?}", e.surface.kind());
+    };
+    let tube = |x: Vec3| {
+        let d = x - centre;
+        let h = axis.dot(d);
+        let r = (d - axis * h).length() - major;
+        r.hypot(h) - minor
+    };
+    on_its_analytic(grown, &on, tube, 1e-11);
+    for s in e.sides {
+        let SideExtension::Extended(a) = s else {
+            panic!("{:?}", e.sides);
+        };
+        assert!((a.enclosure.mid() - 1.5).abs() <= 1e-9 * 1.5, "{a:?}");
+    }
+}

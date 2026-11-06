@@ -8,11 +8,36 @@
 //! and parameters stay bit for bit (a straight direction's end points to rounding, below): a face keeps its UV trims on the result (the shell's
 //! extended offset replaces the face's surface with UV trim creation off). Widening the
 //! analytic itself ([`Surface::continued`]) rebuilds its canonical form over the wider STEP
-//! box, which moves every kept UV trim. The implicit equation composed with the net is a
-//! polynomial identity, so it holds on its continuation: the result is certified on the
-//! analytic on its net ([`lies_on`]), within its rounding. It is a B-spline, carrying the
-//! source's kept exact round where it has one (#2487); an offset surface of an analytic is
-//! the offset of its base so extended.
+//! box, which moves every kept UV trim. The continuation gives the extension's parameters;
+//! its points are then built from the analytic's definition (below), and the result is
+//! certified on the analytic on its net ([`lies_on`]), within its rounding. It is a
+//! B-spline, carrying the source's kept exact round where it has one (#2487); an offset
+//! surface of an analytic is the offset of its base so extended.
+//!
+//! **The extension from the definition.** The continuation is the same polynomial, but the
+//! source's net is on the analytic only to its rounding, and carrying a short span far
+//! carries that residual out with it, `(1 + 2 e / L)` times per degree for a span of length
+//! `L` continued by `e`: a 5.8 mm plane continued 547 mm each way is 6e-11 off its plane.
+//! So the points past the joint are not taken from the continuation but built on the
+//! analytic from its own data, at the place the continuation puts them (`on_definition`):
+//! - a plane's: the plane's point at the continued point's own coordinates in the plane
+//!   (its origin plus its two axes, the part along the normal dropped);
+//! - a cone's along its rulings: at the continued point's height on the axis, at the cone's
+//!   radius there, in the row's own direction from the axis and at its own scale;
+//! - round the axis (a cone, a sphere, a torus): each row a circle about the axis, its arc
+//!   past the joint the joint's point turned about the axis by the angle the continuation
+//!   reached, its middle on the bisector at the radius over `cos` of half that angle, its
+//!   weights the continuation's at its ends and `cos` of the half angle times their
+//!   geometric mean between (the rational quadratic arc's own condition);
+//! - a sphere's meridian or a torus's tube: the profile circle in the plane through the
+//!   axis, turned the same way about its own centre, carried to every row as the form
+//!   revolves it.
+//!
+//! Each new point is then as near the analytic as one evaluation of its data rounds,
+//! whatever the reach; only where along the analytic it lies comes from the continuation,
+//! and that only moves it on the analytic. The rows round the axis and along a meridian or
+//! tube must be rational quadratic arcs (every analytic form is), refused as unsupported
+//! otherwise.
 //!
 //! A plane follows the same rule for a caller keeping its trims (owner, 2026-11-04;
 //! [`Surface::extended_sides_keeping_parameters`]): its bilinear net continued, a B-spline
@@ -63,6 +88,7 @@ use crate::geom::vector3d::Vec3;
 use crate::kernel::Kernel;
 use crate::math::INFINITE_PARAMETER;
 use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
+use crate::nurbs::math::CPoint;
 use crate::nurbs::math::{gamma, NOW};
 use crate::nurbs::srf_basic::{Direction, Surface as Net};
 use crate::nurbs::srf_tool::p1::extract_iso_crv;
@@ -264,7 +290,8 @@ pub(super) fn analytic_extended_sides(
         } else {
             along
         };
-        let (grown, across, capped, bound) = extend_side(&cur, side, &frame, iso, distance)?;
+        let (grown, across, capped, bound) =
+            extend_side(&cur, side, &frame, iso, &implicit, distance)?;
         cur = grown;
         extension = extension.max(bound);
         *done = if capped {
@@ -362,6 +389,7 @@ fn extend_side(
     side: BoxSide,
     f: &Frame,
     iso: Iso,
+    implicit: &Implicit,
     distance: f64,
 ) -> Result<(BSplineSurface, Across, bool, f64)> {
     let net = cur.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
@@ -390,6 +418,9 @@ fn extend_side(
                 "the extension moved the source's net",
             ));
         }
+        let Some(out) = on_definition(&out, side, f, iso, implicit)? else {
+            return Ok(None);
+        };
         let out = if straight {
             joint_removed(&out, side, side.at(&dom))?
         } else {
@@ -593,4 +624,244 @@ fn certify_iso(
         }
     }
     Ok(())
+}
+
+/// `out`, a net continued Natural past `side` (its `deg` points past the joint in each row
+/// across, `deg` its degree across the side), with those points rebuilt from the analytic's
+/// definition (module docs, **The extension from the definition**): the joint's points and
+/// the continuation's parameters (where along the analytic each new point is, and the
+/// weights that place it) are kept, and the points are put on the analytic by its own data.
+///
+/// `None` where the continuation turned a half turn or more (no quadratic arc's weights
+/// are all positive there), as the continuation gives where a weight vanishes.
+///
+/// # Errors
+///
+/// `Unsupported` where the rows across a side round the axis, a sphere's meridian or a
+/// torus's tube are not rational quadratic arcs; `SM_ERR` where a joint point is on the
+/// axis or the net is short.
+fn on_definition(
+    out: &Net,
+    side: BoxSide,
+    f: &Frame,
+    iso: Iso,
+    implicit: &Implicit,
+) -> Result<Option<Net>> {
+    let (p, q) = out.degrees();
+    let deg = if side.is_u() { p } else { q };
+    let mut cpts = out.cpts();
+    let rational = out.is_rational();
+    let n_along = if side.is_u() {
+        cpts.len()
+    } else {
+        cpts.first().map_or(0, Vec::len)
+    };
+    let rows = if side.is_u() {
+        cpts.first().map_or(0, Vec::len)
+    } else {
+        cpts.len()
+    };
+    // the index along the side's direction of the joint (k = 0) and of the k-th point past it
+    let index = |k: usize| -> Result<usize> {
+        let i = if side.is_high() {
+            n_along.checked_sub(deg + 1).map(|j| j + k)
+        } else {
+            deg.checked_sub(k)
+        };
+        i.filter(|&i| i < n_along)
+            .ok_or_else(|| SolidError::sm_err(OP))
+    };
+    let is_u = side.is_u();
+    let slot = |cp: &mut [Vec<CPoint>], a: usize, r: usize| -> Result<CPoint> {
+        Ok(*slot_mut(cp, is_u, a, r)?)
+    };
+    // a control point as its 3D point and its weight
+    let point = |c: &CPoint| -> (Vec3, f64) {
+        let w = if c.w == NOW { 1.0 } else { c.w };
+        (Vec3::new(c.x / w, c.y / w, c.z / w), w)
+    };
+    let put = |c: &mut CPoint, x: Vec3, w: f64| {
+        *c = if rational {
+            CPoint::new(x.x * w, x.y * w, x.z * w, w)
+        } else {
+            CPoint::new(x.x, x.y, x.z, NOW)
+        };
+    };
+    // each row's joint point and the points past it, as continued
+    let mut joint = Vec::with_capacity(rows);
+    let mut past = Vec::with_capacity(rows);
+    for r in 0..rows {
+        joint.push(point(&slot(&mut cpts, index(0)?, r)?));
+        let mut row = Vec::with_capacity(deg);
+        for k in 1..=deg {
+            row.push(point(&slot(&mut cpts, index(k)?, r)?));
+        }
+        past.push(row);
+    }
+    let mut rebuilt: Vec<Vec<(Vec3, f64)>> = Vec::with_capacity(rows);
+    match (*implicit, iso) {
+        // a plane: each point the plane's at its own coordinates in the plane
+        (Implicit::Plane { origin, normal }, _) => {
+            for row in &past {
+                rebuilt.push(
+                    row.iter()
+                        .map(|&(x, w)| (x - normal * normal.dot(x - origin), w))
+                        .collect(),
+                );
+            }
+        }
+        // a cone's ruling: each point at its height along the axis, at the cone's radius
+        // there, in its row's own direction from the axis (and its row's scale: a point off
+        // the cone in the form, the middle of an arc, is that much off it again)
+        (
+            Implicit::Cone {
+                origin,
+                axis,
+                radius,
+                tan_angle,
+            },
+            Iso::Ruling,
+        ) => {
+            let at = |h: f64| radius + tan_angle * h;
+            for (&(j, _), row) in joint.iter().zip(&past) {
+                let d = j - origin;
+                let h = axis.dot(d);
+                let rho = at(h);
+                if !(rho.is_finite() && rho.abs() > 0.0) {
+                    return Err(SolidError::sm_err(OP));
+                }
+                let template = (d - axis * h) * (1.0 / rho);
+                rebuilt.push(
+                    row.iter()
+                        .map(|&(x, w)| {
+                            let h = axis.dot(x - origin);
+                            (origin + axis * h + template * at(h), w)
+                        })
+                        .collect(),
+                );
+            }
+        }
+        // round the axis: each row a circle about the axis, its arc past the joint turned
+        // about the axis from the joint's point by the angle the continuation reached
+        (_, Iso::Parallel) => {
+            if deg != 2 {
+                return Err(SolidError::Unsupported {
+                    operation: OP,
+                    reason: "a form round its axis not of rational quadratic arcs",
+                });
+            }
+            let (origin, axis) = (f.origin, f.axis);
+            for (&(j, wj), row) in joint.iter().zip(&past) {
+                let &[_, (end, wn)] = row.as_slice() else {
+                    return Err(SolidError::sm_err(OP));
+                };
+                let centre = origin + axis * axis.dot(j - origin);
+                let r0 = j - centre;
+                let r1 = end - centre;
+                let delta = axis.dot(r0.cross(r1)).atan2(r0.dot(r1));
+                let turn = |phi: f64| r0 * phi.cos() + axis.cross(r0) * phi.sin();
+                let half = 0.5 * delta;
+                if half.cos().is_nan() || half.cos() <= 0.0 {
+                    return Ok(None);
+                }
+                rebuilt.push(vec![
+                    (
+                        centre + turn(half) * (1.0 / half.cos()),
+                        half.cos() * (wj * wn).sqrt(),
+                    ),
+                    (centre + turn(delta), wn),
+                ]);
+            }
+        }
+        // a sphere's meridian or a torus's tube: the profile, a circle in the plane through
+        // the axis, turned about its centre in that plane from the joint's point by the angle
+        // the continuation reached, then carried to every row as the form revolves it
+        (_, Iso::Meridian { .. } | Iso::Tube { .. }) => {
+            if deg != 2 {
+                return Err(SolidError::Unsupported {
+                    operation: OP,
+                    reason: "a form along its profile not of rational quadratic arcs",
+                });
+            }
+            let (origin, axis) = (f.origin, f.axis);
+            let major = match iso {
+                Iso::Tube { major, .. } => major,
+                _ => 0.0,
+            };
+            // the profile's row: the joint nearest the axis (the others are its scaled
+            // copies, the middles of the arcs round the axis)
+            let flat = |x: Vec3| {
+                let d = x - origin;
+                d - axis * axis.dot(d)
+            };
+            let mut r_ref = 0;
+            for (r, &(x, _)) in joint.iter().enumerate() {
+                let best = joint
+                    .get(r_ref)
+                    .map_or(f64::INFINITY, |&(y, _)| flat(y).length());
+                if flat(x).length() < best {
+                    r_ref = r;
+                }
+            }
+            let (Some(&(j, wj)), Some(&[_, (end, wn)])) =
+                (joint.get(r_ref), past.get(r_ref).map(Vec::as_slice))
+            else {
+                return Err(SolidError::sm_err(OP));
+            };
+            let radial = flat(j);
+            let rho = radial.length();
+            if !(rho.is_finite() && rho > 0.0) {
+                return Err(SolidError::sm_err(OP));
+            }
+            let dir = radial * (1.0 / rho);
+            // the profile plane's coordinates (along the radial direction, along the axis)
+            // about the profile circle's centre
+            let plane = |x: Vec3| {
+                let d = x - origin;
+                (dir.dot(d) - major, axis.dot(d))
+            };
+            let (a0, b0) = plane(j);
+            let (a1, b1) = plane(end);
+            let delta = (a0 * b1 - b0 * a1).atan2(a0 * a1 + b0 * b1);
+            let turn = |phi: f64, s: f64| {
+                let (c, sn) = (phi.cos(), phi.sin());
+                ((a0 * c - b0 * sn) * s + major, (a0 * sn + b0 * c) * s)
+            };
+            let half = 0.5 * delta;
+            if half.cos().is_nan() || half.cos() <= 0.0 {
+                return Ok(None);
+            }
+            let profile = [
+                (
+                    turn(half, 1.0 / half.cos()),
+                    half.cos() * (wj * wn).sqrt() / wj,
+                ),
+                (turn(delta, 1.0), wn / wj),
+            ];
+            for &(jr, wr) in &joint {
+                let template = flat(jr) * (1.0 / rho);
+                rebuilt.push(
+                    profile
+                        .iter()
+                        .map(|&((s, h), ratio)| (origin + axis * h + template * s, wr * ratio))
+                        .collect(),
+                );
+            }
+        }
+        (_, Iso::Ruling) => return Err(SolidError::sm_err(OP)),
+    }
+    for (r, row) in rebuilt.into_iter().enumerate() {
+        for (k, (x, w)) in row.into_iter().enumerate() {
+            put(slot_mut(&mut cpts, is_u, index(k + 1)?, r)?, x, w);
+        }
+    }
+    Net::new(cpts, p, q, out.u_knots().to_vec(), out.v_knots().to_vec()).map(Some)
+}
+
+/// The control point `a` along `is_u`'s direction (u for true) in row `r` across it.
+fn slot_mut(cp: &mut [Vec<CPoint>], is_u: bool, a: usize, r: usize) -> Result<&mut CPoint> {
+    let (i, j) = if is_u { (a, r) } else { (r, a) };
+    cp.get_mut(i)
+        .and_then(|x| x.get_mut(j))
+        .ok_or_else(|| SolidError::sm_err(OP))
 }
