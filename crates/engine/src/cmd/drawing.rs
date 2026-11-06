@@ -28,6 +28,7 @@ use crate::schema::drawing::{
     DrawingCreateParams, DrawingSetParams, SheetTemplateChange, TemplateApplyParams, TemplateApplyResult, TemplateEntry, TemplateListParams,
     TemplateListResult, TemplateSaveParams, TemplateSaveResult,
 };
+use crate::schema::drawing_view::LineGroupParam;
 use crate::schema::{TypedContract, output_schema_for};
 use crate::title_block_text::{self, CellText, Note};
 use crate::{EngineError, Result, Session};
@@ -116,18 +117,15 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("key, or keys: [keys] → metadata, removed: [keys that were there]"),
 ];
 
-/// A `line_group` as given, for a drawing, a sheet or a view: one of ISO 128's groups, by its wide line.
-pub(crate) fn line_group_of(v: &Value) -> std::result::Result<LineGroup, String> {
-    serde_json::from_value(v.clone()).map_err(|_| format!("`line_group` is one of {}", LineGroup::NAMES.join(", ")))
-}
-
-/// [`line_group_of`], refused as `cmd`.
+/// A sheet's `line_group` as given, refused as `cmd` in the words every line group is.
 pub(super) fn line_group(cmd: &str, v: &Value) -> Result<LineGroup> {
-    line_group_of(v).map_err(|e| bad(cmd, e))
+    serde_json::from_value::<LineGroupParam>(v.clone()).map(|group| group.0).map_err(|e| bad(cmd, format!("`line_group` {e}")))
 }
 
 /// `font` as given: a font family's name, never a file (drawings name fonts by family, so they
-/// travel).
+/// travel). Checked as given, before the trim, so a control character or an overlong name is
+/// refused even where trimming would hide it; `Drawing::validate` checks the trimmed name the
+/// drawing keeps, and a drawing read from a file.
 fn font<'a>(cmd: &str, font: Option<&'a str>) -> Result<Option<&'a str>> {
     if let Some(family) = font {
         solidcraft_sketch::check_family(family).map_err(|e| bad(cmd, e.to_string()))?;
@@ -170,7 +168,7 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(projection) = request.projection {
         d.projection = projection;
     }
-    if let Some(group) = request.line_group {
+    if let Some(LineGroupParam(group)) = request.line_group {
         d.line_group = group;
     }
     let source = d.allocate_id(&mut s.ids).map_err(fail)?;
@@ -503,7 +501,7 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(updates) = request.updates {
             d.updates = updates;
         }
-        if let Some(group) = request.line_group {
+        if let Some(LineGroupParam(group)) = request.line_group {
             d.line_group = group;
         }
         if let Some(font) = font(cmd, request.font.as_deref())? {
