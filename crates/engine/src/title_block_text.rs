@@ -7,7 +7,9 @@
 //! - [`lay`] measures each label as one line at its place, and each value's lines in its value box,
 //!   broken between words to the box's width when its fit wraps. What doesn't fit is shown whole
 //!   and noted ([`Warning`]). A text the drawing's font can't set is left off the sheet and noted
-//!   with why, so one name in a script no font has never fails the sheet or its export.
+//!   with why, so one name in a script no font has never fails the sheet or its export. The window's
+//!   sheet doesn't wait for the search for fonts to fall back to: a text it is still looking for is
+//!   off the sheet until then ([`Laid::pending`]), never noted as refused.
 //!   `drawing.inspect` reads the notes; the sheet scene sets what was measured ([`Laid::set`]),
 //!   without measuring again.
 
@@ -20,7 +22,7 @@ use solidcraft_geom::cell::{HAlign, Part, Source, Warning, place_lines};
 use solidcraft_geom::paper::text::{Font, TextRun};
 use solidcraft_geom::title_block::{CellKind, TextCell, TitleBlock, TitleBlockLayout};
 use solidcraft_geom::{Aabb2, EPS};
-use solidcraft_sketch::{PaperLines, TextAlign, TextStyle, paper_lines};
+use solidcraft_sketch::{PaperLines, SketchError, TextAlign, TextStyle, font_dirs, paper_lines, paper_lines_now};
 
 /// A text cell as its sheet shows it: its name, its text, and the value typed text hides.
 #[derive(Clone, Debug, PartialEq)]
@@ -44,6 +46,8 @@ pub enum Note {
 pub struct Laid {
     texts: Vec<(PaperLines, Vec2)>,
     pub notes: Vec<(String, Note)>,
+    /// Whether a text is off the sheet only until the search for a font to fall back to answers.
+    pub pending: bool,
 }
 
 /// A block's text set on paper: its runs in cell order, and the fonts they are set in (a font may be
@@ -106,20 +110,31 @@ fn format_mass(grams: f64) -> String {
 
 /// `block`'s labels, and its text cells' values as `shown` gives them, measured in the font `family`
 /// and `language` (the drawing's; an empty family: the built-in font) where `layout` places them.
-pub fn lay(block: &TitleBlock, layout: &TitleBlockLayout, family: &str, language: &str, shown: &[CellText]) -> Laid {
+/// `wait`: fonts to fall back to are searched for here; else the search's thread is asked, for the
+/// window's sheet.
+pub fn lay(block: &TitleBlock, layout: &TitleBlockLayout, family: &str, language: &str, shown: &[CellText], wait: bool) -> Laid {
+    let dirs = if wait { Vec::new() } else { font_dirs() };
+    let measure = |text: &str, cap_mm: f64, wrap: Option<f64>, style: &TextStyle| {
+        if wait {
+            paper_lines(text, Some(family), language, cap_mm, wrap, style)
+        } else {
+            paper_lines_now(&dirs, text, Some(family), language, cap_mm, wrap, style)
+        }
+    };
     let mut out = Laid::default();
     for (cell, placed) in block.cells.iter().zip(&layout.cells) {
         let mut notes = Vec::new();
-        if let (Some(label), Some(at)) = (&cell.label, placed.label_at) {
-            match paper_lines(&label.text, Some(family), language, label.cap_mm, None, &TextStyle::default()) {
-                Ok(lines) => out.texts.push((lines, at)),
+        let label = cell.label.as_ref().zip(placed.label_at);
+        let label = label.map(|(label, at)| measure(&label.text, label.cap_mm, None, &TextStyle::default()).map(|lines| (lines, at)));
+        let value = match (&cell.kind, shown.iter().find(|shown| shown.name == cell.name)) {
+            (CellKind::Text(text), Some(value)) => Some(value_lines(text, placed.value_box, measure, &value.text, &mut notes)),
+            _ => None,
+        };
+        for text in [label, value].into_iter().flatten() {
+            match text {
+                Ok(text) => out.texts.push(text),
+                Err(SketchError::FontPending) => out.pending = true,
                 Err(e) => notes.push(Note::Refused(e.to_string())),
-            }
-        }
-        if let (CellKind::Text(text), Some(value)) = (&cell.kind, shown.iter().find(|shown| shown.name == cell.name)) {
-            match value_lines(text, placed.value_box, family, language, &value.text, &mut notes) {
-                Ok(lines) => out.texts.push(lines),
-                Err(why) => notes.push(Note::Refused(why)),
             }
         }
         out.notes.extend(notes.into_iter().map(|note| (cell.name.clone(), note)));
@@ -127,16 +142,15 @@ pub fn lay(block: &TitleBlock, layout: &TitleBlockLayout, family: &str, language
     out
 }
 
-/// `value`'s lines in `value_box` by the cell text rule, and where the first starts; what doesn't
-/// fit is added to `notes`.
+/// `value`'s lines in `value_box`, as `measure` sets them, by the cell text rule, and where the
+/// first starts; what doesn't fit is added to `notes`.
 fn value_lines(
     text: &TextCell,
     value_box: Aabb2,
-    family: &str,
-    language: &str,
+    measure: impl Fn(&str, f64, Option<f64>, &TextStyle) -> Result<PaperLines, SketchError>,
     value: &str,
     notes: &mut Vec<Note>,
-) -> Result<(PaperLines, Vec2), String> {
+) -> Result<(PaperLines, Vec2), SketchError> {
     let width = value_box.size().x;
     let align = match text.align {
         HAlign::Left => TextAlign::Left,
@@ -144,12 +158,13 @@ fn value_lines(
         HAlign::Right => TextAlign::Right,
     };
     let style = TextStyle { align, ..TextStyle::default() };
-    let lines = paper_lines(value, Some(family), language, text.cap_mm, text.fit.wrap.then_some(width), &style).map_err(|e| e.to_string())?;
+    let lines = measure(value, text.cap_mm, text.fit.wrap.then_some(width), &style)?;
     notes.extend(text.fit.warn_chars(value).map(Note::Fit));
     if lines.lines.iter().any(|(_, w)| *w > width + EPS) {
         notes.push(Note::Fit(Warning::Width));
     }
-    let (at, height) = place_lines(value_box, lines.lines.len(), text.cap_mm, lines.pitch, text.align, text.fit.wrap).map_err(|e| e.to_string())?;
+    let (at, height) = place_lines(value_box, lines.lines.len(), text.cap_mm, lines.pitch, text.align, text.fit.wrap)
+        .map_err(|e| SketchError::Invalid(e.to_string()))?;
     notes.extend(height.map(Note::Fit));
     Ok((lines, at))
 }

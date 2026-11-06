@@ -185,6 +185,9 @@ pub struct SheetView {
     pub dimensions: Vec<DimensionState>,
     /// The dimensions out of date whose views aren't: [`step`] reads them once the views are done.
     pub stale_dimensions: Vec<u64>,
+    /// A title block's or a dimension's text waits for the search for a font to fall back to: the
+    /// page extracts again on its next tick, and the text is set once the search has answered.
+    pub waiting_for_fonts: bool,
 }
 
 /// What is under a point of a sheet ([`hit`]).
@@ -297,13 +300,13 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     // placed as they are drawn, so at most one view's are held beside the scene.
     let shown = crate::drawing_view::shown(s);
     let drawn = on.iter().map(|(id, view, centre)| (*id, *centre, draw(s, &shown, *id, view)));
-    let text = block_text(record, &Lettering::of(s, drawing), &cell_texts(s, drawing, sheet))?;
+    let (text, _) = block_text(record, &Lettering::of(s, drawing), &cell_texts(s, drawing, sheet), true)?;
     let mut assembly = assemble(record, drawing.projection, &text, &crate::drawing_pictures::groups(drawing, sheet), drawn)?;
     // After the views, as they need the views' frames: one read for the sheet's dimensions.
     let frames: BTreeMap<u64, ViewFrame> = assembly.placed.iter().map(|(view, (frame, _))| (*view, *frame)).collect();
     let wanted = dimensions_on(drawing, on.iter().map(|(id, ..)| *id));
     let group = |view: u64| on.binary_search_by_key(&view, |(id, ..)| *id).ok().and_then(|at| on.get(at)).map(|(_, v, _)| v.line_group.value);
-    let dimensions = draw_dimensions(s, drawing, &wanted, |view| Some((*frames.get(&view)?, group(view)?)));
+    let dimensions = draw_dimensions(s, drawing, &wanted, |view| Some((*frames.get(&view)?, group(view)?)), true);
     assembly.add_dimensions(dimensions.iter());
     let (scene, views, objects, dimensions) = assembly.finish()?;
     Ok(SheetScene { scene, views, objects, dimensions, out_of_date: Vec::new() })
@@ -376,6 +379,8 @@ struct DrawnDimension {
     /// The fonts its group's text uses.
     fonts: Vec<Font>,
     why: Option<String>,
+    /// Whether its text waits for a font to fall back to: [`extract`] reads it again until it doesn't.
+    pending: bool,
 }
 
 /// What a drawing's dimensions read and are set in: its units (the design's, when it follows them),
@@ -456,26 +461,34 @@ fn draw_dimensions(
     d: &Drawing,
     wanted: &[Arc<Dimension>],
     frame: impl Fn(u64) -> Option<(ViewFrame, LineGroup)>,
+    wait: bool,
 ) -> Vec<DrawnDimension> {
     let ids: Vec<u64> = wanted.iter().map(|record| record.id).collect();
     let read = s.doc.resolve_dimensions(&s.model, d, &ids);
     let one = |at: usize, record: &Arc<Dimension>| match read.as_ref().map(|all| all.get(at)) {
         Ok(Some(resolved)) => {
             let paper = frame(record.view)
-                .and_then(|(frame, lines)| crate::drawing_dimension_paper::paper_group(record, resolved, &frame, lines, &d.font, &d.language));
-            let drawn =
-                |group, fonts, why| DrawnDimension { dimension: record.id, view: record.view, status: resolved.status.clone(), group, fonts, why };
+                .and_then(|(frame, lines)| crate::drawing_dimension_paper::paper_group(record, resolved, &frame, lines, &d.font, &d.language, wait));
+            let drawn = |group, fonts, why, pending| DrawnDimension {
+                dimension: record.id,
+                view: record.view,
+                status: resolved.status.clone(),
+                group,
+                fonts,
+                why,
+                pending,
+            };
             match paper {
-                Some(paper) => drawn(Some(paper.group), paper.fonts, paper.why),
+                Some(paper) => drawn(Some(paper.group), paper.fonts, paper.why, paper.pending),
                 None => {
                     let nothing = !resolved.points.is_empty() && frame(record.view).is_some();
-                    drawn(None, Vec::new(), nothing.then(|| "what it measures has no place to draw on its view".to_string()))
+                    drawn(None, Vec::new(), nothing.then(|| "what it measures has no place to draw on its view".to_string()), false)
                 }
             }
         }
         Ok(None) | Err(_) => {
             let status = dimension::Status::Unmeasurable(format!("dimension {} can't be read", ids::encode(record.id)));
-            DrawnDimension { dimension: record.id, view: record.view, status, group: None, fonts: Vec::new(), why: None }
+            DrawnDimension { dimension: record.id, view: record.view, status, group: None, fonts: Vec::new(), why: None, pending: false }
         }
     };
     wanted.iter().enumerate().map(|(at, record)| one(at, record)).collect()
@@ -686,11 +699,15 @@ fn cell_texts(s: &Session, d: &Drawing, sheet: u64) -> Vec<CellText> {
 }
 
 /// Sheet `record`'s title block text, its cells as `cells` gives them, set on paper in `lettering`'s
-/// font and language: nothing without a block.
-fn block_text(record: &Sheet, lettering: &Lettering, cells: &[CellText]) -> Result<Set> {
+/// font and language: nothing without a block. Also whether a text waits for a font to fall back
+/// to, which only the window's sheet leaves to the search's thread (`wait` false).
+fn block_text(record: &Sheet, lettering: &Lettering, cells: &[CellText], wait: bool) -> Result<(Set, bool)> {
     Ok(match (&record.title_block, record.title_block_layout().map_err(|e| bad(CMD, e.to_string()))?) {
-        (Some(block), Some(placed)) => title_block_text::lay(block, &placed, &lettering.font, &lettering.language, cells).set(),
-        _ => Set::default(),
+        (Some(block), Some(placed)) => {
+            let laid = title_block_text::lay(block, &placed, &lettering.font, &lettering.language, cells, wait);
+            (laid.set(), laid.pending)
+        }
+        _ => (Set::default(), false),
     })
 }
 
@@ -816,6 +833,9 @@ struct Assembled {
     lettering: Lettering,
     cells: Vec<CellText>,
     text: Arc<Set>,
+    /// Whether a text of the block waits for a font to fall back to: until it doesn't, the block is
+    /// set again on each [`extract`], and the sheet put together with it is never reused.
+    pending: bool,
     serial: u64,
     inputs: Inputs,
     answer: SheetView,
@@ -891,16 +911,41 @@ impl Cache {
     /// The dimensions of the views `on`, by view and id, to read again: each whose view is up to
     /// date, last drawn from another record, model, drawing of its view, or lettering.
     fn stale_dimensions(&self, d: &Drawing, on: &[(u64, ResolvedView, Vec2)], state: &Arc<ModelState>, lettering: &Lettering) -> Vec<Arc<Dimension>> {
+        self.dimensions_where(d, on, state, lettering, |current| current.is_none())
+    }
+
+    /// The dimensions of the views `on`, by view and id, read as they are now but with text that
+    /// waits for its font: [`extract`] sets it, as it has no lines to draw again.
+    fn waiting_dimensions(
+        &self,
+        d: &Drawing,
+        on: &[(u64, ResolvedView, Vec2)],
+        state: &Arc<ModelState>,
+        lettering: &Lettering,
+    ) -> Vec<Arc<Dimension>> {
+        self.dimensions_where(d, on, state, lettering, |current| current.is_some_and(|e| e.drawn.pending))
+    }
+
+    /// The dimensions of the up-to-date views `on` that `keep` takes, given each one's entry when it
+    /// was read from this record, model, drawing of its view and lettering.
+    fn dimensions_where(
+        &self,
+        d: &Drawing,
+        on: &[(u64, ResolvedView, Vec2)],
+        state: &Arc<ModelState>,
+        lettering: &Lettering,
+        keep: impl Fn(Option<&DimensionEntry>) -> bool,
+    ) -> Vec<Arc<Dimension>> {
         let fresh = on.iter().filter(|(id, view, _)| self.fresh(*id, state, view));
         let serials: BTreeMap<u64, u64> = fresh.filter_map(|(id, ..)| self.views.get(id).map(|e| (*id, e.serial))).collect();
         let current = |record: &Arc<Dimension>, serial: u64| {
-            self.dimensions.get(&record.id).is_some_and(|e| {
-                Arc::ptr_eq(&e.record, record) && Arc::ptr_eq(&e.state, state) && e.view_serial == serial && e.lettering == *lettering
-            })
+            self.dimensions
+                .get(&record.id)
+                .filter(|e| Arc::ptr_eq(&e.record, record) && Arc::ptr_eq(&e.state, state) && e.view_serial == serial && e.lettering == *lettering)
         };
-        let mut stale = dimensions_on(d, serials.keys().copied());
-        stale.retain(|record| serials.get(&record.view).is_some_and(|serial| !current(record, *serial)));
-        stale
+        let mut found = dimensions_on(d, serials.keys().copied());
+        found.retain(|record| serials.get(&record.view).is_some_and(|serial| keep(current(record, *serial))));
+        found
     }
 }
 
@@ -950,7 +995,9 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
     let d = s.drawing(CMD)?.clone();
     let state = s.world_state()?;
     let lettering = Lettering::of(s, &d);
-    let last = s.drawing_scenes.last.as_ref().filter(|last| last.reads(sheet, &d, &s.doc, &state, &lettering));
+    let on = views_on(&d, sheet)?;
+    set_waiting_dimensions(s, &d, &on, &state, &lettering);
+    let last = s.drawing_scenes.last.as_ref().filter(|last| !last.pending && last.reads(sheet, &d, &s.doc, &state, &lettering));
     if let Some(last) = last
         && last.serial == s.drawing_scenes.serial
     {
@@ -958,26 +1005,27 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
     }
     // The title block's cells are read and set again only for another sheet, drawing, design, model
     // or lettering (a name or a mass can change them), not for each view drawn.
-    let (cells, text) = match last {
-        Some(last) => (last.cells.clone(), last.text.clone()),
+    let (cells, text, pending) = match last {
+        Some(last) => (last.cells.clone(), last.text.clone(), false),
         None => {
             let cells = cell_texts(s, &d, sheet);
-            let text = Arc::new(block_text(sheet_of(&d, sheet)?, &lettering, &cells)?);
-            (cells, text)
+            let (text, pending) = block_text(sheet_of(&d, sheet)?, &lettering, &cells, false)?;
+            (cells, Arc::new(text), pending)
         }
     };
     let doc = s.doc.clone();
     let cache = &mut s.drawing_scenes;
     let record = sheet_of(&d, sheet)?;
-    let on = views_on(&d, sheet)?;
     cache.sheet = Some(sheet);
     catch_up(s, &d, on.iter().map(|(id, ..)| *id), &state);
     let cache = &mut s.drawing_scenes;
     let stale = on.iter().filter(|(id, view, _)| !cache.fresh(*id, &state, view)).map(|(id, ..)| *id).collect();
     let stale_dimensions = cache.stale_dimensions(&d, &on, &state, &lettering).iter().map(|record| record.id).collect();
+    let waiting_for_fonts = pending || !cache.waiting_dimensions(&d, &on, &state, &lettering).is_empty();
     let inputs = cache.inputs(&d, record, &on);
     let (scene, views, objects, dimensions, generation) = match cache.last.take() {
-        Some(last) if last.inputs == inputs && last.cells == cells && last.text.faces() == text.faces() => {
+        // Text set while a font was looked for can differ with the same cells and faces.
+        Some(last) if !last.pending && !pending && last.inputs == inputs && last.cells == cells && last.text.faces() == text.faces() => {
             (last.answer.scene, last.answer.views, last.answer.objects, last.answer.dimensions, last.answer.generation)
         }
         _ => {
@@ -992,14 +1040,16 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
             (Arc::new(scene), views, objects.into(), dimensions, GENERATION.fetch_add(1, Ordering::Relaxed).wrapping_add(1))
         }
     };
-    let answer = SheetView { scene, generation, views, stale, objects, dimensions, stale_dimensions };
-    cache.last = Some(Assembled { sheet, drawing: d, doc, state, lettering, cells, text, serial: cache.serial, inputs, answer: answer.clone() });
+    let answer = SheetView { scene, generation, views, stale, objects, dimensions, stale_dimensions, waiting_for_fonts };
+    cache.last =
+        Some(Assembled { sheet, drawing: d, doc, state, lettering, cells, text, pending, serial: cache.serial, inputs, answer: answer.clone() });
     Ok(answer)
 }
 
 /// Draws the first view out of date on the sheet last extracted or, with none, reads the dimensions
 /// out of date of one view, and says whether more are waiting: a short piece of work for the UI's
-/// tick, one view's projection or one read of a view's dimensions.
+/// tick, one view's projection or one read of a view's dimensions. Text that waits for its font is
+/// no work for it: [`extract`] sets it, and its answer says so ([`SheetView::waiting_for_fonts`]).
 pub fn step(s: &mut Session) -> bool {
     let Some((d, on, state)) = drawable(s) else { return false };
     let lettering = Lettering::of(s, &d);
@@ -1075,7 +1125,7 @@ impl Job {
         // The view's dimensions through its new frame, taken in the same swap as its lines.
         let frame = drawn.frame.map(|frame| (frame, ticket.resolved.line_group.value));
         let dimensions = dimensions_on(&drawing, std::iter::once(ticket.view));
-        let lines = draw_dimensions(&copy, &drawing, &dimensions, |_| frame);
+        let lines = draw_dimensions(&copy, &drawing, &dimensions, |_| frame, false);
         Done { ticket, drawn, shows, dimensions, lines, shown: (state, shown) }
     }
 }
@@ -1152,7 +1202,7 @@ fn step_dimensions(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView, Vec2)
     let entry = s.drawing_scenes.views.get(&view);
     let frame = entry.and_then(|e| Some((e.drawn.frame?, e.view.line_group.value)));
     let view_serial = entry.map_or(0, |e| e.serial);
-    let lines = draw_dimensions(s, d, &these, |_| frame);
+    let lines = draw_dimensions(s, d, &these, |_| frame, false);
     let cache = &mut s.drawing_scenes;
     cache.serial += 1;
     cache.keep_dimensions(these, lines, state, view_serial, &lettering);
@@ -1170,6 +1220,25 @@ fn catch_up(s: &mut Session, d: &Drawing, on: impl Iterator<Item = u64> + Clone,
         cache.drawing = Some(d.id);
     }
     keep_what_shows_the_same(s, on, state);
+}
+
+/// Sets the text of each dimension on `on` that waited for its font, once the search has answered:
+/// one read of those dimensions alone, kept only when its text is set, so a text still waiting
+/// changes nothing.
+fn set_waiting_dimensions(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView, Vec2)], state: &Arc<ModelState>, lettering: &Lettering) {
+    let waiting = s.drawing_scenes.waiting_dimensions(d, on, state, lettering);
+    if waiting.is_empty() {
+        return;
+    }
+    let cache = &s.drawing_scenes;
+    let lines = draw_dimensions(s, d, &waiting, |view| cache.views.get(&view).and_then(|e| Some((e.drawn.frame?, e.view.line_group.value))), false);
+    let set: Vec<(Arc<Dimension>, DrawnDimension)> = waiting.into_iter().zip(lines).filter(|(_, drawn)| !drawn.pending).collect();
+    let cache = &mut s.drawing_scenes;
+    for (record, drawn) in set {
+        let Some(view_serial) = cache.dimensions.get(&record.id).map(|e| e.view_serial) else { continue };
+        cache.serial += 1;
+        cache.keep_dimensions(vec![record], vec![drawn], state, view_serial, lettering);
+    }
 }
 
 /// Each view of `on` drawn from another world state that showed what `state` shows takes `state`:

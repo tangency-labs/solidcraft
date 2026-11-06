@@ -7,6 +7,7 @@
 //! or outside by its real length. A text the font can't set leaves the lines and says why.
 
 use std::f64::consts::{FRAC_1_SQRT_2, PI, TAU};
+use std::path::PathBuf;
 
 use solidcore_record::{Seg2, Vec2};
 use solidcraft_doc::drawing::dimension::{Dimension, DimensionKind, Resolved, TextPlace};
@@ -17,7 +18,7 @@ use solidcraft_geom::paper::line::{LineGroup, LineKind};
 use solidcraft_geom::paper::text::{Font, TextRun};
 use solidcraft_geom::paper::{Group, Item, ObjectKind};
 use solidcraft_geom::prelude::*;
-use solidcraft_sketch::{DimFrame, DimSizes, TextStyle, dim_layout_sized, paper_text};
+use solidcraft_sketch::{DimFrame, DimSizes, SketchError, TextStyle, dim_layout_sized, font_dirs, paper_text, paper_text_now};
 
 /// A dimension's sizes on paper, with its text above an unbroken line (ISO 129-1).
 const SIZES: DimSizes = DimSizes { arrow: 3.0, gap: 1.0, overshoot: 2.0, offset: 10.0, above: true };
@@ -44,20 +45,29 @@ struct Text {
     half: Vec2,
     /// Why it isn't set, when it can't be.
     why: Option<String>,
+    /// Whether it is unset only until the search for a font to fall back to answers.
+    pending: bool,
 }
 
 impl Text {
-    /// `text` in the drawing's `font` (a family; empty: the built-in font) and `language`.
-    fn set(text: Option<&str>, font: &str, language: &str) -> Text {
-        let unset = |why| Text { runs: Vec::new(), fonts: Vec::new(), half: Vec2::new(0.0, TEXT_MM * 0.5), why };
-        match text.map(|text| paper_text(text, Some(font), language, Vec2::ZERO, TEXT_MM, 0.0, &TextStyle::default())) {
-            None | Some(Ok(None)) => unset(None),
-            Some(Err(why)) => unset(Some(why.to_string())),
+    /// `text` in the drawing's `font` (a family; empty: the built-in font) and `language`. With
+    /// `now` (the font folders), the search for fonts to fall back to is asked, not waited for.
+    fn set(text: Option<&str>, font: &str, language: &str, now: Option<&[PathBuf]>) -> Text {
+        let unset = |why, pending| Text { runs: Vec::new(), fonts: Vec::new(), half: Vec2::new(0.0, TEXT_MM * 0.5), why, pending };
+        let style = TextStyle::default();
+        let set = |text| match now {
+            Some(dirs) => paper_text_now(dirs, text, Some(font), language, Vec2::ZERO, TEXT_MM, 0.0, &style),
+            None => paper_text(text, Some(font), language, Vec2::ZERO, TEXT_MM, 0.0, &style),
+        };
+        match text.map(set) {
+            None | Some(Ok(None)) => unset(None, false),
+            Some(Err(SketchError::FontPending)) => unset(None, true),
+            Some(Err(why)) => unset(Some(why.to_string()), false),
             Some(Ok(Some((runs, fonts)))) => {
                 let width = runs.iter().map(TextRun::reach).fold(0.0, f64::max);
                 // Its lines stand below the first one's baseline.
                 let below = runs.iter().map(|run| -run.origin.y).fold(0.0, f64::max);
-                Text { runs, fonts, half: Vec2::new(width, TEXT_MM + below) * 0.5, why: None }
+                Text { runs, fonts, half: Vec2::new(width, TEXT_MM + below) * 0.5, why: None, pending: false }
             }
         }
     }
@@ -70,23 +80,36 @@ pub struct OnPaper {
     pub fonts: Vec<Font>,
     /// Why its text isn't there, when it can't be set.
     pub why: Option<String>,
+    /// Whether its text isn't there only until the search for a font to fall back to answers.
+    pub pending: bool,
 }
 
 /// `dimension`, read as `resolved`, on the view through `frame` (centred on the view), its lines in
 /// `group` and its text in the drawing's `font` and `language`: its group, or `None` when what it measures has no place to draw on the
-/// view: it wasn't found again, or it is a single point there.
-pub fn paper_group(dimension: &Dimension, resolved: &Resolved, frame: &ViewFrame, group: LineGroup, font: &str, language: &str) -> Option<OnPaper> {
+/// view: it wasn't found again, or it is a single point there. `wait`: fonts to fall back to are
+/// searched for here; else the search's thread is asked, for the window's sheet.
+pub fn paper_group(
+    dimension: &Dimension,
+    resolved: &Resolved,
+    frame: &ViewFrame,
+    group: LineGroup,
+    font: &str,
+    language: &str,
+    wait: bool,
+) -> Option<OnPaper> {
     let line_mm = LineKind::Thin.width_mm(group);
     let on: Vec<Vec2> = resolved.points.iter().map(|p| frame.to_paper(*p)).collect();
     let mut lines: Vec<Vec<Vec2>> = Vec::new();
     let mut arrows = Vec::new();
-    let (mut texts, mut fonts, mut why) = (Vec::new(), Vec::new(), None);
-    let set = |text: Option<&str>| Text::set(text, font, language);
+    let (mut texts, mut fonts, mut why, mut pending) = (Vec::new(), Vec::new(), None, false);
+    let dirs = (!wait).then(font_dirs);
+    let set = |text: Option<&str>| Text::set(text, font, language, dirs.as_deref());
     for piece in pieces(dimension, resolved, &on, &set)? {
         let layout = dim_layout_sized(&piece.frame, Some(piece.at), &SIZES, piece.text.half, [None, None]);
         texts.extend(placed(piece.text.runs, piece.text.half, layout.text, layout.text_dir));
         fonts.extend(piece.text.fonts);
         why = why.or(piece.text.why);
+        pending |= piece.text.pending;
         // A chain's neighbours share an extension line.
         for line in layout.lines {
             if !lines.iter().any(|other| same_line(other, &line)) {
@@ -103,7 +126,7 @@ pub fn paper_group(dimension: &Dimension, resolved: &Resolved, frame: &ViewFrame
         items.extend(ARROW.place(*tip, *tip - *dir, line_mm).ok()?.0);
     }
     items.extend(texts);
-    Some(OnPaper { group: Group { object: dimension.id, kind: ObjectKind::Dimension, items }, fonts, why })
+    Some(OnPaper { group: Group { object: dimension.id, kind: ObjectKind::Dimension, items }, fonts, why, pending })
 }
 
 /// `runs` of a text `half` in size, centred on `centre` and running along `dir`.

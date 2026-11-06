@@ -77,10 +77,16 @@ fn built(s: &Session, sheet: u64) -> SheetScene {
     build(s, &d, sheet).unwrap()
 }
 
-/// The provider's scene of `sheet` once nothing is waiting.
+/// The provider's scene of `sheet` once nothing is waiting, asked for as the window does: what it
+/// shows, then a short piece of work, until there is none and no text waits for its font.
 fn settled(s: &mut Session, sheet: u64) -> SheetView {
-    extract(s, sheet).unwrap();
-    while step(s) {}
+    let started = std::time::Instant::now();
+    let mut answer = extract(s, sheet).unwrap();
+    while step(s) || answer.waiting_for_fonts {
+        assert!(started.elapsed().as_secs() < 120, "the sheet never settled");
+        std::thread::yield_now();
+        answer = extract(s, sheet).unwrap();
+    }
     extract(s, sheet).unwrap()
 }
 
@@ -91,7 +97,7 @@ fn bytes(scene: &Scene) -> String {
 
 /// `record`'s title block text with no cells, in the built-in font: its labels only.
 fn labels(record: &Sheet) -> Set {
-    block_text(record, &Lettering { units: String::new(), language: String::new(), font: String::new() }, &[]).unwrap()
+    block_text(record, &Lettering { units: String::new(), language: String::new(), font: String::new() }, &[], true).unwrap().0
 }
 
 /// `group` without its text: a title block's lines and symbol, as its layout draws them.
@@ -548,6 +554,74 @@ fn a_title_blocks_text_follows_its_sheet_and_the_model() {
     run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": checkpoint}));
     assert_eq!(bytes(&settled(&mut s, first).scene), bytes(&built(&s, first).scene));
     assert_ne!(shown(&s), with_tower, "the mass read from the model as it is");
+}
+
+/// The window's sheet never waits for the search for a font to fall back to: a title block text in
+/// a script the drawing's font lacks is off the sheet until the search answers, `step` says there
+/// is more to do though no view is waiting, and the settled sheet is the one `build` gives (which
+/// waits). The character is this test's alone, so no other test has searched for it first.
+#[test]
+fn a_title_blocks_text_waits_for_its_font_off_the_windows_thread() {
+    let (mut s, sheet, _) = front_and_top();
+    let block = serde_json::to_value(solidcraft_geom::title_block::default_block()).unwrap();
+    run(&mut s, "drawing.sheet.set", json!({"sheet": ids::encode(sheet), "title_block": block}));
+    settled(&mut s, sheet);
+    run(&mut s, "drawing.sheet.set", json!({"sheet": ids::encode(sheet), "title_block_overrides": {"title": "Plate \u{30fa}"}}));
+    let waiting = extract(&mut s, sheet).unwrap();
+    assert!(s.drawing_scenes.last.as_ref().unwrap().pending, "the window's sheet asked, not waited");
+    assert!(waiting.waiting_for_fonts, "the answer says its text is waiting");
+    // No view is out of date: text alone is no work for a step, so a caller that steps until
+    // there's nothing left (a line pick does) never waits for the search.
+    assert!(!step(&mut s), "a step has nothing to do for text");
+    assert!(line_at(&mut s, sheet, Vec2::new(150.0, 150.0), 1.0).is_ok());
+    assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&built(&s, sheet).scene));
+    assert!(!s.drawing_scenes.last.as_ref().unwrap().pending);
+}
+
+/// A dimension's number in a script the drawing's font lacks is read again until the search for its
+/// font answers, then drawn as `build` draws it. The character is this test's alone.
+#[test]
+fn a_dimensions_text_waits_for_its_font_off_the_windows_thread() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    settled(&mut s, sheet);
+    let p = json!({"view": ids::encode(front), "kind": {"length": {"edge": [50, 0, 20]}}, "override_text": "\u{30f7} 100"});
+    let added = run(&mut s, "drawing.dimension.add", p)["dimension"].as_str().and_then(ids::decode).unwrap();
+    extract(&mut s, sheet).unwrap();
+    step(&mut s);
+    assert!(s.drawing_scenes.dimensions[&added].drawn.pending, "the window's sheet asked, not waited");
+    let first = extract(&mut s, sheet).unwrap();
+    assert!(first.waiting_for_fonts, "the answer says its text is waiting");
+    assert!(!step(&mut s), "it is read again by extract, not by a step");
+    // Still waiting, nothing changed: the sheet isn't put together again.
+    let again = extract(&mut s, sheet).unwrap();
+    if again.waiting_for_fonts {
+        assert_eq!(again.generation, first.generation);
+    }
+    assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&built(&s, sheet).scene));
+    assert!(!s.drawing_scenes.dimensions[&added].drawn.pending);
+}
+
+/// A view drawn again takes its dimensions with it, through the view's job: that read asks for a
+/// font too, as the window's other reads do, so a step never waits for the search. The character is
+/// this test's alone.
+#[test]
+fn a_view_drawn_again_reads_its_dimensions_text_without_waiting() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    settled(&mut s, sheet);
+    let p = json!({"view": ids::encode(front), "kind": {"length": {"edge": [50, 0, 20]}}, "override_text": "\u{30f8} 100"});
+    let added = run(&mut s, "drawing.dimension.add", p)["dimension"].as_str().and_then(ids::decode).unwrap();
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"scale": "1:4"}}));
+    extract(&mut s, sheet).unwrap();
+    // Both views wait (the top one is projected from the front one): step until the front view's
+    // job has read its dimension.
+    let mut waiting = true;
+    while !s.drawing_scenes.dimensions.contains_key(&added) {
+        assert!(waiting, "every view is drawn and the dimension wasn't read");
+        waiting = step(&mut s);
+    }
+    assert!(s.drawing_scenes.dimensions[&added].drawn.pending, "the view's job asked, not waited");
+    assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&built(&s, sheet).scene));
+    assert!(!s.drawing_scenes.dimensions[&added].drawn.pending);
 }
 
 /// The model's state alone changing, the design and the sheet as they were, sets the title
@@ -1521,6 +1595,7 @@ fn a_dimension_past_the_scenes_limits_is_left_out_and_says_why() {
         group: Some(Group { object: id, kind: ObjectKind::Dimension, items }),
         fonts: Vec::new(),
         why: None,
+        pending: false,
     };
     let too_many = dimension(1, vec![stroke(Vec2::X); MAX_RECORDS + 1]);
     let off_paper = dimension(2, vec![stroke(Vec2::new(1e9, 0.0))]);
@@ -1563,6 +1638,7 @@ fn dimensions_share_one_font_table_and_one_left_out_adds_nothing() {
             group: Some(Group { object: id, kind: ObjectKind::Dimension, items }),
             fonts,
             why: None,
+            pending: false,
         }
     };
     let glyphs = |one: &DrawnDimension| one.fonts[0].glyphs.len();

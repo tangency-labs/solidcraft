@@ -200,6 +200,47 @@ fn the_sheet_page_follows_the_documented_designs_name() {
     assert!(block.items.iter().any(|item| matches!(item, Item::Text(run) if run.text == "Plate")));
 }
 
+/// A value in a script the drawing's font lacks: the window's sheet leaves it to the search's thread
+/// and `step` keeps asking, until it is the sheet an export draws, whichever fonts this computer has.
+/// A second one comes while the first's font is on the sheet: no new face, and it still comes. The
+/// drawing's language chooses among the fonts for Han, as it does for an export, and
+/// `drawing.inspect` names the font that set it.
+#[test]
+fn a_value_in_another_script_ends_as_an_export_draws_it() {
+    let (mut s, sheet) = drawing();
+    let settled = |s: &mut Session| {
+        let started = std::time::Instant::now();
+        let mut answer = extract(s, sheet).unwrap();
+        while step(s) || answer.waiting_for_fonts {
+            assert!(started.elapsed().as_secs() < 120, "the search for fonts never answered");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+            answer = extract(s, sheet).unwrap();
+        }
+        let window = extract(s, sheet).unwrap();
+        let d = s.drawing("test").unwrap().clone();
+        assert_eq!(serde_json::to_string(&*window.scene).unwrap(), serde_json::to_string(&build(s, &d, sheet).unwrap().scene).unwrap());
+    };
+    // Characters asked for nowhere else, so the search hasn't answered yet.
+    typed(&mut s, json!({"title": "\u{9f8d}"}));
+    assert!(extract(&mut s, sheet).unwrap().waiting_for_fonts, "the window's sheet leaves it to the search");
+    settled(&mut s);
+    typed(&mut s, json!({"title": "\u{9f8d}", "material": "\u{9f9c}"}));
+    assert!(extract(&mut s, sheet).unwrap().waiting_for_fonts, "the window's sheet leaves it to the search");
+    settled(&mut s);
+    let refused = notes(&mut s, "title");
+    assert_eq!(notes(&mut s, "material").is_null(), refused.is_null(), "the same font has both, or none has");
+    let fallbacks = run(&mut s, "drawing.inspect", json!({}));
+    assert_eq!(fallbacks["font_fallbacks"].as_array().unwrap().is_empty(), !refused.is_null(), "{fallbacks}");
+    for language in ["ja", "zh-CN"] {
+        run(&mut s, "drawing.set", json!({"language": language}));
+        settled(&mut s);
+        let plain = TextStyle::default();
+        if let Ok(Some((own, _))) = solidcraft_sketch::paper_text("\u{9f8d}", None, language, Vec2::ZERO, 3.5, 0.0, &plain) {
+            assert_eq!(find(&runs(&s, sheet), "\u{9f8d}").font, own[0].font, "{language}");
+        }
+    }
+}
+
 /// The sheet page follows a change of the drawing's fields at once, and draws no view again for it.
 #[test]
 fn the_sheet_page_follows_the_drawings_fields() {
