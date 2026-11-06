@@ -84,6 +84,7 @@ mod parts;
 mod point_cloud;
 mod script;
 mod section;
+mod selection;
 pub mod settings;
 pub(crate) use measure_sel::{measure_items, shape_of};
 pub(crate) use measure_shape::Shape;
@@ -352,6 +353,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(browser::COMMANDS.iter());
     v.extend(delete::COMMANDS.iter());
     v.extend(edit::COMMANDS.iter());
+    v.extend(selection::COMMANDS.iter());
     v.extend(clipboard::COMMANDS.iter());
     v.extend(sketch_clipboard::COMMANDS.iter());
     v.extend(script::COMMANDS.iter());

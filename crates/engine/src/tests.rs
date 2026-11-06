@@ -1050,6 +1050,7 @@ fn hostile_params_never_panic() {
         "favorites",
         "filter",
         "kind",
+        "detail",
         "prefix",
         "orientation",
         "seam",

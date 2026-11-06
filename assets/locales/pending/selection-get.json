@@ -1,0 +1,8 @@
+{
+  "en": { "cmd.selection_get": "Get Selection" },
+  "ar": { "cmd.selection_get": "الحصول على التحديد" },
+  "he": { "cmd.selection_get": "קבלת הבחירה" },
+  "ja": { "cmd.selection_get": "選択を取得" },
+  "vi": { "cmd.selection_get": "Lấy vùng chọn" },
+  "zh": { "cmd.selection_get": "获取选择" }
+}
