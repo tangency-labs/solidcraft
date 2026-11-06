@@ -541,13 +541,14 @@ fn mass_properties_reduce(
         let tri = mp_tris[idx];
         let edge1 = tri.v1.xyz - tri.v0.xyz;
         let edge2 = tri.v2.xyz - tri.v0.xyz;
-        area = length(cross(edge1, edge2)) * 0.5;
+        let n = cross(edge1, edge2);
+        area = length(n) * 0.5;
 
         let p0 = mp_tris[0].v0.xyz;
         let a = tri.v0.xyz - p0;
         let b = tri.v1.xyz - p0;
         let c = tri.v2.xyz - p0;
-        let det = dot(a, cross(b, c));
+        let det = dot(a, n);
         v6 = det;
         mom = (a + b + c) * det;
     }

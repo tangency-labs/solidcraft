@@ -849,6 +849,70 @@ fn multi_backend_point_mesh_distance_and_mass_properties_parity() {
         assert!((cu_trans.area - 52.0).abs() < 1e-4);
         assert!(cu_trans.centroid.dist(expected_centroid) < 1e-4);
     }
+
+    // 4. Two separated closed components (Box A at origin and Box B at (1024, -1024, 256), 768 triangles each)
+    let make_subdivided_box = |offset: Vec3| -> Vec<[Vec3; 3]> {
+        let v = [
+            offset + Vec3::new(0.0, 0.0, 0.0),
+            offset + Vec3::new(2.0, 0.0, 0.0),
+            offset + Vec3::new(2.0, 3.0, 0.0),
+            offset + Vec3::new(0.0, 3.0, 0.0),
+            offset + Vec3::new(0.0, 0.0, 4.0),
+            offset + Vec3::new(2.0, 0.0, 4.0),
+            offset + Vec3::new(2.0, 3.0, 4.0),
+            offset + Vec3::new(0.0, 3.0, 4.0),
+        ];
+        let mut cur: Vec<[Vec3; 3]> = initial_indices.iter().map(|&[i, j, k]| [v[i], v[j], v[k]]).collect();
+        for _ in 0..3 {
+            let mut nxt = Vec::with_capacity(cur.len() * 4);
+            for &[a, b, c] in &cur {
+                let ab = (a + b) * 0.5;
+                let bc = (b + c) * 0.5;
+                let ca = (c + a) * 0.5;
+                nxt.push([a, ab, ca]);
+                nxt.push([ab, b, bc]);
+                nxt.push([ca, bc, c]);
+                nxt.push([ab, bc, ca]);
+            }
+            cur = nxt;
+        }
+        cur
+    };
+
+    let box_a = make_subdivided_box(Vec3::ZERO);
+    let box_b = make_subdivided_box(c0);
+    let expected_two_box_centroid = Vec3::new(513.0, -510.5, 130.0);
+
+    for (desc, tris_list) in [("A then B", [&box_a[..], &box_b[..]].concat()), ("B then A", [&box_b[..], &box_a[..]].concat())] {
+        let two_box_gpu: Vec<GpuTri> = tris_list
+            .iter()
+            .enumerate()
+            .map(|(idx, &[v0, v1, v2])| GpuTri {
+                v0: [v0.x as f32, v0.y as f32, v0.z as f32, f32::from_bits(idx as u32)],
+                v1: [v1.x as f32, v1.y as f32, v1.z as f32, 0.0],
+                v2: [v2.x as f32, v2.y as f32, v2.z as f32, 0.0],
+            })
+            .collect();
+        assert_eq!(two_box_gpu.len(), 1536);
+
+        let cpu_m = cpu_mass_properties_scalar(&two_box_gpu);
+        assert!((cpu_m.volume - 48.0).abs() < 1e-4, "{desc} cpu volume: {}", cpu_m.volume);
+        assert!((cpu_m.area - 104.0).abs() < 1e-4, "{desc} cpu area: {}", cpu_m.area);
+        assert!(cpu_m.centroid.dist(expected_two_box_centroid) < 1e-4, "{desc} cpu centroid: {:?}", cpu_m.centroid);
+
+        if let Some(vk) = VulkanAccel::global() {
+            let vk_m = vk.mass_properties(&two_box_gpu).expect("vk mass_properties two-box");
+            assert!((vk_m.volume - 48.0).abs() < 1e-2, "{desc} vk volume: {}", vk_m.volume);
+            assert!((vk_m.area - 104.0).abs() < 1e-2, "{desc} vk area: {}", vk_m.area);
+            assert!(vk_m.centroid.dist(expected_two_box_centroid) < 1e-2, "{desc} vk centroid: {:?}", vk_m.centroid);
+        }
+        if let Some(cuda) = CudaBackend::global() {
+            let cu_m = cuda.mass_properties(&two_box_gpu, false).expect("cuda mass_properties two-box");
+            assert!((cu_m.volume - 48.0).abs() < 1e-4, "{desc} cuda volume: {}", cu_m.volume);
+            assert!((cu_m.area - 104.0).abs() < 1e-4, "{desc} cuda area: {}", cu_m.area);
+            assert!(cu_m.centroid.dist(expected_two_box_centroid) < 1e-4, "{desc} cuda centroid: {:?}", cu_m.centroid);
+        }
+    }
 }
 
 /// Verifies [`Dispatcher`] multi-sample rotated calibration, markdown reporting, and forced routing across all backend targets.
