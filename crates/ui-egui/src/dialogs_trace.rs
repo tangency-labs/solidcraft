@@ -3,10 +3,10 @@
 //! and drawn in the viewport; OK keeps it as a 3D sketch spline (`motion.trace.keep`).
 
 use crate::ui_kit::{choice_row, expr_row, text_row};
-use egui::{Pos2, RichText, Stroke};
+use egui::{Pos2, Stroke};
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_engine::doc::{IDENTITY, Mat, apply_point, mat_inverse, mat_mul};
-use solidcraft_engine::geom::Vec3;
 use solidcraft_engine::{Sel, Session};
 
 use super::{Hover, body_of, capital, movable, num, pt, sel_items, snap_of};
@@ -45,7 +45,11 @@ pub fn form(s: &Session, joint: usize) -> TraceForm {
 fn range(s: &Session, joint: usize, index: usize) -> (String, String) {
     let Some(j) = s.doc.assembly.joints.get(joint) else { return Default::default() };
     let v = j.values.get(index).copied().unwrap_or(0.0);
-    if j.kind.is_angle(index) { (num(v.to_degrees(), "deg"), num(v.to_degrees() + 360.0, "deg")) } else { (num(v, "mm"), num(v + 20.0, "mm")) }
+    if j.kind.is_angle(index) {
+        (num(v.to_degrees(), "deg"), num(v.to_degrees() + 360.0, "deg"))
+    } else {
+        (crate::length_input::model(&s.doc, v), crate::length_input::model(&s.doc, v + 20.0))
+    }
 }
 
 /// The occurrence path placing the picked body: the instance clicked, also when its component
@@ -82,10 +86,13 @@ pub fn params(s: &Session, f: &TraceForm, inputs: &[SelInput]) -> Result<Value, 
     {
         let mut reference = snap.param;
         reference["occurrence"] = json!(path.last().copied().unwrap_or(0));
-        for key in ["point", "face", "circle", "edge"] {
+        for key in ["point", "face", "circle", "edge", "corner"] {
             if let Some(at) = reference.get(key).and_then(solidcraft_engine::params::vec3) {
                 reference[key] = pt(apply_point(&placed, apply_point(&inverse, at)));
             }
+        }
+        if let Some(z) = reference.get("z").and_then(solidcraft_engine::params::vec3) {
+            reference["z"] = pt(solidcraft_engine::doc::apply_vector(&placed, solidcraft_engine::doc::apply_vector(&inverse, z)));
         }
         p["point_ref"] = reference;
     }
@@ -95,8 +102,9 @@ pub fn params(s: &Session, f: &TraceForm, inputs: &[SelInput]) -> Result<Value, 
         let j = s.doc.assembly.joints.get(f.joint).ok_or("no joint that moves yet")?;
         p["joint"] = json!(j.id);
         p["index"] = json!(f.index);
-        p["from"] = json!(f.from.trim());
-        p["to"] = json!(f.to.trim());
+        let kind = if j.kind.is_angle(f.index) { solidcraft_engine::doc::expr::Kind::Angle } else { solidcraft_engine::doc::expr::Kind::Length };
+        p["from"] = json!(crate::length_input::expression(&s.doc, &f.from, kind));
+        p["to"] = json!(crate::length_input::expression(&s.doc, &f.to, kind));
     }
     if !f.samples.trim().is_empty() {
         p["samples"] = json!(f.samples.trim().parse::<f64>().map_err(|_| "samples must be a number")?);
@@ -127,7 +135,6 @@ pub(crate) fn stop_text(v: &Value) -> Option<String> {
 
 /// The dialog's rows; true when Enter was pressed in a value.
 pub fn rows(app: &mut crate::SolveApp, ui: &mut egui::Ui, f: &mut TraceForm, inputs: &[SelInput]) -> bool {
-    let t = Tokens::get();
     let s = &app.session;
     let mut enter = false;
     let studies: Vec<&str> = s.doc.assembly.studies.iter().map(|m| m.name.as_str()).collect();
@@ -144,9 +151,7 @@ pub fn rows(app: &mut crate::SolveApp, ui: &mut egui::Ui, f: &mut TraceForm, inp
     } else {
         let list = movable(s);
         if list.is_empty() {
-            form_row(ui, "", |ui| {
-                ui.label(RichText::new(crate::i18n::tr_label("no joint that moves yet")).color(t.text_dim));
-            });
+            crate::ui_kit::status_line(ui, "no joint that moves yet", crate::ui_kit::StatusTone::Dim);
             return false;
         }
         let labels: Vec<&str> = list.iter().filter_map(|i| s.doc.assembly.joints.get(*i)).map(|j| j.name.as_str()).collect();
@@ -183,16 +188,14 @@ pub fn rows(app: &mut crate::SolveApp, ui: &mut egui::Ui, f: &mut TraceForm, inp
         f.view = placement(s, inputs).and_then(|(_, _, shown, placed)| Some((shown, mat_inverse(&placed)?)));
     }
     if let Some((_, r)) = &f.shown {
-        let (text, colour) = match r {
+        let (text, tone) = match r {
             Ok(v) => match stop_text(v) {
-                Some(why) => (why, t.warning),
-                None => (crate::i18n::format("trace.points", &[("count", &v["samples"].to_string())]), t.text_dim),
+                Some(why) => (why, crate::ui_kit::StatusTone::Warning),
+                None => (crate::i18n::format("trace.points", &[("count", &v["samples"].to_string())]), crate::ui_kit::StatusTone::Dim),
             },
-            Err(e) => (e.clone(), t.text_dim),
+            Err(e) => (crate::i18n::tr_label(e).to_string(), crate::ui_kit::StatusTone::Dim),
         };
-        form_row(ui, "", |ui| {
-            ui.add(egui::Label::new(RichText::new(text).color(colour)).wrap());
-        });
+        crate::ui_kit::status_line(ui, &text, tone);
     }
     enter
 }

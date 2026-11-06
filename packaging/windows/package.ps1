@@ -11,7 +11,14 @@
 
   The binaries link the C runtime statically (+crt-static), so nothing else needs installing.
   The icon comes from $env:SOLIDCRAFT_ICONS (solidcraft.ico, made by `solidcraft-cli icon`), or
-  is drawn by the CLI just built when this machine can run it. Nothing is signed.
+  is drawn by the CLI just built when this machine can run it.
+
+  Signing happens outside this script (the release workflow sends files to SignPath), so the work
+  can be split in two phases with signing in between:
+    -Phase stage     build, check, and copy the three .exe files to the staging folder, then stop
+    -Phase package   make the MSI, portable zip and plain .exe from the staging folder as it is
+                     now (holding the signed .exe files), without building again
+  -Phase all (the default) does both, unsigned, as before.
 
   Needs: Rust (MSVC toolchain + the target) and WiX v5:
     dotnet tool install --global wix --version 5.0.2
@@ -22,10 +29,13 @@
 .EXAMPLE
   pwsh packaging/windows/package.ps1 -Arch x64
   pwsh packaging/windows/package.ps1 -Arch arm64     # cross-compiled; needs the MSVC ARM64 build tools
+  pwsh packaging/windows/package.ps1 -Arch x64 -Phase stage     # then sign target/windows-package/x64/*.exe
+  pwsh packaging/windows/package.ps1 -Arch x64 -Phase package
 #>
 param(
   [ValidateSet('x64', 'x86', 'arm64')] [string] $Arch = 'x64',
-  [switch] $SkipBuild
+  [switch] $SkipBuild,
+  [ValidateSet('all', 'stage', 'package')] [string] $Phase = 'all'
 )
 $ErrorActionPreference = 'Stop'
 $Root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
@@ -56,7 +66,7 @@ New-Item -ItemType Directory -Force -Path $Dist | Out-Null
 
 Write-Output "SolidCraft $Version for Windows $Arch ($Target)"
 
-if (-not $SkipBuild) {
+if (-not $SkipBuild -and $Phase -ne 'package') {
   # Static CRT: no VC++ redistributable needed. Scoped to the target so host build scripts and
   # proc-macros are unaffected.
   $flagVar = 'CARGO_TARGET_' + ($Target.ToUpper() -replace '-', '_') + '_RUSTFLAGS'
@@ -64,6 +74,9 @@ if (-not $SkipBuild) {
   Invoke-Native "cargo build ($Target)" { cargo build --release --locked -p solidcraft -p solidcraft-cli --target $Target }
 }
 $Bin = Join-Path $TargetDir "$Target\release"
+$Stage = Join-Path $TargetDir "windows-package\$Arch"
+# -Phase package checks the staged (by then signed) copies; the other phases check the build.
+$CheckDir = if ($Phase -eq 'package') { $Stage } else { $Bin }
 
 # Check both binaries' PE headers: Machine must match -Arch; Subsystem 2 = GUI (the app opens no
 # console window), 3 = console (the CLI's output reaches the terminal).
@@ -76,17 +89,22 @@ $Machine = switch ($Arch) { 'x64' { 0x8664 } 'x86' { 0x14C } 'arm64' { 0xAA64 } 
 # solvecraft-cli.exe: the old CLI name, forwarding to solidcraft-cli.exe (compatibility shim,
 # docs/compatibility.md). Built by `-p solidcraft-cli` with the CLI.
 foreach ($check in @(@('solidcraft.exe', 2), @('solidcraft-cli.exe', 3), @('solvecraft-cli.exe', 3))) {
-  $h = Get-PeHeader (Join-Path $Bin $check[0])
+  $h = Get-PeHeader (Join-Path $CheckDir $check[0])
   if ($h.Machine -ne $Machine) { throw "$($check[0]) is for machine 0x$('{0:X}' -f $h.Machine), expected 0x$('{0:X}' -f $Machine) ($Arch)" }
   if ($h.Subsystem -ne $check[1]) { throw "$($check[0]) has PE subsystem $($h.Subsystem), expected $($check[1])" }
   Write-Output "ok $($check[0]): $Arch, PE subsystem $($h.Subsystem)"
 }
-$Stage = Join-Path $TargetDir "windows-package\$Arch"
-& (Join-Path $PSScriptRoot 'check-icon.ps1') -Path (Join-Path $Bin 'solidcraft.exe')
-Remove-Item -Recurse -Force $Stage -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force -Path $Stage | Out-Null
-Copy-Item (Join-Path $Bin 'solidcraft.exe'), (Join-Path $Bin 'solidcraft-cli.exe'), (Join-Path $Bin 'solvecraft-cli.exe') $Stage
-foreach ($f in 'LICENSE-MIT', 'LICENSE-APACHE', 'NOTICE', 'THIRD-PARTY-LICENSES.txt') { Copy-Item (Join-Path $Root $f) $Stage }
+& (Join-Path $PSScriptRoot 'check-icon.ps1') -Path (Join-Path $CheckDir 'solidcraft.exe')
+if ($Phase -ne 'package') {
+  Remove-Item -Recurse -Force $Stage -ErrorAction SilentlyContinue
+  New-Item -ItemType Directory -Force -Path $Stage | Out-Null
+  Copy-Item (Join-Path $Bin 'solidcraft.exe'), (Join-Path $Bin 'solidcraft-cli.exe'), (Join-Path $Bin 'solvecraft-cli.exe') $Stage
+  foreach ($f in 'LICENSE-MIT', 'LICENSE-APACHE', 'NOTICE', 'THIRD-PARTY-LICENSES.txt') { Copy-Item (Join-Path $Root $f) $Stage }
+}
+if ($Phase -eq 'stage') {
+  Write-Output "staged for signing: $Stage"
+  exit 0
+}
 
 $Icon = if ($env:SOLIDCRAFT_ICONS) { Join-Path $env:SOLIDCRAFT_ICONS 'solidcraft.ico' } else { Join-Path $Root 'assets/icons/app/windows/exports/solidcraft.ico' }
 if (-not (Test-Path $Icon)) { throw "Missing package icon: $Icon" }

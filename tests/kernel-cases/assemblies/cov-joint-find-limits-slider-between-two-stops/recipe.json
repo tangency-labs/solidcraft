@@ -1,0 +1,127 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 10,
+    "width": 10,
+    "height": 10,
+    "corner": [
+     -30,
+     -5,
+     0
+    ],
+    "operation": "new",
+    "body_name": "StopL"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 10,
+    "width": 10,
+    "height": 10,
+    "corner": [
+     50,
+     -5,
+     0
+    ],
+    "operation": "new",
+    "body_name": "StopR"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 10,
+    "height": 10,
+    "corner": [
+     0,
+     -5,
+     0
+    ],
+    "operation": "new",
+    "body_name": "SlideBox"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "Frame",
+    "parent": "root",
+    "activate": false,
+    "grounded": true
+   }
+  },
+  {
+   "command": "component.move_bodies",
+   "params": {
+    "bodies": [
+     "StopL",
+     "StopR"
+    ],
+    "component": "Frame"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "Carriage",
+    "parent": "root",
+    "activate": false,
+    "grounded": false
+   }
+  },
+  {
+   "command": "component.move_bodies",
+   "params": {
+    "bodies": [
+     "SlideBox"
+    ],
+    "component": "Carriage"
+   }
+  },
+  {
+   "command": "joint.create",
+   "params": {
+    "type": "slider",
+    "name": "Slide",
+    "flip": true,
+    "a": {
+     "occurrence": "Frame",
+     "point": [
+      0,
+      0,
+      5
+     ],
+     "z": [
+      1,
+      0,
+      0
+     ]
+    },
+    "b": {
+     "occurrence": "Carriage",
+     "point": [
+      0,
+      0,
+      5
+     ],
+     "z": [
+      1,
+      0,
+      0
+     ]
+    },
+    "quiet": true
+   }
+  },
+  {
+   "command": "joint.find_limits",
+   "params": {
+    "joint": "Slide"
+   }
+  }
+ ]
+}

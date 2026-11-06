@@ -35,11 +35,70 @@ fn main() {
         println!("cargo:rerun-if-changed={dir}/logs/HEAD");
     }
     println!("cargo:rerun-if-changed=build.rs");
+    if let Err(e) = builtin_themes() {
+        eprintln!("themes: {e}");
+        std::process::exit(1);
+    }
     scenario_tests();
+    if let Err(e) = merged_locales() {
+        eprintln!("locales: {e}");
+        std::process::exit(1);
+    }
     if let Err(e) = icon_data() {
         eprintln!("icon data: {e}");
         std::process::exit(1);
     }
+}
+
+/// `$OUT_DIR/locales/<id>.json`: each catalog in `assets/locales` plus the messages of
+/// `assets/locales/pending/*.json` (`{"<locale>": {"<id>": "<text>"}}`, one file per change, folded
+/// into the catalogs on main), so a pull request's new strings work before they are folded. An id
+/// a catalog already has, or a locale without a catalog, fails the build, as `cargo xtask lists`
+/// does.
+fn merged_locales() -> Result<(), String> {
+    use serde_json::{Map, Value};
+    let dir = std::path::Path::new("../../assets/locales");
+    println!("cargo:rerun-if-changed={}", dir.display());
+    let mut catalogs: std::collections::BTreeMap<String, Map<String, Value>> = std::collections::BTreeMap::new();
+    for entry in std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?.filter_map(Result::ok) {
+        let path = entry.path();
+        if path.extension().is_none_or(|x| x != "json") {
+            continue;
+        }
+        let Some(id) = path.file_stem().and_then(|s| s.to_str()) else { continue };
+        let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        match serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))? {
+            Value::Object(map) => catalogs.insert(id.to_string(), map),
+            _ => return Err(format!("{}: a catalog must be a JSON object", path.display())),
+        };
+    }
+    let pending = dir.join("pending");
+    println!("cargo:rerun-if-changed={}", pending.display());
+    let mut files: Vec<_> = std::fs::read_dir(&pending)
+        .map(|rd| rd.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|x| x == "json")).collect())
+        .unwrap_or_default();
+    files.sort();
+    for file in files {
+        let text = std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+        let map: std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>> =
+            serde_json::from_str(&text).map_err(|e| format!("{}: expected {{\"<locale>\": {{\"<id>\": \"<text>\"}}}}: {e}", file.display()))?;
+        for (locale, messages) in map {
+            let catalog =
+                catalogs.get_mut(&locale).ok_or_else(|| format!("{}: `{locale}` has no catalog assets/locales/{locale}.json", file.display()))?;
+            for (id, text) in messages {
+                if catalog.insert(id.clone(), Value::String(text)).is_some() {
+                    return Err(format!("{}: `{id}` is already in {locale}.json (or another pending file)", file.display()));
+                }
+            }
+        }
+    }
+    let out = std::path::Path::new(&std::env::var("OUT_DIR").map_err(|e| e.to_string())?).join("locales");
+    std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
+    for (id, catalog) in catalogs {
+        let text = serde_json::to_string(&catalog).map_err(|e| e.to_string())?;
+        std::fs::write(out.join(format!("{id}.json")), text).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 /// `$OUT_DIR/scenario_tests.rs`: a `#[test]` per scenario file, named after it; a scenario with
@@ -222,5 +281,35 @@ fn icon_data() -> Result<(), String> {
     let defaults: Vec<_> = defaults.iter().map(|(id, accent)| format!("({id:?}, {accent:?})")).collect();
     let _ = writeln!(out, "pub(crate) const ICON_ACCENTS: &[(&str, &str)] = &[{}];", defaults.join(", "));
     let dest = std::path::Path::new(&std::env::var("OUT_DIR").map_err(|e| e.to_string())?).join("icon_data.rs");
+    std::fs::write(dest, out).map_err(|e| e.to_string())
+}
+
+/// Embed each theme without a shared registry. Only std is needed to collect the files;
+/// theme parsing and ordering use the same validation on native and web targets.
+fn builtin_themes() -> Result<(), String> {
+    let manifest = std::env::var("CARGO_MANIFEST_DIR").map_err(|e| e.to_string())?;
+    let dir = std::path::Path::new(&manifest).join("../../assets/styles/ui/themes");
+    println!("cargo:rerun-if-changed={}", dir.display());
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(&dir).map_err(|e| e.to_string())? {
+        let path = entry.map_err(|e| e.to_string())?.path();
+        if path.extension().is_some_and(|e| e == "json") {
+            files.push(path);
+        }
+    }
+    files.sort_by(|a, b| a.file_stem().cmp(&b.file_stem()));
+    let mut out = String::from("/// The theme files shipped with SolidCraft.\nconst BUILTIN: &[(&str, &str)] = &[\n");
+    for path in files {
+        let id = path.file_stem().and_then(|s| s.to_str()).ok_or("theme file name is not UTF-8")?;
+        let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+        // Keep each file's provenance beside its generated entry, never in a shared header.
+        let provenance = text
+            .lines()
+            .find(|line| line.trim_start().starts_with("\"provenance\":"))
+            .ok_or_else(|| format!("{}: missing provenance", path.display()))?;
+        out += &format!("    ({id:?}, include_str!({:?})), // {}\n", path.display().to_string(), provenance.trim());
+    }
+    out += "];\n";
+    let dest = std::path::Path::new(&std::env::var("OUT_DIR").map_err(|e| e.to_string())?).join("builtin_themes.rs");
     std::fs::write(dest, out).map_err(|e| e.to_string())
 }

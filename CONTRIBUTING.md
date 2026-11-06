@@ -1,8 +1,10 @@
 # Contributing to SolidCraft
 
+Agents: start from the router in [AGENTS.md](AGENTS.md), which points to a short skill in [`skills/`](skills/README.md) for each kind of work. This page stays the full human guide.
+
 SolidCraft is an open-source parametric 3D CAD app written in pure Rust.
 You sketch on a plane, constrain the sketch, turn profiles into solids, and
-change a parameter to watch the timeline rebuild. It runs as a desktop app (Windows, Linux), in
+change a parameter to watch the timeline rebuild. It runs as a desktop app (Windows, macOS, Linux), in
 the browser (wasm + WebGPU/WebGL2), headless from a CLI, and as an MCP server that AI agents can
 model with.
 
@@ -11,18 +13,19 @@ build it, how the code is laid out, the few rules that aren't negotiable, and wh
 needed most.
 
 Before choosing a task, check the [command inventory](docs/features.md) and
-[roadmap](ROADMAP.md) for implemented capabilities and current priorities.
+[roadmap](docs/roadmap-detail.md) for implemented capabilities and current priorities.
 
 Questions, ideas or want to say what you're working on? Join the [Discord](https://discord.gg/FtU4NQNVDH).
 
 ## Kernel work is paused
 
-We're evaluating a new geometry kernel. Until that's decided, please don't open issues, pull
-requests or discussions about kernel work: booleans, fillets, chamfers, shell, offsets, sweeps and
-lofts, threads and holes, STEP/IGES import and export, tessellation, or anything else that changes
-`crates/kernel/`. The pinned issue on the tracker explains it. New ones get the `kernel-paused`
-label (`.github/workflows/kernel-paused.yml`) and a maintainer answers them. Crashes and data loss
-are still taken as issues, and everything outside the kernel carries on as normal.
+We're moving to a new geometry kernel. Until that's done, please don't open pull requests that
+change `crates/kernel/`, `crates/geom/` or `vendor/truck*`, or issues and discussions about kernel
+work: booleans, fillets, chamfers, shell, offsets, sweeps and lofts, threads and holes, STEP/IGES
+import and export, or tessellation. The pinned issue on the tracker explains it. New ones get the
+`kernel-paused` label (`.github/workflows/kernel-paused.yml`) and a maintainer answers them. Crashes
+and data loss are still taken as issues. Pull requests outside those directories carry on as normal,
+including the dialogs and tools for these features.
 
 ## Get it running (about 10 minutes on a fast machine)
 
@@ -85,6 +88,8 @@ The [architecture page](docs/architecture.md) has the layer table. The short ver
 
 - `crates/geom`: vectors, planes, meshes, measures.
 - `crates/sketch`: our own constraint solver, plus profile finding.
+- `crates/dynamics`: multibody dynamics: rigid bodies, joint constraints, gravity and springs,
+  integrated in time (RFC #9719). It depends only on `geom`.
 - `crates/kernel`: the B-rep kernel boundary. It wraps [truck](https://github.com/ricosjp/truck),
   and it's the only crate allowed to touch truck. Fillets, chamfers, shell/offset, Delete Face,
   Split Face, STEP/IGES read and write, and face provenance are our own code here. Patched
@@ -115,7 +120,8 @@ The [architecture page](docs/architecture.md) has the layer table. The short ver
    not.) Permissive
    dependencies are fine. Note which one you're adding and why in the PR. THIRD-PARTY-LICENSES.txt
    lists it once the change lands: the Generated files workflow rewrites it on `main`.
-   Nightly/manual CI also scans advisories, bans and sources with cargo-deny; see
+   Nightly/manual CI also scans advisories, bans and sources with cargo-deny, and a PR that
+   changes Cargo.lock or a Cargo.toml checks the advisories; see
    [the local command and coverage limits](docs/book/src/dev/testing.md#dependency-advisories).
 3. **Every asset is original or openly licensed and has a row in
    [ATTRIBUTION.md](ATTRIBUTION.md).** Icons are drawn in code (`crates/ui-egui/src/icons.rs`).
@@ -130,8 +136,11 @@ The [architecture page](docs/architecture.md) has the layer table. The short ver
    - Every call into truck goes through `solidcraft_kernel::guard`.
    - Every crash fix comes with a regression test.
 5. **Everything is a command, with a test.** A new feature means a `CommandSpec` in
-   `crates/engine/src/cmd/`, engine tests that measure the result (volume, area,
+   `crates/engine/src/cmd/` with input and output schemas (see
+   [Adding a command](docs/book/src/dev/commands.md#adding-a-command); a test warns about a
+   command without them, and will fail it once required), engine tests that measure the result (volume, area,
    face/edge/vertex counts against a value you can derive), and for UI work a scenario (below).
+   A command on the toolbar also ships with its help tooltip (step 6 of Adding a command).
 6. **One set of camera controls.** Every page or canvas that shows a view (the modelling
    viewport, the Render preview, and any new page such as a flat pattern or drawing) calls
    `navigation::handle` (`crates/ui-egui/src/navigation.rs`) for its camera input, with
@@ -154,9 +163,23 @@ the most complete description of the house style.
 | UI scenarios | `crates/ui-egui/tests/scenarios/*.json` | part of `cargo test` |
 | Reference tests | `cargo xtask oracle` | `tests/oracle/` (see below) |
 
-A geometry change that changes the robustness goldens re-records them in the same pull request:
-`ROBUSTNESS_GOLDENS_BLESS="why it changed" cargo test --profile ci -p solidcraft-engine --lib robustness_goldens::`
-(see [docs/robustness.md](docs/robustness.md)); CI runs every seed on pull requests that touch geometry.
+The reference for what the kernel builds is the kernel-cases ladder (`tests/kernel-cases/ladder/`,
+`cargo xtask kernel-cases --ladder`, [docs/kernel-ladder.md](docs/kernel-ladder.md)).
+
+**Kernel cases go to solidcore.** A case that checks a kernel operation (a boolean, a blend, a
+shell, a sweep, an import's geometry) is a new entry in solidcore's corpus,
+`crates/solidcore/tests/kernel_cases/<area>/` in
+[tangency-labs/solidcore](https://github.com/tangency-labs/solidcore), with an answer in closed
+form or exact. Draft it as a rig case here, export it with
+`cargo xtask kernel-cases --area <area> --export DIR`, add `DIR/<area>/<case>.json` and its
+`.bodies.json.gz` there, and delete the draft; or write the entry by hand as that folder's README
+describes. `tests/kernel-cases/` takes no new cases: its `CASES` list only shrinks
+(`cargo xtask lists`). App-level cases (what a command does, the UI, product rules) stay in
+SolidCraft, as tests in their area's existing test file or UI scenarios.
+
+The naming corpus checks persistent names: every name a corpus design stores still finds a face or
+an edge, and two builds name its faces and edges alike
+(`cargo test --profile ci -p solidcraft-cli --test naming_corpus`).
 [docs/mutation-testing.md](docs/mutation-testing.md) shows how to find kernel behaviour these
 black-box suites miss.
 
@@ -190,9 +213,11 @@ in the PR. `cargo xtask test` builds the tests with it and then runs every test 
 shared bound on top-level test/side commands for `cargo xtask test` and `cargo xtask ci`.
 For example, `SOLIDCRAFT_TEST_JOBS=2` allows two commands at once; the sequential wasm/doc
 worker consumes one of those slots. Every binary and side check still runs after failures.
-Without the variable the existing concurrency is unchanged. `RUST_TEST_THREADS`,
-`ACTION_MATRIX_JOBS` and Cargo's build-job setting remain independent caller overrides;
-this limit does not choose their values or change test filters, timeouts or baselines.
+Without the variable the existing concurrency is unchanged. With it set, each test binary
+inherits `RUST_TEST_THREADS` and `ACTION_MATRIX_JOBS` of `max(1, cpus / jobs)` — the machine's
+parallelism shared between the binaries in flight — unless you set either one explicitly;
+explicit caller overrides always win. Cargo's build-job setting remains an independent caller
+override; this limit does not change test filters, timeouts or baselines.
 Tests run beside each other on a busy machine, so a test must not depend on wall-clock timing.
 
 **Ready pull requests test what they touch.** CI maps changed files to workspace packages and
@@ -213,8 +238,7 @@ Pull requests skip a few heavy tests (one to twelve minutes each), which run in 
 Check that validation after merging. They are listed in
 `.config/nextest.toml` and the [testing page](docs/book/src/dev/testing.md):
 
-- `solidcraft-engine`: `tests::hostile_params_never_panic`, everything in `tests::robustness` and
-  the seeds of `tests::robustness_goldens` (`seed_00` … `seed_95`; pull requests that change the kernel, truck or the goldens run all but the slowest, `SLOW_SEEDS` in `ci.yml`),
+- `solidcraft-engine`: `tests::hostile_params_never_panic`, everything in `tests::robustness`,
   `pattern_suppress_tests::enclosure_arc_extinction_keeps_a_real_sharp_inner_lip_after_resize_and_reopen`,
   `pattern_suppress_tests::enclosure_datums_follow_wall_height_and_board_depth_with_material_proofs`,
   `cmd::plastic::tests::enclosure_snap_fit_follows_resized_front_wall`, the `atomic_commands` contract tests
@@ -234,7 +258,8 @@ the surface itself). Expected values are either worked out in closed form
 (`tools/oracle-analytic/`) or computed by building the same recipe in FreeCAD, run as a separate
 program (`tools/freecad-oracle/`); each file says which. The generated
 [reference test report](docs/oracle.md) has the current case count and results. The reference-test
-CI job runs `cargo xtask oracle` during full validation; pull-request runs skip it. A case that
+CI job runs `cargo xtask oracle` during full validation, and on pull requests that reach
+`solidcraft-cli`. A case that
 fails because of a known bug names its issue in `expected.json` (`"known_failure": "#123"`);
 never change an expected value to match SolidCraft's output.
 
@@ -254,14 +279,16 @@ mean something else, it needs a format change. **Add one file, and edit nothing 
    change's file, or any `v<N>/` folder: those are fixed once released.
 
 That's all. The build counts the files: while any are pending it writes the next format number,
-which no release reads, so a release refuses a design that has your change instead of losing it.
+which no release reads, so a release warns about a design that has your change and keeps what it can't read of it.
 A file also lists the pending changes it has (`format_pending`), so a later development build
 runs only the steps that file is missing. Two pull requests that each add a change merge without
 a conflict. `crates/doc/src/format/pending/README.md` has an example.
 
 **At release time** the maintainer runs `scripts/fold-format-pending.sh`, which moves the pending
 files into `crates/doc/src/format/v<N>/` and fixes that number for good (see
-[docs/releasing.md](docs/releasing.md)). Never add a file to a `v<N>/` folder afterwards.
+[docs/releasing.md](docs/releasing.md)). Never add a file to a `v<N>/` folder afterwards. Drawings
+follow the same rules with their own numbers, from 1, in `crates/doc/src/drawing/format/` (see its
+`pending/README.md`), and the same script folds them.
 
 ## Lists many changes add to
 
@@ -269,17 +296,36 @@ Some files gain an item in many pull requests at once. They are kept so that two
 each add an item only meet when their items are neighbours, which spares everyone a conflict
 and a fresh CI run:
 
+- **Growing Rust lists**: use slices (`const ITEMS: &[Item] = &[...];`) without a written
+  length. `cargo xtask lists` rejects non-test const/static arrays with more than ten lines
+  of entries, except fixed standard or algorithm tables listed with reasons in `xtask/src/lists.rs`.
+  Built-in themes need only a JSON file in `assets/styles/ui/themes/`, with a unique nonnegative
+  integer `order` (the picker order) and its own `provenance` line; keep existing order values.
 - **Message catalogs** (`assets/locales/*.json`): one message per line, sorted by id. Add your
   message anywhere and run `cargo xtask lists --fix`; `cargo xtask lists` (in `cargo xtask ci`
   and the Lists workflow) fails on an unsorted catalog or an id that appears twice.
 - **`mod` lines**: one per line, in the sorted group they belong to (`cargo fmt` keeps each group
   sorted). Add a new module into the existing group, not as a new group at the end.
+- **Commands without schemas** (`crates/engine/src/schema/unconverted.txt`): sorted, one id per
+  line, and it only shrinks. Converting a command removes its line; a new command is never added
+  to it.
+- **Toolbar commands without help** (`BACKLOG` in `crates/ui-egui/src/command_help.rs`): sorted,
+  one id per line, and it only shrinks. Writing a command's help removes its line; a new command
+  is never added to it.
+- **`ui.prefs` settings** (`docs/control-protocol.md`): one line per setting, sorted by name, in
+  the list under the protocol table; add a new setting on its own line rather than editing a shared
+  row.
 - **Languages** (`crates/ui-egui/src/i18n.rs`): one per line, English first, then by id (a test
   checks it).
 - **Generated files**: `THIRD-PARTY-LICENSES.txt` and `docs/features.md` are rewritten on `main`
   after each merge by the Generated files workflow (`cargo xtask licences`, `cargo xtask
   features`). Don't regenerate or edit them in a pull request.
 - **Design format**: one file per change, never an edit to a shared number (above).
+- **New UI strings and attribution rows**: one new file per change, `assets/locales/pending/<slug>.json`
+  and `attribution/pending/<slug>.md`, instead of editing the catalogs or the ATTRIBUTION.md table;
+  `cargo xtask fold-pending` folds them on `main` (see the README in each folder). A new English
+  message also needs every catalog delivered complete (`COMPLETE` in `crates/ui-egui/src/i18n.rs`:
+  today ar, he, ja, vi, and zh) in the same pending file; `cargo xtask i18n --check` reports any gap.
 
 ## Sending a change
 
@@ -309,6 +355,15 @@ and a fresh CI run:
    PRs in groups by area, so PRs that touch the same code meet a conflict at most once.
 4. Reference the issue (`Fixes #12`). In the PR, say what you tested and how. For geometry work, include the measured numbers (and
    the expected ones).
+5. Write the PR title and first sentence for someone who hasn't seen your chat, the issue or the
+   code. Maintainers pick what to review from the title, and it becomes the commit on `main`. Say
+   which part of the app changes and what a user now sees or can do, and name things rather than
+   leaning on "there", "it" or "this".
+   - Unclear: `Send to Slicer: pick one print face per body there, and show print faces only while it is open`
+   - Clear: `3D printing: choose the face each body rests on in the Send to Slicer window, not the face menu`
+
+   Use plain, literal English in PR text: one idea per sentence, active voice, and one word for one
+   thing. This helps everyone, including readers whose first language isn't English.
 
 Commenting `/claim` assigns you, adds the `in progress` label, and replies with its automatic cleanup
 deadline. It frees a claim with no linked PR after 72 hours, or a claim with a PR after 14 days
@@ -316,6 +371,13 @@ without pushes. These automatic cleanup deadlines are separate from the daily pr
 72-hour takeover policy above. A draft PR that references the issue claims it the same way.
 `/unclaim` releases the bot claim early (only you or a maintainer can). Issues a maintainer has
 taken are never freed automatically.
+
+**A PR has to explain itself.** Start the description with what it is, in plain words someone new
+to the project would understand: what it does and who it's for. Don't assume anyone knows the name
+of your tool, project or feature. If there's anything to look at, show it in the description: a
+picture or video has to be visible there without opening the changed files. "The GIF is the change"
+doesn't count. A PR that doesn't do this waits until it does. For a PR that adds to
+`docs/showcase.md` or `docs/screenshots/`, the Picture check fails until the description shows one.
 
 Help reviewers see what the words mean. For observable CAD, UI or model behavior, please
 include actual descriptive screenshots or a short recording in the issue or PR. This evidence
@@ -331,6 +393,16 @@ Changes with no useful observable behavior do not need screenshot or video evide
 small example without private designs or sensitive details; attach the media or link to an
 accessible recording rather than committing generated review artifacts.
 
+To show a picture without committing it, attach the media to the PR (it goes to the PR's own
+attachment storage and renders inline in the comment). A gist is the better home for a log or
+another text file, and you link it; a gist does not render a picture inline. The review artifacts
+stay out of the diff that way, and nothing has to be pushed to a branch of its own.
+
+Attaching works in the browser for anyone who can comment: drag the file into a comment on the
+pull request. A command-line agent without a browser session usually cannot attach a file (the
+upload needs write access to this repository). Say so in the pull request, and the person running
+the agent or a maintainer can attach it.
+
 Keep an eye on your PR's status, but don't push to it only to catch up with `main` (no merge of
 `main`, no Update branch button, no rebase for that alone): every push restarts the whole CI
 run for everyone waiting behind it, and `main`'s own run catches what lands in between. When you
@@ -345,6 +417,10 @@ Much of SolidCraft so far was written by AI coding agents (Claude) working in pa
 owning one area, with a human setting direction and reporting bugs. Their working notes are in
 [AGENTS.md](AGENTS.md). Human contributors are just as welcome. Use whatever tools you like, as
 long as the change meets the rules above.
+
+Two quick checks run on every pull request (`.github/workflows/pr-checks.yml`, not required): it
+fails when a lower-numbered open PR by someone else already closes the same issue (the label
+`not-a-duplicate` skips it), or when the description lacks the `Changes a default: no` / `Changes a default: yes — <what>, old behaviour kept behind preference <name>` line (docs-only and bot PRs are exempt).
 
 ## Labels and triage
 
@@ -382,7 +458,7 @@ In order of how much they'd help users:
 2. **Boolean robustness.** A random-design fuzzer currently gets about half of its designs
    through without a kernel error. Each failing seed is a reproducible bug.
 3. **Drawings, CAM and mesh tools.** These are out of scope for now (see
-   [ROADMAP.md](ROADMAP.md)), but anyone who wants to own one is welcome.
+   [ROADMAP.md](docs/roadmap-detail.md)), but anyone who wants to own one is welcome.
 
 ## Updating the generated feature list
 
@@ -397,6 +473,16 @@ the same area), first resolve the command registry and source conflicts, then ru
 `union` merge driver: it can silently retain stale or duplicate command rows.
 The generator tests cover stable ordering and additions that leave existing lines
 unchanged. The initial switch to sorted rows is a one-time larger diff.
+
+## Pictures in the user guide
+
+The user guide's screenshots and short clips (`docs/book/src/media/`) are captured from the real
+app by `examples/demo/doc_shots.py`, one function per figure. Each run starts a fresh app with its
+own settings, so your preferences never show. When a change makes a figure out of date, run
+`python3 examples/demo/doc_shots.py <page or shot>` (it needs Xvfb, ffmpeg, Pillow and a release
+build) and commit the new file. A new figure is a new function there, an ATTRIBUTION row in
+`attribution/pending/`, and a `<video>` (clips) or image link on the page. Keep a still under
+about 250 KB and a clip under about 1 MB.
 
 ## Licence
 

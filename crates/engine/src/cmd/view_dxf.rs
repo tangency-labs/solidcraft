@@ -11,7 +11,7 @@ mod projection;
 pub(super) mod sketch;
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
 use solidcraft_io::{DxfEntity, DxfLayer, DxfLinetype, DxfShape};
 use solidcraft_render::Camera;
 
@@ -56,7 +56,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(path) = path {
         solidcraft_io::vfs::check(path).map_err(|e| crate::EngineError::Other(e.to_string()))?;
     }
-    let started = std::time::Instant::now();
+    let started = web_time::Instant::now();
     progress::Stage::new("dxf_meshes", 1).check().map_err(|e| bad(CMD, e))?;
     let meshes = meshes::prepare(s, tolerance)?;
     let prepare_ms = started.elapsed().as_secs_f64() * 1000.;
@@ -88,7 +88,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     if sketch > 0 {
         layers.push(DxfLayer::new("SKETCH", 5));
     }
-    let text = solidcraft_io::write_dxf_drawing(&layers, &entities);
+    let text = solidcraft_io::write_dxf_drawing(&layers, &entities)?;
     writing.check().map_err(|e| bad(CMD, e))?;
     let mut result = json!({"visible":visible,"hidden":hidden,"sketch":sketch,"units":"mm","tolerance":tolerance,"projection":if cam.fov > 0.0 {"perspective"} else {"orthographic"}});
     result["stats"] = json!({"bodies":meshes.placements.len(),"shared_meshes":meshes.meshes.len(),"triangles":meshes.triangles,

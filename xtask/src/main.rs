@@ -6,13 +6,22 @@
 mod app_icons;
 mod assets;
 mod book;
+mod external_corpus;
 mod features;
 mod i18n;
 mod icons;
+mod kernel_cases;
+mod kernel_corpus;
+mod kernel_ladder;
+mod known_failing;
 mod layers;
 mod licences;
 mod lists;
+mod mesh_decisions;
+mod params;
+mod pending;
 mod render_assets;
+mod skills;
 mod test;
 mod test_nextest;
 mod ui_containers;
@@ -42,6 +51,38 @@ commands:
                   replay the reference tests (tests/oracle/*/recipe.json), compare with each
                   case's expected.json and write docs/oracle.md (--cli: a solidcraft-cli
                   already built, instead of cargo run --release)
+  kernel-cases [--area AREA] [--cli BIN] [--timeout S] [--jobs N] [--out DIR] [--known-failing FILE] [--validation MODE] [--coverage] [--export DIR]
+                  the kernel regression rig: run every case in tests/kernel-cases/<area>/<id>/ on
+                  solidcore (one process each, killed after --timeout, default 180 s), grade it against
+                  the case's own answer and write docs/kernel-cases.md; DIR (default
+                  target/kernel-cases) gets results.json and dumps/<area>-<case>/, the inputs of
+                  each failing kernel call (--cli: a solidcraft-cli already built);
+                  --known-failing FILE: a regression gate instead of the report: fails on a case
+                  that fails and FILE does not list, and on a listed case that passes
+                  (tests/kernel-cases/<area>/KNOWN_FAILING, CI's Kernel rig workflow)
+                  --validation MODE: when the kernel's full check runs on the cases' features:
+                  each_step, each_feature (the default) or off (solidcraft-cli kernel-cases
+                  --validation=MODE); with --ladder too
+                  --ladder [--record REASON | --gate]: the complexity ladder instead
+                  (tests/kernel-cases/ladder/ladder.json, tiers in order), graded and compared
+                  with its timing golden (one case at a time unless --jobs), into
+                  docs/kernel-ladder.md (DIR default target/kernel-ladder); --record re-measures
+                  the golden and re-sorts each tier by time; --gate fails on any case whose status
+                  or counts differ from the golden, instead of the report
+                  --coverage: instead of running cases, fail on a registry command (the CLI's
+                  `commands`, planned ones aside) that no recipe.json under tests/kernel-cases/
+                  uses and tests/kernel-cases/EXEMPT does not list, and on a stale EXEMPT line
+                  --export DIR: instead of the report, the corpus for solidcore's rig: each case's
+                  kernel operations, operand records, fix set and expected values in
+                  DIR/<area>/<case>.json and DIR/manifest.json, every case not expressible as
+                  kernel input listed with its reasons; with --ladder too
+  known-failing --junit PATH... [--list FILE]
+                  grade a nextest run's junit report (a file, or every .xml under a directory)
+                  against the tests known to fail today on the default kernel,
+                  tests/KNOWN_FAILING_TESTS (or FILE): fails
+                  on a test that failed and is not listed, and on a listed test that passed
+                  (fixed: take its line off); a listed test that did not run is neither. CI's
+                  test jobs run it after nextest
   action-matrix [--bless] [--results FILE] [--from DIR]
                   try every ordinary action on every face, edge, vertex and body of the design
                   corpus and compare with tests/action_matrix/baseline.json (--bless rewrites it;
@@ -51,16 +92,35 @@ commands:
   book [--no-build]
                   generate docs/book's command reference and screenshots, then mdbook build
                   into target/book
+  external-corpus [--bless WHY] [--only NAME] [--cli PATH]
+                  import the real-world STEP files listed in tests/external-corpus.toml and
+                  check body counts, total volumes and areas within tolerances and time and
+                  memory budgets (#1397); run nightly by the External corpus workflow, not by
+                  ci (it downloads from the internet). --bless re-records the expected values
+                  in the manifest with the reason given
   licences [--check]
                   write THIRD-PARTY-LICENSES.txt (the licences of every shipped crate, embedded
                   in the programs); --check only reports when it is out of date: pull requests
                   leave it to the Generated files workflow on main
+  fold-pending    fold assets/locales/pending/*.json into the catalogs and attribution/pending/*.md
+                  into ATTRIBUTION.md, and delete them (the Generated files workflow runs this on
+                  main; pull requests add the pending files instead of editing the shared ones)
   lists [--fix]   check that files many changes add to are sorted one item per line (the
-                  message catalogs in assets/locales); --fix sorts them
+                  message catalogs in assets/locales, tests/KNOWN_FAILING_TESTS); --fix sorts
+                  the catalogs
+  skills          check that AGENTS.md and skills/*/SKILL.md cite files, `cargo xtask` commands and skills
+                  that exist, that the router table lists exactly the skills there are, and that
+                  AGENTS.md and new skills stay short
+  mesh-decisions  check that model decisions in crates/doc, crates/engine and crates/kernel use exact
+                  geometry: fails on a function outside display, export, previews and mesh bodies
+                  that uses a mesh and xtask/mesh-decisions.txt does not list, and on a listed one
+                  that no longer does (the list only shrinks)
   test [CARGO ARGS] [-- TEST ARGS]
                   build the tests with the ci profile, then run every test binary at once
                   (and the doc tests alongside); SOLIDCRAFT_TEST_JOBS=N bounds concurrent test
-                  and side commands for test/ci; inherited per-test/worker overrides are unchanged
+                  and side commands for test/ci and splits each binary's test threads and action
+                  matrix workers across the binaries in flight; explicit RUST_TEST_THREADS and
+                  ACTION_MATRIX_JOBS overrides still win
   wasm            cargo check every library crate and the web app for wasm32-unknown-unknown
   web-offline [DIR]
                   write the web build's service worker (sw.js: offline use, updates); run by
@@ -69,7 +129,8 @@ commands:
   web-offline-test [--site DIR]
                   check in headless Chrome that the web app works offline and updates to a new
                   build (a stand-in app, or the web build in DIR such as dist/web)
-  ci              fmt --check, assets, icons, licences --check, lists, layers, ui-containers, clippy -D warnings, then the tests
+  ci              fmt --check, assets, icons, licences --check, lists, skills, layers, ui-containers,
+                  mesh-decisions, clippy -D warnings, then the tests
                   with the wasm check alongside, then web-offline-test when Chrome is installed
                   (stops at the first failing step)
 ";
@@ -85,13 +146,19 @@ fn main() -> ExitCode {
         Some("app-icons") => app_icons::run(&root()),
         Some("features") => features::run(&root()),
         Some("i18n") => i18n::run(&root(), &rest),
+        Some("kernel-cases") => kernel_cases::run(&rest),
+        Some("known-failing") => known_failing::run(&root(), &rest),
         Some("oracle") => cmd_oracle(rest.iter().position(|a| *a == "--cli").and_then(|i| rest.get(i + 1)).copied()),
         Some("action-matrix") => {
             let arg = |name: &str| rest.iter().position(|a| *a == name).and_then(|i| rest.get(i + 1)).copied();
             cmd_action_matrix(rest.contains(&"--bless"), arg("--results"), arg("--from"))
         }
         Some("book") => book::run(&root(), !rest.contains(&"--no-build")),
+        Some("external-corpus") => external_corpus::run(&root(), &rest),
         Some("licences") => licences::run(&root(), rest.contains(&"--check")),
+        Some("fold-pending") => pending::run(&root()),
+        Some("skills") => skills::run(&root()),
+        Some("mesh-decisions") => mesh_decisions::run(&root()),
         Some("lists") => lists::run(&root(), rest.contains(&"--fix")),
         Some("test") => {
             let (cargo_args, test_args) = rest.iter().position(|a| *a == "--").map_or((&rest[..], &[][..]), |i| (&rest[..i], &rest[i + 1..]));
@@ -379,8 +446,10 @@ fn cmd_ci() -> Result<(), String> {
     icons::run(&root())?;
     licences::run(&root(), true)?;
     lists::run(&root(), false)?;
+    skills::run(&root())?;
     cmd_layers()?;
     ui_containers::run(&root())?;
+    mesh_decisions::run(&root())?;
     let mut c = cargo();
     c.args(["clippy", "--workspace", "--all-targets", "--profile", "ci", "--", "-D", "warnings"]);
     run(c, "cargo clippy -D warnings")?;

@@ -1,6 +1,8 @@
 # Keyboard shortcuts
 
-Command shortcuts can be changed in File › Keyboard Shortcuts; these are the defaults.
+Command shortcuts can be changed in File › Keyboard Shortcuts; these are the defaults. Click a
+key to replace it, or the **+** after it to give the command another key: every key it has
+runs it, and menus and tooltips show the first one.
 
 Click a binding to record a new shortcut. A shortcut can contain Shift, Ctrl/Cmd and
 Alt/Option modifiers plus exactly one other key. Hold the modifiers, then press the final
@@ -41,13 +43,34 @@ if that happens; recording is cancelled if the app loses focus.
 | Ctrl+Z | Undo | Ctrl+Y | Redo |
 | Ctrl+N | New Design | Ctrl+O | Open |
 | Ctrl+S | Save | Delete | Delete the selection |
+| Ctrl+Shift+S | Save As | | |
+| Ctrl+1 | Front View | Ctrl+2 | Back View |
+| Ctrl+3 | Left View | Ctrl+4 | Right View |
+| Ctrl+5 | Top View | Ctrl+6 | Bottom View |
+| Ctrl+7 | Isometric View | | |
+
+L, R and C start their tool family (lines, rectangles, circles) in the variant you used last, as
+the family's toolbar button does: after a Midpoint Line, L starts a Midpoint Line again. Pick
+another variant from the button's drop-down (or the Sketch Palette) and the key starts that one
+from then on. The choice is kept across designs and restarts. With **Pressing a tool's shortcut
+again switches its mode** on (Preferences › Sketch), pressing the key again before the first
+click steps to the family's next variant.
+
+One key can be bound to a sketch tool and to a model command at once: in a sketch the key runs
+the sketch tool, outside one the model command. Outside a sketch, a sketch tool's key opens
+Create Sketch and starts the tool in the new sketch. By default a model command's key pressed
+in a sketch still runs it, and one that builds a feature (E, Extrude) finishes the sketch first.
+With **Keep model keys out of sketches** on (File › Keyboard Shortcuts), a sketch and the model
+keep their keys apart: while editing a sketch only sketch keys and keys that work everywhere
+(Measure, the views, the file commands) run, and a model key such as E or F does nothing, so a
+stray key can't close a heavy sketch.
 
 Keys handled by the window itself:
 
 | Key | Action |
 |---|---|
 | S | command search under the ribbon search field |
-| V | show or hide the selected bodies, sketches and planes |
+| V | show or hide the selected bodies, sketches and planes; with a right-click menu open, its Show/Hide (a folder, the Origin folder, an origin plane) |
 | F2 | rename the selected browser or timeline item |
 | F6 | fit the view to the model |
 | ← → ↑ ↓ | turn the view 15° (with Shift, a quarter turn) |
@@ -58,7 +81,9 @@ Keys handled by the window itself:
 While a value box has the keyboard (a dimension being added, a dialog field), keys type into
 it and single-letter shortcuts don't fire. With Sketch Dimension (D), the box opens as soon as
 you click a line, circle or arc (or the second point or line), so D, click, type the value,
-Enter.
+Enter. With Preferences › Design › Step values with the arrow keys and the wheel on, ↑ ↓ in a
+value box, or the wheel over it, step a plain number by 1 (with Shift by 10, with Alt by 0.1);
+see [Parameters and expressions](parameters.md).
 
 Mouse and touch:
 
@@ -69,6 +94,11 @@ Mouse and touch:
 | Hold the left button still (long-press on touch), or right-click › Select Other… | list everything under the cursor to pick from |
 | Double-click a sketch curve or edge | select its chain or tangent loop |
 | Double-click the middle button | go Home: the home view, framing everything shown (Preferences › Navigation › Middle double-click: Home, Fit or Off) |
+
+To zoom by dragging, assign a key to **Drag to Zoom** in File › Keyboard Shortcuts.
+Hold the shortcut, then drag up or down with the left mouse button in the viewport.
+Releasing the shortcut stops the zoom. The Zoom button in the navigation bar also
+shows the assigned shortcut.
 
 Help › Keyboard Shortcuts in the app lists the current bindings, including any you changed.
 
@@ -84,7 +114,7 @@ While drawing or dragging a sketch point:
 | Keys | Action |
 |---|---|
 | Ctrl/Cmd or Alt/Option (default) | suppress auto-snap for that gesture |
-| Shift | prefer a line midpoint when targeting |
+| Shift | prefer a line midpoint when targeting (skips a curve-curve crossing) |
 
 Change the snap-suppress chord in Preferences › Sketch. Selection still uses Shift and
 Ctrl/Cmd to add or toggle (Preferences › Selection can make Shift add-only).

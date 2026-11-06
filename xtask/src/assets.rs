@@ -38,7 +38,7 @@ fn walk(dir: &Path, root: &Path, out: &mut Vec<String>) -> Result<(), String> {
     for e in std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))? {
         let e = e.map_err(|e| e.to_string())?;
         let name = e.file_name().to_string_lossy().into_owned();
-        if name.starts_with('.') || name.starts_with("target") || matches!(name.as_str(), "plan" | "dist" | "node_modules") {
+        if name.starts_with('.') || name.starts_with("target") || matches!(name.as_str(), "plan" | "dist" | "node_modules" | "corpus") {
             continue;
         }
         let p = e.path();
@@ -58,6 +58,9 @@ fn walk(dir: &Path, root: &Path, out: &mut Vec<String>) -> Result<(), String> {
 
 fn needs_attribution(path: &str) -> bool {
     // Include code masters, native work, catalogs, metadata and licence texts in the collection.
+    if path.starts_with("assets/locales/pending/") {
+        return false;
+    }
     if path.starts_with("assets/") {
         return !path.ends_with(".md");
     }
@@ -71,7 +74,12 @@ fn missing<'a>(files: &'a [String], attribution: &str) -> Vec<&'a str> {
 }
 
 pub fn run(root: &Path) -> Result<(), String> {
-    let attribution = std::fs::read_to_string(root.join("ATTRIBUTION.md")).map_err(|e| format!("ATTRIBUTION.md: {e}"))?;
+    let mut attribution = std::fs::read_to_string(root.join("ATTRIBUTION.md")).map_err(|e| format!("ATTRIBUTION.md: {e}"))?;
+    // Rows still pending (attribution/pending/*.md) count: they are folded on main.
+    for (_, row) in crate::pending::attribution_rows(root)? {
+        attribution.push('\n');
+        attribution.push_str(&row);
+    }
     let mut files = Vec::new();
     walk(root, root, &mut files)?;
     files.sort();

@@ -3,6 +3,7 @@
 mod support;
 
 use serde_json::json;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::{Sel, sketch::ConstraintKind};
 use solidcraft_ui_egui::scenario::Harness;
 
@@ -17,7 +18,7 @@ fn select_lines(h: &mut Harness) {
         {"click":{"sketch":[17.5,31.25]},"shift":true}
     ]))
     .unwrap();
-    assert_eq!(h.app.session.selection, vec![Sel::SketchCurve { id: "l1".into() }, Sel::SketchCurve { id: "l2".into() }]);
+    assert_eq!(h.app.session.selection, vec![Sel::SketchCurve { id: "l1".into(), sketch: None }, Sel::SketchCurve { id: "l2".into(), sketch: None }]);
 }
 
 fn assert_line_geometry(h: &Harness, command: &str) {
@@ -122,7 +123,7 @@ fn selected_circles_all_become_equal() {
         sk.radius(sk.curve_index(id).unwrap()).unwrap()
     };
     let r1 = radius(&h, "c1");
-    h.app.session.selection = ["c4", "c3", "c2", "c1"].iter().map(|id| Sel::SketchCurve { id: (*id).into() }).collect();
+    h.app.session.selection = ["c4", "c3", "c2", "c1"].iter().map(|id| Sel::SketchCurve { id: (*id).into(), sketch: None }).collect();
     let undo = h.app.session.undo.len();
     h.run(&json!([{"start":"sketch.constraint.equal"}])).unwrap();
     assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "{:?}", h.app.status);
@@ -140,8 +141,12 @@ fn selected_circles_all_become_equal() {
 fn ambiguous_selection_preserves_tool_first_workflow() {
     for selection in [
         vec![],
-        vec![Sel::SketchCurve { id: "l1".into() }],
-        vec![Sel::SketchCurve { id: "l1".into() }, Sel::SketchCurve { id: "l2".into() }, Sel::SketchPoint { id: "origin".into() }],
+        vec![Sel::SketchCurve { id: "l1".into(), sketch: None }],
+        vec![
+            Sel::SketchCurve { id: "l1".into(), sketch: None },
+            Sel::SketchCurve { id: "l2".into(), sketch: None },
+            Sel::SketchPoint { id: "origin".into() },
+        ],
     ] {
         let mut h = lines();
         h.app.session.selection = selection;
@@ -198,7 +203,7 @@ fn curvature_polygon_and_fix_consume_clicked_operands_atomically() {
         };
         h.call("ui.view", json!({"view":"top"}));
         h.app.cam.distance = 80.0;
-        h.app.cam.target = solidcraft_engine::geom::Vec3::new(30.0, 15.0, 0.0);
+        h.app.cam.target = solidcore_record::Vec3::new(30.0, 15.0, 0.0);
         h.settle();
         for (i, p) in picks.iter().enumerate() {
             h.step(&json!({"click":{"sketch":p},"shift":i>0})).unwrap();
@@ -211,7 +216,7 @@ fn curvature_polygon_and_fix_consume_clicked_operands_atomically() {
         assert!(h.app.tool.is_none());
         assert!(h.app.session.selection.is_empty());
         assert_eq!(h.app.session.undo.len(), undo + 1);
-        let st = h.app.session.world_state();
+        let st = h.app.session.world_state().unwrap();
         let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         assert!(sk.constraints.iter().any(|c| match command {
             "fix" => matches!(c.kind, ConstraintKind::Fix { .. }),
@@ -258,7 +263,7 @@ fn remaining_constraints_preserve_mixed_selections_and_rejected_geometry() {
         let mut h = lines();
         let before = h.app.session.doc.to_json();
         let undo = h.app.session.undo.len();
-        let mixed = vec![Sel::SketchCurve { id: "l1".into() }, Sel::Body { name: "missing".into() }];
+        let mixed = vec![Sel::SketchCurve { id: "l1".into(), sketch: None }, Sel::Body { name: "missing".into() }];
         h.app.session.selection = mixed.clone();
         h.step(&json!({"start":format!("sketch.constraint.{command}")})).unwrap();
         assert!(h.app.tool.is_some());
@@ -267,7 +272,7 @@ fn remaining_constraints_preserve_mixed_selections_and_rejected_geometry() {
         assert_eq!(h.app.session.undo.len(), undo);
     }
     let mut h = lines();
-    let selection = vec![Sel::SketchCurve { id: "l1".into() }, Sel::SketchCurve { id: "missing".into() }];
+    let selection = vec![Sel::SketchCurve { id: "l1".into(), sketch: None }, Sel::SketchCurve { id: "missing".into(), sketch: None }];
     h.app.session.selection = selection.clone();
     let before = h.app.session.doc.to_json();
     let undo = h.app.session.undo.len();

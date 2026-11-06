@@ -167,12 +167,18 @@ fn render(root: &Path, crates: &[Crate]) -> String {
     let font_rule = "=".repeat(80);
     out += &format!(
         "\n{font_rule}\nBundled fonts (SIL Open Font License, Version 1.1)\n{font_rule}\n\n\
-         - LiberationSans-Regular.ttf (assets/fonts/liberation-sans/LiberationSans-Regular.ttf)\n  \
+         - LiberationSans-Regular.ttf (crates/sketch/assets/fonts/liberation-sans/LiberationSans-Regular.ttf)\n  \
            Copyright 2012 Red Hat, Inc. (Liberation Fonts 2.x; digitized data Google)\n  \
            Source: https://github.com/liberationfonts\n\n\
          - BIZUDPGothic-Regular.ttf (assets/fonts/biz-udp-gothic/BIZUDPGothic-Regular.ttf)\n  \
            Copyright 2022 The BIZ UDGothic Project Authors (https://github.com/googlefonts/morisawa-biz-ud-mincho)\n  \
            Source: https://github.com/googlefonts/morisawa-biz-ud-gothic\n\n\
+         - CraftUI-SC.otf (assets/fonts/craft-ui-sc/CraftUI-SC.otf)\n  \
+           Copyright 2014-2021 Adobe / Google Inc. (Noto Sans SC subset for SolidCraft web zh)\n  \
+           Source: https://github.com/notofonts/noto-cjk (Sans SubsetOTF/SC)\n\n\
+         - CraftUI-TC.otf (assets/fonts/craft-ui-tc/CraftUI-TC.otf)\n  \
+           Copyright 2014-2021 Adobe / Google Inc. (Noto Sans TC subset for SolidCraft web zh-TW)\n  \
+           Source: https://github.com/notofonts/noto-cjk (Sans SubsetOTF/TC)\n\n\
          - IBMPlexSans-Variable.ttf (assets/fonts/ibm-plex-sans/IBMPlexSans-Variable.ttf)\n  \
            Copyright 2017 IBM Corp. with Reserved Font Name \"Plex\"\n  \
            Source: https://github.com/IBM/plex\n\n\
@@ -181,7 +187,7 @@ fn render(root: &Path, crates: &[Crate]) -> String {
            Source: https://github.com/IBM/plex\n\n"
     );
     let ofl_path = root.join("assets/fonts/biz-udp-gothic/OFL.txt");
-    let fallback_path = root.join("assets/fonts/liberation-sans/OFL.txt");
+    let fallback_path = root.join("crates/sketch/assets/fonts/liberation-sans/OFL.txt");
     let ofl_text = std::fs::read_to_string(&ofl_path).or_else(|_| std::fs::read_to_string(&fallback_path)).unwrap_or_default();
     let ofl_clean = ofl_text.replace("\r\n", "\n").trim().to_string();
     if !ofl_clean.is_empty() {

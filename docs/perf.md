@@ -1,3 +1,37 @@
+# Where the time goes: the profiler
+
+Every app is built with the profiler (`crates/profile`, the apps' default `profile` feature).
+It records nothing until switched on: `SOLIDCRAFT_PROFILE=1`, the CLI's `--profile`, the
+**Profile operations** preference (Graphics page) or `diagnostics.profile {"enabled": true}`.
+Off, a span is one relaxed atomic load.
+
+What it records, as nested spans on each thread:
+
+| Category | Spans |
+|---|---|
+| `solidcore` | every call into solidcore, the kernel |
+| `kernel` | booleans, blends, sweeps, lofts, shell/draft/offset, healing, sewing, conversions, meshing, measuring |
+| `import` | the stages of a STEP or IGES import: parse, index, each solid, placement, mesh check, convert batches |
+| `feature` | each feature computed, by its type; `doc evaluate` around them |
+| `command` | each `Session::execute`, by command id |
+| `io` | import, export, design read and write |
+
+Self time is a span's time less the spans inside it; its total counts only its outermost run
+on a thread, so a command run by a command is not counted twice. Work handed to other threads
+shows under their own spans. The report is a table (the most self time first, with self time
+per category) and the individual spans as a Chrome trace-event file for chrome://tracing or
+ui.perfetto.dev (at most 200,000 spans; later ones still count in the table).
+
+```sh
+solidcraft-cli run part.step --profile --profile-out trace.json   # table on stderr
+solidcraft-cli run part.solidcraft --profile --quiet
+solidcraft-cli bench-open part.step --profile
+```
+
+Over the control channel or MCP: `diagnostics.profile {"reset": true, "enabled": true}`, do the
+work, then `diagnostics.profile {"top": 30, "trace": "trace.json"}`. A STEP or IGES import's
+reply carries its own profile while recording.
+
 # Design loading
 
 ## Edges made by booleans: each point evaluated once (2026-10-16)
@@ -494,8 +528,8 @@ straight-line projection and exact surface-refinement reuse changes:
 
 These are geometry rebuild times, not complete desktop opening times. The public fixture
 can be generated with `solidcraft-cli run examples/acceptance/sensor_enclosure.json
---save sensor.solidcraft --quiet`, then measured with `solidcraft-cli bench-open
-sensor.solidcraft`. Each benchmark starts a new process; this does not measure a warm
+--save sensor.sc --quiet`, then measured with `solidcraft-cli bench-open
+sensor.sc`. Each benchmark starts a new process; this does not measure a warm
 timeline-cache hit. The local assembly is private and is not part of the repository.
 
 Straight segments now use guarded algebraic closest-point projection instead of sampling
@@ -536,7 +570,7 @@ ready: 13.04 s geometry, 2.20 s placement, 0.53 s meshing and 0.07 s thumbnails.
 the optimized `ci` profile and actual Vulkan rendering, with isolated settings and caches.
 Linux and Windows timings are separate measurements and must not be compared as a speedup.
 
-`solidcraft-cli bench-open design.solidcraft` reports JSON lines for file reading,
+`solidcraft-cli bench-open design.sc` reports JSON lines for file reading,
 JSON decoding and migrations (including input-name repair), timeline evaluation, individual
 features, and world placement/display meshing. `--parse-only` stops before geometry evaluation.
 The parse timer includes document validation and repair, not just the JSON parser.
@@ -727,7 +761,7 @@ apart from the per-feature milliseconds. The
 kernel's test suite passes, including four new tests for the prism route and its identity rule.
 
 Reproduce after compiling a release build, without other builds running: time
-`target/release/solidcraft-cli eval <design> --quiet` with `/usr/bin/time -v`, alternating the
+`target/release/solidcraft-cli eval <design>` with `/usr/bin/time -v`, alternating the
 baseline and patched binaries, and compare the middle of the runs. The corpus (20 generated designs:
 hole plates, box grids, assemblies, many-sketch parts) and the measuring scripts are in
 https://github.com/sahenjp/solidcraft-perf under `perf/`.
@@ -902,3 +936,108 @@ edited New Body and Offset Face drag regressions fail while Join passes. With th
 all six distance-preview regressions pass, covering intermediate geometry, exact final
 convergence, unchanged document/undo, obsolete errors and setup changes. A separate regression
 checks the arrow's position on each held input frame.
+
+## Placement-only model reuse
+
+`Model::evaluate_shared(&Arc<Document>)` retains the document that produced a model and a weak
+reference to that exact model state. A subsequent shared document can keep the model without
+entering `Model::evaluate` when its geometry inputs are unchanged and all its features have
+explicitly supported local inputs. Session opening and refresh use this entry point; drive,
+reach, occurrence movement, scratch sessions and Undo/Redo share its decision. Joint solving,
+motion traces, view revision and world placement still follow the normal refresh path.
+
+Eligibility is computed during ordinary evaluation with its existing feature-owner index.
+The initial supported set is new-body boxes/cylinders/spheres/tori, embedded STEP/mesh imports,
+sketches on explicit local planes without links or 3D wires, and new-body extrudes of their own
+component's sketches without To Object, From Object or Through All. Other features, attachments,
+failed/skipped/stale results, primed evaluation and `no_cache` retain ordinary evaluation.
+The borrowed-document `evaluate` invalidates the retained proof. A saved model establishes a
+shared-input proof on its first ordinary refresh; this does not change saved model formats.
+Renaming results and adopting solved sketches also invalidate it: result labels and
+fingerprints can change while the geometry state stays identical.
+
+Every non-placement document field and every feature field is compared explicitly. Immutable
+import arrays/text are accepted by retained Arc identity; replacing an allocation conservatively
+evaluates again, including an equal-content replacement. New fields of the document, feature,
+mesh or supported feature variants require a decision in this comparison/eligibility policy.
+There is still a linear comparison of lightweight feature definitions and result freshness on a
+new document Arc. This is not a constant-time geometry revision system; the avoided work is the
+evaluator, parameter/context preparation, fingerprints and imported-payload traversal.
+
+Regression tests in the existing placement-cache and evaluation-cost suites check zero timeline
+evaluations, real world-space vertices/normals/topology against fresh evaluation, actual joint
+poses, retained snapshots, scratch and Undo/Redo. Direct geometry/parameter changes, mesh payload
+and metadata replacements, foreign model results, live sketches and unknown features invalidate
+or retain the fallback. The cross-component cut control is a 10 x 10 x 4 mm plate and a 2 x 2 x
+6 mm tool: after a 5 mm slider move it still evaluates to 392 mm3, undo to 384 mm3, redo to 392 mm3.
+
+### Release measurements (2026-10-25)
+
+Windows x64, Intel Core i9-14900K, Rust 1.99.0, release profile (opt-level 3, thin LTO, 16 codegen
+units). Baseline is main `ac53fc1e6fab85a50bdc410178cc75133183393f`; the changed build adds only
+this placement-reuse implementation. Each new process warms canonical meshes and eight operations,
+then runs 64 alternating +10/-10 degree drives/reaches. Three pairs alternate which build runs
+first. Numbers below are medians of the three per-run command/total medians, in milliseconds.
+Total includes the command, world placement and canonical display/reference mesh preparation;
+it excludes UI scene packing, GPU/presentation and input-to-photon latency.
+
+To separate additional benefit from #5480, a second comparison includes that same PR's
+`4720ac3c3f296bfc1d957c0363c656bce8d845cd` implementation in both builds, preserving main's
+feature-JSON and body-measurement caches when integrating it locally:
+
+| Case, with #5480 in both builds | Command before | Command after | Total before | Total after |
+| --- | ---: | ---: | ---: | ---: |
+| One moving component, 256 box bodies | 0.8599 | 0.5457 | 2.7114 | 2.3632 |
+| SO-101 drive | 0.3829 | 0.1363 | 1.4217 | 1.1349 |
+| SO-101 reach (the drag command) | 0.4024 | 0.1401 | 1.4474 | 1.1314 |
+| Cross-component cut, fallback control | 0.0335 | 0.0339 | 0.0842 | 0.0866 |
+
+That is 36.5% less command time / 12.8% less total for 256 bodies, and 65.2% / 21.8% for SO-101
+reach in this integration. The fallback control has no intended speedup; its small absolute
+variation is retained in the table. Against main alone, 256 bodies measure 0.8666 -> 0.5524 ms
+command and 2.7039 -> 2.3913 ms total. SO-101 reach measures 2.8656 -> 0.1443 ms command and
+4.0597 -> 1.1411 ms total; that larger difference overlaps #5480 and is not additive to it.
+
+Every pair agrees on all 64 command responses and occurrence matrices, the final world-space
+position/normal/topology hash, body/triangle counts and Undo/Redo. SO-101 retains its public
+13 bodies / 398,884 triangles; its input SHA-256 is
+`a335456ea4fba3729d41f901374575c785a14d2c4e6bf3bb7081d64062f3f7cb`.
+
+A separate counting build uses #6465's recorder from `969c15c2`, with only the model-evaluation
+and feature-fingerprint hooks wired. It records 1 evaluation / 256 fingerprints -> 0 / 0 for
+256 boxes, and 1 / 1 -> 0 / 0 for SO-101 drive and reach. The cut control stays at 1 / 3.
+The captures are complete for those two instrumented units; no claim is made about the other
+recorder units. The control explicitly disables reuse while retaining the ordinary feature
+cache. These counting-only hooks/switch are absent from the published source and timing builds.
+
+[Reproduction code, exact source/executable hashes and per-operation release samples](https://gist.github.com/takuto-NA/cf4c0c9a40f50d44e1b6cda96bba18bd)
+cover both baseline contexts and the independent counting probe.
+
+## Occurrence placements: one children-by-parent index (2026-11-05)
+
+`Document::placements` walks the assembly tree from the root and, for each component it visits,
+scanned every occurrence for that component's children: placements times occurrences. It runs
+for every world placement (`body_frames`), the Browser, the viewport, edit in place, motion and
+export. `OccurrenceTree` (`crates/doc/src/occurrence_tree.rs`) builds the children of each
+component once, in one pass and in document order, and the walk reads them from it. The walk's
+order, its depth and count caps and where it stops are unchanged; a test compares it with the
+scanning walk on 13 shapes and on hostile generated documents. `inside_component` uses the same
+index.
+
+`benchmark_placements_walk` (ignored; `cargo test --release -p solidcraft-doc --lib
+benchmark_placements_walk -- --ignored --nocapture`) times both walks on a generated board-like
+assembly: `top` modules, each holding `parts` parts of 9 pins. It runs each order in turn (the
+scanning walk first in each round, then the tree first), so neither walk always runs on a cache
+the other warmed. Windows x64, AMD Ryzen 7 7800X3D, Rust 1.99.1, release profile; median of 9
+rounds per order, in milliseconds, the tree's time including building it:
+
+| Occurrences | Placements | First | Scanning | Tree |
+| ---: | ---: | --- | ---: | ---: |
+| 1,010 | 10,011 | scanning | 6.118 | 1.645 |
+| 1,010 | 10,011 | tree | 6.022 | 1.643 |
+| 2,539 | 97,540 | scanning | 121.283 | 15.711 |
+| 2,539 | 97,540 | tree | 120.094 | 15.456 |
+
+The order moves either walk by about 1%.
+
+Both walks return the same placements in the same order (the benchmark asserts it).

@@ -64,25 +64,50 @@ function Rect($h) { $r = New-Object Win+RECT; [void][Win]::GetWindowRect($h, [re
 # Every side and corner, `in` px inside the window's outer pixel, and points just past the border.
 function CheckBorder($h, [string]$when) {
     $r = Rect $h
-    $dpi = [Win]::GetDpiForWindow($h)
-    # Windows' own resize border at this DPI (SM_CXSIZEFRAME + SM_CXPADDEDBORDER), as the app uses it.
-    $b = [Win]::GetSystemMetricsForDpi(32, $dpi) + [Win]::GetSystemMetricsForDpi(92, $dpi)
-    Check ($b -ge 1) "$when : a resize border of $b px"
-    $cx = [int](($r.Left + $r.Right) / 2); $cy = [int](($r.Top + $r.Bottom) / 2)
-    $l = $r.Left; $t = $r.Top; $rt = $r.Right - 1; $bt = $r.Bottom - 1
-    Write-Host "$when : window $($r.Left),$($r.Top) - $($r.Right),$($r.Bottom) at $dpi DPI, border $b px"
-    $cases = @(
-        @($l, $cy, 10), @(($l + $b - 1), $cy, 10), @(($l + $b), $cy, 1),
-        @($rt, $cy, 11), @(($rt - $b + 1), $cy, 11), @(($rt - $b), $cy, 1),
-        @($cx, $t, 12), @($cx, ($t + $b - 1), 12), @($cx, ($t + $b), 1),
-        @($cx, $bt, 15), @($cx, ($bt - $b + 1), 15), @($cx, ($bt - $b), 1),
-        @($l, $t, 13), @($rt, $t, 14), @($l, $bt, 16), @($rt, $bt, 17),
-        @(($l + 2 * $b - 1), $t, 13), @($rt, ($bt - 2 * $b + 1), 17),
-        @($cx, $cy, 1)
-    )
-    foreach ($c in $cases) {
-        $got = [Win]::HitTest($h, $c[0], $c[1])
-        Check ($got -eq $c[2]) "$when hit test at ($($c[0]), $($c[1])): $($HT[$got]) ($got), want $($HT[$c[2]])"
+    if ($when -eq 'first sight') {
+        $settled = $false
+        for ($i = 0; $i -lt 25; $i++) {
+            Start-Sleep -Milliseconds 200
+            $next = Rect $h
+            if ($r.Equals($next)) { $settled = $true; break }
+            $r = $next
+        }
+        if (-not $settled) { throw "$when : window placement did not settle within 5 s" }
+    }
+    for ($try = 1; $try -le 3; $try++) {
+        $r = Rect $h
+        $dpi = [Win]::GetDpiForWindow($h)
+        # Windows' own resize border at this DPI (SM_CXSIZEFRAME + SM_CXPADDEDBORDER), as the app uses it.
+        $b = [Win]::GetSystemMetricsForDpi(32, $dpi) + [Win]::GetSystemMetricsForDpi(92, $dpi)
+        $cx = [int](($r.Left + $r.Right) / 2); $cy = [int](($r.Top + $r.Bottom) / 2)
+        $l = $r.Left; $t = $r.Top; $rt = $r.Right - 1; $bt = $r.Bottom - 1
+        Write-Host "$when : window $($r.Left),$($r.Top) - $($r.Right),$($r.Bottom) at $dpi DPI, border $b px"
+        $cases = @(
+            @($l, $cy, 10), @(($l + $b - 1), $cy, 10), @(($l + $b), $cy, 1),
+            @($rt, $cy, 11), @(($rt - $b + 1), $cy, 11), @(($rt - $b), $cy, 1),
+            @($cx, $t, 12), @($cx, ($t + $b - 1), 12), @($cx, ($t + $b), 1),
+            @($cx, $bt, 15), @($cx, ($bt - $b + 1), 15), @($cx, ($bt - $b), 1),
+            @($l, $t, 13), @($rt, $t, 14), @($l, $bt, 16), @($rt, $bt, 17),
+            @(($l + 2 * $b - 1), $t, 13), @($rt, ($bt - 2 * $b + 1), 17),
+            @($cx, $cy, 1)
+        )
+        # Record failures only after confirming these points used a stable window rect.
+        $results = foreach ($c in $cases) {
+            $got = [Win]::HitTest($h, $c[0], $c[1])
+            @{ ok = ($got -eq $c[2]); what = "$when hit test at ($($c[0]), $($c[1])): $($HT[$got]) ($got), want $($HT[$c[2]])" }
+        }
+        $after = Rect $h
+        if (-not $r.Equals($after)) {
+            if ($try -lt 3) {
+                Write-Host "$when : window rect changed during hit tests; retry $try of 2"
+                continue
+            }
+            Check $false "$when : window rect changed during all 3 hit-test passes"
+            return
+        }
+        Check ($b -ge 1) "$when : a resize border of $b px"
+        foreach ($result in $results) { Check $result.ok $result.what }
+        return
     }
 }
 

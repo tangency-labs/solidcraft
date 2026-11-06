@@ -5,12 +5,49 @@ use egui::{Color32, FontId, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
 
 pub(crate) struct Menu;
 
+/// Seconds the pointer rests on another row before an open flyout closes: a path to the flyout
+/// that crosses a neighbouring row keeps it open.
+pub(crate) const SUBMENU_CLOSE_DELAY: f64 = 0.3;
+
 impl Menu {
     pub(crate) fn context<R>(response: &Response, add: impl FnOnce(&mut Ui) -> R) -> Option<egui::InnerResponse<R>> {
         Container::new(&response.ctx, Surface::Popup).context_menu(response).frame(Self::frame()).show(add)
     }
 
     pub(crate) fn button<R>(ui: &mut Ui, label: impl Into<egui::WidgetText>, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<Option<R>> {
+        Self::button_with(
+            ui,
+            |ui, nested| {
+                let button = egui::Button::new(label.into());
+                ui.add(if nested { button.right_text(egui::menu::SubMenuButton::arrow_atom(None)) } else { button })
+            },
+            add,
+        )
+    }
+
+    pub(crate) fn text<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<Option<R>> {
+        Self::button_with(ui, |ui, _| super::text_button(ui, label, true), add)
+    }
+
+    /// A row whose popup opens beside it, on the left only when the right has no room (#8267).
+    pub(crate) fn item_button<R>(ui: &mut Ui, item: &MenuItem<'_>, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<Option<R>> {
+        Self::button_at(ui, |ui, _| item.show(ui), add, true)
+    }
+
+    pub(crate) fn button_with<R>(
+        ui: &mut Ui,
+        button: impl FnOnce(&mut Ui, bool) -> Response,
+        add: impl FnOnce(&mut Ui) -> R,
+    ) -> egui::InnerResponse<Option<R>> {
+        Self::button_at(ui, button, add, false)
+    }
+
+    fn button_at<R>(
+        ui: &mut Ui,
+        button: impl FnOnce(&mut Ui, bool) -> Response,
+        add: impl FnOnce(&mut Ui) -> R,
+        beside: bool,
+    ) -> egui::InnerResponse<Option<R>> {
         let previous = ui.style().clone();
         let frame = Self::frame();
         let style = ui.style_mut();
@@ -20,8 +57,7 @@ impl Menu {
         style.visuals.window_fill = frame.fill;
         style.visuals.window_stroke = frame.stroke;
         let nested = egui::menu::is_in_menu(ui);
-        let button = egui::Button::new(label.into());
-        let response = ui.add(if nested { button.right_text(egui::menu::SubMenuButton::RIGHT_ARROW) } else { button });
+        let response = button(ui, nested);
         let popup_id = if nested { egui::menu::SubMenu::id_from_widget_id(response.id) } else { egui::Popup::default_response_id(&response) };
         let was_open = ui.ctx().read_response(popup_id).is_some();
         let gate_id = popup_id.with("opening_click");
@@ -49,13 +85,99 @@ impl Menu {
             } else {
                 submenu
             };
-            submenu.show(ui, &response, content)
+            let slot = super::container::BackingSlot::reserve(ui.ctx(), egui::LayerId::new(egui::Order::Foreground, popup_id));
+            submenu.show(ui, &response, |ui| match slot {
+                Some(slot) => slot.body(ui, content),
+                None => content(ui),
+            })
+        } else if beside {
+            let open = Self::flyout_open(ui, &response, popup_id);
+            let popup = Container::new(ui.ctx(), Surface::Popup).menu(&response).open(open).frame(frame);
+            // Last pass's size; the first pass assumes the flyout fits on the right.
+            let size = popup.get_expected_size().unwrap_or(egui::Vec2::ZERO);
+            let at = Self::flyout_at(ui.ctx().content_rect(), response.interact_rect, size, false);
+            popup.anchor(at).align(egui::RectAlign::BOTTOM_START).align_alternatives(&[]).gap(0.0).show(content)
         } else {
             Container::new(ui.ctx(), Surface::Popup).menu(&response).frame(frame).show(content)
         };
         let response = egui::InnerResponse { response, inner: popup.map(|r| r.inner) };
         ui.set_style(previous);
         response
+    }
+
+    /// Hovering a row opens its flyout, like the context menu's. The open flyout stays while the
+    /// pointer is on its row or inside it, and closes after resting elsewhere in the parent menu.
+    fn flyout_open(ui: &Ui, row: &Response, popup_id: egui::Id) -> bool {
+        // (open flyout, when the pointer left it, the pass that last showed it, the pointer has
+        // moved since the parent menu opened)
+        type State = (Option<egui::Id>, Option<f64>, u64, bool);
+        let key = ui.scope_id().with("sc_flyout");
+        let ctx = ui.ctx();
+        let pass = ctx.cumulative_pass_nr();
+        let (mut open, mut leave, seen, mut moved) = ctx.data(|d| d.get_temp::<State>(key)).unwrap_or((None, None, 0, false));
+        // A parent menu that closed and opened again starts with no flyout.
+        if seen + 1 < pass {
+            (open, leave, moved) = (None, None, false);
+        }
+        // Only a menu that opened under a still pointer waits for a move; after that, any row the
+        // pointer rests on shows its flyout, including once another flyout has closed.
+        moved |= Self::pointer_moved(ctx);
+        if open.is_none() && ((moved && row.hovered()) || row.clicked()) {
+            open = Some(popup_id);
+        }
+        if open == Some(popup_id) {
+            let pointer = ctx.pointer_hover_pos();
+            let inside = pointer.is_some_and(|p| row.rect.contains(p) || ctx.read_response(popup_id).is_some_and(|r| r.rect.contains(p)));
+            let elsewhere = pointer.is_some_and(|p| ui.clip_rect().contains(p)) && !inside;
+            if !row.clicked() && elsewhere && (Self::pointer_moved(ctx) || leave.is_some()) {
+                if Self::flyout_leaving(ctx, &mut leave) {
+                    open = None;
+                    // The row under the pointer may come earlier in this pass; it opens on the next.
+                    ctx.request_repaint();
+                }
+            } else {
+                leave = None;
+            }
+        }
+        ctx.data_mut(|d| d.insert_temp(key, (open, leave, pass, moved)));
+        open == Some(popup_id)
+    }
+
+    fn pointer_moved(ctx: &egui::Context) -> bool {
+        ctx.input(|i| i.pointer.delta() != egui::Vec2::ZERO)
+    }
+
+    /// A row opens its flyout when the pointer moves onto it, so a menu that opens under a still
+    /// pointer (or is driven with the keys) opens none.
+    pub(crate) fn flyout_hover(row: &Response) -> bool {
+        row.hovered() && Self::pointer_moved(&row.ctx)
+    }
+
+    /// The pointer rests on another row of the parent menu since `leave`: true once the open
+    /// flyout should close after [`SUBMENU_CLOSE_DELAY`] (#6657).
+    pub(crate) fn flyout_leaving(ctx: &egui::Context, leave: &mut Option<f64>) -> bool {
+        let now = ctx.input(|i| i.time);
+        let left = SUBMENU_CLOSE_DELAY - (now - *leave.get_or_insert(now));
+        if left <= 0.0 || !left.is_finite() {
+            *leave = None;
+            return true;
+        }
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64(left));
+        false
+    }
+
+    /// Where a flyout of `size` sits beside its `row`: on the right with its first row level with
+    /// `row`, on the left only when the right has no room (#8267), and kept on screen. A flyout of
+    /// a flyout that opened to the left (`leftward`) opens to the left too while there is room, so
+    /// it never covers the menu.
+    pub(crate) fn flyout_at(screen: Rect, row: Rect, size: egui::Vec2, leftward: bool) -> egui::Pos2 {
+        let margin = Self::frame().total_margin();
+        let gap = margin.right + 2.0;
+        let right = row.right() + gap;
+        let left = row.left() - gap - size.x;
+        let x = if right + size.x <= screen.right() && !(leftward && left >= screen.left()) { right } else { left.max(screen.left()) };
+        let y = (row.top() - margin.top).min(screen.bottom() - size.y).max(screen.top());
+        pos2(x, y)
     }
 
     pub(crate) fn frame() -> egui::Frame {
@@ -113,13 +235,28 @@ impl Menu {
         enter && selected.is_some_and(|k| enabled.get(k).copied().unwrap_or(false))
     }
 
-    /// Place a submenu beside its row, flipping at the screen edge.
-    pub(crate) fn submenu<R>(ctx: &egui::Context, id: egui::Id, row: Rect, height: f32, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<R> {
-        let screen = ctx.content_rect();
+    /// Place a submenu beside its row with [`Self::flyout_at`].
+    pub(crate) fn submenu<R>(
+        ctx: &egui::Context,
+        id: egui::Id,
+        row: Rect,
+        height: f32,
+        leftward: bool,
+        add: impl FnOnce(&mut Ui) -> R,
+    ) -> egui::InnerResponse<R> {
         let width = crate::context_menu::LIST_W;
-        let x = if row.right() + width <= screen.right() { row.right() } else { (row.left() - width).max(screen.left()) };
-        let at = pos2(x, row.top().min((screen.bottom() - height).max(screen.top())));
-        Container::new(ctx, Surface::Popup).area(id).fixed_pos(at).order(egui::Order::Foreground).show(ctx, |ui| Self::show(ui, width, add))
+        let screen = ctx.content_rect();
+        // The estimate only places the area's first, invisible sizing pass.
+        let height = ctx.memory(|m| m.area_rect(id)).map_or(height, |r| r.height());
+        let at = Self::flyout_at(screen, row, vec2(width, height), leftward);
+        // The sizing pass caps the contents at the default size (egui's is 400 points high), and a
+        // scrolling flyout keeps whatever height it measured there.
+        Container::new(ctx, Surface::Popup)
+            .area(id)
+            .default_size(vec2(width, screen.height()))
+            .fixed_pos(at)
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| Self::show(ui, width, add))
     }
 }
 
@@ -224,7 +361,7 @@ impl<'a> MenuItem<'a> {
         job.wrap.max_rows = 1;
         let galley = painter.layout_job(job);
         painter.galley(pos2(left, r.center().y - galley.size().y / 2.0), galley, ink);
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, label));
         crate::scenario::publish_target(&format!("menu:{}", self.id), r);
         if enabled && response.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -330,7 +467,7 @@ pub(crate) fn workspace_menu(ui: &mut egui::Ui, items: &[Item], key_row: Option<
                     let labels = crate::i18n::tr(tabs).split('·').map(|label| crate::i18n::tr_label(label.trim())).collect::<Vec<_>>().join(" · ");
                     line(labels, r.top() + 47.0);
                 }
-                resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, item.enabled, name));
+                resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, item.enabled, name));
                 if resp.clicked() && item.enabled {
                     picked = Some(item.clone());
                 }
@@ -357,7 +494,7 @@ pub(crate) fn rename_menu(ui: &mut Ui, value: &mut String, focused: &mut bool) -
     Menu::show(ui, t.form_card_width, |ui| {
         super::scope(ui, |ui| {
             Menu::heading(ui, "Rename");
-            let id = egui::Id::new("sc_rename_text");
+            let id = egui::Id::unique("sc_rename_text");
             let response = ui.add(super::fields::text_input(egui::TextEdit::singleline(value).id(id)).desired_width(ui.available_width()));
             t.input_bevel(ui, &response);
             crate::scenario::publish_target("rename:name", response.rect);
@@ -411,6 +548,29 @@ mod tests {
         assert_eq!(frame(key(egui::Key::ArrowDown)), (Some(0), false));
         assert_eq!(frame(key(egui::Key::ArrowUp)), (Some(2), false));
         assert_eq!(frame(key(egui::Key::Enter)), (Some(2), true));
+    }
+
+    #[test]
+    fn flyouts_open_right_of_their_row_and_flip_left_only_without_room() {
+        let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(1000.0, 600.0));
+        let size = vec2(200.0, 100.0);
+        let top = Menu::frame().total_margin().top;
+        let row = Rect::from_min_max(pos2(100.0, 50.0), pos2(400.0, 80.0));
+        let at = Menu::flyout_at(screen, row, size, false);
+        assert!(at.x > row.right() && at.x + size.x <= screen.right(), "{at:?}");
+        assert_eq!(at.y, row.top() - top);
+        // No room on the right: the flyout sits left of the row, still clear of it.
+        let edge = row.translate(vec2(500.0, 0.0));
+        let at = Menu::flyout_at(screen, edge, size, false);
+        assert!(at.x + size.x < edge.left() && at.x >= screen.left(), "{at:?}");
+        // A row near the bottom keeps its flyout on screen.
+        let low = row.translate(vec2(0.0, 500.0));
+        assert_eq!(Menu::flyout_at(screen, low, size, false).y, screen.bottom() - size.y);
+        // Leftward keeps to the left while it fits there, and goes right where it does not.
+        let middle = Rect::from_min_max(pos2(300.0, 50.0), pos2(500.0, 80.0));
+        let at = Menu::flyout_at(screen, middle, size, true);
+        assert!(at.x + size.x < middle.left() && at.x >= screen.left(), "{at:?}");
+        assert!(Menu::flyout_at(screen, row, size, true).x > row.right());
     }
 
     #[test]

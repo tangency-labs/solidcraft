@@ -1,0 +1,73 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "Arc"
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "start": [
+     10,
+     0
+    ],
+    "end": [
+     0,
+     10
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "surface.extrude",
+   "params": {
+    "sketch": "Arc",
+    "curves": [
+     "a1"
+    ],
+    "distance": 20,
+    "body_name": "Quarter"
+   }
+  },
+  {
+   "command": "surface.extend",
+   "params": {
+    "body": "Quarter",
+    "edges": [
+     [
+      9.84807753012208,
+      1.7364817766693033,
+      20
+     ]
+    ],
+    "distance": 5
+   }
+  }
+ ]
+}

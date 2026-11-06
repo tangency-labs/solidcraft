@@ -1,0 +1,11 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#3092",
+    "tangency-labs/solidcraft#2844"
+  ],
+  "what": "a ring (r 19.6/20.8, 20 tall) joined onto the top of an 80x80x1.2 plate with a 9x9 grid of 6.4 mm square holes: the ring's foot crosses many hole edges",
+  "source": "analytic",
+  "method": "plate: 80*80*1.2 - 81*6.4^2*1.2 (holes on an 8 mm pitch, centred); ring: pi*(20.8^2-19.6^2)*20; the ring stands on the plate top (z 1.2..21.2) so they share only a contact face: V = sum. One body",
+  "body_count": 1,
+  "volume_mm3": 6744.77623692066
+}

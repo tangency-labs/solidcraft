@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "r5 rounds on the three edges meeting at the corner (60,40,20): a sphere corner",
+ "source": "analytic",
+ "method": "each edge zone outside the corner cube removes (1-pi/4) r^2 (L - r); the corner cube r^3 keeps a sphere octant pi r^3/6",
+ "body_count": 1,
+ "volume_mm3": 47377.120025868,
+ "faces": 10
+}

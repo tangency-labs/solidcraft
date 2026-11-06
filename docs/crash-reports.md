@@ -8,11 +8,30 @@ until you review and submit it, and the design is not part of the draft.
 
 To send a report:
 
-1. Review the title, report text and screenshot in SolidCraft, then click **Open GitHub draft**.
-   For long reports, SolidCraft copies the text to your clipboard; paste it into the GitHub draft.
+1. Review the title, report text and screenshot in SolidCraft, then click **Open GitHub issue form**
+   (**Open GitHub** in narrow windows). SolidCraft copies the report text to your clipboard and opens
+   GitHub. Short reports are also filled in through the URL; paste longer reports into the GitHub draft.
 2. Attach the screenshot if you want to share it: use **Copy screenshot** and paste it into
    GitHub, or use **Save screenshot…** and upload the PNG. Screenshots are not attached automatically.
 3. Click **Submit new issue** on GitHub to publish the report. Opening the draft alone does not send it.
+
+### Submission and fallback behavior
+
+The same reviewed report dialog is used by **Report a bug**, command errors and crash reports.
+Desktop and web builds submit through GitHub in the browser; the dialog has no direct submission
+API and needs no GitHub token in SolidCraft. It explains this beside the public-report/account notice.
+Sign in with a GitHub account to publish the report.
+
+**Copy report** and **Open GitHub issue form** remain available without credentials or a connection.
+Copying works even before the required description is filled in; opening GitHub with an empty
+description instead focuses that field and explains what is missing. Neither action closes the draft.
+On narrow windows the footer uses **Open GitHub** and **Copy report**; close the draft with the header's
+close button. The two export actions must remain visible at high UI zoom.
+
+If offline, a browser launch is blocked, or GitHub cannot be reached, the dialog tells the user to
+copy the report and keep the text to submit later. Opening GitHub requests a clipboard copy even for
+short reports. SolidCraft cannot confirm browser launch, clipboard delivery or submission; the draft
+stays editable for retrying. Copying or opening a report does not modify the design or its undo history.
 
 ## Where they are
 
@@ -40,14 +59,15 @@ All of these read the same folder:
 
 **Reproduce:** `solidcraft-cli crashes replay <id>` opens the report's design, runs its
 commands, and reports whether the same internal error happens again (same place and message).
-Without the CLI, run `solidcraft-cli run <report>/replay.json --in <report>/design.solidcraft`.
+Without the CLI, run `solidcraft-cli run <report>/replay.json --in <report>/design.sc`.
 A fixed crash turns into a regression test with the same two files.
 
 **Check that reporting works:** with `SOLIDCRAFT_CRASH_TEST=1` set for the app, the command
 `diagnostics.crash_test` has three modes:
 - `panic`: an internal error in a command
 - `kernel`: an internal error inside the geometry kernel
-- `abort`: the app ends at once, and the report appears at the next start
+- `abort`: the app ends at once, and the report appears at the next start. On macOS the
+  signal handler catches it, so the report names SIGABRT and the frames that called `abort()`.
 
 ## What a report holds
 
@@ -58,7 +78,7 @@ A folder `crashes/<YYYYMMDD-HHMMSS>-<signature>/`:
     - `command_panic`: a command hit an internal error; it was caught and the design was left unchanged
     - `kernel_panic_recovered`: the third-party geometry kernel panicked and was caught. This is harmless on the desktop, but it would crash the web build.
     - `panic`: an internal error outside any command
-    - `unclean_exit`: a previous session ended without recording a clean exit. It is detected at the next start, which may be days later. Possible causes include an abort, a stack overflow, a segfault, a crash inside a graphics driver, a system shutdown, or the process being forcibly stopped. This kind alone does not identify the cause. When the app died while starting up, the message and `location` name the startup step (see below). On Windows, a captured native exception also says the exception, the module it happened in and the offset into it.
+    - `unclean_exit`: a previous session ended without recording a clean exit. It is detected at the next start, which may be days later. Possible causes include an abort, a stack overflow, a segfault, a crash inside a graphics driver, a system shutdown, or the process being forcibly stopped. This kind alone does not identify the cause. When the app died while starting up, the message and `location` name the startup step (see below). On Windows and macOS, a captured native crash also says the exception or signal, the module it happened in and the offset into it.
   - `message`, `location` (file:line), `thread`
   - `backtrace`: frames `symbol (file:line)`, without the panic machinery, std internals or the user's home folder
   - `app` (version, commit, build date), `system` (OS, architecture, renderer and GPU), `session.uptime_s`
@@ -74,12 +94,21 @@ A folder `crashes/<YYYYMMDD-HHMMSS>-<signature>/`:
     `viewport pipelines (shader compile)`, `first frame`, `first frame (present)`) and how many
     milliseconds after launch it began. `system.environment` names the renderer (backend, GPU,
     driver) as soon as the adapter is picked, so it is there even when the device never started.
-  - `native` (Windows): what the exception filter caught: `code`, `name`, `address`, `module`,
-    `offset` (into the module), `detail` (for an access violation, the address read or written)
-    and `thread`. The `backtrace` then shows the same in two lines.
-- `design.solidcraft`: the design the replay starts from
+  - `native` (Windows and macOS): what the native crash handler caught: `code`, `name`,
+    `address` (of the faulting instruction), `module`, `offset` (into the module), `detail` (for
+    an access violation or a segfault, the address read or written) and `thread`. The `backtrace`
+    then shows the same in two lines.
+    - On macOS, where a signal handler catches SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGTRAP and SIGABRT,
+      `code` and `signal` are the signal's name (`SIGSEGV`), `name` says it in words (`segmentation
+      fault`, or `stack overflow` when the fault is just below the thread's stack), and it adds
+      `si_code`, `thread_name`, `pid` and `frames`: up to 24 `module+offset symbol+offset` lines
+      walked up the frame pointers from the faulting instruction, which the `backtrace` lists too.
+      The process still ends with the signal, so macOS also writes its own crash report, with every
+      thread's stack: `~/Library/Logs/DiagnosticReports/solidcraft-<date>.ips` (Console ▸ Crash
+      Reports), whose `pid` is the one in `native`.
+- `design.sc`: the design the replay starts from
 - `replay.json`: `{"commands": [{command, params}, …]}`
-- `minidump.dmp` (Windows, native crashes): the threads' stacks and the loaded modules at the
+- `minidump.dmp` (Windows, native crashes; on macOS, see the system's own report above): the threads' stacks and the loaded modules at the
   crash, for WinDbg or Visual Studio. It holds stack memory only, not the design, but it stays
   on this computer like the rest of the report; share it only on request.
 

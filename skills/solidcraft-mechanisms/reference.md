@@ -20,6 +20,7 @@ Each of `a` and `b` in `joint.create` is one of these:
 - `occurrence` is an occurrence name (`Wing:1`), an id, or a component name (its first occurrence). Without it, the body nearest the point is used, which can be the wrong part where two touch.
 - **Use the same form on both sides.** `point` picks its x axis from z. A `frame` with an `x` on one side and a `point` on the other turned a test panel 90 degrees when it was joined.
 - **`flip`:** `false` (the default) mates the origins as two faces meet: b's z points against a's. Two origins at one point with the same `z` then turn part b 180 degrees about the axis, and a joint that closes a loop reports a conflict ("off by 71 mm and 180 degrees" on SELENE). `true` lines b's z up with a's, so parts stay where they are. `joint.edit {"joint":..., "flip":true}` changes it afterwards.
+- **Moving a side:** `joint.edit` takes `a` or `b` in joint.create's form (a joint origin, or a name), so a joint moves its attachment without being deleted and recreated; its limits, values and expressions stay.
 
 ## Joint types
 
@@ -138,7 +139,7 @@ The same pattern moved the solar wings of the SELENE rover (`Rover-v7.solidcraft
 | `a joint needs two different occurrences` | Both origins found the same part. Give `occurrence` on both. If the parts are bodies of one component (an imported STEP file often brings them so), run `component.from_bodies {"bodies": [...]}` first. |
 | "unknown command" for `file.open` | Open a design with the `open` tool or `doc.open {path}`. |
 | Rigid hoses, cables or springs drift as the mechanism moves | Bodies don't bend. Hide them with `browser.visibility`, or model them per link. |
-| `solidcraft-cli snapshot SCRIPT --in design` runs on an empty design | `snapshot` ignores `--in`. Run `solidcraft-cli run SCRIPT --in design --save out.solidcraft` first. |
+| `solidcraft-cli snapshot SCRIPT --in design` runs on an empty design | `snapshot` ignores `--in`. Run `solidcraft-cli run SCRIPT --in design --save out.sc` first. |
 | A URDF export lacks a joint | `export` to `.urdf` leaves out each joint that closes a loop, with a warning, because URDF is a tree. |
 
 ## Reply cost
@@ -154,6 +155,6 @@ The same pattern moved the solar wings of the SELENE rover (`Rover-v7.solidcraft
 
 ## Showing it moving
 
-`motion.export_animation {"study":..., "path":"tour.gif"}` draws the whole motion as an animated GIF in one call, headless or bridged, and changes nothing: `{"joint":..., "from":0, "to":90, "path":...}` animates a drive instead. A path that does not end in `.gif` is a folder for PNG frames (`frame-0001.png`, ...). Pass `camera` (the reply of `ui.camera`, or any of its fields), `width`/`height` (default 800 x 500), `samples` (frames; default the study's steps + 1, or 100), `fps` (default 20), and `grid: false` / `axes: false` for a clean background. The reply is small: `frames`, `bytes`, and `stopped_at` with `stopped_by_loop`/`stopped_by_contact` where the motion first stopped short.
+`motion.export_animation {"study":..., "path":"tour.gif"}` draws the whole motion as an animated GIF in one call, headless or bridged, and changes nothing: `{"joint":..., "from":0, "to":90, "path":...}` animates a drive instead, and `{"view":..., "back":true, "path":...}` an exploded view coming apart and back together (the placements stay as they are). A path that does not end in `.gif` is a folder for PNG frames (`frame-0001.png`, ...). Pass `camera` (the reply of `ui.camera`, or any of its fields), `width`/`height` (default 800 x 500), `samples` (frames; default the study's steps + 1, 100 for a joint, 41 for a view or 81 with `back`), `fps` (default 20), and `grid: false` / `axes: false` for a clean background. The reply is small: `frames`, `bytes`, and `stopped_at` with `stopped_by_loop`/`stopped_by_contact` where the motion first stopped short.
 
 Bridged to the app, `motion.play {"study":..., "step":s}` moves the user's viewport, and `screenshot` captures the window at that step.

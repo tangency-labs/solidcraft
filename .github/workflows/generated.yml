@@ -1,6 +1,8 @@
 # Files generated from the code are rewritten here, on main, after each merge, so pull requests
 # never edit them (two pull requests that each regenerated one would always conflict):
 # THIRD-PARTY-LICENSES.txt (`cargo xtask licences`) and docs/features.md (`cargo xtask features`).
+# Pending files (assets/locales/pending, attribution/pending) are folded into the catalogs and
+# ATTRIBUTION.md by `cargo xtask fold-pending`.
 name: Generated files
 
 on:
@@ -17,6 +19,8 @@ on:
       - "crates/engine/**"
       - "apps/solidcraft-cli/**"
       - "xtask/**"
+      - "assets/locales/pending/*.json"
+      - "attribution/pending/*.md"
       - ".github/workflows/generated.yml"
   workflow_dispatch:
 
@@ -48,13 +52,15 @@ jobs:
         run: cargo xtask licences
       - name: docs/features.md
         run: cargo xtask features
+      - name: Pending locale strings and attribution rows
+        run: cargo xtask fold-pending
       - name: Commit if changed
         run: |
-          if git diff --quiet -- THIRD-PARTY-LICENSES.txt docs/features.md; then echo "unchanged"; exit 0; fi
+          if [ -z "$(git status --porcelain)" ]; then echo "unchanged"; exit 0; fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add THIRD-PARTY-LICENSES.txt docs/features.md
-          git commit -m "Regenerate THIRD-PARTY-LICENSES.txt and docs/features.md [skip ci]"
+          git add -A THIRD-PARTY-LICENSES.txt docs/features.md assets/locales ATTRIBUTION.md attribution
+          git commit -m "Regenerate generated files and fold pending files [skip ci]"
           for _ in 1 2 3; do
             git pull --rebase origin main && git push origin HEAD:main && exit 0
             sleep 10

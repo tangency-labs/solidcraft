@@ -54,9 +54,14 @@ function fake(world = {}) {
 const names = (calls) => calls.map((c) => c[0]);
 const find = (calls, n) => calls.find((c) => c[0] === n);
 const labeled = (at) => ({ event: 'labeled', label: { name: 'in progress' }, created_at: at });
-const pr = (number, login = 'other', state = 'open') => ({
+const said = (body, login = 'github-actions[bot]') => ({ event: 'commented', body, user: { login } });
+const pr = (number, login = 'other', state = 'open', extra = {}) => ({
   event: 'cross-referenced',
-  source: { issue: { number, state, pull_request: {}, user: { login } } },
+  source: { issue: {
+    number, state, pull_request: {}, user: { login },
+    title: 'Work (#7)', body: '', repository: { full_name: 'bherbruck/solidcraft' },
+    ...extra,
+  } },
 });
 
 function ctx(body, { assignees = [], labels = [], user = 'alice', extra = {} } = {}) {
@@ -146,6 +151,15 @@ test('an unclaimed issue with someone else\'s open PR points at the PR', async (
   assert.match(find(calls, 'comment')[1].body, /#42/);
 });
 
+test('a body cross-reference does not block a comment claim', async () => {
+  const { github, calls } = fake({
+    timeline: [pr(42, 'bob', 'open', { title: 'Another fix (#8)', body: 'Not in this PR: #7.' })],
+  });
+  await claim.handleComment({ github, context: ctx('/claim'), now: NOW });
+  assert.deepEqual(find(calls, 'addAssignees')?.[1].assignees, ['alice']);
+  assert.match(find(calls, 'comment')[1].body, /^Claimed by @alice/);
+});
+
 test('bots, locked issues, closed issues, PRs and other comments are ignored', async () => {
   const { github, calls } = fake();
   const bot = ctx('/claim');
@@ -173,6 +187,38 @@ test('unclaim by a maintainer releases, by a stranger does not', async () => {
   await claim.handleComment({ github: w.github, context: ctx('/unclaim', { user: 'mallory', assignees: ['bob'], labels: ['in progress'] }), now: NOW });
   assert.equal(find(w.calls, 'removeLabel'), undefined);
   assert.equal(find(w.calls, 'react')[1].content, 'eyes');
+});
+
+test('unclaim by a claimant the bot could not assign releases, by a stranger does not', async () => {
+  const timeline = [labeled(ago(5 * H)), said('Claimed by @alice through #50. The claim lapses after 14 days without pushes.')];
+  let w = fake({ timeline });
+  await claim.handleComment({ github: w.github, context: ctx('/unclaim', { labels: ['in progress'] }), now: NOW });
+  assert.equal(find(w.calls, 'removeLabel')[1].name, 'in progress');
+  assert.equal(find(w.calls, 'removeAssignees'), undefined);
+  assert.equal(find(w.calls, 'react')[1].content, '+1');
+  w = fake({ timeline });
+  await claim.handleComment({ github: w.github, context: ctx('/unclaim', { user: 'mallory', labels: ['in progress'] }), now: NOW });
+  assert.equal(find(w.calls, 'removeLabel'), undefined);
+  assert.match(find(w.calls, 'comment')[1].body, /Only the person who claimed this/);
+  w = fake({ timeline, perms: { carol: 'write' } });
+  await claim.handleComment({ github: w.github, context: ctx('/unclaim', { user: 'carol', labels: ['in progress'] }), now: NOW });
+  assert.ok(find(w.calls, 'removeLabel'));
+});
+
+test('only the bot\'s latest claim reply, before any release or assignment, names the claimant', async () => {
+  const cases = [
+    [said('Claimed by @mallory.', 'mallory')], // not the bot
+    [said('Claimed by @mallory.'), { event: 'unlabeled', label: { name: 'in progress' } }, labeled(ago(H))], // released since
+    [said('Claimed by @mallory.'), said('Claimed by @bob.')], // taken over
+  ];
+  for (const timeline of cases) {
+    const w = fake({ timeline });
+    await claim.handleComment({ github: w.github, context: ctx('/unclaim', { user: 'mallory', labels: ['in progress'] }), now: NOW });
+    assert.equal(find(w.calls, 'removeLabel'), undefined);
+  }
+  const w = fake({ timeline: [said('Claimed by @mallory.')] }); // someone is assigned since
+  await claim.handleComment({ github: w.github, context: ctx('/unclaim', { user: 'mallory', assignees: ['bob'], labels: ['in progress'] }), now: NOW });
+  assert.equal(find(w.calls, 'removeLabel'), undefined);
 });
 
 test('unclaim on an owner-assigned issue works only for the owner', async () => {
@@ -217,6 +263,16 @@ test('sweep releases a claim whose PR has been idle for 14 days', async () => {
 test('sweep ignores a closed PR', async () => {
   const w = fake({ issues: [issue(7)], timeline: [labeled(ago(80 * H)), pr(9, 'other', 'closed')] });
   assert.deepEqual(await claim.sweep({ github: w.github, context: { repo }, now: NOW }), [7]);
+});
+
+test('an incidental PR mention does not extend a claim past 72 hours', async () => {
+  const w = fake({
+    issues: [issue(7)],
+    timeline: [labeled(ago(80 * H)), pr(9, 'bob', 'open', { title: 'Other work', body: 'See #7.' })],
+    pushed: ago(H),
+  });
+  assert.deepEqual(await claim.sweep({ github: w.github, context: { repo }, now: NOW }), [7]);
+  assert.match(find(w.calls, 'comment')[1].body, /No draft PR showed up within 72 h/);
 });
 
 test('sweep never touches owner- or maintainer-claimed issues', async () => {
@@ -274,9 +330,47 @@ test('a PR on an issue someone else holds comments on the PR and changes nothing
 });
 
 test('the lowest-numbered open PR wins an unrecorded claim', async () => {
-  const { github, calls } = fake({ byNumber: { 7: openIssue(7) }, timeline: [pr(42, 'bob')] });
+  const { github, calls } = fake({
+    byNumber: { 7: openIssue(7) },
+    timeline: [pr(45, 'carol'), pr(42, 'bob')],
+  });
   assert.deepEqual(await claim.handlePull({ github, context: pullCtx(50, 'Thing (#7)') }), []);
   assert.match(find(calls, 'comment')[1].body, /#42 claimed #7 first/);
+});
+
+test('a PR mentioning an issue outside its claim does not block the actual fix', async () => {
+  const { github, calls } = fake({
+    byNumber: { 6608: openIssue(6608) },
+    timeline: [pr(6381, 'bob', 'open', {
+      title: 'Cylinder reference edges (#6380)',
+      body: 'Closes #6380.\n\n## Not in this PR\n\nCanvas value boxes are tracked by #6608.',
+    })],
+  });
+  assert.deepEqual(await claim.handlePull({ github, context: pullCtx(6661, 'Canvas boxes (#6608)') }), [6608]);
+  assert.deepEqual(find(calls, 'addAssignees')[1].assignees, ['alice']);
+  assert.equal(find(calls, 'comment')[1].issue_number, 6608);
+});
+
+test('a closing keyword in the older PR body still reserves the issue', async () => {
+  const { github, calls } = fake({
+    byNumber: { 7: openIssue(7) },
+    timeline: [pr(42, 'bob', 'open', { title: 'Earlier fix', body: 'Resolves #7.' })],
+  });
+  assert.deepEqual(await claim.handlePull({ github, context: pullCtx(50, 'Thing (#7)') }), []);
+  assert.match(find(calls, 'comment')[1].body, /#42 claimed #7 first/);
+  assert.equal(find(calls, 'addAssignees'), undefined);
+});
+
+test('a PR in another repository cannot reserve a local issue with the same number', async () => {
+  const { github, calls } = fake({
+    byNumber: { 7: openIssue(7) },
+    timeline: [pr(42, 'bob', 'open', {
+      repository: { full_name: 'someone/other-project' },
+      body: 'Fixes #7. Related: bherbruck/solidcraft#7.',
+    })],
+  });
+  assert.deepEqual(await claim.handlePull({ github, context: pullCtx(50, 'Thing (#7)') }), [7]);
+  assert.deepEqual(find(calls, 'addAssignees')[1].assignees, ['alice']);
 });
 
 test('the claimant\'s own PR just makes sure the label is there', async () => {

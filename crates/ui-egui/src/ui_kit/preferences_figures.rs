@@ -1,6 +1,7 @@
 //! Deliberately composed preference illustrations. A shared orthographic projection keeps
 //! faces, ground contact, rotation cues and axes consistent at their small display size.
 use crate::theme::Tokens;
+use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Color32, Painter, Pos2, Rect, Shape, Stroke, Vec2, vec2};
 
 struct Canvas {
@@ -68,6 +69,7 @@ fn radial_shadow(p: &Painter, centre: Pos2, radius: Vec2, ink: Color32) {
 
 /// Orbit cards share a deliberately positioned model; only the pivot and its explanatory
 /// cue move. The arc's arrowhead is tangent to the projected ground-plane ellipse.
+#[cfg(test)]
 pub(crate) fn paint_orbit(p: &Painter, rect: Rect, pivot: usize) {
     let t = Tokens::get();
     let c = Canvas { rect };
@@ -89,7 +91,7 @@ pub(crate) fn paint_orbit(p: &Painter, rect: Rect, pivot: usize) {
         p.line_segment([centre, c.at(x - 11.0, y + 5.5)], grey);
     }
     if pivot == 1 {
-        // A restrained screen-space crosshair makes "View centre" distinct from origin.
+        // A restrained screen-space crosshair makes "View center" distinct from origin.
         let guide = Stroke::new(c.width(1.0), t.form_dim.gamma_multiply(0.7));
         for (a, b) in [((x - 9.0, y), (x - 5.0, y)), ((x + 5.0, y), (x + 9.0, y)), ((x, y - 9.0), (x, y - 5.0))] {
             p.line_segment([c.at(a.0, a.1), c.at(b.0, b.1)], guide);
@@ -121,6 +123,17 @@ pub(crate) fn paint_orbit(p: &Painter, rect: Rect, pivot: usize) {
     }
 }
 
+/// Axis tips of the orientation figure on its 120 x 100 canvas, as `(x, y, triad index, label)`,
+/// drawn from the centre `(60, 48)`. Z up has X toward the viewer on the right and Y away on the
+/// right, as the view's axis gizmo draws them (#5680).
+fn orientation_axes(y_up: bool) -> [(f32, f32, usize, &'static str); 3] {
+    if y_up {
+        [(94.0, 65.0, 0, "X"), (60.0, 13.0, 1, "Y"), (26.0, 65.0, 2, "Z")]
+    } else {
+        [(94.0, 65.0, 0, "X"), (94.0, 31.0, 1, "Y"), (60.0, 13.0, 2, "Z")]
+    }
+}
+
 /// Orientation uses the same 30-degree ground plane as the model cards, with unmistakable
 /// axis arrows and readable labels rather than an unrelated generic cube.
 pub(crate) fn paint_orientation(p: &Painter, rect: Rect, y_up: bool) {
@@ -131,13 +144,8 @@ pub(crate) fn paint_orientation(p: &Painter, rect: Rect, y_up: bool) {
     let ground = [c.at(60.0, 32.0), c.at(97.0, 50.5), c.at(60.0, 69.0), c.at(23.0, 50.5)];
     face(&p, ground, t.form_dim.gamma_multiply(0.035));
     p.add(Shape::closed_line(ground.to_vec(), Stroke::new(c.width(0.8), t.form_dim.gamma_multiply(0.20))));
-    let axes = if y_up {
-        [(94.0, 65.0, 0, "X"), (60.0, 13.0, 1, "Y"), (26.0, 65.0, 2, "Z")]
-    } else {
-        [(94.0, 65.0, 0, "X"), (26.0, 65.0, 1, "Y"), (60.0, 13.0, 2, "Z")]
-    };
-    for (x, y, index, label) in axes {
-        let colour = t.triad.get(index).copied().unwrap_or(t.form_ink);
+    for (x, y, index, label) in orientation_axes(y_up) {
+        let colour = t.axes().get(index).copied().unwrap_or(t.form_ink);
         let end = c.at(x, y);
         // A halo keeps every shaft distinct from the subtle ground and the other axes.
         p.line_segment([centre, end], Stroke::new(c.width(4.2), t.viewport_top));
@@ -181,7 +189,8 @@ pub(crate) fn paint_contact_shading(p: &Painter, rect: Rect, on: bool) {
 /// tool marks, tree rows and one simple solid providing recognisable CAD context.
 pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutPreview) {
     let t = Tokens::get();
-    let size = vec2(super::metrics::dimension(ui.available_width()), t.space_24 * 7.0 + t.space_6);
+    let width = super::metrics::dimension(ui.available_width());
+    let size = vec2(width, width * 148.0 / 226.0);
     let (outer, _) = ui.allocate_exact_size(size, egui::Sense::hover());
     let p = ui.painter().with_clip_rect(outer);
     t.container_rect(&p, outer, t.radius_lg, t.control_fill, t.dialog_rule);
@@ -208,12 +217,20 @@ pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutP
         p.rect(rect, if state.compact { 0 } else { t.radius_sm }, fill, t.control_border_stroke(t.control_border), egui::StrokeKind::Inside);
         if !label.is_empty() {
             let centre = if h > 20.0 { c.at(x + w * 0.5, y + 7.0) } else { rect.center() };
-            p.text(centre, egui::Align2::CENTER_CENTER, crate::i18n::tr_label(label), egui::FontId::proportional(t.font_small), t.form_dim);
+            p.with_clip_rect(rect.intersect(p.clip_rect())).text(
+                centre,
+                egui::Align2::CENTER_CENTER,
+                crate::i18n::tr_label(label),
+                egui::FontId::proportional(t.font_small),
+                t.form_dim,
+            );
         }
         rect
     };
     panel(inset, inset, 120.0 - inset * 2.0, ribbon_height, "", t.toolbar);
-    panel(bx, top, bw, browser_height, "Browser", if state.translucent && !state.compact { t.panel.gamma_multiply(0.60) } else { t.panel });
+    let browser =
+        panel(bx, top, bw, browser_height, "Browser", if state.translucent && !state.compact { t.panel.gamma_multiply(0.60) } else { t.panel });
+    crate::scenario::publish_rect("prefs:layout_preview:browser", browser);
     // A full row of quiet tool symbols, with label marks only when labels are enabled.
     let quiet = t.form_dim.lerp_to_gamma(t.viewport_top, 0.55);
     for index in 0..10 {
@@ -237,17 +254,232 @@ pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutP
     crate::icons::glyphs::brand_mark_silhouette(&p, object_centre, c.width(22.0), quiet);
     p.circle_filled(c.at(110.0 - inset, top + 7.0), c.width(3.5), quiet);
     let history = match state.history {
-        1 => panel(inset, top, 10.0, bottom - top, "", t.selected_bg),
-        2 => panel(bx, top + browser_height + gap, bw, bottom - top - browser_height - gap, "History", t.selected_bg),
-        _ => panel(inset, bottom - 10.0, 120.0 - inset * 2.0, 10.0, "History", t.selected_bg),
+        1 => Some(panel(inset, top, 10.0, bottom - top, "", t.selected_bg)),
+        2 => Some(panel(bx, top + browser_height + gap, bw, bottom - top - browser_height - gap, "History", t.selected_bg)),
+        // In the browser: no history panel of its own.
+        3 => None,
+        _ => Some(panel(inset, bottom - 10.0, 120.0 - inset * 2.0, 10.0, "History", t.selected_bg)),
     };
-    if state.history == 1 {
+    if let Some(history) = history {
+        crate::scenario::publish_rect("prefs:layout_preview:history", history);
+    }
+    if let Some(history) = history.filter(|_| state.history == 1) {
         // A single vertical mark reads as the narrow icon-only history rail.
         p.line_segment(
             [history.center_top() + vec2(0.0, t.space_8), history.center_bottom() - vec2(0.0, t.space_8)],
             Stroke::new(2.0, t.form_primary),
         );
     }
+    // An open command dialog demonstrates its placement without another UI host.
+    // The left-column dialog stays below the Browser caption and above any History sharing
+    // that column. Its bounds belong to the Browser region, never to the full column height.
+    let (dialog_x, dialog_top, dialog_height) = if state.dialog_left {
+        (bx, top + 12.0, (browser_height - 12.0 - gap).max(0.0))
+    } else {
+        (120.0 - inset - bw, top, (viewport_bottom - top) * 0.65)
+    };
+    let dialog = panel(dialog_x, dialog_top, bw, dialog_height, "Dialogs", t.dialog_footer);
+    crate::scenario::publish_rect("prefs:layout_preview:dialog", dialog);
     crate::scenario::publish_rect("prefs:layout_preview", outer);
-    super::text(ui, crate::i18n::tr("prefs.preview_choices"), super::Text::Note("preview"));
+    ui.interact(outer, ui.make_persistent_id("layout_preview_help"), egui::Sense::hover())
+        .backing_on_hover_text(crate::i18n::tr("prefs.layout_note"));
+}
+
+#[allow(unused_imports, reason = "painted by the Preferences pages of #9875 to #9883")]
+pub(crate) use super::preferences_figure_ops::ThemeSample;
+use super::preferences_figure_ops::paint;
+
+#[allow(dead_code, reason = "painted by the Preferences pages of #9875 to #9883")]
+/// A theme card's miniature application window, drawn with the theme's own `sample` colours.
+pub(crate) fn paint_theme_thumbnail(p: &Painter, rect: Rect, sample: &ThemeSample) {
+    paint(p, rect, &super::preferences_figure_data::THEME_THUMBNAIL, Some(sample), None);
+}
+
+/// The theme picker's thumbnails have an inner radius matching their card's border.
+/// Keep other thumbnail callers' existing sizing and painting unchanged.
+pub(crate) fn paint_theme_thumbnail_rounded(p: &Painter, rect: Rect, sample: &ThemeSample, radius: f32) {
+    super::preferences_figure_ops::paint_rounded(p, rect, &super::preferences_figure_data::THEME_THUMBNAIL, sample, radius);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::orientation_axes;
+
+    #[test]
+    fn live_layout_preview_follows_each_choice_in_both_themes() {
+        use crate::ui_kit::LayoutPreview;
+        let previous = crate::theme::is_dark();
+        let baseline = LayoutPreview { compact: false, labels: true, history: 0, translucent: false, dialog_left: false };
+        for dark in [false, true] {
+            crate::theme::set_dark(dark);
+            let draw = |state| {
+                let ctx = crate::fonts::test_context();
+                let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                    ui.set_width(262.0);
+                    super::paint_layout(ui, state);
+                });
+                format!("{:?}", output.shapes)
+            };
+            let original = draw(baseline);
+            for state in [
+                LayoutPreview { compact: true, ..baseline },
+                LayoutPreview { labels: false, ..baseline },
+                LayoutPreview { history: 1, ..baseline },
+                LayoutPreview { history: 2, ..baseline },
+                LayoutPreview { history: 3, ..baseline },
+                LayoutPreview { translucent: true, ..baseline },
+                LayoutPreview { dialog_left: true, ..baseline },
+            ] {
+                assert_ne!(original, draw(state), "each actual choice changes the schematic");
+            }
+            let _ = draw(LayoutPreview { compact: false, labels: false, history: 2, translucent: true, dialog_left: true });
+            let browser = crate::scenario::rect_of("prefs:layout_preview:browser").unwrap();
+            let history = crate::scenario::rect_of("prefs:layout_preview:history").unwrap();
+            let dialog = crate::scenario::rect_of("prefs:layout_preview:dialog").unwrap();
+            assert!(browser.contains_rect(dialog), "the left-column dialog remains inside the Browser region");
+            assert!(!dialog.intersects(history), "the dialog cannot cover the Under browser History caption");
+        }
+        crate::theme::set_dark(previous);
+    }
+
+    /// Both orientation figures draw right-handed axes (#5680): seen from above, the turn from X
+    /// to Y and from Y to Z is counter-clockwise on screen (negative cross product, as the canvas y
+    /// axis points down), the way the view's axis gizmo draws them. (Z to X is not tested: with Z
+    /// up, Y points away from the viewer and that turn is clockwise.)
+    #[test]
+    fn orientation_figures_are_right_handed() {
+        for y_up in [false, true] {
+            let axes = orientation_axes(y_up);
+            let v: Vec<(f32, f32)> = axes.iter().map(|(x, y, _, _)| (x - 60.0, y - 48.0)).collect();
+            assert_eq!(axes.map(|a| a.3), ["X", "Y", "Z"]);
+            for i in 0..2 {
+                let (a, b) = (v[i], v[i + 1]);
+                let cross = a.0 * b.1 - a.1 * b.0;
+                assert!(cross < 0.0, "y_up {y_up}: {} to {} turns clockwise (mirrored figure)", axes[i].3, axes[i + 1].3);
+            }
+        }
+    }
+
+    use super::{ThemeSample, paint_theme_thumbnail, paint_theme_thumbnail_rounded};
+    use crate::theme::Tokens;
+    use crate::ui_kit::preferences_figure_data::FIGURES;
+    use egui::{Pos2, Rect, vec2};
+
+    /// Shapes a figure paints into `rect` on a fresh frame, in the given theme.
+    fn shapes(rect: Rect, paint: impl Fn(&egui::Painter, Rect)) -> Vec<egui::epaint::ClippedShape> {
+        let ctx = crate::fonts::test_context();
+        let mut output =
+            ctx.run_ui(egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 300.0))), ..Default::default() }, |ui| {
+                paint(ui.painter(), rect);
+            });
+        output.textures_delta.clear();
+        output.shapes
+    }
+
+    fn rects() -> Vec<Rect> {
+        let nan = f32::NAN;
+        vec![
+            Rect::from_min_size(Pos2::ZERO, vec2(0.0, 0.0)),
+            Rect::from_min_size(Pos2::ZERO, vec2(0.2, 0.2)),
+            Rect::from_min_size(Pos2::new(5.0, 5.0), vec2(1.0, 1.0)),
+            Rect::from_min_size(Pos2::new(5.0, 5.0), vec2(3.0, 200.0)),
+            Rect::from_min_size(Pos2::new(5.0, 5.0), vec2(120.0, 64.0)),
+            Rect::from_min_size(Pos2::new(-50.0, -50.0), vec2(300.0, 300.0)),
+            Rect::from_min_size(Pos2::ZERO, vec2(1.0e5, 1.0e5)),
+            Rect::from_min_size(Pos2::ZERO, vec2(f32::INFINITY, 10.0)),
+            Rect::from_min_size(Pos2::new(nan, 0.0), vec2(10.0, 10.0)),
+            Rect::from_min_size(Pos2::ZERO, vec2(-40.0, 30.0)),
+            Rect::from_min_size(Pos2::ZERO, vec2(nan, nan)),
+        ]
+    }
+
+    #[test]
+    fn theme_thumbnail_operations_stay_inside_the_rounded_inner_border() {
+        let rect = Rect::from_min_size(Pos2::new(20.0, 20.0), vec2(124.0, 76.0));
+        for dark in [false, true] {
+            let sample = ThemeSample::from_tokens(&if dark { Tokens::dark() } else { Tokens::light() });
+            for border in [1.0, 2.0] {
+                let radius = f32::from(Tokens::get().radius_lg) - border;
+                let centre_rect = rect.shrink(radius);
+                let mut vertices = 0;
+                for clipped in shapes(rect, |p, r| paint_theme_thumbnail_rounded(p, r, &sample, radius)) {
+                    crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+                        if let egui::Shape::Mesh(mesh) = shape {
+                            for vertex in &mesh.vertices {
+                                let nearest = Pos2::new(
+                                    vertex.pos.x.clamp(centre_rect.left(), centre_rect.right()),
+                                    vertex.pos.y.clamp(centre_rect.top(), centre_rect.bottom()),
+                                );
+                                assert!(vertex.pos.distance(nearest) <= radius + 0.05, "thumbnail fill leaks outside rounded clip: {:?}", vertex.pos);
+                                vertices += 1;
+                            }
+                        }
+                    });
+                }
+                assert!(vertices > 20, "check the actual background and top-bar geometry");
+            }
+        }
+    }
+
+    /// Every figure, in both themes, paints at size zero, tiny, normal, huge and non-finite without
+    /// panicking, and at a normal size stays inside its rectangle with a bounded number of shapes.
+    #[test]
+    fn every_preference_figure_paints_safely_at_any_size_in_both_themes() {
+        let previous = crate::theme::is_dark();
+        for dark in [false, true] {
+            crate::theme::set_dark(dark);
+            assert!(!FIGURES.is_empty());
+            for (name, size, paint) in FIGURES {
+                for rect in rects() {
+                    let _ = shapes(rect, paint);
+                }
+                let rect = Rect::from_min_size(Pos2::new(20.0, 10.0), vec2(size[0] * 2.0, size[1] * 2.0));
+                let painted = shapes(rect, paint);
+                assert!(!painted.is_empty() && painted.len() < 700, "{name}: {} shapes", painted.len());
+                for shape in &painted {
+                    let bounds = shape.shape.visual_bounding_rect().intersect(shape.clip_rect);
+                    if bounds.is_positive() {
+                        assert!(rect.expand(1.0).contains_rect(bounds), "{name}: {bounds:?} outside {rect:?}");
+                    }
+                }
+            }
+        }
+        crate::theme::set_dark(previous);
+    }
+
+    /// The figures read the theme: the same figure paints different colours in light and dark.
+    #[test]
+    fn preference_figures_follow_the_theme() {
+        let previous = crate::theme::is_dark();
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(120.0, 64.0));
+        let colours = |dark: bool| {
+            crate::theme::set_dark(dark);
+            let mut all = Vec::new();
+            for shape in shapes(rect, super::super::preferences_figure_data::paint_orbit_origin) {
+                if let egui::Shape::Rect(r) = shape.shape {
+                    all.push(r.fill);
+                }
+            }
+            all
+        };
+        let (light, dark) = (colours(false), colours(true));
+        assert!(!light.is_empty() && light != dark);
+        crate::theme::set_dark(previous);
+    }
+
+    #[test]
+    fn theme_thumbnails_paint_with_the_sample_colours() {
+        let (light, dark) = (ThemeSample::from_tokens(&Tokens::light()), ThemeSample::from_tokens(&Tokens::dark()));
+        assert_ne!(light, dark);
+        let rect = Rect::from_min_size(Pos2::new(4.0, 4.0), vec2(124.0, 76.0));
+        for rect in rects().into_iter().chain([rect]) {
+            let _ = shapes(rect, |p, r| paint_theme_thumbnail(p, r, &light));
+        }
+        let single = shapes(rect, |p, r| paint_theme_thumbnail(p, r, &light));
+        assert!(!single.is_empty());
+        for shape in single {
+            let bounds = shape.shape.visual_bounding_rect().intersect(shape.clip_rect);
+            assert!(!bounds.is_positive() || rect.expand(1.0).contains_rect(bounds), "{bounds:?}");
+        }
+    }
 }

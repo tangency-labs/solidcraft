@@ -1,7 +1,594 @@
 use super::*;
+use solidcraft_doc::render_settings::RenderJob;
+use solidcraft_geom::prelude::*;
 
 fn save(s: &mut Session, patch: Value) {
     s.execute("render.settings.set", &json!({"name":"Studio", "set":patch})).unwrap();
+}
+
+#[test]
+fn complete_shot_patch_accepts_all_known_fields_and_refuses_unknowns_without_mutation() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length":2,"width":3,"height":4})).unwrap();
+    save(&mut s, json!({"width":8,"height":8}));
+    let before = s.doc.clone();
+    let model = s.model.state();
+    let camera = s.camera;
+    let evaluations = s.evaluations;
+    let undo = s.undo.len();
+    let mut complete = json!(RenderSetup::default());
+    complete["width"] = json!(16);
+    complete["height"] = json!(12);
+    complete["camera"] = json!(solidcraft_render::Camera { distance: 80.0, fov: 0.6, ..Default::default() });
+    complete["job"] = json!({"method":"cpu_raytrace","options":{"path":{"max_depth":4},
+        "progressive":{"samples_per_pixel":4,"seed":17},"lens":{"aperture_radius_mm":0.02,"focus_distance_mm":80.0},
+        "output":{"linear_exr":true}}});
+    for field in ["surfaces", "optics", "coats", "stage"] {
+        complete[field] = json!([]);
+    }
+    assert_eq!(complete.as_object().unwrap().len(), 15);
+    let expected: RenderSetup = serde_json::from_value(complete.clone()).unwrap();
+    expected.validate().unwrap();
+    let input = json!({"name":"Studio","set":complete});
+    let original = input.clone();
+    s.execute("render.settings.set", &input).unwrap();
+    assert_eq!(s.doc.render.setups["Studio"], expected);
+    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(s.evaluations, evaluations);
+    assert_eq!(s.camera, camera);
+    assert!(Arc::ptr_eq(&model, &s.model.state()));
+    assert_eq!(s.doc.features, before.features);
+    assert_eq!(s.doc.materials, before.materials);
+    assert_eq!(input, original);
+    let saved = s.doc.clone();
+    s.execute("render.settings.set", &input).unwrap();
+    assert!(Arc::ptr_eq(&saved, &s.doc));
+    assert_eq!(s.undo.len(), undo + 1);
+    for set in [json!({"unknown":true}), {
+        let mut over_schema = complete;
+        over_schema["unknown"] = json!(true);
+        over_schema
+    }] {
+        let history = (s.revision, s.undo.len(), s.redo.len(), s.evaluations);
+        assert!(s.execute("render.settings.set", &json!({"name":"Studio","set":set})).is_err());
+        assert!(Arc::ptr_eq(&saved, &s.doc));
+        assert!(Arc::ptr_eq(&model, &s.model.state()));
+        assert_eq!(history, (s.revision, s.undo.len(), s.redo.len(), s.evaluations));
+        assert_eq!(s.camera, camera);
+    }
+    assert_eq!(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap(), *s.doc);
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.doc, before);
+    s.execute("edit.redo", &json!({})).unwrap();
+    assert_eq!(s.doc, saved);
+    assert_eq!(s.camera, camera);
+}
+
+#[test]
+fn environment_editor_rotation_wraps_and_each_edit_is_one_undo() {
+    let mut s = Session::default();
+    save(&mut s, json!({"job":{"method":"gpu_path","options":{"environment":{"kind":"sky"}}}}));
+    for (degrees, expected) in [(215.0, -145.0), (540.0, -180.0), (-541.0, 179.0), (1e6, -80.0), (-1e6, 80.0)] {
+        let before = s.doc.clone();
+        let undo = s.undo.len();
+        let result = s.execute("render.environment.set", &json!({"name":"Studio","rotation_deg":degrees})).unwrap();
+        let angle = result["setup"]["job"]["options"]["environment"]["rotation_rad"].as_f64().unwrap().to_degrees();
+        assert!((-180.0..180.0).contains(&angle));
+        assert!((angle - expected).abs() < 1e-9);
+        assert_eq!(s.undo.len(), undo + 1);
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(s.doc, before);
+        s.execute("edit.redo", &json!({})).unwrap();
+    }
+    let undo = s.undo.len();
+    s.execute("render.environment.set", &json!({"name":"Studio","intensity":2.5})).unwrap();
+    assert_eq!(s.undo.len(), undo + 1);
+    s.execute("render.environment.set", &json!({"name":"Studio","intensity":2.5})).unwrap();
+    assert_eq!(s.undo.len(), undo + 1, "unchanged values do not add history");
+}
+
+#[test]
+fn environment_editor_hostile_inputs_refuse_atomically() {
+    let mut s = Session::default();
+    save(&mut s, json!({"job":{"method":"gpu_path","options":{"environment":{"kind":"sky"}}}}));
+    let before = s.doc.clone();
+    let history = (s.revision, s.undo.len(), s.redo.len());
+    for extra in [
+        json!({"rotation_deg":1e6+1.0}),
+        json!({"rotation_deg":-1e6-1.0}),
+        json!({"rotation_deg":1e300}),
+        json!({"rotation_deg":"NaN"}),
+        json!({"rotation_deg":null}),
+        json!({"intensity":-0.01}),
+        json!({"intensity":100.01}),
+        json!({"intensity":1e300}),
+        json!({"intensity":"Infinity"}),
+        json!({"rotation_deg":30,"intensity":101}),
+        json!({"unexpected":true}),
+        json!({}),
+    ] {
+        let mut request = json!({"name":"Studio"});
+        request.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        assert!(s.execute("render.environment.set", &request).is_err(), "{request}");
+        assert!(Arc::ptr_eq(&before, &s.doc));
+        assert_eq!(history, (s.revision, s.undo.len(), s.redo.len()));
+    }
+}
+
+#[test]
+fn environment_editor_preserves_source_and_refuses_absent_or_incompatible_environment() {
+    let mut s = Session::default();
+    save(&mut s, json!({"job":{"method":"cpu_raytrace","options":{"environment":{"color":[0.2,0.3,0.4],"intensity":1}}}}));
+    let before = s.doc.clone();
+    for request in [json!({"rotation_deg":30}), json!({"intensity":64.01})] {
+        let mut params = json!({"name":"Studio"});
+        params.as_object_mut().unwrap().extend(request.as_object().unwrap().clone());
+        assert!(s.execute("render.environment.set", &params).is_err());
+        assert!(Arc::ptr_eq(&before, &s.doc));
+    }
+    let reply = s.execute("render.environment.set", &json!({"name":"Studio","intensity":64})).unwrap();
+    assert_eq!(reply["setup"]["job"]["options"]["environment"]["color"], json!([0.2, 0.3, 0.4]));
+    for job in [json!({"method":"raster"}), json!({"method":"gpu_path"}), json!({"method":"cpu_raytrace"})] {
+        let before = s.doc.clone();
+        assert!(s.execute("render.environment.set", &json!({"name":"Studio","set":{"job":job},"intensity":2})).is_err());
+        assert!(Arc::ptr_eq(&before, &s.doc));
+    }
+}
+
+#[test]
+fn environment_editor_command_has_schemas_and_strict_validation() {
+    let command = crate::find_command("render.environment.set").unwrap();
+    assert!(command.contract.is_some());
+    assert!(command.output.is_some());
+    let mut s = Session { param_check: crate::schema::ParamCheck::Strict, ..Default::default() };
+    save(&mut s, json!({"job":{"method":"gpu_path","options":{"environment":{"kind":"sky"}}}}));
+    let reply = s.execute("render.environment.set", &json!({"name":"Studio","intensity":2})).unwrap();
+    assert_eq!(reply["setup"]["job"]["options"]["environment"]["intensity"], 2.0);
+    assert!(s.execute("render.environment.set", &json!({"name":"Studio","intensity":2,"unknown":true})).is_err());
+}
+
+#[test]
+fn shot_frame_edits_are_bounded_atomic_and_one_undo_per_edit() {
+    let mut s = Session::default();
+    save(&mut s, json!({"width":800,"height":600}));
+    for patch in [
+        json!({"width":1920,"height":1080}),
+        json!({"width":1080,"height":1920}),
+        json!({"exposure_ev":-32}),
+        json!({"exposure_ev":32}),
+        json!({"camera":{"target":[0,0,0],"yaw":0,"pitch":0,"distance":1e9,"fov":0}}),
+    ] {
+        let before = s.doc.clone();
+        let undo = s.undo.len();
+        let evaluations = s.evaluations;
+        save(&mut s, patch.clone());
+        assert_eq!(s.undo.len(), undo + 1);
+        assert_eq!(s.evaluations, evaluations);
+        save(&mut s, patch);
+        assert_eq!(s.undo.len(), undo + 1);
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(s.doc, before);
+    }
+    let before = s.doc.clone();
+    let undo = s.undo.len();
+    for patch in [
+        json!({"width":0}),
+        json!({"height":0}),
+        json!({"width":u32::MAX}),
+        json!({"width":4096,"height":4096}),
+        json!({"width":1e300}),
+        json!({"exposure_ev":32.1}),
+        json!({"exposure_ev":-32.1}),
+        json!({"exposure_ev":null}),
+        json!({"camera":{"target":[0,0,0],"yaw":0,"pitch":0,"distance":0,"fov":0}}),
+    ] {
+        assert!(s.execute("render.settings.set", &json!({"name":"Studio","set":patch})).is_err());
+        assert!(Arc::ptr_eq(&s.doc, &before));
+        assert_eq!(s.undo.len(), undo);
+    }
+}
+
+#[test]
+fn render_lights_visibility_commands_validate_and_echo_without_document_or_history_changes() {
+    let mut s = Session::default();
+    save(&mut s, json!({"width":800}));
+    save(&mut s, json!({"width":900}));
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.mark_saved();
+    let document = s.doc.clone();
+    let before = (s.undo.len(), s.redo.len(), s.revision, s.evaluations, s.is_dirty());
+    for (command, input) in [
+        ("render.lights.solo", json!({"id":"directional:0","solo":true})),
+        ("render.lights.solo", json!({"solo":false})),
+        ("render.lights.mute", json!({"id":"area:3","mute":true})),
+        ("render.lights.mute", json!({"id":"spot:7","mute":false})),
+    ] {
+        let reply = s.execute(command, &input).unwrap();
+        for (key, value) in input.as_object().unwrap() {
+            assert_eq!(reply.get(key), Some(value));
+        }
+        let spec = crate::find_command(command).unwrap();
+        assert!(!spec.undoable && !spec.reads_model);
+        let description = s.execute("engine.describe", &json!({"command":command})).unwrap();
+        assert!(description["input"].is_object() && description["output"].is_object());
+    }
+    for (command, input) in [
+        ("render.lights.solo", json!({"solo":true})),
+        ("render.lights.solo", json!({"id":"point:8","solo":true})),
+        ("render.lights.solo", json!({"id":"point:00","solo":true})),
+        ("render.lights.solo", json!({"id":"directional:18446744073709551615","solo":true})),
+        ("render.lights.solo", json!(["area:0", true])),
+        ("render.lights.solo", json!({"id":"area:0","solo":"true"})),
+        ("render.lights.mute", json!({"id":"area:4","mute":true})),
+        ("render.lights.mute", json!({"id":"unknown:0","mute":true})),
+        ("render.lights.mute", json!({"id":"area:0","mute":true,"save":true})),
+        ("render.lights.mute", json!({"mute":true})),
+    ] {
+        assert!(s.execute(command, &input).is_err(), "{command}: {input}");
+    }
+    assert!(Arc::ptr_eq(&document, &s.doc));
+    assert_eq!(before, (s.undo.len(), s.redo.len(), s.revision, s.evaluations, s.is_dirty()));
+    s.execute("edit.redo", &json!({})).unwrap();
+    assert_eq!(s.doc.render.setups["Studio"].width, 900);
+}
+
+fn light_fixture(s: &mut Session, method: &str) {
+    let options = if method == "gpu_path" { json!({"lighting":{}}) } else { json!({"lights":[],"punctual_lights":[],"area_lights":[]}) };
+    save(s, json!({"job":{"method":method,"options":options}}));
+}
+
+#[test]
+fn render_lights_small_area_pose_and_resize_preserve_aspect_and_emitting_side() {
+    use crate::schema::render_lights::Geometry;
+    use solidcore_record::Vec3;
+    let mut s = Session::default();
+    save(
+        &mut s,
+        json!({"job":{"method":"cpu_raytrace","options":{"lights":[],"area_lights":[{
+            "center_mm":[0,0,10],"edge_u_mm":[0.000002,0,0],"edge_v_mm":[0,-0.000004,0],"color":[1,1,1],"intensity":1
+        }]}}}),
+    );
+    s.execute("render.lights.set", &json!({"name":"Studio","id":"area:0","set":{"azimuth_deg":90,"elevation_deg":45}})).unwrap();
+    let before = crate::render_lights::inspect(&s.doc.render.setups["Studio"]).unwrap();
+    let Geometry::Area { edge_u_mm: [ux, uy, uz], edge_v_mm: [vx, vy, vz], .. } = before[0].geometry else { panic!("area") };
+    let u = Vec3::new(ux, uy, uz);
+    let v = Vec3::new(vx, vy, vz);
+    assert!((u.len() - 0.000002).abs() < 1e-12);
+    assert!((v.len() / u.len() - 2.0).abs() < 1e-12);
+    s.execute("render.lights.set", &json!({"name":"Studio","id":"area:0","set":{"size_mm":20}})).unwrap();
+    let after = crate::render_lights::inspect(&s.doc.render.setups["Studio"]).unwrap();
+    let Geometry::Area { edge_u_mm: [ux, uy, uz], edge_v_mm: [vx, vy, vz], .. } = after[0].geometry else { panic!("area") };
+    let resized_u = Vec3::new(ux, uy, uz);
+    let resized_v = Vec3::new(vx, vy, vz);
+    assert!((resized_u.len() - 20.0).abs() < 1e-10);
+    assert!((resized_v.len() - 40.0).abs() < 1e-10);
+    assert!(
+        solidcraft_render::surface::unit_direction(u.cross(v))
+            .unwrap()
+            .dot(solidcraft_render::surface::unit_direction(resized_u.cross(resized_v)).unwrap())
+            > 0.999999
+    );
+}
+
+#[test]
+fn render_lights_edit_commands_publish_one_undo_and_preserve_other_settings() {
+    let mut s = Session::default();
+    light_fixture(&mut s, "cpu_raytrace");
+    for (command, params) in [
+        ("render.lights.add", json!({"name":"Studio","set":{"kind":"point"}})),
+        (
+            "render.lights.set",
+            json!({"name":"Studio","id":"point:0","set":{"intensity_ev":2,"temperature_k":3200,"azimuth_deg":35,"elevation_deg":45,"distance_mm":100}}),
+        ),
+        ("render.lights.duplicate", json!({"name":"Studio","id":"point:0"})),
+        ("render.lights.set", json!({"name":"Studio","id":"point:1","set":{"kind":"spot","aim_at":[0,0,0]}})),
+        ("render.lights.remove", json!({"name":"Studio","id":"point:0"})),
+    ] {
+        let before = s.doc.clone();
+        let undo = s.undo.len();
+        let reply = s.execute(command, &params).unwrap();
+        assert_eq!(s.undo.len(), undo + 1, "{command}");
+        assert_eq!(reply["setup"]["width"], 1024);
+        let changed = s.doc.clone();
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(s.doc, before, "{command}");
+        s.execute("edit.redo", &json!({})).unwrap();
+        assert_eq!(s.doc, changed, "{command}");
+    }
+    let list = s.execute("render.lights.list", &json!({"setup":"Studio"})).unwrap();
+    assert_eq!(list["lights"].as_array().unwrap().len(), 1);
+    assert_eq!(list["lights"][0]["kind"], "spot");
+    assert_eq!(list["lights"][0]["intensity"], 4.0);
+    assert_eq!(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap(), *s.doc);
+}
+
+#[test]
+fn render_lights_edit_refusals_are_atomic_for_hostile_numbers_ids_stale_reviews_and_caps() {
+    let mut s = Session::default();
+    light_fixture(&mut s, "cpu_raytrace");
+    s.execute("render.lights.add", &json!({"name":"Studio","set":{"kind":"point"}})).unwrap();
+    for input in [
+        json!({"name":"Studio","id":"point:0","set":{"intensity_ev":1e300}}),
+        json!({"name":"Studio","id":"point:0","set":{"intensity_ev":7}}),
+        json!({"name":"Studio","id":"point:0","set":{"temperature_k":999}}),
+        json!({"name":"Studio","id":"point:0","set":{"softness":0.5}}),
+        json!({"name":"Studio","id":"point:0","set":{"aim_at":[1e300,0,0]}}),
+        json!({"name":"Studio","id":"point:0","set":{"distance_mm":-1}}),
+        json!({"name":"Studio","id":"point:0","set":{"kind":"invalid"}}),
+        json!({"name":"Studio","id":"area:0","set":{"intensity_ev":1}}),
+        json!({"name":"Studio","id":"point:0","set":{"intensity_ev":1},"expected_revision":0}),
+        json!({"name":"Studio","id":"point:0","set":{"save":true}}),
+    ] {
+        let document = s.doc.clone();
+        let before = (s.undo.len(), s.redo.len(), s.revision, s.evaluations);
+        assert!(s.execute("render.lights.set", &input).is_err(), "{input}");
+        assert!(Arc::ptr_eq(&document, &s.doc));
+        assert_eq!(before, (s.undo.len(), s.redo.len(), s.revision, s.evaluations));
+    }
+    for (kind, cap) in [("directional", 8), ("point", 8), ("area", 4)] {
+        light_fixture(&mut s, "cpu_raytrace");
+        for _ in 0..cap {
+            s.execute("render.lights.add", &json!({"name":"Studio","set":{"kind":kind}})).unwrap();
+        }
+        let document = s.doc.clone();
+        let before = (s.undo.len(), s.revision);
+        assert!(s.execute("render.lights.add", &json!({"name":"Studio","set":{"kind":kind}})).is_err());
+        assert!(s.execute("render.lights.duplicate", &json!({"name":"Studio","id":format!("{kind}:0")})).is_err());
+        assert!(Arc::ptr_eq(&document, &s.doc));
+        assert_eq!(before, (s.undo.len(), s.revision));
+    }
+    light_fixture(&mut s, "gpu_path");
+    s.execute("render.lights.add", &json!({"name":"Studio","set":{"kind":"directional","softness":0.5}})).unwrap();
+    let document = s.doc.clone();
+    for command in ["render.lights.add", "render.lights.duplicate"] {
+        let params = if command.ends_with("add") {
+            json!({"name":"Studio","set":{"kind":"directional","softness":0.5}})
+        } else {
+            json!({"name":"Studio","id":"directional:0"})
+        };
+        assert!(s.execute(command, &params).is_err());
+        assert!(Arc::ptr_eq(&document, &s.doc));
+    }
+    for _ in 0..4 {
+        s.execute("render.lights.add", &json!({"name":"Studio","set":{"kind":"area"}})).unwrap();
+    }
+    assert!(s.execute("render.lights.add", &json!({"name":"Studio","set":{"kind":"area"}})).is_err());
+}
+
+#[test]
+fn render_lights_filter_copies_preserve_saved_settings_and_environment() {
+    use crate::schema::render_lights::Visibility;
+    let mut s = Session::default();
+    light_fixture(&mut s, "gpu_path");
+    s.execute("render.lights.add", &json!({"name":"Studio","set":{"kind":"area"}})).unwrap();
+    s.execute("render.lights.duplicate", &json!({"name":"Studio","id":"area:0"})).unwrap();
+    let original = s.doc.render.setups["Studio"].clone();
+    let mut copy = original.clone();
+    let mut visibility = Visibility { solo: Some("area:1".into()), ..Default::default() };
+    assert_eq!(crate::render_lights::filter(&mut copy, &visibility).unwrap(), None);
+    let lights = crate::render_lights::inspect(&copy).unwrap();
+    assert_eq!(lights[0].intensity, 0.0);
+    assert!(lights[1].intensity > 0.0);
+    visibility.muted.insert("area:1".into());
+    crate::render_lights::filter(&mut copy, &visibility).unwrap();
+    assert!(crate::render_lights::inspect(&copy).unwrap().iter().all(|light| light.intensity == 0.0));
+    assert_eq!(s.doc.render.setups["Studio"], original);
+    let mut raster = RenderSetup::default();
+    let unchanged = raster.clone();
+    visibility.solo = Some("directional:1".into());
+    visibility.muted.clear();
+    assert_eq!(crate::render_lights::filter(&mut raster, &visibility).unwrap(), Some([0.0, 1.0, 0.0]));
+    assert_eq!(raster, unchanged);
+}
+
+#[test]
+fn render_lights_list_unifies_cpu_families_and_keeps_source_slot_ids() {
+    let mut s = Session::default();
+    let directional = json!({"direction":[0,0,2],"color":[1,0.5,0.25],"intensity":3});
+    let point = json!({"position_mm":[2,3,4],"color":[0.2,0.4,1],"intensity":2,"reference_distance_mm":10,"minimum_distance_mm":0.01});
+    let mut spot = point.clone();
+    spot["cone"] = json!({"emitted_axis":[0,0,-1],"inner_half_angle_radians":0.2,"outer_half_angle_radians":0.5});
+    let area = json!({"center_mm":[0,0,10],"edge_u_mm":[4,0,0],"edge_v_mm":[0,-6,0],"color":[1,1,1],"intensity":4});
+    save(
+        &mut s,
+        json!({"job":{"method":"cpu_raytrace","options":{
+        "lights":[directional],"punctual_lights":[point,spot],"area_lights":[area]}}}),
+    );
+    let result = s.execute("render.lights.list", &json!({"setup":"Studio"})).unwrap();
+    let lights = result["lights"].as_array().unwrap();
+    assert_eq!(lights.len(), 4);
+    for (light, (id, kind, name)) in lights.iter().zip([
+        ("directional:0", "directional", "Key"),
+        ("point:0", "point", "Fill"),
+        ("spot:1", "spot", "Rim"),
+        ("area:0", "area", "Light 4"),
+    ]) {
+        assert_eq!(light["id"], id);
+        assert_eq!(light["kind"], kind);
+        assert_eq!(light["name"], name);
+        assert_eq!(light["implicit"], false);
+    }
+    assert_eq!(lights[0]["direction"], json!([0.0, 0.0, 2.0]));
+    assert_eq!(lights[0]["colour"], json!([1.0, 0.5, 0.25]));
+    assert_eq!(lights[1]["minimum_distance_mm"], 0.01);
+    assert_eq!(lights[2]["outer_half_angle_radians"], 0.5);
+    assert_eq!(lights[3]["edge_v_mm"], json!([0.0, -6.0, 0.0]));
+    assert_eq!(lights[3]["name_key"], "render.light_default_number");
+    assert_eq!(lights[3]["number"], 4);
+    let mut setup = serde_json::to_value(&s.doc.render.setups["Studio"]).unwrap();
+    setup["job"]["options"]["lights"][0]["intensity"] = json!(6);
+    let document = s.doc.clone();
+    let edited = s.execute("render.lights.list", &json!({"settings":setup})).unwrap();
+    assert_eq!(edited["lights"][0]["id"], lights[0]["id"]);
+    assert_eq!(edited["lights"][0]["intensity"], 6.0);
+    assert!(Arc::ptr_eq(&document, &s.doc));
+}
+
+#[test]
+fn render_lights_list_factors_gpu_radiance_and_converts_half_edges() {
+    let mut s = Session::default();
+    let result = s
+        .execute(
+            "render.lights.list",
+            &json!({"settings":{"job":{"method":"gpu_path","options":{"lighting":{
+                "sun":{"direction":[0,0,1],"angular_radius_rad":0.02,"radiance":[1000,500,250]},
+                "area_lights":[{"center":[2,3,4],"u":[5,0,0],"v":[0,-6,0],"radiance":[8,4,2]},
+                               {"center":[0,0,10],"u":[1,0,0],"v":[0,1,0],"radiance":[0,0,0]}]
+            }}}}}),
+        )
+        .unwrap();
+    let lights = result["lights"].as_array().unwrap();
+    assert_eq!(lights.len(), 3);
+    assert_eq!(lights[0]["id"], "directional:0");
+    assert_eq!(lights[0]["angular_radius_rad"], 0.02);
+    assert_eq!(lights[0]["intensity"], 1000.0);
+    assert_eq!(lights[0]["colour"], json!([1.0, 0.5, 0.25]));
+    assert_eq!(lights[1]["id"], "area:0");
+    assert_eq!(lights[1]["position_mm"], json!([2.0, 3.0, 4.0]));
+    assert_eq!(lights[1]["edge_u_mm"], json!([10.0, 0.0, 0.0]));
+    assert_eq!(lights[1]["edge_v_mm"], json!([0.0, -12.0, 0.0]));
+    for (light, expected) in lights.iter().zip([[1000.0, 500.0, 250.0], [8.0, 4.0, 2.0], [0.0; 3]]) {
+        let intensity = light["intensity"].as_f64().unwrap();
+        for (colour, radiance) in light["colour"].as_array().unwrap().iter().zip(expected) {
+            assert_eq!(colour.as_f64().unwrap() * intensity, radiance);
+        }
+    }
+}
+
+#[test]
+fn render_lights_list_distinguishes_implicit_presets_empty_rigs_and_environments() {
+    let mut s = Session::default();
+    for (settings, count, implicit) in [
+        (json!({}), 3, true),
+        (json!({"job":{"method":"raster"}}), 3, true),
+        (json!({"job":{"method":"cpu_raytrace"}}), 3, true),
+        (json!({"job":{"method":"cpu_raytrace","options":{"preset":"warm_cool"}}}), 3, true),
+        (json!({"job":{"method":"cpu_raytrace","options":{"preset":"key_rim"}}}), 2, true),
+        (json!({"job":{"method":"cpu_raytrace","options":{"lights":[]}}}), 0, false),
+        (json!({"job":{"method":"gpu_path"}}), 3, true),
+        (json!({"job":{"method":"gpu_path","options":{"lighting":{}}}}), 0, false),
+        (json!({"job":{"method":"gpu_path","options":{"environment":{"kind":"sky"}}}}), 0, false),
+    ] {
+        let reply = s.execute("render.lights.list", &json!({"settings":settings})).unwrap();
+        let lights = reply["lights"].as_array().unwrap();
+        assert_eq!(lights.len(), count, "{settings}");
+        assert!(lights.iter().all(|light| light["implicit"] == implicit));
+    }
+    let warm = s.execute("render.lights.list", &json!({"settings":{"job":{"method":"cpu_raytrace","options":{"preset":"warm_cool"}}}})).unwrap();
+    assert_eq!(warm["lights"][0]["colour"], json!([1.0, 0.72, 0.48]));
+}
+
+#[test]
+fn render_lights_list_accepts_all_twenty_cpu_slots_and_refuses_over_caps() {
+    let mut s = Session::default();
+    let directional = json!({"direction":[0,0,1],"color":[1,1,1],"intensity":1});
+    let point = json!({"position_mm":[0,0,10],"color":[1,1,1],"intensity":1,"reference_distance_mm":10,"minimum_distance_mm":0.01});
+    let area = json!({"center_mm":[0,0,10],"edge_u_mm":[4,0,0],"edge_v_mm":[0,6,0],"color":[1,1,1],"intensity":1});
+    let mut settings = json!({"job":{"method":"cpu_raytrace","options":{
+        "lights":vec![directional.clone();8],"punctual_lights":vec![point.clone();8],"area_lights":vec![area.clone();4]}}});
+    let reply = s.execute("render.lights.list", &json!({"settings":settings})).unwrap();
+    let lights = reply["lights"].as_array().unwrap();
+    assert_eq!(lights.len(), 20);
+    assert_eq!(lights.last().unwrap()["id"], "area:3");
+    let ids: std::collections::BTreeSet<_> = lights.iter().map(|l| l["id"].as_str().unwrap()).collect();
+    assert_eq!(ids.len(), 20);
+    for (field, value) in [("lights", directional), ("punctual_lights", point), ("area_lights", area)] {
+        settings["job"]["options"][field].as_array_mut().unwrap().push(value);
+        assert!(s.execute("render.lights.list", &json!({"settings":settings})).is_err());
+        settings["job"]["options"][field].as_array_mut().unwrap().pop();
+    }
+    let area = json!({"center":[0,0,10],"u":[1,0,0],"v":[0,1,0],"radiance":[1,1,1]});
+    for count in [4, 5] {
+        let result = s.execute(
+            "render.lights.list",
+            &json!({"settings":{"job":{"method":"gpu_path","options":{
+            "lighting":{"area_lights":vec![area.clone();count]}}}}}),
+        );
+        if count == 4 {
+            assert_eq!(result.unwrap()["lights"].as_array().unwrap().len(), 4);
+        } else {
+            assert!(result.is_err());
+        }
+    }
+}
+
+#[test]
+fn render_lights_list_hostile_calls_and_reads_preserve_document_history_and_dirty_state() {
+    let mut s = Session::default();
+    save(&mut s, json!({"width":800}));
+    save(&mut s, json!({"width":900}));
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.mark_saved();
+    let document = s.doc.clone();
+    let before = (s.undo.len(), s.redo.len(), s.revision, s.evaluations, s.is_dirty());
+    for params in [
+        json!([]),
+        json!([null, null]),
+        json!(3),
+        json!({"unknown":true}),
+        json!({"setup":null}),
+        json!({"settings":null}),
+        json!({"setup":[]}),
+        json!({"setup":"missing"}),
+        json!({"setup":"Studio","settings":{}}),
+        json!({"settings":[]}),
+        json!({"settings":{"job":{"method":"cpu_raytrace","options":{"lights":[{
+            "direction":[0,0,0],"color":[1,1,1],"intensity":1}]}}}}),
+        json!({"settings":{"job":{"method":"gpu_path","options":{"lighting":{"sun":{
+            "direction":[0,0,1],"angular_radius_rad":0.02,"radiance":[1e300,0,0]}}}}}}),
+    ] {
+        assert!(s.execute("render.lights.list", &params).is_err(), "{params}");
+        assert!(Arc::ptr_eq(&document, &s.doc));
+        assert_eq!(before, (s.undo.len(), s.redo.len(), s.revision, s.evaluations, s.is_dirty()));
+    }
+    // Session::execute normalizes a top-level null to the empty parameter object.
+    for params in [Value::Null, json!({}), json!({"setup":"Studio"}), json!({"settings":{"job":{"method":"cpu_raytrace"}}})] {
+        s.execute("render.lights.list", &params).unwrap();
+        assert!(Arc::ptr_eq(&document, &s.doc));
+        assert_eq!(before, (s.undo.len(), s.redo.len(), s.revision, s.evaluations, s.is_dirty()));
+    }
+    s.execute("edit.redo", &json!({})).unwrap();
+    assert_eq!(s.doc.render.setups["Studio"].width, 900);
+}
+
+#[test]
+fn render_lights_list_publishes_and_checks_both_schemas() {
+    let mut s = Session::default();
+    let reply = s.execute("engine.describe", &json!({"command":"render.lights.list"})).unwrap();
+    assert_eq!(reply["input"]["properties"].as_object().unwrap().keys().map(String::as_str).collect::<Vec<_>>(), ["settings", "setup"]);
+    assert!(reply["input"]["properties"].get("setup").is_some());
+    assert!(reply["input"]["properties"].get("settings").is_some());
+    assert!(reply["output"]["properties"].get("lights").is_some());
+    for mode in [crate::schema::ParamCheck::Off, crate::schema::ParamCheck::Warn, crate::schema::ParamCheck::Strict] {
+        s.param_check = mode;
+        assert!(s.execute("render.lights.list", &json!({"typo":true})).is_err());
+        let reply = s.execute("render.lights.list", &json!({})).unwrap();
+        assert_eq!(reply["lights"].as_array().unwrap().len(), 3);
+    }
+}
+
+#[test]
+fn render_lights_list_does_not_settle_a_stale_model() {
+    let mut s = Session::default();
+    for (command, params) in [
+        ("sketch.create", json!({"plane":"XY"})),
+        ("sketch.rectangle.two_point", json!({"p0":[5,5],"p1":[25,20]})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"distance":5})),
+        ("sketch.edit", json!({"sketch":"Sketch1"})),
+        ("sketch.drag", json!({"entity":"l1.start","from":[5,5],"to":[4,5],"live":true})),
+    ] {
+        s.execute(command, &params).unwrap();
+    }
+    assert!(s.model.is_stale());
+    let document = s.doc.clone();
+    let model = s.model.state();
+    let before = (s.undo.len(), s.redo.len(), s.revision, s.evaluations);
+    s.execute("render.lights.list", &json!({"settings":{"job":{"method":"cpu_raytrace"}}})).unwrap();
+    assert!(s.model.is_stale());
+    assert!(Arc::ptr_eq(&document, &s.doc));
+    assert!(Arc::ptr_eq(&model, &s.model.state()));
+    assert_eq!(before, (s.undo.len(), s.redo.len(), s.revision, s.evaluations));
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -100,7 +687,7 @@ fn embedded_hdr_capture_rejects_parameters_scope_and_cpu_primaries_without_mutat
         assert_eq!(state, (s.revision, s.undo.len(), s.redo.len()));
     }
     let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
-    let dir = std::env::temp_dir().join(format!("solidcraft-hdr-scope-{}-{nonce}", std::process::id()));
+    let dir = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-hdr-scope-{}-{nonce}", std::process::id()));
     std::fs::create_dir(&dir).unwrap();
     let allowed = dir.join("allowed");
     std::fs::create_dir(&allowed).unwrap();
@@ -141,7 +728,7 @@ fn portable_job_save_is_host_independent_atomic_and_undoable_without_geometry_ch
     assert!(s.render_job_host().is_none());
     let original = s.doc.clone();
     let model = s.model.state();
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let undo = s.undo.len();
     s.evaluations = 0;
     let setup: RenderSetup = serde_json::from_value(json!({
@@ -183,11 +770,11 @@ fn portable_job_save_is_host_independent_atomic_and_undoable_without_geometry_ch
     save(&mut s, json!({"job":{"method":"cpu_raytrace"}}));
     assert_eq!(
         s.doc.render.setups["Studio"].job,
-        Some(solidcraft_doc::render_settings::RenderJob::CpuRaytrace { options: solidcraft_doc::render_settings::CpuJob::default() })
+        Some(solidcraft_doc::render_settings::RenderJob::CpuRaytrace { transparent_background: false, options: Box::default() })
     );
     assert_eq!(s.doc.render.setups["Studio"].exposure_ev, 2.5);
     assert!(Arc::ptr_eq(&model, &s.model.state()));
-    assert!(Arc::ptr_eq(&world, &s.world_state()));
+    assert!(Arc::ptr_eq(&world, &s.world_state().unwrap()));
     assert_eq!(s.evaluations, 0);
 }
 
@@ -221,7 +808,7 @@ fn settings_history_preserves_geometry_cache_and_dirty_state() {
     s.execute("occurrence.move", &json!({"occurrence":component["occurrence"],"translate":[30,0,0]})).unwrap();
     s.mark_saved();
     let model = s.model.state();
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     assert!(!Arc::ptr_eq(&model, &world), "exercise the prepared occurrence cache");
     let mesh = model.bodies[0].mesh();
     let undo = s.undo.len();
@@ -254,7 +841,7 @@ fn settings_history_preserves_geometry_cache_and_dirty_state() {
     assert_eq!(s.doc.render.setups["Studio"].width, 1024);
     assert!(Arc::ptr_eq(&model, &s.model.state()));
     assert!(Arc::ptr_eq(&mesh, &s.model.state().bodies[0].mesh()));
-    assert!(Arc::ptr_eq(&world, &s.world_state()));
+    assert!(Arc::ptr_eq(&world, &s.world_state().unwrap()));
     assert_eq!(s.evaluations, 0);
     // A geometry change and its history still require normal evaluation.
     s.execute("solid.box", &json!({"length":2,"width":3,"height":4})).unwrap();
@@ -336,4 +923,324 @@ fn settings_history_and_checkpoint_preserve_a_stale_live_drag() {
     s.execute("sketch.finish", &json!({})).unwrap();
     assert!(!s.model.is_stale());
     assert!(s.evaluations > 0);
+}
+
+#[test]
+fn render_lights_shape_falloff_and_world_vectors_lower_to_existing_fields_with_undo() {
+    use crate::schema::render_lights::Geometry;
+    let mut s = Session::default();
+    for method in ["cpu_raytrace", "gpu_path"] {
+        light_fixture(&mut s, method);
+        s.execute("render.lights.add", &json!({"name":"Studio","set":{"kind":"area"}})).unwrap();
+        let before = s.doc.clone();
+        s.execute(
+            "render.lights.set",
+            &json!({"name":"Studio","id":"area:0","set":{
+                "position_mm":[2,3,40],"width_mm":60,"height_mm":40,"radiance":[8,4,2]
+            }}),
+        )
+        .unwrap();
+        let lights = crate::render_lights::inspect(&s.doc.render.setups["Studio"]).unwrap();
+        assert_eq!(lights[0].colour.map(|c| c * lights[0].intensity), [8.0, 4.0, 2.0]);
+        let Geometry::Area { position_mm, edge_u_mm: [ux, uy, uz], edge_v_mm: [vx, vy, vz] } = lights[0].geometry else { panic!("area") };
+        assert_eq!(position_mm, [2.0, 3.0, 40.0]);
+        assert!((ux.hypot(uy).hypot(uz) - 60.0).abs() < 1e-9);
+        assert!((vx.hypot(vy).hypot(vz) - 40.0).abs() < 1e-9);
+        let changed = s.doc.clone();
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(s.doc, before);
+        s.execute("edit.redo", &json!({})).unwrap();
+        assert_eq!(s.doc, changed);
+        // GPU stores half-edges, CPU full sides. Both inspect as the same full vectors.
+        s.execute("render.lights.set", &json!({"name":"Studio","id":"area:0","set":{"edge_u_mm":[0,60,0],"edge_v_mm":[40,0,0]}})).unwrap();
+        let roundtrip = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+        assert_eq!(roundtrip, *s.doc);
+        s.execute("render.lights.add", &json!({"name":"Studio","set":{"kind":"directional"}})).unwrap();
+        s.execute("render.lights.set", &json!({"name":"Studio","id":"directional:0","set":{"direction":[-0.4,-0.6,0.7]}})).unwrap();
+        let lights = crate::render_lights::inspect(&s.doc.render.setups["Studio"]).unwrap();
+        let Geometry::Directional { direction, .. } = lights[0].geometry else { panic!("directional") };
+        assert_eq!(direction, [-0.4, -0.6, 0.7]);
+    }
+    light_fixture(&mut s, "cpu_raytrace");
+    s.execute("render.lights.add", &json!({"name":"Studio","set":{"kind":"point"}})).unwrap();
+    s.execute(
+        "render.lights.set",
+        &json!({"name":"Studio","id":"point:0","set":{
+            "position_mm":[5,10,20],"reference_distance_mm":1000,"minimum_distance_mm":10
+        }}),
+    )
+    .unwrap();
+    let lights = crate::render_lights::inspect(&s.doc.render.setups["Studio"]).unwrap();
+    assert!(matches!(
+        lights[0].geometry,
+        Geometry::Point { position_mm: [5.0, 10.0, 20.0], reference_distance_mm: 1000.0, minimum_distance_mm: 10.0 }
+    ));
+}
+
+#[test]
+fn render_lights_new_numeric_fields_refuse_hostile_and_inapplicable_patches_atomically() {
+    use crate::schema::render_lights::LightPatch;
+    let mut s = Session::default();
+    light_fixture(&mut s, "cpu_raytrace");
+    for kind in ["area", "point", "directional"] {
+        s.execute("render.lights.add", &json!({"name":"Studio","set":{"kind":kind}})).unwrap();
+    }
+    for (id, set) in [
+        ("area:0", json!({"width_mm":1e300})),
+        ("area:0", json!({"height_mm":-1})),
+        ("area:0", json!({"radiance":[1e300,0,0]})),
+        ("area:0", json!({"edge_u_mm":[0,0,0]})),
+        ("area:0", json!({"edge_v_mm":[1,0,0],"edge_u_mm":[1,0,0]})),
+        ("area:0", json!({"position_mm":[1e300,0,0]})),
+        ("area:0", json!({"minimum_distance_mm":1})),
+        ("point:0", json!({"width_mm":1})),
+        ("point:0", json!({"reference_distance_mm":1e300})),
+        ("point:0", json!({"reference_distance_mm":1,"minimum_distance_mm":2})),
+        ("point:0", json!({"minimum_distance_mm":0})),
+        ("directional:0", json!({"direction":[0,0,0]})),
+        ("directional:0", json!({"direction":[1e300,0,0]})),
+    ] {
+        let before = s.doc.clone();
+        let history = (s.undo.len(), s.revision);
+        assert!(s.execute("render.lights.set", &json!({"name":"Studio","id":id,"set":set})).is_err());
+        assert!(Arc::ptr_eq(&before, &s.doc));
+        assert_eq!((s.undo.len(), s.revision), history);
+    }
+    for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        for edit in [
+            LightPatch { width_mm: Some(invalid), ..Default::default() },
+            LightPatch { height_mm: Some(invalid), ..Default::default() },
+            LightPatch { radiance: Some([invalid, 1.0, 1.0]), ..Default::default() },
+            LightPatch { direction: Some([invalid, 0.0, 1.0]), ..Default::default() },
+            LightPatch { position_mm: Some([invalid, 0.0, 1.0]), ..Default::default() },
+            LightPatch { reference_distance_mm: Some(invalid), ..Default::default() },
+            LightPatch { minimum_distance_mm: Some(invalid), ..Default::default() },
+        ] {
+            let mut light = crate::render_lights::inspect(&s.doc.render.setups["Studio"]).unwrap().remove(0);
+            assert!(crate::render_lights::patch(&mut light, &edit, [0.0; 3], 100.0).is_err());
+        }
+    }
+}
+
+#[test]
+fn render_lights_removing_last_area_clears_area_only_sampling_settings() {
+    let mut s = Session::default();
+    light_fixture(&mut s, "cpu_raytrace");
+    s.execute("render.lights.add", &json!({"name":"Studio","set":{"kind":"area"}})).unwrap();
+    let mut setup = s.doc.render.setups["Studio"].clone();
+    if let Some(RenderJob::CpuRaytrace { options, .. }) = &mut setup.job {
+        options.area_samples = Some(64);
+        options.seed = Some(123);
+    }
+    s.execute("render.lights.remove", &json!({"name":"Studio","id":"area:0","settings":setup})).unwrap();
+    let Some(RenderJob::CpuRaytrace { options, .. }) = &s.doc.render.setups["Studio"].job else { panic!("CPU") };
+    assert!(options.area_samples.is_none() && options.seed.is_none());
+    assert!(options.area_lights.as_ref().unwrap().is_empty());
+}
+
+#[test]
+fn gpu_hard_directional_commands_materialize_defaults_and_keep_sun_distinct() {
+    use crate::schema::render_lights::{Geometry, Visibility};
+    let mut s = Session::default();
+    save(&mut s, json!({"job":{"method":"gpu_path","options":{}}}));
+    let implicit = crate::render_lights::inspect(&s.doc.render.setups["Studio"]).unwrap();
+    assert_eq!(implicit.len(), 3);
+    let before = s.doc.clone();
+    let duplicate = s.execute("render.lights.duplicate", &json!({"name":"Studio","id":"directional:1"})).unwrap();
+    assert_eq!(duplicate["id"], "directional:3");
+    let actual = crate::render_lights::inspect(&s.doc.render.setups["Studio"]).unwrap();
+    assert_eq!(actual.len(), 4);
+    for (a, b) in actual.iter().take(3).zip(&implicit) {
+        assert_eq!((a.intensity, a.colour), (b.intensity, b.colour));
+        let (Geometry::Directional { direction: a, angular_radius_rad: None }, Geometry::Directional { direction: b, angular_radius_rad: None }) =
+            (a.geometry, b.geometry)
+        else {
+            panic!("hard directions")
+        };
+        assert_eq!(a, b);
+    }
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.doc, before);
+    s.execute("edit.redo", &json!({})).unwrap();
+    let sun = s.execute("render.lights.add", &json!({"name":"Studio","set":{"kind":"directional","softness":0.25}})).unwrap();
+    assert_eq!(sun["id"], "directional:0", "finite Sun is canonical first source");
+    let original = s.doc.render.setups["Studio"].clone();
+    let mut render_copy = original.clone();
+    let visibility = Visibility { solo: Some("directional:3".into()), ..Default::default() };
+    assert_eq!(crate::render_lights::filter(&mut render_copy, &visibility).unwrap(), None);
+    let filtered = crate::render_lights::inspect(&render_copy).unwrap();
+    for (i, light) in filtered.iter().enumerate() {
+        assert_eq!(light.intensity > 0.0, i == 3);
+    }
+    assert_eq!(s.doc.render.setups["Studio"], original);
+    for _ in 5..8 {
+        s.execute("render.lights.add", &json!({"name":"Studio","set":{"kind":"directional"}})).unwrap();
+    }
+    let before = s.doc.clone();
+    for (cmd, input) in [
+        ("render.lights.add", json!({"name":"Studio","set":{"kind":"directional"}})),
+        ("render.lights.duplicate", json!({"name":"Studio","id":"directional:1"})),
+        ("render.lights.duplicate", json!({"name":"Studio","id":"directional:0"})),
+    ] {
+        assert!(s.execute(cmd, &input).is_err());
+        assert!(Arc::ptr_eq(&before, &s.doc));
+    }
+    // Punctual sources have their own unchanged8-slot envelope. Filling the
+    // directional envelope does not make the new point-light family unavailable.
+    let point = s.execute("render.lights.add", &json!({"name":"Studio","set":{"kind":"point"}})).unwrap();
+    assert_eq!(point["id"], "point:0");
+    let with_point = crate::render_lights::inspect(&s.doc.render.setups["Studio"]).unwrap();
+    let original_rows = crate::render_lights::inspect(&before.render.setups["Studio"]).unwrap();
+    assert_eq!(with_point.len(), 9);
+    assert_eq!(&with_point[..8], original_rows.as_slice());
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.doc, before, "one Undo restores the complete original8-directional setup");
+    s.execute("render.lights.remove", &json!({"name":"Studio","id":"directional:7"})).unwrap();
+    assert_eq!(crate::render_lights::inspect(&s.doc.render.setups["Studio"]).unwrap().len(), 7);
+    assert_eq!(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap(), *s.doc);
+}
+
+#[test]
+fn gpu_light_id_remap_uses_original_identity_even_when_values_are_identical() {
+    use crate::schema::render_lights::LightIdRemap;
+    let mut s = Session::default();
+    let hard = json!({"direction":[0,0,1],"color":[0.25,0.5,1],"intensity":2});
+    save(&mut s, json!({"job":{"method":"gpu_path","options":{"lighting":{"directional_lights":[hard.clone(),hard]}}}}));
+    let duplicated = s.execute("render.lights.duplicate", &json!({"name":"Studio","id":"directional:0"})).unwrap();
+    let map: Vec<LightIdRemap> = serde_json::from_value(duplicated["id_remap"].clone()).unwrap();
+    assert_eq!(map.len(), 2);
+    assert_eq!(duplicated["id"], "directional:2");
+    assert_eq!(
+        map.iter().map(|m| (m.before.id.as_str(), m.after_id.as_str())).collect::<Vec<_>>(),
+        [("directional:0", "directional:0"), ("directional:1", "directional:1")]
+    );
+    let added = s.execute("render.lights.add", &json!({"name":"Studio","set":{"kind":"directional","softness":0.25}})).unwrap();
+    let map: Vec<LightIdRemap> = serde_json::from_value(added["id_remap"].clone()).unwrap();
+    assert_eq!(map.len(), 3);
+    assert_eq!(added["id"], "directional:0");
+    for (index, entry) in map.iter().enumerate() {
+        assert_eq!(entry.before.id, format!("directional:{index}"));
+        assert_eq!(entry.after_id, format!("directional:{}", index + 1));
+    }
+    let removed = s.execute("render.lights.remove", &json!({"name":"Studio","id":"directional:0"})).unwrap();
+    let map: Vec<LightIdRemap> = serde_json::from_value(removed["id_remap"].clone()).unwrap();
+    assert_eq!(map.len(), 3);
+    for (index, entry) in map.iter().enumerate() {
+        assert_eq!(entry.before.id, format!("directional:{}", index + 1));
+        assert_eq!(entry.after_id, format!("directional:{index}"));
+    }
+    assert!(removed["id"].is_null());
+}
+
+#[test]
+fn gpu_light_edits_preserve_untouched_original_sun_and_area_radiance_bits() {
+    let mut s = Session::default();
+    let rgb = [0.7_f64, 1.0, 9.1];
+    save(
+        &mut s,
+        json!({"job":{"method":"gpu_path","options":{"lighting":{
+            "sun":{"direction":[1,2,3],"angular_radius_rad":0.02,"radiance":rgb},
+            "area_lights":[{"center":[0,0,10],"u":[1,0,0],"v":[0,-1,0],"radiance":rgb}],
+            "directional_lights":[{"direction":[0,0,1],"color":[1,1,1],"intensity":1}]
+        }}}}),
+    );
+    let lighting = |s: &Session| {
+        let Some(RenderJob::GpuPath { options, .. }) = &s.doc.render.setups["Studio"].job else { panic!("gpu") };
+        options.lighting.unwrap()
+    };
+    let original = lighting(&s);
+    let bits = |a: [f64; 3]| a.map(f64::to_bits);
+    for (command, params) in [
+        ("render.lights.add", json!({"name":"Studio","set":{"kind":"directional"}})),
+        ("render.lights.set", json!({"name":"Studio","id":"directional:1","set":{"direction":[2,3,4]}})),
+        ("render.lights.remove", json!({"name":"Studio","id":"directional:2"})),
+    ] {
+        s.execute(command, &params).unwrap();
+        let actual = lighting(&s);
+        assert_eq!(bits(actual.sun.unwrap().radiance), bits(original.sun.unwrap().radiance));
+        assert_eq!(bits(actual.area_lights.iter().next().unwrap().radiance), bits(rgb));
+    }
+    s.execute("render.lights.remove", &json!({"name":"Studio","id":"directional:0"})).unwrap();
+    assert!(lighting(&s).sun.is_none());
+    assert_eq!(bits(lighting(&s).area_lights.iter().next().unwrap().radiance), bits(rgb));
+    s.execute("render.lights.add", &json!({"name":"Studio","set":{"kind":"directional","softness":0.5}})).unwrap();
+    assert_eq!(bits(lighting(&s).area_lights.iter().next().unwrap().radiance), bits(rgb));
+}
+
+#[test]
+fn gpu_point_spot_commands_keep_cones_ranges_undo_visibility_identity_and_portable_reload() {
+    use crate::schema::render_lights::{Geometry, Visibility};
+    let mut s = Session::default();
+    save(&mut s, json!({"job":{"method":"gpu_path","options":{}}}));
+    let implicit = crate::render_lights::inspect(&s.doc.render.setups["Studio"]).unwrap();
+    let add=s.execute("render.lights.add",&json!({"name":"Studio","set":{"kind":"spot","position_mm":[4,5,6],"emitted_axis":[-4,-5,-6],"inner_half_angle_radians":0.2,"outer_half_angle_radians":0.7,"reference_distance_mm":7.25,"minimum_distance_mm":0.002}})).unwrap();
+    assert_eq!(add["id"], "spot:0");
+    let authored = s.doc.clone();
+    let all = crate::render_lights::inspect(&s.doc.render.setups["Studio"]).unwrap();
+    for (a, b) in all.iter().take(3).zip(&implicit) {
+        assert_eq!((a.geometry, a.intensity, a.colour), (b.geometry, b.intensity, b.colour));
+        assert!(!a.implicit);
+    }
+    let Geometry::Spot { position_mm, emitted_axis, inner_half_angle_radians, outer_half_angle_radians, reference_distance_mm, minimum_distance_mm } =
+        all[3].geometry
+    else {
+        panic!("spot")
+    };
+    assert_eq!((position_mm, emitted_axis), ([4.0, 5.0, 6.0], [-4.0, -5.0, -6.0]));
+    assert_eq!((inner_half_angle_radians, outer_half_angle_radians, reference_distance_mm, minimum_distance_mm), (0.2, 0.7, 7.25, 0.002));
+    let undo = s.undo.len();
+    let point = s.execute("render.lights.set", &json!({"name":"Studio","id":"spot:0","set":{"kind":"point"}})).unwrap();
+    assert_eq!(point["id"], "point:0");
+    assert_eq!(s.undo.len(), undo + 1);
+    let rows = crate::render_lights::inspect(&s.doc.render.setups["Studio"]).unwrap();
+    assert_eq!(rows[3].geometry, Geometry::Point { position_mm, reference_distance_mm, minimum_distance_mm });
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.doc, authored);
+    let dup = s.execute("render.lights.duplicate", &json!({"name":"Studio","id":"spot:0"})).unwrap();
+    assert_eq!(dup["id"], "spot:1");
+    assert!(dup["id_remap"].as_array().unwrap().iter().any(|m| m["before"]["id"] == "spot:0" && m["after_id"] == "spot:0"));
+    let before = s.doc.clone();
+    let mut filtered = s.doc.render.setups["Studio"].clone();
+    crate::render_lights::filter(&mut filtered, &Visibility { solo: Some("spot:1".into()), ..Default::default() }).unwrap();
+    let rows = crate::render_lights::inspect(&filtered).unwrap();
+    assert!(rows.iter().all(|l| (l.intensity > 0.0) == (l.id == "spot:1")));
+    assert_eq!(s.doc, before);
+    for _ in 2..8 {
+        s.execute("render.lights.add", &json!({"name":"Studio","set":{"kind":"point"}})).unwrap();
+    }
+    let before = s.doc.clone();
+    let undo = s.undo.len();
+    for command in ["render.lights.add", "render.lights.duplicate"] {
+        let params = if command.ends_with("add") { json!({"name":"Studio","set":{"kind":"spot"}}) } else { json!({"name":"Studio","id":"spot:0"}) };
+        assert!(s.execute(command, &params).is_err());
+        assert!(Arc::ptr_eq(&before, &s.doc));
+        assert_eq!(s.undo.len(), undo);
+    }
+    let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    assert_eq!(reopened, *s.doc);
+    assert_eq!(
+        crate::render_lights::inspect(&reopened.render.setups["Studio"]).unwrap(),
+        crate::render_lights::inspect(&s.doc.render.setups["Studio"]).unwrap()
+    );
+}
+#[test]
+fn gpu_spot_cone_hostile_edits_refuse_atomically_without_widening_or_ignoring_intent() {
+    let mut s = Session::default();
+    light_fixture(&mut s, "gpu_path");
+    s.execute("render.lights.add", &json!({"name":"Studio","set":{"kind":"spot"}})).unwrap();
+    for set in [
+        json!({"inner_half_angle_radians":0.5,"outer_half_angle_radians":0.5}),
+        json!({"inner_half_angle_radians":0.2,"outer_half_angle_radians":0.2000000001}),
+        json!({"emitted_axis":[0,0,0]}),
+        json!({"outer_half_angle_radians":2}),
+        json!({"emitted_axis":[0,0,-1],"aim_at":[1,2,3]}),
+    ] {
+        let doc = s.doc.clone();
+        let before = (s.revision, s.undo.len(), s.redo.len(), s.evaluations);
+        assert!(s.execute("render.lights.set", &json!({"name":"Studio","id":"spot:0","set":set})).is_err());
+        assert!(Arc::ptr_eq(&doc, &s.doc));
+        assert_eq!(before, (s.revision, s.undo.len(), s.redo.len(), s.evaluations));
+    }
+    s.execute("render.lights.set", &json!({"name":"Studio","id":"spot:0","set":{"kind":"point"}})).unwrap();
+    assert!(s.execute("render.lights.set", &json!({"name":"Studio","id":"point:0","set":{"inner_half_angle_radians":0.1}})).is_err());
 }

@@ -10,6 +10,21 @@ pub struct Family {
 }
 
 pub const FAMILIES: &[Family] = &[
+    Family {
+        label: "Construction Line",
+        commands: &[
+            "sketch.construction_line",
+            "sketch.construction_line.horizontal",
+            "sketch.construction_line.vertical",
+            "sketch.construction_line.angle",
+            "sketch.construction_line.parallel",
+            "sketch.construction_line.perpendicular",
+            "sketch.construction_line.tangent_external",
+            "sketch.construction_line.tangent_at",
+            "sketch.construction_line.tangent_two",
+            "sketch.construction_line.bisector",
+        ],
+    },
     Family { label: "Line", commands: &["sketch.line", "sketch.line.midpoint"] },
     Family {
         label: "Rectangle",
@@ -128,6 +143,36 @@ mod tests {
         let mut restored = crate::SolveApp::new(Default::default(), Default::default());
         restored.load_prefs(&h.app.prefs());
         assert_eq!(restored.preferences.sketch_variants.resolve("sketch.rectangle.two_point"), "sketch.rectangle.three_point");
+    }
+
+    #[test]
+    fn pinned_sketch_variants_leave_the_family_choice_to_its_menu() {
+        use serde_json::json;
+
+        for (main, pinned, menu_choice) in [
+            ("sketch.rectangle.two_point", "sketch.rectangle.center", "sketch.rectangle.three_point"),
+            ("sketch.circle.center", "sketch.circle.two_point", "sketch.circle.three_point"),
+        ] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            crate::toolbar_custom::pin(&mut h.app, "SKETCH", pinned).unwrap();
+            h.settle();
+            let f = family(main).unwrap();
+
+            for expected in [main, menu_choice] {
+                if expected == menu_choice {
+                    h.step(&json!({"click":{"handle":format!("family:{}", f.label)}})).unwrap();
+                    h.step(&json!({"click":{"handle":format!("dropdown:{menu_choice}")}})).unwrap();
+                    assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some(menu_choice));
+                }
+                h.step(&json!({"click":{"handle":format!("button:{pinned}")}})).unwrap();
+                assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some(pinned), "the pin starts its exact tool");
+                assert_eq!(h.app.preferences.sketch_variants.resolve(main), expected, "the pin leaves the family choice alone");
+
+                h.step(&json!({"click":{"handle":format!("button:{main}")}})).unwrap();
+                assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some(expected), "the main button still starts the chosen variant");
+            }
+        }
     }
 
     #[test]

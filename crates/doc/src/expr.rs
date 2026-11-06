@@ -127,7 +127,7 @@ impl Kind {
 }
 
 /// Units a parameter or an expression may use: name, kind and size (mm or radians).
-pub const UNITS: [(&str, Kind, f64); 14] = [
+pub const UNITS: &[(&str, Kind, f64)] = &[
     ("mm", Kind::Length, 1.0),
     ("cm", Kind::Length, 10.0),
     ("m", Kind::Length, 1000.0),
@@ -145,7 +145,7 @@ pub const UNITS: [(&str, Kind, f64); 14] = [
 ];
 
 /// Functions an expression may call (name, signature) — for autocomplete and help.
-pub const FUNCTIONS: [(&str, &str); 23] = [
+pub const FUNCTIONS: &[(&str, &str)] = &[
     ("sin", "sin(angle)"),
     ("cos", "cos(angle)"),
     ("tan", "tan(angle)"),
@@ -161,6 +161,12 @@ pub const FUNCTIONS: [(&str, &str); 23] = [
     ("ceil", "ceil(x)"),
     ("round", "round(x)"),
     ("exp", "exp(x)"),
+    ("sinh", "sinh(x)"),
+    ("cosh", "cosh(x)"),
+    ("tanh", "tanh(x)"),
+    ("asinh", "asinh(x)"),
+    ("acosh", "acosh(x), x ≥ 1"),
+    ("atanh", "atanh(x), −1 < x < 1"),
     ("ln", "ln(x)"),
     ("log", "log(x) (base 10)"),
     ("log10", "log10(x)"),
@@ -172,7 +178,7 @@ pub const FUNCTIONS: [(&str, &str); 23] = [
 ];
 
 /// Constants an expression may use.
-pub const CONSTANTS: [&str; 2] = ["pi", "PI"];
+pub const CONSTANTS: &[&str] = &["pi", "PI"];
 
 /// Kind and size (mm or radians per unit) of a parameter's unit; empty means unit-less.
 pub fn unit_info(u: &str) -> Option<(Kind, f64)> {
@@ -255,7 +261,12 @@ impl Value {
             Kind::Angle if self.unitless() => self.v * d.ang,
             Kind::Unitless if self.unitless() => self.v,
             _ => {
-                return Err(DocError::Expr(format!("expected {}, got {}", kind_word(k), self.describe())));
+                let hint = if k == Kind::Unitless && self.len == 1 && self.ang == 0 {
+                    " (a count needs a unit-less value: divide by a length, e.g. `floor(L / (210 mm))`)"
+                } else {
+                    ""
+                };
+                return Err(DocError::Expr(format!("expected {}, got {}{hint}", kind_word(k), self.describe())));
             }
         };
         if out.is_finite() { Ok(out) } else { Err(DocError::Expr("result is not a finite number".into())) }
@@ -291,6 +302,28 @@ pub fn value_in_unit(v: Value, unit: &str) -> f64 {
         (Some((Kind::Length, s)), Some(Kind::Length)) | (Some((Kind::Angle, s)), Some(Kind::Angle)) if s != 0.0 => v.v / s,
         _ => v.v,
     }
+}
+
+/// The number a reply reports for a value: millimetres for a length, degrees for an angle,
+/// as-is for a unit-less or compound value. One meaning of `value` in every reply (#10747).
+pub fn reported_value(v: Value) -> f64 {
+    match v.kind() {
+        Some(Kind::Angle) => v.v.to_degrees(),
+        _ => v.v,
+    }
+}
+
+/// The number a person would read for `v`: the shortest decimal that reads back after
+/// rounding off the last few bits (12 significant digits), so `30 deg` stored as
+/// 29.999999999999996 reports 30 and `0.1 + 0.2` reports 0.3. Only what is *reported*
+/// is rounded; stored values and evaluation keep full precision (#10747).
+pub fn round_reported(v: f64) -> f64 {
+    if !v.is_finite() {
+        return v;
+    }
+    // `:.11e` keeps 12 significant digits; parsing back gives the f64 nearest that decimal,
+    // which serializes as the shortest form that reads back to it.
+    format!("{v:.11e}").parse().unwrap_or(v)
 }
 
 fn unit(name: &str) -> Option<Value> {
@@ -339,18 +372,27 @@ fn lex_spans(s: &str) -> Result<Vec<(Tok, usize, usize)>, DocError> {
     let at = |i: usize| cs.get(i).map(|x| x.0).unwrap_or(s.len());
     let mut i = 0;
     let mut out = Vec::new();
-    // Parentheses open at this point: a comma outside them can only be a decimal comma.
-    let mut depth = 0usize;
+    // Parentheses open at this point, innermost last, true for a function call's: a comma directly
+    // in a call separates its arguments, and anywhere else can only be a decimal comma (#9408).
+    let mut parens: Vec<bool> = Vec::new();
     // A single leading `=` marks the text as a formula (`=d3`, #4681) and is not part of it.
     if let Some(k) = cs.iter().position(|(_, c)| !c.is_whitespace())
         && cs.get(k).is_some_and(|(_, c)| *c == '=')
     {
         i = k + 1;
     }
+    // A value typed as a definition, `name = expression` (#4071), is worth its expression: the
+    // name is what it defines, not part of it (`Document::define_inline` stores it apart).
+    if i == 0
+        && definition(s).is_some()
+        && let Some(eq) = s.find('=')
+    {
+        i = cs.iter().position(|(b, _)| *b > eq).unwrap_or(cs.len());
+    }
     while let Some(&(_, c)) = cs.get(i) {
         if c.is_whitespace() {
             i += 1;
-        } else if c.is_ascii_digit() || c == '.' || leading_decimal_comma(&cs, i, depth, out.last()) {
+        } else if c.is_ascii_digit() || c == '.' || leading_decimal_comma(&cs, i, in_call(&parens), out.last()) {
             let st = i;
             // A leading decimal comma (`,5` for 0,5, #2966) starts the number as `.5` would.
             let leading_comma = c == ',';
@@ -361,11 +403,17 @@ fn lex_spans(s: &str) -> Result<Vec<(Tok, usize, usize)>, DocError> {
                 i += 1;
             }
             // A decimal comma (`2,5 mm`, as typed with a numeric keypad in many locales, #1347):
-            // a comma between digits, in a number with no point, outside any parentheses (inside
-            // them a comma separates a function's arguments: `max(1,2)`).
+            // a comma between digits, in a number with no point, not directly in a function call
+            // (there a comma separates arguments: `max(1,2)`).
             let digit = |k: usize| cs.get(k).is_some_and(|(_, c)| c.is_ascii_digit());
             let has_point = cs.get(st..i).is_some_and(|ds| ds.iter().any(|(_, c)| *c == '.'));
-            if depth == 0 && !leading_comma && !has_point && digit(i.wrapping_sub(1)) && cs.get(i).is_some_and(|(_, c)| *c == ',') && digit(i + 1) {
+            if !in_call(&parens)
+                && !leading_comma
+                && !has_point
+                && digit(i.wrapping_sub(1))
+                && cs.get(i).is_some_and(|(_, c)| *c == ',')
+                && digit(i + 1)
+            {
                 i += 1;
                 while digit(i) {
                     i += 1;
@@ -387,7 +435,7 @@ fn lex_spans(s: &str) -> Result<Vec<(Tok, usize, usize)>, DocError> {
             // A mixed number, as imperial sizes are written (`2 1/8"` is 2.125 in, #1802): a whole
             // number, then a proper fraction of whole numbers, is one value, not `2 × 1/8`.
             if t.chars().all(|c| c.is_ascii_digit())
-                && let Some((fraction, end)) = mixed_fraction(&cs, i, depth)
+                && let Some((fraction, end)) = mixed_fraction(&cs, i, in_call(&parens))
             {
                 out.push((Tok::Num(v + fraction), at(st), at(end)));
                 i = end;
@@ -425,8 +473,10 @@ fn lex_spans(s: &str) -> Result<Vec<(Tok, usize, usize)>, DocError> {
             i += 1;
         } else if "+-*/^(),%".contains(c) {
             match c {
-                '(' => depth += 1,
-                ')' => depth = depth.saturating_sub(1),
+                '(' => parens.push(matches!(out.last(), Some((Tok::Id(_), _, _)))),
+                ')' => {
+                    parens.pop();
+                }
                 _ => {}
             }
             out.push((Tok::Op(c), at(i), at(i + 1)));
@@ -438,27 +488,32 @@ fn lex_spans(s: &str) -> Result<Vec<(Tok, usize, usize)>, DocError> {
     Ok(out)
 }
 
+/// Whether the innermost open parenthesis is a function call's.
+fn in_call(parens: &[bool]) -> bool {
+    parens.last() == Some(&true)
+}
+
 /// Whether the comma at `i` starts a number, as a leading decimal comma (`,5` for 0,5, #2966).
-/// It must be outside parentheses (inside them a comma separates arguments, as for any decimal
-/// comma), be followed by a digit, and stand where an operand is expected: at the start or right
-/// after `+ - * / ^`. A comma after a number, name, `)` or `%` keeps its meaning (`2 ,5` and
-/// `1,5,3` stay errors).
-fn leading_decimal_comma(cs: &[(usize, char)], i: usize, depth: usize, prev: Option<&(Tok, usize, usize)>) -> bool {
-    depth == 0
+/// It must not be directly in a function call (`in_call`: there a comma separates arguments, as
+/// for any decimal comma), be followed by a digit, and stand where an operand is expected: at the
+/// start or right after `( + - * / ^`. A comma after a number, name, `)` or `%` keeps its meaning
+/// (`2 ,5` and `1,5,3` stay errors).
+fn leading_decimal_comma(cs: &[(usize, char)], i: usize, in_call: bool, prev: Option<&(Tok, usize, usize)>) -> bool {
+    !in_call
         && cs.get(i).is_some_and(|(_, c)| *c == ',')
         && cs.get(i + 1).is_some_and(|(_, c)| c.is_ascii_digit())
         && match prev {
             None => true,
-            Some((Tok::Op(op), _, _)) => "+-*/^".contains(*op),
+            Some((Tok::Op(op), _, _)) => "(+-*/^".contains(*op),
             Some(_) => false,
         }
 }
 
 /// The proper fraction of a mixed number whose whole part ends at `i`: spaces, digits, `/`,
 /// digits, with nothing after them that would continue the number (`2 1/8.5`, `2 1/8e3`, a
-/// decimal comma outside parentheses: `2 1/8,5`). Its value and where it ends. `depth`: the
-/// parentheses open there (inside them a comma separates arguments: `max(2 1/8,1)`).
-fn mixed_fraction(cs: &[(usize, char)], mut i: usize, depth: usize) -> Option<(f64, usize)> {
+/// decimal comma: `2 1/8,5`). Its value and where it ends. `in_call`: directly in a function call
+/// there (a comma separates arguments: `max(2 1/8,1)`).
+fn mixed_fraction(cs: &[(usize, char)], mut i: usize, in_call: bool) -> Option<(f64, usize)> {
     let digits = |from: usize| cs.get(from..).map_or(0, |rest| rest.iter().take_while(|(_, c)| c.is_ascii_digit()).count());
     let space = i;
     while cs.get(i).is_some_and(|(_, c)| *c == ' ' || *c == '\t') {
@@ -472,7 +527,7 @@ fn mixed_fraction(cs: &[(usize, char)], mut i: usize, depth: usize) -> Option<(f
     let end = i + numerator + 1 + denominator;
     let next = |k: usize| cs.get(end + k).map(|(_, c)| *c);
     let continues = matches!(next(0), Some('.'))
-        || (depth == 0 && matches!(next(0), Some(',')) && next(1).is_some_and(|c| c.is_ascii_digit()))
+        || (!in_call && matches!(next(0), Some(',')) && next(1).is_some_and(|c| c.is_ascii_digit()))
         || (matches!(next(0), Some('e' | 'E')) && next(1).is_some_and(|c| c.is_ascii_digit() || c == '-' || c == '+'));
     if denominator == 0 || continues {
         return None;
@@ -503,6 +558,28 @@ fn is_reference(toks: &[Tok], i: usize, id: &str) -> bool {
 
 /// Identifiers an expression refers to (excluding units, constants and functions).
 pub fn references(s: &str) -> Vec<String> {
+    // Every evaluation fingerprints every feature by the parameters its expressions name, so the
+    // same short expressions are asked about on every command: the answers are kept (per thread,
+    // bounded) instead of being lexed again.
+    thread_local! {
+        static SEEN: std::cell::RefCell<std::collections::HashMap<String, Vec<String>>> = std::cell::RefCell::new(std::collections::HashMap::new());
+    }
+    if let Some(hit) = SEEN.with(|seen| seen.borrow().get(s).cloned()) {
+        return hit;
+    }
+    let out = scan_references(s);
+    SEEN.with(|seen| {
+        let mut seen = seen.borrow_mut();
+        if seen.len() >= 1 << 16 {
+            seen.clear();
+        }
+        seen.insert(s.to_string(), out.clone());
+    });
+    out
+}
+
+/// [`references`], worked out.
+fn scan_references(s: &str) -> Vec<String> {
     let Ok(toks) = lex(s) else { return Vec::new() };
     let mut out: Vec<String> = Vec::new();
     for (i, t) in toks.iter().enumerate() {
@@ -538,6 +615,10 @@ pub fn rename_reference(s: &str, old: &str, new: &str) -> String {
 
 /// Is the expression just a number (with an optional unit), like `20`, `20 mm` or `-1.5 in`?
 pub fn is_literal(s: &str) -> bool {
+    // A definition names its value: it is not just a number, whatever it defines (#4071).
+    if definition(s).is_some() {
+        return false;
+    }
     let Ok(toks) = lex(s) else { return false };
     let toks: &[Tok] = match toks.first() {
         Some(Tok::Op('-' | '+')) => toks.get(1..).unwrap_or_default(),
@@ -550,9 +631,11 @@ pub fn is_literal(s: &str) -> bool {
     }
 }
 
-/// Is the expression a bare number without a unit, like `20` or `-1.5`?
+/// Is the expression a bare number without a unit, like `20` or `-1.5`? A leading `=` only marks
+/// a formula (#4681), so `=20` is the same bare number.
 pub fn is_bare_number(s: &str) -> bool {
-    is_literal(s) && s.trim().trim_start_matches(['-', '+']).trim().parse::<f64>().is_ok()
+    let number = s.trim().strip_prefix('=').unwrap_or(s);
+    is_literal(s) && number.trim().trim_start_matches(['-', '+']).trim().parse::<f64>().is_ok()
 }
 
 /// Is `s` shaped like a parameter name: a letter or `_`, then letters, digits and `_`? The shape
@@ -562,15 +645,16 @@ fn is_name_shaped(s: &str) -> bool {
     matches!(cs.next(), Some(c) if c.is_alphabetic() || c == '_') && cs.all(|c| c.is_alphanumeric() || c == '_')
 }
 
-/// A value typed as a definition, `name = expression`: the name and the text after the first
-/// `=`, both trimmed (the text may be empty). `None` for anything else, including text whose
+/// A value typed as a definition, `name = expression` (or `#name = expression`, #2371): the name
+/// without the `#` and the text after the first `=`, both trimmed (the text may be empty). `None` for anything else, including text whose
 /// left side is not shaped like a name (`2 = 3`), which stays an ordinary expression and fails
-/// to parse as before. The dimension input defines a user parameter this way (#2916); other
-/// value inputs can take the same form later.
+/// to parse as before. Every value input defines a user parameter this way (#2916, #4071): until
+/// `Document::define_inline` stores the parameter, the text evaluates as its expression.
 pub fn definition(s: &str) -> Option<(&str, &str)> {
     let (name, rhs) = s.split_once('=')?;
     let name = name.trim();
     let rhs = rhs.trim();
+    let name = name.strip_prefix('#').unwrap_or(name);
     // `w == 3` is not a definition: a second `=` would read as a formula marker (#4681).
     (is_name_shaped(name) && !rhs.starts_with('=')).then_some((name, rhs))
 }
@@ -583,6 +667,8 @@ pub fn length_unit_or_mm(units: &str) -> &str {
 
 struct Parser<'a> {
     toks: Vec<Tok>,
+    /// Each token's byte range in the source: whether a fraction is written closed up.
+    spans: Vec<(usize, usize)>,
     pos: usize,
     lookup: &'a dyn Fn(&str) -> Result<Value, DocError>,
     depth: usize,
@@ -642,34 +728,78 @@ impl Parser<'_> {
         }
     }
     fn unary(&mut self) -> Result<Value, DocError> {
+        self.signed(true)
+    }
+    /// A signed operand. `glue`: a number takes the unit written after it (not in an exponent).
+    fn signed(&mut self, glue: bool) -> Result<Value, DocError> {
         match self.peek() {
             Some(Tok::Op('-')) => {
                 self.pos += 1;
                 self.enter()?;
-                let v = self.unary()?;
+                let v = self.signed(glue)?;
                 self.depth -= 1;
                 Ok(Value { v: -v.v, ..v })
             }
             Some(Tok::Op('+')) => {
                 self.pos += 1;
                 self.enter()?;
-                let v = self.unary()?;
+                let v = self.signed(glue)?;
                 self.depth -= 1;
                 Ok(v)
             }
-            _ => self.power(),
+            _ => self.power(glue),
         }
     }
-    fn power(&mut self) -> Result<Value, DocError> {
-        let base = self.atom()?;
+    fn power(&mut self, glue: bool) -> Result<Value, DocError> {
+        let number = matches!(self.peek(), Some(Tok::Num(_)));
+        let at = self.pos;
+        let mut base = self.atom()?;
+        // A number and the unit after it are one quantity, bound tighter than `*` and `/`:
+        // `10 mm / 2 mm` is 5, not (10 mm / 2) mm = 5 mm². The unit keeps its own power
+        // (`3 mm^2`). A name that is not a unit (`2 width`) stays an ordinary product.
+        if glue && number {
+            // A fraction of two numbers before a unit is one value, as sizes are written:
+            // `1/2"` and `1/2 in` are half an inch (as the mixed number `2 1/8"` is one value).
+            // After a division only written closed up: `1 in / 1/2 in` is 2, but
+            // `width / 10 / 2 mm` is (width / 10) / 2 mm.
+            if let (Some(Tok::Op('/')), Some(Tok::Num(d))) = (self.peek(), self.toks.get(self.pos + 1))
+                && self.unit_at(self.pos + 2)
+                && (!self.after_division(at) || self.closed_up(at, self.pos + 1))
+            {
+                let d = Value::num(*d);
+                self.pos += 2;
+                base = mul(base, d, true)?;
+            }
+            if self.unit_at(self.pos) {
+                let u = self.power(false)?;
+                return mul(base, u, false);
+            }
+        }
         if let Some(Tok::Op('^')) = self.peek() {
             self.pos += 1;
             self.enter()?;
-            let e = self.unary()?;
+            // The exponent is a plain number: `2^3 mm` stays 8 mm.
+            let e = self.signed(false)?;
             self.depth -= 1;
             return pow(base, e);
         }
         Ok(base)
+    }
+    /// Whether the operand starting at token `i` is divided by: a `/` before it, past any signs.
+    fn after_division(&self, i: usize) -> bool {
+        let mut k = i;
+        while k > 0 && matches!(self.toks.get(k - 1), Some(Tok::Op('+' | '-'))) {
+            k -= 1;
+        }
+        k > 0 && matches!(self.toks.get(k - 1), Some(Tok::Op('/')))
+    }
+    /// Whether tokens `a` to `b` are written without spaces between them.
+    fn closed_up(&self, a: usize, b: usize) -> bool {
+        (a..b).all(|i| matches!((self.spans.get(i), self.spans.get(i + 1)), (Some(x), Some(y)) if x.1 == y.0))
+    }
+    /// Whether the token at `i` is a unit name, not called as a function.
+    fn unit_at(&self, i: usize) -> bool {
+        matches!(self.toks.get(i), Some(Tok::Id(id)) if unit(id).is_some()) && !matches!(self.toks.get(i + 1), Some(Tok::Op('(')))
     }
     fn atom(&mut self) -> Result<Value, DocError> {
         match self.next() {
@@ -842,7 +972,11 @@ fn call(f: &str, args: &[Value], d: Defaults) -> Result<Value, DocError> {
             let a = one()?;
             unit_fn(a.v.abs(), a)
         }
-        "sign" => Value::num(one()?.v.signum()),
+        "sign" => {
+            let x = one()?.v;
+            // `f64::signum` gives 1 for +0 and -1 for -0; the sign of zero is 0.
+            Value::num(if x == 0.0 { 0.0 } else { x.signum() })
+        }
         "floor" | "ceil" | "round" | "trunc" => {
             let a = one()?;
             // Round in the value's own default unit (round(2.4 in) = 2 in for an inch parameter).
@@ -857,6 +991,24 @@ fn call(f: &str, args: &[Value], d: Defaults) -> Result<Value, DocError> {
             unit_fn(r * if scale != 0.0 { scale } else { 1.0 }, a)
         }
         "exp" => Value::num(num(one()?)?.exp()),
+        "sinh" => Value::num(num(one()?)?.sinh()),
+        "cosh" => Value::num(num(one()?)?.cosh()),
+        "tanh" => Value::num(num(one()?)?.tanh()),
+        "asinh" => Value::num(num(one()?)?.asinh()),
+        "acosh" => {
+            let x = num(one()?)?;
+            if !(x >= 1.0) {
+                return Err(DocError::Expr("`acosh` needs a number of at least 1".into()));
+            }
+            Value::num(x.acosh())
+        }
+        "atanh" => {
+            let x = num(one()?)?;
+            if !(x > -1.0 && x < 1.0) {
+                return Err(DocError::Expr("`atanh` needs a number between -1 and 1, both excluded".into()));
+            }
+            Value::num(x.atanh())
+        }
         "ln" | "log" | "log10" => {
             let x = num(one()?)?;
             if x <= 0.0 {
@@ -896,6 +1048,24 @@ fn call(f: &str, args: &[Value], d: Defaults) -> Result<Value, DocError> {
     })
 }
 
+/// Evaluate a count: a unit-less whole number. A length or angle says how to fix it, and a
+/// fraction is refused rather than rounded to a different number of copies.
+pub fn eval_count(s: &str, vals: &BTreeMap<String, Value>) -> Result<f64, DocError> {
+    let e = s.trim();
+    let value = eval_with(e, &|n| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`"))))?;
+    if let Some(kind @ (Kind::Length | Kind::Angle)) = value.kind() {
+        let subject = if vals.contains_key(e) { format!("`{e}`") } else { "this expression".into() };
+        let remedy = if vals.contains_key(e) { "set its Unit to none to use it as a count" } else { "use a unit-less expression as a count" };
+        return Err(DocError::Expr(format!("{subject} is {} ({}); {remedy}", value.describe(), kind.default_unit())));
+    }
+    let n = value.to_kind(Kind::Unitless)?;
+    // Allow float noise such as `10 / 3 * 3`, never a real fraction.
+    if !n.is_finite() || (n - n.round()).abs() > 1e-9 {
+        return Err(DocError::Expr(format!("a count must be a whole number; `{e}` is {n}")));
+    }
+    Ok(n.round())
+}
+
 /// Evaluate an expression; `lookup` resolves parameter names. Bare numbers are mm / degrees.
 pub fn eval_with(s: &str, lookup: &dyn Fn(&str) -> Result<Value, DocError>) -> Result<Value, DocError> {
     eval_with_defaults(s, lookup, Defaults::default())
@@ -903,11 +1073,14 @@ pub fn eval_with(s: &str, lookup: &dyn Fn(&str) -> Result<Value, DocError>) -> R
 
 /// Evaluate an expression reading bare numbers next to lengths / angles in `defaults`.
 pub fn eval_with_defaults(s: &str, lookup: &dyn Fn(&str) -> Result<Value, DocError>, defaults: Defaults) -> Result<Value, DocError> {
-    let toks = lex(s)?;
+    let (toks, spans): (Vec<Tok>, Vec<(usize, usize)>) = lex_spans(s)?.into_iter().map(|(t, a, b)| (t, (a, b))).unzip();
     if toks.is_empty() {
+        if let Some((name, _)) = definition(s) {
+            return Err(DocError::Expr(format!("`{name} =` needs a value after the `=`")));
+        }
         return Err(DocError::Expr("empty expression".into()));
     }
-    let mut p = Parser { toks, pos: 0, lookup, depth: 0, defaults };
+    let mut p = Parser { toks, spans, pos: 0, lookup, depth: 0, defaults };
     let v = p.expr()?;
     if p.pos < p.toks.len() {
         return Err(DocError::Expr(format!("unexpected input in `{s}`")));
@@ -919,7 +1092,7 @@ pub fn eval_with_defaults(s: &str, lookup: &dyn Fn(&str) -> Result<Value, DocErr
 }
 
 /// One parameter to evaluate: name, expression and unit (`mm`, `in`, `deg`, empty…).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ParamDef {
     pub name: String,
     pub expr: String,
@@ -930,6 +1103,38 @@ pub struct ParamDef {
 /// name. Circular references are reported with their path (`a → b → a`). `doc_len` is the
 /// document's length unit in mm (bare numbers of unit-less-unit parameters next to lengths).
 pub fn eval_params(params: &[ParamDef], doc_len: f64) -> (BTreeMap<String, Value>, BTreeMap<String, String>) {
+    // Each command evaluates the design's parameters (every named feature input is one) several
+    // times over, mostly unchanged: the last few results are kept (per thread) for the same
+    // definitions, compared in full.
+    type Evaluated = (BTreeMap<String, Value>, BTreeMap<String, String>);
+    thread_local! {
+        static LAST: std::cell::RefCell<Vec<(Vec<ParamDef>, u64, Evaluated)>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+    let key = doc_len.to_bits();
+    let hit = LAST.with(|last| {
+        let mut last = last.borrow_mut();
+        let at = last.iter().position(|(defs, len, _)| *len == key && defs.as_slice() == params)?;
+        let entry = last.remove(at);
+        let out = entry.2.clone();
+        last.push(entry);
+        Some(out)
+    });
+    if let Some(out) = hit {
+        return out;
+    }
+    let out = eval_params_uncached(params, doc_len);
+    LAST.with(|last| {
+        let mut last = last.borrow_mut();
+        if last.len() >= 4 {
+            last.remove(0);
+        }
+        last.push((params.to_vec(), key, out.clone()));
+    });
+    out
+}
+
+/// [`eval_params`], worked out.
+fn eval_params_uncached(params: &[ParamDef], doc_len: f64) -> (BTreeMap<String, Value>, BTreeMap<String, String>) {
     let mut done: BTreeMap<String, Value> = BTreeMap::new();
     let mut errors: BTreeMap<String, String> = BTreeMap::new();
     let index: BTreeMap<&str, &ParamDef> = params.iter().map(|p| (p.name.as_str(), p)).collect();
@@ -975,6 +1180,9 @@ pub fn eval_params(params: &[ParamDef], doc_len: f64) -> (BTreeMap<String, Value
         cx.stack.pop();
         let r = match err {
             Some(e) => Err(e),
+            // Most parameters are named feature inputs with a literal value ("10 mm"): those are
+            // worked out once (per thread) rather than parsed again on every evaluation.
+            None if vals.is_empty() => eval_constant(p, cx.doc_len),
             None => eval_def(p, &|n| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`"))), cx.doc_len),
         };
         match &r {
@@ -1007,6 +1215,28 @@ pub fn eval_def(p: &ParamDef, lookup: &dyn Fn(&str) -> Result<Value, DocError>, 
         Kind::Angle => Value::angle(x),
         Kind::Unitless => Value::num(x),
     })
+}
+
+/// [`eval_def`] of a parameter whose expression names no other parameter, remembered by its
+/// expression, unit and the design's length unit.
+fn eval_constant(p: &ParamDef, doc_len: f64) -> Result<Value, DocError> {
+    type Key = (String, String, u64);
+    thread_local! {
+        static SEEN: std::cell::RefCell<std::collections::HashMap<Key, Result<Value, DocError>>> = std::cell::RefCell::new(std::collections::HashMap::new());
+    }
+    let key = (p.expr.clone(), p.unit.clone(), doc_len.to_bits());
+    if let Some(hit) = SEEN.with(|seen| seen.borrow().get(&key).cloned()) {
+        return hit;
+    }
+    let out = eval_def(p, &|n| Err(DocError::Expr(format!("unknown parameter `{n}`"))), doc_len);
+    SEEN.with(|seen| {
+        let mut seen = seen.borrow_mut();
+        if seen.len() >= 1 << 16 {
+            seen.clear();
+        }
+        seen.insert(key, out.clone());
+    });
+    out
 }
 
 /// Dependency edges between parameters: (parameter, parameter it references).
@@ -1050,7 +1280,13 @@ mod tests {
         // Inside parentheses a comma still separates a function's arguments.
         assert_eq!(ev("max(1,2)", Kind::Unitless).unwrap(), 2.0);
         assert_eq!(ev("max(1 mm, 3, 2)", Kind::Length).unwrap(), 3.0);
-        assert_eq!(ev("(2,5)", Kind::Unitless).ok(), None, "a comma inside parentheses is not a decimal comma");
+        // Plain parentheses have no arguments to separate (#9408), also inside a call.
+        assert_eq!(ev("(2,5)", Kind::Unitless).unwrap(), 2.5);
+        assert_eq!(ev("-(width-0,5)/2", Kind::Length).unwrap(), -19.75);
+        assert_eq!(ev("(,5)", Kind::Unitless).unwrap(), 0.5);
+        assert_eq!(ev("(2 1/8,5)", Kind::Unitless).unwrap(), 2.0 / 8.5);
+        assert_eq!(ev("max((1,5), 1)", Kind::Unitless).unwrap(), 1.5);
+        assert_eq!(ev("(max(1,2))", Kind::Unitless).unwrap(), 2.0);
         // Not between two digits, or a second comma: still an error.
         for bad in ["2,", "2 ,5", "2, 5", "1,5,3", "1.5,3", ",5,3", ",5.3", "width ,5", "(1) ,5"] {
             assert!(ev(bad, Kind::Unitless).is_err(), "{bad}");
@@ -1108,6 +1344,39 @@ mod tests {
     }
 
     #[test]
+    fn a_number_and_its_unit_are_one_quantity() {
+        // `10 mm / 2 mm` divides by 2 mm; it is not `(10 mm / 2) mm`, a value in mm².
+        assert_eq!(ev("10 mm / 2 mm", Kind::Unitless).unwrap(), 5.0);
+        assert_eq!(ev("10mm/2mm", Kind::Unitless).unwrap(), 5.0);
+        assert_eq!(ev("width / 4 mm", Kind::Unitless).unwrap(), 10.0);
+        assert_eq!(ev("6 mm / 2 mm * 3", Kind::Unitless).unwrap(), 9.0);
+        assert!((ev("90 deg / 1 rad", Kind::Unitless).unwrap() - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
+        assert!((ev("(ang - 30 deg) / 1 rad * width", Kind::Length).unwrap() - 40.0 * 60f64.to_radians()).abs() < 1e-12);
+        assert_eq!(ev("1 in / 1 mm", Kind::Unitless).unwrap(), 25.4);
+        assert_eq!(ev("2 1/2 in / 1 in", Kind::Unitless).unwrap(), 2.5);
+        assert_eq!(ev("1\" / 1 mm", Kind::Unitless).unwrap(), 25.4);
+        assert_eq!(ev("-10 mm / 2 mm", Kind::Unitless).unwrap(), -5.0);
+        // A fraction of numbers right before a unit stays one value: half an inch.
+        assert_eq!(ev("1/2 in", Kind::Length).unwrap(), 12.7);
+        assert_eq!(ev("width + 3/4\"", Kind::Length).unwrap(), 40.0 + 0.75 * 25.4);
+        assert_eq!(ev("1 in / 1/2 in", Kind::Unitless).unwrap(), 2.0);
+        assert_eq!(ev("10 / 2 mm", Kind::Length).unwrap(), 5.0);
+        // After a division, a spaced-out `/` divides again: (width / 10) / 2 mm.
+        assert_eq!(ev("width / 10 / 2 mm", Kind::Unitless).unwrap(), 2.0);
+        assert_eq!(ev("width / -10 / 2 mm", Kind::Unitless).unwrap(), -2.0);
+        assert_eq!(ev("width / 10/2 mm", Kind::Unitless).unwrap(), 8.0);
+        // The unit keeps its own power, and an exponent stays a plain number.
+        assert_eq!(ev("sqrt(9 mm^2)", Kind::Length).unwrap(), 3.0);
+        assert_eq!(ev("8 mm^3 / 2 mm^2", Kind::Length).unwrap(), 4.0);
+        assert_eq!(ev("2^3 mm", Kind::Length).unwrap(), 8.0);
+        // A number next to a name that is not a unit is a product, as before.
+        assert_eq!(ev("2 width", Kind::Length).unwrap(), 80.0);
+        // Unchanged: a unit alone, and a unit after a parenthesis.
+        assert_eq!(ev("width / mm", Kind::Unitless).unwrap(), 40.0);
+        assert_eq!(ev("(10 / 2) mm", Kind::Length).unwrap(), 5.0);
+    }
+
+    #[test]
     fn arithmetic_and_units() {
         assert_eq!(ev("10", Kind::Length).unwrap(), 10.0);
         assert!((ev("90 deg", Kind::Angle).unwrap() - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
@@ -1131,6 +1400,15 @@ mod tests {
         assert!((ev("atan2(1; 1)", Kind::Angle).unwrap() - std::f64::consts::FRAC_PI_4).abs() < 1e-12);
         assert!((ev("exp(ln(5))", Kind::Unitless).unwrap() - 5.0).abs() < 1e-12);
         assert!((ev("log(1000)", Kind::Unitless).unwrap() - 3.0).abs() < 1e-12);
+        // Hyperbolic functions (#9332): their definitions in exp, identities and inverses.
+        assert!((ev("cosh(1.5) - (exp(1.5) + exp(-1.5)) / 2", Kind::Unitless).unwrap()).abs() < 1e-12);
+        assert!((ev("sinh(1.5) - (exp(1.5) - exp(-1.5)) / 2", Kind::Unitless).unwrap()).abs() < 1e-12);
+        assert!((ev("tanh(0.7) - sinh(0.7) / cosh(0.7)", Kind::Unitless).unwrap()).abs() < 1e-12);
+        assert!((ev("cosh(2) ^ 2 - sinh(2) ^ 2", Kind::Unitless).unwrap() - 1.0).abs() < 1e-12);
+        assert!((ev("asinh(sinh(1.25))", Kind::Unitless).unwrap() - 1.25).abs() < 1e-12);
+        assert!((ev("acosh(cosh(1.25))", Kind::Unitless).unwrap() - 1.25).abs() < 1e-12);
+        assert!((ev("atanh(tanh(0.5))", Kind::Unitless).unwrap() - 0.5).abs() < 1e-12);
+        assert_eq!(ev("cosh(0) + sinh(0) + tanh(0) + asinh(0) + acosh(1) + atanh(0)", Kind::Unitless).unwrap(), 1.0);
         assert_eq!(ev("floor(2.7) + ceil(0.2) + round(1.5) + abs(-1)", Kind::Unitless).unwrap(), 6.0);
         assert!((ev("1 rad", Kind::Angle).unwrap() - 1.0).abs() < 1e-12);
         assert!((ev("acos(0)", Kind::Angle).unwrap() - std::f64::consts::FRAC_PI_2).abs() < 1e-12);
@@ -1138,6 +1416,42 @@ mod tests {
         assert_eq!(ev("hypot(3 mm, 4 mm)", Kind::Length).unwrap(), 5.0);
         assert_eq!(ev("7 % 4", Kind::Unitless).unwrap(), 3.0);
         assert_eq!(ev("width^2 / width", Kind::Length).unwrap(), 40.0);
+    }
+
+    /// The hyperbolic functions (#9332) take a unit-less number, and the inverses refuse what lies
+    /// outside their domain, as `asin` and `ln` do.
+    #[test]
+    fn hyperbolic_functions_refuse_units_and_numbers_outside_their_domain() {
+        for (e, says) in [
+            ("cosh(2 mm)", "`cosh` needs a unit-less number"),
+            ("tanh(30 deg)", "`tanh` needs a unit-less number"),
+            ("acosh(0.5)", "`acosh` needs a number of at least 1"),
+            ("atanh(1)", "`atanh` needs a number between -1 and 1"),
+            ("atanh(-1.5)", "`atanh` needs a number between -1 and 1"),
+        ] {
+            let err = ev(e, Kind::Unitless).map(|v| v.to_string()).unwrap_or_else(|e| e.to_string());
+            assert!(err.contains(says), "{e}: {err}");
+        }
+    }
+
+    /// `sign(0)` is 0, not 1 (Rust's `signum` takes the sign bit, so it calls zero positive).
+    #[test]
+    fn sign_of_zero_is_zero() {
+        for (e, want) in
+            [("sign(0)", 0.0), ("sign(-0)", 0.0), ("sign(0 mm)", 0.0), ("sign(5)", 1.0), ("sign(-2 mm)", -1.0), ("sign(width - 40)", 0.0)]
+        {
+            assert_eq!(ev(e, Kind::Unitless).unwrap(), want, "{e}");
+        }
+    }
+
+    /// A count from a length (`(L - 20) / 210`, the 210 read as unit-less) names the fix (#5901).
+    #[test]
+    fn a_length_where_a_count_is_expected_says_to_divide_by_a_length() {
+        let e = ev("width / 2", Kind::Unitless).unwrap_err().to_string();
+        assert!(e.contains("expected a unit-less number, got a length") && e.contains("divide by a length"), "{e}");
+        assert_eq!(ev("floor(width / (6 mm))", Kind::Unitless).unwrap(), 6.0);
+        let e = ev("45 deg", Kind::Unitless).unwrap_err().to_string();
+        assert!(!e.contains("divide"), "{e}");
     }
 
     #[test]
@@ -1242,6 +1556,8 @@ mod tests {
         assert!(is_literal("20") && is_literal("-1.5 in") && is_literal("3 deg"));
         assert!(!is_literal("d1") && !is_literal("2 * 3") && !is_literal("2 width"));
         assert!(is_bare_number(" -1.5 ") && is_bare_number("+2") && !is_bare_number("20 mm") && !is_bare_number("(2)"));
+        // A leading `=` only marks a formula (#4681): `=5` is the bare number `5`, not `==5`.
+        assert!(is_bare_number("=5") && is_bare_number(" = -1.5") && !is_bare_number("=5 mm") && !is_bare_number("==5") && !is_bare_number("=d3"));
         assert_eq!((length_unit_or_mm(" in "), length_unit_or_mm("deg"), length_unit_or_mm("")), ("in", "mm", "mm"));
     }
 
@@ -1258,6 +1574,9 @@ mod tests {
             ("w = 1 in - 5.4 mm", "w", "1 in - 5.4 mm"),
             ("_w1 = 1", "_w1", "1"),
             ("szerokość = 20", "szerokość", "20"),
+            // A `#` before the name marks it as a new parameter's (#2371).
+            ("#w = 20", "w", "20"),
+            ("  #w=20 mm", "w", "20 mm"),
             // Reserved names split too: the parameter check names the reason.
             ("mm = 5", "mm", "5"),
             ("w = a = 3", "w", "a = 3"),
@@ -1268,8 +1587,49 @@ mod tests {
         for (text, name, rhs) in splits {
             assert_eq!(definition(text), Some((name, rhs)), "{text:?}");
         }
-        for text in ["20", "20 mm", "width / 2", "= 20", "=", "", "2w = 3", "a b = 3", "a-b = 3", "w.x = 3", "(w) = 3", "-w = 3", "w == 3"] {
+        for text in [
+            "20",
+            "20 mm",
+            "width / 2",
+            "= 20",
+            "=",
+            "",
+            "2w = 3",
+            "a b = 3",
+            "a-b = 3",
+            "w.x = 3",
+            "(w) = 3",
+            "-w = 3",
+            "# = 3",
+            "#= 3",
+            "##w = 3",
+            "# w = 3",
+            "#2w = 3",
+            "#w",
+            "w == 3",
+        ] {
             assert_eq!(definition(text), None, "{text:?}");
+        }
+    }
+
+    /// Until the design stores it, a definition is worth its expression (#4071): the name is
+    /// not a reference, it is never a plain number, and it renames like its expression.
+    #[test]
+    fn a_definition_evaluates_as_its_expression() {
+        let look = |n: &str| if n == "a" { Ok(Value::length(4.0)) } else { Err(DocError::Expr(format!("unknown parameter `{n}`"))) };
+        let ev = |s: &str| eval_with(s, &look).and_then(|v| v.to_kind(Kind::Length));
+        assert_eq!(ev("w = 20").ok(), Some(20.0));
+        assert_eq!(ev("#w = a * 2").ok(), Some(8.0));
+        assert_eq!(ev("szerokość=1 in").ok(), Some(25.4));
+        assert_eq!(references("w = a + b"), ["a", "b"]);
+        assert!(references("w = 3").is_empty());
+        assert_eq!(rename_reference("w = a * 2", "a", "len"), "w = len * 2");
+        assert_eq!(rename_reference("a = a * 2", "a", "len"), "a = len * 2");
+        assert!(!is_literal("w = 20") && !is_bare_number("w = 20"));
+        assert!(ev("w = w").unwrap_err().to_string().contains("unknown parameter `w`"));
+        assert!(ev("w =").unwrap_err().to_string().contains("`w =` needs a value after the `=`"));
+        for bad in ["w = = 3", "2 = 3", "w == 3", "w = 3 = 4", "= 5 ="] {
+            assert!(ev(bad).is_err(), "{bad}");
         }
     }
 
@@ -1286,5 +1646,63 @@ mod tests {
         assert_eq!(problem("pi"), "`pi` is a constant, so it cannot be a parameter name");
         assert_eq!(crate::Document::param_name_problem("width"), None);
         assert!(problem("2w").contains("not a valid parameter name"));
+    }
+
+    /// The kept answers of `references` and `eval_params` never stand for different input: an
+    /// edited expression, unit or design length unit gives its own values.
+    #[test]
+    fn kept_parameter_values_follow_every_change() {
+        assert_eq!(references("width * 2 + 3 mm"), vec!["width".to_string()]);
+        assert_eq!(references("width * 2 + 3 mm"), vec!["width".to_string()]);
+        assert!(references("10 mm").is_empty());
+        let mm = |v: &BTreeMap<String, Value>, n: &str| v.get(n).map(|x| x.v);
+        let mut defs = vec![def("a", "10 mm", "mm"), def("b", "a * 2", "mm"), def("c", "5", "mm")];
+        let (first, _) = eval_params(&defs, 1.0);
+        assert_eq!((mm(&first, "a"), mm(&first, "b"), mm(&first, "c")), (Some(10.0), Some(20.0), Some(5.0)));
+        defs[0].expr = "12 mm".into();
+        let (edited, _) = eval_params(&defs, 1.0);
+        assert_eq!((mm(&edited, "a"), mm(&edited, "b")), (Some(12.0), Some(24.0)));
+        defs[0].expr = "10 mm".into();
+        assert_eq!(eval_params(&defs, 1.0).0, first, "back as it was");
+        // Whatever changes, the kept answer is the one worked out afresh.
+        for (unit, expr, len) in [("mm", "5", 25.4), ("", "5", 25.4), ("in", "5", 1.0), ("deg", "5", 1.0), ("", "5", 1.0)] {
+            defs[2].unit = unit.into();
+            defs[2].expr = expr.into();
+            assert_eq!(eval_params(&defs, len), eval_params_uncached(&defs, len), "{unit} {expr} {len}");
+        }
+        defs[2].expr = "bad +".into();
+        assert!(eval_params(&defs, 1.0).1.contains_key("c"));
+    }
+
+    /// #10747: reported numbers are the shortest decimals that read back after rounding off
+    /// the last few bits (12 significant digits); stored values keep full precision.
+    #[test]
+    fn round_reported_reads_as_a_person_would() {
+        for (noisy, read) in [
+            (30f64.to_radians().to_degrees(), 30.0),
+            (0.1 + 0.2, 0.3),
+            (3.0 * 25.4, 76.2),
+            (1.2 * 25.4, 30.48),
+            (29.999999999999996, 30.0),
+            (0.30000000000000004, 0.3),
+            (-0.1 - 0.2, -0.3),
+        ] {
+            assert_eq!(round_reported(noisy), read, "{noisy}");
+        }
+        // A number with real digits of its own keeps them up to 12 significant digits.
+        assert_eq!(round_reported(1.234567890123), 1.23456789012);
+        assert_eq!(round_reported(1.0000000000001), 1.0);
+        // Zero and non-finite values pass through.
+        assert_eq!(round_reported(0.0), 0.0);
+        assert!(round_reported(f64::INFINITY).is_infinite());
+        assert!(round_reported(f64::NAN).is_nan());
+    }
+
+    /// #10747: `value` means millimetres and degrees in every reply.
+    #[test]
+    fn reported_value_is_mm_and_degrees() {
+        assert_eq!(reported_value(Value::length(50.8)), 50.8);
+        assert_eq!(round_reported(reported_value(Value::angle(30f64.to_radians()))), 30.0);
+        assert_eq!(reported_value(Value::num(4.0)), 4.0);
     }
 }

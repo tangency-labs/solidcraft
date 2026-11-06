@@ -1,6 +1,8 @@
 //! The first local appearance-library consumer, inside the existing Appearance panel.
 #[cfg(not(target_arch = "wasm32"))]
 use crate::dialogs_appearance::selected_params;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{SolveApp, dialogs_appearance::Ap, selection::SelInput, ui_kit};
 use serde_json::json;
 use solidcraft_engine::io::catalog::Catalog;
@@ -29,6 +31,19 @@ fn display_order(mut catalog: Catalog) -> Catalog {
 fn editor<'a>(app: &'a mut SolveApp, token: &Arc<()>) -> Option<&'a mut Ap> {
     let crate::dialogs::Kind::Appearance(k) = &mut app.dialog.as_mut()?.kind else { return None };
     Arc::ptr_eq(&k.local.token, token).then_some(k)
+}
+
+/// Parameterless UI activation of the existing export command. JSON execution never picks files.
+pub(crate) fn start_export(app: &mut SolveApp) {
+    let origin = app.session.doc.clone();
+    app.pick_save("my-library.solidcraft-library.json", &["json"], move |app, path| {
+        if let Some(path) = path
+            && Arc::ptr_eq(&origin, &app.session.doc)
+            && let Err(error) = app.run("library.export", json!({"path":path,"overwrite":false}))
+        {
+            app.set_status(error, true);
+        }
+    });
 }
 
 fn save_library(app: &mut SolveApp, token: Arc<()>, overwrite: bool) {
@@ -204,11 +219,17 @@ fn import_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &[SelI
                             };
                             if let Some(look) = look {
                                 let [r, g, b] = look.color;
-                                ui_kit::color_thumbnail(ui, ui.id().with((&entry.id, "sample")), egui::Color32::from_rgb(r, g, b), &look.name, ());
+                                ui_kit::color_thumbnail(
+                                    ui,
+                                    ui.scope_id().with((&entry.id, "sample")),
+                                    egui::Color32::from_rgb(r, g, b),
+                                    &look.name,
+                                    (),
+                                );
                             }
                             let button =
                                 ui_kit::list_picker(ui, &entry.id, entry.definition.name(), k.local.selected.as_deref() == Some(entry.id.as_str()))
-                                    .on_hover_text(format!(
+                                    .backing_on_hover_text(format!(
                                         "{} · {} · {}",
                                         entry.id,
                                         entry.provenance.license,

@@ -57,10 +57,15 @@ pub fn bind_with_fallback(first: u16, tries: u16) -> Result<std::net::TcpListene
 
 /// The folder of the token files: `<data folder>/control` (`SOLIDCRAFT_CONTROL_DIR` replaces it).
 fn control_dir() -> Option<PathBuf> {
-    match solidcraft_geom::env::var_os("CONTROL_DIR").filter(|d| !d.is_empty()) {
+    match custom_control_dir() {
         Some(d) => Some(PathBuf::from(d)),
         None => Some(crate::recovery::data_dir()?.join("control")),
     }
+}
+
+/// The folder `SOLIDCRAFT_CONTROL_DIR` names in place of the default one.
+fn custom_control_dir() -> Option<std::ffi::OsString> {
+    solidcraft_geom::env::var_os("CONTROL_DIR").filter(|d| !d.is_empty())
 }
 
 /// The token file of the app listening on `port`: `<data folder>/control/<port>.token`
@@ -91,13 +96,26 @@ fn parse_port(text: &str) -> Option<u16> {
     text.trim().parse::<u16>().ok().filter(|p| *p != 0)
 }
 
-/// Remove the discovery file at exit, unless a later app has taken it over (it names another port).
-pub fn remove_current_port(port: u16) {
-    if read_current_port() == Some(port)
-        && let Some(path) = current_port_path()
-    {
-        let _ = std::fs::remove_file(path);
+/// Remove the discovery file (and its process file) at exit, unless a later app has taken it
+/// over: it names another port, or another launch now holds this port's token file. Under
+/// Flatpak every instance has its own loopback, so two windows can listen on the same port
+/// number and write the same file names; the one closing first must leave the other's (#8794).
+/// Run it after [`remove_token_file`], which takes this launch's own token file away first.
+pub fn remove_current_port(port: u16, token: &str) {
+    if let (Some(current), Some(file)) = (current_port_path(), token_path(port)) {
+        remove_discovery(&current, &file, port, token);
     }
+}
+
+/// [`remove_current_port`] on given files: `current` is the discovery file, `file` the token file
+/// of `port`.
+fn remove_discovery(current: &Path, file: &Path, port: u16, token: &str) {
+    let named = std::fs::read_to_string(current).ok().filter(|t| t.len() <= 64).and_then(|t| parse_port(&t));
+    if named != Some(port) || held_by_another(file, token) {
+        return;
+    }
+    let _ = std::fs::remove_file(current);
+    let _ = std::fs::remove_file(pid_path(current));
 }
 
 /// A token set on purpose with `SOLIDCRAFT_CONTROL_TOKEN` (test harnesses, sandboxed packages
@@ -263,9 +281,19 @@ pub fn tokens_match(a: &str, b: &str) -> bool {
 
 /// Write `token` to `path`, readable and writable only by the user: the folder is made `0700`
 /// and the file `0600` on Unix; on Windows the file's inherited permissions are replaced by one
-/// entry for the user (`icacls`) before the token goes in. A file left by an earlier launch is
-/// replaced. The process file beside it ([`pid_path`]) records this process, best effort.
+/// entry for the user (`icacls`) before the token goes in; when that fails, the still empty file
+/// is removed and no token is written. A file left by an earlier launch is replaced. The process
+/// file beside it ([`pid_path`]) records this process, best effort.
 pub fn write_token_file(path: &Path, token: &str) -> Result<()> {
+    #[cfg(windows)]
+    let restrict = restrict_to_user;
+    #[cfg(not(windows))]
+    let restrict = |_: &Path| Ok(());
+    write_token_file_with(path, token, restrict)
+}
+
+/// [`write_token_file`], with `restrict` limiting the new file to the user (Windows).
+fn write_token_file_with(path: &Path, token: &str, restrict: impl FnOnce(&Path) -> Result<()>) -> Result<()> {
     let dir = path.parent().ok_or_else(|| Error::new(ErrorKind::InvalidInput, "no folder"))?;
     std::fs::create_dir_all(dir)?;
     let _ = std::fs::remove_file(path);
@@ -277,9 +305,15 @@ pub fn write_token_file(path: &Path, token: &str) -> Result<()> {
         std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
         opts.mode(0o600);
     }
-    let mut f = opts.open(path)?;
-    #[cfg(windows)]
-    restrict_to_user(path)?;
+    let opened = opts.open(path)?;
+    // On a refusal the file goes with the closure, so it is closed before it is removed.
+    let mut f = match restrict(path).map(|()| opened) {
+        Ok(f) => f,
+        Err(e) => {
+            let _ = std::fs::remove_file(path);
+            return Err(e);
+        }
+    };
     f.write_all(token.as_bytes())?;
     f.write_all(b"\n")?;
     f.sync_all()?;
@@ -289,41 +323,161 @@ pub fn write_token_file(path: &Path, token: &str) -> Result<()> {
     Ok(())
 }
 
-/// Remove a token file this launch wrote, and its process file.
-pub fn remove_token_file(path: &Path) {
-    let _ = std::fs::remove_file(path);
-    let _ = std::fs::remove_file(pid_path(path));
+/// Remove a token file this launch wrote, and its process file, while it still holds `token`.
+/// Another launch may have written the same file since (a second window on the same port,
+/// #8794); its file stays. The process id can't tell the two apart, as every Flatpak instance
+/// has the same one, but each launch's token is its own.
+pub fn remove_token_file(path: &Path, token: &str) {
+    if read_token(path).is_some_and(|held| tokens_match(&held, token.trim())) {
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_file(pid_path(path));
+    }
 }
 
-/// Windows: drop inherited entries and grant only the current user full access.
+/// The token a token file holds, trimmed; `None` when there is no readable token file.
+fn read_token(path: &Path) -> Option<String> {
+    let mut text = String::new();
+    std::fs::File::open(path).ok()?.take(MAX_TOKEN_FILE + 1).read_to_string(&mut text).ok()?;
+    let token = text.trim();
+    (text.len() as u64 <= MAX_TOKEN_FILE && !token.is_empty()).then(|| token.to_string())
+}
+
+/// Whether the token file at `path` holds a token other than `token`: another launch's.
+fn held_by_another(path: &Path, token: &str) -> bool {
+    read_token(path).is_some_and(|held| !tokens_match(&held, token.trim()))
+}
+
+/// How long `icacls` may take (#6145). It finishes at once; on some computers the new process
+/// is left suspended (security software holding it), and waiting on it without a limit froze
+/// the app.
+#[cfg(windows)]
+const ICACLS_LIMIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// How a run of `icacls` ended.
+#[cfg(any(windows, test))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum IcaclsEnd {
+    Succeeded,
+    Failed,
+    /// It didn't finish within [`ICACLS_LIMIT`] and was ended.
+    TimedOut,
+}
+
+/// Whether a token may go into a file after `icacls` ended this way. `custom_folder`: the file is
+/// in the folder `SOLIDCRAFT_CONTROL_DIR` names. A timeout is accepted only in the default folder,
+/// the user's own local app data, which other users can't read by default; nothing is known about
+/// the permissions of any other folder.
+#[cfg(any(windows, test))]
+fn restriction_result(end: IcaclsEnd, custom_folder: bool, path: &Path) -> Result<()> {
+    match end {
+        IcaclsEnd::Succeeded => Ok(()),
+        IcaclsEnd::TimedOut if !custom_folder => Ok(()),
+        IcaclsEnd::TimedOut => Err(Error::new(ErrorKind::TimedOut, format!("icacls did not finish in time to restrict {}", path.display()))),
+        IcaclsEnd::Failed => Err(Error::other(format!("icacls failed to restrict {}", path.display()))),
+    }
+}
+
+/// Windows: drop inherited entries and grant only the current user full access. An `icacls`
+/// that doesn't finish in time is ended, and [`restriction_result`] decides what that means.
 #[cfg(windows)]
 fn restrict_to_user(path: &Path) -> Result<()> {
     use std::os::windows::process::CommandExt;
     let user = std::env::var("USERNAME").map_err(|_| Error::other("USERNAME is not set"))?;
     let domain = std::env::var("USERDOMAIN").ok().filter(|d| !d.is_empty());
     let who = domain.map_or(user.clone(), |d| format!("{d}\\{user}"));
-    let status = std::process::Command::new("icacls")
+    let child = std::process::Command::new("icacls")
         .arg(path)
         .args(["/inheritance:r", "/grant:r", &format!("{who}:F")])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .creation_flags(0x0800_0000)
-        .status()?;
-    if status.success() { Ok(()) } else { Err(Error::other(format!("icacls failed to restrict {}", path.display()))) }
+        .spawn()?;
+    let end = match wait_within(child, ICACLS_LIMIT)? {
+        Some(status) if status.success() => IcaclsEnd::Succeeded,
+        Some(_) => IcaclsEnd::Failed,
+        None => IcaclsEnd::TimedOut,
+    };
+    restriction_result(end, custom_control_dir().is_some(), path)
 }
 
-/// Removes the token file when the app ends.
-pub struct TokenFile(pub PathBuf);
+/// Wait for `child` at most `limit`: its exit status, or `None` (and the child ended) when it
+/// hasn't finished by then.
+#[cfg(any(windows, test))]
+fn wait_within(mut child: std::process::Child, limit: std::time::Duration) -> Result<Option<std::process::ExitStatus>> {
+    let start = std::time::Instant::now();
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(Some(status));
+        }
+        if start.elapsed() >= limit {
+            // Not waited for afterwards: a suspended process may not end at once.
+            let _ = child.kill();
+            return Ok(None);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+/// Removes the token file (path, token) when the app ends, while it still holds that token.
+pub struct TokenFile(pub PathBuf, pub String);
 
 impl Drop for TokenFile {
     fn drop(&mut self) {
-        remove_token_file(&self.0);
+        remove_token_file(&self.0, &self.1);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #6145: a child that doesn't finish in time is given up on, not waited for forever.
+    #[cfg(unix)]
+    #[test]
+    fn a_slow_child_is_waited_for_only_so_long() {
+        use std::time::{Duration, Instant};
+        let start = Instant::now();
+        let slow = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        assert!(wait_within(slow, Duration::from_millis(200)).unwrap().is_none());
+        assert!(start.elapsed() < Duration::from_secs(5), "{:?}", start.elapsed());
+        let quick = std::process::Command::new("true").spawn().unwrap();
+        assert!(wait_within(quick, Duration::from_secs(5)).unwrap().is_some_and(|s| s.success()));
+        let failing = std::process::Command::new("false").spawn().unwrap();
+        assert!(wait_within(failing, Duration::from_secs(5)).unwrap().is_some_and(|s| !s.success()));
+    }
+
+    /// #6145's freeze fix stays in the default folder, the user's own; a folder picked with
+    /// `SOLIDCRAFT_CONTROL_DIR` gets no token unless the file was really restricted.
+    #[test]
+    fn only_the_default_folder_accepts_an_icacls_that_timed_out() {
+        let path = Path::new("control/7878.token");
+        for custom in [false, true] {
+            assert!(restriction_result(IcaclsEnd::Succeeded, custom, path).is_ok());
+            assert!(restriction_result(IcaclsEnd::Failed, custom, path).is_err());
+        }
+        assert!(restriction_result(IcaclsEnd::TimedOut, false, path).is_ok());
+        let e = restriction_result(IcaclsEnd::TimedOut, true, path).unwrap_err();
+        assert_eq!(e.kind(), ErrorKind::TimedOut);
+        assert!(e.to_string().contains("7878.token"), "{e}");
+    }
+
+    /// A file that couldn't be restricted is removed, empty and with no process file beside it, and
+    /// the error goes to the caller. A restricted one gets its token.
+    #[test]
+    fn a_token_file_that_could_not_be_restricted_is_removed() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-control-restrict-{}", std::process::id()));
+        let path = dir.join("7879.token");
+        let e = write_token_file_with(&path, "secret-token", |p| {
+            assert_eq!(std::fs::read(p).unwrap(), b"", "restricted before the token goes in");
+            restriction_result(IcaclsEnd::TimedOut, true, p)
+        })
+        .unwrap_err();
+        assert_eq!(e.kind(), ErrorKind::TimedOut);
+        assert!(!path.exists() && !pid_path(&path).exists());
+        write_token_file_with(&path, "secret-token", |p| restriction_result(IcaclsEnd::TimedOut, false, p)).unwrap();
+        assert_eq!(read_token(&path).as_deref(), Some("secret-token"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn tokens_compare_whole() {
@@ -446,8 +600,43 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&path).unwrap().trim(), "0123456789abcdef0123456789abcdef");
         let writer = read_token_file(&path).unwrap().file.unwrap().writer;
         assert_eq!(writer.map(|(pid, _)| pid), Some(std::process::id()));
-        drop(TokenFile(path.clone()));
+        drop(TokenFile(path.clone(), "0123456789abcdef0123456789abcdef".into()));
         assert!(!path.exists() && !pid_path(&path).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #8794: under Flatpak two windows can listen on the same port number (each has its own
+    /// loopback) and write the same files. The one closing first leaves the other's token, process
+    /// and discovery files; the last one takes them all away, `current.pid` too.
+    #[test]
+    fn a_closing_launch_leaves_another_launchs_files() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-control-two-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (file, current) = (dir.join("27878.token"), dir.join("current.port"));
+        let (first, second) = ("a".repeat(64), "b".repeat(64));
+        // The first window, then the second on the same port, each writing both files.
+        for token in [&first, &second] {
+            write_token_file(&file, token).unwrap();
+            write_token_file(&current, "27878").unwrap();
+        }
+        // The first closes: the second's files stay.
+        remove_token_file(&file, &first);
+        remove_discovery(&current, &file, 27878, &first);
+        assert_eq!(read_token(&file).as_deref(), Some(second.as_str()));
+        assert!(pid_path(&file).exists() && current.exists() && pid_path(&current).exists());
+        // Another port named in the discovery file is another app's too.
+        remove_discovery(&current, &file, 27879, &second);
+        assert!(current.exists());
+        // The second closes: nothing of either is left.
+        remove_token_file(&file, &format!(" {second}\n"));
+        remove_discovery(&current, &file, 27878, &second);
+        assert!(!file.exists() && !pid_path(&file).exists() && !current.exists() && !pid_path(&current).exists());
+        // With no token file left (removed by hand, or never written), the discovery file of the
+        // port still goes; a missing file is no error.
+        write_token_file(&current, "27878").unwrap();
+        remove_token_file(&file, &second);
+        remove_discovery(&current, &file, 27878, &second);
+        assert!(!current.exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

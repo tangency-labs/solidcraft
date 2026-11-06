@@ -17,8 +17,11 @@ profile and the wasm build check.
 
 ## Dependency advisories
 
-Scheduled and manually dispatched CI runs have a separate **Dependency advisories** job;
-new advisories do not fail unrelated pull requests. To run the same scan locally:
+Scheduled and manually dispatched CI runs have a separate **Dependency advisories** job that
+checks advisories, bans and sources. A pull request or merge group that changes `Cargo.lock` or
+any `Cargo.toml` runs the same job for advisories only, and `ci` requires it then; other pull
+requests skip it, so a new advisory does not fail an unrelated change. To run the nightly scan
+locally:
 
 ```sh
 cargo install cargo-deny --version 0.20.2 --locked
@@ -66,7 +69,12 @@ so in the PR.
 Run `cargo xtask test` to build with this profile and run the test binaries concurrently,
 with doc tests alongside. Arguments after `--` go to each test binary, for example
 `cargo xtask test -- shell`. To run the test binaries sequentially instead, use
-`cargo test --workspace --profile ci`.
+`cargo test --workspace --profile ci`. On a loaded machine set `SOLIDCRAFT_TEST_JOBS=N` to
+bound how many test binaries and side commands run at once; each binary then gets
+`RUST_TEST_THREADS` and `ACTION_MATRIX_JOBS` of `max(1, cpus / N)` so the binaries in flight
+share the machine instead of each defaulting to one worker per CPU. Setting
+`RUST_TEST_THREADS` or `ACTION_MATRIX_JOBS` yourself overrides that split, and leaving
+`SOLIDCRAFT_TEST_JOBS` unset keeps the original all-at-once behaviour.
 
 ## Test-level scheduling for full local CI
 
@@ -105,9 +113,7 @@ settings in `.config/nextest.toml`), the slowest tests first; doc tests run in t
 Pull requests skip a few heavy tests (each takes one to twelve minutes); they run on every push to
 `main`, nightly, and in `cargo xtask test`:
 
-- `solidcraft-engine`: `tests::hostile_params_never_panic`, everything in `tests::robustness` and
-  the seeds of `tests::robustness_goldens` (`seed_00` … `seed_95`; pull requests that change the kernel, truck or
-  the goldens run all but the slowest, `SLOW_SEEDS` in `ci.yml`),
+- `solidcraft-engine`: `tests::hostile_params_never_panic`, everything in `tests::robustness`,
   `pattern_suppress_tests::enclosure_arc_extinction_keeps_a_real_sharp_inner_lip_after_resize_and_reopen`,
   `pattern_suppress_tests::enclosure_datums_follow_wall_height_and_board_depth_with_material_proofs`,
   `cmd::plastic::tests::enclosure_snap_fit_follows_resized_front_wall`, the `atomic_commands` contract tests

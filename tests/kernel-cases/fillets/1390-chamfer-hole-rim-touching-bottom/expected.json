@@ -1,0 +1,12 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1390",
+  "tangency-labs/solidcraft#1574",
+  "tangency-labs/solidcraft#1428"
+ ],
+ "what": "a 3 mm chamfer on the rim of a hole tangent to the bottom face runs off that face: refused, today because SMLib's blends have no corner of the kind where the rim meets the bottom tangentially (never material added below the part)",
+ "source": "invariants",
+ "method": "cube 20 with a diameter 10 hole along -Y from the back face, its axis at z=5 so the hole wall touches the bottom face z=0 along one line. The hole rim on the back face has no face material between it and the bottom edge there, so a 3 mm setback cannot lie on the face: no chamfer of that size exists. The right answer is a clean refusal (a chamfer of a convex edge only ever removes material; building it grew the part by 1067 mm3 below the bottom face). SMLib refuses it today at the vertex where the rim runs tangentially into the bottom edge: no blend corner it builds handles that, and the refusal says so (the honest reason today; a too-large refusal would need the corner first).",
+ "outcome": "refused",
+ "refusal": "meets a corner of this kind"
+}

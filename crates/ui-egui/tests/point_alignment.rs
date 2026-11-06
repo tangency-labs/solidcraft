@@ -4,10 +4,11 @@
 mod raster;
 
 use serde_json::json;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::sketch::ConstraintKind;
 use solidcraft_ui_egui::scenario::Harness;
 
-fn line_midpoint(sk: &solidcraft_engine::sketch::Sketch, id: &str) -> solidcraft_engine::geom::Vec2 {
+fn line_midpoint(sk: &solidcraft_engine::sketch::Sketch, id: &str) -> solidcore_record::Vec2 {
     let a = sk.point(sk.resolve_point(&format!("{id}.start")).unwrap()).unwrap();
     let b = sk.point(sk.resolve_point(&format!("{id}.end")).unwrap()).unwrap();
     (a + b) * 0.5
@@ -54,8 +55,12 @@ fn horizontal_vertical_leaves_ambiguous_preselection_to_pick_tool() {
     use solidcraft_engine::Sel;
     for selection in [
         vec![Sel::SketchPoint { id: "origin".into() }],
-        vec![Sel::SketchPoint { id: "origin".into() }, Sel::SketchCurve { id: "c1".into() }],
-        vec![Sel::SketchPoint { id: "origin".into() }, Sel::SketchPoint { id: "c1.center".into() }, Sel::SketchCurve { id: "c1".into() }],
+        vec![Sel::SketchPoint { id: "origin".into() }, Sel::SketchCurve { id: "c1".into(), sketch: None }],
+        vec![
+            Sel::SketchPoint { id: "origin".into() },
+            Sel::SketchPoint { id: "c1.center".into() },
+            Sel::SketchCurve { id: "c1".into(), sketch: None },
+        ],
     ] {
         let mut h = Harness::new();
         h.app.session.execute("sketch.create", &json!({"plane":"XY"})).unwrap();
@@ -321,7 +326,7 @@ fn midpoint_aligns_to_the_fixed_origin_without_straightening_the_line() {
         let b = sk.point(sk.resolve_point("l1.end").unwrap()).unwrap();
         assert!(((a + b) * 0.5).x.abs() < 1e-6);
         assert!((b.x - a.x).abs() > 1. && (b.y - a.y).abs() > 1., "only the midpoint is aligned");
-        assert_eq!(sk.point(0).unwrap(), solidcraft_engine::geom::Vec2::ZERO);
+        assert_eq!(sk.point(0).unwrap(), solidcore_record::Vec2::ZERO);
     }
 }
 
@@ -429,7 +434,7 @@ fn context_menu_alignment_requires_exactly_two_points_and_preserves_conflicts() 
     h.app.run("sketch.circle.center", json!({"center":[20,30],"radius":3})).unwrap();
     let origin = Sel::SketchPoint { id: "origin".into() };
     let center = Sel::SketchPoint { id: "c1.center".into() };
-    let curve = Sel::SketchCurve { id: "c1".into() };
+    let curve = Sel::SketchCurve { id: "c1".into(), sketch: None };
     for selection in [vec![], vec![origin.clone()], vec![origin.clone(), curve.clone()], vec![origin.clone(), center.clone(), curve]] {
         h.app.session.selection = selection;
         assert!(
@@ -476,7 +481,7 @@ fn context_menu_alignment_review_images() {
             h.app.run("sketch.point", json!({"point":point,"id":id})).unwrap();
         }
         h.call("ui.view", json!({"view":"top"}));
-        h.app.cam.target = solidcraft_engine::geom::Vec3::new(40.0, 22.0, 0.0);
+        h.app.cam.target = solidcore_record::Vec3::new(40.0, 22.0, 0.0);
         h.app.cam.distance = 180.0;
         h.app.cam_anim = None;
         h.frames(3);
@@ -571,7 +576,7 @@ fn idle_midpoints_are_selectable_without_modifying_the_sketch() {
         assert_eq!(h.app.session.undo.len(), undo);
         // Ordinary edge and endpoint picks still work away from MID.
         h.step(&json!({"click":{"sketch":[20,12.5]}})).unwrap();
-        assert_eq!(h.app.session.selection, vec![Sel::SketchCurve { id: "l1".into() }]);
+        assert_eq!(h.app.session.selection, vec![Sel::SketchCurve { id: "l1".into(), sketch: None }]);
         h.step(&json!({"click":{"sketch":[10,10]}})).unwrap();
         assert!(matches!(h.app.session.selection.as_slice(), [Sel::SketchPoint { .. }]));
         h.app.ui.pick_off.push("sketch_points".into());
@@ -723,7 +728,7 @@ fn midpoint_selection_review_images() {
             h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[80,70]})).unwrap();
             h.app.run("sketch.rectangle.two_point", json!({"p0":[15,18],"p1":[50,58]})).unwrap();
             h.call("ui.view", json!({"view":"top"}));
-            h.app.cam.target = solidcraft_engine::geom::Vec3::new(40., 35., 0.);
+            h.app.cam.target = solidcore_record::Vec3::new(40., 35., 0.);
             h.app.cam.distance = 180.;
             h.app.cam_anim = None;
             h.frames(3);

@@ -1,4 +1,6 @@
 {
+  "order": 160,
+  "provenance": "Original SolidCraft mapping of Nord (MIT palette)",
   "base": "dark",
   "colors": {
     "accent": "#88c0d0",
@@ -50,8 +52,8 @@
     "dialog_footer": "#2e3440",
     "dialog_label": "#eceff4",
     "dialog_rule": "#4c566a",
-    "dimension": "#eceff4",
-    "dimension_driven": "#a4b0c2",
+    "dimension": "#d08770",
+    "dimension_driven": "#a87060",
     "error": "#bf616a",
     "field": "#242933",
     "form_accent": "#cfa7c7",
@@ -65,11 +67,6 @@
     "form_success": "#a3be8c",
     "form_success_fill": "#424b4d",
     "form_tab_ink": "#c3a5bd",
-    "gizmo": [
-      "#bf616a",
-      "#a3be8c",
-      "#5e81ac"
-    ],
     "glyph_bg": "#3b4252",
     "glyph_edge": "#f9959c",
     "glyph_text": "#f9959c",
@@ -168,6 +165,7 @@
     "sketch_centerline": "#ebcb8b",
     "sketch_construction": "#ebcb8b",
     "sketch_fixed": "#eceff4",
+    "sketch_halo": "#242f40",
     "sketch_ink": "#a3be8c",
     "sketch_locked": "#a3be8c",
     "sketch_lost": "#bf616a",
@@ -188,11 +186,6 @@
     "timeline_item_error": "#513f4a",
     "timeline_marker": "#a4b0c2",
     "toolbar": "#2e3440",
-    "triad": [
-      "#bf616a",
-      "#a3be8c",
-      "#5e81ac"
-    ],
     "viewport_bottom": "#242f40",
     "viewport_top": "#242f40",
     "warning": "#ebcb8b"

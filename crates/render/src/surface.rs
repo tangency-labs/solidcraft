@@ -1,9 +1,10 @@
 //! Bounded opaque metallic/roughness surfaces in linear sRGB.
 //! This numerical contract does not enable a renderer or persist appearances.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::PI;
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 /// Lowest admitted perceptual roughness. Perfect delta mirrors need another integrator.
 pub const MIN_ROUGHNESS: f64 = 0.045;
@@ -62,6 +63,27 @@ impl OpaqueSurface {
             return Err(SurfaceError::DielectricIor);
         }
         Ok(Self { base_color, metallic, roughness, dielectric_ior, clear_coat: None })
+    }
+
+    /// Bounded runtime optical finish, matching authored aging's 0.02..1 domain.
+    /// The public appearance constructor keeps its historical 0.045 minimum. This
+    /// explicit internal route preserves authored values without a clamp, retains
+    /// IOR/coat identity and validates every newly supplied component.
+    #[cfg(any(feature = "raytrace-cpu", test))]
+    pub(crate) fn with_authored_finish(mut self, base_color: Vec3, metallic: f64, roughness: f64) -> Result<Self, SurfaceError> {
+        if !base_color.is_finite() || ![base_color.x, base_color.y, base_color.z].into_iter().all(|c| (0.0..=1.0).contains(&c)) {
+            return Err(SurfaceError::BaseColor);
+        }
+        if !metallic.is_finite() || !(0.0..=1.0).contains(&metallic) {
+            return Err(SurfaceError::Metallic);
+        }
+        if !roughness.is_finite() || !(0.02..=1.0).contains(&roughness) {
+            return Err(SurfaceError::Roughness);
+        }
+        self.base_color = base_color;
+        self.metallic = metallic;
+        self.roughness = roughness;
+        Ok(self)
     }
 
     /// Runtime optical layer; never serialized into a document appearance.
@@ -138,11 +160,8 @@ impl OpaqueSurface {
     }
 }
 
-/// Exact piecewise sRGB decoding of an existing 8-bit color channel.
-pub fn srgb8_to_linear(channel: u8) -> f64 {
-    let c = f64::from(channel) / 255.0;
-    if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
-}
+/// Exact piecewise sRGB decoding of an existing 8-bit color channel ([`solidcraft_geom::srgb::decode8`]).
+pub use solidcraft_geom::srgb::decode8 as srgb8_to_linear;
 
 /// Normalize finite directions without overflow or an arbitrary magnitude threshold.
 pub fn unit_direction(v: Vec3) -> Result<Vec3, SurfaceError> {
@@ -271,13 +290,5 @@ mod tests {
                 assert!((s.specular_fresnel(c) - conductor * metallic).len() < 1e-14);
             }
         }
-    }
-
-    #[test]
-    fn srgb_conversion_includes_the_linear_toe() {
-        assert_eq!(srgb8_to_linear(0), 0.0);
-        assert_eq!(srgb8_to_linear(255), 1.0);
-        assert!((srgb8_to_linear(10) - (10.0 / 255.0) / 12.92).abs() < 1e-15);
-        assert!((srgb8_to_linear(128) - 0.21586050011389926).abs() < 1e-14);
     }
 }

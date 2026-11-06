@@ -14,7 +14,7 @@ use crate::selection::{PROFILES, SKETCH_LINES, SelInput, SelectionExt as _};
 use crate::ui_kit::{choice_row, expr_row, hint_row, text_row};
 
 /// The anchors as `frame.member` names them, and their labels.
-const ANCHORS: [(&str, &str); 11] = [
+const ANCHORS: &[(&str, &str)] = &[
     ("origin", "Origin"),
     ("center", "Center"),
     ("centroid", "Centroid"),
@@ -119,14 +119,14 @@ pub fn commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<Str
     let mut known = None;
     for pick in picks {
         match pick {
-            Sel::ExternalSketchCurve { sketch, id } => {
+            Sel::ExternalSketchCurve { sketch, id } | Sel::SketchCurve { id, sketch: Some(sketch) } => {
                 if known.is_some_and(|k| k != *sketch) {
                     return Err("the lines must be in one sketch".into());
                 }
                 known = Some(*sketch);
                 lines.push(id.clone());
             }
-            Sel::SketchCurve { id } => lines.push(id.clone()),
+            Sel::SketchCurve { id, sketch: None } => lines.push(id.clone()),
             _ => {}
         }
     }

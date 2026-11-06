@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use crate::Session;
 
@@ -15,6 +16,13 @@ fn occ(s: &Session, component: &str) -> u64 {
     s.doc.occurrence_of(c).map(|o| o.id).unwrap_or(0)
 }
 
+/// The call that deletes item `id` with `delete`: Edit Contact Set deletes with `delete: true`;
+/// Delete Motion Study and Delete Exploded View take only the item, and strict refuses any other
+/// key (#12155).
+fn deletion(delete: &str, key: &str, id: u64) -> Value {
+    if delete == "contact.edit" { json!({key: id, "delete": true}) } else { json!({key: id}) }
+}
+
 #[test]
 fn deleted_motion_item_ids_are_not_reused_after_reopening() {
     for (create, delete, key, params) in [
@@ -28,14 +36,54 @@ fn deleted_motion_item_ids_are_not_reused_after_reopening() {
             run(&mut s, "component.create", json!({"name": name}));
         }
         let first = run(&mut s, create, params.clone())[key].as_u64().unwrap();
-        let deletion = json!({key: first, "delete": true});
-        run(&mut s, delete, deletion.clone());
+        let deleting = deletion(delete, key, first);
+        run(&mut s, delete, deleting.clone());
         let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
         *s.doc_mut() = doc;
         let second = run(&mut s, create, params)[key].as_u64().unwrap();
         assert!(second > first, "{create}: deleted item {first} was reused as {second}");
-        assert!(s.execute(delete, &deletion).is_err());
+        assert!(s.execute(delete, &deleting).is_err());
     }
+}
+
+/// #9738: a default name skips the names in use, after a delete too: contact sets, motion
+/// studies, exploded views, and the placements of a component.
+#[test]
+fn default_names_skip_names_in_use() {
+    for (create, delete, key, params, prefix) in [
+        ("contact.create", "contact.edit", "set", json!({"occurrences": ["A", "B"]}), "Contact Set"),
+        ("motion.study", "motion.delete", "study", json!({"steps": 10}), "Motion Study"),
+        ("explode.create", "explode.delete", "view", json!({"moves": [{"occurrence": "B", "translate": [20, 0, 0]}]}), "Exploded View"),
+    ] {
+        let mut s = Session::default();
+        for name in ["A", "B"] {
+            run(&mut s, "component.activate", json!({"component": "root"}));
+            run(&mut s, "component.create", json!({"name": name}));
+        }
+        let made = |s: &mut Session| {
+            let r = run(s, create, params.clone());
+            (r[key].as_u64().unwrap(), r["name"].as_str().unwrap().to_string())
+        };
+        let (first, one) = made(&mut s);
+        let (_, two) = made(&mut s);
+        assert_eq!([one, two], [format!("{prefix}1"), format!("{prefix}2")]);
+        run(&mut s, delete, deletion(delete, key, first));
+        assert_eq!(made(&mut s).1, format!("{prefix}1"), "{create}: the free name, not {prefix}2 again");
+    }
+    // Placements: with the first deleted, a copy takes a name none has.
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Arm"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let arm = occ(&s, "Arm");
+    for _ in 0..2 {
+        run(&mut s, "occurrence.copy", json!({"occurrence": arm, "translate": [20, 0, 0]}));
+    }
+    let names = |s: &Session| s.doc.occurrences.iter().map(|o| o.name.clone()).collect::<Vec<_>>();
+    assert_eq!(names(&s), ["Arm:1", "Arm:2", "Arm:3"]);
+    run(&mut s, "selection.delete", json!({"occurrences": ["Arm:1"]}));
+    run(&mut s, "occurrence.copy", json!({"occurrence": "Arm:3", "translate": [20, 0, 0]}));
+    assert_eq!(names(&s), ["Arm:2", "Arm:3", "Arm:1"]);
 }
 
 /// Where B's corner (20, 0, 0) is now.
@@ -107,7 +155,7 @@ fn assert_joint_only_moves(s: &mut Session, joint: &str) {
     use std::sync::Arc;
     let definitions = s.model.state();
     let meshes: Vec<_> = definitions.bodies.iter().map(|b| b.mesh()).collect();
-    for body in &s.world_state().bodies {
+    for body in &s.world_state().unwrap().bodies {
         std::hint::black_box(body.mesh());
         std::hint::black_box(body.display_plan());
     }
@@ -127,7 +175,7 @@ fn assert_joint_only_moves(s: &mut Session, joint: &str) {
         for (b, mesh) in current.bodies.iter().zip(&meshes) {
             assert!(Arc::ptr_eq(&b.mesh(), mesh), "{}: canonical mesh replaced", b.name);
         }
-        let world = s.world_state();
+        let world = s.world_state().unwrap();
         let (_, work) = crate::kernel::profile::capture(|| {
             for b in &world.bodies {
                 let local = definitions.body(b.definition_name()).unwrap().mesh();
@@ -200,7 +248,7 @@ fn joint_pose_second_occurrence_shares_the_definition() {
     let mut s = joined_motion_part(PartAuthoring::InComponent, JoinSelection::Named);
     let second = run(&mut s, "occurrence.copy", json!({"component":"Rotor","translate":[40,0,0]}))["occurrence"].as_u64().unwrap();
     run(&mut s, "joint.as_built", json!({"type":"revolute","name":"Copy turn","a":0,"b":second,"at":{"occurrence":0,"point":[40,0,0],"z":[0,0,1]}}));
-    assert_eq!(s.world_state().bodies.len(), 2);
+    assert_eq!(s.world_state().unwrap().bodies.len(), 2);
     assert_joint_only_moves(&mut s, "Copy turn");
     assert_motion_matches_full_rebuild(&s);
 }
@@ -639,6 +687,35 @@ fn motion_study_plays_and_exports() {
     assert_eq!(run(&mut s, "motion.list", json!({}))["studies"].as_array().map(Vec::len), Some(0));
 }
 
+/// Regression (#9741): `motion.study` takes degrees for angle keys, so `motion.list` must give
+/// the keys back in those same units — feeding a listed study straight back to `motion.study`
+/// must not turn a 90° key into 1.57°.
+#[test]
+fn motion_list_round_trips_key_units_through_motion_study() {
+    let hinge_deg = |s: &mut Session| {
+        run(s, "joint.list", json!({}))["joints"]
+            .as_array()
+            .and_then(|a| a.iter().find(|j| j["name"] == "Hinge").cloned())
+            .and_then(|j| j["values"][0]["value"].as_f64())
+            .unwrap_or(f64::NAN)
+    };
+    let mut s = hinged_plates(0.0);
+    run(&mut s, "motion.study", json!({"name": "Turn", "steps": 10, "keys": [{"joint": "Hinge", "points": [[0, 0], [10, 90]]}]}));
+    run(&mut s, "motion.play", json!({"study": "Turn", "step": 10}));
+    assert!((hinge_deg(&mut s) - 90.0).abs() < 1e-6, "playing step 10 gave {}°", hinge_deg(&mut s));
+    let listed = run(&mut s, "motion.list", json!({}));
+    let key = &listed["studies"][0]["keys"][0];
+    assert_eq!(key["joint_name"], "Hinge");
+    assert_eq!(key["unit"], "deg");
+    assert!((key["points"][1][1].as_f64().unwrap_or(f64::NAN) - 90.0).abs() < 1e-6, "{listed}");
+    // The listed keys go back to `motion.study` unchanged and the study still plays 90°.
+    let keys = listed["studies"][0]["keys"].clone();
+    run(&mut s, "motion.study", json!({"study": "Turn", "keys": keys}));
+    run(&mut s, "motion.play", json!({"study": "Turn", "step": 0}));
+    run(&mut s, "motion.play", json!({"study": "Turn", "step": 10}));
+    assert!((hinge_deg(&mut s) - 90.0).abs() < 1e-6, "the round-tripped study played {}°", hinge_deg(&mut s));
+}
+
 #[test]
 fn exploded_views_show_without_changing_the_design() {
     let mut s = rail();
@@ -648,10 +725,22 @@ fn exploded_views_show_without_changing_the_design() {
     run(&mut s, "explode.show", json!({"view": "Apart"}));
     // Centres at x 5 and 25 → middle 15: each moves 10 mm further out.
     let bb = |s: &mut Session, b: &str| run(s, "inspect.measure", json!({"bodies": [b]}))["bodies"][0]["bbox"]["min"][0].as_f64().unwrap_or(f64::NAN);
-    let names: Vec<String> = s.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+    let names: Vec<String> = s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
     assert!((bb(&mut s, &names[0]) + 10.0).abs() < 1e-6, "{names:?}");
     assert!((bb(&mut s, &names[1]) - 30.0).abs() < 1e-6);
     assert_eq!(s.doc.occurrences, before, "shown only");
+    // The design's placements are not the view's: the properties report where the design
+    // places B, and Capture Position has nothing of the view's to keep (it stays shown).
+    let b_id = occ(&s, "B");
+    let centre =
+        |s: &mut Session| run(s, "occurrence.properties", json!({"occurrence": b_id}))["total"]["center_of_mass"][0].as_f64().unwrap_or(f64::NAN);
+    run(&mut s, "explode.show", json!({"view": null}));
+    let placed = centre(&mut s);
+    run(&mut s, "explode.show", json!({"view": "Apart"}));
+    assert!((centre(&mut s) - placed).abs() < 1e-9, "{} shown, {placed} placed", centre(&mut s));
+    assert_eq!(run(&mut s, "component.capture_position", json!({}))["captured"], 0);
+    assert_eq!(s.doc.occurrences, before, "the exploded view is never captured");
+    assert!((bb(&mut s, &names[1]) - 30.0).abs() < 1e-6, "still shown");
     run(&mut s, "explode.show", json!({"view": null}));
     assert!(bb(&mut s, &names[0]).abs() < 1e-6);
     run(&mut s, "explode.create", json!({"name": "Hand", "moves": [{"occurrence": "B", "translate": [0, 0, 50]}]}));
@@ -660,6 +749,33 @@ fn exploded_views_show_without_changing_the_design() {
         (run(&mut s, "inspect.measure", json!({"bodies": [names[1]]}))["bodies"][0]["bbox"]["min"][2].as_f64().unwrap_or(0.0) - 50.0).abs() < 1e-6
     );
     assert_eq!(run(&mut s, "explode.list", json!({}))["views"].as_array().map(Vec::len), Some(2));
+}
+
+/// #9142: on a part of plain bodies (the sample plate) Exploded View opened its dialog and failed
+/// on OK ("an exploded view needs two or more occurrences"). It is greyed out instead, saying why,
+/// until the design has two components to pull apart.
+#[test]
+fn exploded_view_is_greyed_out_until_there_are_two_components() {
+    let spec = crate::cmd::find_command("explode.create").unwrap();
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Plate"}));
+    let info = spec.info(&s);
+    assert!(!info.enabled, "a part of plain bodies has nothing to explode");
+    assert_eq!(info.disabled_reason.as_deref(), Some(super::EXPLODE_NEEDS_COMPONENTS));
+    let e = s.execute("explode.create", &json!({"scale": 1.62})).unwrap_err();
+    assert!(e.to_string().contains("two or more of them"), "{e}");
+    assert!(s.doc.assembly.exploded.is_empty(), "nothing was added: {e}");
+    // One component is still nothing to pull apart.
+    run(&mut s, "component.from_bodies", json!({"bodies": ["Plate"]}));
+    assert_eq!(s.doc.occurrences.len(), 1);
+    assert!(!spec.info(&s).enabled);
+    // A second one brings it back, and the automatic view separates the two.
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Lid"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [30, 0, 0]}));
+    assert!(spec.info(&s).enabled, "{:?}", spec.info(&s).disabled_reason);
+    let r = run(&mut s, "explode.create", json!({"scale": 1.62}));
+    assert_eq!(r["moves"].as_array().map(Vec::len), Some(2), "{r}");
 }
 
 /// Pictures drawn by the CPU rasterizer (the engine has no GPU): real views of the scene.
@@ -825,9 +941,77 @@ fn an_animation_is_drawn_from_the_camera_given() {
 }
 
 #[test]
+fn an_exploded_view_animates_apart_and_back_without_moving_the_design() {
+    let mut s = rail();
+    run(&mut s, "explode.create", json!({"name": "Apart", "scale": 1}));
+    // Another view shown: the animation starts from the assembled placement all the same.
+    run(&mut s, "explode.create", json!({"name": "Up", "moves": [{"occurrence": "B", "translate": [0, 0, 50]}]}));
+    run(&mut s, "explode.show", json!({"view": "Up"}));
+    s.mark_saved();
+    let (doc, pending, undo) = (s.doc.clone(), s.pending_moves.clone(), s.undo.len());
+    // Each frame: the lowest x and z of each body drawn, rounded to a micrometre.
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let record = {
+        let seen = seen.clone();
+        move |scene: &crate::render::Scene, cam: &crate::render::Camera, w: u32, h: u32| {
+            let mut lows: Vec<[i64; 2]> =
+                scene.meshes.iter().map(|m| m.mesh.bounds().min).map(|v| [(v.x * 1e3).round() as i64, (v.z * 1e3).round() as i64]).collect();
+            lows.sort();
+            seen.lock().unwrap().push((lows, *cam));
+            cpu(scene, cam, w, h)
+        }
+    };
+    let dir = out_dir("explode");
+    let gif = dir.join("apart.gif");
+    let frames = |p: Value| {
+        let mut p = p;
+        p["path"] = json!(gif.to_string_lossy());
+        p["width"] = json!(24);
+        p["height"] = json!(16);
+        let r = super::animation::export_with(&s, &p, Some(&record)).unwrap();
+        let seen = std::mem::take(&mut *seen.lock().unwrap());
+        assert_eq!(r["frames"].as_u64(), Some(seen.len() as u64), "{r}");
+        assert_eq!(gif_frames(&std::fs::read(&gif).unwrap()), (24, 16, seen.len()));
+        seen
+    };
+    let lows = |seen: &[(Vec<[i64; 2]>, crate::render::Camera)]| seen.iter().map(|(l, _)| l.clone()).collect::<Vec<_>>();
+    // A at x 0, B at x 20: each moves 10 mm out, at a steady pace.
+    let at = |x: i64| vec![[x * 1000, 0], [(20 - x) * 1000, 0]];
+    let apart = frames(json!({"view": "Apart", "samples": 3}));
+    assert_eq!(lows(&apart), [at(0), at(-5), at(-10)]);
+    // Back together too: exploded at the middle frame, assembled at both ends.
+    let round = frames(json!({"view": "Apart", "back": true, "samples": 5}));
+    assert_eq!(lows(&round), [at(0), at(-5), at(-10), at(-5), at(0)]);
+    // One camera for the whole clip, framing the parts assembled and exploded alike.
+    assert!(round.iter().all(|(_, c)| *c == round[0].1));
+    let mut framed = crate::render::Camera::default();
+    framed.fit(&solidcraft_geom::Aabb3 { min: Vec3::new(-10.0, 0.0, 0.0), max: Vec3::new(40.0, 10.0, 10.0) });
+    assert!(round[0].1.target.dist(framed.target) < 1e-9 && (round[0].1.distance - framed.distance).abs() < 1e-9, "{:?}", round[0].1);
+    // Without samples: 41 frames, or 81 with back (the middle one exploded).
+    assert_eq!(frames(json!({"view": "Apart"})).len(), 41);
+    let long = frames(json!({"view": "Up", "back": true}));
+    assert_eq!(long.len(), 81);
+    assert_eq!(long[40].0, [[0, 0], [20_000, 50_000]], "B up at the middle");
+    assert_eq!((long[0].0.clone(), long[80].0.clone()), (vec![[0, 0], [20_000, 0]], vec![[0, 0], [20_000, 0]]));
+    // The design keeps its placements, the view shown, its history and its saved state.
+    assert_eq!((&*s.doc, &s.pending_moves, s.undo.len()), (&*doc, &pending, undo));
+    // Through the registry too.
+    crate::capture::install_test_renderer();
+    let r = run(
+        &mut s,
+        "motion.export_animation",
+        json!({"view": "Apart", "back": true, "path": gif.to_string_lossy(), "samples": 3, "width": 16, "height": 16}),
+    );
+    assert_eq!(r["frames"], 3, "{r}");
+    assert_eq!((&*s.doc, &s.pending_moves, s.undo.len(), s.is_dirty()), (&*doc, &pending, undo, false));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn hostile_animation_params_are_refused() {
     let mut s = rail();
     run(&mut s, "motion.study", json!({"name": "Push", "steps": 10, "keys": [{"joint": "Rail", "points": [[0, 10], [10, 0]]}]}));
+    run(&mut s, "explode.create", json!({"name": "Apart", "scale": 1}));
     let dir = out_dir("hostile");
     let gif = dir.join("x.gif").to_string_lossy().to_string();
     let base = json!({"study": "Push", "path": gif, "samples": 2, "width": 16, "height": 16});
@@ -873,6 +1057,12 @@ fn hostile_animation_params_are_refused() {
         json!({"study": null}),
         json!({"study": "Nope"}),
         json!({"study": null, "joint": "Rail"}),
+        json!({"back": true}),
+        json!({"view": "Apart"}),
+        json!({"study": null, "view": "Nope"}),
+        json!({"study": null, "view": [1]}),
+        json!({"study": null, "view": "Apart", "back": "yes"}),
+        json!({"study": null, "view": "Apart", "joint": "Rail", "from": 0, "to": 1}),
         // 4096 × 4096 frames: a GIF holds four of them.
         json!({"width": 4096, "height": 4096, "samples": 5}),
     ] {
@@ -891,6 +1081,20 @@ fn hostile_animation_params_are_refused() {
         assert!(refused(json!({"path": root.join("in.gif").to_string_lossy()})).is_none());
     });
     assert!(root.join("in.gif").exists() && !dir.join("out").exists());
+    // A design file's exploded view moving parts by no number, too far, or parts gone: those
+    // moves are left out, here and in explode.show.
+    let b = occ(&s, "B");
+    let moves = vec![
+        (b, Vec3::new(f64::NAN, 0.0, 0.0)),
+        (b, Vec3::new(0.0, f64::INFINITY, 0.0)),
+        (b, Vec3::new(1e300, 0.0, 0.0)),
+        (999, Vec3::new(1.0, 0.0, 0.0)),
+    ];
+    s.doc_mut().assembly.exploded.push(solidcraft_doc::motion::ExplodedView { id: 900, name: "Bad".into(), moves });
+    let p = json!({"view": "Bad", "path": gif, "samples": 2, "width": 16, "height": 16});
+    super::animation::export_with(&s, &p, Some(&cpu)).unwrap();
+    run(&mut s, "explode.show", json!({"view": "Bad"}));
+    assert!(s.pending_moves.is_empty(), "{:?}", s.pending_moves);
     let _ = std::fs::remove_dir_all(&dir);
 }
 

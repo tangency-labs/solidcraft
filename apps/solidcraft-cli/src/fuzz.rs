@@ -33,27 +33,25 @@ pub fn one(args: &[String]) -> Result<(), String> {
     std::panic::set_hook(Box::new(|_| {
         PANICS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }));
-    eprintln!("design {seed}");
-    let run = fuzz::run_with(seed, steps, &mut |st| eprintln!("step {}", serde_json::to_string(st).unwrap_or_default()));
+    solidcraft_engine::note!("design {seed}");
+    let run = fuzz::run_with(seed, steps, &mut |st| solidcraft_engine::note!("step {}", serde_json::to_string(st).unwrap_or_default()));
     let mut design = json!({
         "outcome": run.outcome,
         "steps": run.steps.iter().map(|s| s.kind).collect::<Vec<_>>(),
         "unsupported": run.unsupported,
         "rejected": run.rejected,
-        "boolean_fallbacks": run.boolean_fallbacks,
-        "boolean_reports_truncated": run.boolean_reports_truncated,
         "panics": PANICS.swap(0, std::sync::atomic::Ordering::SeqCst),
     });
     if run.outcome.is_bug() {
         design["script"] = run.script();
         if minimise {
-            eprintln!("minimise");
+            solidcraft_engine::note!("minimise");
             let m = fuzz::minimise(&run);
             design["minimal"] = json!({"outcome": m.outcome, "steps": m.steps.iter().map(|s| s.kind).collect::<Vec<_>>(), "script": m.script()});
         }
     }
     let (a, b) = solidcraft_engine::fuzz::boolean_shapes(seed);
-    eprintln!("boolean {seed} {} {}", serde_json::to_string(&a).unwrap_or_default(), serde_json::to_string(&b).unwrap_or_default());
+    solidcraft_engine::note!("boolean {seed} {} {}", serde_json::to_string(&a).unwrap_or_default(), serde_json::to_string(&b).unwrap_or_default());
     let b = boolean_case(seed);
     let bp = PANICS.swap(0, std::sync::atomic::Ordering::SeqCst);
     println!("{}", json!({"seed": seed, "design": design, "boolean": b, "boolean_panics": bp}));
@@ -164,11 +162,14 @@ fn record(v: &Value, out_dir: Option<&str>) {
     let d = &v["design"];
     let bug = matches!(d["outcome"]["kind"].as_str(), Some("failed" | "panic" | "invalid" | "volume"));
     if bug || v.get("timeout").is_some() || v.get("crash").is_some() {
-        eprintln!("seed {seed}: {}", if bug { format!("{} {}", d["outcome"]["kind"], d["outcome"]["detail"]) } else { format!("{v}") });
+        solidcraft_engine::note!(
+            "seed {seed}: {}",
+            if bug { format!("{} {}", d["outcome"]["kind"], d["outcome"]["detail"]) } else { format!("{v}") }
+        );
     }
     let bk = v["boolean"]["outcome"].as_str().unwrap_or("ok");
     if bk != "ok" {
-        eprintln!("seed {seed}: boolean {bk} {}", v["boolean"]["detail"]);
+        solidcraft_engine::note!("seed {seed}: boolean {bk} {}", v["boolean"]["detail"]);
     }
     if let Some(dir) = out_dir {
         use std::io::Write;
@@ -191,23 +192,9 @@ fn summarise(results: &[Value], took: Duration) -> String {
     let mut boolean: BTreeMap<String, usize> = BTreeMap::new();
     let mut at_step: BTreeMap<String, usize> = BTreeMap::new();
     let mut unsupported: BTreeMap<String, usize> = BTreeMap::new();
-    let mut fallbacks: BTreeMap<String, [u64; 2]> = BTreeMap::new();
-    let mut truncated = [0usize; 2];
     let mut steps = 0;
     let (mut dp, mut bp) = (0, 0);
     for v in results {
-        for (i, group) in ["design", "boolean"].into_iter().enumerate() {
-            if v[group]["boolean_reports_truncated"].as_bool().unwrap_or(false) {
-                truncated[i] += 1;
-            }
-            if let Some(counts) = v[group]["boolean_fallbacks"].as_object() {
-                for (strategy, count) in counts {
-                    if let Some(total) = fallbacks.entry(strategy.clone()).or_default().get_mut(i) {
-                        *total = total.saturating_add(count.as_u64().unwrap_or(0));
-                    }
-                }
-            }
-        }
         dp += usize::from(v["design"]["panics"].as_u64().unwrap_or(0) > 0);
         bp += usize::from(v["boolean_panics"].as_u64().unwrap_or(0) > 0);
         let k = if v.get("timeout").is_some() {
@@ -246,11 +233,6 @@ fn summarise(results: &[Value], took: Duration) -> String {
     for (k, c) in &boolean {
         s += &format!("- {k}: {}\n", pct(*c));
     }
-    s += "\nSuccessful Boolean retries (events, including nested operations):\n";
-    for (strategy, [designs, checks]) in &fallbacks {
-        s += &format!("- {strategy}: designs {designs}, boolean checks {checks}\n");
-    }
-    s += &format!("- Capped reports: designs {}, boolean checks {}\n", truncated[0], truncated[1]);
     s
 }
 
@@ -259,15 +241,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn report_counts_retry_events_separately_and_marks_incomplete_logs() {
+    fn report_counts_outcomes_and_timeouts() {
         let results = [
-            json!({"design":{"outcome":{"kind":"ok"},"boolean_fallbacks":{"shifted_operands":2}},"boolean":{"outcome":"ok","boolean_fallbacks":{"shifted_operands":3},"boolean_reports_truncated":true}}),
-            json!({"design":{"outcome":{"kind":"ok"},"boolean_fallbacks":{"shifted_operands":1}},"boolean":{"outcome":"ok"}}),
+            json!({"design":{"outcome":{"kind":"ok"}},"boolean":{"outcome":"ok"}}),
+            json!({"design":{"outcome":{"kind":"ok"}},"boolean":{"outcome":"ok"}}),
             json!({"timeout":90}),
         ];
         let text = summarise(&results, Duration::ZERO);
-        assert!(text.contains("shifted_operands: designs 3, boolean checks 3"), "{text}");
-        assert!(text.contains("Capped reports: designs 0, boolean checks 1"), "{text}");
         assert!(text.contains("timeout: 1 (33.3 %)"), "{text}");
     }
 }

@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
-pub const MAX_RULES: usize = 128;
+/// Most configuration rules a design keeps. A rule drives one feature's suppression, so an
+/// assembly that switches a few hundred parts on and off, by two rules each, needs hundreds.
+pub const MAX_RULES: usize = 2048;
 const MAX_NODES: usize = 64;
 const MAX_DEPTH: usize = 8;
 
@@ -235,7 +237,61 @@ fn condition(doc: &Document, values: &BTreeMap<String, expr::Value>, value: &Rul
     }
 }
 
+/// The features whose suppression a condition reads.
+fn suppression_reads(c: &RuleCondition) -> Vec<u64> {
+    match c {
+        RuleCondition::Always | RuleCondition::Parameter { .. } => Vec::new(),
+        RuleCondition::All { conditions } | RuleCondition::Any { conditions } => conditions.iter().flat_map(suppression_reads).collect(),
+        RuleCondition::Not { condition } => suppression_reads(condition),
+        RuleCondition::Suppression { feature, .. } => vec![*feature],
+    }
+}
+
 impl Document {
+    /// After a plain parameter edit (`before`: the parameter values before it): the enabled rules
+    /// that switch a feature's suppression and whose condition reads a parameter whose value
+    /// changed, or the suppression of a feature switched earlier in this pass, applied in their
+    /// order as activation applies them. A switch parameter alone so switches its features.
+    /// Driven parameters and restrictions still wait for a configuration edit or activation, and
+    /// a rule whose condition reads nothing that changed leaves its feature as it is. A rule that
+    /// cannot be evaluated (a missing parameter) is skipped: it never blocks the edit.
+    /// Returns the features switched, with their new suppression.
+    pub fn apply_suppression_rules(&mut self, before: &BTreeMap<String, expr::Value>) -> Vec<(u64, bool)> {
+        if !self.configs.rules.iter().any(|r| r.enabled && matches!(r.effect, RuleEffect::DriveSuppression { .. })) {
+            return Vec::new();
+        }
+        let (values, _) = self.param_values();
+        let changed: BTreeSet<&String> = values
+            .iter()
+            .filter(|(name, v)| before.get(*name).is_none_or(|b| !close(b.v, v.v) || b.len != v.len || b.ang != v.ang))
+            .map(|(name, _)| name)
+            .chain(before.keys().filter(|name| !values.contains_key(*name)))
+            .collect();
+        if changed.is_empty() {
+            return Vec::new();
+        }
+        let mut switched: Vec<(u64, bool)> = Vec::new();
+        for rule in self.configs.rules.clone() {
+            let RuleEffect::DriveSuppression { feature, value } = rule.effect else { continue };
+            if !rule.enabled {
+                continue;
+            }
+            let reads = rule.parameter_references().iter().any(|n| changed.contains(n))
+                || suppression_reads(&rule.condition).iter().any(|f| switched.iter().any(|(s, _)| s == f));
+            if !reads || !condition(self, &values, &rule.condition, rule.length_unit.as_deref()).unwrap_or(false) {
+                continue;
+            }
+            if let Some(f) = self.feature_mut(feature)
+                && f.suppressed != value
+            {
+                f.suppressed = value;
+                switched.retain(|(s, _)| *s != feature);
+                switched.push((feature, value));
+            }
+        }
+        switched
+    }
+
     /// Apply ordered drives, then enforce all matched restrictions on the final state.
     /// Running on a scratch document makes a failing rule fully atomic for callers.
     pub(super) fn evaluate_configuration_rules(&mut self) -> Result<Vec<RuleTrace>> {
@@ -572,7 +628,16 @@ mod tests {
         .unwrap();
         assert!(validate_rules_json(&serde_json::json!({"configs":{"rules":[valid.clone()]}})).is_ok());
         assert!(validate_rules_json(&serde_json::json!({"configs":{"rules":null}})).is_err());
-        assert!(validate_rules_json(&serde_json::json!({"configs":{"rules":vec![valid.clone();129]}})).is_err());
+        // An assembly that switches a few hundred parts on and off, by two rules each, keeps them.
+        let many: Vec<Value> = (0..600)
+            .map(|i| {
+                let mut r = valid.clone();
+                r["id"] = serde_json::json!(format!("r{i}"));
+                r
+            })
+            .collect();
+        assert!(validate_rules_json(&serde_json::json!({"configs":{"rules":many}})).is_ok());
+        assert!(validate_rules_json(&serde_json::json!({"configs":{"rules":vec![valid.clone();MAX_RULES + 1]}})).is_err());
         let mut condition = serde_json::json!({"type":"always"});
         for _ in 0..8 {
             condition = serde_json::json!({"type":"not","condition":condition});
@@ -636,7 +701,7 @@ mod tests {
             Value::Null,
             serde_json::json!([deep]),
             serde_json::json!([wide]),
-            serde_json::json!(vec![valid; 129]),
+            serde_json::json!(vec![valid; MAX_RULES + 1]),
             serde_json::json!([invalid_context]),
         ] {
             let mut saved = serde_json::to_value(design()).unwrap();

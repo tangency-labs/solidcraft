@@ -5,7 +5,9 @@
 //! of the chosen display quality (Preferences ▸ Graphics) in physical pixels, where the body is
 //! nearest the eye. [`refinement_for`] turns that into a refinement step (each halves the chord),
 //! with hysteresis. A step not made yet is planned off the UI thread and swapped in when it is
-//! ready; until then the body keeps the step it has. Only bodies on screen and big enough get
+//! ready; until then the body keeps the step it has. Nothing is chosen or swapped in while the
+//! camera moves (each swap rebuilds and uploads the whole model scene), only once it has stood
+//! still for a moment (`viewport::REFINE_STILL_MS`). Only bodies on screen and big enough get
 //! refined, within a triangle budget (the bodies that need it most first) and a cache size.
 //!
 //! The model scene draws a refined body's faces from the refined plan (on the GPU, or its CPU
@@ -13,13 +15,15 @@
 //! drawn triangles (#1064). Display only: the reference mesh the model reads, exports and the
 //! B-rep never change.
 
+use solidcraft_engine::geom::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use solidcore_record::Vec3;
 use solidcraft_engine::doc::ModelBody;
 use solidcraft_engine::doc::display_quality::{DisplayQuality, MAX_REFINE, refinement_for};
 use solidcraft_engine::geom::tess::TessPlan;
-use solidcraft_engine::geom::{Aabb3, Mesh, Vec3};
+use solidcraft_engine::geom::{Aabb3, Mesh};
 
 /// Most triangles all refined bodies may draw together (on top of the rest of the model).
 pub(crate) const TRIANGLE_BUDGET: usize = 6_000_000;

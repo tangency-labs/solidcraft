@@ -76,7 +76,7 @@ call the same `run(command, args)` JSON.
 | Recovery autosave | Warm tier, same semantics as [`compatibility.md`](compatibility.md) |
 | [Design containers](design-container.md) content-addressed blobs | Tier keys by hash; cold tier holds large blobs without copying into OPFS |
 | [Control protocol](control-protocol.md) over TCP | Same methods over `MessagePort` to broker headless session (WebMCP-shaped, not a second registry) |
-| Parallel mesh work ([ROADMAP](../ROADMAP.md): web path serial) | Offload eval / IO jobs via `JobSubmit`; viewport stays on main thread |
+| Parallel mesh work ([roadmap detail](roadmap-detail.md): web path serial) | Offload eval / IO jobs via `JobSubmit`; viewport stays on main thread |
 
 ## craft-libs crates (reference)
 

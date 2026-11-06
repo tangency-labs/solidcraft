@@ -14,15 +14,14 @@
 //! - Windows portable `.zip` / standalone `.exe`: the running `solidcraft.exe` is renamed to
 //!   `solidcraft.exe.old` (Windows allows renaming a running executable), the new one takes its
 //!   name, and SolidCraft offers a restart; the `.old` file is deleted at the next start.
-//! - macOS: the `.dmg` is verified and opened; the user drags the app to Applications. SolidCraft
-//!   is ad-hoc signed and not notarized, so replacing the bundle in place would install code the
-//!   system can't vouch for without the user seeing it.
+//! - macOS: the `.dmg` is verified and opened; the user drags the app to Applications. The
+//!   bundle is never replaced in place from the background.
 //! - Flatpak, Snap, `.deb`, `.rpm`, `.tar.gz`: never replaced; the window shows the command.
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use sha2::{Digest, Sha256};
 
@@ -146,16 +145,49 @@ pub struct Progress {
     pub done: AtomicU64,
     pub total: AtomicU64,
     pub cancel: AtomicBool,
+    /// Final release and whether the refresh failed; absent while checking.
+    selected: Mutex<Option<(Release, bool)>>,
+}
+
+impl Progress {
+    pub fn selection(&self) -> Option<(Release, bool)> {
+        self.selected.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    pub fn message(&self) -> String {
+        let selected = self.selected.lock().unwrap_or_else(|e| e.into_inner());
+        match selected.as_ref() {
+            None => crate::i18n::tr("update.refresh_checking").to_string(),
+            Some((release, fallback)) => {
+                crate::i18n::format(if *fallback { "update.refresh_fallback" } else { "update.refresh_selected" }, &[("version", release.version())])
+            }
+        }
+    }
 }
 
 /// What the update needs from the host.
 pub struct Net {
     pub get: super::HttpGet,
     pub download: HttpDownload,
+    pub feed: Option<PathBuf>,
 }
 
-/// Download, verify and apply `release` for `method`. Runs on a background thread. `staging` is
-/// a folder for downloads that aren't written next to their target (the `.msi`, the `.dmg`).
+/// GET `url` unless Cancel was pressed; check again after the response so a cancel during the
+/// wait still ends the install without starting the package download (#8908).
+fn get_unless_cancelled(net: &Net, progress: &Progress, url: &str) -> Result<Vec<u8>, FetchError> {
+    if progress.cancel.load(Ordering::Relaxed) {
+        return Err(FetchError::Failed("cancelled".into()));
+    }
+    let body = (net.get)(url)?;
+    if progress.cancel.load(Ordering::Relaxed) {
+        return Err(FetchError::Failed("cancelled".into()));
+    }
+    Ok(body)
+}
+
+/// Refresh the feed, then download, verify and apply the newest release for `method`, falling
+/// back to `release` when the check fails. Runs on a background thread. `staging` holds downloads
+/// that are not written next to their target (the `.msi`, the `.dmg`).
 pub fn run(
     release: &Release,
     kind: &InstallKind,
@@ -165,12 +197,28 @@ pub fn run(
     staging: &Path,
     progress: &Progress,
 ) -> Result<Outcome, String> {
+    // Honour Cancel before each network wait: feed refresh and checksum fetches used to run
+    // without looking at the flag, so Cancel looked dead until the body download started (#8908).
+    if progress.cancel.load(Ordering::Relaxed) {
+        return Err("cancelled".into());
+    }
+    // The release shown may be stale by now: install the newest one the feed names, or the one
+    // shown when the feed can't be read.
+    let (release, fallback) = match super::fetch_latest(net.feed.as_deref(), Some(&net.get)) {
+        Ok(latest) if super::is_newer(&latest.tag, &release.tag) => (latest, false),
+        Ok(_) => (release.clone(), false),
+        Err(_) => (release.clone(), true),
+    };
+    *progress.selected.lock().unwrap_or_else(|e| e.into_inner()) = Some((release.clone(), fallback));
+    if progress.cancel.load(Ordering::Relaxed) {
+        return Err("cancelled".into());
+    }
     let asset = release.asset_for(kind, arch).ok_or_else(|| format!("this release has no package for a {} on {arch}", kind.label()))?;
     if asset.size > MAX_PACKAGE {
         return Err(format!("{} is too large ({} bytes)", asset.name, asset.size));
     }
     let sums_url = release.assets.iter().find(|a| a.name == SUMS).map(|a| a.url.clone()).ok_or_else(|| format!("this release has no {SUMS}"))?;
-    let sums = (net.get)(&sums_url).map_err(|e| format!("{SUMS}: {e}"))?;
+    let sums = get_unless_cancelled(net, progress, &sums_url).map_err(|e| format!("{SUMS}: {e}"))?;
     if let Some(key) = PUBLIC_KEY {
         let sig_url = release
             .assets
@@ -178,7 +226,7 @@ pub fn run(
             .find(|a| a.name == SUMS_SIG)
             .map(|a| a.url.clone())
             .ok_or_else(|| format!("this release isn't signed (no {SUMS_SIG})"))?;
-        let sig = (net.get)(&sig_url).map_err(|e| format!("{SUMS_SIG}: {e}"))?;
+        let sig = get_unless_cancelled(net, progress, &sig_url).map_err(|e| format!("{SUMS_SIG}: {e}"))?;
         verify_signature(&sums, &String::from_utf8_lossy(&sig), key, &release.tag)?;
     }
     let sums = String::from_utf8_lossy(&sums);
@@ -214,7 +262,29 @@ pub fn run(
     if actual != expected {
         return Err(cleanup(format!("{} doesn't match {SUMS} (got {actual}, expected {expected}); it was deleted", asset.name)));
     }
-    apply(method, &part).map_err(cleanup)
+    let outcome = apply(method, &part).map_err(cleanup)?;
+    Ok(match (method, outcome) {
+        // Zsync-based tools (Gearlever, AppImageUpdate) find the update data by the release's file name.
+        (Method::AppImage(_), Outcome::Restart(placed)) => {
+            let named = release_named(&placed, release.version(), arch);
+            // A failed rename leaves the new AppImage under its old name: it still works.
+            Outcome::Restart(if named != placed && std::fs::rename(&placed, &named).is_ok() { named } else { placed })
+        }
+        (_, outcome) => outcome,
+    })
+}
+
+/// Where an AppImage called `path` goes once it holds `version`: if its name is a release name
+/// (`solidcraft-<version>-linux-<arch>.AppImage`, or the old `solvecraft-` one), the new release's name
+/// in the same folder; any other name (renamed by the user, or without a version) is kept.
+pub fn release_named(path: &Path, version: &str, arch: &str) -> PathBuf {
+    let name = path.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    let rest = name.strip_prefix("solidcraft-").or_else(|| name.strip_prefix("solvecraft-"));
+    if rest.is_some_and(|r| r.starts_with(|c: char| c.is_ascii_digit()) && r.contains("-linux-") && r.ends_with(".appimage")) {
+        path.with_file_name(format!("solidcraft-{}-linux-{arch}.AppImage", version.trim_start_matches('v')))
+    } else {
+        path.to_path_buf()
+    }
 }
 
 /// Put a verified package in place.

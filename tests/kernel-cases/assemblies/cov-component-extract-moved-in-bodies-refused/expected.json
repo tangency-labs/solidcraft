@@ -1,0 +1,18 @@
+{
+ "sources": [],
+ "what": "component.extract of a component whose body was moved in from the root",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded: 4000 mm3; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5): 4000 mm3; Arm's body came in by component.move_bodies, a feature outside it that touches nothing else outside: since #12142 that history goes with Arm to its own design (the folder name keeps the case's id from when it was refused), so extract succeeds with ArmBox and the design keeps both bodies where they were: 8000 mm3",
+ "body_count": 2,
+ "volume_mm3": 8000.0,
+ "results": [
+  {
+   "step": 8,
+   "json": {
+    "bodies": [
+     "ArmBox"
+    ]
+   }
+  }
+ ]
+}

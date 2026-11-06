@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#5024"
+ ],
+ "what": "a drilled O8 hole, 10 deep with a 118 deg point, centred on the top edge of a 40x30x20 box (x = 0): half of it in the box, across the edge: 17-54 s in truck",
+ "source": "analytic",
+ "method": "the hole's axis lies in the box's side plane x = 0, so the box keeps half of the drilled cut: V = 40*30*20 - (pi r^2 d + pi r^2 h/3)/2, r = 4, d = 10, the point's height h = r / tan 59 deg (main refuses a position off the face, so the centre is on the edge, not 1 mm past it)",
+ "body_count": 1,
+ "volume_mm3": 23728.5376
+}

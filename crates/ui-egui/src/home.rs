@@ -35,7 +35,15 @@ pub struct HomeState {
     /// Recent design paths, newest first (kept in the preferences).
     pub recent: Vec<String>,
     pub opened_at: std::collections::BTreeMap<String, u64>,
+    /// Designs the user removed from the list. Kept in the preferences so a host that rebuilds
+    /// the recent list from its stored designs (the web build, see `sync_recents`) does not add
+    /// them back. Opening or saving a design clears it from here.
+    pub forgotten: std::collections::BTreeSet<String>,
     thumbs: HashMap<String, Option<egui::TextureHandle>>,
+    /// Keys whose picture could not be made (an empty or unreadable design). Terminal: the card
+    /// shows a placeholder instead of spinning forever. Cleared when the design is opened or saved
+    /// (see `add_recent`), which asks for the picture again.
+    failed: std::collections::HashSet<String>,
     samples: HashMap<usize, Session>,
     /// Keys asked for and not made yet.
     queued: Vec<String>,
@@ -46,6 +54,10 @@ pub struct HomeState {
     sample_rx: Option<std::sync::mpsc::Receiver<Made>>,
     #[cfg(not(target_arch = "wasm32"))]
     remembering: Option<std::sync::mpsc::Receiver<Made>>,
+    /// Watches the designs the picture threads open and build, and stops them when the app
+    /// closes ([`finish_pictures`]): closing must not wait for every cold recent file (#8398).
+    #[cfg(not(target_arch = "wasm32"))]
+    stop: std::sync::Arc<solidcraft_engine::doc::progress::Progress>,
     /// A sample picked before its design was ready.
     wanted: Option<usize>,
     /// Whether each recent file is there, found off the window thread (a stat of a slow or
@@ -75,6 +87,12 @@ impl HomeState {
         self.recent.iter().filter(|p| self.thumbs.get(*p).is_some_and(Option::is_some)).count()
     }
 
+    /// Whether a design's picture could not be made, so its card shows a placeholder rather than
+    /// a spinner that would otherwise turn forever.
+    fn thumb_failed(&self, key: &str) -> bool {
+        self.failed.contains(key)
+    }
+
     pub fn ready_samples(&self) -> usize {
         (0..solidcraft_engine::sample::samples().len()).filter(|i| self.thumbs.get(&format!("sample:{i}")).is_some_and(Option::is_some)).count()
     }
@@ -94,6 +112,19 @@ impl HomeState {
         self.opened_at.insert(path.to_string(), web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0));
         self.opened_at.retain(|p, _| self.recent.contains(p));
         self.thumbs.remove(path);
+        // Opening or saving a design undoes an earlier removal from the list.
+        self.forgotten.remove(path);
+        // A fresh open or save earns another attempt at the picture.
+        self.failed.remove(path);
+    }
+
+    /// Drop a design from the recent list and remember that the user did so, so a host that
+    /// rebuilds the list from its stored designs (the web build) does not add it back.
+    pub fn forget(&mut self, path: &str) {
+        self.recent.retain(|p| p != path);
+        self.opened_at.remove(path);
+        self.thumbs.remove(path);
+        self.forgotten.insert(path.to_string());
     }
 }
 
@@ -101,14 +132,15 @@ impl HomeState {
 pub fn thumbnail(s: &Session) -> Option<egui::ColorImage> {
     let mut cam = Camera::default();
     cam.set_view(StandardView::Iso);
-    let b = solidcraft_engine::view::bounds(s);
+    // No picture of a model that cannot be placed.
+    let b = solidcraft_engine::view::bounds(s).ok()?;
     if b.is_empty() {
         return None;
     }
     cam.fit(&b);
     // Fill the card: the fit leaves room for a whole window's margins.
     cam.distance *= 0.7;
-    let scene = solidcraft_engine::view::scene(s, &cam);
+    let scene = solidcraft_engine::view::scene(s, &cam).ok()?;
     // Drawn on the GPU by the renderer the app installs; none (a browser): no picture.
     let picture = solidcraft_engine::capture::rgba(&scene, &cam, THUMB[0] as u32, THUMB[1] as u32).ok()?;
     Some(egui::ColorImage::from_rgba_unmultiplied(THUMB, &picture.rgba))
@@ -185,6 +217,25 @@ fn remember_at(s: &Session, key: &str, #[cfg(not(target_arch = "wasm32"))] ident
     Some(img)
 }
 
+/// Waits up to `within` for the threads drawing Home pictures, and drops what they made: the
+/// window is going, and a picture still on the GPU as the process exits can crash the driver.
+/// They are told to stop first: the design being built stops at its next feature and the cold
+/// recent files after it are left alone, so closing waits for one picture at most, not for every
+/// recent design to be imported and rebuilt (#8398).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn finish_pictures(h: &mut HomeState, within: std::time::Duration) {
+    h.stop.cancel();
+    let end = std::time::Instant::now() + within;
+    for rx in [h.rx.take(), h.sample_rx.take(), h.remembering.take()].into_iter().flatten() {
+        // Each thread sends what it made and ends; its channel closes when it has.
+        while let Some(left) = end.checked_duration_since(std::time::Instant::now()) {
+            if let Err(std::sync::mpsc::RecvTimeoutError::Disconnected) = rx.recv_timeout(left) {
+                break;
+            }
+        }
+    }
+}
+
 /// A Home picture is being drawn off the UI thread.
 #[cfg(test)]
 pub(crate) fn remembering(h: &HomeState) -> bool {
@@ -225,8 +276,19 @@ pub(crate) fn remember_source(h: &mut HomeState, s: &Session, key: &str) {
 }
 
 pub(crate) fn install(h: &mut HomeState, ctx: &egui::Context, key: &str, img: Option<egui::ColorImage>) {
-    let tex = img.map(|i| ctx.load_texture(format!("thumb:{key}"), i, egui::TextureOptions::LINEAR));
-    h.thumbs.insert(key.to_string(), tex);
+    match img {
+        Some(i) => {
+            let tex = ctx.load_texture(format!("thumb:{key}"), i, egui::TextureOptions::LINEAR);
+            h.thumbs.insert(key.to_string(), Some(tex));
+            h.failed.remove(key);
+        }
+        // The job finished with no picture: an empty design, or one that could not be read. Mark
+        // it so the card stops spinning and shows a placeholder (#4655).
+        None => {
+            h.thumbs.insert(key.to_string(), None);
+            h.failed.insert(key.to_string());
+        }
+    }
 }
 
 /// Read a disposable picture without evaluating, importing or meshing a model.
@@ -243,8 +305,28 @@ fn sample_picture(i: usize) -> Option<egui::ColorImage> {
     decode_thumbnail(SAMPLE_PICTURES.get(i)?.to_vec())
 }
 
-/// Build what a key stands for (runs off the UI thread where threads exist).
+/// Build what a key stands for (on the web, which has no threads; elsewhere [`make_watched`]).
+#[cfg(any(test, target_arch = "wasm32"))]
 fn make(key: &str) -> Made {
+    make_unless(key, &|| false)
+}
+
+/// [`make`] on a picture thread watched by `stop` ([`HomeState::stop`]): once stopped, the
+/// design is built no further and no picture is drawn or cached.
+#[cfg(not(target_arch = "wasm32"))]
+fn make_watched(key: &str, stop: &std::sync::Arc<solidcraft_engine::doc::progress::Progress>) -> Made {
+    if stop.is_cancelled() {
+        return (key.to_string(), None, None);
+    }
+    let made = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        solidcraft_engine::doc::progress::watch(stop.clone(), || make_unless(key, &|| stop.is_cancelled()))
+    }));
+    made.unwrap_or_else(|_| (key.to_string(), None, None))
+}
+
+/// [`make`], with no picture once `stopped` says so: a build stopped part way is not the design,
+/// and its picture must not be cached as the design's.
+fn make_unless(key: &str, stopped: &dyn Fn() -> bool) -> Made {
     let sample = key.strip_prefix("sample:").and_then(|i| i.parse::<usize>().ok());
     if sample.is_none()
         && let Some(img) = picture(key)
@@ -262,12 +344,12 @@ fn make(key: &str) -> Made {
         }),
         None => s.execute("doc.open", &serde_json::json!({ "path": key })).is_ok(),
     };
-    if !built {
+    if !built || stopped() {
         return (key.to_string(), None, None);
     }
     if sample.is_some() {
         // Keep the first viewport frame warm even though the preview needs no new render.
-        s.world_state().warm_meshes(|| true);
+        crate::open_meshing::session_world(&s).warm_meshes(|| true);
     }
     let img = match sample {
         Some(i) => sample_picture(i),
@@ -301,12 +383,16 @@ fn start_jobs(h: &mut HomeState) {
     }
     let mut keys = std::mem::take(&mut h.queued);
     let (tx, rx) = std::sync::mpsc::channel();
+    let stop = h.stop.clone();
     let spawned = std::thread::Builder::new().name("thumbnails".into()).spawn(move || {
         // Prefer local PNGs; even the metadata checks belong off the window thread.
         keys.sort_by_key(|k| !cache_path(k).is_some_and(|p| p.exists()));
         let Some(cold) = read_pictures(keys, &tx) else { return };
         for k in cold {
-            let made = std::panic::catch_unwind(|| make(&k)).unwrap_or((k, None, None));
+            if stop.is_cancelled() {
+                return;
+            }
+            let made = make_watched(&k, &stop);
             if tx.send(made).is_err() {
                 return;
             }
@@ -324,11 +410,11 @@ fn start_sample(h: &mut HomeState) {
         return;
     }
     let (tx, rx) = std::sync::mpsc::channel();
+    let stop = h.stop.clone();
     if std::thread::Builder::new()
         .name("selected-sample".into())
         .spawn(move || {
-            let key = format!("sample:{i}");
-            let made = std::panic::catch_unwind(|| make(&key)).unwrap_or((key, None, None));
+            let made = make_watched(&format!("sample:{i}"), &stop);
             let _ = tx.send(made);
         })
         .is_ok()
@@ -408,8 +494,13 @@ fn poll(app: &mut SolveApp, ctx: &egui::Context) {
             app.home.wanted = None;
             app.set_status(format!("the sample could not be built ({key})"), true);
         }
-        // A failed sample build does not discard its shipped preview.
-        if img.is_some() || !app.home.thumbs.contains_key(&key) {
+        // A failed sample build keeps its shipped preview, so never overwrite a sample that
+        // already has a picture with an empty result. A recent with no picture, though, must
+        // settle into a terminal "failed" state so its card stops spinning (#4655); `install`
+        // records that.
+        let is_sample = key.starts_with("sample:");
+        let already_ready = app.home.thumbs.get(&key).is_some_and(Option::is_some);
+        if img.is_some() || (!is_sample && !already_ready) || !app.home.thumbs.contains_key(&key) {
             install(&mut app.home, ctx, &key, img);
         }
         if let (Some(s), Some(i)) = (session, key.strip_prefix("sample:").and_then(|i| i.parse::<usize>().ok())) {
@@ -497,9 +588,13 @@ fn ask_present(h: &mut HomeState, ctx: &egui::Context, recent: &[String]) {
             }
         }
     }
+    // The browser's files are in memory, so they are looked up here; no thread wakes the page.
     #[cfg(target_arch = "wasm32")]
-    for p in recent {
-        h.present.insert(p.clone(), solidcraft_engine::io::vfs::exists(p));
+    {
+        let _ = ctx;
+        for p in recent {
+            h.present.insert(p.clone(), solidcraft_engine::io::vfs::exists(p));
+        }
     }
 }
 
@@ -533,13 +628,13 @@ enum FileAction {
 /// File view replaces the workspace while keeping the open design and its history intact.
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     poll(app, ui.ctx());
-    let file_menu_open = ui.ctx().data(|data| data.get_temp::<bool>(egui::Id::new("sc_file_menu"))).unwrap_or(false);
+    let file_menu_open = ui.ctx().data(|data| data.get_temp::<bool>(egui::Id::unique("sc_file_menu"))).unwrap_or(false);
     let interactive = !app.file_picker_busy() && !app.file_load.busy() && !file_menu_open;
     // Help windows draw before Home; remember their prior visibility so one Escape closes only the window.
     let had_help_window = ui.ctx().memory(|memory| {
         ["sc_about", "sc_crash_reports"]
             .iter()
-            .any(|id| memory.areas().visible_last_frame(&egui::LayerId::new(egui::Order::Middle, egui::Id::new(id))))
+            .any(|id| memory.areas().visible_last_frame(&egui::LayerId::new(egui::Order::Middle, egui::Id::unique(id))))
     });
 
     if interactive
@@ -770,7 +865,8 @@ fn start_content(app: &mut SolveApp, ui: &mut egui::Ui, action: &mut Option<File
         if !app.home.recent.is_empty() {
             FileView::recent_list(ui, |ui| {
                 for (index, path) in app.home.recent.clone().iter().enumerate() {
-                    let name = std::path::Path::new(path).file_stem().map(|name| name.to_string_lossy()).unwrap_or_else(|| path.as_str().into());
+                    // Keep the extension so plate.step and plate.stl are not both "plate" (#9081).
+                    let name = std::path::Path::new(path).file_name().map(|name| name.to_string_lossy()).unwrap_or_else(|| path.as_str().into());
                     let missing = !available(app, path);
                     let when = if app.session.path.as_ref() == Some(path) { app.tr("home.open_now").to_string() } else { recent_time(app, path) };
                     let shown_path = if missing {
@@ -782,6 +878,7 @@ fn start_content(app: &mut SolveApp, ui: &mut egui::Ui, action: &mut Option<File
                     } else {
                         friendly_path(path)
                     };
+                    let kind = recent_kind(app, path);
                     let response = FileView::recent_row(
                         ui,
                         &format!("home:recent:{index}"),
@@ -789,15 +886,17 @@ fn start_content(app: &mut SolveApp, ui: &mut egui::Ui, action: &mut Option<File
                             title: &name,
                             path: &shown_path,
                             when: &when,
-                            workspace: app.tr("home.design_workspace"),
+                            workspace: &kind,
                             thumbnail: texture(app.home.thumbs.get(path).and_then(Option::as_ref)),
+                            // A design whose picture could not be made shows a dimmed placeholder,
+                            // distinct from the one shown while a picture is still loading (#4655).
+                            thumbnail_failed: app.home.thumb_failed(path),
                         },
                     );
                     publish(&format!("home:recent:{index}"), &response);
                     ui_kit::Menu::context(&response, |ui| {
                         if crate::context_menu::button(ui, app.tr_label("Remove from list"), "delete").clicked() {
-                            app.home.recent.retain(|x| x != path);
-                            app.home.opened_at.remove(path);
+                            app.home.forget(path);
                             ui.close();
                         }
                         if !cfg!(target_arch = "wasm32") && crate::context_menu::button(ui, app.tr_label("Show in folder"), "folder").clicked() {
@@ -843,7 +942,7 @@ fn texture(texture: Option<&egui::TextureHandle>) -> Option<(egui::TextureId, eg
 }
 
 /// Abbreviate only an actual home-directory ancestor; the source path is kept for actions.
-fn friendly_path(path: &str) -> String {
+pub(crate) fn friendly_path(path: &str) -> String {
     let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
     abbreviated_path(path, home.as_deref().map(std::path::Path::new))
 }
@@ -854,6 +953,30 @@ fn abbreviated_path(path: &str, home: Option<&std::path::Path>) -> String {
     } else {
         path.to_owned()
     }
+}
+
+/// Kind column for a recent file: Design for `.sc`/legacy, else STEP, STL, … (#9081).
+fn recent_kind(app: &SolveApp, path: &str) -> String {
+    let ext = std::path::Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or("");
+    if solidcraft_engine::io::is_design_ext(ext) || ext.eq_ignore_ascii_case("json") {
+        return app.tr("home.design_workspace").to_string();
+    }
+    if solidcraft_engine::io::is_drawing_path(path) {
+        return app.tr_label("Drawing").to_string();
+    }
+    let label = match ext.to_ascii_lowercase().as_str() {
+        "step" | "stp" => "STEP",
+        "igs" | "iges" => "IGES",
+        "stl" => "STL",
+        "3mf" => "3MF",
+        "obj" => "OBJ",
+        "glb" | "gltf" => "glTF",
+        "fcstd" => "FreeCAD",
+        "3dm" => "Rhino",
+        other if !other.is_empty() => return other.to_ascii_uppercase(),
+        _ => return app.tr("home.design_workspace").to_string(),
+    };
+    label.to_string()
 }
 
 fn recent_time(app: &SolveApp, path: &str) -> String {
@@ -965,11 +1088,13 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
                 app.open_path_async(&path);
             }
         }),
-        FileAction::Import => app.pick_open_for(&["step", "stp", "iges", "igs", "stl", "obj", "3mf", "gltf", "glb"], |app, path| {
-            if let Some(path) = path {
-                app.open_path_async(&path);
-            }
-        }),
+        FileAction::Import => {
+            app.pick_open_for(&["step", "stp", "iges", "igs", "stl", "obj", "3mf", "gltf", "glb", "ply", "xyz", "pts"], |app, path| {
+                if let Some(path) = path {
+                    app.open_path_async(&path);
+                }
+            })
+        }
         FileAction::Save => {
             app.home.open = false;
             crate::toolbar::save(app);
@@ -1016,6 +1141,31 @@ mod tests {
         assert_eq!(abbreviated_path("/Users/sample", home), "~");
         assert_eq!(abbreviated_path("/Users/sample-other/plate.solidcraft", home), "/Users/sample-other/plate.solidcraft");
         assert_eq!(abbreviated_path("/disk/design.solidcraft", None), "/disk/design.solidcraft");
+    }
+
+    #[test]
+    fn recent_kind_names_imports_by_extension() {
+        let app = crate::test_support::sample_app();
+        assert_eq!(recent_kind(&app, "/tmp/plate.sc"), "Design");
+        assert_eq!(recent_kind(&app, "/tmp/plate.solidcraft"), "Design");
+        assert_eq!(recent_kind(&app, "/tmp/plate.step"), "STEP");
+        assert_eq!(recent_kind(&app, "/tmp/plate.STL"), "STL");
+        assert_eq!(recent_kind(&app, "/tmp/plate.3mf"), "3MF");
+        assert_eq!(recent_kind(&app, "/tmp/plate.obj"), "OBJ");
+    }
+
+    #[test]
+    fn middle_ellipsis_keeps_both_ends_of_a_path() {
+        let ctx = crate::fonts::test_context();
+        let mut shown = String::new();
+        crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+            let font = egui::FontId::monospace(12.0);
+            let full = "~/Projects/exports/out/plate.step";
+            shown = crate::ui_kit::ellipsize_middle(ui, full, font, 80.0);
+        });
+        assert!(shown.contains('…'), "{shown}");
+        assert!(shown.ends_with("plate.step") || shown.ends_with(".step"), "{shown}");
+        assert!(shown.starts_with('~') || shown.starts_with("~/P"), "{shown}");
     }
 
     #[test]
@@ -1127,7 +1277,7 @@ mod tests {
         }
         let mut session = Session::default();
         session.execute("solid.box", &serde_json::json!({"length":10,"width":20,"height":30})).unwrap();
-        for body in &session.world_state().bodies {
+        for body in &session.world_state().unwrap().bodies {
             body.mesh();
         }
         let bytes = session.design_container(solidcraft_engine::io::DesignCompression::Fast, false, true).unwrap();
@@ -1195,7 +1345,7 @@ mod tests {
         let key = path.to_string_lossy().into_owned();
         let mut s = Session::default();
         s.execute("solid.box", &serde_json::json!({"length":10,"width":20,"height":30})).unwrap();
-        for b in &s.world_state().bodies {
+        for b in &s.world_state().unwrap().bodies {
             b.mesh();
         }
         let bytes = s.design_container(solidcraft_engine::io::DesignCompression::Fast, false, true).unwrap();
@@ -1209,6 +1359,46 @@ mod tests {
         assert!(picture.is_some() && rebuilt.is_none());
         assert!(cached(&key).is_none(), "the portable picture did not rebuild the design");
         std::fs::remove_file(path).unwrap();
+    }
+
+    /// Closing the app with cold recent files still being imported for their pictures stops
+    /// them: it does not wait for each to be built, and nothing built part way is cached (#8398).
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn closing_stops_the_cold_recent_pictures_instead_of_waiting_for_them() {
+        let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let mut part = Session::default();
+        part.execute("solid.box", &serde_json::json!({"length":10,"width":20,"height":30})).unwrap();
+        let keys: Vec<String> = (0..4)
+            .map(|n| {
+                let path = std::env::temp_dir().join(format!("solidcraft-closing-cold-{}-{nonce}-{n}.step", std::process::id()));
+                let key = path.to_string_lossy().into_owned();
+                part.execute("file.export", &serde_json::json!({"path":key})).unwrap();
+                key
+            })
+            .collect();
+        let mut h = HomeState::default();
+        // The first cold design waits before its first feature until stopped: still being
+        // built whatever the machine's speed when the app closes.
+        h.stop.hold_at(0);
+        h.queued = keys.clone();
+        start_jobs(&mut h);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while h.stop.features().1 == 0 && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(h.stop.features().1 > 0, "the first cold recent is being built");
+        let rx = h.rx.take().unwrap();
+        assert!(matches!(rx.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty)), "it is still being built");
+        h.rx = Some(rx);
+        let began = std::time::Instant::now();
+        finish_pictures(&mut h, std::time::Duration::from_secs(60));
+        assert!(began.elapsed() < std::time::Duration::from_secs(30), "closing waited {:?}", began.elapsed());
+        assert!(h.rx.is_none());
+        for key in keys {
+            assert!(!cache_path(&key).unwrap().exists(), "no picture of a stopped build is cached");
+            std::fs::remove_file(key).unwrap();
+        }
     }
 
     #[test]
@@ -1245,6 +1435,29 @@ mod tests {
         assert!(app.home.rx.is_some());
         assert_eq!(app.session.doc.name, "Sheet Metal Bracket");
         assert!(!app.session.is_dirty());
+    }
+
+    /// The shipped picture of the sample being opened can arrive after it was asked for: that is
+    /// not its build failing, and the sample still opens (#4349 fixed it; it had made the
+    /// `s15_start_page_sample_save_reopen` scenario fail depending on timing).
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_sample_picture_arriving_while_the_sample_builds_is_not_a_failed_build() {
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        let (pictures, rx) = std::sync::mpsc::channel();
+        app.home.rx = Some(rx);
+        let ctx = egui::Context::default();
+        open_sample(&mut app, 0);
+        assert!(app.home.open && app.home.wanted == Some(0));
+        pictures.send(("sample:0".into(), sample_picture(0), None)).unwrap();
+        let began = std::time::Instant::now();
+        while app.home.open && began.elapsed() < std::time::Duration::from_secs(30) {
+            poll(&mut app, &ctx);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(app.status.as_ref().is_none_or(|(_, _, error)| !error), "{:?}", app.status);
+        assert!(!app.home.open, "the sample opens once built");
+        assert_eq!(app.session.doc.name, "Sample Plate");
     }
 
     #[test]
@@ -1294,7 +1507,7 @@ mod tests {
         h.call("ui.click", serde_json::json!({"x": gear.x, "y": gear.y}));
         assert!(h.app.prefs_window.open && h.app.home.open);
         let shown = |h: &crate::scenario::Harness| {
-            h.ctx.memory(|m| m.areas().visible_last_frame(&egui::LayerId::new(egui::Order::Middle, egui::Id::new("sc_prefs"))))
+            h.ctx.memory(|m| m.areas().visible_last_frame(&egui::LayerId::new(egui::Order::Middle, egui::Id::unique("sc_prefs"))))
         };
         assert!(shown(&h), "the Preferences window must be drawn on Home");
         h.call("ui.prefs", serde_json::json!({"button": "cancel"}));
@@ -1407,6 +1620,17 @@ mod tests {
         assert!(!h.app.home.open);
     }
 
+    /// The entry that opens Preferences (Cmd / Ctrl + `,`) carries the window's own name
+    /// (#8318): beside the File menu's "Preferences…" it read "Settings" for the same window.
+    #[test]
+    fn the_entry_that_opens_preferences_carries_the_windows_name() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.show(0);
+        assert_eq!(crate::i18n::tr("home.settings"), crate::i18n::tr("ui.preferences"), "one name for the window");
+        click_file(&mut h, "home:settings");
+        assert!(h.app.prefs_window.open, "the entry opens Preferences");
+    }
+
     #[test]
     fn file_view_narrow_navigation_and_content_stay_inside_the_window() {
         for dark in [false, true] {
@@ -1463,7 +1687,7 @@ mod tests {
         h.frames(3);
         h.settle();
         assert!(!h.app.home.open);
-        assert_eq!(h.app.session.path.as_deref(), h.dir.join("Copy.solidcraft").to_str());
+        assert_eq!(h.app.session.path.as_deref(), h.dir.join("Copy.sc").to_str());
         assert_eq!(std::fs::read(source).unwrap(), bytes);
     }
 

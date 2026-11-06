@@ -1,0 +1,15 @@
+# The sources whose change must rerun the history cases (git pathspec globs, one a line).
+# The timeline, configuration and parameter commands.
+crates/engine/src/cmd/edit.rs
+crates/engine/src/cmd/config.rs
+crates/engine/src/cmd/parameters.rs
+# The design's timeline (delete, folders, marker), its configuration table and rules, and its
+# parameters and expressions.
+crates/doc/src/document.rs
+crates/doc/src/config.rs
+crates/doc/src/config_rules.rs
+crates/doc/src/params.rs
+crates/doc/src/expr.rs
+# Rebuilding the timeline, and the results it keeps between rebuilds.
+# The cases themselves.
+tests/kernel-cases/history/**

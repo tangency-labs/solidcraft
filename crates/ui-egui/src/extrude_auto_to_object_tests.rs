@@ -1,8 +1,8 @@
 //! Extrude's automatic To Object: with profiles picked, a pick off their plane is the object to
 //! extrude to, and the extent turns to To Object without the Extent Type choice.
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
-use solidcraft_engine::geom::Vec3;
 
 use crate::dialogs::{Dialog, Kind, apply_commands, face_sel};
 use crate::scenario::Harness;
@@ -84,7 +84,7 @@ fn face_off_the_profile_plane_turns_the_extent_to_that_face() {
     // OK builds the extrude up to the face.
     h.step(&json!({"widget": "OK"})).unwrap();
     h.frames(4);
-    let state = h.app.session.world_state();
+    let state = crate::open_meshing::session_world(&h.app.session);
     let volume: f64 = state.bodies.iter().filter_map(|b| solidcraft_engine::doc::kernel::measure(&b.body).ok()).map(|m| m.volume).sum();
     // The box, the cylinder and the 10 x 10 x 20 extrude.
     let expected = 8000.0 + std::f64::consts::PI * 25.0 * 30.0 + 2000.0;
@@ -117,7 +117,7 @@ fn vertex_and_curved_face_are_targets() {
 
 /// The cylinder's side, at the middle of one of its triangles.
 fn curved_hit(h: &Harness) -> Hit {
-    let st = h.app.session.world_state();
+    let st = crate::open_meshing::session_world(&h.app.session);
     for b in &st.bodies {
         let m = b.mesh();
         for (t, f) in m.triangles.iter().zip(&m.tri_face) {
@@ -131,7 +131,7 @@ fn curved_hit(h: &Harness) -> Hit {
 }
 
 fn dialog_body(h: &Harness) -> String {
-    h.app.session.world_state().bodies.first().unwrap().name.clone()
+    crate::open_meshing::session_world(&h.app.session).bodies.first().unwrap().name.clone()
 }
 
 #[test]
@@ -180,9 +180,7 @@ fn target_below_keeps_its_side_and_exact_length() {
 }
 
 #[test]
-fn off_by_default_a_face_off_the_profile_plane_joins_the_profiles() {
-    let h = Harness::new();
-    assert!(!h.app.preferences.extrude_auto_to_object, "the preference starts off");
+fn with_the_preference_off_a_face_off_the_profile_plane_joins_the_profiles() {
     let mut h = scene_with(false);
     assert!(click(&mut h, |h| face_hit(h, Vec3::new(40.0, 10.0, 20.0))));
     let d = dialog(&h);
@@ -193,4 +191,76 @@ fn off_by_default_a_face_off_the_profile_plane_joins_the_profiles() {
     let mut h = scene_with(false);
     assert!(!click(&mut h, |_| Hit::Plane { name: "Lid".into(), point: Vec3::new(5.0, 5.0, 25.0) }));
     assert!(to_object(dialog(&h)).is_none());
+}
+
+#[test]
+fn manual_to_object_accepts_a_parallel_plane_with_automatic_switching_off() {
+    let mut h = scene_with(false);
+    h.step(&json!({"click": {"handle": "dialog:Extent Type"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Extent Type:To Object"}})).unwrap();
+    assert_eq!(dialog(&h).active_input().unwrap().label, "To Object");
+    assert!(!click(&mut h, |_| Hit::Plane { name: "YZ".into(), point: Vec3::new(0.0, 5.0, 5.0) }));
+    assert!(!click(&mut h, |_| Hit::Plane { name: "XY".into(), point: Vec3::new(5.0, 5.0, 0.0) }));
+    assert!(to_object(dialog(&h)).is_none());
+    assert!(click(&mut h, |_| Hit::Plane { name: "Lid".into(), point: Vec3::new(5.0, 5.0, 25.0) }));
+    let commands = apply_commands(&h.app, dialog(&h)).unwrap();
+    assert_eq!(commands[0].1["to"], json!([0.0, 0.0, 25.0]));
+    assert!((solidcraft_engine::extrude_reach(&h.app.session, &commands[0].1).unwrap() - 25.0).abs() < 1e-9);
+}
+
+#[test]
+fn the_preference_starts_on() {
+    assert!(Harness::new().app.preferences.extrude_auto_to_object);
+}
+
+/// The scene with the box's top face (z = 20) picked as the profile instead of the sketch.
+fn face_profile_scene() -> Harness {
+    let mut h = scene();
+    let top = face_sel(&h.app.session, Vec3::new(40.0, 10.0, 20.0)).unwrap();
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![top];
+    h.frames(2);
+    h
+}
+
+#[test]
+fn face_profile_then_the_opposite_face_is_the_target() {
+    let mut h = face_profile_scene();
+    assert!(click(&mut h, |h| face_hit(h, Vec3::new(40.0, 10.0, 0.0))));
+    let d = dialog(&h);
+    assert!(matches!(to_object(d), Some(Sel::Face { .. })), "the bottom face is where it goes to");
+    assert_eq!(d.inputs[0].items.len(), 1, "the top face stays the only profile");
+    let commands = apply_commands(&h.app, d).unwrap();
+    assert!(commands[0].1.get("to").is_some());
+    let reach = solidcraft_engine::extrude_reach(&h.app.session, &commands[0].1).unwrap();
+    assert!((reach + 20.0).abs() < 1e-9, "{reach}: 20 mm down through the body");
+}
+
+#[test]
+fn face_profile_then_a_parallel_face_of_another_body_is_the_target() {
+    let mut h = face_profile_scene();
+    assert!(click(&mut h, |h| face_hit(h, Vec3::new(70.0, 10.0, 30.0))));
+    let d = dialog(&h);
+    assert!(matches!(to_object(d), Some(Sel::Face { .. })));
+    assert_eq!(d.inputs[0].items.len(), 1);
+}
+
+#[test]
+fn a_side_face_is_a_target_at_its_picked_point() {
+    let mut h = face_profile_scene();
+    assert!(click(&mut h, |h| face_hit(h, Vec3::new(50.0, 10.0, 10.0))));
+    let d = dialog(&h);
+    assert!(matches!(to_object(d), Some(Sel::Face { .. })), "a non-parallel planar face is taken as the target");
+    assert_eq!(d.inputs[0].items.len(), 1);
+}
+
+#[test]
+fn clicking_into_the_profiles_box_adds_an_off_plane_face_as_a_profile() {
+    let mut h = scene();
+    let at = crate::scenario::rect_of("dialog:field:Profiles").expect("the Profiles field is drawn").center();
+    h.step(&json!({"click": [at.x, at.y]})).unwrap();
+    h.frames(2);
+    assert!(click(&mut h, |h| face_hit(h, Vec3::new(40.0, 10.0, 20.0))));
+    let d = dialog(&h);
+    assert!(to_object(d).is_none(), "the box was chosen, so the pick is a profile");
+    assert_eq!(d.inputs[0].items.len(), 2);
 }

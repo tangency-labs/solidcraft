@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Path Flange</title>
+  <path d="M9.5 44L23.5 44A6 6 0 0 0 29.5 38L29.5 26A6 6 0 0 1 35.5 20L43.5 20A6 6 0 0 1 47.74 21.76L54.81 28.83" fill="none" stroke="#34465b" stroke-width="11.4" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M9.5 44L23.5 44" fill="none" stroke="#b8c3cf" stroke-width="6.3" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M23.5 44A6 6 0 0 0 29.5 38L29.5 26A6 6 0 0 1 35.5 20L43.5 20A6 6 0 0 1 47.74 21.76L54.81 28.83" fill="none" stroke="#328bd3" stroke-width="6.3" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

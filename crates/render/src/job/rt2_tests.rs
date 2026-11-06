@@ -6,6 +6,7 @@ use solidcraft_geom::Aabb3;
 
 fn request(integrator: Integrator) -> ImageRequest {
     ImageRequest {
+        studio_weights: None,
         environment: None,
         textures: None,
         integrator,
@@ -75,41 +76,58 @@ fn rejected_raytrace_submission_leaves_existing_raster_reservation_intact() {
     assert_eq!(raster.cancel().unwrap().progress.phase, Phase::Cancelled);
     // Pump only to discard cancelled queued input; it must not produce a frame.
     assert!(!host.pump(1).unwrap());
-    assert_eq!(host.admitted_bytes(), 0);
+    assert!(raster.work_released());
+    assert_eq!(host.admitted_bytes(), ImageRequest::fixed_cpu_metadata_bytes(), "the live handle retains only its exact fixed request header");
     assert!(raster.frame().unwrap().is_none());
+    drop(raster);
+    assert_eq!(host.admitted_bytes(), 0, "the last handle releases that header without any frame");
 }
 
 #[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
 #[test]
 fn native_integrators_share_one_host_and_retained_frame_budget() {
-    let mut host = CpuHost::for_platform().unwrap();
-    let scene = || ProductScene { meshes: Vec::new(), bounds: Aabb3::EMPTY };
-    let raster_id = JobId { session: 10, serial: 1, generation: 1 };
-    let raytrace_id = JobId { session: 20, serial: 1, generation: 1 };
-    let raster = host.submit(raster_id, 100, scene(), request(Integrator::Raster)).unwrap();
-    let raytrace = host.submit(raytrace_id, 200, scene(), request(Integrator::Raytrace)).unwrap();
-    // Deadlock watchdog only; there is no rendering-speed assertion.
-    for job in [&raster, &raytrace] {
-        assert_eq!(job.wait_timeout(std::time::Duration::from_secs(60)).unwrap().progress.phase, Phase::Completed);
+    for frames_first in [false, true] {
+        let mut host = CpuHost::for_platform().unwrap();
+        let scene = || ProductScene { meshes: Vec::new(), bounds: Aabb3::EMPTY };
+        let raster_id = JobId { session: 10, serial: 1, generation: 1 };
+        let raytrace_id = JobId { session: 20, serial: 1, generation: 1 };
+        let raster = host.submit(raster_id, 100, scene(), request(Integrator::Raster)).unwrap();
+        let raytrace = host.submit(raytrace_id, 200, scene(), request(Integrator::Raytrace)).unwrap();
+        // Deadlock watchdog only; there is no rendering-speed assertion.
+        for job in [&raster, &raytrace] {
+            assert_eq!(job.wait_timeout(std::time::Duration::from_secs(60)).unwrap().progress.phase, Phase::Completed);
+        }
+        host.join_worker_for_test().unwrap();
+        let raster_frame = raster.frame().unwrap().unwrap();
+        let raytrace_frame = raytrace.frame().unwrap().unwrap();
+        assert_eq!(raster_frame.info.job, raster_id);
+        assert_eq!(raytrace_frame.info.job, raytrace_id);
+        assert_eq!(raster_frame.info.scene_generation, 100);
+        assert_eq!(raytrace_frame.info.scene_generation, 200);
+        assert_eq!(raster_frame.info.executor.as_str(), "cpu-product");
+        assert_eq!(raytrace_frame.info.executor.as_str(), "cpu-raytrace");
+        let fixed = ImageRequest::fixed_cpu_metadata_bytes();
+        let both = host.admitted_bytes();
+        assert!(both > 2 * fixed);
+        if frames_first {
+            drop(raster_frame);
+            drop(raytrace_frame);
+            assert_eq!(host.admitted_bytes(), both, "held Records still own both final images and both fixed request headers");
+            drop(raster);
+            assert!(host.admitted_bytes() > fixed && host.admitted_bytes() < both - fixed, "the remaining Record keeps its image and exact header");
+            drop(raytrace);
+        } else {
+            drop(raster);
+            assert_eq!(host.admitted_bytes(), both - fixed);
+            drop(raytrace);
+            let frames = both - 2 * fixed;
+            assert_eq!(host.admitted_bytes(), frames, "external frames retain image leases, not the dropped Records' request headers");
+            drop(raster_frame);
+            assert!(host.admitted_bytes() > 0 && host.admitted_bytes() < frames);
+            drop(raytrace_frame);
+        }
+        assert_eq!(host.admitted_bytes(), 0);
     }
-    host.join_worker_for_test().unwrap();
-    let raster_frame = raster.frame().unwrap().unwrap();
-    let raytrace_frame = raytrace.frame().unwrap().unwrap();
-    assert_eq!(raster_frame.info.job, raster_id);
-    assert_eq!(raytrace_frame.info.job, raytrace_id);
-    assert_eq!(raster_frame.info.scene_generation, 100);
-    assert_eq!(raytrace_frame.info.scene_generation, 200);
-    assert_eq!(raster_frame.info.executor.as_str(), "cpu-product");
-    assert_eq!(raytrace_frame.info.executor.as_str(), "cpu-raytrace");
-    let both = host.admitted_bytes();
-    assert!(both > 0);
-    drop(raster);
-    drop(raytrace);
-    assert_eq!(host.admitted_bytes(), both, "external frames retain both leases");
-    drop(raster_frame);
-    assert!(host.admitted_bytes() > 0 && host.admitted_bytes() < both);
-    drop(raytrace_frame);
-    assert_eq!(host.admitted_bytes(), 0);
 }
 
 #[cfg(feature = "raytrace-cpu")]

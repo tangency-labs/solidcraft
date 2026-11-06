@@ -1,6 +1,9 @@
 use serde_json::{Value, json};
 
-use super::{BoxParams, ExtrudeParams, FeatureResult};
+use super::{
+    BoundingSolidParams, BoxParams, ConeParams, CylinderParams, ExtrudeParams, FeatureResult, FilletParams, FilletResult, OffsetPlaneParams,
+    PipeParams, PlaneAtAngleParams, ScaleParams, SphereParams, TorusParams,
+};
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms, sketch_rectangle};
 use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
@@ -9,7 +12,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<BoxParams>(),
-        &["body_name", "body_names", "center", "corner", "height", "length", "name", "operation", "participants", "targets", "width"],
+        &["body_name", "body_names", "center", "corner", "height", "length", "name", "operation", "participants", "targets", "touching", "width"],
     );
     assert_keys(
         input_schema_for::<ExtrudeParams>(),
@@ -22,6 +25,7 @@ fn schemas_and_the_key_check_agree() {
             "direction",
             "distance",
             "distance2",
+            "exact_regions",
             "extent",
             "face",
             "face_body",
@@ -42,6 +46,69 @@ fn schemas_and_the_key_check_agree() {
             "through_all",
             "to",
             "to_offset",
+            "touching",
+        ],
+    );
+    assert_keys(
+        input_schema_for::<CylinderParams>(),
+        &["axis", "base", "body_name", "body_names", "diameter", "height", "name", "operation", "participants", "radius", "references", "targets"],
+    );
+    assert_keys(
+        input_schema_for::<SphereParams>(),
+        &["body_name", "body_names", "center", "diameter", "name", "operation", "participants", "radius", "targets"],
+    );
+    assert_keys(
+        input_schema_for::<TorusParams>(),
+        &["body_name", "body_names", "center", "major", "minor", "name", "operation", "participants", "targets"],
+    );
+    assert_keys(
+        input_schema_for::<ConeParams>(),
+        &[
+            "axis",
+            "base",
+            "body_name",
+            "body_names",
+            "diameter",
+            "height",
+            "name",
+            "operation",
+            "participants",
+            "radius",
+            "targets",
+            "top_diameter",
+            "top_radius",
+        ],
+    );
+    assert_keys(
+        input_schema_for::<PipeParams>(),
+        &["body_name", "body_names", "diameter", "name", "operation", "participants", "path", "path_sketch", "targets", "wall"],
+    );
+    assert_keys(input_schema_for::<BoundingSolidParams>(), &["bodies", "body_name", "body_names", "margin", "name", "participants"]);
+    assert_keys(input_schema_for::<ScaleParams>(), &["bodies", "factor", "factors", "name", "origin", "participants"]);
+    assert_keys(input_schema_for::<OffsetPlaneParams>(), &["base", "name", "offset", "participants", "through"]);
+    assert_keys(input_schema_for::<PlaneAtAngleParams>(), &["angle", "axis", "base", "direction_only", "name", "participants", "pivot"]);
+    assert_keys(
+        input_schema_for::<FilletParams>(),
+        &[
+            "body",
+            "body_name",
+            "body_names",
+            "corner",
+            "edges",
+            "fit",
+            "knots",
+            "mid",
+            "name",
+            "participants",
+            "radii",
+            "radius",
+            "radius2",
+            "setbacks",
+            "smooth",
+            "start",
+            "tangent_chain",
+            "turn",
+            "type",
         ],
     );
 }
@@ -71,6 +138,56 @@ fn strict_keeps_todays_errors() {
         ("solid.extrude", json!({"distance": 5, "convention": "per_side"})),
         ("solid.extrude", json!({"distance": "  "})),
         ("solid.extrude", json!({"distance": 5, "operation": "x".repeat(1000)})),
+        ("solid.cylinder", json!({"radius": 5, "height": 5, "axis": "W"})),
+        ("solid.cylinder", json!({"radius": 5, "height": 5, "axis": " w "})),
+        ("solid.cylinder", json!({"radius": 5, "height": 5, "axis": [0, 0, 0]})),
+        ("solid.cylinder", json!({"radius": 5, "height": 5, "axis": null})),
+        ("solid.cylinder", json!({"radius": 5, "height": 5, "base": [1, 2]})),
+        ("solid.cylinder", json!({"radius": 5, "height": 5, "operation": "bogus"})),
+        ("solid.cylinder", json!({"radius": 5, "height": true})),
+        ("solid.sphere", json!({"radius": 5, "center": "x"})),
+        ("solid.sphere", json!({"radius": 5, "center": null})),
+        ("solid.sphere", json!({"radius": 5, "operation": "bogus"})),
+        ("solid.torus", json!({"major": 5, "minor": 1, "center": {"x": 1, "y": 2}})),
+        ("solid.torus", json!({"major": true, "minor": 1})),
+        ("solid.torus", json!({"major": 5, "minor": 1, "operation": "bogus"})),
+        ("solid.cone", json!({"radius": 5, "height": 5, "axis": "W"})),
+        ("solid.cone", json!({"radius": 5, "height": 5, "axis": null})),
+        ("solid.cone", json!({"radius": 5, "height": 5, "base": [1, 2]})),
+        ("solid.cone", json!({"radius": 5, "height": true})),
+        ("solid.cone", json!({"radius": 5, "height": 5, "operation": "bogus"})),
+        // A `null` top radius alone is the handler's to refuse, with its message.
+        ("solid.cone", json!({"radius": 5, "height": 5, "top_radius": null})),
+        ("solid.pipe", json!({"path_sketch": true, "path": ["l1"], "diameter": 2})),
+        ("solid.pipe", json!({"path_sketch": null, "path": ["l1"], "diameter": 2})),
+        ("solid.scale", json!({"bodies": ["Body1"], "factors": [1, 2]})),
+        ("solid.scale", json!({"bodies": ["Body1"], "factors": [1, 2, 3, 4]})),
+        ("solid.scale", json!({"bodies": ["Body1"]})),
+        ("construct.plane.offset", json!({"base": true, "offset": 5})),
+        ("construct.plane.offset", json!({"base": {"face": [1, 2]}, "offset": 5})),
+        ("construct.plane.offset", json!({"base": {"face": [0, 0, 0], "fixed": "yes"}, "offset": 5})),
+        ("construct.plane.offset", json!({"base": {"face": [0, 0, 0], "body": ""}, "offset": 5})),
+        ("construct.plane.offset", json!({"base": {"face": [0, 0, 0], "body": "Body1"}, "offset": 5})),
+        ("construct.plane.offset", json!({"base": {"face": [0, 0, 0], "index": -1}, "offset": 5})),
+        ("construct.plane.offset", json!({"base": {"face": [0, 0, 0], "path": [0]}, "offset": 5})),
+        ("construct.plane.offset", json!({"base": {"face": [0, 0, 0], "path": vec![1; 65]}, "offset": 5})),
+        ("construct.plane.offset", json!({"base": {"normal": [0, 0, 1], "origin": "here"}, "offset": 5})),
+        ("construct.plane.offset", json!({"base": "XY", "through": {"edge": "x"}})),
+        ("construct.plane.offset", json!({"base": "XY", "offset": true})),
+        ("construct.plane.at_angle", json!({"base": "XY", "axis": {"dir": [0, 0, 0]}, "angle": 30})),
+        ("construct.plane.at_angle", json!({"base": "XY", "axis": {"origin": "o", "dir": [0, 0, 1]}, "angle": 30})),
+        ("construct.plane.at_angle", json!({"base": "XY", "axis": 5, "angle": 30})),
+        ("construct.plane.at_angle", json!({"base": "XY", "axis": null, "angle": 30})),
+        ("construct.plane.at_angle", json!({"base": "XY", "axis": {"face": "x", "point": [0, 0, 0]}, "angle": 30})),
+        ("construct.plane.at_angle", json!({"base": "XY", "axis": {"face": "x"}, "angle": 30})),
+        ("construct.plane.at_angle", json!({"base": "XY", "axis": "X", "angle": true})),
+        ("solid.fillet", json!({"edges": [[0, 0, 0]], "radius": 1, "turn": "round"})),
+        ("solid.fillet", json!({"edges": [[0, 0, 0]], "radius": 1, "turn": "ROUND"})),
+        ("solid.fillet", json!({"edges": [[0, 0, 0]], "radius": 1, "type": "bogus"})),
+        ("solid.fillet", json!({"edges": [[0, 0, 0]], "radius": 1, "fit": "bogus"})),
+        ("solid.fillet", json!({"edges": [[0, 0, 0]], "radius": 1, "corner": "round"})),
+        ("solid.fillet", json!({"edges": [], "radius": 1})),
+        ("solid.fillet", json!({"edges": 5, "radius": 1})),
     ]);
 }
 
@@ -89,6 +206,7 @@ fn feature_result_serializes_like_the_old_reply() {
             warning: warning.clone(),
             ms,
             param_warnings: vec![],
+            notice: None,
         };
         assert_eq!(serde_json::to_value(&new).ok(), Some(old));
     }
@@ -124,4 +242,134 @@ fn replies_match_the_output_schema() {
     let mut bad = ok.clone();
     bad.as_object_mut().map(|o| o.remove("name"));
     assert!(!conforms(schema, schema, &bad), "{bad}");
+}
+
+/// `solid.fillet` replies with `FilletResult` in each of its forms, its contract taking each: a
+/// boss's base rounded with each turn and its options spelled out, a reduced round (with the radii
+/// it used), chord and curvature rounds, a smooth-patch corner with setbacks, and the variable and
+/// spline forms.
+#[test]
+fn fillet_replies_match_its_output_schema() {
+    let schema = output_schema_for::<FilletResult>();
+    let schema = schema.as_value();
+    // A 40 x 30 x 10 plate with a 10 x 10 x 5 boss on it, whose base edges `boss` are.
+    let run = |p: Value| {
+        let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+        s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 10, "body_name": "B"})).unwrap_or_else(|e| panic!("{e}"));
+        s.execute("solid.box", &json!({"corner": [15, 10, 10], "length": 10, "width": 10, "height": 5, "operation": "join"}))
+            .unwrap_or_else(|e| panic!("{e}"));
+        let r = s.execute("solid.fillet", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+        assert!(r.get("param_warnings").is_none(), "{p}: {r}");
+        r
+    };
+    let boss = json!([[20, 10, 10], [25, 15, 10], [20, 20, 10], [15, 15, 10]]);
+    run(
+        json!({"edges": boss, "radius": 1, "turn": "mitre", "type": "constant", "fit": "exact", "corner": "rolling", "tangent_chain": true, "body": "B", "name": "Round"}),
+    );
+    run(json!({"edges": boss, "radius": "1 mm", "turn": "Swept"}));
+    run(json!({"edges": boss, "radius": 1, "turn": "swept", "fit": "reduce"}));
+    let reduced = run(json!({"edges": [[20, 0, 10]], "radius": 15, "fit": "reduce"}));
+    assert!(reduced.get("radius_applied").is_some_and(Value::is_number) && reduced.get("radii_applied").is_some_and(Value::is_array), "{reduced}");
+    run(json!({"edges": [[20, 0, 10]], "radius": 1, "type": "chord"}));
+    run(json!({"edges": [{"body": "B", "index": 0}], "radius": 0.5, "tangent_chain": false}));
+    run(json!({"edges": [[20, 0, 10]], "radius": 1, "type": "curvature"}));
+    // Variable and spline radii: solidcore fails a variable round on a box edge at this pin (status
+    // 1001, as `variable_radius_on_a_box_edge`), so their forms are checked against the contract.
+    for p in [
+        json!({"edges": [[20, 0, 10]], "radius": 1, "type": "variable", "radius2": 2, "start": [0, 0, 10], "mid": [[0.5, "1.5 mm"]], "smooth": true}),
+        json!({"edges": [[20, 0, 10]], "radius": 1, "type": "spline", "start": [0, 0, 10], "radii": [2], "knots": [0, 0, 1, 1]}),
+    ] {
+        assert!(crate::schema::Contract::check(&crate::schema::TypedContract::<FilletParams>::new(), &p).is_empty(), "{p}");
+    }
+    run(json!({"edges": [[20, 0, 10], [40, 15, 10], [40, 0, 5]], "radius": 2, "corner": "g2", "setbacks": [{"vertex": [40, 0, 10], "distance": 4}]}));
+}
+
+/// The feature commands converted after box and extrude answer with `FeatureResult` too, and
+/// their contracts take every form these calls use: in Warn, a contract that refused one would
+/// still run the command, so the replies are checked for warnings too.
+#[test]
+fn converted_primitives_and_body_commands_reply_with_feature_result() {
+    let schema = output_schema_for::<FeatureResult>();
+    let schema = schema.as_value();
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let mut run = |id: &str, p: Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id}: {e}"));
+    let mut replies = vec![
+        run(
+            "solid.cylinder",
+            json!({"radius": 2, "diameter": 9, "height": 5, "base": [20, "0 mm", 0], "axis": " x ", "name": "Cyl", "body_name": "Cyl"}),
+        ),
+        run("solid.cylinder", json!({"diameter": 2, "height": 3, "base": [0, -20, 0], "axis": [0, 1, 0], "operation": "new body"})),
+        run(
+            "solid.cylinder",
+            json!({"radius": 1, "height": 3, "base": {"x": 0, "y": -30, "z": 0}, "axis": {"x": 0, "y": 0, "z": 1}, "body_names": ["Peg"]}),
+        ),
+        run("solid.sphere", json!({"diameter": 4, "center": {"x": 0, "y": 20, "z": 0}})),
+        run("solid.sphere", json!({"radius": 1, "center": [22, 0, 2], "operation": "union", "targets": ["Peg"], "participants": []})),
+        run("solid.sphere", json!({"radius": 1, "center": [23, 0, -2], "operation": "join", "targets": ["Peg"], "participants": ["Cyl"]})),
+        run("solid.torus", json!({"major": 5, "minor": 1, "center": [0, 0, "20 mm"], "participants": ["Peg"]})),
+        run("solid.bounding_solid", json!({"bodies": ["Cyl"], "margin": 1})),
+        run("solid.bounding_solid", json!({})),
+        run("solid.bounding_solid", json!({"bodies": "Peg", "body_name": "PegBox"})),
+        run("solid.scale", json!({"bodies": ["Cyl"], "factors": [1, 2, "1.5"], "origin": [20, 0, 0]})),
+        run("solid.scale", json!({"bodies": "Cyl", "factors": [1, 1, 2], "factor": 3})),
+        run(
+            "solid.scale",
+            json!({"bodies": "Peg", "factor": "3 / 2", "origin": {"x": 0, "y": -30, "z": 0}, "name": "Grow", "participants": ["Cyl"]}),
+        ),
+    ];
+    let sketch = run("sketch.create", json!({"plane": "XZ", "name": "Path"}));
+    let line = run("sketch.line", json!({"points": [[40, 0], [40, 30]]}));
+    let across = run("sketch.line", json!({"points": [[22, -8], [22, 8]]}));
+    run("sketch.finish", json!({}));
+    let id = sketch["sketch"].clone();
+    assert!(id.is_u64(), "{sketch}");
+    replies.push(run("solid.pipe", json!({"path_sketch": "Path", "path": line["curves"].clone(), "diameter": 4, "wall": 1, "body_name": "Tube"})));
+    replies.push(run(
+        "solid.pipe",
+        json!({"path_sketch": id, "path": across["curves"][0].clone(), "diameter": 1, "operation": "join", "targets": ["Cyl"]}),
+    ));
+    replies.push(run("solid.cone", json!({"radius": 3, "height": 6, "base": [60, 0, 0]})));
+    replies.push(run(
+        "solid.cone",
+        json!({"diameter": 6, "top_diameter": 2, "height": "-4 mm", "base": {"x": 70, "y": 0, "z": 0}, "axis": " x ", "name": "Frustum", "body_name": "Frustum"}),
+    ));
+    replies.push(run(
+        "solid.cone",
+        json!({"radius": 2, "diameter": 9, "top_radius": 1, "top_diameter": 7, "height": 5, "base": [80, "0 mm", 0], "axis": [0, 1, 0]}),
+    ));
+    replies.push(run(
+        "solid.cone",
+        json!({"radius": 2, "top_radius": null, "top_diameter": 2, "height": 3, "base": [90, 0, 0], "axis": {"x": 0, "y": 0, "z": 1}, "operation": "new body", "body_names": ["Can"]}),
+    ));
+    // The cone meets only `Frustum` but joins its target, `Can`, as the sphere above does.
+    let cone_union =
+        run("solid.cone", json!({"radius": 1, "height": 2, "base": [69, 0, 0], "operation": "union", "targets": ["Can"], "participants": []}));
+    assert_eq!(cone_union["changed_bodies"], json!(["Can"]), "{cone_union}");
+    replies.push(cone_union);
+    // Warn reports what the contract refuses and runs the command anyway.
+    let typo = run("solid.scale", json!({"bodies": "Cyl", "factor": 2, "colour": "red"}));
+    assert_eq!(typo["param_warnings"], json!(["unknown key `colour`"]));
+    // A scale makes no body, so its contract doesn't take the new body's name.
+    let no_body = run("solid.scale", json!({"bodies": "Cyl", "factor": 1, "body_name": "Big"}));
+    let warning = no_body["param_warnings"][0].as_str().unwrap_or_default();
+    assert!(warning.starts_with("unknown key `body_name`"), "{no_body}");
+    for r in replies.iter().chain([&typo, &no_body]) {
+        assert!(conforms(schema, schema, r), "{r} doesn't match {schema}");
+    }
+    for r in &replies {
+        assert!(r.get("param_warnings").is_none(), "{r}");
+    }
+    // A primitive's `targets` count when `participants` lists no bodies (the sphere meets only
+    // `Cyl` but joins `Peg`) and not when it does; a scale's `participants` don't change which
+    // bodies it scales.
+    let changed = [4, 5, 12].map(|i| replies[i]["changed_bodies"].clone());
+    assert_eq!(changed, [json!(["Peg"]), json!(["Cyl"]), json!(["Peg"])]);
+    // With `factors` given, `factor` has no effect but must still evaluate.
+    assert!(s.execute("solid.scale", &json!({"bodies": "Cyl", "factors": [1, 1, 2], "factor": "no_such_parameter"})).is_err());
+    // Without `targets`, a primitive works on every body in the component: an intersect removes
+    // the bodies it doesn't meet.
+    let r = s.execute("solid.sphere", &json!({"radius": 1, "center": [22, 0, 0], "operation": "intersect"})).unwrap_or_else(|e| panic!("{e}"));
+    let (changed, removed) = (r["changed_bodies"].as_array().cloned(), r["removed_bodies"].as_array().cloned());
+    assert!(changed.is_some_and(|c| c.contains(&json!("Bounding"))) && removed.is_some_and(|r| r.contains(&json!("Peg"))), "{r}");
 }

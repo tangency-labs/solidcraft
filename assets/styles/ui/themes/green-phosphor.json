@@ -1,4 +1,6 @@
 {
+  "order": 100,
+  "provenance": "Original SolidCraft theme",
   "base": "dark",
   "colors": {
     "accent": "#4dff79",
@@ -50,8 +52,8 @@
     "dialog_footer": "#061009",
     "dialog_label": "#8def9f",
     "dialog_rule": "#173b22",
-    "dimension": "#8def9f",
-    "dimension_driven": "#5b9b6a",
+    "dimension": "#c8ff4d",
+    "dimension_driven": "#7fa040",
     "error": "#d8ffdf",
     "field": "#061009",
     "form_accent": "#1faa4e",
@@ -65,11 +67,6 @@
     "form_success": "#39d45c",
     "form_success_fill": "#133b20",
     "form_tab_ink": "#36b95c",
-    "gizmo": [
-      "#c1f3ba",
-      "#4dff79",
-      "#599b70"
-    ],
     "glyph_bg": "#09200e",
     "glyph_edge": "#afd5b6",
     "glyph_text": "#afd5b6",
@@ -168,6 +165,7 @@
     "sketch_centerline": "#32ba50",
     "sketch_construction": "#2fad4a",
     "sketch_fixed": "#8def9f",
+    "sketch_halo": "#021007",
     "sketch_ink": "#bbffca",
     "sketch_locked": "#39d45c",
     "sketch_lost": "#d8ffdf",
@@ -188,11 +186,6 @@
     "timeline_item_error": "#21462a",
     "timeline_marker": "#5b9b6a",
     "toolbar": "#061009",
-    "triad": [
-      "#c1f3ba",
-      "#4dff79",
-      "#599b70"
-    ],
     "viewport_bottom": "#010703",
     "viewport_top": "#010703",
     "warning": "#d1ffad"
