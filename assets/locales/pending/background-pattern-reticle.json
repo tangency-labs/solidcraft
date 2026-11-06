@@ -1,0 +1,86 @@
+{
+  "en": {
+    "prefs.pattern_reticle": "Reticle"
+  },
+  "ar": {
+    "prefs.pattern_reticle": "شبكة تصويب"
+  },
+  "cs": {
+    "prefs.pattern_reticle": "Zaměřovač"
+  },
+  "da": {
+    "prefs.pattern_reticle": "Sigtekorn"
+  },
+  "de": {
+    "prefs.pattern_reticle": "Fadenkreuz"
+  },
+  "en-GB": {
+    "prefs.pattern_reticle": "Reticle"
+  },
+  "es": {
+    "prefs.pattern_reticle": "Retícula"
+  },
+  "fr": {
+    "prefs.pattern_reticle": "Réticule"
+  },
+  "gl": {
+    "prefs.pattern_reticle": "Retícula"
+  },
+  "he": {
+    "prefs.pattern_reticle": "כוונת"
+  },
+  "hu": {
+    "prefs.pattern_reticle": "Célkereszt"
+  },
+  "id": {
+    "prefs.pattern_reticle": "Retikel"
+  },
+  "it": {
+    "prefs.pattern_reticle": "Reticolo"
+  },
+  "ja": {
+    "prefs.pattern_reticle": "照準"
+  },
+  "ko": {
+    "prefs.pattern_reticle": "조준선"
+  },
+  "ms": {
+    "prefs.pattern_reticle": "Retikel"
+  },
+  "nb": {
+    "prefs.pattern_reticle": "Trådkors"
+  },
+  "nl": {
+    "prefs.pattern_reticle": "Dradenkruis"
+  },
+  "pl": {
+    "prefs.pattern_reticle": "Celownik"
+  },
+  "pt-BR": {
+    "prefs.pattern_reticle": "Retícula"
+  },
+  "ro": {
+    "prefs.pattern_reticle": "Reticul"
+  },
+  "ru": {
+    "prefs.pattern_reticle": "Прицел"
+  },
+  "sv": {
+    "prefs.pattern_reticle": "Hårkors"
+  },
+  "tr": {
+    "prefs.pattern_reticle": "Nişangâh"
+  },
+  "uk": {
+    "prefs.pattern_reticle": "Приціл"
+  },
+  "vi": {
+    "prefs.pattern_reticle": "Lưới ngắm"
+  },
+  "zh": {
+    "prefs.pattern_reticle": "准星"
+  },
+  "zh-TW": {
+    "prefs.pattern_reticle": "準星"
+  }
+}

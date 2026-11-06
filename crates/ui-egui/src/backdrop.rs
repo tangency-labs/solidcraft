@@ -9,7 +9,7 @@
 use egui::{Color32, Mesh, Painter, Pos2, Rect, Stroke, pos2, vec2};
 
 /// The built-in patterns: their id (the `background_pattern` preference) and name (a message id).
-pub const PATTERNS: &[(&str, &str)] = &[("aurora", "prefs.pattern_aurora")];
+pub const PATTERNS: &[(&str, &str)] = &[("aurora", "prefs.pattern_aurora"), ("reticle", "prefs.pattern_reticle")];
 
 /// How much of the background's colour veils a pattern in the middle of the 3D view.
 const VIEW_VEIL: f32 = 0.55;
@@ -34,6 +34,7 @@ pub fn paint(painter: &Painter, rect: Rect, top: Color32, bottom: Color32, id: &
 fn pattern(id: &str) -> Option<fn(&Painter, Rect, Color32, Color32)> {
     match id {
         "aurora" => Some(aurora),
+        "reticle" => Some(reticle),
         _ => None,
     }
 }
@@ -115,6 +116,110 @@ fn aurora(painter: &Painter, rect: Rect, top: Color32, bottom: Color32) {
             let along = i as f32 / last - 0.5;
             line(spread * along, 1.2, layers.strand.gamma_multiply(0.05 + 0.09 * (1.0 - along.abs() * 2.0)));
         }
+    }
+}
+
+/// "Reticle": fine instrument lines, as on a technical drawing: a sight low on the left (a
+/// crossed circle in a ring, a scale of ticks round it, a diagonal through it and a rule out to a
+/// dashed line), a dashed rule with a few ticks across the top, a scale down the right edge and
+/// two faint hexagons, all thin and faint in a shade of the background that reads against it.
+fn reticle(painter: &Painter, rect: Rect, top: Color32, bottom: Color32) {
+    let (w, h) = (rect.width(), rect.height());
+    let size = w.min(h);
+    let at = |x: f32, y: f32| pos2(rect.left() + w * x, rect.top() + h * y);
+    // Darker lines on a light background, lighter on a dark one.
+    let middle = top.lerp_to_gamma(bottom, 0.5);
+    let light_ground = middle.r() as u32 * 299 + middle.g() as u32 * 587 + middle.b() as u32 * 114 > 128_000;
+    let ink = if light_ground { middle.lerp_to_gamma(Color32::from_rgb(0x1c, 0x2a, 0x40), 0.6) } else { middle.lerp_to_gamma(Color32::WHITE, 0.6) };
+    let line = |strength: f32| Stroke::new(1.0, ink.gamma_multiply(strength));
+    // A deeper wash in the top left corner, as light falls across a page.
+    let corner = at(0.0, 0.0);
+    fan(painter, corner, top.lerp_to_gamma(ink, 0.12).gamma_multiply(0.6), &ellipse(corner, vec2(w * 0.7, h * 0.6), 48), Color32::TRANSPARENT);
+
+    // The sight.
+    let center = at(0.2, 0.68);
+    let (cross, ring, scale) = (size * 0.09, size * 0.42, size * 0.66);
+    painter.circle_stroke(center, cross, line(0.45));
+    let reach = cross * 1.55;
+    for (dx, dy) in [(1.0, 1.0), (1.0, -1.0)] {
+        let d = vec2(dx, dy) * std::f32::consts::FRAC_1_SQRT_2 * reach;
+        painter.line_segment([center - d, center + d], line(0.4));
+    }
+    painter.circle_stroke(center, ring, line(0.35));
+    // A heavy ring broken into segments round the crossed circle, and a fine one outside it.
+    for k in 0..6 {
+        let from = (k as f32 * 60.0 + 8.0).to_radians();
+        let arc: Vec<Pos2> =
+            (0..=12).map(|s| from + (44.0_f32).to_radians() * s as f32 / 12.0).map(|a| center + vec2(a.cos(), a.sin()) * size * 0.155).collect();
+        painter.add(egui::Shape::line(arc, Stroke::new(3.0, ink.gamma_multiply(0.22))));
+    }
+    painter.circle_stroke(center, size * 0.185, line(0.2));
+    // The diagonal, from below the sight up through it and off the top.
+    let up = vec2(1.0, -1.0) * std::f32::consts::FRAC_1_SQRT_2;
+    painter.line_segment([center - up * cross * 1.2, center + up * (w + h)], line(0.3));
+    // The rule out to a small circle on the ring, and a dashed line on from it.
+    let mark = center + vec2(ring, 0.0);
+    let small = size * 0.035;
+    painter.line_segment([center + vec2(cross * 1.3, 0.0), mark - vec2(small, 0.0)], line(0.35));
+    painter.circle_stroke(mark, small, line(0.4));
+    painter.extend(egui::Shape::dashed_line(&[mark + vec2(small, 0.0), pos2(rect.right(), mark.y)], line(0.3), 7.0, 6.0));
+    // The scale round the sight: a tick every degree, longer every fifth.
+    for i in 0..360 {
+        let angle = (i as f32).to_radians();
+        let dir = vec2(angle.cos(), angle.sin());
+        let length = if i % 5 == 0 { size * 0.018 } else { size * 0.009 };
+        let (a, b) = (center + dir * scale, center + dir * (scale + length));
+        if rect.contains(a) || rect.contains(b) {
+            painter.line_segment([a, b], line(if i % 5 == 0 { 0.4 } else { 0.25 }));
+        }
+    }
+
+    // The dashed rule across the top, with a few ticks over its middle.
+    let rule = at(0.0, 0.07).y;
+    painter.extend(egui::Shape::dashed_line(&[pos2(rect.left(), rule), pos2(rect.right(), rule)], line(0.3), 9.0, 7.0));
+    for (i, x) in [0.47_f32, 0.485, 0.5, 0.515, 0.53].into_iter().enumerate() {
+        let tall = if i == 2 { size * 0.03 } else { size * 0.018 };
+        let x = at(x, 0.0).x;
+        painter.line_segment([pos2(x, rule - size * 0.012 - tall), pos2(x, rule - size * 0.012)], line(0.35));
+    }
+    // The scale down the right edge.
+    let edge = rect.right() - w * 0.025;
+    let mut y = rule + size * 0.04;
+    let mut i = 0;
+    while y < rect.bottom() && i < 400 {
+        let long = i % 5 == 0;
+        painter.line_segment([pos2(edge - if long { size * 0.02 } else { size * 0.01 }, y), pos2(edge, y)], line(if long { 0.35 } else { 0.22 }));
+        y += size * 0.016;
+        i += 1;
+    }
+    // Circuit traces: pairs of lines that run in from the edges, turn at 45 degrees and end in
+    // small rings. (Where each starts and turns, as fractions of the view.)
+    let traces: [[(f32, f32); 4]; 3] = [
+        [(0.56, 1.0), (0.56, 0.92), (0.6, 0.86), (0.74, 0.86)],
+        [(1.0, 0.3), (0.92, 0.3), (0.88, 0.35), (0.8, 0.35)],
+        [(0.0, 0.27), (0.08, 0.27), (0.12, 0.22), (0.2, 0.22)],
+    ];
+    for trace in traces {
+        let points: Vec<Pos2> = trace.iter().map(|&(x, y)| at(x, y)).collect();
+        // The pair stays apart along every leg, since no leg runs down to the right.
+        for offset in [0.0, 3.5] {
+            let shifted: Vec<Pos2> = points.iter().map(|p| *p + vec2(offset, offset)).collect();
+            if let Some(end) = shifted.last().copied() {
+                painter.add(egui::Shape::line(shifted, line(0.3)));
+                painter.circle_stroke(end + vec2(3.0, 0.0), 2.5, line(0.4));
+            }
+        }
+    }
+    // Two faint hexagons, high on the right.
+    for (x, y, r) in [(0.62, 0.18, 0.055), (0.7, 0.13, 0.04)] {
+        let hub = at(x, y);
+        let corners: Vec<Pos2> = (0..6)
+            .map(|k| {
+                let a = std::f32::consts::TAU * k as f32 / 6.0;
+                hub + vec2(a.cos(), a.sin()) * size * r
+            })
+            .collect();
+        painter.add(egui::Shape::closed_line(corners, line(0.18)));
     }
 }
 

@@ -94,8 +94,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                     let mut labels = vec![app.tr("prefs.pattern_none").to_string()];
                     labels.extend(crate::backdrop::PATTERNS.iter().map(|(_, name)| app.tr(name).to_string()));
                     let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
-                    let before =
-                        crate::backdrop::PATTERNS.iter().position(|(id, _)| *id == app.preferences.background_pattern).map_or(0, |i| i + 1);
+                    let before = crate::backdrop::PATTERNS.iter().position(|(id, _)| *id == app.preferences.background_pattern).map_or(0, |i| i + 1);
                     let mut selected = before;
                     let response = ui_kit::dropdown(ui, "background_pattern", &mut selected, &labels);
                     crate::scenario::publish_target("prefs:background_pattern", response.rect);
