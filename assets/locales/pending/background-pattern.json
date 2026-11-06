@@ -1,0 +1,142 @@
+{
+  "en": {
+    "prefs.background_pattern": "Background pattern",
+    "prefs.pattern_aurora": "Aurora",
+    "prefs.pattern_none": "None"
+  },
+  "en-GB": {
+    "prefs.background_pattern": "Background pattern",
+    "prefs.pattern_aurora": "Aurora",
+    "prefs.pattern_none": "None"
+  },
+  "ar": {
+    "prefs.background_pattern": "نمط الخلفية",
+    "prefs.pattern_aurora": "شفق",
+    "prefs.pattern_none": "بلا"
+  },
+  "cs": {
+    "prefs.background_pattern": "Vzor pozadí",
+    "prefs.pattern_aurora": "Polární záře",
+    "prefs.pattern_none": "Žádný"
+  },
+  "da": {
+    "prefs.background_pattern": "Baggrundsmønster",
+    "prefs.pattern_aurora": "Nordlys",
+    "prefs.pattern_none": "Ingen"
+  },
+  "de": {
+    "prefs.background_pattern": "Hintergrundmuster",
+    "prefs.pattern_aurora": "Polarlicht",
+    "prefs.pattern_none": "Keines"
+  },
+  "es": {
+    "prefs.background_pattern": "Patrón de fondo",
+    "prefs.pattern_aurora": "Aurora",
+    "prefs.pattern_none": "Ninguno"
+  },
+  "fr": {
+    "prefs.background_pattern": "Motif d’arrière-plan",
+    "prefs.pattern_aurora": "Aurore",
+    "prefs.pattern_none": "Aucun"
+  },
+  "gl": {
+    "prefs.background_pattern": "Patrón de fondo",
+    "prefs.pattern_aurora": "Aurora",
+    "prefs.pattern_none": "Ningún"
+  },
+  "he": {
+    "prefs.background_pattern": "תבנית רקע",
+    "prefs.pattern_aurora": "זוהר",
+    "prefs.pattern_none": "ללא"
+  },
+  "hu": {
+    "prefs.background_pattern": "Háttérminta",
+    "prefs.pattern_aurora": "Sarki fény",
+    "prefs.pattern_none": "Nincs"
+  },
+  "id": {
+    "prefs.background_pattern": "Pola latar",
+    "prefs.pattern_aurora": "Aurora",
+    "prefs.pattern_none": "Tidak ada"
+  },
+  "it": {
+    "prefs.background_pattern": "Motivo di sfondo",
+    "prefs.pattern_aurora": "Aurora",
+    "prefs.pattern_none": "Nessuno"
+  },
+  "ja": {
+    "prefs.background_pattern": "背景パターン",
+    "prefs.pattern_aurora": "オーロラ",
+    "prefs.pattern_none": "なし"
+  },
+  "ko": {
+    "prefs.background_pattern": "배경 패턴",
+    "prefs.pattern_aurora": "오로라",
+    "prefs.pattern_none": "없음"
+  },
+  "ms": {
+    "prefs.background_pattern": "Corak latar",
+    "prefs.pattern_aurora": "Aurora",
+    "prefs.pattern_none": "Tiada"
+  },
+  "nb": {
+    "prefs.background_pattern": "Bakgrunnsmønster",
+    "prefs.pattern_aurora": "Nordlys",
+    "prefs.pattern_none": "Ingen"
+  },
+  "nl": {
+    "prefs.background_pattern": "Achtergrondpatroon",
+    "prefs.pattern_aurora": "Poollicht",
+    "prefs.pattern_none": "Geen"
+  },
+  "pl": {
+    "prefs.background_pattern": "Wzór tła",
+    "prefs.pattern_aurora": "Zorza",
+    "prefs.pattern_none": "Brak"
+  },
+  "pt-BR": {
+    "prefs.background_pattern": "Padrão de fundo",
+    "prefs.pattern_aurora": "Aurora",
+    "prefs.pattern_none": "Nenhum"
+  },
+  "ro": {
+    "prefs.background_pattern": "Model de fundal",
+    "prefs.pattern_aurora": "Auroră",
+    "prefs.pattern_none": "Niciunul"
+  },
+  "ru": {
+    "prefs.background_pattern": "Узор фона",
+    "prefs.pattern_aurora": "Сияние",
+    "prefs.pattern_none": "Нет"
+  },
+  "sv": {
+    "prefs.background_pattern": "Bakgrundsmönster",
+    "prefs.pattern_aurora": "Norrsken",
+    "prefs.pattern_none": "Inget"
+  },
+  "tr": {
+    "prefs.background_pattern": "Arka plan deseni",
+    "prefs.pattern_aurora": "Kutup ışığı",
+    "prefs.pattern_none": "Yok"
+  },
+  "uk": {
+    "prefs.background_pattern": "Візерунок тла",
+    "prefs.pattern_aurora": "Сяйво",
+    "prefs.pattern_none": "Немає"
+  },
+  "vi": {
+    "prefs.background_pattern": "Họa tiết nền",
+    "prefs.pattern_aurora": "Cực quang",
+    "prefs.pattern_none": "Không"
+  },
+  "zh": {
+    "prefs.background_pattern": "背景图案",
+    "prefs.pattern_aurora": "极光",
+    "prefs.pattern_none": "无"
+  },
+  "zh-TW": {
+    "prefs.background_pattern": "背景圖案",
+    "prefs.pattern_aurora": "極光",
+    "prefs.pattern_none": "無"
+  }
+}

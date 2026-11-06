@@ -1272,6 +1272,9 @@ preference_settings! {
     theme: String = "dark".into(), PAGE_APPEARANCE;
     /// A picture behind the model in place of the view's background; empty for none.
     background_image: String = String::new(), PAGE_APPEARANCE;
+    /// A built-in pattern behind the model (`backdrop::PATTERNS`), in the view's background
+    /// colours; empty for none. A background picture covers it.
+    background_pattern: String = String::new(), PAGE_APPEARANCE;
     /// Theme used when the operating system is light; unknown ids resolve to Light.
     theme_day: String = "light".into(), PAGE_APPEARANCE;
     /// Theme used when the operating system is dark; unknown ids resolve to Dark.
@@ -4096,6 +4099,10 @@ fn prepare_preferences(
     }
     if solidcraft_engine::doc::display_quality::DisplayQuality::parse(&new.display_quality).is_none() {
         return Err("`display_quality` must be coarse, normal, fine or ultra".into());
+    }
+    if !crate::backdrop::known(&new.background_pattern) {
+        let ids: Vec<&str> = crate::backdrop::PATTERNS.iter().map(|(id, _)| *id).collect();
+        return Err(format!("`background_pattern` must be empty (none) or one of: {}", ids.join(", ")));
     }
     if !SUPERSAMPLING.contains(&new.supersampling) {
         return Err("`supersampling` must be 1 (off), 1.5 or 2".into());
