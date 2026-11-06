@@ -410,6 +410,13 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     &mut app.preferences.history_play_button,
                     "history_play_button",
                 );
+                layout_check(
+                    ui,
+                    app.tr("prefs.history_folder_kind_icon"),
+                    app.tr("prefs.history_folder_kind_icon_note"),
+                    &mut app.preferences.history_folder_kind_icon,
+                    "history_folder_kind_icon",
+                );
                 // A design's joints as one button in the History, from the second joint (#8884).
                 layout_check(
                     ui,

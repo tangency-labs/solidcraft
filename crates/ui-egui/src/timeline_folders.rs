@@ -250,8 +250,9 @@ pub(crate) fn folder_chip(
     let state = history.inside(folder.start, folder.end, folder.open);
     let picked = app.tree.picked_timeline_groups.contains(&folder.id)
         || (!folder.open && history.folders.joints.get(&folder.id).is_some_and(|j| j.iter().any(|j| app.tree.picked_joints.contains(j))));
+    let icon = crate::timeline::folder_kind_icon(app, folder.id).unwrap_or("feature_group");
     let chip = HistoryGroupChip {
-        icon: "feature_group",
+        icon,
         name: &name,
         count,
         open: folder.open,
