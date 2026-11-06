@@ -95,7 +95,7 @@ const NO_KERNEL: [&str; 14] = [
     "hold_a_kernel",
 ];
 
-const ANSWERING: [&str; 63] = [
+const ANSWERING: [&str; 64] = [
     "set_dump_dir",
     "current_call",
     "crash_test",
@@ -159,6 +159,7 @@ const ANSWERING: [&str; 63] = [
     "loft_to_point",
     "screw_sweep",
     "screw_sweep_radial",
+    "screw_sweep_with_options",
 ];
 
 /// Every `pub fn` of the files that hold the crate's kernel entry points is accounted for.
@@ -278,6 +279,17 @@ fn every_entry_point_answers() {
     says("loft_to_point", Brep::loft_to_point(&lines, p(5.0, 5.0, 12.0)));
     says("screw_sweep", Brep::screw_sweep(&lines, p(30.0, 0.0, 0.0), p(0.0, 0.0, 1.0), 12.0, 1.0, 0.01));
     says("screw_sweep_radial", Brep::screw_sweep_radial(&lines, p(30.0, 0.0, 0.0), p(0.0, 0.0, 1.0), 12.0, 1.0, &[(0.0, 0.0), (1.0, 0.0)], 0.01));
+    says(
+        "screw_sweep_with_options",
+        Brep::screw_sweep_with_options(
+            &lines,
+            p(30.0, 0.0, 0.0),
+            p(0.0, 0.0, 1.0),
+            12.0,
+            1.0,
+            crate::sweeps::ScrewSweepOptions { law: None, join_spline_walls: true, tolerance: 0.01 },
+        ),
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

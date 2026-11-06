@@ -1347,20 +1347,30 @@ fn cylinder_piece(k: &mut Kernel, b: &mut Brep, m: &Screw, a: Point3, e: Point3,
     })
 }
 
-/// `screw_wall`: the wall one profile curve sweeps over `st`: across the curve its NURBS, across
-/// the turns each control point's path, the weights the curve's times the arcs'.
-fn screw_wall(m: &Screw, c: &CurveCanonical, st: &Stations) -> Out<Surface> {
-    let across = 2 * st.spans() + 1;
+/// `screw_wall`: the wall one profile curve sweeps over consecutive station pieces: across the
+/// curve its NURBS, across the turns each control point's path. Cylinder seams split the pieces,
+/// not this wall: join their existing nets at the shared endpoint, without refitting the spans.
+fn screw_wall(m: &Screw, c: &CurveCanonical, pieces: &[Stations]) -> Out<Surface> {
+    let across = 2 * pieces.iter().map(Stations::spans).sum::<usize>() + 1;
     let mut net = Vec::with_capacity(c.control_points.len() * across);
     let mut weights = Vec::with_capacity(net.capacity());
     for (l, &p) in c.control_points.iter().enumerate() {
         let w = c.weights.get(l).copied().unwrap_or(1.0);
-        for (j, q) in screw_path(m, p, st).into_iter().enumerate() {
-            net.push(q);
-            weights.push(w * st.weight(j));
+        for (i, st) in pieces.iter().enumerate() {
+            for (j, q) in screw_path(m, p, st).into_iter().enumerate().skip(usize::from(i > 0)) {
+                net.push(q);
+                weights.push(w * st.weight(j));
+            }
         }
     }
-    let (vknots, vmult) = st.knots();
+    let vknots: Vec<f64> = pieces.iter().enumerate().flat_map(|(i, st)| st.t.iter().copied().skip(usize::from(i > 0))).collect();
+    let mut vmult = vec![2; vknots.len()];
+    if let Some(first) = vmult.first_mut() {
+        *first = 3;
+    }
+    if let Some(last) = vmult.last_mut() {
+        *last = 3;
+    }
     let data = CanonicalSurfaceData {
         u_degree: c.degree,
         v_degree: 2,
@@ -1411,7 +1421,7 @@ fn screw_placed(m: &Screw, c: &Profile, a: f64) -> Profile {
 /// by span (SM_API's curve sweep carries the profile on its own frame, which along a helix turns
 /// it away from the screw motion), lines parallel to the axis as exact cylinder pieces, the caps
 /// where the motion starts and ends, all stitched and oriented.
-fn screw(k: &mut Kernel, profile: &[Profile], mut m: Screw, turns: f64, tolerance: f64) -> solidcore::Result<Out<Brep>> {
+fn screw(k: &mut Kernel, profile: &[Profile], mut m: Screw, turns: f64, tolerance: f64, join_spline_walls: bool) -> solidcore::Result<Out<Brep>> {
     let curves = match parse(k, profile) {
         Ok(c) => c,
         Err(e) => return Ok(Err(e)),
@@ -1456,7 +1466,8 @@ fn screw(k: &mut Kernel, profile: &[Profile], mut m: Screw, turns: f64, toleranc
         }
     }
     // Walls of lines parallel to the axis are exact cylinders, which cannot turn on themselves:
-    // then every wall comes in pieces of half a turn (the last up to an eighth longer).
+    // their faces come in pieces of half a turn (the last up to an eighth longer). All walls use
+    // these stations so their shared boundary curves agree, but spline walls keep one face.
     let mut radius = Vec::with_capacity(curves.len());
     for c in &curves {
         radius.push(axial_radius(k, &m, c, tolerance)?);
@@ -1502,17 +1513,22 @@ fn screw(k: &mut Kernel, profile: &[Profile], mut m: Screw, turns: f64, toleranc
         pieces.push(Stations::new(from, to, n as usize));
     }
     let mut b = new_brep(k, USE_DEFAULT, USE_DEFAULT)?;
-    for st in &pieces {
+    // A radial law's knots can change the wall's tangent, so retain those face boundaries. Half
+    // turns are only cylinder seams: join the other walls' spans when explicitly requested.
+    for group in pieces.chunk_by(|a, _| join_spline_walls && !m.angles.contains(&a.last())) {
         for (i, (c, wall)) in curves.iter().zip(&walls).enumerate() {
             let r = radius.get(i).copied().unwrap_or(0.0);
-            if r > 0.0 && m.offset(st.first()) == m.offset(st.last()) {
+            let (Some(first), Some(last)) = (group.first(), group.last()) else { continue };
+            if r > 0.0 && m.offset(first.first()) == m.offset(last.last()) {
                 let (a, e) = ends(k, c)?;
-                if let Err(err) = cylinder_piece(k, &mut b, &m, a, e, r + m.offset(st.first()), st)? {
-                    return Ok(Err(err));
+                for st in group {
+                    if let Err(err) = cylinder_piece(k, &mut b, &m, a, e, r + m.offset(st.first()), st)? {
+                        return Ok(Err(err));
+                    }
                 }
                 continue;
             }
-            let surface = match screw_wall(&m, wall, st) {
+            let surface = match screw_wall(&m, wall, group) {
                 Ok(s) => s,
                 Err(err) => return Ok(Err(err)),
             };
@@ -1551,6 +1567,7 @@ pub(crate) fn screw_sweep(
     turns: f64,
     law: Option<&[(f64, f64)]>,
     tolerance: f64,
+    join_spline_walls: bool,
 ) -> Result<Body> {
     if !screw_ok(origin, pitch, turns, tolerance) {
         return Err(Error::Argument);
@@ -1578,7 +1595,7 @@ pub(crate) fn screw_sweep(
             angles: law.iter().map(|(t, _)| TAU * t).collect(),
             offsets: law.iter().map(|(_, o)| *o).collect(),
         };
-        screw(k, profile, m, turns, tolerance)
+        screw(k, profile, m, turns, tolerance, join_spline_walls)
     })
 }
 

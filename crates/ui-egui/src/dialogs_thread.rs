@@ -643,6 +643,7 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, kind: &FeatureKind) {
         designation,
         length,
         modeled,
+        continuous_flanks,
         from,
         up_to,
         form,
@@ -659,6 +660,7 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, kind: &FeatureKind) {
     else {
         return;
     };
+    d.extra.insert("continuous_flanks".into(), json!(continuous_flanks));
     if *modeled {
         d.extra.insert("modeled".into(), json!(true));
     }

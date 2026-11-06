@@ -959,6 +959,10 @@ pub enum FeatureKind {
         length: Option<Expr>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         modeled: bool,
+        /// Continuous flank faces for this feature. Missing in older designs: keep
+        /// their half-turn faces and groove-before-chamfer order for saved references.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        continuous_flanks: bool,
         /// A point near the end of the face the thread starts at; `None`: the face's only free
         /// end (no material past it), or the end the pick at `face` lies near.
         #[serde(default, skip_serializing_if = "Option::is_none")]
