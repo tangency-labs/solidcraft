@@ -175,11 +175,13 @@ fn tools_and_cells_required(schema: &mut Schema) {
 #[schemars(deny_unknown_fields, transform = tools_and_cells_required)]
 pub struct BoundaryFillParams {
     // Required in the schema (`tools_and_cells_required`), optional in the type: left out, the
-    // handler refuses the call with its own message, as for an empty list.
+    // handler refuses the call with its own message, which the contract gives `null` and an
+    // empty list (`present`: a `null` goes to `FillCells`, which refuses it).
     #[serde(default, deserialize_with = "fill_tools")]
     #[schemars(schema_with = "fill_tools_schema")]
     pub tools: Option<NameList>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "FillCells")]
     pub cells: Option<FillCells>,
     /// How the filled solid combines with the design's bodies. Default: new.
     #[serde(default)]

@@ -74,6 +74,31 @@ fn assert_strict_keeps_errors_on(fixture: fn(ParamCheck) -> Session, cases: &[(&
     }
 }
 
+/// #12655: a `null` or empty `curves`, `bodies`, `tools` or `cells`, which the handlers refuse,
+/// is refused by the contracts too, with the handlers' messages. So the check (warn, strict, MCP
+/// validation, batch preflight) catches it before the handler runs. Only a key left out goes on
+/// to the handler, for its own message.
+#[test]
+fn the_contracts_refuse_null_and_empty_where_the_handlers_do() {
+    let curves = "`curves` must list 1…1000 sketch curve ids";
+    let cells = "`cells` must list 1…1000 points [x, y, z], one inside each cell";
+    for (id, p, message) in [
+        ("solid.rib", json!({"curves": null, "thickness": 1}), curves),
+        ("solid.web", json!({"curves": [], "thickness": 1}), curves),
+        ("solid.remove", json!({"bodies": null}), "`bodies` must list bodies"),
+        ("solid.remove", json!({"bodies": []}), "`bodies` must list bodies"),
+        ("solid.boundary_fill", json!({"tools": null, "cells": [[1, 2, 3]]}), "`tools` must list 1…64 bodies"),
+        ("solid.boundary_fill", json!({"tools": ["A"], "cells": null}), cells),
+        ("solid.boundary_fill", json!({"tools": ["A"], "cells": []}), cells),
+    ] {
+        let messages: Vec<String> = crate::schema::issues(id, &p).into_iter().map(|i| i.message).collect();
+        assert_eq!(messages, [message], "{id} {p}");
+    }
+    for (id, p) in [("solid.rib", json!({"thickness": 1})), ("solid.remove", json!({})), ("solid.boundary_fill", json!({}))] {
+        assert!(crate::schema::issues(id, &p).is_empty(), "{id} {p}: left out, the handler refuses it");
+    }
+}
+
 /// #12655: calls that fail today get the same message in strict. The first ones fail on the
 /// shared helper's sketch; the rest need the bracket's curve or the two boxes.
 #[test]
