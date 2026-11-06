@@ -279,6 +279,27 @@ fn a_lined_up_view_moves_only_when_its_line_up_is_broken() {
     assert_eq!(*s.drawing("test").unwrap(), before);
 }
 
+/// A view's line group is its own, its parent's, its sheet's or its drawing's, as inspect says. It
+/// is a display setting: unlinking sets it at the value it has, linking clears it.
+#[test]
+fn a_views_line_group_follows_its_sheet_and_links_with_its_parent() {
+    let (mut s, [front, right, top]) = three_views();
+    assert_eq!(inspect_view(&mut s, front)["settings"]["line_group"], json!({"value": "0.5", "from": "drawing", "set": null}));
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    run(&mut s, "drawing.sheet.set", json!({"sheet": sheet, "line_group": "0.35"}));
+    assert_eq!(inspect_view(&mut s, right)["settings"]["line_group"]["from"], "sheet");
+    let edited = edit_view(&mut s, right, json!({"line_group": "0.7"}));
+    assert_eq!((edited["changed"].clone(), edited["followers"].clone()), (json!(["line_group"]), json!([ids::encode(top)])));
+    let followed = json!({"value": "0.7", "from": "parent", "parent": ids::encode(right), "set": null});
+    assert_eq!(inspect_view(&mut s, top)["settings"]["line_group"], followed);
+    assert_eq!(inspect_view(&mut s, right)["linked"], "partly");
+    edit_view(&mut s, right, json!({"linked": true}));
+    assert_eq!(inspect_view(&mut s, right)["settings"]["line_group"]["from"], "sheet", "linking clears it");
+    edit_view(&mut s, right, json!({"linked": false}));
+    assert_eq!(inspect_view(&mut s, right)["settings"]["line_group"]["set"], "0.35", "unlinking keeps the value it had");
+    assert!(edit_refused(&mut s, front, json!({"line_group": "0.6"})).contains("line_group"));
+}
+
 /// A copy is one undo step of new views, independent of the ones it came from: with its linked
 /// views, they are copied lined up with the copy; without, it goes alone. Without a choice, a view
 /// with views lined up with it is refused, naming them.
@@ -351,6 +372,10 @@ fn a_side_view_copied_alone_is_a_base_view_looking_the_way_it_did() {
         ..ViewOverrides::default()
     };
     assert_eq!(made.settings, own);
+    // A group its chain gave it is its own; one its sheet or drawing gave it, its new sheet gives.
+    edit_view(&mut s, front, json!({"line_group": "0.7"}));
+    let chained = copy(&mut s, right);
+    assert_eq!(saved(&s, chained).settings.line_group, Some(LineGroup::Mm0_7));
     let of_top = copy(&mut s, top);
     let d = s.drawing("test").unwrap().clone();
     let ViewKind::Base { view: ViewDirection::Looking(_), .. } = saved(&s, of_top).kind else { panic!("the right view's top view is no named view") };

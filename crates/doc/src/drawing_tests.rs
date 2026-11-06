@@ -2,6 +2,7 @@ use serde_json::json;
 use solidcraft_geom::drawing_measure::{LinearDirection, Reading};
 use solidcraft_geom::drawing_sheet::{Margins, Orientation, PaperSize, SheetSize};
 use solidcraft_geom::drawing_view::{NamedView, ProjectedSide};
+use solidcraft_geom::paper::line::LineGroup;
 use solidcraft_geom::title_block::{Cell, CellKind, TextCell};
 
 use solidcraft_render::VisualStyle;
@@ -46,6 +47,7 @@ pub(crate) fn plate() -> Drawing {
         dpi: 600.0,
         documents: Some(SheetComponent { source: plate_id, component: 0 }),
         excluded: Excluded { count: false, print: true },
+        line_group: None,
     }));
     Arc::make_mut(&mut d.sheets[0]).documents = Some(SheetComponent { source: plate_id, component: 7 });
     Arc::make_mut(&mut d.properties).set(crate::metadata::Owner::Design, "author", json!("Jane Doe")).unwrap();
@@ -294,6 +296,38 @@ fn a_fixed_unit_is_a_length_unit_of_the_expression_table() {
     }
     for broken in [json!("follow_design"), json!({"fixed": "in"}), json!({"fixed": {}}), json!(null)] {
         assert!(units(broken.clone()).is_err(), "{broken}");
+    }
+}
+
+/// A drawing always saves its line group, so a later default never changes it, and an older
+/// drawing, which saved none, reads the 0.5 group; anything but a name of ISO 128's series is refused.
+#[test]
+fn a_drawings_line_group_is_always_saved_and_an_older_one_reads_0_5() {
+    let d = bare();
+    let v = file(&d);
+    assert_eq!(v["line_group"], json!("0.5"));
+    let mut older = v.clone();
+    older.as_object_mut().unwrap().remove("line_group");
+    assert_eq!(read(&older).unwrap().line_group, LineGroup::Mm0_5);
+    let mut wider = v;
+    wider["line_group"] = json!("0.7");
+    assert_eq!(read(&wider).unwrap().line_group, LineGroup::Mm0_7);
+    for hostile in [json!("0.6"), json!(0.5), json!(null), json!(""), json!("Mm0_5"), json!({"wide": "0.5"})] {
+        assert_ne!(refused(&d, |v| v["line_group"] = hostile.clone()), "read", "{hostile}");
+    }
+}
+
+/// A sheet saves a line group only when it sets one of its own; otherwise it follows the drawing's.
+#[test]
+fn a_sheets_line_group_is_saved_only_when_it_sets_one() {
+    let mut d = bare();
+    assert_eq!(file(&d)["sheets"][0].get("line_group"), None);
+    Arc::make_mut(&mut d.sheets[0]).line_group = Some(LineGroup::Mm0_35);
+    let v = file(&d);
+    assert_eq!(v["sheets"][0]["line_group"], json!("0.35"));
+    assert_eq!(read(&v).unwrap().sheets[0].line_group, Some(LineGroup::Mm0_35));
+    for hostile in [json!("3"), json!(0.35), json!([])] {
+        assert_ne!(refused(&d, |v| v["sheets"][0]["line_group"] = hostile.clone()), "read", "{hostile}");
     }
 }
 

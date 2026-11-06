@@ -20,6 +20,7 @@ use solidcraft_doc::drawing_view::ViewDirection;
 use solidcraft_doc::{Document, ids};
 use solidcraft_geom::cell::{Content, Projection};
 use solidcraft_geom::drawing_view::ProjectedSide;
+use solidcraft_geom::paper::line::LineGroup;
 use solidcraft_geom::revision::Numbering;
 use solidcraft_geom::title_block::CellKind;
 
@@ -40,7 +41,7 @@ const TEMPLATE_SAVE_CONTRACT: TypedContract<TemplateSaveParams> = TypedContract:
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("drawing.create", "Create Drawing", create).any_part().icon("new").doc_only().params(
-        "name?: the drawing's name (default: the design's); template?: a built-in's name (drawing.template.list; default iso-a3-part for a part, iso-a2-assembly for an assembly, a design that places components) or a .json template file (drawing.template.save); language?: the drawing's content language, a BCP 47 tag (default: the template's, en for the built-ins); units?: \"follow_model\" or one length unit such as \"mm\" (default: the template's); projection?: first or third (angle) (default: the template's, third for the built-ins); font?: the font family its text is set in, by name (default: the template's, the built-in font for the built-ins). Adds a drawing of this design made from the template, with ids of its own, and opens it (one undo step of the model) → as drawing.inspect",
+        "name?: the drawing's name (default: the design's); template?: a built-in's name (drawing.template.list; default iso-a3-part for a part, iso-a2-assembly for an assembly, a design that places components) or a .json template file (drawing.template.save); language?: the drawing's content language, a BCP 47 tag (default: the template's, en for the built-ins); units?: \"follow_model\" or one length unit such as \"mm\" (default: the template's); projection?: first or third (angle) (default: the template's, third for the built-ins); font?: the font family its text is set in, by name (default: the template's, the built-in font for the built-ins); line_group?: the ISO 128 line group its lines are drawn in, by its wide line, one of 0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2 (default: the template's, 0.5 for the built-ins). Adds a drawing of this design made from the template, with ids of its own, and opens it (one undo step of the model) → as drawing.inspect",
     ),
     CommandSpec::new("drawing.template.apply", "Apply Drawing Template", crate::checked!("drawing.template.apply", template_apply))
         .in_drawing()
@@ -93,13 +94,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         "drawing: id → deleted: its id; closed when it was open (one undo step of the model)",
     ),
     CommandSpec::new("drawing.inspect", "Inspect Drawing", inspect).in_drawing().icon("inspect").noundo().doc_only().params(
-        "→ {id, name, units, projection, updates: automatic or deferred, language, font, font_note: why its text is set in the built-in font instead (the font isn't on this computer, or can't be set on paper), or null, properties, sources: [{id}], sheets: [{id, name, size_mm, orientation, title_block (its definition, or null), title_block_cells: [{name, text, value?}] (each text cell as the sheet shows it: its fields' values, \"-\" for one with none, or the text typed over it with the value it hides as `value`), title_block_overrides, dpi, documents, excluded, views: [{id, kind: base|projected, parent?, side?, label, dimensions: [ids], balloons: [ids]}], base views by id, each followed by those projected from it}], revisions: {rows: [{row, revision, description, designer, checker, date, hidden}], the oldest first (the newest is the drawing's revision), next: the revision a new row gets}}. Read-only.",
+        "→ {id, name, units, projection, updates: automatic or deferred, language, font, line_group, font_note: why its text is set in the built-in font instead (the font isn't on this computer, or can't be set on paper), or null, properties, sources: [{id}], sheets: [{id, name, size_mm, orientation, title_block (its definition, or null), title_block_cells: [{name, text, value?}] (each text cell as the sheet shows it: its fields' values, \"-\" for one with none, or the text typed over it with the value it hides as `value`), title_block_overrides, dpi, line_group (its own, or null for the drawing's), documents, excluded, views: [{id, kind: base|projected, parent?, side?, label, dimensions: [ids], balloons: [ids]}], base views by id, each followed by those projected from it}], revisions: {rows: [{row, revision, description, designer, checker, date, hidden}], the oldest first (the newest is the drawing's revision), next: the revision a new row gets}}. Read-only.",
     ),
     CommandSpec::new("drawing.set", "Drawing Settings", set)
         .in_drawing()
         .icon("settings")
         .doc_only()
-        .params("name?, language?: a BCP 47 tag, units?: \"follow_model\" or one length unit such as \"mm\", projection?: first or third (angle), which every projected view follows, updates?: automatic, or deferred: its views follow a changed model only on drawing.update, font?: the font family its text is set in, by name, never a file (\"\": the built-in font). revision_numbering?: {start: 0 or 1}, the number new revisions count from: rows already there stay as typed. One undo step."),
+        .params("name?, language?: a BCP 47 tag, units?: \"follow_model\" or one length unit such as \"mm\", projection?: first or third (angle), which every projected view follows, updates?: automatic, or deferred: its views follow a changed model only on drawing.update, font?: the font family its text is set in, by name, never a file (\"\": the built-in font). line_group?: the ISO 128 line group its lines are drawn in, by its wide line: 0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2; a sheet or a view may choose another. revision_numbering?: {start: 0 or 1}, the number new revisions count from: rows already there stay as typed. One undo step."),
     CommandSpec::new("drawing.properties", "Drawing Properties", properties).in_drawing().icon("settings").noundo().doc_only().params(
         "→ metadata: the drawing's properties as saved (other tools' keys too); properties: project, part_number, revision, author, organization, description and license, each its text or null. The design properties' rules (document.metadata).",
     ),
@@ -137,6 +138,11 @@ fn updates(cmd: &str, p: &Value) -> Result<Option<Updates>> {
         None => Ok(None),
         Some(v) => serde_json::from_value(v.clone()).map(Some).map_err(|_| bad(cmd, "`updates` is automatic or deferred")),
     }
+}
+
+/// A `line_group` as given, for a drawing, a sheet or a view: one of ISO 128's groups, by its wide line.
+pub(super) fn line_group(cmd: &str, v: &Value) -> Result<LineGroup> {
+    serde_json::from_value(v.clone()).map_err(|_| bad(cmd, format!("`line_group` is one of {}", LineGroup::NAMES.join(", "))))
 }
 
 /// `font` as given: a font family's name, never a file (drawings name fonts by family, so they
@@ -190,6 +196,9 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
     }
     if let Some(projection) = projection(cmd, p)? {
         d.projection = projection;
+    }
+    if let Some(group) = p.get("line_group") {
+        d.line_group = line_group(cmd, group)?;
     }
     let source = d.allocate_id(&mut s.ids).map_err(fail)?;
     d.sources.push(Source { id: source });
@@ -405,6 +414,7 @@ fn inspect(s: &mut Session, _p: &Value) -> Result<Value> {
             "title_block_cells": title_block_cells(&s.doc, &mut tree, d, at),
             "title_block_overrides": sheet.title_block_overrides,
             "dpi": sheet.dpi,
+            "line_group": sheet.line_group,
             "documents": sheet.documents.map(|c| json!({"source": ids::encode(c.source), "component": c.component})),
             "excluded": sheet.excluded,
             "views": sheet_views(d, sheet.id, &dimensions, &balloons),
@@ -420,6 +430,7 @@ fn inspect(s: &mut Session, _p: &Value) -> Result<Value> {
         "updates": d.updates,
         "language": d.language,
         "font": d.font,
+        "line_group": d.line_group,
         "font_note": solidcraft_sketch::paper_font_note(&solidcraft_sketch::font_dirs(), &d.font),
         "properties": d.properties,
         "sources": d.sources.iter().map(|source| json!({"id": ids::encode(source.id)})).collect::<Vec<_>>(),
@@ -504,6 +515,9 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
         }
         if let Some(updates) = updates(cmd, p)? {
             d.updates = updates;
+        }
+        if let Some(group) = p.get("line_group") {
+            d.line_group = line_group(cmd, group)?;
         }
         if let Some(font) = font(cmd, p)? {
             d.font = font.to_string();

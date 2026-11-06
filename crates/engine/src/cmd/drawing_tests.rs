@@ -368,6 +368,33 @@ fn a_drawings_updates_are_automatic_or_deferred() {
     }
 }
 
+/// A drawing's line group is one of ISO 128's, 0.5 when nothing chooses: shown by
+/// `drawing.inspect` beside each sheet's own, chosen by `drawing.create`, changed by `drawing.set`
+/// as one undo step, saved with the design, and anything else refused.
+#[test]
+fn a_drawings_line_group_is_set_as_one_undo_step_and_saved() {
+    let folder = Folder::new("drawing-line-group");
+    let mut s = design();
+    let made = run(&mut s, "drawing.create", json!({}));
+    assert_eq!((&made["line_group"], &made["sheets"][0]["line_group"]), (&json!("0.5"), &Value::Null));
+    let steps = s.undo.len();
+    assert_eq!(run(&mut s, "drawing.set", json!({"line_group": "0.7"}))["line_group"], "0.7");
+    assert_eq!(s.undo.len(), steps + 1);
+    run(&mut s, "file.save", json!({"path": folder.path("plate.solidcraft")}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": folder.path("plate.solidcraft")}));
+    assert_eq!(opened.doc.drawings[0].line_group, LineGroup::Mm0_7);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(run(&mut s, "drawing.inspect", json!({}))["line_group"], "0.5");
+    for bad in [json!("0.6"), json!(0.5), json!("Mm0_5"), json!(null)] {
+        assert!(
+            refused(&mut s, "drawing.set", json!({"line_group": bad})).contains("`line_group` is one of 0.25, 0.35, 0.5, 0.7, 1, 1.4, 2"),
+            "{bad}"
+        );
+    }
+    assert_eq!(run(&mut design(), "drawing.create", json!({"line_group": "1.4"}))["line_group"], "1.4");
+}
+
 /// A drawing's font is a family named by `drawing.create` or `drawing.set` (one undo step), saved
 /// with the design; the built-in font when none is named. A family this computer lacks is named in
 /// `font_note`, and a font file or anything but text is refused.
