@@ -1677,6 +1677,16 @@ fn render_preview_tab_surfaces_preserve_scene_backplates_and_viewport_overrides(
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn progressive_image_controls_route_to_the_registered_host() {
+    // GPU path tracing can hang on a software adapter (lavapipe); see issue #12664.
+    // Skipped there until that is fixed; it still runs on real GPUs.
+    let software = solidcraft_gpu::select::Policy::from_env()
+        .ok()
+        .and_then(solidcraft_gpu::select::pick)
+        .is_some_and(|(_, report)| report.tier == solidcraft_gpu::select::Tier::Software);
+    if software {
+        eprintln!("skipping progressive UI device test: software GPU adapter (#12664)");
+        return;
+    }
     let host = solidcraft_gpu::select::Policy::from_env()
         .and_then(|policy| solidcraft_gpu::select::pick(policy).ok_or_else(|| "no qualifying adapter".to_string()))
         .and_then(|(adapter, _)| solidcraft_gpu::path::host_on_adapter(&adapter).map_err(|e| e.to_string()));
