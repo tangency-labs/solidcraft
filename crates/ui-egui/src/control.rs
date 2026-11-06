@@ -1134,6 +1134,19 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             }
             ok(reply)
         }
+        "ui.editFolder" => {
+            let Some(id) = (match p.get("folder") {
+                Some(Value::Number(n)) => n.as_u64(),
+                Some(Value::String(x)) => app.session.doc.timeline_groups.iter().find(|group| group.name == *x).map(|group| group.id),
+                _ => return err("`folder` must be a timeline folder id or name"),
+            }) else {
+                return err("no such timeline folder");
+            };
+            if let Err(why) = crate::hole_folder::open(app, id) {
+                return err(why);
+            }
+            ok(started(app))
+        }
         "ui.selection" => ok(json!({
             "selection": app.session.selection,
             "dialog": app.dialog.as_ref().map(|d| d.inputs.iter().map(|i| json!({"label": i.label, "items": i.items})).collect::<Vec<_>>()),

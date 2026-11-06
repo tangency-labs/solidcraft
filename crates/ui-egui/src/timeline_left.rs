@@ -1177,6 +1177,7 @@ fn vertical_group_row(
             crate::context_menu::start_rename(app, crate::context_menu::RenameWhat::TimelineGroup(group.id), rect.center());
             ui.close();
         }
+        crate::timeline::edit_holes_item(app, ui, group.id);
         ui.separator();
         selection_actions(app, ui, &table.groups, false);
     });

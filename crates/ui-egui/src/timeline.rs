@@ -968,8 +968,22 @@ fn folder_tile(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter, x: f32,
             app.tree.collapsed.remove(&key);
         }
     }
+    crate::ui_kit::Menu::context(&resp, |ui| edit_holes_item(app, ui, id));
     resp.backing_on_hover_text(format!("{} ({count})", group.name));
     x + 32.0
+}
+
+/// A folder's Edit Holes item, when it holds holes only: one Hole dialog for all of them.
+pub(crate) fn edit_holes_item(app: &mut SolveApp, ui: &mut egui::Ui, folder: u64) {
+    if crate::hole_folder::holes(app, folder).is_none() {
+        return;
+    }
+    if crate::context_menu::button(ui, "Edit Holes", "hole").clicked() {
+        if let Err(why) = crate::hole_folder::open(app, folder) {
+            app.set_status(why, true);
+        }
+        ui.close();
+    }
 }
 
 fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {

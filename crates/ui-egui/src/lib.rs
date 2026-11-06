@@ -75,6 +75,7 @@ pub mod help;
 pub(crate) mod history_rows;
 #[cfg(test)]
 mod hole_direction_ui_tests;
+pub(crate) mod hole_folder;
 pub(crate) mod hole_place;
 #[cfg(test)]
 mod hole_place_ui_tests;
