@@ -721,6 +721,9 @@ impl FilletSession<'_> {
         let mut wall_creases: BTreeMap<FaceId, Vec<Curve>> = BTreeMap::new();
         // per continued wall of a boss, the round's surface its creases lie on (when one)
         let mut wall_round: BTreeMap<FaceId, Option<FaceId>> = BTreeMap::new();
+        // the walls are read from one copy of each body they lie in, made at its first wall and
+        // dropped after this loop, which changes only the sheet's own faces (`creases`)
+        let (mut sheet_copy, mut target_copy): (Option<Brep>, Option<Brep>) = (None, None);
         for feature in &mut features {
             if feature.boss && feature.walls.is_empty() {
                 // a boss whose walls aren't upright: reached when its footprint's rim crosses a
@@ -744,21 +747,27 @@ impl FilletSession<'_> {
                 continue;
             }
             for wall in feature.walls.clone() {
-                let wall_body: Brep = if feature.boss {
-                    sheet.clone_standing_for_self()?
+                let (copy, body) = if feature.boss {
+                    (&mut sheet_copy, &*sheet)
                 } else {
-                    self.objects.target.clone_standing_for_self()?
+                    (&mut target_copy, &*self.objects.target)
+                };
+                let wall_body: &Brep = if let Some(copy) = copy {
+                    copy
+                } else {
+                    k.work_counters.add_wall_body_copy();
+                    copy.insert(body.clone_standing_for_self()?)
                 };
                 let wall_box =
-                    crate::query::api_queries::face_bounding_box(k, &wall_body, wall, false)?;
+                    crate::query::api_queries::face_bounding_box(k, wall_body, wall, false)?;
                 for (sheet_box, &sheet_face) in sheet_boxes.iter().zip(&sheet_faces) {
                     if sheet_box.are_disjoint(&wall_box, on_tol) {
                         continue;
                     }
-                    let found = creases(k, sheet, sheet_face, &wall_body, wall, crease_tol)?;
+                    let found = creases(k, sheet, sheet_face, wall_body, wall, crease_tol)?;
                     let mut on_wall = Vec::new();
                     for curve in &found {
-                        on_wall.extend(pieces_in_face(k, &wall_body, wall, curve, tol)?);
+                        on_wall.extend(pieces_in_face(k, wall_body, wall, curve, tol)?);
                     }
                     for curve in &on_wall {
                         for piece in pieces_in_face(k, sheet, sheet_face, curve, tol)? {
@@ -784,6 +793,7 @@ impl FilletSession<'_> {
                 }
             }
         }
+        drop((sheet_copy, target_copy));
         // the continued walls of the bosses no band reaches leave the sheet
         for feature in &mut features {
             if !feature.boss || !feature.creases.is_empty() {

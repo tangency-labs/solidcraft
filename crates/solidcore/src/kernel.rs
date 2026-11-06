@@ -148,8 +148,8 @@ impl Caches {
     }
 }
 
-/// Counts of the work done by the steps of a boolean whose cost once grew with the square
-/// of the body's size, so a test can check how that work grows: the same on every
+/// Counts of the work done by the steps of a boolean or a blend whose cost once grew with
+/// the square of the body's size, so a test can check how that work grows: the same on every
 /// machine, where a ratio of times is not (the SolidCraft fork's `SmWorkCounters`,
 /// tangency-labs/smlib@2e9e6b2 and @edf7414).
 ///
@@ -161,6 +161,7 @@ impl Caches {
 pub struct WorkCounters {
     face_pairs: Cell<u64>,
     loops_classified: Cell<u64>,
+    wall_body_copies: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -181,10 +182,19 @@ impl WorkCounters {
         self.loops_classified.get()
     }
 
+    /// Copies keep features makes of the body a feature's walls lie in (the sheet of
+    /// rounds for a boss, the target for a cut) to read the walls' boxes and creases from.
+    /// Not the fork's.
+    #[must_use]
+    pub fn wall_body_copies(&self) -> u64 {
+        self.wall_body_copies.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
         self.loops_classified.set(0);
+        self.wall_body_copies.set(0);
     }
 
     /// Counts one face pair examined for intersection.
@@ -196,6 +206,12 @@ impl WorkCounters {
     pub(crate) fn add_loop_classified(&self) {
         self.loops_classified
             .set(self.loops_classified.get().saturating_add(1));
+    }
+
+    /// Counts one copy of a body keep features reads feature walls from.
+    pub(crate) fn add_wall_body_copy(&self) {
+        self.wall_body_copies
+            .set(self.wall_body_copies.get().saturating_add(1));
     }
 }
 
@@ -1727,8 +1743,8 @@ pub struct Kernel {
     /// own count, never this one.
     pub blend_operation_scopes: Arc<core::sync::atomic::AtomicU32>,
     /// Not upstream (the SolidCraft fork's `SmWorkCounters`): counts of the work done by
-    /// the steps of a boolean whose cost once grew with the square of the body's size, for
-    /// tests and profiling. They change no result.
+    /// the steps of a boolean or a blend whose cost once grew with the square of the body's
+    /// size, for tests and profiling. They change no result.
     pub work_counters: WorkCounters,
     /// Not upstream (tangency-labs/solidcore#2489): while `Some`, each fillet session that
     /// finishes filleting appends the faces it made in its target, each with what made it
@@ -1922,15 +1938,18 @@ mod tests {
     fn work_counters_count_until_reset() {
         let k = Kernel::default();
         let w = &k.work_counters;
-        assert_eq!((w.face_pairs(), w.loops_classified()), (0, 0));
+        let counts =
+            |w: &WorkCounters| (w.face_pairs(), w.loops_classified(), w.wall_body_copies());
+        assert_eq!(counts(w), (0, 0, 0));
         w.add_face_pair();
         w.add_face_pair();
         w.add_loop_classified();
-        assert_eq!((w.face_pairs(), w.loops_classified()), (2, 1));
+        w.add_wall_body_copy();
+        assert_eq!(counts(w), (2, 1, 1));
         // each kernel counts its own work
         assert_eq!(Kernel::default().work_counters.face_pairs(), 0);
         w.reset();
-        assert_eq!((w.face_pairs(), w.loops_classified()), (0, 0));
+        assert_eq!(counts(w), (0, 0, 0));
     }
 
     #[test]

@@ -387,3 +387,40 @@ fn a_pocket_astride_the_contact_line_matches_the_fork() {
         assert_pinned(keep, astride, 8.0, 23371.292359915951, 12);
     }
 }
+
+// ---- Work ----
+
+/// A pocket and a boss in one round's band, each as `prisms_match_the_fork` keeps it alone:
+/// together they keep the same volumes. Keep features reads the walls of each from one copy of
+/// the body they lie in (the block for the pocket's 4 walls, the sheet of rounds for the boss's
+/// 8 continued walls), not one copy per wall.
+#[test]
+fn walls_are_read_from_one_copy_per_body() {
+    fn pocket_and_boss(k: &mut Kernel, block: Brep) -> Result<Brep> {
+        let pocket = create_box(k, Point3::new(8.0, 2.0, 15.0), 4.0, 4.0, 6.0)?;
+        let block = boolean_difference(k, block, pocket)?;
+        let boss = create_box(k, Point3::new(28.0, 2.0, 20.0), 4.0, 4.0, 5.0)?;
+        boolean_union(k, block, boss)
+    }
+    let mut k = fork_kernel(true);
+    let block = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
+    let mut b = pocket_and_boss(&mut k, block).unwrap();
+    let e = pick(&k, &b, Point3::new(20.0, 0.0, 20.0));
+    k.work_counters.reset();
+    fillet_edges(&mut k, &mut b, &[e], 8.0, 1, 1, 1.0).unwrap();
+    let copies = k.work_counters.wall_body_copies();
+    assert!(solidcore::topology::brep::p2::is_manifold_solid(&b).unwrap());
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    let v = volume_of(&k, &mut b);
+    let want = 23549.896259768986 + 23389.896259952176 - TAKEN;
+    println!(
+        "volume {v:.17}, want {want:.17}; {} faces; {copies} copies",
+        b.face_list().len()
+    );
+    assert!((v - want).abs() <= 1e-9 * want, "volume {v}, want {want}");
+    assert_eq!(b.face_list().len(), 17);
+    assert_eq!(copies, 2);
+}
