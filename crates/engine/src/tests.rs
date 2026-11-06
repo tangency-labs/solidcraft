@@ -5495,3 +5495,70 @@ fn a_command_check_that_panics_refuses_the_command() {
     assert!(matches!(r, Err(EngineError::Internal(..))), "{r:?}");
     assert!(s.doc.features.is_empty());
 }
+
+fn vibration_support(s: &Session, body: &str, coordinate: impl Fn(Vec3) -> f64) -> u32 {
+    let world = s.world_state().unwrap();
+    let mesh = world.body(body).unwrap().mesh();
+    mesh.triangles
+        .iter()
+        .zip(&mesh.tri_face)
+        .find_map(|(triangle, &face)| mesh.tri(triangle).filter(|points| points.iter().all(|&p| coordinate(p).abs() < 1e-7)).map(|_| face))
+        .unwrap()
+}
+
+fn vibration_steel(s: &mut Session, bodies: &[&str]) {
+    run(
+        s,
+        "material.create",
+        json!({"name":"Test steel","density_g_cm3":7.85,"physical_card":{
+            "schema_version":1,"designation":"Analytic steel specimen","family":"metal",
+            "sources":[{"id":"analytic","title":"Prescribed analytic specimen","kind":"illustrative"}],
+            "properties":[{"source_id":"analytic","data":{"kind":"elasticity","model":{
+                "symmetry":"isotropic","young_modulus_pa":200e9,"poisson_ratio":0.3}}}]}
+        }),
+    );
+    run(s, "material.assign", json!({"bodies":bodies,"material":"Test steel"}));
+}
+
+#[test]
+fn vibration_cantilever_matches_first_bending_frequency_and_base_response() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name":"Beam","length":180,"width":18,"height":12,"corner":[0,0,0]}));
+    let fixed = vibration_support(&s, "Beam", |p| p.x);
+    let params = json!({"body":"Beam","supports":[{"body":"Beam","face":fixed}],"start_hz":20.0,"end_hz":550.0});
+    assert!(s.execute(vibration::COMMAND, &params).unwrap_err().to_string().contains("Beam"));
+    vibration_steel(&mut s, &["Beam"]);
+    let before = s.doc.clone();
+    let result: vibration::SweepResult = serde_json::from_value(run(&mut s, vibration::COMMAND, params)).unwrap();
+    let mode = &result.modes[0];
+    // Euler–Bernoulli cantilever, first root of cosh(b) cos(b) = -1.
+    let expected = 1.87510407_f64.powi(2) / (2.0 * PI * 0.18_f64.powi(2)) * (200e9_f64 / 7850.0 * 0.012_f64.powi(2) / 12.0).sqrt();
+    assert!((mode.hz / expected - 1.0).abs() < 0.05, "FE {:.3}, analytic {:.3}", mode.hz, expected);
+    assert!(result.vertices_mm[mode.maximum][0] > 175.0);
+    let peak = result.peaks.iter().max_by(|a, b| a.amplitude[a.maximum].total_cmp(&b.amplitude[b.maximum])).unwrap();
+    assert!((peak.hz / mode.hz - 1.0).abs() < 0.025, "peak {}, mode {}", peak.hz, mode.hz);
+    // The first cantilever mode's tip-normalized uniform participation is 1.566.
+    let expected_mm = 9.80665 * 1.566 * 1000.0 / (2.0 * 0.02 * (2.0 * PI * mode.hz).powi(2));
+    assert!((peak.amplitude[peak.maximum] / expected_mm - 1.0).abs() < 0.15, "FE {:.4}, analytic {:.4}", peak.amplitude[peak.maximum], expected_mm);
+    for triangle in result.triangles.iter().filter(|t| t.support) {
+        assert!(triangle.vertices.iter().all(|&i| peak.amplitude[i] < 1e-12));
+    }
+    assert!(std::sync::Arc::ptr_eq(&s.doc, &before));
+}
+
+#[test]
+fn vibration_assembly_bonds_a_touching_part_and_rejects_a_floating_one() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name":"Base","length":20,"width":20,"height":8,"corner":[0,0,0],"operation":"new"}));
+    run(&mut s, "solid.box", json!({"body_name":"Arm","length":65,"width":16,"height":8,"corner":[2,2,8],"operation":"new"}));
+    vibration_steel(&mut s, &["Base", "Arm"]);
+    let fixed = vibration_support(&s, "Base", |p| p.z);
+    let params = json!({"supports":[{"body":"Base","face":fixed}],"start_hz":100.0,"end_hz":4500.0});
+    let result: vibration::SweepResult = serde_json::from_value(run(&mut s, vibration::COMMAND, params.clone())).unwrap();
+    assert_eq!(result.bodies, ["Base", "Arm"]);
+    assert!(result.modes.iter().any(|m| result.vertex_body[m.maximum] == 1));
+    run(&mut s, "solid.box", json!({"body_name":"Floating","length":10,"width":10,"height":10,"corner":[200,0,0],"operation":"new"}));
+    run(&mut s, "material.assign", json!({"bodies":["Floating"],"material":"Test steel"}));
+    let error = s.execute(vibration::COMMAND, &params).unwrap_err().to_string();
+    assert!(error.contains("No bonded planar interface") && error.contains("Floating"), "{error}");
+}

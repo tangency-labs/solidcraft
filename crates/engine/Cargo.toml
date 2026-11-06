@@ -35,6 +35,10 @@ name = "sketch_target_bench"
 required-features = ["solver-profiling"]
 
 [dependencies]
+fieldcraft-fem = { git = "https://github.com/tangency-labs/fieldcraft.git", rev = "6b613217851b4c5ddf2d315930db12e9e25354dc" }
+fieldcraft-mesh = { git = "https://github.com/tangency-labs/fieldcraft.git", rev = "6b613217851b4c5ddf2d315930db12e9e25354dc" }
+fieldcraft-model = { git = "https://github.com/tangency-labs/fieldcraft.git", rev = "6b613217851b4c5ddf2d315930db12e9e25354dc" }
+fieldcraft-solver = { git = "https://github.com/tangency-labs/fieldcraft.git", rev = "6b613217851b4c5ddf2d315930db12e9e25354dc" }
 solidcore-record = { workspace = true }
 solidcraft-geom = { workspace = true }
 solidcraft-sketch = { workspace = true }

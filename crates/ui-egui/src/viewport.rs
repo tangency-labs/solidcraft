@@ -5645,6 +5645,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         crate::dialogs_assembly::joint_glyphs(app, &painter, &proj);
     }
     crate::joint_handles::show(app, ui, &painter, &proj);
+    crate::vibration::draw(app, &painter, &proj);
     overlays(app, &painter, &proj);
     paint_device_pivot(app, &painter, &proj);
     crate::dim_view::show(app, ui, &painter, &proj);

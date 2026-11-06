@@ -191,7 +191,7 @@ pub const SECTIONS: &[Section] = &[
         tab: "INSPECT",
         panel: "CHECK",
         promoted: 4,
-        ids: &["inspect.interference", "inspect.draft", "inspect.accessibility", "contact.check", "inspect.compare"],
+        ids: &["inspect.interference", "inspect.draft", "inspect.accessibility", "contact.check", "inspect.compare", "inspect.vibration"],
     },
     Section {
         tab: "INSPECT",
@@ -1315,7 +1315,7 @@ mod tests {
         assert_eq!(panels("MANAGE"), ["PARAMETERS", "CONFIGURATIONS", "MATERIALS", "RULES", "DESIGN"]);
         // The former sketch/solid INSPECT panels now share a global INSPECT tab.
         for (panel, commands) in [
-            ("CHECK", vec!["inspect.interference", "inspect.draft", "inspect.accessibility"]),
+            ("CHECK", vec!["inspect.interference", "inspect.draft", "inspect.accessibility", "inspect.vibration"]),
             ("MEASURE", vec!["inspect.center_of_mass"]),
             (
                 "SURFACE QUALITY",

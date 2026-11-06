@@ -366,6 +366,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(material_properties::COMMANDS.iter());
     v.extend(libraries::COMMANDS.iter());
     v.extend(section::COMMANDS.iter());
+    v.extend(crate::vibration::COMMANDS.iter());
     v.extend(view_navigation::COMMANDS.iter());
     v.extend(view_dxf::COMMANDS.iter());
     v.extend(settings::COMMANDS.iter());
