@@ -26,7 +26,7 @@ use solidcraft_io::MAX_DRAWING_BYTES;
 
 use super::check::{located, whole};
 use super::sketch_ends::SketchTarget;
-use super::types::Point2;
+use super::types::{Point2, not_blank_pattern};
 
 /// A key that, once given (`null` included), must parse as `T`, as the handler reads it.
 fn some<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Option<T>, D::Error> {
@@ -41,8 +41,8 @@ pub struct InsertDrawingKeys {
     /// The drawing itself, as text. Wins over `path`. At most 16 MiB (`MAX_DRAWING_BYTES`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<DrawingText>,
-    /// The drawing file to read (not blank, under 4096 characters). Used when `text` is not
-    /// given; ignored when it is.
+    /// The drawing file to read (not blank, fewer than 4096 UTF-8 bytes). Used when `text` is
+    /// not given; ignored when it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "path_schema")]
     pub path: Option<DrawingPath>,
@@ -162,9 +162,12 @@ impl JsonSchema for InsertSvgParams {
 
 const INSERT_SVG: &str = "Insert an SVG drawing into a sketch as curves: the active sketch, or a new one when none is being edited. Give the drawing as `path` or as `text`. It can be sized, turned and placed. Text in the drawing becomes sketch text. One undo step.";
 
-/// The insert commands need `path` or `text`; the handler says so when both are left out.
+/// The insert commands need `path` or `text`; the handler says so when both are left out. A
+/// `path` it reads (no `text`) is not blank and under 4096 bytes; `maxLength` counts
+/// characters, so 4095 is as close as the schema gets.
 fn source_required(schema: &mut Schema) {
-    schema.insert("anyOf".into(), serde_json::json!([{"required": ["text"]}, {"required": ["path"]}]));
+    let read_path = serde_json::json!({"type": "string", "maxLength": 4095, "pattern": not_blank_pattern()});
+    schema.insert("anyOf".into(), serde_json::json!([{"required": ["text"]}, {"required": ["path"], "properties": {"path": read_path}}]));
 }
 
 fn path_schema(_: &mut SchemaGenerator) -> Schema {

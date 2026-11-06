@@ -160,8 +160,15 @@ fn the_schemas_take_what_the_handlers_read() {
                 (json!({"text": "x", "align": "left"}), false),
                 (json!({"text": "x", "at": [1]}), false),
                 (json!({"text": "x", "wdth": 5}), false),
+                (json!({"path": "x".repeat(4096)}), false),
+                (json!({"text": "x", "path": " "}), true),
             ],
         );
+    }
+    // A `path` read without `text` is not blank (`conforms` doesn't check patterns).
+    for schema in [input_schema_for::<InsertDxfParams>(), input_schema_for::<InsertSvgParams>()] {
+        let read_path = &schema.as_value()["anyOf"][1]["properties"]["path"];
+        assert_eq!(read_path["pattern"], json!(crate::schema::types::not_blank_pattern()));
     }
     takes(
         input_schema_for::<ExportDxfParams>(),
