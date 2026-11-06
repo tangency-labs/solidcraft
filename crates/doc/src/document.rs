@@ -2449,6 +2449,11 @@ pub struct HoleReference {
     /// the face's plane.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub datum: Option<HoleDatum>,
+    /// With a `datum`: the hole is on the other side of its line than the plane's normal (or, for
+    /// an axis, the face's normal crossed with it) points to. Set where the hole is placed, so the
+    /// hole keeps its side when the plane or axis later moves past it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub opposite: bool,
 }
 
 /// What a hole's reference measures from when it is not an edge, by name: an origin plane or

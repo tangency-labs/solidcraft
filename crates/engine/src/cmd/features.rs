@@ -60,7 +60,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("cylinder")
         .contract(&CYLINDER_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("radius | diameter, height: expr; base?: [x,y,z] (centre of the bottom: numbers in mm or length expressions; default: the origin); axis?: X|Y|Z|[x,y,z] (default Z); references?: [{edge: [x,y,z] on a straight edge of the face it stands on | plane: name | axis: name (an origin XY, XZ, YZ, X, Y, Z or a construction one: its line in the face's plane), distance: expr}] (at most two, as solid.hole's: the base centre goes that far from each edge's line, in the face's plane, and follows the edges; with a numeric base only); operation?, touching?, targets?: [body], name?, body_name?"),
+        .params("radius | diameter, height: expr; base?: [x,y,z] (centre of the bottom: numbers in mm or length expressions; default: the origin); axis?: X|Y|Z|[x,y,z] (default Z); references?: [{edge: [x,y,z] on a straight edge of the face it stands on | plane: name | axis: name (an origin XY, XZ, YZ, X, Y, Z or a construction one: its line in the face's plane, the base keeping its side of it), distance: expr}] (at most two, as solid.hole's: the base centre goes that far from each edge's line, in the face's plane, and follows the edges; with a numeric base only); operation?, touching?, targets?: [body], name?, body_name?"),
     CommandSpec::new("solid.sphere", "Sphere", crate::checked!("solid.sphere", prim_sphere))
         .at("SOLID", "CREATE")
         .icon("sphere")
@@ -105,7 +105,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "CREATE")
         .icon("hole")
         .key("H")
-        .params("position: [x,y,z] on a face (numbers, or length expressions the hole follows) | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch, into the material on whichever side of the sketch plane it is) | sketch alone (every sketch point: standalone points and circle centres); flip?: bool (sketch points: drill to the other side); single?: bool (with one sketch point: a Single hole that follows the point, drilled into the face there); direction?: [x,y,z] (default: into the face, against its outward normal; where faces of several bodies meet there, the face of a body in `targets`; one that leaves the face is mirrored into it; ignored with sketch points unless single); diameter | thread (a tapped hole, drilled with the tap maker's tabulated drill: ISO metric (a custom metric size: major minus pitch), UNC/UNF, G, Rp, Rc 1/16 to 4, NPT 1/16 to 3; a `diameter` given with it chooses another drill, from the thread's minor diameter to 5% over the tap maker's) | clearance: \"M6\" with fit?: close|normal|loose (ISO 273); depth? (default through all) | to?: [x,y,z] (To Object: drill to that face or point); references?: [{edge: [x,y,z] on a straight edge of the face | plane: name | axis: name (an origin XY, XZ, YZ, X, Y, Z or a construction one: its line in the face's plane), distance: expr}] (at most two; the centre goes that far from each edge's line, in the face's plane, and follows the edges; with a numeric position only); type?: simple|drilled|counterbore|countersink; tip_angle?; cb_diameter?, cb_depth?, bridge?: length (counterbore: two 3D-printing bridge layers this thick below its floor, a slot along X then a square; e.g. 0.2 mm); cs_diameter?, cs_angle?; thread?: \"M6\", \"1/4-20 UNC\", \"G 1/4\", \"Rp 1/4\", \"Rc 1/4\" or \"1/4-18 NPT\" (cosmetic unless modeled); hand?: right|left (the tapped thread's hand; default right; needs thread); thread_depth?: positive length independent of drill depth (default: full useful cylindrical wall; must fit that wall); modeled?: bool (needs thread: the tapped thread cut into the wall, the groove between its teeth, as solid.thread's modelled one; default false: listed only); ease_out?: expr|standard|short (modelled tapped threads: the inner end, towards the bottom, fades out over this length, ISO 3508's runout, standard 2.5 P, short 1.25 P; without it the groove stops square at thread_depth, or clear of a blind hole's bottom); targets?: [body] (the bodies to drill; holes at the points of a sketch on a body's face default to that body, found along the holes' direction on it alone; explicit targets or participants override, [\"*\"] every body)"),
+        .params("position: [x,y,z] on a face (numbers, or length expressions the hole follows) | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch, into the material on whichever side of the sketch plane it is) | sketch alone (every sketch point: standalone points and circle centres); flip?: bool (sketch points: drill to the other side); single?: bool (with one sketch point: a Single hole that follows the point, drilled into the face there); direction?: [x,y,z] (default: into the face, against its outward normal; where faces of several bodies meet there, the face of a body in `targets`; one that leaves the face is mirrored into it; ignored with sketch points unless single); diameter | thread (a tapped hole, drilled with the tap maker's tabulated drill: ISO metric (a custom metric size: major minus pitch), UNC/UNF, G, Rp, Rc 1/16 to 4, NPT 1/16 to 3; a `diameter` given with it chooses another drill, from the thread's minor diameter to 5% over the tap maker's) | clearance: \"M6\" with fit?: close|normal|loose (ISO 273); depth? (default through all) | to?: [x,y,z] (To Object: drill to that face or point); references?: [{edge: [x,y,z] on a straight edge of the face | plane: name | axis: name (an origin XY, XZ, YZ, X, Y, Z or a construction one: its line in the face's plane, the hole keeping its side of it), distance: expr}] (at most two; the centre goes that far from each edge's line, in the face's plane, and follows the edges; with a numeric position only); type?: simple|drilled|counterbore|countersink; tip_angle?; cb_diameter?, cb_depth?, bridge?: length (counterbore: two 3D-printing bridge layers this thick below its floor, a slot along X then a square; e.g. 0.2 mm); cs_diameter?, cs_angle?; thread?: \"M6\", \"1/4-20 UNC\", \"G 1/4\", \"Rp 1/4\", \"Rc 1/4\" or \"1/4-18 NPT\" (cosmetic unless modeled); hand?: right|left (the tapped thread's hand; default right; needs thread); thread_depth?: positive length independent of drill depth (default: full useful cylindrical wall; must fit that wall); modeled?: bool (needs thread: the tapped thread cut into the wall, the groove between its teeth, as solid.thread's modelled one; default false: listed only); ease_out?: expr|standard|short (modelled tapped threads: the inner end, towards the bottom, fades out over this length, ISO 3508's runout, standard 2.5 P, short 1.25 P; without it the groove stops square at thread_depth, or clear of a blind hole's bottom); targets?: [body] (the bodies to drill; holes at the points of a sketch on a body's face default to that body, found along the holes' direction on it alone; explicit targets or participants override, [\"*\"] every body)"),
     CommandSpec::new("solid.pipe", "Pipe", crate::checked!("solid.pipe", pipe))
         .at("SOLID", "CREATE")
         .icon("pipe")
@@ -1489,7 +1489,7 @@ fn prim_cylinder(s: &mut Session, p: &Value) -> Result<Value> {
     let axis = axis_dir_param(p, cmd)?;
     // Reference edges (#6380), as a Single hole's: the base centre sits at these distances from
     // straight edges of the face it stands on, and `base` keeps where those put it.
-    let references = hole_reference_params(s, p, cmd)?;
+    let mut references = hole_reference_params(s, p, cmd)?;
     let base = if references.is_empty() {
         base
     } else {
@@ -1497,7 +1497,7 @@ fn prim_cylinder(s: &mut Session, p: &Value) -> Result<Value> {
             .get("base")
             .and_then(vec3)
             .ok_or_else(|| bad(cmd, "`references` place a cylinder by its `base` given as numbers, not length expressions"))?;
-        point_expr(referenced_centre(s, cmd, &references, at, -axis)?)
+        point_expr(referenced_centre(s, cmd, &mut references, at, -axis)?)
     };
     add_feature(s, p, FeatureKind::Cylinder { base, axis: Dir(axis), radius, height, operation: operation(p, cmd)?, references })
 }
@@ -2807,7 +2807,7 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
         None => None,
     };
     // Reference edges (#37): the centre sits at these distances from straight edges of its face.
-    let references = hole_reference_params(s, p, cmd)?;
+    let mut references = hole_reference_params(s, p, cmd)?;
     if !references.is_empty() && (points.is_some() || at.is_some()) {
         return Err(bad(cmd, "`references` place a hole by its `position` given as numbers, not at sketch points or length expressions"));
     }
@@ -2845,7 +2845,7 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
     };
     // Placed by its reference edges: drilled where their distances put it, which `position`
     // then keeps. The edges must be straight edges at the given points, and cross.
-    let position = if references.is_empty() { position } else { referenced_centre(s, cmd, &references, position, direction)? };
+    let position = if references.is_empty() { position } else { referenced_centre(s, cmd, &mut references, position, direction)? };
     // The diameter: given, or a metric-estimate/Unified-table tap drill, or an ISO 273
     // clearance hole for a bolt size (close, normal or loose fit).
     // A diameter number out of range says so, rather than that none was given (#9625).
@@ -2999,11 +2999,12 @@ fn runout_param(s: &Session, p: &Value, cmd: &str, key: &str) -> Result<Option<s
 
 /// Where reference edges (#37) put a hole's (or a cylinder's) centre picked at `at` on a flat
 /// face, `dir` into it: at their distances from the edges, which must be straight edges at the
-/// given points, and cross.
-fn referenced_centre(s: &Session, cmd: &str, references: &[solidcraft_doc::HoleReference], at: Vec3, dir: Vec3) -> Result<Vec3> {
+/// given points, and cross. A plane or an axis keeps the side of its line `at` is on.
+fn referenced_centre(s: &Session, cmd: &str, references: &mut [solidcraft_doc::HoleReference], at: Vec3, dir: Vec3) -> Result<Vec3> {
     let st = s.model.state();
+    solidcraft_doc::hole_reference::keep_datum_sides(&st, at, dir, references, true).map_err(|e| bad(cmd, e.to_string()))?;
     let mut distances = Vec::with_capacity(references.len());
-    for r in references {
+    for r in references.iter() {
         distances.push(s.doc.eval(&r.distance, Kind::Length).map_err(|e| bad(cmd, format!("`references`: {e}")))?);
     }
     let inputs = solidcraft_doc::hole_reference::inputs_of(&st, references, &[]).map_err(|e| bad(cmd, e.to_string()))?;
@@ -3045,7 +3046,7 @@ fn hole_reference_params(s: &Session, p: &Value, cmd: &str) -> Result<Vec<solidc
         };
         let distance = expr(r, "distance").ok_or_else(|| bad(cmd, format!("`references[{i}].distance` {}", expr_problem(r.get("distance")))))?;
         check_expr(s, &distance, Kind::Length, cmd, "references")?;
-        out.push(solidcraft_doc::HoleReference { edge: Position(edge), distance, datum });
+        out.push(solidcraft_doc::HoleReference { edge: Position(edge), distance, datum, opposite: false });
     }
     Ok(out)
 }
