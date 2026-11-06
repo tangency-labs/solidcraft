@@ -3,7 +3,9 @@
 use std::collections::BTreeSet;
 
 use crate::inertia::principal;
-use crate::{Mesh, Vec3};
+use solidcore_record::Vec3;
+
+use crate::{Mesh, Vec3Geom};
 
 /// The most points [`convex_hull`] takes.
 pub const MAX_HULL_POINTS: usize = 2_000_000;
