@@ -111,7 +111,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.offset_resolve_crossing_loops = true;
     f.offset_walls_touch_refused = true;
     f.offset_analytic_mate_edges = true;
-    f.precise_properties_split_at_surface_knots = true;
     f.nurb_cylinder_inside_out_frame = true;
     f.shell_inner_shell_of_statuses = true;
     f.offset_collapsed_rounds_mated = true;

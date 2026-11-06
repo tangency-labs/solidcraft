@@ -1,0 +1,812 @@
+# Known mismatches of mass.integrator (format: crates/difftest/src/known.rs).
+
+# The trims' lowest v is the only integration base (#1556; plan/findings/mass.integrator--trim-base-v-default-moves-cases-2026-11-05.md): 38 cases on bounded faces, within the requested accuracy on both sides.
+[[mismatch]]
+unit = "mass.integrator"
+case = "disk_face_area_eps1e-06"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[0]: cpp=7.853981667916758e-1 rust=7.853981721366852e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "disk_face_centroid_eps1e-06"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[0]: cpp=7.853981606601437e-1 rust=7.853981629120825e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "disk_brep_area_eps1e-06"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[0]: cpp=7.853981667916758e-1 rust=7.853981721366852e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "annulus_face_area_eps1e-06"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[0]: cpp=6.597344606562352e-1 rust=6.597344626128508e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "annulus_face_centroid_eps1e-06"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[0]: cpp=6.597344547738021e-1 rust=6.597344570057695e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "annulus_brep_area_eps1e-06"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[0]: cpp=6.597344606562352e-1 rust=6.597344626128508e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1556_disk_bounded_eps1e-06_orientation0_flags3"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[3]: cpp=-1.6493361681648178e-1 rust=-1.6493361658824646e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1556_disk_bounded_eps1e-06_orientation1_flags3"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[3]: cpp=-1.6493361681648178e-1 rust=-1.6493361658824646e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1556_disk_bounded_eps1e-06_orientation0_flags63"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[2]: cpp=-2.9059732315297954e-1 rust=-2.905973223289204e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1556_disk_bounded_eps1e-06_orientation1_flags63"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[2]: cpp=-2.9059732315297954e-1 rust=-2.905973223289204e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1556_disk_bounded_eps0.001_orientation0_flags3"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[0]: cpp=7.854231050186571e-1 rust=7.854028853486881e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1556_disk_bounded_eps0.001_orientation1_flags3"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[0]: cpp=7.854231050186571e-1 rust=7.854028853486881e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1556_disk_bounded_eps0.001_orientation0_flags63"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[0]: cpp=7.853978604653888e-1 rust=7.854003768664791e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1556_disk_bounded_eps0.001_orientation1_flags63"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[0]: cpp=7.853978604653888e-1 rust=7.854003768664791e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind1_eps0.001_orientation0_flags1"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[0]: cpp=7.853934955010916e-1 rust=7.854027880729091e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind1_eps0.001_orientation0_flags63"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[0]: cpp=7.854043854258602e-1 rust=7.854062551331382e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind1_eps0.001_orientation1_flags1"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[0]: cpp=7.853934955010916e-1 rust=7.854027880729091e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind1_eps0.001_orientation1_flags63"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[0]: cpp=7.854043854258602e-1 rust=7.854062551331382e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind1_eps0.0001_orientation0_flags1"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[0]: cpp=7.854000366462612e-1 rust=7.853991378447139e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind1_eps0.0001_orientation0_flags63"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[0]: cpp=7.853994690675159e-1 rust=7.853987876710342e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind1_eps0.0001_orientation1_flags1"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[0]: cpp=7.854000366462612e-1 rust=7.853991378447139e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind1_eps0.0001_orientation1_flags63"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[0]: cpp=7.853994690675159e-1 rust=7.853987876710342e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind1_eps1e-06_orientation0_flags1"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[0]: cpp=7.853981827437269e-1 rust=7.853981721366851e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind1_eps1e-06_orientation0_flags63"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[3]: cpp=-9.503317796851434e-1 rust=-9.503317817632463e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind1_eps1e-06_orientation1_flags1"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[0]: cpp=7.853981827437269e-1 rust=7.853981721366851e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind1_eps1e-06_orientation1_flags63"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[3]: cpp=-9.503317796851434e-1 rust=-9.503317817632463e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind2_eps0.001_orientation0_flags1"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[0]: cpp=6.597283879895861e-1 rust=6.597382274924593e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind2_eps0.001_orientation0_flags63"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[0]: cpp=6.59739231914306e-1 rust=6.59741439300085e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind2_eps0.001_orientation1_flags1"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[0]: cpp=6.597283879895861e-1 rust=6.597382274924593e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind2_eps0.001_orientation1_flags63"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[0]: cpp=6.59739231914306e-1 rust=6.59741439300085e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind2_eps0.0001_orientation0_flags1"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[0]: cpp=6.597361066971066e-1 rust=6.597352190761927e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind2_eps0.0001_orientation0_flags63"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[0]: cpp=6.597355274010016e-1 rust=6.597348363330051e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind2_eps0.0001_orientation1_flags1"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[0]: cpp=6.597361066971066e-1 rust=6.597352190761927e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind2_eps0.0001_orientation1_flags63"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[0]: cpp=6.597355274010016e-1 rust=6.597348363330051e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind2_eps1e-06_orientation0_flags1"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[0]: cpp=6.597344756021939e-1 rust=6.597344626128506e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind2_eps1e-06_orientation0_flags63"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[3]: cpp=-7.982786884871111e-1 rust=-7.982786934786243e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind2_eps1e-06_orientation1_flags1"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[0]: cpp=6.597344756021939e-1 rust=6.597344626128506e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind2_eps1e-06_orientation1_flags63"
+why = "the iso-u integrals start at the trims' lowest v, not the face UV domain's (#1556): the Runge-Kutta steps differ and the result moves within the requested accuracy, both sides holding it against the closed form (values.out[3]: cpp=-7.982786884871111e-1 rust=-7.982786934786243e-1)"
+
+# WR-563 (plan/upstream-issues/WR-563--addendum-2026-11-05-trim-base-v-default.md): 16 cases unbounded or half-open in v, where the C++ is wrong.
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1556_disk_unbounded_eps1e-06_orientation0_flags3"
+cpp_defect = "WR-563"
+why = "the C++ area is a small difference of large terms (values.out[0]: cpp=7.857377377804369e-1 rust=7.853981643758157e-1, exact pi/4 = 0.7853981633974483)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1556_disk_unbounded_eps1e-06_orientation1_flags3"
+cpp_defect = "WR-563"
+why = "the C++ area is a small difference of large terms (values.out[0]: cpp=7.857377377804369e-1 rust=7.853981643758157e-1, exact pi/4 = 0.7853981633974483)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1556_disk_unbounded_eps1e-06_orientation0_flags63"
+cpp_defect = "WR-563"
+why = "the C++ fails with status 1001 and no values (its iso-u integrals start 1.2e6 below the disk, the moments' error scales cannot be met); solidcore returns all 26 components"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1556_disk_unbounded_eps1e-06_orientation1_flags63"
+cpp_defect = "WR-563"
+why = "the C++ fails with status 1001 and no values (its iso-u integrals start 1.2e6 below the disk, the moments' error scales cannot be met); solidcore returns all 26 components"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1556_disk_unbounded_eps0.001_orientation0_flags3"
+cpp_defect = "WR-563"
+why = "the C++ area is a small difference of large terms (values.out[0]: cpp=2.19905123176286e1 rust=7.854140020563323e-1, exact pi/4 = 0.7853981633974483)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1556_disk_unbounded_eps0.001_orientation1_flags3"
+cpp_defect = "WR-563"
+why = "the C++ area is a small difference of large terms (values.out[0]: cpp=2.19905123176286e1 rust=7.854140020563323e-1, exact pi/4 = 0.7853981633974483)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1556_disk_unbounded_eps0.001_orientation0_flags63"
+cpp_defect = "WR-563"
+why = "the C++ fails with status 1001 and no values (its iso-u integrals start 1.2e6 below the disk, the moments' error scales cannot be met); solidcore returns all 26 components"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1556_disk_unbounded_eps0.001_orientation1_flags63"
+cpp_defect = "WR-563"
+why = "the C++ fails with status 1001 and no values (its iso-u integrals start 1.2e6 below the disk, the moments' error scales cannot be met); solidcore returns all 26 components"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1556_disk_halfopen_eps1e-06_orientation0_flags3"
+cpp_defect = "WR-563"
+why = "the C++ area is a small difference of large terms (values.out[0]: cpp=7.857377377804369e-1 rust=7.853981643758157e-1, exact pi/4 = 0.7853981633974483)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1556_disk_halfopen_eps1e-06_orientation1_flags3"
+cpp_defect = "WR-563"
+why = "the C++ area is a small difference of large terms (values.out[0]: cpp=7.857377377804369e-1 rust=7.853981643758157e-1, exact pi/4 = 0.7853981633974483)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1556_disk_halfopen_eps1e-06_orientation0_flags63"
+cpp_defect = "WR-563"
+why = "the C++ fails with status 1001 and no values (its iso-u integrals start 1.2e6 below the disk, the moments' error scales cannot be met); solidcore returns all 26 components"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1556_disk_halfopen_eps1e-06_orientation1_flags63"
+cpp_defect = "WR-563"
+why = "the C++ fails with status 1001 and no values (its iso-u integrals start 1.2e6 below the disk, the moments' error scales cannot be met); solidcore returns all 26 components"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1556_disk_halfopen_eps0.001_orientation0_flags3"
+cpp_defect = "WR-563"
+why = "the C++ area is a small difference of large terms (values.out[0]: cpp=2.19905123176286e1 rust=7.854140020563323e-1, exact pi/4 = 0.7853981633974483)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1556_disk_halfopen_eps0.001_orientation1_flags3"
+cpp_defect = "WR-563"
+why = "the C++ area is a small difference of large terms (values.out[0]: cpp=2.19905123176286e1 rust=7.854140020563323e-1, exact pi/4 = 0.7853981633974483)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1556_disk_halfopen_eps0.001_orientation0_flags63"
+cpp_defect = "WR-563"
+why = "the C++ fails with status 1001 and no values (its iso-u integrals start 1.2e6 below the disk, the moments' error scales cannot be met); solidcore returns all 26 components"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1556_disk_halfopen_eps0.001_orientation1_flags63"
+cpp_defect = "WR-563"
+why = "the C++ fails with status 1001 and no values (its iso-u integrals start 1.2e6 below the disk, the moments' error scales cannot be met); solidcore returns all 26 components"
+
+# The precise-property steps' fifth-order error estimate (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): 89 cases whose steps move.
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_full_eps0.001_orientation0_flags1"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=1.1776888347623412e1 rust=1.177465618008263e1); not checked against an independent reference (at most against a tighter solidcore run, see the finding); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again; each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 1.0e-05 relative (rust was 1.1774779172613957e1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_full_eps0.001_orientation1_flags1"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=1.1776888347623412e1 rust=1.177465618008263e1); not checked against an independent reference (at most against a tighter solidcore run, see the finding); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again; each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 1.0e-05 relative (rust was 1.1774779172613957e1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_full_eps0.001_orientation0_flags63"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=1.1773361839289525e1 rust=1.1774752410269489e1); not checked against an independent reference (at most against a tighter solidcore run, see the finding); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again; each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 3.5e-10 relative (rust was 1.1774752414334227e1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_full_eps0.001_orientation1_flags63"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=1.1773361839289525e1 rust=1.1774752410269489e1); not checked against an independent reference (at most against a tighter solidcore run, see the finding); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again; each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 3.5e-10 relative (rust was 1.1774752414334227e1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_full_eps1e-06_orientation0_flags1"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=1.1774743123714035e1 rust=1.177475348990078e1); not checked against an independent reference (at most against a tighter solidcore run, see the finding); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again; each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 1.0e-09 relative (rust was 1.1774753501933382e1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_full_eps1e-06_orientation1_flags1"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=1.1774743123714035e1 rust=1.177475348990078e1); not checked against an independent reference (at most against a tighter solidcore run, see the finding); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again; each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 1.0e-09 relative (rust was 1.1774753501933382e1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_full_eps1e-06_orientation0_flags63"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=1.1774752376213497e1 rust=1.1774753791492468e1); not checked against an independent reference (at most against a tighter solidcore run, see the finding); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again; each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 1.8e-13 relative (rust was 1.1774753791494568e1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_full_eps1e-06_orientation1_flags63"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=1.1774752376213497e1 rust=1.1774753791492468e1); not checked against an independent reference (at most against a tighter solidcore run, see the finding); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again; each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 1.8e-13 relative (rust was 1.1774753791494568e1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_full_eps1e-08_orientation0_flags1"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=1.177475374989784e1 rust=1.177475379089077e1); not checked against an independent reference (at most against a tighter solidcore run, see the finding); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again; each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 4.2e-12 relative (rust was 1.1774753790940473e1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_full_eps1e-08_orientation1_flags1"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=1.177475374989784e1 rust=1.177475379089077e1); not checked against an independent reference (at most against a tighter solidcore run, see the finding); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again; each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 4.2e-12 relative (rust was 1.1774753790940473e1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_full_eps1e-08_orientation0_flags63"
+why = "precise-property steps are accepted on the larger of the embedded and the fifth-order estimate (#1556) and integrated between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md): no step crosses the iso-u integrand's jump at the double v knot 0.5, where it underflowed before; at the requested 1e-8 Rust is 2.8e-11 off a solidcore run at 1e-10 (not an independent reference), C++ 1.2e-10, so the values differ within the accuracy (values.out[14]: cpp=-6.854952359852559e-2 rust=-6.854952431479716e-2); each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 2.2e-12 relative (rust was -6.85495243146485e-2)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_full_eps1e-08_orientation1_flags63"
+why = "precise-property steps are accepted on the larger of the embedded and the fifth-order estimate (#1556) and integrated between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md): no step crosses the iso-u integrand's jump at the double v knot 0.5, where it underflowed before; at the requested 1e-8 Rust is 2.8e-11 off a solidcore run at 1e-10 (not an independent reference), C++ 1.2e-10, so the values differ within the accuracy (values.out[14]: cpp=6.854952359852559e-2 rust=6.854952431479716e-2); each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 2.2e-12 relative (rust was 6.85495243146485e-2)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_sub_eps0.001_orientation0_flags1"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=6.421001904121697e0 rust=6.427785145336853e0); not checked against an independent reference (at most against a tighter solidcore run, see the finding); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again; each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 3.2e-06 relative (rust was 6.427805935418449e0)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_sub_eps0.001_orientation1_flags1"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=6.421001904121697e0 rust=6.427785145336853e0); not checked against an independent reference (at most against a tighter solidcore run, see the finding); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again; each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 3.2e-06 relative (rust was 6.427805935418449e0)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_sub_eps0.001_orientation0_flags63"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=6.424831399330402e0 rust=6.427798303334571e0); not checked against an independent reference (at most against a tighter solidcore run, see the finding); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again; each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 8.9e-10 relative (rust was 6.4277983090872635e0)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_sub_eps0.001_orientation1_flags63"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=6.424831399330402e0 rust=6.427798303334571e0); not checked against an independent reference (at most against a tighter solidcore run, see the finding); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again; each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 8.9e-10 relative (rust was 6.4277983090872635e0)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_sub_eps1e-06_orientation0_flags1"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=6.427793875020921e0 rust=6.427798304801244e0); not checked against an independent reference (at most against a tighter solidcore run, see the finding); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again; each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 1.3e-09 relative (rust was 6.427798313005562e0)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_sub_eps1e-06_orientation1_flags1"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=6.427793875020921e0 rust=6.427798304801244e0); not checked against an independent reference (at most against a tighter solidcore run, see the finding); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again; each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 1.3e-09 relative (rust was 6.427798313005562e0)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_sub_eps1e-06_orientation0_flags63"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=6.427798571242889e0 rust=6.427798446390148e0); not checked against an independent reference (at most against a tighter solidcore run, see the finding); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again; each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 7.5e-13 relative (rust was 6.4277984463949585e0)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_sub_eps1e-06_orientation1_flags63"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=6.427798571242889e0 rust=6.427798446390148e0); not checked against an independent reference (at most against a tighter solidcore run, see the finding); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again; each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 7.5e-13 relative (rust was 6.4277984463949585e0)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_sub_eps1e-08_orientation0_flags1"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=6.427798496633921e0 rust=6.427798445122718e0); not checked against an independent reference (at most against a tighter solidcore run, see the finding); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again; each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 2.7e-12 relative (rust was 6.427798445140327e0)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_sub_eps1e-08_orientation1_flags1"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=6.427798496633921e0 rust=6.427798445122718e0); not checked against an independent reference (at most against a tighter solidcore run, see the finding); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again; each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 2.7e-12 relative (rust was 6.427798445140327e0)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_sub_eps1e-08_orientation0_flags63"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=6.427798471565715e0 rust=6.4277984461152124e0); not checked against an independent reference (at most against a tighter solidcore run, see the finding); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again; each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 1.5e-15 relative (rust was 6.427798446115222e0)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_sub_eps1e-08_orientation1_flags63"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=6.427798471565715e0 rust=6.4277984461152124e0); not checked against an independent reference (at most against a tighter solidcore run, see the finding); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again; each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 1.5e-15 relative (rust was 6.427798446115222e0)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_onespan_eps0.001_orientation0_flags63"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[17]: cpp=-1.0268328625177602e-3 rust=-1.0269249112021895e-3); not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_onespan_eps0.001_orientation1_flags63"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[17]: cpp=1.0268328625177602e-3 rust=1.0269249112021895e-3); not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_atknots_eps0.001_orientation0_flags63"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[19]: cpp=1.0504154747584548e-2 rust=1.050368227203086e-2); not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_atknots_eps0.001_orientation1_flags63"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[19]: cpp=-1.0504154747584548e-2 rust=-1.050368227203086e-2); not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_full_query2"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=1.1774743123714035e1 rust=1.177475348990078e1); not checked against an independent reference (at most against a tighter solidcore run, see the finding); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again; each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 1.0e-09 relative (rust was 1.1774753501933382e1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_full_query3"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=1.1774754999636038e1 rust=1.177475375528007e1); not checked against an independent reference (at most against a tighter solidcore run, see the finding); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again; each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 4.3e-11 relative (rust was 1.177475375578176e1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_full_query4"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=1.1774743123714035e1 rust=1.177475348990078e1); not checked against an independent reference (at most against a tighter solidcore run, see the finding); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again; each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 1.0e-09 relative (rust was 1.1774753501933382e1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_sub_query2"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=6.427793875020921e0 rust=6.427798304801244e0); not checked against an independent reference (at most against a tighter solidcore run, see the finding); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again; each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 1.3e-09 relative (rust was 6.427798313005562e0)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_sub_query3"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=6.427798285695551e0 rust=6.427798444378693e0); not checked against an independent reference (at most against a tighter solidcore run, see the finding); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again; each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 1.2e-11 relative (rust was 6.427798444454616e0)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_sub_query4"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=6.427793875020921e0 rust=6.427798304801244e0); not checked against an independent reference (at most against a tighter solidcore run, see the finding); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again; each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 1.3e-09 relative (rust was 6.427798313005562e0)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_huge_eps0.0001_flags63"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=1.0297775112768044e8 rust=1.0297715976191568e8); not checked against an independent reference (at most against a tighter solidcore run, see the finding); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again; each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 4.9e-09 relative (rust was 1.0297716026253788e8)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_huge_eps1e-08_flags63"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=1.0297715174510382e8 rust=1.0297715205556242e8); not checked against an independent reference (at most against a tighter solidcore run, see the finding); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again; each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 2.2e-14 relative (rust was 1.0297715205556473e8)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_tiny_eps0.0001_flags63"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=1.1771627858807163e0 rust=1.1771676578347727e0); not checked against an independent reference (at most against a tighter solidcore run, see the finding); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again; each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 3.3e-10 relative (rust was 1.1771676582183037e0)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "issue1435_multispan_tiny_eps1e-08_flags63"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[1]: cpp=-6.94504292286638e-7 rust=-6.945051382978423e-7); not checked against an independent reference (at most against a tighter solidcore run, see the finding); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again; each iso-u piece's end is evaluated from its own knot span (WR-670, #2091; plan/findings/mass.integrator--span-end-from-below-default-moves-cases-2026-11-05.md): the same integrals, moved again by 6.1e-11 relative (rust was -6.945051383403739e-7)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "edge_0_0"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[11]: cpp=1.4117293514598574e1 rust=1.4117299401900054e1); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "edge_0_2"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[11]: cpp=1.4117293514598574e1 rust=1.4117299401900054e1); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind3_eps0.001_orientation0_flags1"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=1.5316513639045044e0 rust=1.5316431634045e0); not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind3_eps0.001_orientation0_flags63"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[19]: cpp=6.066644290629446e-3 rust=6.066369476302059e-3); not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind3_eps0.001_orientation1_flags1"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=1.5316513639045044e0 rust=1.5316431634045e0); not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind3_eps0.001_orientation1_flags63"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[19]: cpp=-6.066644290629446e-3 rust=-6.066369476302059e-3); not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind3_eps0.0001_orientation0_flags1"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=1.531672379514613e0 rust=1.5316808353594389e0); not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind3_eps0.0001_orientation0_flags63"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[19]: cpp=6.066174901254158e-3 rust=6.06616870407084e-3); not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind3_eps0.0001_orientation1_flags1"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=1.531672379514613e0 rust=1.5316808353594389e0); not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind3_eps0.0001_orientation1_flags63"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[19]: cpp=-6.066174901254158e-3 rust=-6.06616870407084e-3); not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind3_eps1e-06_orientation0_flags1"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=1.5316866658736457e0 rust=1.5316864721533743e0); not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_face_kind3_eps1e-06_orientation1_flags1"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[0]: cpp=1.5316866658736457e0 rust=1.5316864721533743e0); not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_edge_exact_quarter_circle_1e-06_[0, 1]_0"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[11]: cpp=1.579942220942077e-1 rust=1.5799380767996107e-1); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_edge_exact_quarter_circle_1e-09_[0, 1]_0"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps. Only the length is under error control: an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction. Against the closed form pi r^2 int_0^(pi/2) (cos t - 0.37)^2 dt (r 0.1) = 8.181969578704593e-3 both sides miss the requested 1e-9 on out[18]: C++ -1.88e-8, Rust -2.34e-8; over the eight moved moment components C++ 3.7e-9 to 1.9e-8, Rust 4.7e-9 to 2.3e-8 (values.out[18]: cpp=8.181969424625443e-3 rust=8.181969387357924e-3)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_edge_rational_1e-06_[0, 1]_0"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[18]: cpp=4.861403834119381e-2 rust=4.861405399254936e-2); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_edge_rational_1e-06_[0.1, 0.9]_0"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[6]: cpp=9.109390152302982e-1 rust=9.109392931150639e-1); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_edge_rational_1e-09_[0, 1]_0"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[19]: cpp=8.523729984498926e-3 rust=8.52372999353917e-3); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_edge_constant_1e-06_[0, 1]_0"
+why = "a zero-length (constant) edge: every value is integration noise of order 1e-17, which the fifth-order step estimate (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) moves (values.out[18]: cpp=7.019270506221422e-21 rust=7.783658886404678e-21)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_edge_constant_1e-06_[0.1, 0.9]_0"
+why = "a zero-length (constant) edge: every value is integration noise of order 1e-17, which the fifth-order step estimate (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) moves (values.out[18]: cpp=2.124328576201437e-21 rust=5.248759817449463e-21)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_edge_constant_1e-09_[0, 1]_0"
+why = "a zero-length (constant) edge: every value is integration noise of order 1e-17, which the fifth-order step estimate (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) moves (values.out[15]: cpp=-1.1236456109466682e-19 rust=-1.1016102629694446e-19)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_edge_constant_1e-09_[0.1, 0.9]_0"
+why = "a zero-length (constant) edge: every value is integration noise of order 1e-17, which the fifth-order step estimate (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) moves (values.out[15]: cpp=-7.084765499177106e-20 rust=-7.09621766331163e-20)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_edge_scaled_exact_arc_1e-09_0"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[11]: cpp=1.5799422209420776e-37 rust=1.5799380767996128e-37); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen0014"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps. Against an independent reference (the quadratic Bezier evaluated in 40-digit arithmetic, tanh-sinh quadrature, cross-checked by a composite 64 x 20-point Gauss-Legendre rule): the length (out[0]) holds the requested 1e-6 on both sides, C++ 3.71e-8, Rust 3.85e-8; an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction, and they miss it alike, up to C++ 6.77e-6, Rust 6.95e-6 (out[10]) (values.out[10]: cpp=-2.579321510408551e-1 rust=-2.579321037039445e-1)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen0015"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[7]: cpp=2.494197806067281e19 rust=2.4941978939669475e19); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen0053"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[10]: cpp=-3.304950384300644e17 rust=-3.304948326675048e17); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen0089"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[7]: cpp=1.6086560024460752e-21 rust=1.6086559978971077e-21); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen0170"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[9]: cpp=6.8415958338780905e-3 rust=6.8415762195428356e-3); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen0306"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[9]: cpp=-6.157981454408036e-22 rust=-6.1579911428065055e-22); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen0325"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[11]: cpp=-1.7752517846673038e-1 rust=-1.775251059283146e-1); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen0370"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[9]: cpp=-6.0881374233342965e-2 rust=-6.0881786639330235e-2); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen0410"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[17]: cpp=-2.725669085181796e-23 rust=-2.7256688057787954e-23); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen0415"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[9]: cpp=6.410594086087826e-22 rust=6.410599319302717e-22); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen0417"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[8]: cpp=3.856563982914931e-22 rust=3.856558778517249e-22); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen0599"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[6]: cpp=1.4959785912708013e-2 rust=1.495978410228572e-2); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen0622"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[16]: cpp=-1.9868851978766925e17 rust=-1.9868851266871466e17); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen0624"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[8]: cpp=2.215403206681208e-1 rust=2.2154091147095906e-1); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen0658"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[6]: cpp=1.9383599202823926e19 rust=1.938359926129736e19); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen0662"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[3]: cpp=2.440546464505245e-18 rust=2.440548544950737e-18); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen0672"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[10]: cpp=-2.9746029712627645e-3 rust=-2.974729993252862e-3); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen0674"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[11]: cpp=1.3348921343085448e-21 rust=1.3348919335178984e-21); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen0700"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[21]: cpp=-5.017749178972226e21 rust=-5.017749208109253e21); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen0713"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[8]: cpp=1.9696080377673614e-1 rust=1.9696092503713677e-1); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen0765"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[18]: cpp=2.6669614720107435e-29 rust=2.6669618206702145e-29); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen0794"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[9]: cpp=5.5294356191219085e-2 rust=5.5294280530766474e-2); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen0803"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[11]: cpp=-3.007650470138298e-21 rust=-3.0076502296209557e-21); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen0832"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[9]: cpp=-4.697052410743003e19 rust=-4.697052524112276e19); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen0936"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[18]: cpp=5.8492191973813085e-28 rust=5.849202145982622e-28); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen0940"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[8]: cpp=3.390298690954588e-22 rust=3.390302605742828e-22); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen1072"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[22]: cpp=-3.4142041332867242e22 rust=-3.4142041391970547e22); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen1106"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[8]: cpp=1.2691588589609603e-21 rust=1.2691594003749546e-21); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen1191"
+why = "precise-property steps are accepted on the larger of the embedded estimate and the fifth-order one, the fifth divided difference of the step's samples (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.out[6]: cpp=7.940216416280623e-21 rust=7.940238009987348e-21); an edge's area, volume and moment components are not under error control (each has the error scale BIG_DOUBLE, as upstream), so no accuracy holds for them by construction; not checked against an independent reference (at most against a tighter solidcore run, see the finding)"
+
+# A curve's length: span ends from their own knot span, steps on the quadrature estimate (plan/findings/curve.curve_p5--curve-length-honest-acceptance-moves-cases-2026-11-05.md).
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_surface_area_kind3_eps0.001"
+why = "a curve's length: each span's end is evaluated in its own knot span and the steps are accepted on the larger of the embedded estimate and the fifth divided difference (plan/findings/curve.curve_p5--curve-length-honest-acceptance-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves within the requested accuracy; error against a composite Gauss-Legendre reference (values.out[0]: cpp=6.172008456445699e-1 (error 1.66e-5) rust=6.172008961967692e-1 (error 1.66e-5))"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_edge_rational_1e-06_[0.1, 0.9]_1"
+why = "a curve's length: each span's end is evaluated in its own knot span and the steps are accepted on the larger of the embedded estimate and the fifth divided difference (plan/findings/curve.curve_p5--curve-length-honest-acceptance-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves within the requested accuracy; error against a composite Gauss-Legendre reference (values.out[0]: cpp=2.3518616866401674e0 (error 4.04e-9) rust=2.351861689282625e0 (error 5.16e-9))"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen0054"
+why = "a curve's length: each span's end is evaluated in its own knot span and the steps are accepted on the larger of the embedded estimate and the fifth divided difference (plan/findings/curve.curve_p5--curve-length-honest-acceptance-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves within the requested accuracy; error against a composite Gauss-Legendre reference (values.out[0]: cpp=2.4798720694305123e0 (error 6.28e-9) rust=2.479872075025882e0 (error 8.54e-9))"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen0237"
+why = "a curve's length: each span's end is evaluated in its own knot span and the steps are accepted on the larger of the embedded estimate and the fifth divided difference (plan/findings/curve.curve_p5--curve-length-honest-acceptance-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves within the requested accuracy; error against a composite Gauss-Legendre reference (values.out[0]: cpp=2.1864449009187074e5 (error 3.00e-9) rust=2.1864449043031014e5 (error 4.55e-9))"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen0509"
+why = "a curve's length: each span's end is evaluated in its own knot span and the steps are accepted on the larger of the embedded estimate and the fifth divided difference (plan/findings/curve.curve_p5--curve-length-honest-acceptance-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves within the requested accuracy; error against a composite Gauss-Legendre reference (values.out[0]: cpp=3.0319740513317933e5 (error 9.30e-9) rust=3.031974056807959e5 (error 1.11e-8))"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen1177"
+why = "a curve's length: each span's end is evaluated in its own knot span and the steps are accepted on the larger of the embedded estimate and the fifth divided difference (plan/findings/curve.curve_p5--curve-length-honest-acceptance-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves within the requested accuracy; error against a composite Gauss-Legendre reference (values.out[0]: cpp=1.47755888032351e5 (error -7.27e-8) rust=1.477558885233032e5 (error -6.94e-8))"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen0339"
+why = "a curve's length: each span's end is evaluated in its own knot span and the steps are accepted on the larger of the embedded estimate and the fifth divided difference (plan/findings/curve.curve_p5--curve-length-honest-acceptance-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves within the requested accuracy; error against a composite Gauss-Legendre reference (values.out[0]: cpp=-3.432429768168192e-1 (error -2.04e-8 (closed form)) rust=-3.432429771810604e-1 (error -1.93e-8 (closed form)))"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen0426"
+why = "a curve's length: each span's end is evaluated in its own knot span and the steps are accepted on the larger of the embedded estimate and the fifth divided difference (plan/findings/curve.curve_p5--curve-length-honest-acceptance-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves within the requested accuracy; error against a composite Gauss-Legendre reference (values.out[0]: cpp=9.447298764782703e-1 (error -2.36e-7 (closed form)) rust=9.447298599441718e-1 (error -2.54e-7 (closed form)))"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "gen0994"
+why = "both sides miss the requested 1e-9 against the closed form -c0/c1 (cos(c1 b + c2) - cos(c1 a + c2)) = 9.756956687989441e-17: C++ -4.39e-6, Rust -4.70e-6 relative. The integral is below EFF_ZERO = 1e-12, and the step control floors each error scale at EFF_ZERO (upstream's SmODEIntegrator, kept), so the integral is held to an absolute 1e-12 * 1e-9 per step, not to the relative accuracy; the curve-length change (each span's end in its own knot span, the fifth divided difference; plan/findings/curve.curve_p5--curve-length-honest-acceptance-moves-cases-2026-11-05.md) takes other steps under the same floor (values.out[0]: cpp=9.756913811407506e-17 rust=9.756910829702335e-17)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_edge_constant_0.001_[0.1, 0.9]_1"
+why = "a point curve (three equal control points): its length is exactly 0. C++ integrates |C'|, which is rounding noise, and returns noise; Rust gives exactly 0, since a span whose control points are one point has length 0 (BSplineCurve::span_speed gives None), and its steps are accepted at the rounding of the computed speed (SpanSpeed::rounding_bound) (values.out[0]: cpp=2.869137949964774e-17 rust=0e0; exact 0)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_edge_constant_1e-06_[0, 1]_1"
+why = "a point curve (three equal control points): its length is exactly 0. C++ integrates |C'|, which is rounding noise, and returns noise; Rust gives exactly 0, since a span whose control points are one point has length 0 (BSplineCurve::span_speed gives None), and its steps are accepted at the rounding of the computed speed (SpanSpeed::rounding_bound) (values.out[0]: cpp=5.1892366649254e-17 rust=0e0; exact 0)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_edge_constant_1e-06_[0.1, 0.9]_1"
+why = "a point curve (three equal control points): its length is exactly 0. C++ integrates |C'|, which is rounding noise, and returns noise; Rust gives exactly 0, since a span whose control points are one point has length 0 (BSplineCurve::span_speed gives None), and its steps are accepted at the rounding of the computed speed (SpanSpeed::rounding_bound) (values.out[0]: cpp=3.8879599162417425e-17 rust=0e0; exact 0)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_edge_constant_1e-09_[0, 1]_1"
+why = "a point curve (three equal control points): its length is exactly 0. C++ integrates |C'|, which is rounding noise, and returns noise; Rust gives exactly 0, since a span whose control points are one point has length 0 (BSplineCurve::span_speed gives None), and its steps are accepted at the rounding of the computed speed (SpanSpeed::rounding_bound) (values.out[0]: cpp=4.5176520155805236e-17 rust=0e0; exact 0)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_edge_constant_1e-09_[0.1, 0.9]_1"
+why = "a point curve (three equal control points): its length is exactly 0. C++ integrates |C'|, which is rounding noise, and returns noise; Rust gives exactly 0, since a span whose control points are one point has length 0 (BSplineCurve::span_speed gives None), and its steps are accepted at the rounding of the computed speed (SpanSpeed::rounding_bound) (values.out[0]: cpp=3.334745134151084e-17 rust=0e0; exact 0)"
+
+[[mismatch]]
+unit = "mass.integrator"
+case = "review_edge_constant_0.001_[0, 1]_1"
+why = "a point curve (three equal control points): its length is exactly 0. C++ integrates |C'|, which is rounding noise, and returns noise; Rust gives exactly 0, since a span whose control points are one point has length 0 (BSplineCurve::span_speed gives None), and its steps are accepted at the rounding of the computed speed (SpanSpeed::rounding_bound) (values.out[0]: cpp=7.119288733715064e-17 rust=0e0; exact 0)"

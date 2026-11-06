@@ -4089,7 +4089,6 @@ impl AreaIntegrand<'_> {
             k,
             self.uv_domain.min().y,
             self.uv_domain.max().y,
-            crate::mass::integrator::IntegrationAlgorithm::Romberg,
             self.iso_curve_accuracy,
             |v| eval.evaluate(k, v),
         )

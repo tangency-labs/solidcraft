@@ -209,12 +209,11 @@ fn a_band_short_of_the_feature_leaves_it_either_way() {
     }
 }
 
-// ---- Against the fork's kernel at eb883ad, bit for bit ----
+// ---- With the fork's opt-ins at eb883ad (the figures: `assert_pinned`) ----
 
 /// The opt-ins these figures rest on, found by removing every flag the figures don't need, so a
 /// new flag on `main` can't move them. Not `UpstreamFixes::all()`: it holds fixes the fork doesn't
-/// have, such as `precise_properties_trim_base_v` (WR-563), which moves the volume of any face on
-/// a cylinder or a cone.
+/// have.
 fn fork_kernel(keep: bool) -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut fixes = UpstreamFixes::default();
@@ -223,7 +222,6 @@ fn fork_kernel(keep: bool) -> Kernel {
     fixes.fillet_overflow_trim_at_creases = true;
     fixes.linear_sweep_arc_is_cylinder = true;
     fixes.precise_properties_body_length_scale = true;
-    fixes.precise_properties_split_at_surface_knots = true;
     fixes.fillet_keep_features = keep;
     k.fixes = fixes;
     k
@@ -246,28 +244,38 @@ fn rounded_with(keep: bool, feature: Feature, r: f64) -> Result<(f64, usize)> {
     Ok((volume_of(&k, &mut b), b.face_list().len()))
 }
 
-/// The figures are the fork's `smlib_brep_volume` at accuracy 1e-7, on Linux, printed with 17
-/// digits.
-fn assert_as_the_fork(keep: bool, feature: Feature, r: f64, volume: f64, faces: usize) {
+/// Pins solidcore's own volume (at accuracy 1e-7, on Linux, printed with 17 digits) and face
+/// count of the block with `feature`, rounded `r`; these are not the fork's figures. They were
+/// checked against two references. Against the fork's `smlib_brep_volume` at the same
+/// accuracy: the face counts and statuses are the fork's; the prism boss's volume is the fork's
+/// bit for bit, the prism pocket's and the taken features' within a last bit, and those of a
+/// body with a cylinder or a cone face within the 1e-7 they are integrated to (by -2.4e-7 at
+/// most, 1e-11 of it), since solidcore's precise properties integrate each iso-u line from the
+/// trims' lowest v (WR-563, #1556) where the fork starts at the face UV domain's, and its steps
+/// read a fifth-order error estimate (#1556, 5.0e-13 at most). Against the closed forms: the
+/// r 1.9 boss and hole are off by +2.0e-7 and -3.6e-7 (the fork's +4.4e-7 and -1.9e-7), and the
+/// r 8 kept cylinder boss and hole, cone boss and 19 degree lean stay 3.4e-5 to 4.8e-5 above
+/// theirs, the crease's fit, as the fork's do; the cone pit has none.
+fn assert_pinned(keep: bool, feature: Feature, r: f64, volume: f64, faces: usize) {
     let (v, n) = rounded_with(keep, feature, r).unwrap();
-    // Bit for bit where the fork's figures were taken. Elsewhere the platform's libm can move
+    // Bit for bit where the figures were taken (Linux). Elsewhere the platform's libm can move
     // the last bit (one on Windows, the kept hole).
     if cfg!(target_os = "linux") {
         assert_eq!(
             v.to_bits(),
             volume.to_bits(),
-            "volume {v:.17}, the fork's {volume:.17}"
+            "volume {v:.17}, pinned {volume:.17}"
         );
     } else {
         assert!(
             (v - volume).abs() <= 1e-14 * volume,
-            "volume {v:.17}, the fork's {volume:.17}"
+            "volume {v:.17}, pinned {volume:.17}"
         );
     }
     assert_eq!(n, faces);
 }
 
-const TAKEN: f64 = 23450.619298757138;
+const TAKEN: f64 = 23450.619298757134;
 
 fn cylinder_boss(k: &mut Kernel, block: Brep) -> Result<Brep> {
     let c = create_cylinder(k, Point3::new(20.0, 4.0, 20.0), 2.0, 5.0)?;
@@ -300,33 +308,33 @@ fn cone_pit(k: &mut Kernel, block: Brep) -> Result<Brep> {
 }
 
 #[test]
-fn cylinders_match_the_fork() {
-    assert_as_the_fork(true, cylinder_boss, 8.0, 23528.16552792312, 9);
-    assert_as_the_fork(true, cylinder_hole, 8.0, 23402.501835366344, 9);
-    assert_as_the_fork(false, cylinder_boss, 8.0, TAKEN, 7);
-    assert_as_the_fork(false, cylinder_hole, 8.0, TAKEN, 7);
+fn cylinders_keep_their_pinned_volumes() {
+    assert_pinned(true, cylinder_boss, 8.0, 23528.165527753492, 9);
+    assert_pinned(true, cylinder_hole, 8.0, 23402.501835298488, 9);
+    assert_pinned(false, cylinder_boss, 8.0, TAKEN, 7);
+    assert_pinned(false, cylinder_hole, 8.0, TAKEN, 7);
     for keep in [true, false] {
-        assert_as_the_fork(keep, cylinder_boss, 1.9, 24031.843348307855, 9);
-        assert_as_the_fork(keep, cylinder_hole, 1.9, 23906.179641530241, 9);
+        assert_pinned(keep, cylinder_boss, 1.9, 24031.84334806833, 9);
+        assert_pinned(keep, cylinder_hole, 1.9, 23906.179641369188, 9);
     }
 }
 
 /// Planar walls: each crease is an exact section.
 #[test]
-fn prisms_match_the_fork() {
-    assert_as_the_fork(true, prism_boss, 8.0, 23549.896259768986, 12);
-    assert_as_the_fork(true, prism_pocket, 8.0, 23389.896259952176, 12);
-    assert_as_the_fork(false, prism_boss, 8.0, TAKEN, 7);
-    assert_as_the_fork(false, prism_pocket, 8.0, TAKEN, 7);
+fn prisms_keep_their_pinned_volumes() {
+    assert_pinned(true, prism_boss, 8.0, 23549.896259768986, 12);
+    assert_pinned(true, prism_pocket, 8.0, 23389.896259952173, 12);
+    assert_pinned(false, prism_boss, 8.0, TAKEN, 7);
+    assert_pinned(false, prism_pocket, 8.0, TAKEN, 7);
 }
 
 /// Walls that lean: kept as the fork keeps them, the boss's with no refusal.
 #[test]
-fn cones_match_the_fork() {
-    assert_as_the_fork(true, cone_boss, 8.0, 23501.985588925883, 11);
-    assert_as_the_fork(true, cone_pit, 8.0, 23427.540889420579, 9);
-    assert_as_the_fork(false, cone_boss, 8.0, TAKEN, 7);
-    assert_as_the_fork(false, cone_pit, 8.0, TAKEN, 7);
+fn cones_keep_their_pinned_volumes() {
+    assert_pinned(true, cone_boss, 8.0, 23501.985588856085, 11);
+    assert_pinned(true, cone_pit, 8.0, 23427.54088939281, 9);
+    assert_pinned(false, cone_boss, 8.0, TAKEN, 7);
+    assert_pinned(false, cone_pit, 8.0, TAKEN, 7);
 }
 
 /// A boss's walls count as upright within the fillet's angular tolerance: at 19 degrees off they
@@ -346,11 +354,11 @@ fn a_boss_leaning_past_the_angular_tolerance_is_refused_as_the_fork() {
         let c = create_cone(k, Point3::new(20.0, 4.0, 20.0), 2.0, 1.0, 1.0)?;
         boolean_union(k, block, c)
     }
-    assert_as_the_fork(true, lean_19, 8.0, 23486.591790759474, 11);
-    assert_as_the_fork(false, lean_19, 8.0, TAKEN, 7);
+    assert_pinned(true, lean_19, 8.0, 23486.59179069601, 11);
+    assert_pinned(false, lean_19, 8.0, TAKEN, 7);
     for steep in [lean_30 as Feature, lean_45] {
         assert!(rounded_with(true, steep, 8.0).is_err());
-        assert_as_the_fork(false, steep, 8.0, TAKEN, 7);
+        assert_pinned(false, steep, 8.0, TAKEN, 7);
     }
 }
 
@@ -376,6 +384,6 @@ fn a_pocket_astride_the_contact_line_matches_the_fork() {
         boolean_difference(k, block, c)
     }
     for keep in [true, false] {
-        assert_as_the_fork(keep, astride, 8.0, 23371.292359915951, 12);
+        assert_pinned(keep, astride, 8.0, 23371.292359915951, 12);
     }
 }

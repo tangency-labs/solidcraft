@@ -256,3 +256,21 @@ why = "the offset's extended surfaces reach as far as the offsets meet, not five
 unit = "offset.offset_executive_p2"
 case = "round_merge_deleted_surface_user_ShellBrep_983_face0_inset"
 why = "a face offset by 1 collapses (a round of radius 1 inset by 1): refused at that face (OffsetFailure::Collapses, status SM_ERR, #2350). Before, the C++ and the port failed with SM_ERR too, later (no body either way); only the executive's partial offset differs: 11 faces built before the refusal, 16 before the C++ failure"
+
+# The trims' lowest v is the only integration base (#1556; plan/findings/mass.integrator--trim-base-v-default-moves-cases-2026-11-05.md): 2 cases whose precise properties move.
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "issue1528_plate_api_shell_2_volume"
+why = "precise properties start each iso-u integral at the trims' lowest v, not the face UV domain's (#1556): the same integral by a different adaptive step sequence, so the value moves (values.volumes[3]: cpp=1.0400212793677376e4 rust=1.0400212857439205e4); not checked against an independent reference (at most against a tighter solidcore run, see the finding); main with the domain's base passes it"
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "issue1528_plate_api_shell_2_volume_first"
+why = "precise properties start each iso-u integral at the trims' lowest v, not the face UV domain's (#1556): the same integral by a different adaptive step sequence, so the value moves (values.volumes[1]: cpp=2.6373613020399418e4 rust=2.637361290724646e4); not checked against an independent reference (at most against a tighter solidcore run, see the finding); main with the domain's base passes it"
+
+# Precise-property steps on the fifth-order estimate and between the surface's knots (#1556, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md): 1 cases whose properties move within their accuracy.
+
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "issue1528_box_cylinder_api_shell_2_volume_first"
+why = "precise-property steps are accepted on the larger of the embedded and the fifth-order estimate (#1556) and integrated between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md): the same integrals by other steps, so the volumes move within the requested 1e-6; against a solidcore run at 1e-10 Rust is 4.9e-12 off, C++ 2.7e-08; checked only against a tighter solidcore run (values.volumes[1]: cpp=2.6373613608718748e4 rust=2.637361290612591e4)"

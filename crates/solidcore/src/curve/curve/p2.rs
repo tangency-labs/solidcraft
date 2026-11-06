@@ -899,6 +899,29 @@ impl Curve {
         &self.kind
     }
 
+    /// The B-spline (base) of the kinds derived from `SmBSplineCurve` (`SM_CAST_PTR`):
+    /// the B-spline, line, ellipse or circle, hyperbola and parabola; `None` for the
+    /// others.
+    #[must_use]
+    pub const fn b_spline_base(&self) -> Option<&BSplineCurve> {
+        match &self.kind {
+            CurveKind::BSpline(b) => Some(b),
+            CurveKind::Line(l) => Some(l.base()),
+            CurveKind::Ellipse(e) => Some(e.base()),
+            CurveKind::Hyperbola(h) => Some(h.base()),
+            CurveKind::Parabola(p) => Some(p.base()),
+            CurveKind::Hermite(_)
+            | CurveKind::Conic(_)
+            | CurveKind::Projected(_)
+            | CurveKind::Iso(_)
+            | CurveKind::Offset(_)
+            | CurveKind::CrvInVolume(_)
+            | CurveKind::CrvOnSurf(_)
+            | CurveKind::TangentField(_)
+            | CurveKind::Composite(_) => None,
+        }
+    }
+
     /// Writes the geometry of `edited`, a working copy of this curve that was edited,
     /// back into this curve object, as upstream's in-place edit of the object leaves
     /// it: the owner and the notification identity stay this object's (a plain

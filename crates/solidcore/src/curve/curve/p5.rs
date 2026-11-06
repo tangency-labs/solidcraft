@@ -128,6 +128,7 @@ use crate::geom::vector3d::{acos, sqrt, Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::{max2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::p2::ArcData;
+use crate::nurbs::b_spline_curve::speed::SpanSpeed;
 use crate::nurbs::b_spline_curve::{BSplineCurve, GapFix};
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::surface::surface::p2::MAX_GEOMETRY_NESTING;
@@ -1802,13 +1803,29 @@ impl Curve {
     /// (chord height `ApproximateLength(5) / 10`, 90 degrees) of the span chord for a
     /// degree 1 curve, else the Romberg integral of `|C'|`; the end point distance
     /// for an interval shorter than `SM_EFF_ZERO` or a curve that does not
-    /// tessellate (kinds not derived from `SmBSplineCurve`).
+    /// tessellate (kinds not derived from `SmBSplineCurve`). Not upstream: each span's
+    /// end is evaluated in its own knot span (upstream: the span above), and the
+    /// integral's steps are accepted on the quadrature estimate
+    /// ([`crate::mass::integrator::integrate_rounded_with_kernel`]). For the kinds with
+    /// control points the speed is evaluated in difference form on the span's knot span
+    /// ([`BSplineCurve::span_speed`]), so its rounding scales with the curve's size, not
+    /// with its distance from the origin, and a span whose control points are one point
+    /// has length 0 exactly.
+    ///
+    /// The contract: each span's integral is within its share of `desired_accuracy`
+    /// by the step control's estimates, the steps accepted at the rounding of the
+    /// computed speed included (their errors, together, within that share of the
+    /// span's length: [`crate::mass::integrator::OdeOptions::rounding`]), or the span is
+    /// refused (`SM_ERR`, operation `mass::integrator::step_control`): the accuracy asks
+    /// for less than the computed speed resolves. The refusal is returned with
+    /// [`crate::kernel::UpstreamFixes::integrator_propagates_failure`] and is a zero
+    /// length without it, as every failed span integration (WR-94).
     ///
     /// # Errors
     ///
     /// Those of the length estimate and of the degree query (and of the span
     /// integration when [`crate::kernel::UpstreamFixes::integrator_propagates_failure`]
-    /// is enabled, WR-94);
+    /// is enabled, WR-94); those of [`BSplineCurve::span_speed`];
     /// [`SolidError::Unported`] from the tessellation or curve evaluator, and for an
     /// edge's curve borrowed from its record (`SmTol::GetZoneTol3d`: the cache's
     /// tolerance is the edge's, which the curve cannot reach; use
@@ -1882,6 +1899,9 @@ impl Curve {
         let span_accuracy = desired_accuracy / span_count as f64;
 
         let bsp = cache.curve();
+        // (a kind with control points; a Hermite curve tessellates without them, and its
+        // speed's rounding is not bounded here)
+        let nurb = bsp.b_spline_base();
         for i in 0..span_count {
             let bez_elem = cache.span(i)?;
             let (p1, p2, seg_ivl) = bez_elem.aux.ends_on(k, bsp)?;
@@ -1893,17 +1913,34 @@ impl Curve {
                 continue;
             }
 
+            // The speed in difference form on the span's knot span, with the bound on its
+            // rounding; a span whose control points are one point is that point: length
+            // 0, exactly.
+            let speed = match nurb.map(|n| n.span_speed(&seg_ivl)).transpose()? {
+                Some(None) => continue,
+                Some(Some(speed)) => Some(speed),
+                None => None,
+            };
+
             // Greater than degree 1 if make it to here
             // Do an integration to get the length of the
-            // first derivatives integrated over the entire curve.
-            total_length += crate::mass::integrator::integrate_with_kernel(
+            // first derivatives integrated over the entire curve, refused where the
+            // accuracy asks for less than the computed speed resolves.
+            total_length += crate::mass::integrator::integrate_rounded_with_kernel(
                 k,
                 seg_ivl.min(),
                 seg_ivl.max(),
-                crate::mass::integrator::IntegrationAlgorithm::Romberg,
                 span_accuracy,
+                speed.as_ref().map(SpanSpeed::rounding_bound),
                 |t| {
-                    let pv = bsp.evaluate(k, t, 1, true, false)?;
+                    if let Some(speed) = &speed {
+                        // the span's own piece, its end (a knot) included
+                        return speed.speed(t);
+                    }
+                    // The span's end, `x2` exactly as the integrator's last node, is
+                    // evaluated from below (`bFromLeft = FALSE`), every other t as
+                    // upstream (`TRUE`).
+                    let pv = bsp.evaluate(k, t, 1, t != seg_ivl.max(), false)?;
                     pv.get(1)
                         .map(|v| v.length())
                         .ok_or_else(|| SolidError::sm_err("curve::length"))

@@ -44,12 +44,13 @@ use solidcore::topology::proto_topology::p1::api_transform::{
 };
 use solidcore::topology::{edge, vertex, Brep, EdgeId, FaceId};
 
-/// Every opt-in fix on, with the blend corner as given, except the two the fork does not
-/// have that move this body's measure: the exact trims of the cylinder's sections by the
-/// plate (`cylinder_plane_section_trims_exact`) and the integrator's split at surface knots
-/// (`precise_properties_split_at_surface_knots`). With them on the union measures 3.6e-5
+/// Every opt-in fix on, with the blend corner as given, except the one the fork does not
+/// have that moves this body's measure: the exact trims of the cylinder's sections by the
+/// plate (`cylinder_plane_section_trims_exact`). With it on the union measures 3.6e-5
 /// less (38601.117929445747 against the fork's 38601.117965259655), and the removed
-/// volumes move by 1.7e-4.
+/// volumes move by 1.7e-4. The integrator splits at the surface's knots on every kernel
+/// (WR-494): it moves the removed volumes below by 6.5e-9 to 3.2e-8 (at most 8e-13 of the
+/// part's 38601, inside the 1e-10 the volumes are integrated to).
 fn kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut f = UpstreamFixes::default();
@@ -57,7 +58,6 @@ fn kernel() -> Kernel {
         *f.flag_mut(name).unwrap() = true;
     }
     f.cylinder_plane_section_trims_exact = false;
-    f.precise_properties_split_at_surface_knots = false;
     k.fixes = f;
     k
 }
@@ -176,11 +176,13 @@ fn tilt_20_is_refused_naming_the_largest_radius() {
     assert!(fit.size < bound() && fit.size >= bound() - 0.02);
 }
 
-/// The radii below the bound build, as the fork's: the removed volumes agree to 2.5e-9
-/// (-0.576293096943 and -0.635789174601 here; the union to 4e-8 of 38601.12).
+/// The radii below the bound build, as the fork's: the fork removes -0.576293096943 and
+/// -0.635789174601, solidcore -0.576293104474 and -0.635789178705 (was -0.576293097954 and
+/// -0.635789172127 stepping across the surface's knots): 7.5e-9 and 4.1e-9 off, 2e-13 of
+/// the part's 38601, inside the 1e-10 its volumes are integrated to.
 #[test]
 fn tilt_20_below_the_bound_builds() {
-    for (r, removed) in [(0.25, -0.576_293_097_954), (0.2625, -0.635_789_172_127)] {
+    for (r, removed) in [(0.25, -0.576_293_104_474), (0.2625, -0.635_789_178_705)] {
         let (got, faces) = rounded(20.0, r).unwrap();
         assert!((got - removed).abs() <= 5e-9, "{r}: {got}");
         assert_eq!(faces, 11);
@@ -193,15 +195,16 @@ fn tilt_20_below_the_bound_builds() {
 /// The +y End's rim edge stops at the seam's vertex short of the rail's end, which lies on
 /// the next rim edge; the End's edge on the rim joins the two (a circle's arcs: their
 /// B-splines). The fork: 10 faces, -33.432934277429 removed, the rails' ends at
-/// (-4.176377478, +-4.664695271, 0.893582223). Pinned here at -33.432934235592: the side
+/// (-4.176377478, +-4.664695271, 0.893582223). Pinned at -33.432934235592 first: the side
 /// plane extended for the round is now an exactly widened plane (the fork's path handed the
-/// round the plane's fitted B-spline), and the faces, rails and rounds are exact. The move,
-/// 4.2e-8, is 1.1e-12 of the part's volume (38601): rounding at the part's scale, so the
-/// value is re-pinned with the same 5e-9.
+/// round the plane's fitted B-spline), and the faces, rails and rounds are exact; then
+/// -33.432934267425 with the integration split at the surface's knots (WR-494; -3.2e-8).
+/// The move from the fork's, 1.0e-8, is 2.6e-13 of the part's volume (38601): rounding at
+/// the part's scale, so the value is re-pinned with the same 5e-9.
 #[test]
 fn tilt_40_rail_continued_across_the_seam_vertex() {
     let (got, faces, points) = rounded_seam(40.0, 125.13, 1.5).unwrap();
-    assert!((got - -33.432_934_235_592).abs() <= 5e-9, "{got}");
+    assert!((got - -33.432_934_267_425).abs() <= 5e-9, "{got}");
     assert_eq!(faces, 10);
     for y in [-4.664_695_271, 4.664_695_271] {
         let want = Point3::new(-4.176_377_478, y, 0.893_582_223);

@@ -1,0 +1,237 @@
+# Known mismatches of topology.face_p2 (format: crates/difftest/src/known.rs).
+
+# SmODEAreaIFEO::Evaluate's port departs from upstream (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md).
+[[mismatch]]
+unit = "topology.face_p2"
+case = "ode_area_plane_1_0.001_vertical"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state[2]: cpp=-3.7e1 rust=0e0)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "ode_area_plane_1_1e-05_vertical"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state[2]: cpp=-3.7e1 rust=0e0)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "ode_area_plane_8_0.001_vertical"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state[2]: cpp=-3.7e1 rust=0e0)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "ode_area_plane_8_1e-05_vertical"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state[2]: cpp=-3.7e1 rust=0e0)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "ode_area_plane_63_0.001_vertical"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state.len: cpp=5 rust=30)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "ode_area_plane_63_1e-05_vertical"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state.len: cpp=5 rust=30)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "ode_area_bss_1_0.001_vertical"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state[2]: cpp=-3.7e1 rust=0e0)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "ode_area_bss_1_1e-05_vertical"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state[2]: cpp=-3.7e1 rust=0e0)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "ode_area_bss_8_0.001_vertical"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state[2]: cpp=-3.7e1 rust=0e0)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "ode_area_bss_8_1e-05_vertical"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state[2]: cpp=-3.7e1 rust=0e0)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "ode_area_bss_63_0.001_vertical"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state.len: cpp=5 rust=30)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "ode_area_bss_63_1e-05_vertical"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state.len: cpp=5 rust=30)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "gen0000"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state.len: cpp=4 rust=12)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra00000"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state.len: cpp=4 rust=30)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra00204"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state.len: cpp=2 rust=23)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra00205"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state.len: cpp=4 rust=30)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra00251"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state.len: cpp=2 rust=30)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra00299"
+why = "the iso-curve integral's steps are accepted on the larger of the embedded and the fifth-order estimate (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.state[3]: cpp=-1.7118489571019122e0 rust=-1.7119725300149347e0); against an independent reference (the surface and the UV curve evaluated in 30-digit arithmetic, parameters outside the knot range clamped as the kernel does, the iso-u integral by tanh-sinh quadrature split at the v knots), largest error over the compared components relative to max(|value|, its error scale) at the requested 1e-3: Rust 1.0e-9, C++ 2.6e-3 (misses); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra00304"
+why = "the iso-curve integral's steps are accepted on the larger of the embedded and the fifth-order estimate (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.state[4]: cpp=-5.059113273668858e-1 rust=-5.059088422274958e-1); not checked against an independent reference (a thick face: its offset surfaces are not modelled by the reference)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra00440"
+why = "the iso-curve integral's steps are accepted on the larger of the embedded and the fifth-order estimate (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.state[6]: cpp=4.7732720033672835e-2 rust=4.8928041888441555e-2); against an independent reference (the surface and the UV curve evaluated in 30-digit arithmetic, parameters outside the knot range clamped as the kernel does, the iso-u integral by tanh-sinh quadrature split at the v knots), largest error over the compared components relative to max(|value|, its error scale) at the requested 1e-3: Rust 9.2e-5, C++ 2.8e-3 (misses)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra00466"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state.len: cpp=3 rust=28)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra00518"
+why = "the iso-curve integral's steps are accepted on the larger of the embedded and the fifth-order estimate (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.state[3]: cpp=-2.2386180584339777e5 rust=-2.238626549354779e5); against an independent reference (the surface and the UV curve evaluated in 30-digit arithmetic, parameters outside the knot range clamped as the kernel does, the iso-u integral by tanh-sinh quadrature split at the v knots), largest error over the compared components relative to max(|value|, its error scale) at the requested 1e-6: Rust 1.9e-7, C++ 2.2e-5 (misses); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra00567"
+why = "the iso-curve integral's steps are accepted on the larger of the embedded and the fifth-order estimate (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.state[3]: cpp=4.065046701841908e-1 rust=4.0650469780776827e-1); not checked against an independent reference (out-of-bounds evaluation is enabled: the surface extension is not modelled by the reference); integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra00612"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state.len: cpp=2 rust=29)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra00615"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state.len: cpp=3 rust=20)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra00622"
+why = "the iso-curve integral's steps are accepted on the larger of the embedded and the fifth-order estimate (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.state[3]: cpp=-2.0461963948695913e-1 rust=-2.046196362337494e-1); against an independent reference (the surface and the UV curve evaluated in 30-digit arithmetic, parameters outside the knot range clamped as the kernel does, the iso-u integral by tanh-sinh quadrature split at the v knots), largest error over the compared components relative to max(|value|, its error scale) at the requested 1e-6: Rust 6.0e-9, C++ 4.7e-8; integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra00646"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state.len: cpp=4 rust=31)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra00649"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state.len: cpp=5 rust=31)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra00719"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state.len: cpp=2 rust=16)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra00732"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state.len: cpp=5 rust=28)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra00788"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state.len: cpp=2 rust=19)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra00848"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state.len: cpp=4 rust=30)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra00854"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state.len: cpp=4 rust=31)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra00904"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state.len: cpp=5 rust=31)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra00955"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state.len: cpp=3 rust=30)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra01031"
+why = "the iso-curve integral's steps are accepted on the larger of the embedded and the fifth-order estimate (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.state[3]: cpp=1.1368941315913181e-1 rust=1.1368935495135271e-1); against an independent reference (the surface and the UV curve evaluated in 30-digit arithmetic, parameters outside the knot range clamped as the kernel does, the iso-u integral by tanh-sinh quadrature split at the v knots), largest error over the compared components relative to max(|value|, its error scale) at the requested 1e-6: Rust 1.7e-8, C++ 6.2e-8; integrating between the surface's knots (WR-494, #1435; plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md) moves it again"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra01053"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state.len: cpp=4 rust=9)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra01106"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state.len: cpp=5 rust=14)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra01130"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state.len: cpp=2 rust=31)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra01226"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state.len: cpp=6 rust=31)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra01272"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state.len: cpp=2 rust=31)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra01278"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state.len: cpp=4 rust=25)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra01297"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state.len: cpp=2 rust=17)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra01389"
+why = "the iso-curve integral's steps are accepted on the larger of the embedded and the fifth-order estimate (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md): the same integral by other steps, so the value moves (values.state[9]: cpp=-1.8155170677679985e-3 rust=-1.819142473131865e-3); against an independent reference (the surface and the UV curve evaluated in 30-digit arithmetic, parameters outside the knot range clamped as the kernel does, the iso-u integral by tanh-sinh quadrature split at the v knots), largest error over the compared components relative to max(|value|, its error scale) at the requested 1e-3: Rust 2.5e-4, C++ 4.7e-5"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra01413"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state.len: cpp=5 rust=14)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra01415"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state.len: cpp=5 rust=31)"
+
+[[mismatch]]
+unit = "topology.face_p2"
+case = "extra01456"
+why = "the trim's du/dt is zero at t: upstream leaves the derivative array as given (the integrator's stale slope), solidcore writes the integrand's value there, zero (#1556; plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md) (values.state.len: cpp=5 rust=30)"

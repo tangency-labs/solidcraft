@@ -11,6 +11,7 @@ pub(crate) mod analysis;
 pub mod p1;
 pub mod p2;
 pub mod p3;
+pub mod speed;
 
 pub use p1::{
     BSplineCurve, BSplineCurveForm, CanonicalData, Ends, KnotType, NurbCircleParam, ProjectionType,

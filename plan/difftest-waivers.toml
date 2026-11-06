@@ -143,3 +143,38 @@ unit = "offset.offset_executive_p2"
 check = "ratchet"
 case = "gen0212"
 reason = "HANG-53 (#2737): the offset distance is below the input B-rep tolerance (0, -0, or tolerance 1e300 against 0.5), which the offset now refuses on both sides before building anything; the case was compared before and is rejected now"
+
+[[waiver]]
+unit = "mass.integrator"
+check = "ratchet"
+reason = "#1556: precise_properties_trim_base_v deleted, the trims' lowest v is the only integration base; 38 bounded-face passes are known mismatches within their accuracy (plan/findings/mass.integrator--trim-base-v-default-moves-cases-2026-11-05.md) and 16 unbounded or half-open v passes are parked as WR-563 (plan/upstream-issues/WR-563--addendum-2026-11-05-trim-base-v-default.md); 89 more passes move with the fifth-order step estimate (plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md). 14 more move with a curve length's span ends from their own knot span and its quadrature step estimate (plan/findings/curve.curve_p5--curve-length-honest-acceptance-moves-cases-2026-11-05.md). 1 more moves when a point curve's length becomes exactly 0, through the step acceptance's rounding floor (same findings). Remove once #1556 has merged."
+
+[[waiver]]
+unit = "boolean.api_brep"
+check = "ratchet"
+reason = "#1556: precise properties start each iso-u integral at the trims' lowest v; 53 passes whose face areas or property attributes move are known mismatches (plan/findings/mass.integrator--trim-base-v-default-moves-cases-2026-11-05.md), and 51 more with the fifth-order step estimate (plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md). Remove once #1556 has merged."
+
+[[waiver]]
+unit = "blend.fillet_executive_p3"
+check = "ratchet"
+reason = "#1556: precise properties start each iso-u integral at the trims' lowest v; 72 passes whose mass properties or property attributes move are known mismatches (plan/findings/mass.integrator--trim-base-v-default-moves-cases-2026-11-05.md), and 71 more with the fifth-order step estimate and the split at the surface's knots (#1435, plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md). Remove once #1556 has merged."
+
+[[waiver]]
+unit = "offset.offset_executive_p2"
+check = "ratchet"
+reason = "#1556: precise properties start each iso-u integral at the trims' lowest v; 2 passes whose volumes move are known mismatches (plan/findings/mass.integrator--trim-base-v-default-moves-cases-2026-11-05.md), and 1 more with the fifth-order step estimate and the split at the surface's knots (#1435, plan/findings/mass.integrator--split-at-surface-knots-default-moves-cases-2026-11-05.md). Remove once #1556 has merged."
+
+[[waiver]]
+unit = "topology.face_p2"
+check = "ratchet"
+reason = "#1556 follow-on: SmODEAreaIFEO's port writes the integrand (zero) where the trim's du/dt is zero, and the iso-curve steps take the fifth-order error estimate too; 47 passes are known mismatches (plan/findings/mass.integrator--quadrature-step-estimate-moves-cases-2026-11-05.md). Remove once #1556 has merged."
+
+[[waiver]]
+unit = "curve.curve_p5"
+check = "ratchet"
+reason = "a curve's length evaluates each span's end in its own knot span and accepts its steps on the quadrature estimate; 6 pass(es) move within their accuracy, each a known mismatch with both sides' errors against a Gauss-Legendre reference (plan/findings/curve.curve_p5--curve-length-honest-acceptance-moves-cases-2026-11-05.md). Remove once this branch has merged."
+
+[[waiver]]
+unit = "curve.curve_p3"
+check = "ratchet"
+reason = "a curve's length evaluates each span's end in its own knot span and accepts its steps on the quadrature estimate; 1 pass(es) move within their accuracy, each a known mismatch with both sides' errors against a Gauss-Legendre reference (plan/findings/curve.curve_p5--curve-length-honest-acceptance-moves-cases-2026-11-05.md). Remove once this branch has merged."

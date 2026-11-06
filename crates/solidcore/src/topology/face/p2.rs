@@ -1159,6 +1159,8 @@ fn runge_kutta_ode_integrate(
             initial_step: h1,
             minimum_step: 0.0,
             scale: Some(y_scale),
+            quadrature: true,
+            rounding: None,
         },
         |t, _, dy| {
             eval_calls += 1;
@@ -1968,8 +1970,8 @@ pub struct OdeIsoCurveLength<'a> {
     face_thickness: f64,
     layout: &'a PrecisePropertyLayout,
     /// The v evaluated from the lower knot span (`bVFromLeft = FALSE`) rather than
-    /// upstream's upper one: the end of a span-wise piece under
-    /// `precise_properties_span_end_from_below` (WR-670); `None` upstream.
+    /// upstream's upper one: the end of a span-wise piece (WR-670); `None` for an
+    /// integrand not limited to one piece.
     v_from_below: Option<f64>,
 }
 
@@ -1999,7 +2001,8 @@ impl<'a> OdeIsoCurveLength<'a> {
     /// The same integrand, evaluated at `v = end` from the knot span below `end`
     /// (`bVFromLeft = FALSE`), every other v as upstream (`TRUE`, the span above): the
     /// end of a piece that stops at a v knot of the surface lies in the piece's own
-    /// span (WR-670, [`UpstreamFixes::precise_properties_span_end_from_below`](crate::kernel::UpstreamFixes::precise_properties_span_end_from_below)).
+    /// span, so its value there is the one-sided limit from inside the piece (WR-670,
+    /// #2091).
     #[must_use]
     pub const fn with_v_end_from_below(mut self, end: f64) -> Self {
         self.v_from_below = Some(end);
@@ -2285,7 +2288,19 @@ pub struct OdeArea<'a> {
 
 impl OdeArea<'_> {
     /// `Evaluate`: replaces `dydx` by `0` followed by the iso-curve integral times
-    /// `-du/dt` when `|du/dt| > SM_EFF_ZERO`; otherwise leaves it unchanged.
+    /// `-du/dt`, the integrand's value at `t`. Where `du/dt` is exactly zero that value
+    /// is zero, written without the iso-curve integral.
+    ///
+    /// Not upstream: upstream skips the point when `|du/dt| <= SM_EFF_ZERO` and leaves
+    /// `dydx` as it was. The integrator's array then still holds the integrand of the
+    /// previous step's start, so a step that starts where the trim turns in u (the
+    /// middle of a symmetric arc, which a first step of half the span lands on) begins
+    /// from a stale slope. Its error estimate sees a jump, the steps shrink until the
+    /// stale value fits, and the accepted step keeps an error far above the requested
+    /// accuracy (-5.1e-4 relative at 1e-4 on a quarter annulus).
+    ///
+    /// Not upstream either: the iso-curve integral runs piece by piece between the
+    /// surface's v knots (WR-494, #1435), where upstream steps across them.
     ///
     /// # Errors
     ///
@@ -2301,6 +2316,12 @@ impl OdeArea<'_> {
             .copied()
             .ok_or_else(|| null("OdeArea: no curve tangent"))?;
 
+        let num_components = self.y_scale.len();
+        if p1.x == 0.0 {
+            dydx.clear();
+            dydx.resize(num_components + 1, 0.0);
+            return Ok(());
+        }
         let eval = OdeIsoCurveLength::new(
             self.kernel,
             self.surface,
@@ -2310,70 +2331,56 @@ impl OdeArea<'_> {
             self.layout,
         );
 
-        if p1.x.abs() > EFF_ZERO {
-            let num_components = self.y_scale.len();
-            let mut dy = Vec::new();
-            dy.resize(num_components, 0.0);
-            if k.fixes.precise_properties_split_at_surface_knots {
-                // Along the iso-u line the integrand is smooth only within each knot
-                // span of the surface: integrated span by span, as the trim curve is
-                // (WR-494; the SolidCraft fork's tangency-labs/smlib@08d9a14).
-                let mut breaks =
-                    surface_knots_inside(k, self.surface, SurfParamType::V, self.min_v, p0.y)?;
-                breaks.insert(0, self.min_v);
-                breaks.push(p0.y);
-                let mut piece_y = Vec::new();
-                piece_y.resize(num_components, 0.0);
-                for pair in breaks.windows(2) {
-                    let &[a, b] = pair else {
-                        continue;
-                    };
-                    piece_y.fill(0.0);
-                    // With `fixes.precise_properties_span_end_from_below` (WR-670,
-                    // #2091) each piece's end (a v knot, or the trim point) is evaluated
-                    // in the piece's own span: upstream's `TRUE` takes the span above,
-                    // so the integrand jumped at the piece's last point and the steps
-                    // shrank toward every knot (about 5x the evaluations a piece).
-                    let piece_eval = if k.fixes.precise_properties_span_end_from_below && b > a {
-                        eval.with_v_end_from_below(b)
-                    } else {
-                        eval
-                    };
-                    // A failed inner integration is not a zero-area contribution.
-                    runge_kutta_ode_integrate(
-                        &piece_eval,
-                        &mut piece_y,
-                        a,
-                        b,
-                        self.iso_curve_accuracy,
-                        (b - a) / 2.0,
-                        self.y_scale,
-                    )?;
-                    for (total, part) in dy.iter_mut().zip(piece_y.iter()) {
-                        *total += *part;
-                    }
-                }
+        let mut dy = Vec::new();
+        dy.resize(num_components, 0.0);
+        // Along the iso-u line the integrand is smooth only within each knot span of
+        // the surface: built from first derivatives, it is C^(p-m-1) at a v knot of
+        // multiplicity m (p the degree), so discontinuous at a rational circle's double
+        // knot, and a step across any knot has an error its estimate does not measure.
+        // Integrated span by span, as the trim curve is (WR-494; the SolidCraft fork's
+        // tangency-labs/smlib@08d9a14).
+        let knots = surface_knots_inside(k, self.surface, SurfParamType::V, self.min_v, p0.y)?;
+        let mut piece_y = Vec::new();
+        piece_y.resize(num_components, 0.0);
+        // (the pieces `[a, b]` between `min_v`, the knots and `p0.y`, in that order)
+        let mut a = self.min_v;
+        for b in knots.into_iter().chain(core::iter::once(p0.y)) {
+            piece_y.fill(0.0);
+            // Each piece's end (a v knot, or the trim point) is evaluated in the
+            // piece's own span: the integral over [a, b] is of the integrand's
+            // restriction to that span, whose value at b is the limit from below.
+            // Upstream's `TRUE` takes the span above, so where the derivatives jump
+            // at the knot (C0 at a rational circle's double knot, #1435; a G2 not C2
+            // loft, #2091) the piece's last sample was the next span's value: the
+            // steps shrank toward every knot, and underflowed at tight accuracies
+            // (WR-670). A piece descending to b (the curve point below `min_v`, one
+            // piece) lies in the span above b, upstream's side.
+            let piece_eval = if b > a {
+                eval.with_v_end_from_below(b)
             } else {
-                let step = p0.y - self.min_v;
-
-                // A failed inner integration is not a zero-area contribution.
-                runge_kutta_ode_integrate(
-                    &eval,
-                    &mut dy,
-                    self.min_v,
-                    p0.y,
-                    self.iso_curve_accuracy,
-                    step / 2.0,
-                    self.y_scale,
-                )?;
+                eval
+            };
+            // A failed inner integration is not a zero-area contribution.
+            runge_kutta_ode_integrate(
+                &piece_eval,
+                &mut piece_y,
+                a,
+                b,
+                self.iso_curve_accuracy,
+                (b - a) / 2.0,
+                self.y_scale,
+            )?;
+            for (total, part) in dy.iter_mut().zip(piece_y.iter()) {
+                *total += *part;
             }
-            dydx.clear();
-            dydx.push(0.0);
-            dydx.extend_from_slice(&dy);
-            for v in dydx.iter_mut().skip(1) {
-                // (* -1.0: an exact negation)
-                *v = -(*v * p1.x);
-            }
+            a = b;
+        }
+        dydx.clear();
+        dydx.push(0.0);
+        dydx.extend_from_slice(&dy);
+        for v in dydx.iter_mut().skip(1) {
+            // (* -1.0: an exact negation)
+            *v = -(*v * p1.x);
         }
 
         Ok(())

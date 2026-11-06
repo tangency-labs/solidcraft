@@ -1765,13 +1765,6 @@ fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
             &mut k.fixes.boolean_wire_edge_keeps_faceuse_shell
         }
         "boolean_new_face_closure_both_sides" => &mut k.fixes.boolean_new_face_closure_both_sides,
-        "precise_properties_split_at_surface_knots" => {
-            &mut k.fixes.precise_properties_split_at_surface_knots
-        }
-        "precise_properties_trim_base_v" => &mut k.fixes.precise_properties_trim_base_v,
-        "precise_properties_span_end_from_below" => {
-            &mut k.fixes.precise_properties_span_end_from_below
-        }
         "loops_go_on_round_the_vertex" => &mut k.fixes.loops_go_on_round_the_vertex,
         "revolve_nested_shells_as_cavities" => &mut k.fixes.revolve_nested_shells_as_cavities,
         "revolve_splits_curves_on_axis" => &mut k.fixes.revolve_splits_curves_on_axis,

@@ -20,16 +20,16 @@
 //! B-rep enumeration, bounding boxes, and region classification remain calls into
 //! their unported units. `boundary_properties` exposes the integration after trim
 //! construction for callers already holding oriented trim curves. Nested integration
-//! has a fixed two-level call structure, not input-driven recursion. With
-//! `UpstreamFixes::precise_properties_split_at_surface_knots` (WR-494) both levels split
-//! at the surface's knots, as the SolidCraft fork's tangency-labs/smlib@08d9a14 does.
+//! has a fixed two-level call structure, not input-driven recursion. Both levels split
+//! at the surface's knots, as the SolidCraft fork's tangency-labs/smlib@08d9a14 does
+//! (WR-494, #1435): upstream steps across them.
 //! With `UpstreamFixes::brep_area_between_solid_and_void` (WR-535) a volume-separating
 //! faceuse adds its volume only where it bounds a non void region and its area only
 //! where the area behaviour selects it (tangency-labs/smlib@d2d9586).
-//! With `UpstreamFixes::precise_properties_trim_base_v` (WR-563, #1556) the iso-u
-//! integrals start at the trims' lowest v, not at the face UV domain's.
-//! With `UpstreamFixes::precise_properties_span_end_from_below` (WR-670, #2091) each
-//! span-wise iso-u piece is evaluated at its end from its own knot span.
+//! The iso-u integrals start at the trims' lowest v, not at the face UV domain's
+//! (WR-563, #1556).
+//! Each span-wise iso-u piece is evaluated at its end from its own knot span, the
+//! one-sided limit from inside the piece (WR-670, #2091): upstream takes the span above.
 use super::{OdeIntegrator, OdeOptions};
 use crate::curve::curve::Curve;
 use crate::geom::attribute::{ids, AttributeStore, AttributeValue, ObjectKey};
@@ -172,6 +172,8 @@ pub fn curve_properties(
             initial_step: (interval.max() - interval.min()) / 2.0,
             minimum_step: 0.0,
             scale: Some(&scale),
+            quadrature: true,
+            rounding: None,
         },
         |t, _, dy| {
             eval.evaluate(k, t, &mut scratch)?;
@@ -313,16 +315,12 @@ pub fn boundary_properties(
     } else {
         1.0
     };
-    // The base of every iso-u integral: upstream's `GetUVDomain().GetMin().y`. Any base
-    // gives the same loop integral (a different base adds a function of u alone, whose
-    // integral round a closed loop is zero), but one far below the trims makes each
-    // integral long and the area a small difference of large terms. With
-    // `fixes.precise_properties_trim_base_v` (WR-563, #1556) it is the trims' lowest v.
-    let base_v = if k.fixes.precise_properties_trim_base_v {
-        trims_base_v(k, trims, domain)?
-    } else {
-        domain.min().y
-    };
+    // The base of every iso-u integral: the trims' lowest v. Any base gives the same loop
+    // integral (a different base adds a function of u alone, whose integral round a
+    // closed loop is zero), but one far below the trims, such as upstream's
+    // `GetUVDomain().GetMin().y` on a face whose domain is unbounded in v, makes each
+    // integral long and the area a small difference of large terms (WR-563, #1556).
+    let base_v = trims_base_v(k, trims, domain)?;
     let mut result = PreciseProperties::default();
     for trim in trims {
         let area_scale = estimated_area / 10.0;
@@ -380,21 +378,14 @@ pub fn boundary_properties(
             face_thickness: thickness,
             layout: &layout,
         };
-        let ivl = trim.natural_interval();
 
-        // Integrate each knot span of the natural interval separately: the RK error
-        // estimate assumes a smooth integrand, so a step across a knot can hide a large
-        // error.
-        //
-        // With `fixes.precise_properties_split_at_surface_knots` (WR-494; the SolidCraft
-        // fork's tangency-labs/smlib@08d9a14) the pieces are those between the trim
-        // curve's knots and its crossings of the surface's knot lines u = k, where the
-        // integrand's derivatives jump too.
-        let knots = if k.fixes.precise_properties_split_at_surface_knots {
-            trim_curve_breaks(k, trim, surface)?
-        } else {
-            trim.knots(k, Some(&ivl))?.0
-        };
+        // Integrate piece by piece between the trim curve's knots and its crossings of the
+        // surface's knot lines u = k (WR-494; the SolidCraft fork's
+        // tangency-labs/smlib@08d9a14): at either the integrand's derivatives jump, and
+        // at a knot of multiplicity reaching the degree (a rational circle's double knot)
+        // the integrand itself does. A step's error estimate is the leading term of an
+        // expansion that holds only where the integrand is smooth across the step.
+        let knots = trim_curve_breaks(k, trim, surface)?;
 
         // A coarse first Runge-Kutta step can trip the integrator's abort guard for one
         // traversal direction, so a reversed cap loop fails where its twin succeeds. Try
@@ -407,9 +398,7 @@ pub fn boundary_properties(
                 continue;
             };
             // (`!(dB > dA)`: also an unordered pair)
-            if k.fixes.precise_properties_split_at_surface_knots
-                && b.partial_cmp(&a) != Some(std::cmp::Ordering::Greater)
-            {
+            if b.partial_cmp(&a) != Some(std::cmp::Ordering::Greater) {
                 continue; // a crossing at a knot
             }
             let mut status = Err(SolidError::sm_err(OP));
@@ -426,21 +415,16 @@ pub fn boundary_properties(
                             initial_step: (b - a) / divisor,
                             minimum_step: 0.0,
                             scale: Some(&scale),
+                            quadrature: true,
+                            rounding: None,
                         },
                         |t, _, dy| {
                             eval_calls += 1;
                             if (eval_calls & 63) == 1 {
                                 k.check_cancelled(OP)?;
                             }
-                            // A zero U tangent leaves the caller's derivative array
-                            // untouched upstream. Preserve this particular stage's
-                            // values, rather than another stage's shared scratch.
-                            if let Some(unused) = scratch.first_mut() {
-                                *unused = 0.0;
-                            }
-                            for (s, d) in scratch.iter_mut().skip(1).zip(dy.iter()) {
-                                *s = *d;
-                            }
+                            // (the evaluator writes every component, zero where
+                            // the trim's du/dt is)
                             eval.evaluate(k, t, &mut scratch)?;
                             for (d, v) in dy.iter_mut().zip(scratch.iter().skip(1)) {
                                 *d = *v;
@@ -1576,35 +1560,33 @@ mod tests {
         }
     }
 
-    /// #2545: a whole sphere at 1e-8 with WR-472's error scale off does not converge;
-    /// the estimated entry says so, typed, where the API entry keeps upstream's `SM_ERR`.
+    /// #2545: a whole sphere at 1e-8 with WR-472's error scale off did not converge (its
+    /// steps crossed the NURB sphere's double knots). Integrated between the surface's knots
+    /// (WR-494, #1435) it converges, both entries, and holds the closed forms: area and
+    /// volume 4 pi r^2 = 4/3 pi r^3 (r 3), inertia 2/5 m r^2. The typing of a failure that
+    /// does not converge is `integration_failures_are_typed_by_cause`'s.
     #[test]
-    fn a_sphere_that_does_not_converge_is_typed_not_converged() {
+    fn a_sphere_without_the_length_scale_converges_between_knots() {
         let mut k = Kernel::default();
         k.fixes.precise_properties_body_length_scale = false;
         let mut b =
             crate::primitive::api_primitives::create_sphere(&mut k, Point3::ZERO, 3.0).unwrap();
-        let typed = estimated(&k, &mut b, &MassPropertyRequest::centroidal());
-        assert!(
-            matches!(typed, Err(SolidError::NotConverged { .. })),
-            "{typed:?}"
-        );
+        let exact = 36.0 * PI;
+        let inertia = 0.4 * exact * 9.0;
+        let typed = estimated(&k, &mut b, &MassPropertyRequest::centroidal()).unwrap();
+        assert!(near(typed.area, exact, 1e-9), "{typed:?}");
+        assert!(near(typed.volume, exact, 1e-9), "{typed:?}");
+        for m in [typed.inertia.x, typed.inertia.y, typed.inertia.z] {
+            assert!(near(m, inertia, 1e-9), "{typed:?}");
+        }
         let store = no_attributes();
         let attrs = PropertyAttributes {
             store: &store,
             key_of: &|_| ObjectKey(0),
         };
-        let api = brep_mass_properties(&k, &mut b, 1e-8, 1.0, Point3::ZERO, &attrs);
-        assert!(
-            matches!(
-                api,
-                Err(SolidError::Upstream {
-                    code: crate::error::SM_ERR,
-                    ..
-                })
-            ),
-            "{api:?}"
-        );
+        let api = brep_mass_properties(&k, &mut b, 1e-8, 1.0, Point3::ZERO, &attrs).unwrap();
+        assert!(near(api.properties.area, exact, 1e-9), "{api:?}");
+        assert!(near(api.properties.volume, exact, 1e-9), "{api:?}");
     }
 
     /// The estimated entry types each integration failure by its cause, and only step
