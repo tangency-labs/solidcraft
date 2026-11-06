@@ -241,6 +241,27 @@ fn freeze_holds_the_geometry_and_resume_follows_again() {
 }
 
 #[test]
+fn a_frozen_projection_keeps_its_size_when_the_source_is_resized_and_update_says_frozen() {
+    let (mut s, _, sketch, face) = parametric_plate(false);
+    run(&mut s, "sketch.freeze_link", json!({"link":face}));
+    // Hiding and showing it again leaves it frozen.
+    run(&mut s, "sketch.link_visibility", json!({"link":face,"visible":false}));
+    run(&mut s, "sketch.link_visibility", json!({"link":face,"visible":true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "parameters.change", json!({"name":"w","expression":"60 mm"}));
+    // A:2's top runs from x = 100 to 100 + w: frozen, it still ends at 140, not 160.
+    assert!(on_x(&link_lines(&s, sketch, &face, false), 140.0).is_some(), "frozen at w = 40");
+    assert!(on_x(&link_lines(&s, sketch, &face, false), 160.0).is_none());
+    let r = run(&mut s, "sketch.update_references", json!({"sketch":sketch}));
+    assert_eq!(r["links"][0]["status"], "frozen", "{r}");
+    assert_eq!(run(&mut s, "sketch.references", json!({"sketch":sketch}))["references"][0]["status"], "frozen");
+    assert!(on_x(&link_lines(&s, sketch, &face, true), 140.0).is_some(), "update leaves it where it was");
+    run(&mut s, "sketch.edit", json!({"sketch":sketch}));
+    run(&mut s, "sketch.resume_link", json!({"link":face}));
+    assert!(on_x(&link_lines(&s, sketch, &face, false), 160.0).is_some(), "resumed, it follows w = 60");
+}
+
+#[test]
 fn pending_moves_are_reported_and_captured_by_update() {
     let (mut s, _, a2, sketch) = holed_parts();
     let face = top_face_of_second(&mut s, a2);
@@ -574,9 +595,9 @@ fn part_of_a_projection_without_source_edges_breaks_off_the_rest() {
 /// Part A: a 40 × 40 × 10 plate with a D-shaped pocket 1 mm into its top face (a line and a
 /// cubic control-point spline), placed twice (A:2 at x = 100); part B's sketch projects A:2's
 /// top face. The spline's edge comes in as its exact Bézier piece (#1508), and a deleted
-/// member is matched against that same piece: it is found to be the spline's source edge, and
-/// the rest is broken off only because that edge's name does not follow exact history (a
-/// pocket's wall is found again by geometry), not as a curve of no source edge.
+/// member is matched against that same piece: it is found to be the spline's source edge. The
+/// pocket's walls are named from the cut's exact history, so the deleted member is recorded and
+/// the rest of the projection stays linked.
 #[test]
 fn a_deleted_exact_spline_member_is_matched_to_its_source_edge() {
     let mut s = Session::default();
@@ -606,7 +627,11 @@ fn a_deleted_exact_spline_member_is_matched_to_its_source_edge() {
         .collect();
     assert_eq!(exact.len(), 1, "the spline comes in as its exact piece");
     let r = run(&mut s, "sketch.delete", json!({"entities":exact}));
-    assert!(broken_because(&r, &face).contains("name is not exact"), "matched to its source edge: {r}");
+    assert!(r.get("broken_links").is_none(), "matched to its source edge: {r}");
+    let link = s.doc.sketch(b).unwrap().link(&face).cloned().expect("still linked");
+    assert!(!link.lost);
+    assert_eq!(link.omit_edges.len(), 1, "the spline's wall is kept out by name");
+    assert!(s.doc.sketch(b).unwrap().link_curves(&face).iter().all(|c| !exact.contains(&s.doc.sketch(b).unwrap().curves[*c].id)));
 }
 
 /// A solid's exact pieces (#1508) are matched on the curves they gave the sketch: a control-point
