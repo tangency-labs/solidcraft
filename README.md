@@ -2,14 +2,15 @@
 
 # solidcore
 
-**📊 Live progress: [tangency-labs.github.io/solidcore](https://tangency-labs.github.io/solidcore/)**: every unit's port status and difftest results, the upstream-issues log, and the surface/surface intersection corpus scores, regenerated on every merge.
+**📊 Live progress: [tangency-labs.github.io/solidcore](https://tangency-labs.github.io/solidcore/)**: every unit's port status, the upstream-issues log, and the surface/surface intersection corpus scores, regenerated on every merge.
 
 solidcore is a boundary-representation (B-rep) solid modeling kernel in safe Rust. It is based
 on NVIDIA's SMLib (from [USD BRep](https://github.com/NVIDIA-Omniverse/usd-brep), Apache-2.0)
 and goes its own way from there: it started as a port, and its new constructions, such as the
 generic rolling-ball blend ([docs/generic-blend.md](docs/generic-blend.md)), are designed and built
 here as clean, procedural constructions that replace the code they supersede. Contributing:
-[CONTRIBUTING.md](CONTRIBUTING.md).
+[CONTRIBUTING.md](CONTRIBUTING.md). Design discussion: the
+[`#solidcore-dev`](https://discord.com/channels/1560611394934673498/1560631619340214394) channel on Discord.
 
 Solids are exact: shells, faces, loops, edges and vertices bound to analytic and NURBS
 curves and surfaces. solidcore's first consumer is **SolidCraft**.
@@ -26,17 +27,16 @@ See [ATTRIBUTION.md](ATTRIBUTION.md).
 
 Goals: no `unsafe` in the kernel, no panics on bad input, deterministic results, no
 global state (one `Kernel` per thread), builds for `wasm32-unknown-unknown`, and exact or
-certified geometry. Its own tests and SolidCraft's operation cases are the gate; the difftest
-against the C++ reference is a tool the maintainers run where parity matters (AGENTS.md §1).
+certified geometry. The gate is its own tests, SolidCraft's operation cases and the goldens:
+every unit's cases checked against their committed expected outputs (AGENTS.md §1).
 
 ## Status
 
 Every SMLib kernel module has a Rust counterpart, and primitive construction is exercised
-end to end. Integration remains in progress: partial units, deferred paths and known
-mismatches still limit coverage. The API is experimental (0.0.x).
+end to end. Integration remains in progress: deferred paths still limit coverage. The API is experimental (0.0.x).
 
 Use the [live unit results](https://tangency-labs.github.io/solidcore/units/index.html)
-for current differential coverage and blockers, and the
+for each unit's status and blockers, and the
 [primitive checks](https://tangency-labs.github.io/solidcore/solids.html) for whole-solid
 results. Per-unit plans and notes live in [`plan/units/`](plan/units/); the generated
 checklist is [`PROGRESS.md`](https://tangency-labs.github.io/solidcore/PROGRESS.md) on the site, with handoff notes in
@@ -61,13 +61,11 @@ schematics. Start with the first; each ends with "If you're stuck".
 | Path                    | Contents                                                     |
 |-------------------------|--------------------------------------------------------------|
 | `crates/solidcore`      | The kernel library                                           |
-| `crates/solidcore-ffi`  | `extern "C"` bindings to the upstream C++ (feature `cpp`)    |
-| `crates/difftest`       | Runs Rust and C++ side by side on the same inputs           |
+| `crates/goldens`        | Every unit's cases, checked against their goldens            |
 | `crates/diagnostics`    | `solidcore-diag`: a shaded picture and a tolerance report of one `.smb` body |
-| `harness/cpp`           | Builds the upstream C++ reference into `bin/cpp`; FFI shims  |
 | `plan/`                 | Unit list, port order, status, findings                      |
 | `site/`                  | Generator for the GitHub Pages progress site                 |
-| `upstream/`             | Local clone of usd-brep v1.0.1 at `3fd5b95` (gitignored)    |
+| `upstream/`             | Local clone of usd-brep v1.0.1 at `3fd5b95`, read only (gitignored) |
 | `bin/`                  | All build output (gitignored)                                |
 
 ## Building
@@ -99,59 +97,49 @@ default, e.g. in the consumer's `.cargo/config.toml`:
 rustflags = ["-C", "link-arg=-zstack-size=8388608"]   # 8 MiB, as a native main thread
 ```
 
-## Difftest (Rust vs C++)
+## Goldens
 
-On Linux x86_64 with glibc 2.39 or newer and GCC 13 or newer (Ubuntu 24.04, the CI
-image, or a newer distribution), `scripts/fetch-cpp.sh` downloads the prebuilt C++
-reference libraries (about 50 MB) from this repository's
-[releases](https://github.com/tangency-labs/solidcore/releases) and checks their
-sha256; it needs only `curl`, `tar` and `zstd`. Elsewhere, or when no prebuilt matches
-the current `harness/cpp` (key from `scripts/cpp-ref-key.sh`), it says so and runs
-`harness/cpp/build.sh` instead. Either way you still clone `upstream/`: the shims
-include its headers and difftest reads its test files.
-
-Building from source requires Bash, CMake 3.20 or newer, and a C++17 toolchain.
-Ninja is optional: when absent, CMake uses its default generator (typically Unix
-Makefiles, which requires `make`). Linux with GNU C++ is the parity reference used
-in CI; shell compatibility on macOS does not establish Apple-Clang difftest parity.
-Rust-only builds do not need these C++ build tools.
+Every unit's cases (`fixtures/<unit>/`, upstream's `TestFiles`, seeded generators) run on
+solidcore and are checked against the unit's golden, `crates/goldens/expected/<unit>.jsonl`:
+the outputs recorded when it was blessed. CI fails on any changed, added, missing or broken
+case. Many cases read upstream's test files, so clone `upstream/` first:
 
 ```sh
 git clone https://github.com/NVIDIA-Omniverse/usd-brep upstream
 git -C upstream checkout 3fd5b95   # v1.0.1; the pin is in scripts/upstream-pin.env
-scripts/fetch-cpp.sh                                  # C++ reference -> bin/cpp (prebuilt, or built)
-cargo run --profile difftest -p difftest --features cpp -- --green   # all green and partial units
-cargo run --profile difftest -p difftest --features cpp -- --unit <unit id>   # one unit
+cargo run --profile goldens -p goldens -- --all --goldens --jobs 0   # every unit (CI)
+cargo run --profile goldens -p goldens -- --unit <unit id> --goldens   # one unit
+cargo run --profile goldens -p goldens -- --unit <unit id> --bless     # record a change on purpose
 ```
 
-`solidcore-ffi` and `difftest` compile without the C++ build; only the `cpp` feature
-links it. The `cpp` feature compiles about 200 FFI shims with the `cc` crate on every
-clean build; with `RUSTC_WRAPPER=sccache` the `cc` crate runs them through sccache too,
-so they are cached like the Rust crates.
+A golden proves a result unchanged, not correct. A change that moves one is blessed and
+justified in its pull request: the cases that changed, their numbers, and pictures for
+geometry ([crates/goldens/README.md](crates/goldens/README.md)). upstream's C++ is a reading
+reference only: nothing here builds, links or runs it.
 
 ## Contributing
 
 Contributions go through pull requests, and AI agents are welcome. Useful work includes
-connecting ported units, resolving deferred comparisons, adding operation regressions
+connecting ported units, resolving deferred cases, adding operation regressions
 and fixing bugs.
 
 1. Check the [live unit results](https://tangency-labs.github.io/solidcore/units/index.html),
    [open issues](https://github.com/tangency-labs/solidcore/issues) and
    [open PRs](https://github.com/tangency-labs/solidcore/pulls). Choose an unclaimed
    unit or a specific completion task: a missing function, back-edge, exact import,
-   coverage gap or parity bug. Green reports do not prove every branch is exercised.
+   coverage gap or bug. A passing golden does not prove every branch is exercised.
 2. Search PR titles and bodies for the unit, symbols and paths. Claim the specific
    work in a draft PR; initial ports use `port: <unit id>`. A claim covers its stated
    scope, leaving independent tasks in the same unit available. Coordinate overlapping
    functions or shared interfaces in the existing PR before editing them.
 3. Describe the intended behavior, affected paths, related PRs and validation, and
-   list independent follow-ups others can take. Compare against C++ and rerun affected
-   units with existing tolerances and coverage. CI is the merge gate. See
+   list independent follow-ups others can take. Check the affected units against their
+   goldens and justify every golden you bless. CI is the merge gate. See
    [AGENTS.md §4](AGENTS.md#4-pull-requests) for the claim template,
    handoffs and inactivity rules.
 
 To keep parallel PRs from conflicting: edit only your unit's `plan/units/<unit id>.toml`,
-never commit `reports/difftest/` (CI generates them), and put each finding or upstream issue
+and put each finding or upstream issue
 in its own new file under `plan/findings/` or `plan/upstream-issues/` (never append to a
 shared file). A branch started before the per-unit
 split migrates with `git fetch origin && git merge origin/main;
@@ -166,7 +154,7 @@ agent at it).
 `crates/solidcore/Cargo.toml` in a PR, merge it, then push a tag
 `solidcore-v<version>` (`.github/workflows/release.yml`, needs the
 `CARGO_REGISTRY_TOKEN` repository secret). Only `solidcore` is published;
-`solidcore-ffi` and `difftest` are test-only. It stays at 0.0.x until it is usable end
+`goldens` is test-only. It stays at 0.0.x until it is usable end
 to end.
 
 ## Sponsors

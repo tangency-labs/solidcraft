@@ -30,7 +30,7 @@ CCDB = os.path.join(ROOT, "bin", "cpp", "compile_commands.json")
 LIBCLANG = os.environ.get("LIBCLANG", "/home/linuxbrew/.linuxbrew/opt/llvm/lib/libclang.so")
 RESOURCE_DIR = os.environ.get("CLANG_RESOURCE_DIR", "/home/linuxbrew/.linuxbrew/Cellar/llvm/21.1.8/lib/clang/21")
 
-# libstdc++ include dirs matching the g++ used by harness/cpp/build.sh (from `g++ -E -v`).
+# libstdc++ include dirs matching the g++ the compilation database names (from `g++ -E -v`).
 SYS_INCLUDES = os.environ.get("CXX_SYS_INCLUDES", "/usr/include/c++/13:/usr/include/x86_64-linux-gnu/c++/13:"
                               "/usr/include/c++/13/backward").split(":")
 

@@ -1449,8 +1449,9 @@ impl BSplineCurve {
     ///
     /// # Errors
     ///
-    /// `InvalidInput` for `start > end`, `end > n`, a stride below the point size or a
-    /// dimension below 2; `SM_ERR` without a NURB.
+    /// `InvalidInput` for `start > end`, `end > n`, a stride below the point size, a
+    /// dimension below 2 or an output (`stride` values per point) above
+    /// [`crate::limits::MAX_ALLOC_BYTES`]; `SM_ERR` without a NURB.
     pub fn control_points_expert(
         &self,
         form: ControlPointForm,
@@ -1477,11 +1478,10 @@ impl BSplineCurve {
         let len = stride
             .checked_mul(count)
             .ok_or_else(|| invalid(OP_EXPERT, "output too large"))?;
-        // the caller's output array upstream: allocated fallibly here
-        let mut out = Vec::new();
-        out.try_reserve_exact(len)
-            .map_err(|_| invalid(OP_EXPERT, "output too large"))?;
-        out.resize(len, 0.0);
+        // the caller's output array upstream: allocated within limits::MAX_ALLOC_BYTES
+        // here, so a huge stride fails at once instead of zero-filling it
+        let mut out = crate::limits::try_filled(len, 0.0)
+            .ok_or_else(|| invalid(OP_EXPERT, "output too large"))?;
         let mut address = 0usize;
         let three_d = dim > 2;
 
@@ -2291,10 +2291,22 @@ mod tests {
     #[test]
     fn control_points_expert_absurd_stride_is_an_error() {
         // fuzz regression (nurbs.b_spline_curve_p2 fuzz00841): a 2^32 stride aborted
-        // the output allocation
+        // the output allocation, and a 2^31 stride over two points (32 GiB, which an
+        // overcommitting reservation grants) was zero-filled for 30 s
         let c = cubic();
         let r = c.control_points_expert(ControlPointForm::NonRational, 0, 4, 1 << 62);
         assert!(r.is_err());
+        let r = c.control_points_expert(ControlPointForm::NonRational, 0, 1, 1 << 31);
+        assert!(
+            matches!(
+                r,
+                Err(SolidError::InvalidInput {
+                    reason: "output too large",
+                    ..
+                })
+            ),
+            "{r:?}"
+        );
         assert!(c
             .control_points_expert(ControlPointForm::NonRational, 0, 4, usize::MAX)
             .is_err());

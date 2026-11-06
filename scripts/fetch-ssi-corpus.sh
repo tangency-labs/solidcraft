@@ -4,11 +4,11 @@
 # corpus/ssi/ (gitignored; never commit case data). Idempotent: re-running leaves an
 # existing checkout at the pinned commit.
 #
-# The corpus is data only: difftest --ssi-corpus reads its cases/data/*.json and never
+# The corpus is data only: goldens --ssi-corpus reads its cases/data/*.json and never
 # executes anything from it.
 #
 # Usage: scripts/fetch-ssi-corpus.sh [dest]      (default <repo>/corpus/ssi)
-# Used by: cargo run --profile difftest -p difftest --features cpp -- --ssi-corpus
+# Used by: cargo run --profile goldens -p goldens -- --ssi-corpus
 set -euo pipefail
 
 URL="https://github.com/jyviko/ssi-corpus.git"

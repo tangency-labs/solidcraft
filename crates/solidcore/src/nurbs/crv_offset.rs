@@ -25,7 +25,8 @@
 //!   upstream, where `NL_DEGREE` is a `short`) is [`SolidError::InvalidInput`], so
 //!   index arithmetic and allocations sized from a degree cannot overflow.
 //! - HANG-44: more sample points in total than the input-scaled
-//!   [`offset_sample_bound`] is [`SolidError::InvalidInput`]. Upstream samples any
+//!   [`offset_sample_bound`] is [`SolidError::InvalidInput`] with reason
+//!   [`TOO_MANY_SAMPLES_REASON`]. Upstream samples any
 //!   count, but the knot removal that follows takes time quadratic in it (practically
 //!   forever for the counts a pole or a tiny tolerance produce). The bound is
 //!   `min(2^17, max(16 384, 4 * segments * ceil((1/tol)^exp * 2 deg)))`: any count up
@@ -57,6 +58,10 @@ const OP: &str = "nurbs::crv_offset::Curve::offset_pt_sampling";
 /// sum of the per-segment counts; the difftest guard allows 4000). Above it the
 /// input-scaled [`offset_sample_bound`] applies.
 pub const MAX_OFFSET_SAMPLES: isize = 16_384;
+
+/// `reason` of the `InvalidInput` error of [`Curve::offset_pt_sampling`] when the
+/// sample count exceeds [`offset_sample_bound`] (a pole or a cusp of the offset).
+pub const TOO_MANY_SAMPLES_REASON: &str = "too many sample points";
 
 /// How many times its curvature-free count (`ceil(f1 * 2 deg)` per Bezier segment) a
 /// curve may sample in [`offset_sample_bound`].
@@ -270,7 +275,7 @@ impl Curve {
         {
             return Err(SolidError::InvalidInput {
                 operation: OP,
-                reason: "too many sample points",
+                reason: TOO_MANY_SAMPLES_REASON,
             });
         }
 

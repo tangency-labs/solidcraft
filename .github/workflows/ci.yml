@@ -7,23 +7,10 @@ on:
   # The merge queue tests each PR merged with the latest main (and the PRs ahead of it).
   merge_group:
   workflow_dispatch:
-    inputs:
-      baseline_sha:
-        description: "Exact main revision used as baseline"
-        type: string
-      diagnostic_only:
-        description: "Explicitly skip the ratchet for a diagnostic manual run"
-        type: boolean
-        default: false
-      difftest:
-        description: "Run the difftest against the C++ reference (maintainers, when a PR needs it)"
-        type: boolean
-        default: false
 
 # Every job runs on Blacksmith's hosted runners (blacksmith.sh; ephemeral VMs, sponsored
 # minutes, outside the org's 20-runner cap): pushes to main, every pull request (fork or not)
-# and Run workflow. Builds are cached with actions/cache (Swatinem/rust-cache and the C++
-# reference build cache below). To fall back when the sponsorship ends, change the
+# and Run workflow. Builds are cached with actions/cache (Swatinem/rust-cache). To fall back when the sponsorship ends, change the
 # `blacksmith-*` labels back to `ubuntu-latest`. A new push to a PR supersedes the run on its
 # previous head, so cancel it. Runs on main are keyed by commit, so they never queue behind or
 # cancel each other: every merge is checked.
@@ -35,25 +22,20 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
   # The upstream pin (UPSTREAM_REPO/UPSTREAM_VERSION/UPSTREAM_COMMIT) comes from
-  # scripts/upstream-pin.env, loaded by .github/actions/cpp-reference.
+  # scripts/upstream-pin.env, loaded by .github/actions/upstream.
 
 permissions:
   contents: read
 
 jobs:
-  # The gate is solidcore's own: fmt, clippy, its tests and wasm. The difftest against the C++
-  # reference is a tool, not the gate (AGENTS.md §1): its jobs, the C++-feature clippy and the
-  # difftest runners' tests run only when a maintainer starts this workflow with `difftest`
-  # set (Run workflow on the PR's branch, with the PR's base as `baseline_sha`). On pull
-  # requests, the merge queue and pushes to main they are skipped, and the `difftest`
-  # required check passes as not requested.
+  # The gate: fmt, clippy, the tests, wasm and the goldens (every unit's cases against their
+  # committed expected outputs).
   #
   # What this run must check. `code`: false only when a pull_request or merge_group change
-  # touches nothing but docs (DOCS_ONLY below); those skip the build/test/difftest jobs, whose
+  # touches nothing but docs (DOCS_ONLY below); those skip the build/test/goldens jobs, whose
   # required checks then report "skipped" (passing). `full`: code and not a push to main. A
   # push to main was already tested on the identical tree by the merge queue, so it runs only
-  # what publishes main's artifacts (difftest reports for the next PRs' exact-base ratchet,
-  # solids report); everything else is skipped there.
+  # what publishes main's artifacts (the solids report); everything else is skipped there.
   changes:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     outputs:
@@ -71,7 +53,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
-      - run: scripts/ci/test-difftest-baseline.sh
+      - run: python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v
       - run: python3 -I scripts/ci/check_record_ids.py
 
   fmt:
@@ -89,46 +71,34 @@ jobs:
     needs: changes
     if: needs.changes.outputs.full == 'true'
     runs-on: blacksmith-8vcpu-ubuntu-2404
-    env:
-      SOLIDCORE_CPP_DIR: ${{ github.workspace }}/.cpp
     steps:
       - uses: actions/checkout@v4
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> bin"
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      # The plain run above cannot see code behind the cpp feature (ffi bindings and the
-      # difftest unit runners); lint it too, with the C++ headers in place.
-      # difftest/cpp enables solidcore-ffi/cpp and registers the runners.
-      - uses: ./.github/actions/cpp-reference
-        if: github.event_name == 'workflow_dispatch' && inputs.difftest
-      - name: Clippy with the C++ feature
-        if: github.event_name == 'workflow_dispatch' && inputs.difftest
-        run: cargo clippy --workspace --all-targets --features difftest/cpp -- -D warnings
 
   test:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: blacksmith-8vcpu-ubuntu-2404
     env:
-      SOLIDCORE_CPP_DIR: ${{ github.workspace }}/.cpp
       # Tests that read upstream/TestFiles fail instead of skipping when it is missing.
       SOLIDCORE_REQUIRE_UPSTREAM: "1"
     steps:
       - uses: actions/checkout@v4
-      # upstream/ for the tests that read its TestFiles, sccache for every build here,
-      # and the C++ reference for the difftest runner tests below.
-      - name: Upstream sources and sccache for the workspace tests
-        uses: ./.github/actions/cpp-reference
+      # upstream/ for the tests that read its TestFiles.
+      - name: Upstream sources for the workspace tests
+        uses: ./.github/actions/upstream
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> bin"
-      # Every test runs once, optimised, in the difftest profile (Cargo.toml
-      # [profile.difftest]: opt-level 3 with overflow-checks and debug-assertions still
+      # Every test runs once, optimised, in the goldens profile (Cargo.toml
+      # [profile.goldens]: opt-level 3 with overflow-checks and debug-assertions still
       # on; Rust floating point does not change with opt-level, and this is the build the
-      # difftest gate already measures parity with). Unoptimised, the suite took ~30 of
+      # goldens are checked with). Unoptimised, the suite took ~30 of
       # this job's ~40 minutes; optimised it takes a few. Its solidcore is the one the
-      # solids report and the runner tests below reuse, so it is built once.
+      # solids report below reuses, so it is built once.
       # cargo-nextest runs the tests of all binaries in parallel (one process per test),
       # so a binary whose tests are slow no longer holds up the rest. nextest skips
       # doctests, so they run separately. The two SolidCraft whole-corpus tests are
@@ -137,19 +107,19 @@ jobs:
         if: needs.changes.outputs.full == 'true'
         with:
           tool: cargo-nextest@0.9.150
-      - name: Workspace tests (difftest profile)
+      - name: Workspace tests (goldens profile)
         if: needs.changes.outputs.full == 'true'
-        run: cargo nextest run --workspace --cargo-profile difftest --no-fail-fast
-      - name: Doctests (difftest profile)
+        run: cargo nextest run --workspace --cargo-profile goldens --no-fail-fast
+      - name: Doctests (goldens profile)
         if: needs.changes.outputs.full == 'true'
-        run: cargo test --workspace --profile difftest --doc
+        run: cargo test --workspace --profile goldens --doc
       # Solids: the primitives example's per-shape results (built, blocker, checks) for
-      # the site's Solids page. It reuses the difftest-profile build above and exits 1
+      # the site's Solids page. It reuses the goldens-profile build above and exits 1
       # while any primitive fails, so only a crash (or a missing JSON) fails the job.
       - name: Solids report (primitives example)
         run: |
           set +e
-          cargo run --profile difftest -p solidcore --example primitives -- --json reports/solids/solids.json
+          cargo run --profile goldens -p solidcore --example primitives -- --json reports/solids/solids.json
           rc=$?
           set -e
           [ "$rc" -le 1 ] && test -s reports/solids/solids.json
@@ -162,13 +132,6 @@ jobs:
           path: reports/solids/solids.json
           if-no-files-found: error
           retention-days: 90
-      # The difftest runners' own unit tests (guards, decoders, probes) need the C++
-      # reference (installed above). Same profile as the difftest job's binary
-      # (Cargo.toml [profile.difftest]); here rather than after the difftest run, so they
-      # no longer add to its wall time.
-      - name: Difftest runner tests
-        if: needs.changes.outputs.full == 'true' && github.event_name == 'workflow_dispatch' && inputs.difftest
-        run: cargo test --profile difftest -p difftest -p solidcore-ffi --features cpp
 
   # The kernel rig (#2394): SolidCraft's operation-level cases in
   # crates/solidcore/tests/kernel_cases, replayed through solidcore-ops' public
@@ -193,7 +156,7 @@ jobs:
           KERNEL_CASES_REPORT: ${{ github.workspace }}/reports/kernel-rig/table.md
         run: |
           mkdir -p reports/kernel-rig
-          cargo test --profile difftest -p solidcore-ops --test kernel_cases -- --ignored --nocapture
+          cargo test --profile goldens -p solidcore-ops --test kernel_cases -- --ignored --nocapture
       - name: Upload the table
         if: always()
         uses: actions/upload-artifact@v4
@@ -237,260 +200,46 @@ jobs:
         with:
           command: check licenses bans sources
 
-  # The difftest gate is split so its slow parts overlap (they used to run one after
-  # another: exact-base wait, sweep, perturbation). `difftest-baseline` fetches and
-  # validates the exact-base artifact while `difftest-sweep` runs the green sweep and
-  # `difftest-perturb` the (mandatory) perturbation check; `difftest-compare` then holds the
-  # sweep's finished reports to the validated base with the same ratchet as `--baseline`;
-  # `difftest` (the required check's name) fails unless every part succeeded.
-  difftest-baseline:
+  # Every unit's cases, run on solidcore and checked against the unit's golden
+  # (crates/goldens/expected/<unit>.jsonl): a case whose output changed (beyond the 1e-9
+  # relative rule and the unit's documented floors), a case added or missing, and a case
+  # that breaks (harness error or panic) all fail, each printed with its first
+  # differences. A golden changes only with `--bless`, justified in the pull request.
+  # --jobs 0: one child process per unit, one per vCPU (same output as a serial run).
+  goldens:
     needs: changes
-    if: needs.changes.outputs.full == 'true' && (github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.difftest))
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    permissions:
-      contents: read
-      actions: read  # reads the exact base revision's run and report artifact
-    outputs:
-      baseline: ${{ steps.validate.outputs.baseline }}
-    steps:
-      - uses: actions/checkout@v4
-
-      # Fail closed: any validation error fails this step (and so the job and `difftest`).
-      # Only a genuine bootstrap/diagnostic run, which the helper reports by printing
-      # nothing, continues without a base.
-      - name: Validate exact-base report artifact
-        id: validate
-        env:
-          GH_TOKEN: ${{ github.token }}
-          EVENT: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.baseline_sha }}
-        run: |
-          arg=$(scripts/ci/difftest-baseline.sh "$EVENT" "$BASE" "$RUNNER_TEMP/difftest-baseline" --current-plan "$GITHUB_WORKSPACE")
-          if [ -n "$arg" ]; then
-            echo "baseline=yes" >> "$GITHUB_OUTPUT"
-          else
-            echo "baseline=no" >> "$GITHUB_OUTPUT"
-          fi
-
-      # Hand the validated reports and their provenance to difftest-compare.
-      - name: Upload validated baseline
-        if: steps.validate.outputs.baseline == 'yes'
-        uses: actions/upload-artifact@v4
-        with:
-          name: difftest-validated-baseline
-          path: ${{ runner.temp }}/difftest-baseline
-          if-no-files-found: error
-          retention-days: 1
-
-  difftest-sweep:
-    # Pushes to main, where its reports are main's published set (the exact base a requested
-    # run checks against, and the site's case counts), and manual runs with the `difftest`
-    # input. Pull requests and the merge queue skip it. Starts right after `changes`: it is the
-    # longest part. Clippy with the cpp feature and the runner tests run in the clippy and test
-    # jobs, in parallel with this one.
-    needs: changes
-    if: needs.changes.outputs.code == 'true' && (github.event_name == 'push' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.difftest))
+    if: needs.changes.outputs.full == 'true'
     runs-on: blacksmith-16vcpu-ubuntu-2404
-    permissions:
-      contents: read
-      actions: read  # scripts/fetch-reports.sh reads main's report artifact
-    env:
-      SOLIDCORE_CPP_DIR: ${{ github.workspace }}/.cpp
-    outputs:
-      any: ${{ steps.green.outputs.any }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Select optional native execution
-        id: green
-        run: |
-          if grep -Eqs '^\s*status\s*=\s*"(green|partial)"' plan/units/*.toml; then
-            echo "any=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "any=false" >> "$GITHUB_OUTPUT"
-            echo "No current green units; exact-base retention is still required."
-          fi
-
-      - name: Upstream sources, sccache and the C++ reference
-        if: steps.green.outputs.any == 'true'
-        uses: ./.github/actions/cpp-reference
-
+      # upstream/TestFiles: the .smb, .sms and point files many fixtures read.
+      - name: Upstream sources (TestFiles)
+        uses: ./.github/actions/upstream
       - uses: Swatinem/rust-cache@v2
-        if: steps.green.outputs.any == 'true'
         with:
           workspaces: ". -> bin"
-          key: difftest
+          key: goldens
+      - name: Build
+        run: cargo build --profile goldens -p goldens
+      - name: Every unit against its golden
+        run: bin/goldens/goldens --all --goldens --jobs 0 --no-report
 
-      # Reports are not committed. main's latest set (uploaded below) only orders the
-      # --jobs queue, slowest unit first (times.tsv: each unit's wall time in main's last
-      # run; else its case count; without either, an estimate from its fixtures).
-      - name: Fetch main's difftest reports (queue order)
-        if: steps.green.outputs.any == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: scripts/fetch-reports.sh || echo "no previous reports; queue ordered by fixture size"
-
-      - name: Difftest green units
-        if: steps.green.outputs.any == 'true'
-        # Optimised profile (Cargo.toml [profile.difftest]): identical results, about 20x
-        # faster than the debug build that used to take ~35 min here. --jobs 0: one child
-        # process per unit, one per vCPU (same output and reports as a serial run). The
-        # exact-base ratchet is applied afterwards by difftest-compare, to
-        # these reports; the per-unit status and value-share gates run here.
-        run: cargo run --profile difftest -p difftest --features cpp -- --green --jobs 0
-
-      - name: Keep only reports of green/partial units
-        if: steps.green.outputs.any == 'true' && !cancelled()
-        run: |
-          python3 - <<'PY'
-          import pathlib, sys
-          sys.path.insert(0, "harness/plan")
-          import units
-          keep = {u["id"] for u in units.load_units() if u.get("status") in ("green", "partial")}
-          for p in pathlib.Path("reports/difftest").glob("*.json"):
-              if p.stem not in keep:
-                  p.unlink()
-          PY
-
-      # Carries the finished reports to difftest-compare (run-internal, short-lived).
-      - name: Upload sweep reports
-        if: steps.green.outputs.any == 'true' && !cancelled()
-        uses: actions/upload-artifact@v4
-        with:
-          name: difftest-sweep-reports
-          path: reports/difftest/*.json
-          if-no-files-found: error
-          retention-days: 1
-
-      # main's reports are published from here (site, checklist case counts,
-      # scripts/fetch-reports.sh), never committed.
-      - name: Upload difftest reports
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.green.outputs.any == 'true' && !cancelled()
-        uses: actions/upload-artifact@v4
-        with:
-          name: difftest-reports
-          path: |
-            reports/difftest/*.json
-            reports/difftest/times.tsv
-          if-no-files-found: error
-          retention-days: 90
-
-      - name: sccache stats
-        if: always() && steps.green.outputs.any == 'true'
-        run: sccache --show-stats || true
-
-  # On request only (the `difftest` input), in parallel with the sweep.
-  difftest-perturb:
-    needs: changes
-    if: needs.changes.outputs.full == 'true' && github.event_name == 'workflow_dispatch' && inputs.difftest
-    runs-on: blacksmith-16vcpu-ubuntu-2404
-    env:
-      SOLIDCORE_CPP_DIR: ${{ github.workspace }}/.cpp
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Select optional native execution
-        id: green
-        run: |
-          if grep -Eqs '^\s*status\s*=\s*"(green|partial)"' plan/units/*.toml; then
-            echo "any=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "any=false" >> "$GITHUB_OUTPUT"
-            echo "No current green units; nothing to perturb."
-          fi
-
-      - name: Upstream sources, sccache and the C++ reference
-        if: steps.green.outputs.any == 'true'
-        uses: ./.github/actions/cpp-reference
-
-      - uses: Swatinem/rust-cache@v2
-        if: steps.green.outputs.any == 'true'
-        with:
-          workspaces: ". -> bin"
-          key: difftest
-
-      - name: Difftest perturbation check
-        if: steps.green.outputs.any == 'true'
-        run: cargo run --profile difftest -p difftest --features cpp -- --green --perturb --jobs 0 --no-report
-
-      - name: sccache stats
-        if: always() && steps.green.outputs.any == 'true'
-        run: sccache --show-stats || true
-
-  # The exact-base ratchet. Needs both the validated base and the finished sweep: if either
-  # job fails or is skipped, this job is skipped and `difftest` fails.
-  difftest-compare:
-    needs: [changes, difftest-baseline, difftest-sweep]
-    if: needs.changes.outputs.full == 'true' && (github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.difftest))
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: Swatinem/rust-cache@v2
-        if: needs.difftest-baseline.outputs.baseline == 'yes' && needs.difftest-sweep.outputs.any == 'true'
-        with:
-          workspaces: ". -> bin"
-          key: difftest-compare
-
-      - name: Download validated baseline
-        if: needs.difftest-baseline.outputs.baseline == 'yes'
-        uses: actions/download-artifact@v4
-        with:
-          name: difftest-validated-baseline
-          path: ${{ runner.temp }}/difftest-baseline
-
-      - name: Download sweep reports
-        if: needs.difftest-sweep.outputs.any == 'true'
-        uses: actions/download-artifact@v4
-        with:
-          name: difftest-sweep-reports
-          path: ${{ runner.temp }}/difftest-sweep
-
-      # No C++ and no cases: the same ratchet as --baseline, over the finished reports.
-      - name: Compare sweep reports with the exact base
-        if: needs.difftest-baseline.outputs.baseline == 'yes' && needs.difftest-sweep.outputs.any == 'true'
-        run: >-
-          cargo run -p difftest --
-          --compare-reports "$RUNNER_TEMP/difftest-sweep"
-          --baseline "$RUNNER_TEMP/difftest-baseline/reports"
-
-  # The required check ("difftest"). Runs even when a part failed or was skipped, and
-  # succeeds only if every part succeeded.
+  # Exists only for the required-check name `difftest` (the branch ruleset requires that
+  # check until an admin renames it): it succeeds exactly when `goldens` did, or when the run
+  # had nothing to check (docs-only changes, a push to main).
   difftest:
-    needs: [changes, difftest-baseline, difftest-sweep, difftest-perturb, difftest-compare]
+    needs: [changes, goldens]
     if: always()
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
-      - name: Require every difftest part
+      - name: Require goldens
         env:
           CHANGES: ${{ needs.changes.result }}
           FULL: ${{ needs.changes.outputs.full }}
-          SWEEP: ${{ needs.difftest-sweep.result }}
-          REQUESTED: ${{ github.event_name == 'workflow_dispatch' && inputs.difftest }}
-          PR: ${{ github.event_name == 'pull_request' }}
-          PERTURB: ${{ needs.difftest-perturb.result }}
-          RESULTS: ${{ join(needs.*.result, ' ') }}
+          GOLDENS: ${{ needs.goldens.result }}
         run: |
-          echo "changes difftest-baseline difftest-sweep difftest-perturb difftest-compare: $RESULTS"
           [ "$CHANGES" = success ] || { echo "the changes job did not succeed"; exit 1; }
-          if [ "$PR" = true ] && [ "$FULL" = true ]; then
-            # a pull request runs the sweep against its exact base, so a change that moves a
-            # case shows it before it merges; the perturbation check stays on request
-            for part in "${{ needs.difftest-baseline.result }}" "$SWEEP" "${{ needs.difftest-compare.result }}"; do
-              [ "$part" = success ] || { echo "a difftest part did not succeed"; exit 1; }
-            done
-            [ "$PERTURB" = skipped ] || [ "$PERTURB" = success ] || { echo "difftest-perturb: $PERTURB"; exit 1; }
-            exit 0
-          fi
-          if [ "$REQUESTED" != true ]; then
-            echo "difftest not requested: it runs on pull requests, and when a maintainer starts the workflow with difftest set"; exit 0
-          fi
           if [ "$FULL" != true ]; then
-            # docs-only change (everything skipped), or a push to main (only the sweep, which
-            # publishes main's reports, runs; the merge queue already ran the full gate)
-            case "$SWEEP" in success|skipped) echo "not a full run (full=$FULL)"; exit 0;; esac
-            echo "difftest-sweep: $SWEEP"; exit 1
+            echo "not a full run (full=$FULL): goldens not run"; exit 0
           fi
-          for r in $RESULTS; do
-            [ "$r" = success ] || { echo "a difftest part did not succeed"; exit 1; }
-          done
+          [ "$GOLDENS" = success ] || { echo "goldens: $GOLDENS"; exit 1; }

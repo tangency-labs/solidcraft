@@ -2469,7 +2469,7 @@ impl Curve {
 
 /// Whether every corner coordinate of `b` is a number within
 /// [`crate::limits::MAX_COORDINATE_MAGNITUDE`].
-fn is_measurable_box(b: &Extent3d) -> bool {
+pub(super) fn is_measurable_box(b: &Extent3d) -> bool {
     let (min, max) = (b.min(), b.max());
     [min.x, min.y, min.z, max.x, max.y, max.z]
         .iter()

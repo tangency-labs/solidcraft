@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/solidcore", "crates/solidcore-record", "crates/solidcore-convert", "crates/solidcore-tess", "crates/solidcore-ffi", "crates/difftest", "crates/nurbs-grid-mesh", "crates/ssi", "crates/solidcore-ssi", "crates/step-brep", "crates/step-export", "crates/step-import", "crates/xtask", "crates/solidcore-ops", "crates/diagnostics"]
+members = ["crates/solidcore", "crates/solidcore-record", "crates/solidcore-convert", "crates/solidcore-tess", "crates/goldens", "crates/nurbs-grid-mesh", "crates/ssi", "crates/solidcore-ssi", "crates/step-brep", "crates/step-export", "crates/step-import", "crates/xtask", "crates/solidcore-ops", "crates/diagnostics"]
 default-members = ["crates/solidcore"]
 
 [workspace.package]
@@ -13,12 +13,10 @@ rust-version = "1.85"
 thiserror = "2"
 
 # Lints shared by every crate that opts in with `[lints] workspace = true`.
-# solidcore-ffi is the only crate allowed to contain `unsafe`: it opts in and
-# overrides with `#![allow(unsafe_code)]` at its crate root (deny, not forbid,
-# so that override is possible). Test code may unwrap/expect/panic/index: see
+# No crate contains `unsafe` (forbidden). Test code may unwrap/expect/panic/index: see
 # clippy.toml.
 [workspace.lints.rust]
-unsafe_code = "deny"
+unsafe_code = "forbid"
 missing_docs = "warn"
 unreachable_pub = "allow"
 unused_qualifications = "warn"
@@ -61,19 +59,19 @@ module_name_repetitions = "allow"
 # - thousands of ported getters; #[must_use] is added deliberately where it matters
 must_use_candidate = "allow"
 
-# difftest runs optimised (FP results are unchanged: Rust never contracts or reassociates
-# floating point; every --green report is identical at opt-level 1 and 3) but keeps
-# overflow checks and debug assertions as a safety net.
-[profile.difftest]
+# The goldens profile runs optimised (FP results are unchanged: Rust never contracts or
+# reassociates floating point; the goldens agree at opt-level 1 and 3) but keeps overflow
+# checks and debug assertions as a safety net. CI's tests use it too.
+[profile.goldens]
 inherits = "release"
 opt-level = 3
 overflow-checks = true
 debug-assertions = true
 incremental = true
 
-# The difftest crate itself (runners, fixtures, comparison; ~300k lines) is glue: at
-# opt-level 3 it took ~5 of CI's ~6 build minutes, at 0 about 1.5, and the --green run
-# is ~4% slower in total (the kernel, solidcore, and the C++ stay fully optimised).
-# Reports are byte-identical at either level.
-[profile.difftest.package.difftest]
+# The goldens crate itself (runners, fixtures, checks; ~300k lines) is glue: at opt-level
+# 3 it took ~5 of CI's ~6 build minutes, at 0 about 1.5, and a full run is ~4% slower in
+# total (the kernel, solidcore, stays fully optimised). Outputs are identical at either
+# level.
+[profile.goldens.package.goldens]
 opt-level = 0

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Regenerate the call graph and the plan (plan/closure.md, plan/units/*.toml, plan/order.md).
-# Requires bin/cpp/compile_commands.json (harness/cpp/build.sh) and libclang (see README.md).
+# Requires bin/cpp/compile_commands.json (a CMake compilation database of upstream/source/SMLib
+# and SM_API configured with g++; nothing is compiled) and libclang (see README.md).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 VENV=bin/callgraph-venv

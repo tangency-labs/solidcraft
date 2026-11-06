@@ -6,7 +6,7 @@ It's pure Rust with no dependencies and no `unsafe`, and it builds for `wasm32-u
 Library code never panics, unwraps or indexes. It's single-threaded and deterministic.
 
 This is not a port unit. It's a separate workspace crate that builds under the workspace lints
-and touches nothing in the ported kernel, `plan/` or `difftest`.
+and touches nothing in the ported kernel, `plan/` or `goldens`.
 
 ## Measured
 

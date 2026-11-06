@@ -8,17 +8,9 @@ Moved from AGENTS.md (§2, §3) unchanged; AGENTS.md points here.
 
 ```sh
 export CARGO_BUILD_JOBS=2 RUSTC_WRAPPER=sccache      # sccache is installed in ~/.cargo/bin
-nice -n 10 cargo test -p solidcore                     # every cargo/C++ command under nice
+nice -n 10 cargo test -p solidcore                     # every cargo command under nice
 ```
 
-- C++ reference: `scripts/fetch-cpp.sh` downloads the prebuilt libraries for the current
-  harness key (no compiling); it falls back to `nice -n 10 harness/cpp/build.sh --jobs 6`
-  when no prebuilt matches. Only refetch/rebuild if `bin/cpp/lib` is missing or the
-  harness changed; one shared `bin/cpp` serves all worktrees (below). With
-  `RUSTC_WRAPPER=sccache` the shims solidcore-ffi compiles are cached by sccache too.
-- Run it from the main tree; worktrees reuse that build by exporting
-  `SOLIDCORE_CPP_DIR=$HOME/github/solidcore/bin/cpp` (the CMake build dir is keyed by
-  source tree, so a worktree run gets its own build dir but installs to the same `lib/`).
 - Before claiming a unit, check load: `cut -d' ' -f1 /proc/loadavg`. If > 24, do not
   claim; finish or wait.
 - After merging, delete your worktree's `bin/` (each worktree has its own cargo target).
@@ -30,8 +22,8 @@ nice -n 10 cargo test -p solidcore                     # every cargo/C++ command
 ported and unchanged keeps upstream numerics: same formulas, same operation order, same
 iteration order, same branch structure for tolerance tests and degenerate cases. Do not
 "simplify" `a*b + c` into `mul_add`, reorder sums, swap in `hypot`/`midpoint`, or replace
-loops with library calls that change rounding there; the C++ reference is built with
-`-ffp-contract=off`, so matching order gives matching bits. Code that fixes or replaces a
+loops with library calls that change rounding there: the goldens record those bits, and
+upstream's results came from matching order with no contraction. Code that fixes or replaces a
 construction uses the numerics its correctness needs (exact predicates, interval enclosures,
 certified rounding bounds) and says so in its doc comment. Everything else is Rust-first:
 

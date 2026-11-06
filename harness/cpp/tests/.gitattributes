@@ -1,2 +1,0 @@
-# These reference gates run through Bash, including from Windows worktrees in WSL.
-*.sh text eol=lf

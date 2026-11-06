@@ -71,6 +71,14 @@
 //!   nested reimplantation always disables subdivision, so that call chain has
 //!   at most one nested implantation. Geometric subdivision retains the base
 //!   cache's documented bounds; construction uses its containment guard.
+//! - **Subdivision stop.** `ImplantEdgeuse` splits a leaf near the curve (or near a
+//!   pole side) until it is smaller than the minimum node size, which it derives from
+//!   the cache domain and the curve's box. Upstream subdivides whatever those are; a
+//!   trim curve with a non-finite box (one evaluated on an invalid surface) makes the
+//!   size NaN, no comparison with it is true, and the leaves at a pole split forever
+//!   down to zero width. The port refuses a curve whose box is not finite, and a
+//!   subdividing implant whose minimum node size is not a positive finite number,
+//!   with [`SolidError::InvalidInput`] before splitting anything.
 //! - **Unported callees** (all return [`SolidError::Unported`]): `SmSurface::GetFace`
 //!   without a [`CacheFace`] (through [`SurfaceCache::face`]); `SmTol::GetZoneTol3d`
 //!   and `SmFace::PointClassify` of [`TrimSrfCache::point_test`] /
@@ -971,9 +979,11 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
     ///
     /// # Errors
     ///
-    /// `SM_ERR_NULL_POINTER` without trim curve; those of the curve box, the curve
-    /// cache and the tree; [`SolidError::Unported`] for `FindUVNodes` and
-    /// `SubdivideNode`.
+    /// `SM_ERR_NULL_POINTER` without trim curve; [`SolidError::InvalidInput`] for a
+    /// curve box that is not finite, or with `do_subdivision` a minimum node size that
+    /// is not a positive finite number (module docs, subdivision stop); those of the
+    /// curve box, the curve cache and the tree; [`SolidError::Unported`] for
+    /// `FindUVNodes` and `SubdivideNode`.
     pub fn implant_edgeuse(
         &mut self,
         k: &Kernel,
@@ -1069,8 +1079,13 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
             )?
             .normal
             .ok_or_else(|| invalid(OP_EU, "no curve box"))?;
-        let mut curve_bbox =
-            Extent2d::from_bounds(bbox.min().x, bbox.min().y, bbox.max().x, bbox.max().y);
+        let corners = [bbox.min().x, bbox.min().y, bbox.max().x, bbox.max().y];
+        // (not upstream) every size below derives from this box: see the module docs
+        if !corners.iter().all(|c| c.is_finite()) {
+            return Err(invalid(OP_EU, "trim curve box is not finite"));
+        }
+        let [x0, y0, x1, y1] = corners;
+        let mut curve_bbox = Extent2d::from_bounds(x0, y0, x1, y1);
         let expand = (1.0 + curve_bbox.size().length()) * EFF_ZERO_SQRT;
         curve_bbox.expand_absolute(expand);
 
@@ -1115,6 +1130,14 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
         if line.is_some() {
             let line_size = curve_bbox.size().length() / 10.0;
             min_node_size_squared = max2(min_node_size_squared, line_size * line_size);
+        }
+
+        // (not upstream) the subdivision stops only below a positive finite size
+        if do_subdivision && !(min_node_size_squared.is_finite() && min_node_size_squared > 0.0) {
+            return Err(invalid(
+                OP_EU,
+                "minimum node size is not a positive finite number",
+            ));
         }
 
         // sMinSize
@@ -1786,6 +1809,43 @@ mod tests {
                 Some(NodeId(1)),
             )
             .is_err());
+    }
+
+    /// A trim curve whose box is not finite (one evaluated on an invalid surface) is
+    /// refused before any split: its NaN minimum node size stopped no subdivision, and
+    /// the leaves at a pole split forever.
+    #[test]
+    fn non_finite_trim_curve_is_refused_before_subdividing() {
+        let k = Kernel::default();
+        let mut c = cache();
+        let mut ext = Extent2d::new();
+        let crv = line_2d([f64::NAN, 0.3], [0.4, 0.7]);
+        let refused = c.implant_edgeuse(
+            &k,
+            EdgeuseInput {
+                edgeuse: 7,
+                uv_trim_curve: Some(crv),
+                owner_zone_tol_3d: None,
+            },
+            true,
+            &mut ext,
+            None,
+        );
+        assert!(
+            matches!(
+                refused,
+                Err(SolidError::InvalidInput {
+                    reason: "trim curve box is not finite",
+                    ..
+                })
+            ),
+            "{refused:?}"
+        );
+        assert_eq!(c.base().tree().map(|t| t.nodes().len()), Some(3));
+        for node in 0..3 {
+            assert!(c.base().aux(NodeId(node)).unwrap().edgeuse_list.is_empty());
+        }
+        assert!(ext.is_init());
     }
 
     #[test]

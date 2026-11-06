@@ -74,7 +74,7 @@ def main():
                 memo[s] = frames(s)
             stacks[memo[s]] += w or 1
     total = sum(stacks.values())
-    exe = next((l for l in libs if l["debugName"] == "difftest"), None)
+    exe = next((l for l in libs if l["debugName"] == "goldens"), None)
     addrs = set()
     for fr, _ in stacks.items():
         for i, (lib, a) in enumerate(fr):
@@ -128,14 +128,12 @@ def main():
             names.extend(name_of(lib, a, i == len(fr) - 1))
         inner = names[-1] if names else "?"
         cxx = "(" in inner.split("<")[0] or "libstdc++" in inner
-        if any("::run_cpp" in x for x in names):
-            split["run_cpp"] += w
-        elif cxx or any(x.startswith("solidcore_ffi::") for x in names):
-            split["C++ outside run_cpp (FFI calls from run_rust, or truncated C++ stacks)"] += w
+        if cxx:
+            split["C++ (libstdc++ or truncated stacks)"] += w
         elif any(x.startswith("solidcore::") or x.startswith("<solidcore::") for x in names):
             split["Rust kernel (solidcore::)"] += w
-        elif any("difftest::" in x for x in names):
-            split["harness (difftest)"] += w
+        elif any("goldens::" in x for x in names):
+            split["harness (goldens)"] += w
         else:
             split["libc / unattributed"] += w
         if focus and not any(focus in x for x in names):
@@ -148,7 +146,7 @@ def main():
                 callees[names[j] if j < len(names) else "(self)"] += w
         selfc[names[-1] if names else "?"] += w
         if alloc_mode and names and re.search(r"malloc|free|realloc|calloc|memset|memcpy|memmove|finish_grow|deallocate|try_allocate_in|__rust_alloc|__rust_dealloc|__rust_realloc|alloc_shim|fun_[0-9a-f]+ \[libc", names[-1]):
-            owner = next((x for x in reversed(names) if x.startswith(("solidcore::", "<solidcore::", "difftest::", "<difftest::")) or re.match(r"^[A-Za-z_]+\w*\(", x)), "?")
+            owner = next((x for x in reversed(names) if x.startswith(("solidcore::", "<solidcore::", "goldens::", "<goldens::")) or re.match(r"^[A-Za-z_]+\w*\(", x)), "?")
             allocs[owner] += w
         for x in set(names):
             incl[x] += w

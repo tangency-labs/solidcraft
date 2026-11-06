@@ -11,9 +11,7 @@ design wherever that is more correct than upstream's (§4b). People: [CONTRIBUTI
 
 ```
 crates/solidcore       the kernel (pure Rust, no unsafe, wasm-ok)        owner: unit porters
-crates/solidcore-ffi   extern "C" bindings to the C++ kernel (feature cpp)
-crates/difftest        side-by-side Rust vs C++ runner
-harness/cpp            C++ reference build (build.sh -> bin/cpp) + shim/<unit>.cpp
+crates/goldens         every unit's cases, checked against expected/<unit>.jsonl (the goldens)
 plan/                  units/<id>.toml, findings/<slug>.md, upstream-issues/<slug>.md (one file each), STATUS.md, order.md
 ```
 
@@ -26,8 +24,8 @@ paths nobody reaches.
 
 **What to work on: what has been reported.** Take an open issue someone reported (a user, a
 maintainer, a failing rig case or sweep), in this order, and claim it before you start:
-1. **`urgent` issues.** Main's red difftest sweep comes first (#2794 lists each red unit and the
-   cases): every pull request's difftest stays red until main is green.
+1. **`urgent` issues.** A red goldens job on main comes first: every pull request's goldens
+   job stays red until main is green.
 2. **`help wanted` issues**, oldest first among equals.
 3. **The rig's failures and unported operations** with an issue: the case names its operation
    and the result it expects (`cargo test -p solidcore-ops --test kernel_cases -- --ignored`).
@@ -68,7 +66,8 @@ request that names it. Check all three, and build on the existing work rather th
   problem, search for related work, split it into briefs and inspect what comes back.
 
 Each reference ends with "If you're stuck". If the docs and the code don't answer your question,
-ask the maintainers on the area's hub issue before you build.
+ask the maintainers on the area's hub issue before you build. Design discussion happens in the
+[`#solidcore-dev`](https://discord.com/channels/1560611394934673498/1560631619340214394) channel on Discord.
 
 **Show the problem first, then research it.** Before you build a fix, show the person you work
 for what you are solving: a schematic of the problem drawn in VectorCraft (house style:
@@ -93,7 +92,7 @@ read or build `OCCT_BREP_*`, `SM_API_USD`, `BREP_SM_USD`, `BREP_USD_DATA`, `HYDR
 anywhere (including dependencies; `deny.toml` bans copyleft crates).
 
 **Library code (`crates/solidcore`).**
-- No `unsafe` (`#![forbid(unsafe_code)]`). Only `solidcore-ffi` may use it.
+- No `unsafe` (`#![forbid(unsafe_code)]`, workspace-wide).
 - No `unwrap`/`expect`/`panic!`/`todo!`/unchecked `[i]` indexing (denied by lints; tests
   are exempt). Use `.get()`, iterators, `?` and `SolidError`.
 - Deterministic: no clock, no hashing of addresses, no `HashMap` iteration order in
@@ -120,28 +119,28 @@ anywhere (including dependencies; `deny.toml` bans copyleft crates).
   file header's Deviations line. `audit.recursion` (last unit) sweeps the whole crate.
 
 **Correctness is proved directly.** A result is right because closed forms, geometric checks
-and invariants say so, not because it matches the C++. Every fix comes with a regression test
-that fails without it.
+and invariants say so, not because it matches the C++ or a golden. Every fix comes with a
+regression test that fails without it.
 
-**The gate.** solidcore's CI gates on its own checks: fmt, clippy, its tests and the wasm build.
-A pull request is green when they pass. The difftest against the C++ reference is a tool, not
-the gate: maintainers run it on a pull request that needs it, from the CI workflow's Run workflow
-with `difftest` set (`.github/workflows/ci.yml`), and the reference it builds is set in
-`scripts/upstream-pin.env`. Pushes to main still run the sweep and publish main's reports,
-which are the exact base a requested run checks against. When it runs, it holds the rules below.
+**The gate.** CI gates on fmt, clippy, the tests, the wasm build and the goldens. A pull
+request is green when they pass.
 
-**Difftest.** The difftest against the pinned C++ is a diagnostic for code that is ported and
-unchanged, not a goal: where solidcore is more correct and differs, the C++ is wrong for that
-case, recorded as below. The rules for a port: a unit is **green** only when difftest runs
-the Rust and the C++
-(via FFI) on the same inputs and topology is identical and every value agrees within
-`1e-9` relative (`|a-b| <= 1e-9 * max(|a|,|b|)`; an absolute floor only where a unit
-documents one per key in `abs_floors()`, recorded in its report). Never loosen a tolerance to get green. The harness never feeds C++ outputs or C++ process state into the Rust side (`crates/difftest/README.md`, No C++ state reaches the Rust side). A disagreement you cannot fix
-goes in a new `plan/findings/<slug>.md` (unit, inputs, both values, suspected cause) and the unit
-stays `blocked`. Sole exception: a case where the C++ reference is verified wrong (a confirmed
-`plan/upstream-issues/` entry) is listed with `cpp_defect = "<id>"` in its known-mismatch entry
-and is parked: not run in the gate, not counted as a pass, and does not block green; removing
-the marker runs it again (`crates/difftest/README.md`); never use it for a Rust divergence.
+**Goldens.** Every unit's cases (`fixtures/<unit>/`, upstream's `TestFiles`, each runner's
+seeded generator) run on solidcore in `crates/goldens`, and each output is checked against the
+unit's golden, `crates/goldens/expected/<unit>.jsonl`: what solidcore produced when the golden
+was blessed. A case fails when its output changed (integers, topology, status and deferrals
+exactly; floats within `1e-9` relative, `|a-b| <= 1e-9 * max(|a|,|b|)`, plus an absolute floor
+only where the unit documents one per key in `abs_floors()`), when it is added or missing, and
+when it breaks (a harness error or a panic). Check with
+`cargo run --profile goldens -p goldens -- --unit <id> --goldens` (`--all --jobs 0` for every
+unit). A golden proves a result unchanged, not correct. When your change moves a result on
+purpose, bless the unit (`--unit <id> --bless`) and commit the golden with its justification:
+in the commit message and the pull request, the cases that changed with their old and new
+values, why the new ones are right, and pictures before and after for geometry. A golden
+change without that is not reviewed. Never loosen a tolerance or a floor to keep a golden.
+
+**The C++ is a reading reference.** `upstream/` is read for test inputs, expected values and
+known constructions (§4b). Nothing in this repository builds, links or runs it.
 
 **Git.** Work happens through pull requests to github.com/tangency-labs/solidcore. Never
 push to `main` directly, never force-push shared branches, never rewrite `main`'s
@@ -186,17 +185,16 @@ draft and say where the WIP is.
 
 **Verify** (under `nice -n 10`): `cargo fmt --all --check`; `cargo clippy --workspace
 --all-targets -- -D warnings`; `cargo test -p solidcore`; `cargo check -p solidcore --target
-wasm32-unknown-unknown`; and, for kernel changes, the difftest of every unit you touched
-(`cargo run --profile difftest -p difftest --features cpp -- --unit <id>`). Every case your
-change moves is fixed or recorded with evidence that names it (§1, §4b).
+wasm32-unknown-unknown`; and, for kernel changes, the goldens of every unit you touched
+(`cargo run --profile goldens -p goldens -- --unit <id> --goldens`). Every case your change
+moves is fixed, or blessed with the justification §1 asks for.
 
 **Finish:** rebase onto the latest `origin/main` (never merge `main` in), re-verify, put the
-difftest summary lines in the description, and mark the PR ready. CI is the merge gate.
+goldens summary lines in the description, and mark the PR ready. CI is the merge gate.
 
 **Records are files, never appended.** Every finding and upstream issue is its own new file
 (`plan/findings/<slug>.md`, `plan/upstream-issues/<slug>.md`); a merged record is never edited,
-an update is an addendum file. Known mismatches live in
-`crates/difftest/known_mismatches/<unit id>.toml`. Never commit `reports/difftest/`.
+an update is an addendum file.
 
 **No new document without the maintainers.** `docs/` holds the reference pages listed in §1 and
 what the maintainers have agreed to. Never add a file to `docs/` that hasn't been discussed with
@@ -229,9 +227,9 @@ own constructions. The policy (owner, 2026-11-04; supersedes 2026-11-02 and #101
 - **Retire the existing flags.** The `UpstreamFixes` fields that exist are left from the port.
   Turning one on by default, deleting its off path and the solidcore-only `WR-` patches made to
   it, is welcome work: a few flags per PR, each with the cases whose results change.
-- **Record differences from the C++, don't hide them.** When solidcore is more correct and
-  differs, the C++ is wrong for that case: record it as a confirmed `plan/upstream-issues/` entry
-  and a `cpp_defect` known-mismatch marker (§1). Never loosen a tolerance.
+- **Record upstream defects, don't hide them.** When solidcore is more correct than the C++ for
+  a case, record the C++ defect as a confirmed `plan/upstream-issues/` entry, and bless the
+  goldens your fix moves with their justification (§1). Never loosen a tolerance.
 - **Cases with images.** A pull request that makes a kernel case pass, or turns a known failure
   into a correct refusal, updates the case's entry (its expectation, and its `gallery_note` if the
   gallery needs to say more), its line in `known_failing.json` and its render beside it
@@ -299,18 +297,15 @@ own constructions. The policy (owner, 2026-11-04; supersedes 2026-11-02 and #101
 - `crates/solidcore/tests/kernel_cases/<area>/<case>.json`: a kernel-operation case (an entry, its operand records and exact expected values), one file per case; new ones come here, not to SolidCraft's rig (its README, "Adding a case").
 - `plan/units/<id>.toml`: one unit's plan entry (status, claims, notes). Edit only
   your unit's file. Every tool reads them through `harness/plan/units.py` (Rust:
-  `crates/difftest/src/plan.rs`).
-- `plan/findings/<slug>.md`, one file per finding: Rust-vs-C++ disagreements, upstream
-  bugs, nondeterminism (e.g. upstream `srand(time(NULL))`), anything a later agent must
+  `crates/goldens/src/plan.rs`).
+- `plan/findings/<slug>.md`, one file per finding: upstream bugs, nondeterminism (e.g. upstream `srand(time(NULL))`), anything a later agent must
   know. A reference to `plan/findings.md: <heading>` (older code comments): grep the
   heading under `plan/findings/`.
 - `plan/upstream-issues/<slug>.md`, one file per issue: upstream C++ defects (problems
-  only, with location, trigger, how found and whether the C++ build confirmed it). The
+  only, with location, trigger, how found and how it was confirmed). The
   site reads them all. A `plan/upstream-issues.md` ID: grep it under that directory.
-- `reports/difftest/<unit>.json`: difftest output. Not committed: CI uploads main's set
-  as an artifact; `scripts/fetch-reports.sh` downloads it.
 - [Checklist](https://tangency-labs.github.io/solidcore/PROGRESS.md): generated on the site
   by `harness/plan/progress.py` (local runs write the gitignored `plan/PROGRESS.md`).
 - `plan/STATUS.md`: overall progress summary and handoff notes.
-- `bin/`: all build output (cargo `target-dir`, `bin/cpp/` for C++). Gitignored. Never
+- `bin/`: all build output (cargo `target-dir`). Gitignored. Never
   commit build output or anything under `upstream/`.

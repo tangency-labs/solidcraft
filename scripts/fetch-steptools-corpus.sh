@@ -11,11 +11,11 @@
 # with the pinned hash are not downloaded again; a present file with another hash is an
 # error (remove it and re-run).
 #
-# The corpus is data only: difftest --step-corpus parses it as untrusted input and never
+# The corpus is data only: goldens --step-corpus parses it as untrusted input and never
 # executes anything from it.
 #
 # Usage: scripts/fetch-steptools-corpus.sh [dest]      (default <repo>/corpus/steptools)
-# Used by: cargo run --profile difftest -p difftest --features cpp -- --step-corpus
+# Used by: cargo run --profile goldens -p goldens -- --step-corpus
 set -euo pipefail
 
 BASE="https://steptools.com/docs/stpfiles"

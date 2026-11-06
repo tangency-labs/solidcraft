@@ -274,8 +274,8 @@ and the bottom row its result panel.
 #17 proposed three steps:
 1. **The corpus becomes fixtures for the `intersect.*` units**: per case, the two surfaces, the exact
    truth (implicit or parametric) and the expected branches, isolated points, singular points and
-   coincident regions with a coverage tolerance. difftest uses only the surfaces, so the gate stays
-   Rust against C++ at 1e-9.
+   coincident regions with a coverage tolerance. The unit runners use only the surfaces, and
+   their goldens record the results.
 2. **A separate ground-truth acceptance test** that scores the port's output against the exact truth
    per case, and does not gate a unit's green status (a green unit must reproduce the gaps).
 3. **Fixes after parity**: each gap its own change, gated by the acceptance test going from fail to
@@ -285,7 +285,7 @@ What came of it, from #17's thread:
 - The corpus is public at [jyviko/ssi-corpus](https://github.com/jyviko/ssi-corpus) (MIT OR
   Apache-2.0): the 119 case files with exact truth, the generators, the scorer, and the SMLib runner
   as the runner contract's example.
-- `difftest --ssi-corpus` is step 2. It scores the C++ at 81/119, matching #17, and its scorer
+- `goldens --ssi-corpus` is step 2. It scored the C++ at 81/119, matching #17, and its scorer
   agrees with the corpus's `score.py` on 119/119 verdicts (§9). The 38 C++ misses are logged as
   WR-74 to WR-80, the fixes of §4.4.
 - #17 also recommends the method of Yang, Jia and Yan [16] for completeness, since neither SMLib nor
@@ -583,8 +583,8 @@ tighter enclosure, never a sample.
 | `EFF_ZERO`, `EFF_ZERO_SQRT` | 1e-12, 1e-6 | `math.rs` | zero tests; the closed forms' tolerance when none is given |
 | a face's tolerance | per face | the B-rep | plane boxes in the closed forms are expanded by it (`PlaneOwner`) |
 | interior seed angles | 5°, 2° | `adv_surface_intersector.rs` | below them a leaf pair's seed is skipped |
-| corpus approximation tolerance | 1e-6 | `difftest --ssi-corpus` | the tolerance passed to both engines |
-| corpus accuracy tolerance | 1e-5 (10 × tol) | `difftest/src/ssi/score.rs` | a curve farther than this from an exact surface is `INACCURATE` |
+| corpus approximation tolerance | 1e-6 | `goldens --ssi-corpus` | the tolerance passed to each engine |
+| corpus accuracy tolerance | 1e-5 (10 × tol) | `goldens/src/ssi/score.rs` | a curve farther than this from an exact surface is `INACCURATE` |
 | `ssi` Newton | 1e-11 | `ssi::Options::tolerance` | residual, scaled by the sine of the angle |
 | `ssi` link, resolution | 1e-7, 1e-5 | `ssi::Options` | arc ends joined; pieces below this unresolved are refused |
 | `ssi` field band | 1e-14 of the field's scale | `trace2d.rs`, `CLEAR` | a value within it is zero to rounding |
@@ -618,7 +618,7 @@ and why the approximation tolerance is half of it.
 **Refusals.** `ssi` refuses by name: `BOOLEAN_TANGENT` (a contact it cannot prove), `BAD_PATCH`,
 `MARCHING_STALLED`, `EXIT_DIVERGED`, `ARC_UNFINISHED` (`ssi/src/lib.rs`). A refusal names where. The
 port returns `SolidError` statuses; a refusal there is an error code, and an unported callee is
-`SolidError::Unported`, which difftest scores as `DEFERRED`, never as a result.
+`SolidError::Unported`, which the corpus report scores as `DEFERRED`, never as a result.
 
 **Near-miss seams (#2538, #2537).** A box cut by a cylinder tilted 4° whose axis lies in a box face, or
 whose end cap is bisected by a face, fails the B-rep check with `SmFace::Test #36` or a 1001 in
@@ -656,15 +656,16 @@ A reviewer can check each of these on a change to SSI.
 13. The same input gives bit-identical output, independent of thread count.
 14. A change's tests check values a wrong result changes: corpus verdicts, distances to the exact
     curve, counts of curves and points, exact volumes in the boolean. Never timings.
-15. A change to ported code that is not a fix keeps difftest parity bit for bit on its
-    `intersect.*` units; a fix changes the default result and lists what changed (AGENTS.md §4b).
+15. A change to ported code that is not a fix keeps the goldens of its `intersect.*` units bit
+    for bit; a fix changes the default result, blesses the goldens it moves and lists what changed
+    (AGENTS.md §1, §4b).
 
 ## 9. Status
 
-**The SSI corpus.** `difftest --ssi-corpus` scores the engines on jyviko's corpus
+**The SSI corpus.** `goldens --ssi-corpus` scores the engines on jyviko's corpus
 ([ssi-corpus](https://github.com/jyviko/ssi-corpus), commit `b04c8a6`): 119 cases (planes,
 quadrics, tori, B-spline and NURBS pairs, 25 from Yang, Jia and Yan [16]), each with the dense exact
-intersection and its topology, at approximation tolerance 1e-6 (`crates/difftest/README.md`).
+intersection and its topology, at approximation tolerance 1e-6 (`crates/goldens/README.md`).
 
 | engine | pass (of 119) | not passing | source |
 |---|---|---|---|
@@ -678,7 +679,7 @@ The C++ row reproduces #17's primary run (§3.2). The port's column is the pinne
 case no engine passes, `y23_fig1d_two_quads`, is two patches 1e-8 apart that separate only at second
 order in places, below the 4.4e-13 their degree-9 form is exact to.
 
-**Port units.** The difftest units are `intersect.surface_intersector_p1` to `_p5`,
+**Port units.** The goldens units are `intersect.surface_intersector_p1` to `_p5`,
 `intersect.adv_surface_intersector`, `intersect.surface_tracer`, `intersect.surface_drop_lib_p1` to
 `_p3`, `intersect.surface_drop_curve`, `intersect.curve_class_p1` to `_p9`, `intersect.point_class`,
 `intersect.topology_solver_p1` and `_p2`, `intersect.api_intersectors`, `intersect.ray_tracer`,
@@ -723,7 +724,7 @@ implementations ([layers.md](layers.md) §2, step 4 of its order).
   through a pole, is §7's near-miss seam or pole row.
 - **Check the flags.** The port's fixes are off by default; SolidCraft runs with most of them on. A
   result that differs between the two is usually a flag (`UpstreamFixes::flags` lists them).
-- **Use the corpus.** `difftest --ssi-corpus 'c3_*'` runs a class; the per-case JSON in
+- **Use the corpus.** `goldens --ssi-corpus 'c3_*'` runs a class; the per-case JSON in
   `reports/` has each verdict's distances and topology signature. Add a corpus-style case for your
   pair when none exists.
 - **Read the literature before designing.** The survey chapters of [11] and the papers below cover

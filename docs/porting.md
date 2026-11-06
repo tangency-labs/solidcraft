@@ -10,8 +10,8 @@ Unit list and states: `plan/units/<unit id>.toml`, one file per unit (format:
 `plan/modules.schema.md`, order: `plan/order.md`). **The [checklist](https://tangency-labs.github.io/solidcore/PROGRESS.md)** is generated
 from `main` by the Pages workflow (`harness/plan/progress.py`; not committed). **Any `todo` unit or unclaimed completion task can be claimed**, after the work §0 lists. A claim reserves
 its stated scope, not every future change to the unit. Missing functions, back-edge
-wiring, exact runner imports, fixtures and demonstrated parity bugs remain useful
-work in `partial` and `green` units; inspect source and reports, not status alone.
+wiring, exact runner imports, fixtures and demonstrated bugs remain useful work in
+`partial` and `green` units; inspect the source and the goldens, not status alone.
 A unit is *ready* when its `depends_on` are all
 `green` or `partial` (`soft_depends_on` never blocks; see section 4a); ready units are
 the easiest, lowest `layer` first. Claiming a unit that is not ready is fine:
@@ -23,12 +23,12 @@ the easiest, lowest `layer` first. Claiming a unit that is not ready is fine:
 - If that dependency has an open `port:` PR, do not port the same code twice: build on
   that PR's branch (merge it into yours) or agree on the split in that PR's comments.
 
-**One-time setup** (per machine): clone this repo, clone upstream at the pinned commit
-into `upstream/` (see README), then run `scripts/fetch-cpp.sh`, or
-`nice -n 10 harness/cpp/build.sh --jobs 6` to build from source.
+**One-time setup** (per machine): clone this repo, and clone upstream at the pinned commit
+into `upstream/` (see README): it is the reading reference, and many cases read its
+`TestFiles`. Nothing builds it.
 
 1. **Claim = a scoped draft PR.** Search open PR titles and bodies for the unit,
-   symbols and affected paths, including `wire:`, `fix:` and `difftest:` work; a title
+   symbols and affected paths, including `wire:`, `fix:` and `goldens:` work; a title
    search for `port:` alone misses completion work. Branch from the latest `main`.
    Do not edit `plan/units/` to claim.
    Initial whole-unit ports keep the title **`port: <unit id>`**. For completion work,
@@ -66,13 +66,13 @@ into `upstream/` (see README), then run `scripts/fetch-cpp.sh`, or
    If the unit's notes mention a WIP branch, inspect it before starting.
 
 2. **Port** the upstream functions the unit owns (listed in
-   `harness/callgraph/units.json`) into its `rust_module`, plus the C++ shim
-   (`harness/cpp/shim/<unit_id_with_underscores>.cpp`, functions `sc_<unit>_<fn>`, plain
-   C data only), its `solidcore-ffi` binding, and its difftest runner and fixtures,
-   following `crates/difftest/README.md`. Inputs: the unit's upstream `tests`, plus
-   fixed-seed generated and edge cases (degenerate, boundary, tolerance limits).
+   `harness/callgraph/units.json`) into its `rust_module`, reading upstream's source, and
+   extend its runner and fixtures (`crates/goldens/README.md`). Inputs: the unit's
+   upstream `tests`, plus fixed-seed generated and edge cases (degenerate, boundary,
+   tolerance limits). Expected values come from closed forms, geometric checks and
+   invariants, and from upstream's tests where they state them.
 3. **Wire back-edges** (section 4a): replace `UNPORTED(<unit id>)` stubs elsewhere with
-   real calls and re-run the difftest of every unit you touched.
+   real calls and check the goldens of every unit you touched.
 4. **Verify** (`export CARGO_BUILD_JOBS=2 RUSTC_WRAPPER=sccache`, everything under
    `nice -n 10`):
    ```sh
@@ -80,18 +80,16 @@ into `upstream/` (see README), then run `scripts/fetch-cpp.sh`, or
    cargo clippy --workspace --all-targets -- -D warnings
    cargo test -p solidcore
    cargo check -p solidcore --target wasm32-unknown-unknown
-   cargo run --profile difftest -p difftest --features cpp -- --unit <unit id>   # and every unit you touched
-   cargo run --profile difftest -p difftest --features cpp -- --green --jobs 4   # what CI runs (with --jobs 0)
+   cargo run --profile goldens -p goldens -- --unit <unit id> --goldens   # and every unit you touched
+   cargo run --profile goldens -p goldens -- --all --goldens --jobs 4     # what CI runs (with --jobs 0)
    ```
    `--jobs N` runs N units at a time, each in its own process (`0` = every core; the
-   output and reports are the same as a serial run). On a shared machine stay within the
-   section 2 budget: `--jobs 4` at most, fewer when the load is high.
-   CI also enforces the 75% value-share floor and exact-base artifact ratchet
-   (`crates/difftest/README.md`, Regression gate). Missing/expired baseline artifacts
-   fail closed; do not extract historical committed reports or waive lost coverage
-   to make a run pass. Local `--baseline` runs must use matching seeds and no filter.
-5. **Before you mark a PR ready**, check each item. Earlier PRs passed CI yet still
-   disagreed with the C++ because of these:
+   output is the same as a serial run's). On a shared machine stay within the section 2
+   budget: `--jobs 4` at most, fewer when the load is high. A case your change moves is
+   blessed (`--bless`) only with the justification AGENTS.md §1 asks for: the cases, their
+   old and new values, why the new ones are right, pictures for geometry.
+5. **Before you mark a PR ready**, check each item. Earlier ports passed CI yet still
+   departed from upstream's behaviour because of these:
    1. **Default arguments** match upstream (e.g. `IsDegenerate()` defaults to
       `SM_EFF_ZERO`, not a zone tolerance).
    2. **No parameter dropped or hard-coded** (e.g. `0.0` passed instead of the
@@ -100,13 +98,12 @@ into `upstream/` (see README), then run `scripts/fetch-cpp.sh`, or
       for a line parallel to the axis).
    4. **Statuses upstream relies on are honoured** (e.g. `Unitize()` turning a zero
       vector into `(0,0,1)`).
-   5. **The shim builds every geometry kind the code branches on** (real
-      `SmEllipse`/`SmCircle`/`SmLine`/..., not B-spline stand-ins), or those branches
-      are never compared.
-   6. **FFI guards reject exactly the inputs that are undefined or crash in C++**: no
-      more (valid inputs stay covered), no fewer (no garbage or segfaults).
+   5. **The runner builds every geometry kind the code branches on** (real ellipses,
+      circles, lines, ..., not B-spline stand-ins), or those branches are never checked.
+   6. **Input contracts refuse exactly the inputs that are undefined upstream**: no more
+      (valid inputs stay covered), no fewer.
    7. **Generated cases cover** degenerate, boundary, tolerance-limit, huge/tiny-scale
-      and sub-domain inputs, and most cases compare real values, not just an error
+      and sub-domain inputs, and most cases record real values, not just an error
       status.
    8. **No panics on extreme caller input**: bound derivative orders and counts; file
       readers bound header counts; input-driven recursion is bounded (section 1).
@@ -118,9 +115,9 @@ into `upstream/` (see README), then run `scripts/fetch-cpp.sh`, or
    `--force-with-lease`; never rewrite a branch someone else builds on, or `main`. Re-verify,
    set the unit's `status` to `"green"` or `"partial"` in
    `plan/units/<unit id>.toml` with case/deferred counts in `notes` (plus the files of
-   any units you promoted), commit, push, and mark the PR ready. Put the difftest summary lines in
-   the PR description. CI runs fmt, clippy, tests, wasm, difftest on every green or
-   partial unit, and the difftest runner tests. **CI is the merge gate.** Once CI is
+   any units you promoted), commit, push, and mark the PR ready. Put the goldens summary lines
+   in the PR description. CI runs fmt, clippy, tests, wasm and every unit against its golden.
+   **CI is the merge gate.** Once CI is
    green, a maintainer adds the PR to the merge queue after a quick check (stub tags,
    no loosened tolerance, no case dropped), and the queue re-runs CI on the PR merged
    with the latest `main`. Deep adversarial review happens after merge; anything it
@@ -129,19 +126,14 @@ into `upstream/` (see README), then run `scripts/fetch-cpp.sh`, or
 **Shared files (avoid merge conflicts).** Every open PR touches the same plan, so:
 - Edit only `plan/units/<id>.toml` of your unit (and of units you promote or co-port
   into). There is no shared `plan/modules.toml` any more.
-- Never commit `reports/difftest/` (gitignored). difftest still writes your reports
-  there locally; CI regenerates them, uploads main's set as the `difftest-reports`
-  artifact, and the site and its checklist read that
-  (`scripts/fetch-reports.sh` downloads it). Quote your summary lines in the PR instead.
 - **Never append to a shared file.** Every finding and every upstream issue is its own
   new file: `plan/findings/<slug>.md` and `plan/upstream-issues/<slug>.md` (formats in
   each directory's `README.md`). Records are never edited after they merge (like ADRs):
   an update is an addendum file. The old shared `plan/findings.md` and
   `plan/upstream-issues.md` were split into those directories; CI fails if either comes
   back. Two PRs that each add a file never conflict.
-  Known difftest mismatches likewise live in `crates/difftest/known_mismatches/<unit id>.toml`
-  (one file per unit; see `crates/difftest/src/known.rs`), and SolidCraft cases in
-  `fixtures/solidcraft/<issue>-<slug>.json` (one file per issue).
+  Goldens likewise are one file per unit (`crates/goldens/expected/<unit id>.jsonl`), and
+  SolidCraft cases one per issue (`fixtures/solidcraft/<issue>-<slug>.json`).
   The same goes for anything new you design: a registry or log is a directory of
   per-entry files that tools read in sorted order, never one file everybody appends to.
 - **Branches from before the per-unit split** (they edit `plan/modules.toml` or commit
@@ -165,7 +157,8 @@ on: close it, and say where the WIP is.
 For new ports and completion changes, include the [completion evidence checklist](#completion-evidence-checklist)
 in the PR description. The evidence table is required for `wire:` PRs that remove
 `UNPORTED` stubs, including when existing fixtures do not reach the continuation. Identify the owned functions and branches implemented, which
-operations actually complete successfully against C++, and which remain unreachable.
+operations actually complete successfully (with their checked results), and which remain
+unreachable.
 A passing status or empty result is evidence for that case, not proof that the
 operation's successful construction or mutation path works.
 
@@ -177,7 +170,7 @@ Report that limitation even if existing fixtures never reach it. Unit status fol
 the existing gate; it does not certify complete function or branch coverage.
 
 When a dependency is wired, rerun the affected callers and add cases that reach the
-previously blocked continuations. Keep newly exposed mismatches visible. Review
+previously blocked continuations. Keep newly exposed failures visible. Review
 runner skips, stand-in geometry and absent-entity cases before claiming coverage.
 Record independent harness follow-ups with reproducible evidence and check existing
 PRs before implementing them. This checklist supplements the existing correctness
@@ -196,39 +189,39 @@ The kernel core is one big call cycle, so the plan dropped ~2,300 calls as *back
   through `Err(SolidError::Unported { upstream: "<C++ symbol>", unit: "<unit id>" })`.
   Never panic, never fake a result. Every such site carries the comment
   `// UNPORTED(<unit id>): <C++ symbol>` so the target's porter can find it with grep.
-- **Difftest with back-edges.** Cases whose C++ path reaches an unported callee are
-  classified `deferred` (the Rust side returns `Unported`); they are neither pass nor
-  fail. A unit with all non-deferred cases passing and >=1 deferred case is
+- **Cases with back-edges.** A case whose path reaches an unported callee is `deferred`
+  (the Rust side returns `Unported`), and its golden records the deferral. A unit with all non-deferred cases passing and >=1 deferred case is
   **`partial`**. With zero deferred cases it is **`green`**. `partial` satisfies
   `depends_on` for scheduling only; it is never reported as green.
 - **Wiring back-edges when you port a unit.** After your unit passes, grep
   `UNPORTED(<your unit id>)` across `crates/solidcore`, replace each stub with the real
-  call, and re-run difftest for every unit you touched. Any unit whose deferred count
-  drops to 0 and passes becomes `green`; record this in the same commit.
+  call, and bless the goldens of every unit whose deferred cases now run, with the values
+  they now produce and why they are right. Any unit whose deferred count drops to 0
+  becomes `green`; record this in the same commit.
 - **Local swarms only:** when several agents share one clone, everything that writes
   that clone's `main` runs under `flock .git/swarm.lock -c '<commands>'`.
 
 ## Completion evidence checklist
 
 This checklist makes implementation gaps and useful follow-up tasks visible during
-completion of the port. It complements AGENTS.md and the native comparison gate.
-It does not add a second status system or change acceptance tolerances.
+completion of the port. It complements AGENTS.md and the goldens. It does not add a second
+status system or change acceptance tolerances.
 
 ### PR evidence
 
 Use a short table for the operations affected by the PR. Group identical paths;
 there is no need to inventory unrelated functions on every change.
 
-| Operation / upstream symbols | Implementation | Successful native comparison | Remaining gap |
+| Operation / upstream symbols | Implementation | Successful operation checked | Remaining gap |
 | --- | --- | --- | --- |
-| `<operation and function group>` | Complete body, or exact missing branches | Case IDs and observable results, or none | Dependency, missing body, runner/export gap, or none |
+| `<operation and function group>` | Complete body, or exact missing branches | Case IDs and observable results, or none | Dependency, missing body, runner gap, or none |
 
-Include the tested commit, native summary lines and affected callers. Distinguish
+Include the tested commit, goldens summary lines and affected callers. Distinguish
 these forms of evidence:
 
-- A successful operation compared against the real native operation, including
-  observable geometry, topology or state changes appropriate to that operation.
-- A legitimate refusal, error or no-op compared against native behavior.
+- A successful operation whose result is checked: observable geometry, topology or state
+  changes appropriate to that operation, against closed forms or invariants.
+- A legitimate refusal, error or no-op, matching upstream's documented behaviour.
 - A path blocked by an unported call or a harness limitation.
 
 All are useful information. Only the first demonstrates the corresponding successful
@@ -252,39 +245,36 @@ Once a dependency becomes available:
 
 1. Wire the actual service with the caller's real geometry, topology and context.
 2. Exercise the previously blocked continuation and its relevant boundary branches.
-3. Rerun affected callers, retaining existing case identities and comparisons.
-4. Diagnose newly reached mismatches; do not hide them by broadening guards, adding
+3. Rerun affected callers, retaining existing case identities.
+4. Diagnose newly reached failures; do not hide them by broadening guards, adding
    deferrals or loosening tolerances.
 
 ### Turning harness gaps into contributor tasks
 
 Before debugging or taking a task, search current open PRs for its symbols and paths.
-The historical inventories in issues #210 and #294 are starting points; their counts
-and ownership must be checked against current main.
 
 For each available task, provide this information in an issue or related PR body:
 
 ```text
 Unit / operation / symbols:
 Current main SHA and reproducing command / case IDs:
-Gap: missing body, missing dependency wiring, shim/export, or generator
+Gap: missing body, missing dependency wiring, runner, or generator
 Expected edit boundary and related active PRs:
 Evidence needed to finish:
 ```
 
 Useful independent tasks include constructing real B-reps instead of opaque handles,
-preserving analytic geometry types in exports, replacing stale runner skips with
-real calls, and generating existing entities so the intended operation is exercised.
+replacing stale runner skips with real calls, and generating existing entities so the
+intended operation is exercised.
 Each task needs a checkable result, not just fewer deferred cases.
 
 Keep legitimate empty-input and refusal tests. Add meaningful successful cases rather
-than deleting negative cases to improve a coverage percentage. A broader native crash
-guard must not be narrowed without evidence for the exact inputs it protects.
+than deleting negative cases to improve a coverage percentage. An input contract must not
+be narrowed without evidence for the exact inputs it protects.
 
-For runner or shim changes, show that both engines execute the intended operation
-on equivalent inputs. Preserve previous output comparisons and add operation-specific
-checks for the new results. Use the existing perturbation check where applicable.
-A lower deferral count alone does not establish equivalence.
+For runner changes, show that the runner executes the intended operation. Keep the existing
+cases and add operation-specific checks for the new results. A lower deferral count alone
+does not establish correctness.
 
 ### Reporting scope
 

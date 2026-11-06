@@ -1309,7 +1309,8 @@ impl BSplineSurface {
     ///
     /// `InvalidInput` for inverted or out-of-net index ranges, or (for more than one
     /// point) a `v_stride` below the point size or a `u_stride` below `v_stride`
-    /// times the v count; `SM_ERR` without NURB.
+    /// times the v count, or an output above [`crate::limits::MAX_ALLOC_BYTES`];
+    /// `SM_ERR` without NURB.
     pub fn control_points_expert(
         &self,
         form: ControlPointForm,
@@ -1375,11 +1376,10 @@ impl BSplineSurface {
             .and_then(|a| v_stride.checked_mul(nv).and_then(|b| a.checked_add(b)))
             .and_then(|a| a.checked_add(pt_size))
             .ok_or_else(|| SolidError::invalid_input(OP_EXPERT, "output too large"))?;
-        // the caller's output array upstream: allocated fallibly here
-        let mut out = Vec::new();
-        out.try_reserve_exact(len)
-            .map_err(|_| SolidError::invalid_input(OP_EXPERT, "output too large"))?;
-        out.resize(len, 0.0);
+        // the caller's output array upstream: allocated within limits::MAX_ALLOC_BYTES
+        // here, so huge strides fail at once instead of zero-filling them
+        let mut out = crate::limits::try_filled(len, 0.0)
+            .ok_or_else(|| SolidError::invalid_input(OP_EXPERT, "output too large"))?;
 
         // copy the requested array of control points into the requested output array
         for (u_cnt, i_u) in (start_u..=end_u).enumerate() {
@@ -2177,6 +2177,25 @@ mod tests {
                 "{block:?}"
             );
         }
+    }
+
+    /// A u stride of 2^31 over two rows asks for 2^31 + 8 values (16 GiB), more than
+    /// `limits::MAX_ALLOC_BYTES`: refused before anything is zero-filled.
+    #[test]
+    fn control_points_expert_huge_output_is_refused() {
+        let s = patch(true);
+        let block = ControlPointBlock {
+            start_u: 0,
+            end_u: 1,
+            start_v: 0,
+            end_v: 1,
+            u_stride: 1 << 31,
+            v_stride: 4,
+        };
+        assert_eq!(
+            s.control_points_expert(ControlPointForm::HomogeneousRational, &block),
+            Err(SolidError::invalid_input(OP_EXPERT, "output too large"))
+        );
     }
 
     #[test]

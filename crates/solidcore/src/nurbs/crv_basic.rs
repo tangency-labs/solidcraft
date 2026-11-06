@@ -27,6 +27,7 @@
 //! | [`size_arrays`]                               | `N_CrvSizeArrays`                 |
 //! | [`Curve::copy_into`], `Clone`                 | `N_CrvCopy`                       |
 //! | [`Curve::is_3d`]                              | `N_CrvIs3d`                       |
+//! | [`Curve::counts_are_valid`]                   | `N_CrvCountsAreValid`             |
 //! | [`Curve::weights_are_valid`]                  | `N_CrvWeightsAreValid`            |
 //! | [`Curve::is_sized`]                           | `N_CrvIsSized`                    |
 //! | [`Curve::is_rational`]                        | `N_IsCrvRat`                      |
@@ -111,7 +112,7 @@ use crate::nurbs::geom::{
     dist_cpt_cpt_homo, dist_perp_pt_line_seg, dist_pt_pt, dist_signed_pt_plane, normalize,
     plane_pt_normal_to_implicit, pt_along_vector, vectors_angle, Interval,
 };
-use crate::nurbs::knots::KnotVector;
+use crate::nurbs::knots::{KnotVector, MAX_DEGREE};
 use crate::nurbs::math::{CPoint, MODEL_TOL, NOW, NOZ};
 use crate::nurbs::srf_basic::{Surface, WEIGHT_MAX, WEIGHT_MIN, WEIGHT_TOL};
 
@@ -362,6 +363,34 @@ impl Curve {
     }
 
     // ---- error checks ---------------------------------------------------------------
+
+    /// Checks `n + p + 1 == m`, the degree limit and that every control point shares
+    /// the dimension (`z == NOZ`) and the rationality (`w == NOW`) of `Pw[0]`
+    /// (`N_CrvCountsAreValid`).
+    ///
+    /// # Errors
+    ///
+    /// [`NlibCode::Curve`] (`NL_CUR_ERR`) or [`NlibCode::Degree`] (`NL_DEG_ERR`,
+    /// degree above [`MAX_DEGREE`]).
+    pub fn counts_are_valid(&self) -> Result<()> {
+        const OP: &str = "nurbs::crv_basic::Curve::counts_are_valid";
+        if self.n.checked_add(self.p).and_then(|k| k.checked_add(1)) != Some(self.m) {
+            return Err(nlib(OP, NlibCode::Curve));
+        }
+        if self.p > MAX_DEGREE {
+            return Err(nlib(OP, NlibCode::Degree));
+        }
+        let first = self.first();
+        let (dim, rat) = (first.z != NOZ, first.w != NOW);
+        if self
+            .cpts()
+            .iter()
+            .any(|pw| (pw.z != NOZ) != dim || (pw.w != NOW) != rat)
+        {
+            return Err(nlib(OP, NlibCode::Curve));
+        }
+        Ok(())
+    }
 
     /// For a rational curve, checks that every weight is in
     /// `[WEIGHT_MIN, WEIGHT_MAX]` (`N_CrvWeightsAreValid`; NaN weights pass).
@@ -1421,6 +1450,33 @@ mod tests {
         assert!(c.is_sized(2, 5).is_ok());
         assert!(c.is_sized(3, 5).is_err());
         assert_eq!(c.knot_vector().unwrap().last_index(), 5);
+    }
+
+    /// `N_CrvCountsAreValid`: one dimension and rationality for every point, and
+    /// `n + p + 1 = m`.
+    #[test]
+    fn counts_are_valid_refuses_mixed_points_and_counts() {
+        let code = |c: &Curve| match c.counts_are_valid() {
+            Ok(()) => None,
+            Err(SolidError::Nlib { code, .. }) => Some(code),
+            Err(e) => panic!("{e:?}"),
+        };
+        assert_eq!(code(&line2()), None);
+        assert_eq!(code(&arc()), None);
+        for (i, pw) in [
+            CPoint::new(1.0, 0.0, 0.0, 1.0),
+            CPoint::new(1.0, 0.0, NOZ, NOW),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut c = line2();
+            c.cpts_mut()[1 + i] = pw;
+            assert_eq!(code(&c), Some(NlibCode::Curve), "{pw:?}");
+        }
+        let short =
+            Curve::new(line2().cpts().to_vec(), 2, vec![0.0, 0.0, 0.0, 1.0, 1.0]).expect("curve");
+        assert_eq!(code(&short), Some(NlibCode::Curve));
     }
 
     #[test]

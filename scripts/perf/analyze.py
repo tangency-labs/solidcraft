@@ -6,7 +6,7 @@ usage: analyze.py PROFILE.json [--top N] [--focus SUBSTR] [--lines] [--libc]
   --lines   : self time by file:line of the innermost frame
   --libc    : also print libc (malloc/memset/...) self samples by Rust caller
 Needs gimli addr2line (`cargo install addr2line --features bin`); binutils
-addr2line is far too slow on the difftest binary.
+addr2line is far too slow on the goldens binary.
 """
 import collections
 import os

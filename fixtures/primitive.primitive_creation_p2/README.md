@@ -1,7 +1,7 @@
 # Primitive creation p2 comparisons
 
-A case is `{ "op": N, "data": [...] }`, checked by the FFI wrapper before either
-engine runs (layouts in `crates/solidcore-ffi/src/units/primitive_primitive_creation_p2.rs`).
+A case is `{ "op": N, "data": [...] }`, checked against the runner's input contract
+before it runs (layouts in `crates/goldens/src/units/primitive_primitive_creation_p2.rs`).
 Curve records are p1's `[kind, x, y, z, a, b, c]`: a B-spline line, or a quadratic
 circular arc (the same construction as `SmApiCreateArc`). Each op calls the public
 `SmPrimitiveCreation` entry point on a fresh native B-rep with only its infinite

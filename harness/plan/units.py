@@ -5,7 +5,7 @@ Format: `plan/modules.schema.md`. Each file holds one unit's fields as top-level
 (`id`, `upstream`, `rust_module`, ...); `id` must equal the file name. Every tool that
 reads the plan goes through this module (harness/plan/progress.py, site/build.py,
 harness/plan/soften.py, harness/callgraph/plan_units.py, scripts/units-split.py,
-scripts/units-migrate-branch.sh); the Rust side (`crates/difftest/src/plan.rs`) follows
+scripts/units-migrate-branch.sh); the Rust side (`crates/goldens/src/plan.rs`) follows
 the same rules. Units are always returned sorted by id.
 
 Before the split (PR "infra: stop shared-file conflicts") the plan was the single file

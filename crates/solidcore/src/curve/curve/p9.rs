@@ -71,6 +71,13 @@
 //! - **Opt-in fix.** `CalculateTightBoundingBox` adds only the knots strictly inside
 //!   the interval with `Kernel::fixes.curve_tight_box_interval_knots` (WR-474, #1054);
 //!   off by default, as upstream.
+//! - **Coordinate bound.** `GlobalCurveSolve` of a curve whose natural box reaches past
+//!   [`crate::limits::MAX_COORDINATE_MAGNITUDE`] (`1e150`, below `sqrt(f64::MAX)`)
+//!   fails with `InvalidInput` before any cache is built (the curve cache is built over
+//!   the natural interval): its squared distances overflow, and the global solver's
+//!   branching ran 49 s on a cubic Hermite with a `1e300` end tangent (fuzz
+//!   `curve.curve_p9` fuzz01043). The coincidence check refuses such a curve the same
+//!   way.
 //! - `SM_ASSERT`s and the `SM_DEBUG_CODE` blocks are not ported. `GlobalCurveSolve`
 //!   recurses once at most (the signed angle minimiser asks for projected
 //!   tangencies), so it needs no depth bound.
@@ -89,6 +96,7 @@ use crate::curve::curve::p3::local_curve_intersect;
 use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::p4::{point_or_pass_on, proj_dist};
 use crate::curve::curve::p5::{local_property_analysis, make_curve_cache};
+use crate::curve::curve::p6::is_measurable_box;
 use crate::curve::curve::p7::PropertyAnalysisOptions;
 use crate::curve::curve::p8::{operand_handles, CurveIntersectOptions};
 use crate::curve::curve_cache::CurveCache;
@@ -1205,6 +1213,11 @@ fn cache_tree<O: SolutionObject>(cache: &CurveCache<O>) -> Result<&Tree<O>> {
 /// [`crate::kernel::UpstreamFixes::query_statuses_pass_on`], tangency-labs/smlib
 /// 8311f8e).
 fn natural_bounding_box(k: &Kernel, curve: &Curve) -> Result<Extent3d> {
+    Ok(natural_box(k, curve)?.unwrap_or_else(Extent3d::new))
+}
+
+/// [`natural_bounding_box`], `None` where upstream keeps the default box.
+fn natural_box(k: &Kernel, curve: &Curve) -> Result<Option<Extent3d>> {
     let req = BoundingBoxRequest {
         normal: true,
         pseudo: false,
@@ -1214,8 +1227,7 @@ fn natural_bounding_box(k: &Kernel, curve: &Curve) -> Result<Extent3d> {
         curve.calculate_bounding_box(k, &curve.natural_interval(), req, true),
         k.fixes.query_statuses_pass_on,
     )?
-    .and_then(|b| b.normal)
-    .unwrap_or_else(Extent3d::new))
+    .and_then(|b| b.normal))
 }
 
 impl Curve {
@@ -1234,9 +1246,11 @@ impl Curve {
     ///
     /// `SM_ERR_NULL_POINTER` when a cache cannot be built or has no tree, or for
     /// [`SolverOperation::AtDistance`] without target distance; `InvalidInput` for a
-    /// missing option vector; those of the line/line intersection and of the signed
-    /// angle minimum. Errors of the global solve itself are ignored (upstream ignores
-    /// `SolveIt`'s status), except [`SolidError::Unported`].
+    /// missing option vector or a curve whose box reaches past
+    /// [`crate::limits::MAX_COORDINATE_MAGNITUDE`] (module docs); those of the
+    /// line/line intersection and of the signed angle minimum. Errors of the global
+    /// solve itself are ignored (upstream ignores `SolveIt`'s status), except
+    /// [`SolidError::Unported`].
     pub fn global_curve_solve<O: SolutionObject>(
         &self,
         k: &Kernel,
@@ -1279,6 +1293,16 @@ impl Curve {
                 .copied()
                 .ok_or(SolidError::invalid_input(OP_GCS, "missing option vector"))
         };
+
+        // (not upstream) see the module docs: coordinates past 1e150
+        for curve in [self, other] {
+            if natural_box(k, curve)?.is_some_and(|b| !is_measurable_box(&b)) {
+                return Err(SolidError::invalid_input(
+                    OP_GCS,
+                    "curve solve of a curve with a coordinate beyond 1e150",
+                ));
+            }
+        }
 
         // init outputs
         let mut sols: SolutionArray<O> = SolutionArray::new();

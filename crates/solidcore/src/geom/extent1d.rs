@@ -694,23 +694,35 @@ impl Extent1d {
         if v + period == v {
             return v;
         }
-        while v < self.min {
-            v += period;
-            if (v - self.min).abs() < EFF_ZERO {
-                v = self.min;
+        // The whole periods to the interval in one step: a value below lands in
+        // `[min, max)`, one above in `(min, max]`, as upstream's one-period-a-time loop
+        // leaves them, which never ended for a value many periods out.
+        // The count is the fewest periods that reach the interval to within `EFF_ZERO`, where
+        // the loop stopped: the quotient's rounding can make its ceiling one too many.
+        if v < self.min {
+            let mut k = ((self.min - v) / period).ceil();
+            if k > 1.0 && v + (k - 1.0) * period >= self.min - EFF_ZERO {
+                k -= 1.0;
             }
-            if (v - self.max).abs() < EFF_ZERO {
-                v = self.max;
+            v += k * period;
+        } else if v > self.max {
+            let mut k = ((v - self.max) / period).ceil();
+            if k > 1.0 && v - (k - 1.0) * period <= self.max + EFF_ZERO {
+                k -= 1.0;
             }
+            v -= k * period;
         }
-        while v > self.max {
+        // The product's rounding can leave `v` just past an end: one period more at most.
+        if v < self.min - EFF_ZERO {
+            v += period;
+        } else if v > self.max + EFF_ZERO {
             v -= period;
-            if (v - self.min).abs() < EFF_ZERO {
-                v = self.min;
-            }
-            if (v - self.max).abs() < EFF_ZERO {
-                v = self.max;
-            }
+        }
+        if (v - self.min).abs() < EFF_ZERO {
+            v = self.min;
+        }
+        if (v - self.max).abs() < EFF_ZERO {
+            v = self.max;
         }
         v
     }
@@ -1098,6 +1110,18 @@ mod tests {
         let e = Extent1d::from_min_max(0.0, 2.0);
         assert_eq!(e.periodic_wrap(4.5), 0.5);
         assert_eq!(e.periodic_wrap(-1.0), 1.0);
+        // Whole periods out: below lands on `min`, above on `max`.
+        assert_eq!(e.periodic_wrap(-4.0), 0.0);
+        assert_eq!(e.periodic_wrap(6.0), 2.0);
+        // One period out by a quotient that rounds above 1 still takes one step.
+        let e = Extent1d::from_min_max(-1.0, 0.945_266_454_097_540_8);
+        assert_eq!(e.periodic_wrap(-2.945_266_454_097_541), -1.0);
+        // Many periods out wraps in one step (the period-at-a-time loop never ended).
+        let short = Extent1d::from_min_max(0.0, 1e-6);
+        for v in [1e9, -1e9, 12_345.678_9] {
+            let w = short.periodic_wrap(v);
+            assert!((0.0..=1e-6).contains(&w), "{v} wrapped to {w}");
+        }
         let full = Extent1d::from_min_max(0.0, 360.0);
         let r = full
             .intersect_periodic(&Extent1d::from_min_max(-90.0, 90.0), 360.0, false)

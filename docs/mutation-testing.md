@@ -5,9 +5,9 @@ notice. A mutant that every check lets through is behaviour nothing constrains: 
 assertion, an unexercised branch, or an equivalent or unreachable mutation to triage away.
 
 solidcore's correctness is proved directly, by closed forms, geometric checks and invariants
-(AGENTS.md §1), so its own tests are the check that counts. `scripts/mutants.sh` also runs the
-unit's difftest against the C++ reference; that comparison matters only for code ported
-unchanged, and a mutant the tests miss is a missing test whatever the difftest says.
+(AGENTS.md §1), so its own tests are the check that counts. `scripts/mutants.sh` also checks
+the unit's cases against its golden; a golden only shows a result changed, and a mutant the
+tests miss is a missing test whatever the golden says.
 
 ## Quick start
 
@@ -15,8 +15,8 @@ unchanged, and a mutant the tests miss is a missing test whatever the difftest s
 # One module, one representative shard, both tiers:
 scripts/mutants.sh --module crates/solidcore/src/geom/vector2d.rs --unit geom.vector2d --shard 1/20
 
-# Only the lines a PR changes, tier 1 (unit tests) only — cheap, no C++ build:
-scripts/mutants.sh --in-diff-base origin/main --no-difftest
+# Only the lines a PR changes, tier 1 (unit tests) only — cheap:
+scripts/mutants.sh --in-diff-base origin/main --no-goldens
 
 # Which mutants exist for a module (no build, no tests):
 scripts/mutants.sh --module crates/solidcore/src/geom/vector2d.rs --list-only
@@ -24,7 +24,7 @@ scripts/mutants.sh --module crates/solidcore/src/geom/vector2d.rs --list-only
 
 Tier 1 is `cargo-mutants` with the package's unit tests as the oracle. Tier 2 patches
 each unit-test survivor into the working tree, runs
-`difftest --unit <id>` against the C++ reference, and reverts. The script patches the
+`goldens --unit <id> --goldens` against the unit's golden, and reverts. The script patches the
 tree, so the mutated files must be clean; it checks and refuses otherwise.
 
 Output goes to `reports/mutants/<utc-stamp>/` (ignored by git): `mutants.out/`
@@ -36,7 +36,7 @@ Output goes to `reports/mutants/<utc-stamp>/` (ignored by git): `mutants.out/`
 | option | meaning |
 |---|---|
 | `-m, --module FILE` | source file to mutate (globs allowed) |
-| `-u, --unit ID` | difftest unit whose cases check the survivors (required for tier 2) |
+| `-u, --unit ID` | unit whose goldens check the survivors (required for tier 2) |
 | `-D, --in-diff-base REF` | mutate only lines changed from `REF` (`git diff REF...HEAD`) |
 | `-p, --package NAME` | cargo package (default `solidcore`) |
 | `-j, --jobs N` | mutants in parallel (default 2; the machine budget is shared) |
@@ -44,9 +44,7 @@ Output goes to `reports/mutants/<utc-stamp>/` (ignored by git): `mutants.out/`
 | `--timeout SECS` | per-mutant timeout (default 180) |
 | `--max-replay N` | replay at most N survivors in tier 2 |
 | `--re REGEX` | only mutants whose description matches `REGEX` (cargo-mutants `-F`; note that cargo-mutants does not apply this filter to "delete struct field" mutants, so a few extra ones may appear) |
-| `--docker-image IMG` | run tier 2 in a container (see below) |
-| `--docker-cpp-dir DIR` | C++ reference inside the image (default `/work/bin/cpp-linux`) |
-| `--no-difftest` | tier 1 only |
+| `--no-goldens` | tier 1 only |
 | `--fail-on-both-tier` | exit 1 if any mutant passes both tiers |
 | `--list-only` | print mutants, run nothing |
 | `-o, --out DIR` | report directory |
@@ -65,40 +63,19 @@ The whole crate is far too large for one run (tens of thousands of mutants). Tar
 module, a shard, or a PR diff. Shard a module across jobs when going wide, and keep
 `-j` at 2 on a shared machine.
 
-## Docker (macOS and other hosts without a native C++ build)
-
-The C++ reference is Linux-only. Build it inside an Ubuntu 24.04 container (arm64 or
-x86_64) that has `build-essential cmake ninja-build git curl zstd libssl-dev python3`
-and rustup, with the repository mounted at `/work`:
-
-```sh
-docker run --rm -v "$PWD:/work" -w /work <image> bash -lc \
-  'SOLIDCORE_CPP_DIR=/work/bin/cpp-linux harness/cpp/build.sh --jobs 6'
-```
-
-Commit that container (or keep it) and pass its image name to the script:
-
-```sh
-scripts/mutants.sh --module ... --unit ... --docker-image <image>
-```
-
-The image is expected to have the reference at `/work/bin/cpp-linux`; use
-`--docker-cpp-dir` for another path. On Linux, `scripts/fetch-cpp.sh` and the default
-`bin/cpp` are used instead.
-
 ## Reading the results
 
 Tier 1 writes `caught`, `missed`, `timeout` and `unviable` lists. Tier 2 classifies
 each survivor as:
 
-- **caught-by-difftest** — the parity gate catches it. The unit tests are the weak
-  layer; adding a unit test with an input that distinguishes the mutation keeps tier 1
-  meaningful and CI fast. Check the failure margin in the summary line: a mutation
-  caught by 2 of 4,000 cases is barely covered.
+- **caught-by-goldens** — the goldens catch it. The unit tests are the weak layer; adding
+  a unit test with an input that distinguishes the mutation keeps tier 1 meaningful and CI
+  fast. Check the margin in the summary line: a mutation that changes 2 of 4,000 cases is
+  barely covered.
 - **both-tier-missed** — the interesting case. Triage it:
   1. add the missing unit assertion;
-  2. extend the difftest record so the state it changes is compared (the runner/shim
-     work tracked by issue #294);
+  2. extend the unit's record so the state it changes is in the golden (the runner work),
+     and bless it with that justification;
   3. if it is equivalent or unreachable in the exercised configurations, record why
      and exclude it (`--exclude-re` or a `mutants.toml`) rather than leaving it on the
      list.
@@ -111,19 +88,18 @@ each survivor as:
 Not enabled here: a mutation job is a maintainer decision because it adds CI cost.
 Two modes fit the existing workflow.
 
-**Per pull request (advisory, cheap).** Mutate only the changed lines and run tier 1;
-no C++ build is needed:
+**Per pull request (advisory, cheap).** Mutate only the changed lines and run tier 1:
 
 ```sh
 git fetch --no-tags origin main
-scripts/mutants.sh --in-diff-base origin/main --no-difftest
+scripts/mutants.sh --in-diff-base origin/main --no-goldens
 ```
 
 Report the survivors in the job summary. This catches weak unit tests in new code
 without gating the merge.
 
-**Nightly (deeper).** One module and unit per job or matrix entry, tier 2 included.
-The C++ reference is built with the same composite action as the difftest job:
+**Nightly (deeper).** One module and unit per job or matrix entry, tier 2 included, with
+upstream's TestFiles from the same composite action as the goldens job:
 
 ```yaml
 name: mutants-nightly
@@ -132,16 +108,14 @@ on:
   workflow_dispatch:
     inputs:
       module: { description: source file, required: true, type: string }
-      unit: { description: difftest unit, required: true, type: string }
+      unit: { description: goldens unit, required: true, type: string }
 jobs:
   mutants:
     runs-on: blacksmith-8vcpu-ubuntu-2404
-    env:
-      SOLIDCORE_CPP_DIR: ${{ github.workspace }}/bin/cpp
     steps:
       - uses: actions/checkout@v4
       - run: rustup show active-toolchain || rustup toolchain install
-      - uses: ./.github/actions/cpp-reference
+      - uses: ./.github/actions/upstream
       - run: scripts/mutants.sh --module "${{ inputs.module }}" --unit "${{ inputs.unit }}" --shard 1/4
       - uses: actions/upload-artifact@v4
         if: always()
@@ -149,9 +123,9 @@ jobs:
 ```
 
 A matrix of `(module, unit, shard)` entries is maintainer-owned: start with the modules
-whose difftest record compares the fewest values and with units that have recent
-deferral reductions. Track **both-tier-missed per module** over time, not the unit
-mutation score alone — the score rewards assertions that difftest already provides.
+whose golden records the fewest values and with units that have recent deferral
+reductions. Track **both-tier-missed per module** over time, not the unit mutation score
+alone — the score rewards assertions the goldens already provide.
 
 ## Pilot findings (2026-10-23)
 

@@ -3,7 +3,7 @@
 # (AGENTS.md section 5):
 # - plan/findings.md and plan/upstream-issues.md, split into one file per record under
 #   plan/findings/ and plan/upstream-issues/ (scripts/split_archives.py);
-# - crates/difftest/known_mismatches.toml, split into known_mismatches/<unit id>.toml.
+# - crates/goldens/known_mismatches.toml, split into known_mismatches/<unit id>.toml.
 # Deleting them passes; re-adding one (e.g. a stale branch that appended to it) fails.
 # Usage: check-frozen-archives.sh [<base sha>]   (the base is no longer needed; accepted so
 # the CI call stays the same)
@@ -17,9 +17,9 @@ for f in plan/findings.md plan/upstream-issues.md; do
   fi
 done
 # Retired shared lists that must not come back (one file per entry instead).
-for f in crates/difftest/known_mismatches.toml; do
+for f in crates/goldens/known_mismatches.toml; do
   if git cat-file -e "HEAD:$f" 2>/dev/null; then
-    echo "::error file=$f::$f is retired; put known mismatches in crates/difftest/known_mismatches/<unit id>.toml (one file per unit, see crates/difftest/src/known.rs)."
+    echo "::error file=$f::$f is retired; put known mismatches in crates/goldens/known_mismatches/<unit id>.toml (one file per unit, see crates/goldens/src/known.rs)."
     fail=1
   fi
 done

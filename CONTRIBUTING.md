@@ -11,7 +11,7 @@ case, replacing the code they supersede. This page is the short version;
 
 - **Fix what has been reported.** solidcore replaced SMLib as SolidCraft's kernel in 0.40, and
   the switch came with bugs: not everything works yet. Take an open reported issue: `urgent`
-  first (main's red difftest sweep, #2794), then `help wanted`. A defect you find yourself in code
+  first (a red goldens job on main comes before everything), then `help wanted`. A defect you find yourself in code
   no user reaches, an unrequested improvement or a speed trick: file it as an issue with a real
   reproduction and leave it for triage. A pull request names, in its first lines, the issue it
   fixes. [AGENTS.md §0](AGENTS.md) has the details.
@@ -24,8 +24,9 @@ case, replacing the code they supersede. This page is the short version;
 - **Check what's already open.** Look at open pull requests, the issues for the area, and its
   hub issue (fillets and chamfers: [#2243](https://github.com/tangency-labs/solidcore/issues/2243)).
   Claim an issue before you start, and build on others' work rather than next to it.
-- **Ask when the docs and the code can't answer.** Ask the maintainers on the hub issue and wait
-  for an answer rather than guessing. A short question saves a long review.
+- **Ask when the docs and the code can't answer.** Ask the maintainers on the hub issue, or in
+  the [`#solidcore-dev`](https://discord.com/channels/1560611394934673498/1560631619340214394) channel on Discord for design discussion, and wait for
+  an answer rather than guessing. A short question saves a long review.
 
 ## How we fix things
 
@@ -57,6 +58,23 @@ case, replacing the code they supersede. This page is the short version;
   left from the port (turn on, delete the old path) is welcome work.
 - **Don't extend the old paths.** Improve the construction that replaces them.
 - **Keep history linear.** Rebase your branch onto `main`; never merge `main` into it.
+
+## Goldens
+
+Every unit's cases are checked against its golden, `crates/goldens/expected/<unit>.jsonl`: the
+output solidcore produced for each case when the golden was blessed. CI fails on any case whose
+output changed, any case added or missing, and any case that breaks.
+
+- **Check:** `cargo run --profile goldens -p goldens -- --unit <id> --goldens` (`--all --jobs 0`
+  for every unit, as CI runs it).
+- **Bless** a change you made on purpose: `... --unit <id> --bless`, then commit the golden with
+  its reason. The commit message and the pull request list the cases that changed with their
+  old and new values, say why the new ones are right, and show pictures before and after for
+  geometry. A golden change without that justification is not reviewed.
+- **A golden proves a result unchanged, not correct.** Correctness comes from closed forms,
+  geometric checks and invariants. Never loosen a tolerance to keep a golden.
+- **The C++ is a reading reference.** `upstream/` is read for inputs, expected values and known
+  constructions; nothing here builds, links or runs it.
 
 ## Cases and known failures
 

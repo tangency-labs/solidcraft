@@ -1,19 +1,11 @@
-name: Nightly difftest
+name: Nightly
 
-# Slow checks that are too expensive for every pull request:
-# * `--fuzz` on every green or partial unit (probes the FFI guards for crashes, panics
-#   and hangs; see crates/difftest/README.md). Reproducers include failures and diagnostic
-#   notes, which remain nonfailures. Retain them even when the run succeeds; copy fixed
-#   cases into fixtures/<unit>/ as regressions.
+# Slow checks that are too expensive for every pull request.
 # Runs on GitHub's runners, like Run workflow in ci.yml.
 on:
   schedule:
     - cron: "41 3 * * *"
   workflow_dispatch:
-    inputs:
-      fuzz_cases:
-        description: "Fuzz cases per unit"
-        default: "300"
 
 permissions:
   contents: read
@@ -25,46 +17,21 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
-  # The upstream pin comes from scripts/upstream-pin.env, loaded by
-  # .github/actions/cpp-reference.
 
 jobs:
-  fuzz:
+  slow:
     runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 240
-    env:
-      SOLIDCORE_CPP_DIR: ${{ github.workspace }}/.cpp
-      FUZZ_CASES: ${{ github.event.inputs.fuzz_cases || '300' }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Upstream sources, sccache and C++ reference
-        uses: ./.github/actions/cpp-reference
+      - name: Upstream sources (TestFiles)
+        uses: ./.github/actions/upstream
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> bin"
-          key: difftest
-
-      - name: Build difftest
-        run: cargo build --profile difftest -p difftest --features cpp
-
-      # One unit at a time so a failure names its unit and the rest still run.
-      - name: Fuzz every green or partial unit
-        run: |
-          case "$FUZZ_CASES" in
-            ''|*[!0-9]*) echo "fuzz_cases must be a positive integer" >&2; exit 2 ;;
-          esac
-          test "$FUZZ_CASES" -gt 0
-          bin=bin/difftest/difftest
-          units=$(python3 scripts/ci/fuzz-units.py)
-          test -n "$units" || { echo "no green/partial units were selected" >&2; exit 1; }
-          failed=0
-          for u in $units; do
-            "$bin" --unit "$u" --fuzz "$FUZZ_CASES" --fuzz-out bin/fuzz || failed=$((failed + 1))
-          done
-          echo "fuzz: $failed unit(s) failed"
-          test "$failed" -eq 0
+          key: goldens
 
       # Owner-approved (2026-10-26): a regression too slow for every PR (~3 min): the
       # tiny-scale torus booleans finish under MAX_SOLVE_BRANCHES (geom::global_solver).
@@ -78,14 +45,6 @@ jobs:
       - name: SolidCraft corpus harness checks
         if: ${{ !cancelled() }}
         run: >-
-          cargo test --profile difftest -p difftest --features cpp --lib -- --ignored --exact
+          cargo test --profile goldens -p goldens --lib -- --ignored --exact
           solidcraft::tests::every_case_reaches_a_verdict_without_a_harness_error
           solidcraft::tests::deferrals_name_a_plan_unit
-
-      - name: Upload fuzz reproducers (failures and diagnostic notes)
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: fuzz-failures
-          path: bin/fuzz/*/fuzz*.json
-          if-no-files-found: ignore
