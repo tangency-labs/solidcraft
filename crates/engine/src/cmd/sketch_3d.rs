@@ -22,7 +22,7 @@ const MOVE3D_CONTRACT: TypedContract<Move3dParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.line3d", "3D Line", crate::checked!("sketch.line3d", line3d))
-        .icon("line")
+        .icon("line3d")
         .enabled(in_sketch_3d)
         .contract(&LINE3D_CONTRACT)
         .output(output_schema_for::<Curves3dResult>)
@@ -31,20 +31,20 @@ pub static COMMANDS: &[CommandSpec] = &[
             created_doc!()
         )),
     CommandSpec::new("sketch.spline3d", "3D Spline", crate::checked!("sketch.spline3d", spline3d))
-        .icon("spline")
+        .icon("spline3d")
         .enabled(in_sketch_3d)
         .contract(&SPLINE3D_CONTRACT)
         .output(output_schema_for::<Curves3dResult>)
         .params(concat!("points: [[x,y,z]…] world fit points (2 or more): a smooth 3D curve through them (needs 3D Sketch on)", created_doc!())),
     CommandSpec::new("sketch.arc3d", "3D Arc", arc3d)
-        .icon("arc3")
+        .icon("arc3d")
         .enabled(in_sketch_3d)
         .params(concat!(
             "start, through, end: [x,y,z] world points: an exact circular arc through them, from start through through to end (needs 3D Sketch on). Stored exactly (centre, radius, angles), so path consumers can treat it as a true arc",
             created_doc!()
         )),
     CommandSpec::new("sketch.point3d", "3D Point", crate::checked!("sketch.point3d", point3d))
-        .icon("point")
+        .icon("point3d")
         .enabled(in_sketch_3d)
         .contract(&POINT3D_CONTRACT)
         .output(output_schema_for::<Point3dResult>)
