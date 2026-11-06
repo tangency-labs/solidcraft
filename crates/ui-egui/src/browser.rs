@@ -2458,6 +2458,7 @@ pub fn canvas_items(app: &SolveApp, id: u64) -> Vec<Item> {
     vec![
         Item::action("ui.editCanvas", "Edit Canvas", "canvas").with(json!({ "canvas": id })),
         Item::action("ui.calibrateCanvas", "Calibrate", "measure").with(json!({ "canvas": id })),
+        Item::action("ui.straightenCanvas", "Straighten", "canvas").with(json!({ "canvas": id })),
         Item::action("canvas.to_sketch", "Canvas to Sketch", "canvas").with(json!({ "canvas": id })),
         Item::sep(),
         Item::action("ui.delete", "Delete", "delete").with(json!({ "canvases": [id] })),
@@ -2467,17 +2468,24 @@ pub fn canvas_items(app: &SolveApp, id: u64) -> Vec<Item> {
     ]
 }
 
-/// Editing a canvas (position, size, angle, opacity, flip) or calibrating it (two points on
-/// the image and their true distance). Live edits of one opening are one undo step.
+/// Editing a canvas (position, size, angle, opacity, flip), calibrating it (two points on
+/// the image and their true distance) or straightening it (two points along an edge of the
+/// image and the direction that edge should have, #11989). Live edits of one opening are one
+/// undo step.
 #[derive(Clone, Debug)]
 pub struct CanvasPanel {
     pub canvas: u64,
     pub calibrate: bool,
+    pub straighten: bool,
     /// Undo depth when the panel opened.
     pub(crate) depth: usize,
     pub a: [f64; 2],
     pub b: [f64; 2],
     pub distance: f64,
+    /// Straighten: the line A–B becomes horizontal (`0`), vertical (`1`) or `angle` (`2`).
+    pub direction: usize,
+    /// Straighten: the direction for `direction == 2`, in degrees.
+    pub angle: f64,
     /// Next viewport click sets Point A (`0`) or Point B (`1`) (#9108).
     pub next: u8,
 }
@@ -2493,7 +2501,26 @@ impl CanvasPanel {
             .find(|c| c.id == canvas)
             .map(|c| ([c.center.x - c.width / 2.0, c.center.y], [c.center.x + c.width / 2.0, c.center.y], c.width))
             .unwrap_or(([0.0, 0.0], [100.0, 0.0], 100.0));
-        CanvasPanel { canvas, calibrate, depth: app.session.undo.len(), a, b, distance: d, next: 0 }
+        CanvasPanel { canvas, calibrate, straighten: false, depth: app.session.undo.len(), a, b, distance: d, direction: 0, angle: 0.0, next: 0 }
+    }
+
+    /// The Straighten card: pick two points along an edge of the image, then the direction.
+    pub fn straighten(app: &SolveApp, canvas: u64) -> Self {
+        CanvasPanel { straighten: true, ..CanvasPanel::new(app, canvas, false) }
+    }
+
+    /// Does a click on the image set Point A or B (Calibrate and Straighten)?
+    pub fn picks_points(&self) -> bool {
+        self.calibrate || self.straighten
+    }
+
+    /// The direction, in degrees, Straighten turns the line A–B to.
+    pub fn target_angle(&self) -> f64 {
+        match self.direction {
+            0 => 0.0,
+            1 => 90.0,
+            _ => self.angle,
+        }
     }
 }
 

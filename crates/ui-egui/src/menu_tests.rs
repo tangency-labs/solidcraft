@@ -836,6 +836,9 @@ fn canvas_menu_hides_renames_calibrates_and_deletes() {
     act(&mut app, &t, "Calibrate");
     let p = app.tree.canvas_panel.clone().unwrap();
     assert!(p.calibrate && (p.distance - 80.0).abs() < 1e-9, "starts from the image's width");
+    act(&mut app, &t, "Straighten");
+    let p = app.tree.canvas_panel.clone().unwrap();
+    assert!(p.straighten && !p.calibrate && p.picks_points() && p.target_angle() == 0.0, "{p:?}");
     act(&mut app, &t, "Delete");
     assert!(app.session.doc.canvases.is_empty());
     app.run("edit.undo", json!({})).unwrap();
