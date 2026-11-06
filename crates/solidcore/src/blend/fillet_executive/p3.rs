@@ -202,6 +202,11 @@ pub enum NoRoomReason {
     /// Join ends them on. The fit is the smaller offset, on the edge of the larger (not the
     /// fork's, #2905).
     JoinOffsetsDiffer,
+    /// A blend past its faces would leave a strip of the body, along an edge of the body,
+    /// thinner than the part resolves: the edge lies off the blend by less than the trim's
+    /// tolerance and the body's together, within which the strip's vertices are one. The
+    /// fit is the blend's size less the fit margin (not the fork's, #2404).
+    StripBelowResolution,
 }
 
 /// The initialized error-info members p3 reads or writes. Corner kinds use the

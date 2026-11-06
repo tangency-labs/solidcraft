@@ -36,6 +36,10 @@
 //!   there and the sheet is sewn to it. The fork drops such a crease as not inside the
 //!   face, leaves the sheet's piece past the face, and refuses at the sewing (a disc 2 high
 //!   rounded 2.001: the crease runs 2.5e-7 inside the bottom edge). Without it the caller subtracts the round, as before.
+//! - **A strip below resolution (not the fork's, #2404).** A body edge that runs along the
+//!   kept sheet, just off it, leaves a strip whose sides the trim's tolerances cannot tell
+//!   apart: refused (`NoRoomReason::StripBelowResolution`), not left to fail at the sewing or
+//!   to fall in two.
 //! - **Open setbacks and each round's side (the fork's ef57570, ce748fa; smlib#125).** An
 //!   open G1 setback corner's spring curves are imprinted with the sheet's boundary and its
 //!   hole's `3 n` edges stay free; a concave round's sheet lies in the void it fills.
@@ -61,8 +65,12 @@ use crate::geom::global_solver::SolverOperation;
 use crate::geom::object::ObjectRef;
 use crate::kernel::Kernel;
 use crate::math::{Point3, BIG_DOUBLE};
+use crate::nurbs::knots::Side;
 use crate::query::brep::BrepIdentity;
 use crate::surface::plane::Plane;
+use crate::surface::procedural_blend::NetScope;
+use crate::surface::surface::p4::NoObject;
+use crate::surface::surface::p5::DropPointOptions;
 use crate::surface::surface::Surface;
 use crate::topology::brep::p3::{self, delete_face, with_kernel_callbacks, DeleteFaceOptions};
 use crate::topology::brep_cache::CacheObject;
@@ -319,6 +327,137 @@ impl FilletSession<'_> {
             // where its rails stay on their faces
             self.executive
                 .note_fit_on_its_faces(k, &mut self.objects, solver)?;
+        }
+        Ok(())
+    }
+
+    /// Not the fork's (#2404): whether an edge of the target other than the blended ones runs
+    /// along the sheet just off it, on the side the sheet keeps: at its quarter points off
+    /// the sheet by more than the body's tolerance (on the sheet, it is a crease) and less
+    /// than the trim's `tol` and the body's together, a sheet vertex's and a body vertex's
+    /// tolerances, across which the strip's two sides are one. An edge on the side of the
+    /// blended edges goes with the material they take off (a crease that stands for it,
+    /// WR-717), and leaves no strip.
+    fn strip_below_resolution(
+        &self,
+        k: &Kernel,
+        sheet: &Brep,
+        blended: &[EdgeId],
+        tol: f64,
+    ) -> Result<bool> {
+        let target = &*self.objects.target;
+        let body_tol = target.tolerance();
+        // answered to the trim's tolerance: a reopened round's net holds it (#2510)
+        let _scope = NetScope::within(k, tol);
+        let sheet_faces = crate::topology::brep::p1::faces(sheet, None)?;
+        let mut taken = Vec::new();
+        for &e in blended {
+            let curve = edge_curve(k, target, e)?;
+            taken.push(curve.evaluate_point(k, curve.natural_interval().evaluate(0.5))?);
+        }
+        // the signed drop of `p` on face `s`: its gap, and its side of the surface
+        let drop_on_face = |s: FaceId, p: Point3| -> Result<Option<(f64, f64)>> {
+            let surface =
+                face::p2::surface(sheet, s)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+            let domain = face::p2::uv_domain(sheet, s)?;
+            let dropped =
+                surface.drop_point::<NoObject>(k, p, &domain, &DropPointOptions::default())?;
+            if !dropped.success {
+                return Ok(None);
+            }
+            let normal = surface.evaluate_normal(k, dropped.result_uv, Side::Left, Side::Left)?;
+            let foot = surface.evaluate_point(k, dropped.result_uv)?;
+            Ok(Some((dropped.gap, (p - foot).dot(normal))))
+        };
+        for e in crate::topology::brep::p1::edges(target, None)? {
+            if blended.contains(&e) {
+                continue;
+            }
+            let Some(curve) = edge::curve(target, e)? else {
+                continue;
+            };
+            let ivl = edge::interval(target, e)?;
+            let mut along = true;
+            for quarter in [0.25, 0.5, 0.75] {
+                let p = curve.evaluate_point(k, ivl.evaluate(quarter))?;
+                let mut nearest: Option<(FaceId, f64, f64)> = None;
+                for &s in &sheet_faces {
+                    if let Some((gap, side)) = drop_on_face(s, p)? {
+                        if nearest.is_none_or(|(_, best, _)| gap < best) {
+                            nearest = Some((s, gap, side));
+                        }
+                    }
+                }
+                let Some((s, gap, side)) = nearest else {
+                    along = false;
+                    break;
+                };
+                if gap <= body_tol || gap >= tol + body_tol {
+                    along = false;
+                    break;
+                }
+                let mut toward = None;
+                let mut closest = f64::INFINITY;
+                for &m in &taken {
+                    let d = m.distance(p);
+                    if d < closest {
+                        closest = d;
+                        toward = Some(m);
+                    }
+                }
+                let Some(m) = toward else {
+                    along = false;
+                    break;
+                };
+                let kept = drop_on_face(s, m)?.is_some_and(|(_, other)| other * side < 0.0);
+                if !kept {
+                    along = false;
+                    break;
+                }
+            }
+            if along {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    /// The fit of [`Self::strip_below_resolution`]'s refusal: the least constant ball of the
+    /// blends, less the fit margin of a blended edge (a thousand of its tolerances). None
+    /// where no constant ball rolls.
+    fn note_fit_of_the_strip(
+        &mut self,
+        solvers: &[FilletObject],
+        blended: &[EdgeId],
+    ) -> Result<()> {
+        let mut size = f64::INFINITY;
+        for &solver in solvers {
+            let FilletObject::Solver(id) = solver else {
+                return Err(invalid("object is not a solver"));
+            };
+            let object = self.objects.solver(id)?;
+            let (rolls, on_law) = super::ball_regular::rolls_a_ball(object);
+            if rolls && !on_law {
+                let surface = object
+                    .base()
+                    .surface(0)?
+                    .ok_or_else(|| SolidError::null_pointer(OP))?;
+                size = smos_min(size, surface.surface.offset_distance().abs());
+            }
+        }
+        let Some(&e) = blended.first() else {
+            return Ok(());
+        };
+        if size.is_finite() {
+            let margin = 1000.0 * edge::tolerance(self.objects.target, e)?;
+            self.executive.note_fit_radius(
+                smos_max(0.0, size - margin),
+                Some(FilletObject::Topology(
+                    FilletBody::Target,
+                    EntityRef::Edge(e),
+                )),
+                crate::blend::fillet_executive::FitKind::Radius,
+            );
         }
         Ok(())
     }
@@ -608,6 +747,21 @@ impl FilletSession<'_> {
         }
         let on_tol = 10.0 * tol;
 
+        // Not the fork's (#2404): the strip a blend leaves on an edge of the body, thinner than
+        // the part resolves, has no topology to build
+        if self.strip_below_resolution(k, &sheet, blended_edges, tol)? {
+            if k.fixes.fillet_gn_section_generator {
+                self.note_fit_of_the_strip(solvers, blended_edges)?;
+            }
+            return refuse(
+                note,
+                refusal(
+                    FilletErrorType::NoRoom,
+                    Some(NoRoomReason::StripBelowResolution),
+                    "Fillet Error: a blend past its faces would leave a strip of the body along an edge thinner than the part resolves: a smaller blend keeps it",
+                ),
+            );
+        }
         // the blended edges' curves, to find their pieces after the imprint
         let mut blended_curves = Vec::new();
         for &e in blended_edges {
