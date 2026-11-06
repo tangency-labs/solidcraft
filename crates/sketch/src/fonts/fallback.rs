@@ -502,7 +502,11 @@ fn known(queries: &[Query]) -> Option<Vec<Answer>> {
 }
 
 fn store(found: Vec<(Query, Answer)>) {
-    let mut search = state();
+    store_in(&mut state(), found);
+}
+
+/// [`store`] under a lock already held.
+fn store_in(search: &mut Search, found: Vec<(Query, Answer)>) {
     if search.answers.len() + found.len() > MAX_ANSWERS {
         search.answers.clear();
     }
@@ -531,8 +535,11 @@ impl Drop for Running {
         if self.done {
             return;
         }
-        state().running = false;
-        store(self.held.drain(..).map(|query| (query, None)).collect());
+        // Under one lock, so no request sees the mark cleared before the held queries are answered
+        // and starts a search for them again.
+        let mut search = state();
+        search.running = false;
+        store_in(&mut search, self.held.drain(..).map(|query| (query, None)).collect());
     }
 }
 
