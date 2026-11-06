@@ -127,6 +127,312 @@ impl Sketch {
         self.update_pattern(index, kind)
     }
 
+    /// Change the source entities of an existing rectangular sketch pattern.
+    ///
+    /// Surviving seed/copy pairs and their solver relations keep their stable IDs. Copies for
+    /// removed seeds are discarded, and copies for newly selected seeds are created at every
+    /// surviving pattern slot. Selection from the pattern's own generated geometry is rejected.
+    pub fn update_pattern_entities(&mut self, id: &str, entity_ids: Vec<String>, kind: SketchPatternKind) -> Result<(), SketchError> {
+        let mut candidate = self.clone();
+        candidate.update_pattern_entities_inner(id, entity_ids, kind)?;
+        *self = candidate;
+        Ok(())
+    }
+
+    fn update_pattern_entities_inner(&mut self, id: &str, entity_ids: Vec<String>, kind: SketchPatternKind) -> Result<(), SketchError> {
+        let index = self.patterns.iter().position(|pattern| pattern.id == id).ok_or_else(|| SketchError::Invalid("missing sketch pattern".into()))?;
+        let original = self.patterns.get(index).cloned().ok_or_else(|| SketchError::Invalid("missing sketch pattern".into()))?;
+        let SketchPatternKind::Rectangular { .. } = &original.kind else {
+            return Err(SketchError::Invalid("only rectangular pattern source entities can be changed".into()));
+        };
+        if entity_ids.is_empty() || entity_ids.len() > crate::MAX_CURVES + crate::MAX_POINTS {
+            return Err(SketchError::Invalid("a rectangular pattern needs at least one valid source entity".into()));
+        }
+        let mut unique = std::collections::BTreeSet::new();
+        if entity_ids.iter().any(|id| id.is_empty() || id.len() > 512 || !unique.insert(id.as_str())) {
+            return Err(SketchError::Invalid("pattern source entities must be unique valid IDs".into()));
+        }
+        if entity_ids == original.entities {
+            return self.update_pattern(index, kind);
+        }
+
+        let curve_ids =
+            |ids: &[String]| -> Result<Vec<String>, SketchError> { Ok(ids.iter().filter(|id| self.curve_index(id).is_some()).cloned().collect()) };
+        let old_curve_ids = curve_ids(&original.entities)?;
+        let new_curve_ids = curve_ids(&entity_ids)?;
+        let resolve_seed_points = |ids: &[String]| -> Result<Vec<String>, SketchError> {
+            let (mut curves, mut points) = (Vec::new(), Vec::new());
+            for id in ids {
+                if let Some(curve) = self.curve_index(id) {
+                    curves.push(curve);
+                } else if let Some(point) = self.resolve_point(id) {
+                    points.push(point);
+                } else {
+                    return Err(SketchError::Invalid("pattern source contains a missing sketch entity".into()));
+                }
+            }
+            let mut indices = Vec::new();
+            for curve in curves {
+                if let Some(shape) = self.curves.get(curve) {
+                    indices.extend(shape.kind.point_ids());
+                }
+            }
+            indices.extend(points);
+            indices.sort_unstable();
+            indices.dedup();
+            Ok(indices.into_iter().filter_map(|index| self.points.get(index).map(|point| point.id.clone())).collect())
+        };
+        let old_point_ids = resolve_seed_points(&original.entities)?;
+        let new_point_ids = resolve_seed_points(&entity_ids)?;
+
+        let generated_curves: std::collections::BTreeSet<_> =
+            original.instances.iter().flat_map(|instance| instance.curves.iter().cloned()).collect();
+        let generated_points: std::collections::BTreeSet<_> =
+            original.instances.iter().flat_map(|instance| instance.points.iter().map(|(_, copy)| copy.clone())).collect();
+        if entity_ids.iter().any(|id| generated_curves.contains(id) || generated_points.contains(id))
+            || new_point_ids.iter().any(|id| generated_points.contains(id))
+        {
+            return Err(SketchError::Invalid("a pattern cannot use its own generated copies as source entities".into()));
+        }
+
+        // Follow dependent patterns through selected geometry, shared endpoints and driving
+        // references. Adding any of their outputs as a seed would reverse that dependency.
+        let mut dependent_outputs: std::collections::BTreeSet<_> = generated_curves.union(&generated_points).cloned().collect();
+        let mut descendants = std::collections::BTreeSet::from([original.id.clone()]);
+        loop {
+            let previous = descendants.len();
+            for pattern in &self.patterns {
+                if descendants.contains(&pattern.id) {
+                    continue;
+                }
+                let mut inputs: Vec<&String> = pattern.entities.iter().collect();
+                match &pattern.kind {
+                    SketchPatternKind::Circular { center, .. } => inputs.push(center),
+                    SketchPatternKind::Rectangular { direction, direction2, .. } => {
+                        inputs.extend(direction.iter().chain(direction2.iter()));
+                    }
+                }
+                let depends = inputs.iter().any(|id| {
+                    dependent_outputs.contains(*id)
+                        || self.curve_index(id).is_some_and(|index| {
+                            self.curves[index]
+                                .kind
+                                .point_ids()
+                                .iter()
+                                .any(|point| self.points.get(*point).is_some_and(|point| dependent_outputs.contains(&point.id)))
+                        })
+                        || self.resolve_point(id).and_then(|index| self.points.get(index)).is_some_and(|point| dependent_outputs.contains(&point.id))
+                });
+                if depends {
+                    descendants.insert(pattern.id.clone());
+                    dependent_outputs.extend(pattern.instances.iter().flat_map(|instance| instance.curves.iter().cloned()));
+                    dependent_outputs.extend(pattern.instances.iter().flat_map(|instance| instance.points.iter().map(|(_, copy)| copy.clone())));
+                }
+            }
+            if descendants.len() == previous {
+                break;
+            }
+        }
+        if entity_ids.iter().chain(&new_point_ids).any(|id| dependent_outputs.contains(id)) {
+            return Err(SketchError::Invalid("a pattern cannot use outputs of a dependent pattern as source entities".into()));
+        }
+        let references: Vec<_> = match &kind {
+            SketchPatternKind::Circular { center, .. } => vec![center],
+            SketchPatternKind::Rectangular { direction, direction2, .. } => direction.iter().chain(direction2.iter()).collect(),
+        };
+        if references.iter().any(|id| {
+            dependent_outputs.contains(*id)
+                || self.curve_index(id).is_some_and(|index| {
+                    self.curves[index]
+                        .kind
+                        .point_ids()
+                        .iter()
+                        .any(|point| self.points.get(*point).is_some_and(|point| dependent_outputs.contains(&point.id)))
+                })
+                || self.resolve_point(id).and_then(|index| self.points.get(index)).is_some_and(|point| dependent_outputs.contains(&point.id))
+        }) {
+            return Err(SketchError::Invalid("a pattern cannot use its own or dependent outputs as driving references".into()));
+        }
+
+        let wanted_curves: std::collections::BTreeSet<_> = new_curve_ids.iter().cloned().collect();
+        let wanted_points: std::collections::BTreeSet<_> = new_point_ids.iter().cloned().collect();
+        let mut retired_curves = std::collections::BTreeSet::new();
+        let mut retired_points = std::collections::BTreeSet::new();
+        let mut removed_owned_constraints = std::collections::BTreeSet::new();
+        for instance in &original.instances {
+            if instance.curves.len() != old_curve_ids.len() {
+                return Err(SketchError::Invalid("the pattern's source and generated curve maps are inconsistent".into()));
+            }
+            for (seed, copy) in old_curve_ids.iter().zip(&instance.curves) {
+                if !wanted_curves.contains(seed) {
+                    retired_curves.insert(copy.clone());
+                }
+            }
+            for (seed, copy) in &instance.points {
+                if !old_point_ids.contains(seed) || self.resolve_point(seed).is_none() || self.resolve_point(copy).is_none() {
+                    return Err(SketchError::Invalid("the pattern's source and generated point maps are inconsistent".into()));
+                }
+                if !wanted_points.contains(seed) {
+                    retired_points.insert(copy.clone());
+                }
+            }
+            for constraint_id in &instance.constraints {
+                let Some(constraint) = self.constraints.iter().find(|constraint| constraint.id == *constraint_id) else {
+                    return Err(SketchError::Invalid("the pattern has a missing generated constraint".into()));
+                };
+                let remove = match &constraint.kind {
+                    ConstraintKind::PatternPoint { p, .. } => {
+                        let seed = self.points.get(*p).map(|point| point.id.as_str());
+                        seed.is_none_or(|seed| !wanted_points.contains(seed))
+                    }
+                    ConstraintKind::PatternRadius { a, .. } => {
+                        let seed = self.curves.get(*a).map(|curve| curve.id.as_str());
+                        seed.is_none_or(|seed| !wanted_curves.contains(seed))
+                    }
+                    _ => return Err(SketchError::Invalid("the pattern owns an unsupported generated constraint".into())),
+                };
+                if remove {
+                    removed_owned_constraints.insert(constraint_id.clone());
+                }
+            }
+        }
+
+        let retired_curve_indices: std::collections::BTreeSet<_> = retired_curves.iter().filter_map(|id| self.curve_index(id)).collect();
+        let retired_point_indices: std::collections::BTreeSet<_> = retired_points.iter().filter_map(|id| self.resolve_point(id)).collect();
+        for point_index in &retired_point_indices {
+            let has_external_curve = self
+                .curves
+                .iter()
+                .enumerate()
+                .any(|(curve_index, curve)| curve.kind.uses(*point_index) && !retired_curve_indices.contains(&curve_index));
+            if has_external_curve {
+                return Err(SketchError::Invalid(
+                    "cannot remove these pattern sources because another sketch curve uses their generated points".into(),
+                ));
+            }
+        }
+        let mut downstream_patterns = Vec::new();
+        for pattern in self.patterns.iter().filter(|pattern| pattern.id != original.id) {
+            if retired_curves.iter().any(|id| pattern.contains(id)) || retired_points.iter().any(|id| pattern.contains(id)) {
+                downstream_patterns.push(pattern.id.clone());
+            }
+        }
+        if !downstream_patterns.is_empty() {
+            return Err(SketchError::Invalid("cannot remove source entities whose generated copies are used by another sketch pattern".into()));
+        }
+        for constraint in self.constraints.iter().filter(|constraint| !removed_owned_constraints.contains(&constraint.id)) {
+            let mut kind = constraint.kind.clone();
+            let survives = kind.remap(&|point| (!retired_point_indices.contains(&point)).then_some(point), &|curve| {
+                (!retired_curve_indices.contains(&curve)).then_some(curve)
+            });
+            if !survives {
+                return Err(SketchError::Invalid(
+                    "cannot remove these pattern sources because an external sketch constraint depends on their copies".into(),
+                ));
+            }
+        }
+
+        let retained_earlier: Vec<_> = self.patterns.iter().take(index).map(|pattern| pattern.id.clone()).collect();
+        let mut pattern = self.patterns.remove(index);
+        let mut instance_rebuilds = Vec::new();
+        for (instance_index, instance) in pattern.instances.iter().enumerate() {
+            let old_copy_curves: std::collections::BTreeMap<_, _> =
+                old_curve_ids.iter().zip(&instance.curves).map(|(seed, copy)| (seed.clone(), copy.clone())).collect();
+            let old_copy_points: std::collections::BTreeMap<_, _> = instance.points.iter().cloned().collect();
+            instance_rebuilds.push((instance_index, old_copy_curves, old_copy_points));
+        }
+
+        for instance in &mut pattern.instances {
+            instance.curves.retain(|id| !retired_curves.contains(id));
+            instance.points.retain(|(seed, _)| wanted_points.contains(seed));
+            instance.constraints.retain(|id| !removed_owned_constraints.contains(id));
+        }
+        self.constraints.retain(|constraint| !removed_owned_constraints.contains(&constraint.id));
+        for copy in &retired_curves {
+            if let Some(index) = self.curve_index(copy) {
+                self.drop_curves(&[index]);
+            }
+        }
+        for copy in &retired_points {
+            if let Some(index) = self.resolve_point(copy) {
+                self.remove_points(&[index]);
+            }
+        }
+
+        let seed_curves: Vec<_> = new_curve_ids.iter().filter_map(|id| self.curve_index(id)).collect();
+        let seed_points: Vec<_> = new_point_ids.iter().filter_map(|id| self.resolve_point(id)).collect();
+        let involved = involved_points(self, &seed_curves, &seed_points);
+        let wanted_point_order: Vec<_> = involved.iter().filter_map(|index| self.points.get(*index).map(|point| point.id.clone())).collect();
+
+        for (instance_index, old_copy_curves, old_copy_points) in instance_rebuilds {
+            let mut instance = pattern
+                .instances
+                .get(instance_index)
+                .cloned()
+                .ok_or_else(|| SketchError::Invalid("missing pattern instance while changing its sources".into()))?;
+            let mut point_map = Vec::new();
+            for seed_id in &wanted_point_order {
+                if let (Some(seed), Some(copy)) = (self.resolve_point(seed_id), old_copy_points.get(seed_id).and_then(|id| self.resolve_point(id))) {
+                    point_map.push((seed, copy));
+                }
+            }
+            let missing_points: Vec<_> =
+                wanted_point_order.iter().filter(|id| !old_copy_points.contains_key(*id)).filter_map(|id| self.resolve_point(id)).collect();
+            let added_curves: Vec<_> = seed_curves
+                .iter()
+                .copied()
+                .filter(|index| self.curves.get(*index).is_some_and(|curve| !old_copy_curves.contains_key(&curve.id)))
+                .collect();
+            let (made, map) = copy_through_with_map(self, &added_curves, &missing_points, &|point| point, point_map)?;
+            let additions: std::collections::BTreeMap<_, _> = added_curves
+                .iter()
+                .zip(&made)
+                .filter_map(|(seed, copy)| Some((self.curves.get(*seed)?.id.clone(), self.curves.get(*copy)?.id.clone())))
+                .collect();
+            let point_additions: std::collections::BTreeMap<_, _> =
+                map.iter().filter_map(|(seed, copy)| Some((self.points.get(*seed)?.id.clone(), self.points.get(*copy)?.id.clone()))).collect();
+            let mut curve_ids = Vec::new();
+            for seed in &new_curve_ids {
+                let copy = old_copy_curves.get(seed).filter(|id| self.curve_index(id).is_some()).or_else(|| additions.get(seed));
+                let copy = copy.ok_or_else(|| SketchError::Invalid("failed to preserve or create a source curve copy".into()))?;
+                curve_ids.push(copy.clone());
+            }
+            let mut point_pairs = Vec::new();
+            for seed in &wanted_point_order {
+                let copy = old_copy_points.get(seed).filter(|id| self.resolve_point(id).is_some()).or_else(|| point_additions.get(seed));
+                let copy = copy.ok_or_else(|| SketchError::Invalid("failed to preserve or create a source point copy".into()))?;
+                point_pairs.push((seed.clone(), copy.clone()));
+            }
+            for (seed, copy) in point_pairs.iter().filter(|(seed, _)| !old_copy_points.contains_key(seed)) {
+                let p = self.resolve_point(seed).ok_or_else(|| SketchError::Invalid("missing source point after pattern edit".into()))?;
+                let q = self.resolve_point(copy).ok_or_else(|| SketchError::Invalid("missing new point copy after pattern edit".into()))?;
+                instance.constraints.push(self.add_constraint(
+                    ConstraintKind::PatternPoint { p, q, center: None, angle: 0.0, offset: Vec2::ZERO, directions: [None; 2] },
+                    None,
+                )?);
+            }
+            for (seed, copy) in new_curve_ids.iter().zip(&curve_ids).filter(|(seed, _)| !old_copy_curves.contains_key(*seed)) {
+                let a = self.curve_index(seed).ok_or_else(|| SketchError::Invalid("missing source curve after pattern edit".into()))?;
+                if matches!(self.curves.get(a).map(|curve| &curve.kind), Some(CurveKind::Circle { .. } | CurveKind::Ellipse { .. })) {
+                    let b = self.curve_index(copy).ok_or_else(|| SketchError::Invalid("missing new curve copy after pattern edit".into()))?;
+                    instance.constraints.push(self.add_constraint(ConstraintKind::PatternRadius { a, b }, None)?);
+                }
+            }
+            instance.curves = curve_ids;
+            instance.points = point_pairs;
+            pattern.instances[instance_index] = instance;
+        }
+        pattern.entities = entity_ids;
+        let insertion = retained_earlier.iter().filter(|id| self.patterns.iter().any(|pattern| pattern.id == **id)).count().min(self.patterns.len());
+        self.patterns.insert(insertion, pattern);
+        let index = self
+            .patterns
+            .iter()
+            .position(|pattern| pattern.id == id)
+            .ok_or_else(|| SketchError::Invalid("pattern was lost while changing source entities".into()))?;
+        self.update_pattern(index, kind)
+    }
+
     /// Rebuild a pattern after its driving expressions change, retaining surviving copy ids.
     pub fn update_pattern(&mut self, index: usize, kind: SketchPatternKind) -> Result<(), SketchError> {
         let old = self.patterns.get(index).cloned().ok_or_else(|| SketchError::Invalid("missing sketch pattern".into()))?;
@@ -529,12 +835,26 @@ fn involved_points(sk: &Sketch, cs: &[usize], ps: &[usize]) -> Vec<usize> {
 
 /// Copy seed curves and their points, returning curves and the original-to-copy point map.
 fn copy_through(sk: &mut Sketch, cs: &[usize], ps: &[usize], f: &dyn Fn(Vec2) -> Vec2) -> Result<(Vec<usize>, Vec<(usize, usize)>), SketchError> {
+    copy_through_with_map(sk, cs, ps, f, Vec::new())
+}
+
+/// Copy curves and points while reusing any original-to-copy point relationships supplied by a
+/// retained pattern seed. Shared seed endpoints therefore remain one shared generated point.
+fn copy_through_with_map(
+    sk: &mut Sketch,
+    cs: &[usize],
+    ps: &[usize],
+    f: &dyn Fn(Vec2) -> Vec2,
+    mut map: Vec<(usize, usize)>,
+) -> Result<(Vec<usize>, Vec<(usize, usize)>), SketchError> {
     if sk.curves.len().saturating_add(cs.len()) > crate::MAX_CURVES {
         return Err(crate::SketchError::TooLarge);
     }
     let pts = involved_points(sk, cs, ps);
-    let mut map: Vec<(usize, usize)> = Vec::new();
     for q in &pts {
+        if map.iter().any(|(seed, _)| seed == q) {
+            continue;
+        }
         let pos = sk.point(*q).unwrap_or_default();
         let n = sk.add_point(f(pos), None)?;
         map.push((*q, n));

@@ -482,6 +482,159 @@ fn malformed_pattern_edits_roll_back_and_deleted_seed_does_not_panic() {
 }
 
 #[test]
+fn rectangular_pattern_can_add_and_remove_seed_curves_without_restarting() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points":[[10,0],[20,0],[20,10]],"ids":["l1","l2"]}));
+    let out = run(&mut s, "sketch.pattern.rectangular", json!({"entities":["l1"],"count":3,"spacing":40}));
+    let original = sketch(&s).patterns[0].clone();
+    let retained_curve_ids: Vec<_> = original.instances.iter().map(|instance| instance.curves[0].clone()).collect();
+    let expanded = run(&mut s, "sketch.pattern.rectangular", json!({"pattern":out["pattern"],"entities":["l1","l2"]}));
+    let expanded_pattern = sketch(&s).patterns[0].clone();
+    assert_eq!(expanded_pattern.entities, vec!["l1".to_string(), "l2".to_string()]);
+    assert_eq!(expanded_pattern.kind, original.kind);
+    for (before, after) in original.instances.iter().zip(&expanded_pattern.instances) {
+        assert_eq!(before.curves[0], after.curves[0], "surviving seed copy IDs remain stable");
+        let shared_seed = sketch(&s).resolve_point("l1.end").unwrap();
+        let shared_id = sketch(&s).points[shared_seed].id.clone();
+        let old_copy = before.points.iter().find(|(seed, _)| seed == &shared_id).map(|(_, copy)| copy).unwrap();
+        let new_copy = after.points.iter().find(|(seed, _)| seed == &shared_id).map(|(_, copy)| copy).unwrap();
+        assert_eq!(old_copy, new_copy, "shared endpoint mapping remains stable");
+        let l2_copy = sketch(&s).curve_index(&after.curves[1]).unwrap();
+        let l1_copy = sketch(&s).curve_index(&after.curves[0]).unwrap();
+        let CurveKind::Line { b: l1_end, .. } = &sketch(&s).curves[l1_copy].kind else { panic!("line copy") };
+        let CurveKind::Line { a: l2_start, .. } = &sketch(&s).curves[l2_copy].kind else { panic!("line copy") };
+        assert_eq!(l1_end, l2_start, "connected seed endpoints share one generated point");
+    }
+    assert_eq!(ids(&expanded["curves"]).len(), 4);
+    check_relations(&s);
+
+    let before_remove = s.doc.to_json();
+    run(&mut s, "sketch.pattern.rectangular", json!({"pattern":out["pattern"],"entities":["l2"]}));
+    let reduced = sketch(&s);
+    assert_eq!(reduced.patterns[0].entities, vec!["l2".to_string()]);
+    assert_eq!(reduced.patterns[0].kind, original.kind, "omitted settings retain their prior values");
+    for (before, after) in original.instances.iter().zip(&reduced.patterns[0].instances) {
+        assert_eq!(after.curves[0], expanded_pattern.instances.iter().find(|i| i.index == before.index).unwrap().curves[1]);
+    }
+    assert!(retained_curve_ids.iter().all(|id| reduced.curve_index(id).is_none()), "copies of the removed seed are retired");
+    check_relations(&s);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before_remove);
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(sketch(&s).patterns[0].entities, vec!["l2".to_string()]);
+
+    let saved = s.doc.to_json();
+    let mut reopened = Session { doc: solidcraft_doc::format::read(&saved).unwrap().into(), active_sketch: s.active_sketch, ..Default::default() };
+    reopened.refresh();
+    assert_eq!(sketch(&reopened).patterns[0].entities, vec!["l2".to_string()]);
+    assert_eq!(
+        sketch(&reopened).patterns[0].instances.iter().map(|i| i.curves[0].clone()).collect::<Vec<_>>(),
+        sketch(&s).patterns[0].instances.iter().map(|i| i.curves[0].clone()).collect::<Vec<_>>()
+    );
+    check_relations(&reopened);
+}
+
+#[test]
+fn circular_pattern_seed_edit_is_rejected_atomically() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.circle.center", json!({"center":[20,0],"radius":2,"id":"seed"}));
+    run(&mut s, "sketch.line", json!({"points":[[0,10],[10,10]],"ids":["other"]}));
+    let pattern = run(&mut s, "sketch.pattern.circular", json!({"entities":["seed"],"center":"origin","count":4}));
+    let before = s.doc.to_json();
+    let error = s.execute("sketch.pattern.circular", &json!({"pattern":pattern["pattern"],"entities":["other"]})).unwrap_err().to_string();
+    assert!(error.contains("the seed entities of an existing pattern cannot be changed"), "{error}");
+    assert_eq!(s.doc.to_json(), before, "circular pattern seed edits leave the complete document unchanged");
+    check_relations(&s);
+}
+
+#[test]
+fn rectangular_pattern_seed_removal_rejects_external_copy_dependencies_atomically() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points":[[10,0],[20,0],[20,10]],"ids":["l1","l2"]}));
+    let out = run(&mut s, "sketch.pattern.rectangular", json!({"entities":["l1","l2"],"count":3,"spacing":40}));
+    let first = sketch(&s).patterns[0].instances[0].clone();
+    let l1_start = sketch(&s).resolve_point("l1.start").unwrap();
+    let seed_id = sketch(&s).points[l1_start].id.clone();
+    let copy_id = first.points.iter().find(|(seed, _)| seed == &seed_id).unwrap().1.clone();
+    run(&mut s, "sketch.constraint.fix", json!({"entities":[copy_id]}));
+    let before = s.doc.to_json();
+    let error = s.execute("sketch.pattern.rectangular", &json!({"pattern":out["pattern"],"entities":["l2"]})).unwrap_err().to_string();
+    assert!(error.contains("external sketch constraint"), "{error}");
+    assert_eq!(s.doc.to_json(), before, "unsafe source edits leave the complete document unchanged");
+    assert_eq!(sketch(&s).patterns[0].entities, vec!["l1".to_string(), "l2".to_string()]);
+    check_relations(&s);
+}
+
+#[test]
+fn rectangular_pattern_seed_edit_adds_explicit_points_and_preserves_expressions() {
+    let mut s = new_sketch();
+    run(&mut s, "parameters.add", json!({"name":"copies","expression":"3","unit":""}));
+    run(&mut s, "parameters.add", json!({"name":"pitch","expression":"20","unit":"mm"}));
+    run(&mut s, "sketch.line", json!({"points":[[10,0],[20,0]],"ids":["l1"]}));
+    let point_id = ids(&run(&mut s, "sketch.point", json!({"point":[5,5],"id":"freePoint"}))["created"]["points"])[0].clone();
+    let out = run(&mut s, "sketch.pattern.rectangular", json!({"entities":["l1"],"count":"copies","spacing":"pitch"}));
+    let before = sketch(&s).patterns[0].instances[0].curves[0].clone();
+    run(&mut s, "sketch.pattern.rectangular", json!({"pattern":out["pattern"],"entities":["l1","freePoint"]}));
+    let expanded = sketch(&s).patterns[0].clone();
+    assert_eq!(expanded.expressions.get("count").map(String::as_str), Some("copies"));
+    assert_eq!(expanded.expressions.get("spacing").map(String::as_str), Some("pitch"));
+    assert_eq!(expanded.instances[0].curves[0], before);
+    let seed_point = point_id.clone();
+    let copy_point = expanded.instances[0].points.iter().find(|(seed, _)| seed == &seed_point).unwrap().1.clone();
+    assert!(point(&sketch(&s), &copy_point).dist(Vec2::new(25., 5.)) < 1e-6);
+    assert!(point_id == seed_point);
+    check_relations(&s);
+
+    let saved = s.doc.to_json();
+    let mut reopened = Session { doc: solidcraft_doc::format::read(&saved).unwrap().into(), active_sketch: s.active_sketch, ..Default::default() };
+    reopened.refresh();
+    run(&mut reopened, "parameters.change", json!({"name":"pitch","expression":"30"}));
+    run(&mut reopened, "parameters.change", json!({"name":"copies","expression":"4"}));
+    let pattern = &sketch(&reopened).patterns[0];
+    assert_eq!(pattern.instances.len(), 3);
+    assert_eq!(pattern.expressions.get("count").map(String::as_str), Some("copies"));
+    assert_eq!(pattern.expressions.get("spacing").map(String::as_str), Some("pitch"));
+    let last = pattern.instances.last().unwrap();
+    let copy = last.points.iter().find(|(seed, _)| seed == &seed_point).unwrap().1.clone();
+    assert!(point(&sketch(&reopened), &copy).dist(Vec2::new(95., 5.)).abs() < 1e-6);
+    check_relations(&reopened);
+}
+
+#[test]
+fn rectangular_pattern_seed_edit_rejects_its_output_point_through_an_outside_curve() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points":[[10,0],[20,0]],"ids":["l1"]}));
+    let out = run(&mut s, "sketch.pattern.rectangular", json!({"entities":["l1"],"count":2,"spacing":20}));
+    let output = ids(&out["curves"])[0].clone();
+    run(&mut s, "sketch.line", json!({"points":[format!("{output}.end"),[40,15]],"ids":["outside"]}));
+    let before = s.doc.to_json();
+    assert!(s.execute("sketch.pattern.rectangular", &json!({"pattern":out["pattern"],"entities":["l1","outside"]}),).is_err());
+    assert_eq!(s.doc.to_json(), before, "using an output point through another curve must not create a pattern cycle");
+}
+
+#[test]
+fn rectangular_pattern_seed_edit_rejects_a_downstream_pattern_output() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points":[[10,0],[20,0]],"ids":["l1"]}));
+    let parent = run(&mut s, "sketch.pattern.rectangular", json!({"entities":["l1"],"count":2,"spacing":20}));
+    let parent_output = ids(&parent["curves"])[0].clone();
+    let child = run(&mut s, "sketch.pattern.rectangular", json!({"entities":[parent_output],"count":2,"spacing":30}));
+    let child_output = ids(&child["curves"])[0].clone();
+    let before = s.doc.to_json();
+    assert!(s.execute("sketch.pattern.rectangular", &json!({"pattern":parent["pattern"],"entities":["l1",child_output]}),).is_err());
+    assert_eq!(s.doc.to_json(), before, "reversing a pattern dependency must leave the document unchanged");
+    run(&mut s, "sketch.line", json!({"points":[[0,10],[10,10]],"ids":["extra"]}));
+    let before = s.doc.to_json();
+    for direction in ["direction", "direction2"] {
+        let mut params = json!({"pattern":parent["pattern"],"entities":["l1","extra"]});
+        params[direction] = json!(child_output);
+        let error = s.execute("sketch.pattern.rectangular", &params).unwrap_err().to_string();
+        assert!(error.contains("driving references"), "{error}");
+        assert_eq!(s.doc.to_json(), before, "a new driving reference cannot reverse a dependency");
+    }
+}
+
+#[test]
 fn pattern_seed_move_and_scale_preserve_shape_and_shared_points() {
     let mut s = new_sketch();
     run(&mut s, "sketch.line", json!({"points":[[10,0],[20,0],[20,10]],"ids":["l1","l2"]}));

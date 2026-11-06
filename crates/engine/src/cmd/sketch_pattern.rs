@@ -85,7 +85,7 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
             .chain(ps.iter().filter_map(|i| sk.points.get(*i).map(|p| p.id.clone())))
             .collect();
         if let Some(old) = &old {
-            if entity_ids != old.entities {
+            if circular && entity_ids != old.entities {
                 return Err(bad(cmd, "the seed entities of an existing pattern cannot be changed"));
             }
             if old.instances.len() >= MAX_COPIES {
@@ -181,16 +181,22 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
         };
         let center_id = center.and_then(|i| sk.points.get(i)).map(|p| p.id.clone());
         let index = old_index.unwrap_or(sk.patterns.len());
+        let is_seed_edit = old.as_ref().is_some_and(|old| entity_ids != old.entities);
         let pattern = SketchPattern {
             id: id.clone(),
-            entities: entity_ids,
+            entities: if is_seed_edit { old.as_ref().map_or_else(|| entity_ids.clone(), |old| old.entities.clone()) } else { entity_ids.clone() },
             kind: kind.clone(),
-            instances: old.map(|old| old.instances).unwrap_or_default(),
+            instances: old.as_ref().map_or_else(Vec::new, |old| old.instances.clone()),
             expressions,
             count_expression,
         };
         sk.patterns.insert(index.min(sk.patterns.len()), pattern);
-        sk.update_pattern(index, kind)?;
+        if is_seed_edit {
+            sk.update_pattern_entities(&id, entity_ids, kind)?;
+        } else {
+            sk.update_pattern(index.min(sk.patterns.len().saturating_sub(1)), kind)?;
+        }
+        let index = sk.patterns.iter().position(|pattern| pattern.id == id).ok_or_else(|| bad(cmd, "missing sketch pattern"))?;
         let pattern = sk.patterns.get(index).ok_or_else(|| bad(cmd, "missing sketch pattern"))?;
         let curves: Vec<_> = pattern.instances.iter().flat_map(|i| i.curves.iter().cloned()).collect();
         let constraints: Vec<_> = pattern.instances.iter().flat_map(|i| i.constraints.iter().cloned()).collect();
