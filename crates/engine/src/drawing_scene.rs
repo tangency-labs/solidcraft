@@ -831,10 +831,15 @@ pub struct ViewStanding {
 }
 
 /// Each view of `d`, the drawing open, in id order, as the provider last drew it, whichever sheet it
-/// is on. It reads the cache: nothing is drawn. A view that drew but didn't fit its sheet's scene is
-/// as the last assembly left it, while that is still its sheet's scene ([`Cache::assembled`]).
-pub fn standing(s: &Session, d: &Drawing) -> Vec<ViewStanding> {
+/// is on. It reads the cache, caught up first ([`catch_up`]): nothing is drawn. A view that drew but
+/// didn't fit its sheet's scene is as the last assembly left it, while that is still its sheet's
+/// scene ([`Cache::assembled`]).
+pub fn standing(s: &mut Session, d: &Drawing) -> Vec<ViewStanding> {
+    forget_closed(s);
     let state = s.world_state().ok();
+    if let Some(state) = &state {
+        catch_up(s, d, d.views.iter().map(|v| v.id), state);
+    }
     let cache = &s.drawing_scenes;
     let assembled = cache.assembled(d).unwrap_or_default();
     let in_assembly = |id: u64| assembled.binary_search_by_key(&id, |v| v.view).ok().and_then(|at| assembled.get(at));
@@ -871,12 +876,8 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
     }
     let record = sheet_of(&d, sheet)?;
     let on = views_on(&d, sheet)?;
-    if cache.drawing != Some(d.id) {
-        cache.take_kept(d.id);
-    }
-    cache.drawing = Some(d.id);
     cache.sheet = Some(sheet);
-    keep_what_shows_the_same(s, &on, &state);
+    catch_up(s, &d, on.iter().map(|(id, ..)| *id), &state);
     let cache = &mut s.drawing_scenes;
     let stale = on.iter().filter(|(id, view, _)| !cache.fresh(*id, &state, view)).map(|(id, ..)| *id).collect();
     let stale_dimensions = cache.stale_dimensions(&d, &on, &state, &units).iter().map(|record| record.id).collect();
@@ -917,14 +918,14 @@ pub fn step(s: &mut Session) -> bool {
 }
 
 /// What [`step`] and [`begin`] draw from: the drawing open, the views of the sheet last extracted
-/// and the world state, once each view that shows the same has taken it. None while a deferred
+/// and the world state, once the cache has caught up with it ([`catch_up`]). None while a deferred
 /// drawing holds, or with nothing to draw from.
 fn drawable(s: &mut Session) -> Option<(Arc<Drawing>, Vec<(u64, ResolvedView, Vec2)>, Arc<ModelState>)> {
     forget_closed(s);
     let (Ok(d), Some(sheet)) = (s.drawing(CMD).cloned(), s.drawing_scenes.sheet) else { return None };
     let on = views_on(&d, sheet).ok()?;
     let state = s.world_state().ok()?;
-    keep_what_shows_the_same(s, &on, &state);
+    catch_up(s, &d, on.iter().map(|(id, ..)| *id), &state);
     (!s.drawing_scenes.holds(&d, &state)).then_some((d, on, state))
 }
 
@@ -1064,12 +1065,25 @@ fn step_dimensions(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView, Vec2)
     !others.is_empty()
 }
 
+/// Brings the cache to `d`, the drawing open, and `state`, before anything reads or draws from it:
+/// the lines kept when `d` closed come back, and each of the views `on` that shows the same takes
+/// `state` ([`keep_what_shows_the_same`]). [`extract`], [`step`], [`begin`] and [`standing`] all start
+/// here, so each says the same of a view.
+fn catch_up(s: &mut Session, d: &Drawing, on: impl Iterator<Item = u64> + Clone, state: &Arc<ModelState>) {
+    let cache = &mut s.drawing_scenes;
+    if cache.drawing != Some(d.id) {
+        cache.take_kept(d.id);
+        cache.drawing = Some(d.id);
+    }
+    keep_what_shows_the_same(s, on, state);
+}
+
 /// Each view of `on` drawn from another world state that showed what `state` shows takes `state`:
 /// drawn as it draws now, it is then up to date ([`Cache::fresh`]) and draws nothing. `state`'s shown
 /// set is worked out once, only when a view is behind it, and kept for [`step`] to draw from.
-fn keep_what_shows_the_same(s: &mut Session, on: &[(u64, ResolvedView, Vec2)], state: &Arc<ModelState>) {
-    let entry = |id: &u64| s.drawing_scenes.views.get(id);
-    if !on.iter().any(|(id, ..)| entry(id).is_some_and(|e| e.shows.is_some() && !Arc::ptr_eq(&e.state, state))) {
+fn keep_what_shows_the_same(s: &mut Session, on: impl Iterator<Item = u64> + Clone, state: &Arc<ModelState>) {
+    let entry = |id: u64| s.drawing_scenes.views.get(&id);
+    if !on.clone().any(|id| entry(id).is_some_and(|e| e.shows.is_some() && !Arc::ptr_eq(&e.state, state))) {
         return;
     }
     let shown = match s.drawing_scenes.shown.take() {
@@ -1080,8 +1094,8 @@ fn keep_what_shows_the_same(s: &mut Session, on: &[(u64, ResolvedView, Vec2)], s
     let cache = &mut s.drawing_scenes;
     cache.shown = Some((state.clone(), shown));
     let Some(now) = now else { return };
-    for (id, ..) in on {
-        if let Some(entry) = cache.views.get_mut(id).filter(|e| e.shows_the_same(state, &now)) {
+    for id in on {
+        if let Some(entry) = cache.views.get_mut(&id).filter(|e| e.shows_the_same(state, &now)) {
             entry.state = state.clone();
         }
     }

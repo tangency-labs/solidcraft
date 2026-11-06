@@ -489,6 +489,21 @@ fn closing_the_drawing_keeps_its_lines_for_when_it_opens_again() {
     assert_eq!((bytes(&after.scene), s.drawing_scenes.projections), (bytes(&before.scene), 0));
 }
 
+/// Opened again with nothing changed, before any sheet is drawn, `drawing.status` says its views are
+/// current: the lines kept for them show what the model shows, so none waits to be drawn.
+#[test]
+fn opened_again_its_status_says_the_kept_lines_are_current() {
+    let (mut s, sheet, _) = front_and_top();
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    settled(&mut s, sheet);
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    let (reply, words) = status_of(&mut s);
+    assert!(all_are(&words, "current") && reply["waiting"] == json!(0), "{reply}");
+    assert!(extract(&mut s, sheet).unwrap().stale.is_empty());
+    assert_eq!(s.drawing_scenes.projections, 0);
+}
+
 /// A change that leaves every body where it was and as it was draws no view: a sketch (a new feature,
 /// so a new world state, that adds no body), and a model edit taken back before its views were drawn
 /// again.
