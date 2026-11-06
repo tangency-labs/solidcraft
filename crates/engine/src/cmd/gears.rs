@@ -1,5 +1,5 @@
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, num, str_, vec3};
