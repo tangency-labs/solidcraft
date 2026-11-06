@@ -1239,7 +1239,7 @@ impl Sketch {
         Ok(())
     }
 
-    /// The sketch scaled by `factor` about its origin, for its first dimension (#1365): drawn
+    /// The sketch scaled by `factor`, for its first dimension (#1365): drawn
     /// geometry has no size of its own until a dimension gives it one, so the first length
     /// dimension scales the whole sketch to its value instead of distorting it. Only a sketch
     /// with nothing that fixes a size: no other driving length dimension, nothing fixed,
@@ -1248,7 +1248,10 @@ impl Sketch {
     /// geometric constraint and angle holds on the scaled sketch as it held before.
     /// `None` when the sketch does not qualify, also
     /// when its curves form several separate chains (#3786): the dimension sizes only its own.
-    pub fn scaled_for_first_dimension(&self, factor: f64) -> Option<Sketch> {
+    /// A drawing tied to the origin scales about the origin; one drawn away from it scales about
+    /// its own middle and stays where it was drawn (#11043), unless `about_origin` asks for the
+    /// origin anyway (the behaviour before #11043).
+    pub fn scaled_for_first_dimension(&self, factor: f64, about_origin: bool) -> Option<Sketch> {
         if !(factor.is_finite() && (1e-6..=1e6).contains(&factor)) {
             return None;
         }
@@ -1317,15 +1320,34 @@ impl Sketch {
                 }
             }
         }
-        let mut roots = drawn_curves().filter_map(|c| c.kind.point_ids().first().map(|&p| find(&mut parent, p)));
-        if let Some(first) = roots.next()
-            && roots.any(|r| r != first)
-        {
+        let roots: Vec<usize> = drawn_curves().filter_map(|c| c.kind.point_ids().first().copied()).map(|p| find(&mut parent, p)).collect();
+        let first = roots.first().copied();
+        if roots.iter().any(|&r| Some(r) != first) {
             return None;
         }
+        // The fixed point the drawing grows or shrinks about (#11043): the sketch origin when
+        // asked, or when the drawing is tied to it (joined to the origin, or held by a constraint
+        // to a sketch axis); otherwise the middle of the drawing, so a shape drawn away from the
+        // origin keeps its place and only changes size.
+        let anchor = match first {
+            Some(root) if !about_origin && find(&mut parent, 0) != root && !self.tied_to_axes() => {
+                let mut lo = Vec2::new(f64::INFINITY, f64::INFINITY);
+                let mut hi = Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
+                for (i, p) in self.points.iter().enumerate() {
+                    if find(&mut parent, i) == root && !p.fixed && p.link.is_none() {
+                        lo = Vec2::new(lo.x.min(p.pos.x), lo.y.min(p.pos.y));
+                        hi = Vec2::new(hi.x.max(p.pos.x), hi.y.max(p.pos.y));
+                    }
+                }
+                let mid = (lo + hi) * 0.5;
+                if in_range(mid) { mid } else { Vec2::ZERO }
+            }
+            _ => Vec2::ZERO,
+        };
+        let scale = |p: Vec2| anchor + (p - anchor) * factor;
         let mut out = self.clone();
         for p in out.points.iter_mut().filter(|p| !p.fixed && p.link.is_none()) {
-            p.pos = p.pos * factor;
+            p.pos = scale(p.pos);
             if !in_range(p.pos) {
                 return None;
             }
@@ -1340,9 +1362,20 @@ impl Sketch {
         }
         // Dimension texts keep their places relative to what they measure.
         for t in out.constraints.iter_mut().filter_map(|c| c.text.as_mut()) {
-            *t = *t * factor;
+            *t = scale(*t);
         }
         Some(out)
+    }
+
+    /// Does a driving constraint hold drawn geometry to a projected sketch axis or the origin
+    /// point: the drawing then has a place relative to the origin, and scales about it.
+    fn tied_to_axes(&self) -> bool {
+        let held_point = |i: usize| i == 0 || self.points.get(i).is_some_and(|p| p.link.is_some());
+        let held_curve = |i: usize| self.curves.get(i).is_some_and(|c| c.link.is_some());
+        self.constraints.iter().filter(|c| !c.driven).any(|c| {
+            let (points, curves) = c.kind.indices();
+            points.into_iter().any(held_point) || curves.into_iter().any(held_curve)
+        })
     }
 
     /// Is point `i` held in place: fixed, projected (linked), fixed by a Fix constraint or a
