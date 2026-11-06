@@ -14,7 +14,10 @@ use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 
 use solidcore_record::Vec3;
 use solidcraft_doc::joints::{self, Joint, JointDynamics, JointKind};
-use solidcraft_doc::{CollisionShape, Document, IDENTITY, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, ModelState, Occurrence, PhysicalOverride, apply_point, mat_inverse, mat_mul};
+use solidcraft_doc::{
+    CollisionShape, Document, IDENTITY, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, ModelState, Occurrence, PhysicalOverride, apply_point, mat_inverse,
+    mat_mul,
+};
 use solidcraft_geom::Mesh;
 use solidcraft_geom::hull3::{convex_hull, fit_box, fit_cylinder, fit_sphere};
 use solidcraft_geom::inertia::principal;
