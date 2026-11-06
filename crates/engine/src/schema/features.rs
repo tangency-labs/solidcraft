@@ -113,9 +113,9 @@ pub struct ExtrudeParams {
     /// Which way to extrude. Default: positive.
     #[serde(default)]
     pub direction: Option<DirectionParam>,
-    /// Two Sides: a second distance the other way from the first side, which may be
-    /// `through_all` or `to`; with `direction: negative` the first side goes against the normal
-    /// and `distance2` along it.
+    /// Two Sides: a second distance on the side `direction` leaves free; the first side may be
+    /// `through_all` or `to`. With `direction: negative` the first side goes against the normal
+    /// and `distance2` along it. A negative distance only turns its own side over.
     #[serde(default)]
     pub distance2: Option<LengthExpr>,
     /// Start this far from the sketch plane, along its normal.
@@ -429,6 +429,14 @@ pub struct PlaneAtAngleParams {
     pub axis: AxisLine,
     /// How far to turn, counterclockwise looking back along `axis`'s direction.
     pub angle: AngleExpr,
+    /// Use only the axis direction (projected onto `base`), not the axis as a full line.
+    /// When true, the plane turns about the line through `pivot` (or the base origin).
+    #[serde(default)]
+    pub direction_only: Option<bool>,
+    /// Pivot for `direction_only`: a vertex, sketch point, construction point or fixed point.
+    /// Omit to use the base plane's origin. `null` counts as not given.
+    #[serde(default)]
+    pub pivot: Option<GeoRefParam>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: PlaneCommon,
 }

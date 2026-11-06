@@ -138,9 +138,82 @@ pub(crate) fn editor_layout(stage: Rect, prefs: &NavigationBar, label_width: imp
 
 pub(crate) fn measured(app: &SolveApp, ctx: &egui::Context, content: Rect) -> BarLayout {
     let t = Tokens::get();
-    measure(content, &app.preferences.navigation_bar, navigation_bar::canvas_caps(app), |slot| {
+    let label_width = |slot: &Slot| {
         ctx.fonts_mut(|fonts| fonts.layout_no_wrap(slot_text(app, slot).to_owned(), crate::fonts::medium(ui_kit::NAV_TEXT), t.form_ink).size().x)
-    })
+    };
+    let mut bar = measure(content, &app.preferences.navigation_bar, navigation_bar::canvas_caps(app), label_width);
+    let Some(_) = app.universal_panel_frame() else {
+        return bar;
+    };
+    if !bar.rect.is_positive() {
+        return bar;
+    }
+    let Ok(region) = crate::shell::host_usable(app) else {
+        bar.rect = Rect::NOTHING;
+        bar.slots.clear();
+        bar.more = Rect::NOTHING;
+        return bar;
+    };
+    let preferred = bar.rect.center();
+    let place = |bar: &BarLayout| {
+        region.place_footprint(
+            solidcraft_engine::panels::Size { width: bar.rect.width(), height: bar.rect.height() },
+            solidcraft_engine::panels::Point { x: preferred.x, y: preferred.y },
+            t.space_4,
+        )
+    };
+    let mut location = place(&bar);
+    if location.is_none() {
+        // Keep the existing value/label/More policy when a full row cannot fit.
+        // Measure a smaller row, then validate its complete footprint against
+        // the contour rather than anchoring it to a fictitious central strip.
+        let width = region
+            .free
+            .iter()
+            .filter(|bounds| bounds.size.height >= bar.rect.height() + 2.0 * t.space_4)
+            .map(|bounds| (bounds.size.width - 2.0 * t.space_4).max(0.0))
+            .max_by(f32::total_cmp)
+            .unwrap_or(0.0);
+        bar = measure(
+            Rect::from_min_size(content.min, vec2(width, content.height())),
+            &app.preferences.navigation_bar,
+            navigation_bar::canvas_caps(app),
+            label_width,
+        );
+        if bar.rect.is_positive() {
+            location = place(&bar);
+        }
+    }
+    if location.is_none() {
+        // A minimal More row may span adjacent sweep slabs even when no single
+        // free piece is tall enough. Validate that measured footprint directly.
+        let metrics = ui_kit::NavigationMetrics::for_size(app.preferences.navigation_bar.size);
+        let width = metrics.button + 2.0 * (ui_kit::NAV_BORDER + ui_kit::NAV_PADDING + ui_kit::NAV_EDGE);
+        bar = measure(
+            Rect::from_min_size(content.min, vec2(width, content.height())),
+            &app.preferences.navigation_bar,
+            navigation_bar::canvas_caps(app),
+            label_width,
+        );
+        if bar.rect.is_positive() {
+            location = place(&bar);
+        }
+    }
+    if let Some(location) = location {
+        let delta = crate::panel_runtime::egui_rect(location).min - bar.rect.min;
+        bar.rect = bar.rect.translate(delta);
+        for (_, rect) in &mut bar.slots {
+            *rect = rect.translate(delta);
+        }
+        if bar.more.is_positive() {
+            bar.more = bar.more.translate(delta);
+        }
+    } else {
+        bar.rect = Rect::NOTHING;
+        bar.slots.clear();
+        bar.more = Rect::NOTHING;
+    }
+    bar
 }
 
 fn selected(app: &SolveApp, id: &str) -> bool {
@@ -176,7 +249,7 @@ fn activate(app: &mut SolveApp, slot: &Slot) {
         _ => {
             if let Some(command) = slot.command {
                 let params = match slot.kind {
-                    Kind::Tool => json!({"tool": if selected(app, slot.id) { "none" } else { slot.id }}),
+                    Kind::Tool if command == "view.tool" => json!({"tool": if selected(app, slot.id) { "none" } else { slot.id }}),
                     _ if slot.id == "ambient_occlusion" => json!({"enabled": !app.preferences.ambient_occlusion}),
                     _ => json!({}),
                 };
@@ -187,16 +260,18 @@ fn activate(app: &mut SolveApp, slot: &Slot) {
 }
 
 fn tooltip(app: &SolveApp, response: egui::Response, slot: &Slot, hidden: Option<&str>, along: Rect, edge: Edge) -> egui::Response {
+    let key = slot.command.and_then(|id| crate::keymap::display_for(app, id));
     let label = if let Some(hidden) = hidden {
         app.tr(hidden).to_owned()
     } else if slot.id == "visual_style" {
         crate::i18n::format("navbar.value_tip", &[("name", app.tr(slot.label)), ("value", current_style(app))])
     } else if slot.id == "projection" && projection_locked(app) {
         app.tr("nav.perspective.sketch").to_owned()
+    } else if slot.id == "zoom" && key.is_some() {
+        app.tr("navbar.zoom_hold_tip").to_owned()
     } else {
         app.tr(slot.label).to_owned()
     };
-    let key = slot.command.and_then(|id| crate::keymap::display_for(app, id));
     ui_kit::navigation_tooltip(&response, along, edge, &label, key.as_deref());
     response
 }

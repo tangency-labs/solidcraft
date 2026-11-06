@@ -2847,6 +2847,63 @@ fn offset_plane_through_a_picked_vertex() {
     assert!(matches!(reopened.inputs[1].items.as_slice(), [Sel::Vertex { body, .. }] if body == "Box"), "{:?}", reopened.inputs[1].items);
 }
 
+/// Plane at Angle's "Use axis direction only" option shows a Pivot pick and sends both parameters (#12041).
+#[test]
+fn plane_at_angle_direction_only_shows_a_pivot_and_applies() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Box"})).unwrap();
+    h.app.start("construct.plane.at_angle");
+    h.frames(2);
+    let d = h.app.dialog.as_mut().unwrap();
+    assert!(matches!(d.kind, Kind::AnglePlane { direction_only: false, .. }));
+    assert!(!d.inputs.iter().any(|i| i.label == "Pivot"), "{:?}", d.inputs);
+    d.inputs[0].items = vec![Sel::Plane { name: "XY".into() }];
+    d.inputs[1].items = vec![Sel::Axis { name: "Y".into() }];
+    if let Kind::AnglePlane { direction_only, .. } = &mut d.kind {
+        *direction_only = true;
+    }
+    // The dense form adds Pivot once the option is on; mirror that here for the parameter build.
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        crate::dialogs::set_object_accepting(
+            &mut d.inputs,
+            &mut d.active,
+            "Pivot",
+            crate::selection::VERTICES | crate::selection::POINTS | crate::selection::CONSTRUCTION_POINTS,
+            true,
+        );
+        let pivot = d.inputs.iter_mut().find(|i| i.label == "Pivot").expect("Pivot");
+        pivot.items = vec![Sel::Vertex { body: "Box".into(), point: Vec3::new(40.0, 0.0, 0.0) }];
+        if let Kind::AnglePlane { angle, .. } = &mut d.kind {
+            *angle = "90 deg".into();
+        }
+    }
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(
+        commands.first().map(|c| c.1.clone()),
+        Some(json!({
+            "base": "XY",
+            "axis": "Y",
+            "angle": "90 deg",
+            "direction_only": true,
+            "pivot": {"vertex": [40.0, 0.0, 0.0]}
+        }))
+    );
+    let (cmd, params) = commands.into_iter().next().unwrap();
+    h.app.dialog = None;
+    let id = h.app.run(&cmd, params).unwrap()["feature"].as_u64().unwrap();
+    let pl = solidcraft_engine::view::construction_planes(&h.app.session)
+        .into_iter()
+        .find(|(fid, _, _)| *fid == id)
+        .map(|(_, _, pl)| pl)
+        .expect("the plane");
+    assert!(pl.origin.dist(Vec3::new(40.0, 0.0, 40.0)) < 1e-3, "{pl:?}");
+    assert!(pl.normal().cross(Vec3::X).len() < 1e-6, "{pl:?}");
+    let reopened = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    assert!(matches!(reopened.kind, Kind::AnglePlane { direction_only: true, .. }), "{:?}", reopened.kind);
+    assert!(reopened.inputs.iter().any(|i| i.label == "Pivot" && !i.items.is_empty()), "{:?}", reopened.inputs);
+}
+
 /// Plane at Angle draws the tilted plane while its dialog is open, when created and when edited,
 /// and redraws it when the angle changes (it used to show only the picked plane and the label).
 #[test]
@@ -2861,7 +2918,7 @@ fn plane_at_angle_previews_the_tilted_plane_when_edited() {
     assert!(d.previews(), "the edited plane is previewed");
     wait_feature_preview(&mut h);
     let first = h.app.preview.key;
-    if let Kind::AnglePlane { angle } = &mut h.app.dialog.as_mut().unwrap().kind {
+    if let Kind::AnglePlane { angle, .. } = &mut h.app.dialog.as_mut().unwrap().kind {
         *angle = "30 deg".into();
     }
     wait_feature_preview(&mut h);

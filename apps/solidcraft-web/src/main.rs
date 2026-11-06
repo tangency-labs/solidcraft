@@ -828,7 +828,9 @@ mod web {
                     self.files.panel.set(false);
                 }
                 "insert" => {
-                    self.app.insert_path(&path);
+                    if !solidcraft_ui_egui::mesh_units::ask(&mut self.app, &path, true) {
+                        self.app.insert_path(&path);
+                    }
                     self.files.panel.set(false);
                 }
                 "download" => match vfs::read(&path, solidcraft_engine::io::MAX_DESIGN_BYTES) {
@@ -873,10 +875,16 @@ mod web {
                                         *r = new.clone();
                                     }
                                 }
+                                if let Some(at) = self.app.home.opened_at.remove(&old) {
+                                    self.app.home.opened_at.insert(new.clone(), at);
+                                }
                                 // A forgotten design follows its new name.
                                 if self.app.home.forgotten.remove(&old) {
-                                    self.app.home.forgotten.insert(new);
+                                    self.app.home.forgotten.insert(new.clone());
                                 }
+                                // An open tab of that file keeps its path and, when the name came
+                                // from the file, the title that matches the file list (#11375).
+                                solidcraft_ui_egui::documents::follow_file_rename(&mut self.app, &old, &new);
                             }
                             Err(e) => self.app.set_status(e, true),
                         }

@@ -127,9 +127,10 @@ crate::dialog_descriptor::dialog_descriptors! {
             offset: String = "0 mm".into() => shown_expr(distance, ValueKind::Length),
         } => json!({"offset": offset});
         AnglePlane("construct.plane.at_angle", "PLANE AT ANGLE", [("Plane", PLANES | PLANAR_FACES, false), ("Axis", AXIS_PICKS, false)],
-            FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { angle, .. } }) {
+            FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { angle, direction_only, .. } }) {
             angle: String = "45 deg".into() => shown_expr(angle, ValueKind::Angle),
-        } => json!({"angle": angle});
+            direction_only: bool = false => *direction_only,
+        } => json!({"angle": angle, "direction_only": direction_only});
         // With a reference plane, the plane touches where the face turns towards it (#8822).
         TangentPlane("construct.plane.tangent", "TANGENT PLANE", [("Face", FACES, false), ("Reference plane", PLANES | PLANAR_FACES, false)],
             FeatureKind::ConstructionPlane { plane: PlaneRef::Tangent { angle, .. } }) {
@@ -1270,6 +1271,26 @@ impl Dialog {
         {
             inp.items = default_profiles(s);
         }
+        if matches!(d.kind, Kind::SketchModify(crate::sketch_modify_ui::Mod::Mirror)) && app.preferences.sketch_mirror_auto_line {
+            let state = s.model.state();
+            if let Some(sketch) = s.active_sketch.and_then(|id| state.sketch(id)) {
+                let mut lines = s.selection.iter().filter_map(|sel| {
+                    let Sel::SketchCurve { id, sketch: from } = sel else { return None };
+                    if from.is_some() && *from != s.active_sketch {
+                        return None;
+                    }
+                    let curve = sketch.sketch.curves.get(sketch.sketch.curve_index(id)?)?;
+                    (curve.construction && matches!(curve.kind, solidcraft_engine::sketch::CurveKind::Line { .. })).then_some(curve)
+                });
+                if let Some(line) = lines.next()
+                    && lines.next().is_none()
+                    && let Some(input) = d.inputs.get_mut(1)
+                    && input.items.is_empty()
+                {
+                    input.items.push(Sel::SketchCurve { id: line.id.clone(), sketch: None });
+                }
+            }
+        }
         d.sync_thread(s);
         d.sync_material(s);
         d.advance();
@@ -1444,7 +1465,7 @@ impl Dialog {
             }
             Kind::Pipe { diameter, .. } => ("Diameter", ValueKind::Length, diameter),
             Kind::Stock { margin } => ("Margin", ValueKind::Length, margin),
-            Kind::AnglePlane { angle } => ("Angle", ValueKind::Angle, angle),
+            Kind::AnglePlane { angle, .. } => ("Angle", ValueKind::Angle, angle),
             Kind::Scale { per_axis: true, .. } => return None,
             Kind::Scale { factor, .. } => ("Scale", ValueKind::Unitless, factor),
             Kind::OffsetFaces { distance } => ("Distance", ValueKind::Length, distance),
@@ -3857,6 +3878,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let window = panel.window(ctx);
     let repeatable =
         matches!(&d.kind, Kind::SketchModify(k) if crate::sketch_modify_ui::repeatable(k)) && d.editing.is_none() && !d.extra.contains_key("pattern");
+    let host = app.universal_panel_host_enabled();
+    let mut painted = false;
     if let Kind::ConfirmDelete { with, fail, .. } = &d.kind {
         let detail = with.join(" · ");
         let (closed, action) = crate::ui_kit::Confirm::new(egui::Id::unique(("sc_dialog", title(&d.kind))), "delete", &heading)
@@ -3864,6 +3887,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             .actions("Delete", "Cancel", None)
             .detail(&detail)
             .show(ctx, true, |ui| {
+                painted = ui.is_visible() && !ui.is_sizing_pass();
                 if !with.is_empty() {
                     crate::ui_kit::text(ui, tr("Also deletes"), crate::ui_kit::Text::Report("also_deletes", false));
                 }
@@ -3873,9 +3897,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             });
         ok = action == crate::ui_kit::Action::Ok;
         cancel = closed || action == crate::ui_kit::Action::Cancel;
-        app.viewport.dialog_rect = crate::scenario::rect_of("dialog:window");
+        app.viewport.dialog_rect = crate::scenario::rect_of("dialog:window").filter(|_| !host || painted);
     } else {
         let response = window.open(&mut keep).show(ctx, |ui| {
+            painted = ui.is_visible() && !ui.is_sizing_pass();
             let spec = dense::command(&d.kind).and_then(solidcraft_engine::find_command);
             let icon = spec.as_ref().map_or("", |s| s.icon);
             let label = spec.as_ref().map_or(heading.as_str(), |s| tr(s.label));
@@ -3932,7 +3957,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 }
             }
         });
-        app.viewport.dialog_rect = response.map(|r| r.response.rect);
+        app.viewport.dialog_rect = response.filter(|_| !host || painted).map(|r| r.response.rect);
         // OK and Cancel in the view's corner do what the dialog's own do (#6709).
         if app.issue_report.draft.is_none() {
             match corner {
@@ -4724,7 +4749,25 @@ fn look_at_sketch_from(app: &mut SolveApp, again: bool) {
     if let Some(ss) = app.session.active_sketch.and_then(|id| st.sketch(id)) {
         let n = facing(app, ss.plane.normal(), again);
         let to = square_sketch_axes(app.cam.looking_from(n), ss.plane.x, ss.plane.y);
-        app.animate_to(onto_sketch(to, ss));
+        if app.universal_panel_host_enabled() && again {
+            let bounds = ss.sketch.bounds().map(|(lo, hi)| {
+                let mut bounds = Aabb3::default();
+                for point in [lo, hi, solidcore_record::Vec2::new(lo.x, hi.y), solidcore_record::Vec2::new(hi.x, lo.y)] {
+                    bounds.add(ss.plane.to_world(point));
+                }
+                bounds
+            });
+            let mut to = to;
+            to.target = bounds.as_ref().map_or(ss.plane.origin, Aabb3::center);
+            if let (Some(layout), Ok(usable)) = (app.viewport.layout.as_ref(), crate::shell::host_usable(app))
+                && let Some(centred) = crate::viewport_layout::centre_host_camera(to, bounds.as_ref(), layout, &usable, app.view_fov())
+            {
+                to = centred;
+            }
+            app.animate_to(to);
+        } else {
+            app.animate_to(onto_sketch(to, ss));
+        }
     }
 }
 
@@ -4789,6 +4832,26 @@ pub(crate) fn facing(app: &SolveApp, n: Vec3, again: bool) -> Vec3 {
 
 fn sels(d: &Dialog, i: usize) -> &[Sel] {
     selection::items(&d.inputs, i)
+}
+
+/// The body every picked edge and face lies on, when they all lie on one. A face feature given
+/// it finds its faces there alone; without it, it looks through every body for each point and
+/// takes the one whose box is nearest, which in an assembly can be an enclosing part with no face
+/// there ("no face at …") and meshes every part of a large design (#4555, as Shell names it).
+fn single_body(picks: &[Sel]) -> Option<String> {
+    let mut bodies = picks.iter().filter_map(|x| match x {
+        Sel::Edge { body, .. } | Sel::Face { body, .. } => Some(body),
+        _ => None,
+    });
+    bodies.next().filter(|first| bodies.all(|b| b == *first)).cloned()
+}
+
+/// `p` with the picked faces' or edges' body named ([`single_body`]).
+fn with_single_body(mut p: Value, picks: &[Sel]) -> Value {
+    if let Some(body) = single_body(picks) {
+        p["body"] = json!(body);
+    }
+    p
 }
 
 /// Section Analysis with a section on and no plane picked: OK turns the section off.
@@ -5181,13 +5244,17 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
         Kind::Revolve { angle, operation, axis: stored_axis } => {
             need(0, "profiles")?;
+            let (sketch, idx) = profiles();
+            // A sketch line is kept by id only when that id on the profile sketch is the
+            // highlighted line. Ids repeat across sketches (#3726); the highlight and the angle
+            // handle follow the pick's sketch, and a bare id would revolve about whatever line
+            // the profile sketch happens to number the same.
             let axis = match sels(d, 1).first() {
                 Some(Sel::Axis { name }) => json!(name),
-                Some(Sel::SketchCurve { id, .. }) => json!(id),
+                Some(curve @ Sel::SketchCurve { .. }) => sketch_curve_axis(app, curve, sketch.as_u64())?,
                 Some(x) => axis_param(app, x)?,
                 None => stored_axis.clone().ok_or("select an axis")?,
             };
-            let (sketch, idx) = profiles();
             let mut p = json!({"axis": axis, "angle": angle, "operation": OPS.get(*operation).copied().unwrap_or("new")});
             // A planar body face revolves like a profile (#2747); profiles win when both are picked.
             let face = sels(d, 0).iter().find_map(|x| match x {
@@ -5240,7 +5307,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             }
             let edges: Vec<Value> = uniq.into_iter().map(pt).collect();
             if *chamfer {
-                let mut p = json!({"edges": edges, "distance": radius});
+                let mut p = with_single_body(json!({"edges": edges, "distance": radius}), sels(d, 0));
                 match *ctype {
                     1 => p["distance2"] = json!(distance2),
                     2 => p["angle"] = json!(angle),
@@ -5251,7 +5318,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 }
                 ("solid.chamfer", p)
             } else {
-                let mut p = json!({"edges": edges, "radius": radius});
+                let mut p = with_single_body(json!({"edges": edges, "radius": radius}), sels(d, 0));
                 let style = d.extra.get("type").and_then(Value::as_str);
                 if matches!(style, Some("variable" | "spline")) {
                     // The start radius goes at one end of the first edge (Swap Ends: the other).
@@ -5492,14 +5559,18 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 None => ("construct.plane.tangent", json!({"face": face, "angle": null})),
             }
         }
-        Kind::AnglePlane { .. } => {
+        Kind::AnglePlane { direction_only, .. } => {
             need(0, "a plane")?;
             let base = plane_arg(app, sels(d, 0).first())?;
             let axis = match sels(d, 1).first() {
                 Some(x) => axis_param(app, x)?,
                 None => d.extra.get("axis").cloned().ok_or("pick an axis")?,
             };
-            ("construct.plane.at_angle", json!({"base": base, "axis": axis}))
+            let mut p = json!({"base": base, "axis": axis, "direction_only": direction_only});
+            if *direction_only && let Some(pivot) = angle_pivot(d) {
+                p["pivot"] = construct_ref(app, pivot)?;
+            }
+            ("construct.plane.at_angle", p)
         }
         Kind::Rib { web, thickness, depth, flip, normal } => {
             need(0, "open sketch curves")?;
@@ -5525,7 +5596,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::ReplaceFace => {
             need(0, "faces to move")?;
             need(1, "the target")?;
-            let mut p = json!({"faces": face_points(0)});
+            let mut p = with_single_body(json!({"faces": face_points(0)}), sels(d, 0));
             match sels(d, 1).first() {
                 Some(Sel::Plane { name }) => p["target"] = json!(name),
                 Some(Sel::Face { point, .. }) => p["target_face"] = pt(*point),
@@ -5535,7 +5606,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
         Kind::DeleteFaces => {
             need(0, "faces")?;
-            ("face.delete", json!({"faces": face_points(0)}))
+            ("face.delete", with_single_body(json!({"faces": face_points(0)}), sels(d, 0)))
         }
         Kind::Align { flip, components, axes, angle } => {
             need(0, if *components { "components" } else { "bodies" })?;
@@ -5651,7 +5722,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
         Kind::OffsetFaces { .. } => {
             need(0, "faces")?;
-            ("solid.offset_face", json!({"faces": face_points(0)}))
+            ("solid.offset_face", with_single_body(json!({"faces": face_points(0)}), sels(d, 0)))
         }
         Kind::Thread { designation, length, suggested, options, .. } => {
             need(0, "a cylindrical face")?;
@@ -6172,6 +6243,48 @@ pub(crate) fn takes_as_axis(s: &Session, sel: &Sel) -> bool {
     }
 }
 
+/// A sketch curve picked as a revolve axis.
+///
+/// The highlight and the angle handle follow [`axis_of`] (the sketch the pick names, or the
+/// active sketch when it does not). Eval resolves a bare curve id on the profile sketch, and
+/// curve ids repeat from sketch to sketch (#3726), so that line can be a different edge — often
+/// the opposite side of a rectangle. Keep the id when the profile sketch's line is the
+/// highlighted one, so a same-sketch axis stays a sketch line. Otherwise pass the highlighted
+/// line as `{origin, dir}` in world coordinates (the command stores it in the component frame).
+/// A face profile has no sketch yet — its generated sketch numbers edges from `l1` again — so
+/// that pick is always the geometric line.
+pub(crate) fn sketch_curve_axis(app: &SolveApp, sel: &Sel, profile_sketch: Option<u64>) -> Result<Value, String> {
+    let Sel::SketchCurve { id, .. } = sel else { return axis_param(app, sel) };
+    let (origin, dir) = axis_of(app, sel).ok_or(AXIS_PICK)?;
+    if !origin.is_finite() || !dir.is_finite() {
+        return Err(AXIS_PICK.into());
+    }
+    let same = profile_sketch.and_then(|sketch| profile_axis_line(app, sketch, id)).is_some_and(|line| same_axis(line, (origin, dir)));
+    if same { Ok(json!(id)) } else { Ok(json!({"origin": pt(origin), "dir": pt(dir)})) }
+}
+
+/// The world line of curve `id` on `sketch`, when that curve is a line.
+fn profile_axis_line(app: &SolveApp, sketch: u64, id: &str) -> Option<(Vec3, Vec3)> {
+    let st = app.session.world_state().ok()?;
+    let ss = st.sketch(sketch)?;
+    let c = ss.sketch.curves.get(ss.sketch.curve_index(id)?)?;
+    let solidcraft_engine::sketch::CurveKind::Line { a, b } = c.kind else { return None };
+    let pa = ss.plane.to_world(ss.sketch.point(a)?);
+    let pb = ss.plane.to_world(ss.sketch.point(b)?);
+    let dir = (pb - pa).normalized()?;
+    (pa.is_finite() && dir.is_finite()).then_some((pa, dir))
+}
+
+/// Whether two world lines are the same axis: parallel, and no gap between them.
+fn same_axis((o1, d1): (Vec3, Vec3), (o2, d2): (Vec3, Vec3)) -> bool {
+    let (Some(d1), Some(d2)) = (d1.normalized(), d2.normalized()) else { return false };
+    if d1.dot(d2).abs() <= 1.0 - 1e-9 {
+        return false;
+    }
+    let sep = (o2 - o1).cross(d1).len();
+    sep <= 1e-6 * (1.0 + o1.len() + o2.len())
+}
+
 /// An axis input's pick as a command's `axis`: a world axis or construction axis by name, a
 /// circular edge or round face by reference, anything else (a sketch line, a straight edge) as
 /// its line.
@@ -6454,7 +6567,15 @@ pub(crate) fn offset_through_point(d: &Dialog) -> Option<&Sel> {
     sels(d, 1).first()
 }
 
-/// A stored point reference back into a dialog pick: a body vertex or a sketch point.
+/// Pivot pick on Plane at Angle when "Use axis direction only" is on.
+pub(crate) fn angle_pivot(d: &Dialog) -> Option<&Sel> {
+    if !matches!(d.kind, Kind::AnglePlane { direction_only: true, .. }) {
+        return None;
+    }
+    d.inputs.iter().find(|i| i.label == "Pivot").and_then(|i| i.items.first())
+}
+
+/// A stored point reference back into a dialog pick: a body vertex, sketch point or construction point.
 fn point_sel(s: &Session, g: &solidcraft_engine::doc::construct::GeoRef) -> Option<Sel> {
     use solidcraft_engine::doc::construct::GeoRef;
     match g {
@@ -6463,6 +6584,9 @@ fn point_sel(s: &Session, g: &solidcraft_engine::doc::construct::GeoRef) -> Opti
             _ => None,
         },
         GeoRef::SketchPoint { sketch, point } => Some(Sel::SketchPoint { id: format!("{sketch}:{point}") }),
+        GeoRef::ConstructPoint { name } => Some(Sel::ConstructionPoint { name: name.to_string() }),
+        GeoRef::Origin => Some(Sel::Vertex { body: String::new(), point: Vec3::ZERO }),
+        GeoRef::Point { p } => Some(Sel::Vertex { body: String::new(), point: *p }),
         _ => None,
     }
 }
@@ -7338,7 +7462,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { base, axis_origin, axis_dir, line, .. } } => {
+        FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { base, axis_origin, axis_dir, line, direction_only, pivot, .. } } => {
             let mut d = start("construct.plane.at_angle")?;
             d.kind = Kind::simple_restore(&f.kind)?;
             if let Some(inp) = d.inputs.first_mut() {
@@ -7359,6 +7483,13 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 }
                 (None, None) => {
                     d.extra.insert("axis".into(), json!({"origin": pt3(*axis_origin), "dir": pt3(*axis_dir)}));
+                }
+            }
+            if *direction_only {
+                const PIVOT: Accept = selection::VERTICES | selection::POINTS | selection::CONSTRUCTION_POINTS;
+                set_object_accepting(&mut d.inputs, &mut d.active, "Pivot", PIVOT, true);
+                if let Some(inp) = d.inputs.iter_mut().find(|i| i.label == "Pivot") {
+                    inp.items = pivot.as_deref().and_then(|g| point_sel(s, g)).into_iter().collect();
                 }
             }
             d
@@ -7608,7 +7739,7 @@ mod refused_ok_tests {
         let mut dialog = Dialog::for_command(&app, "construct.plane.at_angle").expect("the command has a dialog");
         dialog.inputs[0].items = vec![Sel::Plane { name: "XY".into() }];
         dialog.inputs[1].items = vec![Sel::Axis { name: "X".into() }];
-        if let Kind::AnglePlane { angle } = &mut dialog.kind {
+        if let Kind::AnglePlane { angle, .. } = &mut dialog.kind {
             *angle = "30 deg".into();
         }
 

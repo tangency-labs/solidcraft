@@ -21,6 +21,22 @@ use crate::prefs::{OrbitAround, pivot_under};
 use crate::space_mouse::{BridgeMotion, Motion};
 use crate::viewport::{Hit, NavMode, axis_rect, nearest_quarter_turn, pick, pick_cached, projection};
 
+/// Take a predominantly horizontal wheel gesture for a hovered scroll viewport.
+/// Leave vertical input for its enclosing page, and leave horizontal input
+/// unconsumed when this viewport is already at the requested end.
+pub(crate) fn take_horizontal_wheel(ui: &egui::Ui, offset: f32, max_offset: f32) -> f32 {
+    ui.input_mut(|input| {
+        let delta = input.smooth_scroll_delta;
+        if delta.x == 0.0 || delta.x.abs() <= delta.y.abs() {
+            return 0.0;
+        }
+        if (offset - delta.x).clamp(0.0, max_offset) != offset {
+            input.smooth_scroll_delta.x = 0.0;
+        }
+        delta.x
+    })
+}
+
 /// What a page's camera may do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct NavCaps {
@@ -36,6 +52,27 @@ impl NavCaps {
     pub const MODEL: NavCaps = NavCaps { orbit: true, pick: true };
     /// The Render workspace's product preview: shared navigation and product picking.
     pub const RENDER: NavCaps = NavCaps { orbit: true, pick: true };
+}
+
+/// Give a panel the wheel delta left by its children, one movable axis at a time.
+/// Boundary deltas remain available to the panel host's input fallback.
+pub(crate) fn panel_scroll_offset(ctx: &egui::Context, previous: egui::Vec2, maximum: egui::Vec2) -> egui::Vec2 {
+    let mut offset = previous;
+    ctx.input_mut(|input| {
+        if maximum.x > 0.0 && input.smooth_scroll_delta.x != 0.0 {
+            offset.x = (previous.x - input.smooth_scroll_delta.x).clamp(0.0, maximum.x);
+            if offset.x != previous.x {
+                input.smooth_scroll_delta.x = 0.0;
+            }
+        }
+        if maximum.y > 0.0 && input.smooth_scroll_delta.y != 0.0 {
+            offset.y = (previous.y - input.smooth_scroll_delta.y).clamp(0.0, maximum.y);
+            if offset.y != previous.y {
+                input.smooth_scroll_delta.y = 0.0;
+            }
+        }
+    });
+    offset
 }
 
 /// Supplies the scroll phases browsers omit, before the shared navigation sees input.
@@ -424,11 +461,11 @@ pub(crate) struct KeyHold {
 }
 
 /// A menu, the command box or a focused widget has the keyboard, so the view keys are not ours.
-fn view_keys_blocked(app: &SolveApp, ctx: &egui::Context) -> bool {
+fn view_keys_blocked(app: &SolveApp, ctx: &egui::Context, canvas: Option<egui::Id>) -> bool {
     egui::Popup::is_any_open(ctx)
         || app.viewport.context_menu.is_some()
         || app.ui.palette_open
-        || ctx.memory(|m| m.focused().is_some())
+        || ctx.memory(|m| m.focused().is_some_and(|focused| Some(focused) != canvas))
         || ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::unique("sc_panel_open")).is_some())
 }
 
@@ -439,7 +476,7 @@ fn view_keys_blocked(app: &SolveApp, ctx: &egui::Context) -> bool {
 /// menu, the command box or a focused widget has the arrows. Returns whether the key was used.
 pub(crate) fn view_key(app: &mut SolveApp, ctx: &egui::Context, key: egui::Key, mods: egui::Modifiers, repeat: bool) -> bool {
     use egui::Key;
-    let menu_open = view_keys_blocked(app, ctx);
+    let menu_open = view_keys_blocked(app, ctx, None);
     let ctrl = mods.command || mods.ctrl;
     if mods.alt || menu_open {
         return false;
@@ -459,6 +496,7 @@ pub(crate) fn view_key(app: &mut SolveApp, ctx: &egui::Context, key: egui::Key, 
     if ctrl {
         // The model moves with the arrow, as it does under a pan drag.
         if let Some(rect) = app.viewport.rect {
+            let rect = crate::render_workspace::camera_rect(app, rect);
             let step = rect.height() * 0.1;
             let params = json!({"motion": "pan", "delta": [dx * step, dy * step]});
             if result {
@@ -488,7 +526,7 @@ pub(crate) fn step_key_hold(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let Some(hold) = app.viewport.key_hold else { return };
     let (down, dt) = ctx.input(|i| (i.key_down(hold.key), f64::from(i.unstable_dt)));
-    if !down || view_keys_blocked(app, ctx) {
+    if !down || view_keys_blocked(app, ctx, None) {
         app.viewport.key_hold = None;
         return;
     }
@@ -514,6 +552,7 @@ pub(crate) fn step_key_hold(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// Continuous camera changes use the same JSON command as programmatic callers.
 pub(crate) fn camera_motion(app: &mut SolveApp, rect: Rect, mut params: serde_json::Value) {
+    let rect = crate::render_workspace::camera_rect(app, rect);
     let stored_fov = app.cam.fov;
     params["camera"] = json!(projection(app, rect).cam);
     params["viewport"] = json!([rect.width().max(1.0), rect.height().max(1.0)]);
@@ -531,13 +570,13 @@ pub(crate) struct CameraInput {
     pub secondary_down: bool,
     pub primary_down: bool,
     pub primary_pressed: bool,
-    /// The pointer is over this view (not a window, menu or the axis view above it).
+    /// The pointer is over this view and available for canvas input.
     pub inside: bool,
     /// The axis view or navigation cube's rectangle.
     pub axes: Rect,
     pub pinch: f32,
     pub pan: egui::Vec2,
-    /// The navigation bar's fixed mode, or the preset's left-button binding.
+    /// The active left-button navigation mode, including a shortcut that owns the press.
     pub primary_nav: Option<NavMode>,
     /// The navigation this frame's pointer input drives.
     pub mode: Option<NavMode>,
@@ -550,6 +589,10 @@ pub(crate) struct CameraInput {
 /// selectable, so a press that would start a selection navigates as on empty space; with
 /// `caps.orbit` off, bindings that orbit do nothing and pan and zoom work as usual.
 pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::Response, caps: NavCaps) -> CameraInput {
+    // A framed Render image and its gray letterbox share input ownership, but
+    // camera deltas and anchors use the exact image projection's pixel scale.
+    let input_rect = rect;
+    let rect = crate::render_workspace::camera_rect(app, rect);
     let picking = caps.pick;
     let (hover, scroll, mods, middle, secondary_down, primary_down, primary_pressed, primary_released, delta) = ui.input(|i| {
         (
@@ -569,16 +612,16 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     // The right button belongs to the marking menu while it is open.
     let secondary_down = secondary_down && app.viewport.context_menu.is_none();
     // The axis view handles its own clicks; the model underneath must not see them.
-    let axes = if caps.orbit { axis_rect(app, rect) } else { Rect::NOTHING };
+    let axes = if caps.orbit { axis_rect(app, input_rect) } else { Rect::NOTHING };
     // So is the View angles readout under it (#6032).
-    let readout = crate::view_angles::readout_rect(ui.ctx(), rect).filter(|_| caps.orbit && app.preferences.show_view_angles);
+    let readout = crate::view_angles::readout_rect(ui.ctx(), input_rect).filter(|_| caps.orbit && app.preferences.show_view_angles);
     // Floating windows and menus own input over the model, including wheel navigation. egui's
     // hit test also counts the model as under the pointer a few points past its own edge and
     // inside a window's or a list's edge (#678), so the pointer must be in the viewport too,
     // with no window or menu above it.
     let inside = ui.is_enabled()
         && resp.contains_pointer()
-        && ui.rect_contains_pointer(rect)
+        && ui.rect_contains_pointer(input_rect)
         && hover.is_some_and(|p| !axes.contains(p) && !readout.is_some_and(|r| r.contains(p)));
     // The wheel and trackpad gestures go on under a box anchored to the model (a value box such
     // as Extrude's distance, a dimension's editor): it scrolls nothing, and a pan, orbit or zoom
@@ -589,7 +632,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
             && !crate::value_step::enabled(ui.ctx())
             && !hover.is_some_and(|p| crate::dim_view::window::covers(ui.ctx(), p))
             && hover.is_some_and(|p| {
-                rect.contains(p)
+                input_rect.contains(p)
                     && !axes.contains(p)
                     && !readout.is_some_and(|r| r.contains(p))
                     && ui.ctx().layer_id_at(p).is_some_and(crate::ui_kit::container::is_canvas)
@@ -688,13 +731,27 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         let sign = crate::prefs::orbit_sign(app);
         orbit(app, rect, sign * f64::from(raw.shift_pan.x), sign * f64::from(raw.shift_pan.y), hover);
     }
+    let zoom_held = (inside || app.viewport.zoom_shortcut_drag)
+        && ui.input(|input| crate::keymap::drag_zoom_held(app, input))
+        && !view_keys_blocked(app, ui.ctx(), Some(resp.id))
+        && !app.prefs_window.open
+        && !crate::dim_view::editing();
+    if primary_pressed {
+        app.viewport.zoom_shortcut_drag = inside && zoom_held;
+    } else if !primary_down && !primary_released {
+        app.viewport.zoom_shortcut_drag = false;
+    }
+    let zoom_drag = app.viewport.zoom_shortcut_drag;
+
     // A left press with the preset's keys (Alias: Shift+Alt) navigates until the button is let
     // go (kept through the release frame, so the end of the drag doesn't select either).
-    if primary_pressed && inside {
+    if primary_pressed && inside && !zoom_drag {
         let empty_space = |app: &SolveApp| {
             app.viewport.context_menu.is_none()
                 && hover.is_some_and(|p| {
-                    if !picking {
+                    // The free canvas owns navigation, including gray letterbox. Its
+                    // invisible continuation of the camera ray contains no pickable scene.
+                    if !picking || !rect.contains(p) {
                         return true;
                     }
                     let proj = projection(app, rect);
@@ -714,7 +771,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         // still selects, and Ctrl on geometry still drags it without snapping.
         let ctrl_orbit = (mods.ctrl || mods.command) && !mods.shift && !mods.alt && empty_space(app);
         app.viewport.primary_nav = preset.or(ctrl_orbit.then_some(NavMode::Orbit));
-    } else if !primary_down && !primary_released {
+    } else if zoom_drag || (!primary_down && !primary_released) {
         app.viewport.primary_nav = None;
     }
     // Hold Space for a momentary pan: the hand tool of design apps. It overrides whatever the
@@ -725,11 +782,18 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         && !ui.ctx().egui_wants_keyboard_input()
         && !crate::dim_view::editing()
         && ui.input(|i| i.key_down(egui::Key::Space));
-    if space_pan {
+    if zoom_held {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ZoomIn);
+    } else if space_pan {
         ui.ctx().set_cursor_icon(if primary_down { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Grab });
     }
-    // The fixed navigation mode (navigation bar), a held Space, or the preset's left-button binding.
-    let primary_nav = if space_pan { Some(NavMode::Pan) } else { app.viewport.nav.or(app.viewport.primary_nav) };
+    let primary_nav = if zoom_drag {
+        zoom_held.then_some(NavMode::Zoom)
+    } else if space_pan {
+        Some(NavMode::Pan)
+    } else {
+        app.viewport.nav.or(app.viewport.primary_nav)
+    };
     // The right button also clicks (the context menu), so it navigates only once the press can no
     // longer be a click: a Magic Mouse moves the pointer a fraction of a point as it is clicked (#5517).
     // On that frame the drag catches up with the whole way from the press, so none of it is lost.
@@ -887,6 +951,9 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         app.cam = Camera::default();
         app.fit_view();
     }
+    // Even if the shortcut was released first, the mouse release belongs to the zoom gesture.
+    let inside = inside && !zoom_drag;
+    let primary_nav = if zoom_drag { Some(NavMode::Zoom) } else { primary_nav };
     CameraInput { hover, scroll, mods, middle, secondary_down, primary_down, primary_pressed, inside, axes, pinch, pan, primary_nav, mode }
 }
 
@@ -949,6 +1016,7 @@ fn unwrapped_delta(app: &mut SolveApp, delta: egui::Vec2) -> egui::Vec2 {
 /// for its page; the 3D mouse only reads the device and queues the motion
 /// ([`crate::space_mouse::navigate_frame`]).
 pub(crate) fn device(app: &mut SolveApp, rect: Rect, caps: NavCaps) {
+    let rect = crate::render_workspace::camera_rect(app, rect);
     if app.viewport.device_motion.is_none() && app.viewport.bridge_motion.is_none() {
         return;
     }
@@ -1308,6 +1376,40 @@ fn orbit_camera(app: &mut SolveApp, dx: f64, dy: f64) {
 #[cfg(test)]
 mod tests {
     use solidcraft_engine::geom::prelude::*;
+
+    #[test]
+    fn panel_wheel_consumes_only_axes_that_move_and_clamps_to_their_limits() {
+        use egui::vec2;
+        let ctx = crate::fonts::test_context();
+        for (previous, delta, maximum, expected, remaining) in [
+            (vec2(20.0, 30.0), vec2(-200.0, 200.0), vec2(100.0, 80.0), vec2(100.0, 0.0), egui::Vec2::ZERO),
+            (vec2(100.0, 30.0), vec2(-10.0, 10.0), vec2(100.0, 80.0), vec2(100.0, 20.0), vec2(-10.0, 0.0)),
+            (vec2(20.0, 0.0), vec2(10.0, 10.0), vec2(100.0, 80.0), vec2(10.0, 0.0), vec2(0.0, 10.0)),
+            (egui::Vec2::ZERO, vec2(-10.0, -10.0), egui::Vec2::ZERO, egui::Vec2::ZERO, vec2(-10.0, -10.0)),
+        ] {
+            crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+                ui.input_mut(|input| input.smooth_scroll_delta = delta);
+                assert_eq!(super::panel_scroll_offset(ui.ctx(), previous, maximum), expected);
+                assert_eq!(ui.input(|input| input.smooth_scroll_delta), remaining);
+            });
+        }
+    }
+
+    #[test]
+    fn panel_wheel_leaves_child_consumed_axes_and_raw_fallback_untouched() {
+        use egui::vec2;
+        let ctx = crate::fonts::test_context();
+        let event = web_wheel(egui::MouseWheelUnit::Point, vec2(-12.0, -18.0), egui::Modifiers::NONE);
+        crate::test_support::frame(&ctx, egui::RawInput { events: vec![event], ..Default::default() }, |ui| {
+            // A child has already consumed Y; only its unclaimed X reaches the host.
+            ui.input_mut(|input| input.smooth_scroll_delta = vec2(-12.0, 0.0));
+            let events = ui.input(|input| input.events.clone());
+            assert_eq!(super::panel_scroll_offset(ui.ctx(), vec2(5.0, 7.0), vec2(40.0, 40.0)), vec2(17.0, 7.0));
+            assert_eq!(ui.input(|input| input.smooth_scroll_delta), egui::Vec2::ZERO);
+            assert_eq!(ui.input(|input| input.events.clone()), events, "raw fallback ownership stays with the host");
+        });
+    }
+
     fn web_wheel(unit: egui::MouseWheelUnit, delta: egui::Vec2, modifiers: egui::Modifiers) -> egui::Event {
         egui::Event::MouseWheel { source: egui::MouseWheelSource::Unknown, unit, delta, modifiers, phase: egui::TouchPhase::Move }
     }

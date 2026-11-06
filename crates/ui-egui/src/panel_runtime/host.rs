@@ -12,7 +12,7 @@ pub struct PanelContext {
     pub viewport: ViewportId,
     pub native_host: Option<HostId>,
     pub outer: LogicalRect,
-    pub usable_body: LogicalRect,
+    pub usable_body: Option<LogicalRect>,
     pub flow: Flow,
     pub size_class: SizeClass,
     pub focused: bool,
@@ -25,9 +25,11 @@ impl PanelContext {
         self.owner.validate()?;
         LocalScope { workspace: self.workspace.clone(), document: self.document.clone(), viewport: self.viewport.clone() }.validate()?;
         self.outer.validate()?;
-        self.usable_body.validate()?;
-        if !self.outer.contains_rect(self.usable_body) {
-            return Err(error(Rule::Bounds, "presentation body outside host"));
+        if let Some(body) = self.usable_body {
+            body.validate()?;
+            if !self.outer.contains_rect(body) {
+                return Err(error(Rule::Bounds, "presentation body outside host"));
+            }
         }
         if let Some(host) = &self.native_host {
             valid_id(&host.0)?;
@@ -138,6 +140,11 @@ impl LocalRequest {
 /// host-local focus/overlays but retains the content controller and its owner.
 pub trait PanelLocalServices {
     fn request(&mut self, scope: &LocalScope, request: LocalRequest) -> PanelResult<()>;
+    /// Optional UI-only provenance for an actual overlay Area. Existing local
+    /// providers receive the same typed request; no layer enters saved state.
+    fn request_overlay_layer(&mut self, scope: &LocalScope, instance: &InstanceId, region: InputRegion, _layer: egui::LayerId) -> PanelResult<()> {
+        self.request(scope, LocalRequest::Overlay { instance: instance.clone(), region })
+    }
     fn release(&mut self, scope: &LocalScope, instance: &InstanceId);
 }
 
@@ -186,6 +193,8 @@ pub enum ContentSlot {
     Header,
     Body,
     Footer,
+    /// One total short-wide row, sharing its height with the host controls.
+    Inline,
 }
 
 /// Shared host adapter seam. Geometry is resolved by the host; content chooses
@@ -208,6 +217,26 @@ pub trait NativeHostAdapter {
     fn capabilities(&self) -> HostCapabilities;
     fn prepare(&self, effects: &[HostEffect]) -> PanelResult<()>;
     fn commit(&mut self, effects: &[HostEffect]);
+}
+
+/// Persistent truthful default for the internal in-app host. It owns no native
+/// resources and must never acknowledge a create/rebind/release effect.
+#[derive(Default)]
+pub struct InAppNativeAdapter;
+impl NativeHostAdapter for InAppNativeAdapter {
+    fn capabilities(&self) -> HostCapabilities {
+        HostCapabilities { native_windows: false, persistence: false, max_native_hosts: 0 }
+    }
+    fn prepare(&self, effects: &[HostEffect]) -> PanelResult<()> {
+        if effects
+            .iter()
+            .any(|effect| matches!(effect, HostEffect::CreateNative { .. } | HostEffect::RebindNative { .. } | HostEffect::ReleaseNative { .. }))
+        {
+            return Err(error(Rule::Capability, "in-app adapter has no native resources"));
+        }
+        Ok(())
+    }
+    fn commit(&mut self, _effects: &[HostEffect]) {}
 }
 
 /// Existing ui_kit is the outer boundary. This adapter paints into host-provided
@@ -242,20 +271,23 @@ impl PanelHost for EguiPanelHost<'_> {
         }
         let rect = |r: LogicalRect| egui::Rect::from_min_size(egui::pos2(r.origin.x, r.origin.y), egui::vec2(r.size.width, r.size.height));
         let outer = rect(geometry.outer);
-        let body = rect(geometry.body);
+        let body = geometry.body.map(rect);
         let parent_clip = self.ui.clip_rect().intersect(outer);
         let container = crate::ui_kit::Container::new(self.ui.ctx(), crate::ui_kit::Surface::Panel);
         let frame = container.frame(self.ui.ctx(), crate::theme::Tokens::get().dialog_body, crate::frame::Side::Left).inner_margin(0);
         let mut failure = None;
         self.ui.scope_builder(
-            egui::UiBuilder::new().id_salt(("panel_runtime", &geometry.instance.0, &context.owner, &context.viewport.0)).max_rect(outer),
+            egui::UiBuilder::new().scope_id(egui::Id::unique(("panel_runtime", &geometry.instance.0, &context.owner))).max_rect(outer),
             |ui| {
                 ui.set_clip_rect(ui.clip_rect().intersect(parent_clip));
                 container.show_frame(ui, frame, outer, |ui| {
                     // Slots have explicit bounds. No mandatory ScrollArea around content.
-                    let header = egui::Rect::from_min_max(outer.min, egui::pos2(outer.right(), body.top()));
-                    let footer = egui::Rect::from_min_max(egui::pos2(outer.left(), body.bottom()), outer.max);
-                    for (slot, bounds) in [(ContentSlot::Header, header), (ContentSlot::Body, body), (ContentSlot::Footer, footer)] {
+                    let header = egui::Rect::from_min_max(outer.min, egui::pos2(outer.right(), body.map_or(outer.bottom(), |body| body.top())));
+                    let footer = body.map(|body| egui::Rect::from_min_max(egui::pos2(outer.left(), body.bottom()), outer.max));
+                    for (slot, bounds) in [(ContentSlot::Header, Some(header)), (ContentSlot::Body, body), (ContentSlot::Footer, footer)] {
+                        let Some(bounds) = bounds else {
+                            continue;
+                        };
                         if failure.is_some() {
                             break;
                         }
@@ -298,7 +330,9 @@ impl PanelHost for EguiPanelHost<'_> {
                                     });
                                 });
                             }
-                            if let Err(reason) = content.render(slot, ui, context, services) {
+                            if geometry.body.is_some()
+                                && let Err(reason) = content.render(slot, ui, context, services)
+                            {
                                 failure = Some(reason);
                             }
                         });

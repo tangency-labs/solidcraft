@@ -133,6 +133,12 @@ pub struct ViewportState {
     pub rect: Option<Rect>,
     pub(crate) layout: Option<crate::viewport_layout::Layout>,
     pub(crate) palette_rect: Option<Rect>,
+    /// None before the host's early confirmation paint; Some(NOTHING) means
+    /// no visible pair this pass. Late controls retain the already drawn rect.
+    pub(crate) host_confirm: Option<Rect>,
+    /// Snapshot of this host pass's shared persistent Window paint. None is a
+    /// bounded-ledger failure; the usable seam then refuses placement/framing.
+    pub(crate) host_windows: Option<Vec<Rect>>,
     pub(crate) dialog_rect: Option<Rect>,
     /// OK or Cancel clicked in the view's corner for the open dialog (#6709), which
     /// `dialogs::show` acts on in the same frame as its own buttons.
@@ -182,6 +188,8 @@ pub struct ViewportState {
     /// The preset's navigation for the left-button drag under way (Alias: Shift+Alt), taken
     /// when the button went down, so the drag neither selects nor moves sketch geometry.
     pub primary_nav: Option<NavMode>,
+    /// A primary press that started with the Zoom shortcut owns the pointer until release.
+    pub(crate) zoom_shortcut_drag: bool,
     /// Button-free gesture and its last owned pointer position, kept through pauses.
     pub(crate) modifier_nav: Option<(NavMode, Pos2)>,
     /// The mode the middle or right drag under way started with, kept until its button is
@@ -530,6 +538,9 @@ pub(crate) fn scene_pick_slack(app: &SolveApp) -> f64 {
 }
 
 pub fn projection(app: &SolveApp, rect: Rect) -> Proj {
+    // Product paint, control-channel world coordinates, navigation and picking share
+    // one camera frame. The helper leaves explicit subframes and Design unchanged.
+    let rect = crate::render_workspace::camera_rect(app, rect);
     let mut cam = app.cam;
     // Render owns an explicit product camera, including its saved/custom FOV.
     if !crate::render_workspace::active(app) {
@@ -2111,7 +2122,7 @@ fn shadow_geometry(app: &SolveApp, st: &std::sync::Arc<solidcraft_engine::doc::M
         return geometry;
     }
     let mut scene = GpuScene::default();
-    ground_shadow(&mut scene, app, ground_bounds(app, st));
+    ground_shadow(&mut scene, app, ground_boxes(app, st));
     let geometry = ShadowGeometry { key, state: st.clone(), bytes: std::sync::Arc::new(scene.shadow), palette: scene.palette };
     if let Ok(mut cache) = app.viewport.shadow.lock() {
         *cache = Some(geometry.clone());
@@ -2119,11 +2130,16 @@ fn shadow_geometry(app: &SolveApp, st: &std::sync::Arc<solidcraft_engine::doc::M
     geometry
 }
 
-/// A soft dark ellipse on the ground under the shown bodies (darkest in the middle).
-fn ground_bounds(app: &SolveApp, st: &std::sync::Arc<solidcraft_engine::doc::ModelState>) -> solidcraft_engine::geom::Aabb3 {
+/// Each shown body's box in the camera's Z-up frame (the ground is its XY plane).
+fn ground_boxes(app: &SolveApp, st: &std::sync::Arc<solidcraft_engine::doc::ModelState>) -> Vec<solidcraft_engine::geom::Aabb3> {
     let boxes = body_bounds(app, st);
     let shown = st.bodies.iter().zip(boxes.iter()).filter(|(x, (_, bb))| !bb.is_empty() && app.body_visible(&x.name));
-    frame_bounds(app, shown.flat_map(|(_, (_, bb))| box_corners(bb)))
+    shown.map(|(_, (_, bb))| frame_bounds(app, box_corners(bb).into_iter())).collect()
+}
+
+/// The box around all shown bodies in the camera's Z-up frame.
+fn ground_bounds(app: &SolveApp, st: &std::sync::Arc<solidcraft_engine::doc::ModelState>) -> solidcraft_engine::geom::Aabb3 {
+    ground_boxes(app, st).iter().fold(solidcraft_engine::geom::Aabb3::EMPTY, |a, b| a.union(b))
 }
 
 /// The corners of a box.
@@ -2165,30 +2181,75 @@ fn ground_height(app: &SolveApp, bounds: solidcraft_engine::geom::Aabb3) -> f64 
     ground - 1e-3 * (1.0 + bounds.diagonal())
 }
 
-fn ground_shadow(sc: &mut GpuScene, app: &SolveApp, b: solidcraft_engine::geom::Aabb3) {
-    if b.is_empty() {
+/// A soft dark ellipse on the ground under each group of shown bodies (darkest in the middle).
+fn ground_shadow(sc: &mut GpuScene, app: &SolveApp, framed: Vec<solidcraft_engine::geom::Aabb3>) {
+    let all = framed.iter().fold(solidcraft_engine::geom::Aabb3::EMPTY, |a, b| a.union(b));
+    if all.is_empty() {
         return;
     }
-    let size = b.size();
-    let c = b.center();
-    let z = ground_height(app, b);
-    let (rx, ry) = (size.x * 0.62 + size.z * 0.15, size.y * 0.62 + size.z * 0.15);
-    if !(rx > 0.0 && ry > 0.0) {
-        return;
-    }
+    // Every ellipse lies on the lowest body's ground, so none floats beside a lower body.
+    let z = ground_height(app, all);
     let dark = if crate::theme::viewport_dark() { 150 } else { 80 };
+    for b in shadow_groups(framed) {
+        let (c, (rx, ry)) = (b.center(), shadow_radii(&b));
+        if !(rx > 0.0 && ry > 0.0) {
+            continue;
+        }
+        let at = |r: f64, a: f64| app.cam.from_frame(Vec3::new(c.x + rx * r * a.cos(), c.y + ry * r * a.sin(), z)).to_f32();
+        shadow_ellipse(sc, dark, at);
+    }
+}
+
+/// The half-axes of the ground shadow's ellipse under a box (in the camera's Z-up frame).
+fn shadow_radii(b: &solidcraft_engine::geom::Aabb3) -> (f64, f64) {
+    let size = b.size();
+    (size.x * 0.62 + size.z * 0.15, size.y * 0.62 + size.z * 0.15)
+}
+
+/// The boxes the ground shadow draws one ellipse under each (#10442): bodies whose boxes meet on
+/// the ground share one, and bodies apart get one each. One ellipse over all of them was darkest
+/// in its middle, which for two bodies side by side is the empty gap between them.
+fn shadow_groups(mut boxes: Vec<solidcraft_engine::geom::Aabb3>) -> Vec<solidcraft_engine::geom::Aabb3> {
+    // More groups than this is a crowd (an array, an assembly): one ellipse under it all, as
+    // before, keeps the scene small.
+    const MOST: usize = 64;
+    let meet = |a: &solidcraft_engine::geom::Aabb3, b: &solidcraft_engine::geom::Aabb3| {
+        a.min.x <= b.max.x && b.min.x <= a.max.x && a.min.y <= b.max.y && b.min.y <= a.max.y
+    };
+    // Merge until no two groups meet: a merged box can reach a group it missed before.
+    let mut merged = true;
+    while merged && boxes.len() > 1 {
+        merged = false;
+        let mut out: Vec<solidcraft_engine::geom::Aabb3> = Vec::with_capacity(boxes.len());
+        for b in boxes {
+            match out.iter_mut().find(|o| meet(o, &b)) {
+                Some(o) => {
+                    *o = o.union(&b);
+                    merged = true;
+                }
+                None => out.push(b),
+            }
+            if out.len() > MOST {
+                return vec![out.iter().fold(solidcraft_engine::geom::Aabb3::EMPTY, |a, b| a.union(b))];
+            }
+        }
+        boxes = out;
+    }
+    boxes
+}
+
+/// One soft ellipse of shadow triangles, `at(r, angle)` placing a point `r` (0 middle, 1 rim)
+/// of the way out.
+fn shadow_ellipse(sc: &mut GpuScene, dark: u32, at: impl Fn(f64, f64) -> [f32; 3]) {
     // Rings from the middle out, fading to nothing.
     let rings = [(0.0, dark), (0.55, dark * 3 / 4), (0.85, dark / 3), (1.0, 0)];
     let n = 48;
-    let at = |r: f64, k: usize| {
-        let a = k as f64 / n as f64 * std::f64::consts::TAU;
-        app.cam.from_frame(Vec3::new(c.x + rx * r * a.cos(), c.y + ry * r * a.sin(), z)).to_f32()
-    };
+    let angle = |k: usize| k as f64 / n as f64 * std::f64::consts::TAU;
     for w in rings.windows(2) {
         let ((r0, a0), (r1, a1)) = (w[0], w[1]);
         let (c0, c1) = (sc.color([0, 0, 0, a0 as u8]), sc.color([0, 0, 0, a1 as u8]));
         for k in 0..n {
-            let (p00, p01, p10, p11) = (at(r0, k), at(r0, k + 1), at(r1, k), at(r1, k + 1));
+            let (p00, p01, p10, p11) = (at(r0, angle(k)), at(r0, angle(k + 1)), at(r1, angle(k)), at(r1, angle(k + 1)));
             sc.shadow_tri(p00, c0);
             sc.shadow_tri(p10, c1);
             sc.shadow_tri(p11, c1);
@@ -2672,6 +2733,11 @@ pub(crate) fn pick_through(app: &SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit> {
 }
 
 fn pick_with_sketch_points(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool) -> Vec<Hit> {
+    // Gray canvas can navigate but cannot supply an invisible surface for selection,
+    // cursor orbit or surface zoom beyond the rendered image's captured camera frame.
+    if crate::render_workspace::active(app) && !app.preferences.render_legacy_image_defaults && !proj.rect.contains(pos) {
+        return Vec::new();
+    }
     let mut hits = pick_hits(app, proj, pos, other_sketch_points, false, true, false);
     // A Single hole's face place snaps to the face's centre and its round edges' centres.
     crate::hole_place::snap_hits(app, proj, pos, &mut hits);
@@ -2732,6 +2798,10 @@ impl<T: PartialOrd + Copy> Near<T> {
 }
 
 fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, all: bool, include_midpoints: bool, through: bool) -> Vec<Hit> {
+    // Select Other and tool picks share the same visible-image boundary as ordinary picks.
+    if crate::render_workspace::active(app) && !app.preferences.render_legacy_image_defaults && !proj.rect.contains(pos) {
+        return Vec::new();
+    }
     let s = &app.session;
     let st = crate::open_meshing::shown_world(app);
     let bounds = body_bounds(app, &st);
@@ -3946,7 +4016,19 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
     app.session.visibility.hidden_folders.hash(&mut h);
     // How strongly print faces are tinted (Preferences › General › Slicer).
     app.preferences.print_face_highlight.to_bits().hash(&mut h);
+    image_target_outlines(app).hash(&mut h);
     h.finish()
+}
+
+/// Product pixels must stay visible while their appearance target is selected.
+fn image_target_outlines(app: &SolveApp) -> bool {
+    crate::render_workspace::active(app) && !app.preferences.render_legacy_image_defaults && crate::render_workspace::live::has_picture(app)
+}
+
+/// Display-only triangle-mesh polylines are not modeling edges. Targets without
+/// drawable pickable boundaries keep their existing face/body fill feedback.
+fn has_pickable_outline(mesh: &solidcraft_engine::geom::Mesh) -> bool {
+    mesh.edges.iter().enumerate().any(|(index, edge)| edge.len() >= 2 && mesh.edge_pickable(index))
 }
 
 pub(crate) fn highlight_key(app: &SolveApp) -> u64 {
@@ -4191,6 +4273,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
     let gpu_lit = |b: &solidcraft_engine::doc::ModelBody| !dragged.contains(b.name.as_str());
     // Faces lit over the model use the triangles the model shows them with.
     let product = crate::render_workspace::active(app);
+    let outlines = image_target_outlines(app);
     // Bodies a Move dialog moves are lit where they stand (as they are picked). While its triad
     // is dragged they aren't lit at all, so the highlight is built again once, when it lets go,
     // rather than every frame.
@@ -4392,19 +4475,34 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                 // Lit, not flat: an imported mesh (STL, OBJ) is one face, and a flat fill would
                 // paint the whole part as a single silhouette.
                 if let Some(b) = by_name.get(body).filter(|_| app.body_visible(body) && !replaced(body)) {
-                    face_tris(&mut feedback, &shown(b), *index, c4(t.sel_face), true);
-                    hidden_face_outline(&mut feedback, &drawn(b), *index, t.sel_edge);
+                    let m = shown(b);
+                    if outlines && has_pickable_outline(&m) {
+                        for (ei, e) in m.edges.iter().enumerate() {
+                            if m.edge_pickable(ei) && m.edge_faces.get(ei).is_some_and(|faces| faces.iter().any(|f| *f as usize == *index)) {
+                                edge_lines(&mut feedback, e, selected_edge, 2.0, &[]);
+                            }
+                        }
+                    } else {
+                        face_tris(&mut feedback, &m, *index, c4(t.sel_face), true);
+                        hidden_face_outline(&mut feedback, &drawn(b), *index, t.sel_edge);
+                    }
                 }
             }
             Sel::Body { name } => {
                 if let Some(b) = by_name.get(name)
                     && app.body_visible(name)
                 {
-                    let lit = WholeBody { selected: true, colour: c4(t.body_selected) };
-                    if !(gpu_lit(b) && light_whole_body(app, b, &active_bodies, lit, &body_slots, &mut feedback, &mut selected_instances)) {
-                        let m = shown(b);
-                        let count = b.body.face_count();
-                        mesh_tris(&mut feedback, &m, c4(t.body_selected), true, |f| (f as usize) < count);
+                    if let Some(m) = outlines.then(|| shown(b)).filter(|mesh| has_pickable_outline(mesh)) {
+                        for (_, e) in m.edges.iter().enumerate().filter(|(ei, _)| m.edge_pickable(*ei)) {
+                            edge_lines(&mut feedback, e, selected_edge, 2.0, &[]);
+                        }
+                    } else {
+                        let lit = WholeBody { selected: true, colour: c4(t.body_selected) };
+                        if !(gpu_lit(b) && light_whole_body(app, b, &active_bodies, lit, &body_slots, &mut feedback, &mut selected_instances)) {
+                            let m = shown(b);
+                            let count = b.body.face_count();
+                            mesh_tris(&mut feedback, &m, c4(t.body_selected), true, |f| (f as usize) < count);
+                        }
                     }
                 }
             }
@@ -4524,12 +4622,13 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
         if faces.is_empty() {
             continue;
         }
-        let m = drawn_mesh(app, b);
+        let m = if outlines { shown(b) } else { drawn_mesh(app, b) };
+        let use_outlines = outlines && has_pickable_outline(&m);
         let base = body_color(&s.doc, b).unwrap_or(t.body);
         let k = t.hover_face_lift;
         let hover_col = [base.r().saturating_add(k), base.g().saturating_add(k), base.b().saturating_add(k), 255];
         let selected_body = selected_whole.contains(b.name.as_str());
-        if !selected_body {
+        if !selected_body && !use_outlines {
             // A whole body the model draws from a plan is lit by redrawing the plan's own
             // evaluated triangles, not by building every triangle again (see `highlight_plan`).
             let lit = WholeBody { selected: false, colour: hover_col };
@@ -4562,11 +4661,13 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
             if let Some(b) = st.body(body) {
                 let k = t.hover_face_lift;
                 let c = body_rgb(app, body);
-                let m = drawn(b);
+                let m = if outlines { shown(b) } else { drawn(b) };
                 let patch = m.surface_patch(*index);
-                let lit = shown(b);
-                for &f in &patch {
-                    face_tris(&mut feedback, &lit, f, [c.0.saturating_add(k), c.1.saturating_add(k), c.2.saturating_add(k), 255], true);
+                if !(outlines && has_pickable_outline(&m)) {
+                    let lit = shown(b);
+                    for &f in &patch {
+                        face_tris(&mut feedback, &lit, f, [c.0.saturating_add(k), c.1.saturating_add(k), c.2.saturating_add(k), 255], true);
+                    }
                 }
                 for (e, _) in m.edge_faces.iter().enumerate().filter(|(_, fs)| fs.iter().any(|f| patch.contains(&(*f as usize)))) {
                     if let Some(p) = m.edges.get(e)
@@ -5584,9 +5685,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::design_properties::overlay(app, &painter, &proj);
     crate::sketch_dims::show(app, ui, &proj);
     crate::select_other::show(app, ui.ctx());
-    axis_view(app, ui, rect);
-    crate::view_angles::show(app, ui, rect);
-    crate::navigation_bar_view::show(app, ui, rect);
+    if !app.universal_panel_host_enabled() {
+        axis_view(app, ui, rect);
+        crate::view_angles::show(app, ui, rect);
+        crate::navigation_bar_view::show(app, ui, rect);
+    }
     crate::viewport_status::show(app, ui.ctx(), rect);
     crate::viewport_status_fixture::show(app, ui.ctx(), rect);
     // The notices and the agent chip first, so the 3D mouse picture can keep clear of them.
@@ -7083,6 +7186,40 @@ pub(crate) fn scene_palette(dark: bool, mode: crate::theme::ColorVision) -> soli
 
 pub(crate) fn refresh_layout(app: &mut SolveApp, ctx: &egui::Context) {
     if let Some(rect) = app.viewport.rect {
+        if app.universal_panel_frame().is_some() {
+            let Ok(usable) = crate::shell::host_usable(app) else {
+                // Refuse new control placement without inventing an occupied
+                // viewport. An early pair already painted remains authoritative.
+                app.viewport.layout = Some(crate::viewport_layout::Layout {
+                    viewport: rect,
+                    content: rect,
+                    drawable: Rect::NOTHING,
+                    middle: Rect::NOTHING,
+                    navigation: Rect::NOTHING,
+                    axis_view: Rect::NOTHING,
+                    confirm: app.viewport.host_confirm.unwrap_or(Rect::NOTHING),
+                    usable: None,
+                });
+                return;
+            };
+            let navigation = if app.ui.show_navigation_bar { crate::navigation_bar_view::measured(app, ctx, rect).rect } else { Rect::NOTHING };
+            let orbit = crate::navigation_bar::canvas_caps(app).orbit;
+            app.viewport.layout = Some(if let Some(confirm) = app.viewport.host_confirm {
+                crate::viewport_layout::Layout::host_with_retained_confirm(rect, &usable, app.preferences.navigator_style, confirm, navigation, orbit)
+            } else if orbit {
+                crate::viewport_layout::Layout::host(rect, &usable, app.preferences.navigator_style, crate::view_confirm::size(app), navigation)
+            } else {
+                crate::viewport_layout::Layout::host_with_axis(
+                    rect,
+                    &usable,
+                    app.preferences.navigator_style,
+                    crate::view_confirm::size(app),
+                    navigation,
+                    false,
+                )
+            });
+            return;
+        }
         let docks = crate::shell::fit_rects(app);
         let mut content = crate::shell::content_rect(app, rect);
         if crate::render_ui::focused(app) {
@@ -7110,7 +7247,7 @@ pub(crate) fn refresh_layout(app: &mut SolveApp, ctx: &egui::Context) {
         // OK and Cancel in the view's corner (#6709) take the top right; the axis view goes below.
         let corner = crate::view_confirm::size(app);
         let style = app.preferences.navigator_style;
-        app.viewport.layout = Some(if crate::render_workspace::active(app) {
+        let layout = if crate::render_workspace::active(app) {
             let navigation = if app.ui.show_navigation_bar { crate::navigation_bar_view::measured(app, ctx, content).rect } else { Rect::NOTHING };
             if app.preferences.render_inspector_side == "left" {
                 crate::viewport_layout::Layout::product_left(rect, content, &docks, ctx.pixels_per_point(), style, corner, navigation)
@@ -7121,8 +7258,29 @@ pub(crate) fn refresh_layout(app: &mut SolveApp, ctx: &egui::Context) {
             let content = if app.ui.layout == crate::shell::LayoutMode::Docked { rect } else { content };
             let navigation = if app.ui.show_navigation_bar { crate::navigation_bar_view::measured(app, ctx, content).rect } else { Rect::NOTHING };
             crate::viewport_layout::Layout::with_content(rect, content, &docks, ctx.pixels_per_point(), style, corner, navigation)
-        });
+        };
+        // Cache the exact product camera projection as well as its Fit room.
+        // Controls retain their outer content/axis/navigation rectangles.
+        let layout = if crate::render_workspace::active(app) && !app.preferences.render_legacy_image_defaults {
+            crate::render_workspace::picture_layout(app, &layout)
+        } else {
+            layout
+        };
+        app.viewport.layout = Some(layout);
     }
+}
+
+/// The opt-in host paints its existing controls after resolving actual Area
+/// visibility. This does not render the scene or call navigation::handle again.
+pub(crate) fn show_host_controls(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
+    refresh_layout(app, ui.ctx());
+    if crate::navigation_bar::canvas_caps(app).orbit {
+        axis_view(app, ui, rect);
+        if !crate::render_workspace::active(app) {
+            crate::view_angles::show(app, ui, rect);
+        }
+    }
+    crate::navigation_bar_view::show(app, ui, rect);
 }
 
 /// Orientation controls share the layout reservation used by model fitting.
@@ -7137,7 +7295,7 @@ fn axis_center(app: &SolveApp, rect: Rect) -> Pos2 {
 pub(crate) const AXIS_CENTER_LIFT: f32 = 4.0;
 
 pub(crate) fn axis_rect(app: &SolveApp, rect: Rect) -> Rect {
-    app.viewport.layout.as_ref().filter(|l| l.viewport == rect).map(|l| l.axis_view).unwrap_or_else(|| {
+    app.viewport.layout.as_ref().filter(|l| l.viewport == crate::render_workspace::camera_rect(app, rect)).map(|l| l.axis_view).unwrap_or_else(|| {
         let size = axis_view_size(app.preferences.navigator_style);
         Rect::from_min_size(pos2(rect.right() - size, rect.top()), vec2(size, size))
     })
@@ -7507,7 +7665,7 @@ mod tests {
             let mut app = SolveApp::new(session, crate::Services::default());
             app.cam.up = up;
             let mut scene = GpuScene::default();
-            ground_shadow(&mut scene, &app, ground_bounds(&app, &app.session.world_state()?));
+            ground_shadow(&mut scene, &app, ground_boxes(&app, &app.session.world_state()?));
             assert!(!scene.shadow.is_empty());
             for vertex in scene.shadow.as_chunks::<{ crate::gpu::TRI_SIZE }>().0 {
                 let height = f32::from_le_bytes(vertex[coordinate * 4..coordinate * 4 + 4].try_into()?);
@@ -7542,7 +7700,7 @@ mod tests {
                 assert!(std::sync::Arc::ptr_eq(&after.bytes, &shadow_geometry(&app, &state).bytes), "unchanged placement stays cached");
                 crate::prefs::set(&mut app, &json!({"ground_shadow_follows_model": follows_model}))?;
                 let mut scene = GpuScene::default();
-                ground_shadow(&mut scene, &app, ground_bounds(&app, &app.session.world_state()?));
+                ground_shadow(&mut scene, &app, ground_boxes(&app, &app.session.world_state()?));
                 assert!(!scene.shadow.is_empty());
                 for vertex in scene.shadow.as_chunks::<{ crate::gpu::TRI_SIZE }>().0 {
                     let actual = f32::from_le_bytes(vertex[coordinate * 4..coordinate * 4 + 4].try_into()?);
@@ -7553,7 +7711,7 @@ mod tests {
                 }
                 app.session.visibility.hidden_bodies.push("Box".into());
                 let mut hidden = GpuScene::default();
-                ground_shadow(&mut hidden, &app, ground_bounds(&app, &app.session.world_state()?));
+                ground_shadow(&mut hidden, &app, ground_boxes(&app, &app.session.world_state()?));
                 assert!(hidden.shadow.is_empty(), "hidden bodies cast no shadow");
             }
         }
@@ -7566,7 +7724,7 @@ mod tests {
         session.execute("solid.box", &json!({"length": 30, "width": 30, "height": 10}))?;
         let app = SolveApp::new(session, crate::Services::default());
         let mut scene = GpuScene::default();
-        ground_shadow(&mut scene, &app, ground_bounds(&app, &crate::open_meshing::session_world(&app.session)));
+        ground_shadow(&mut scene, &app, ground_boxes(&app, &crate::open_meshing::session_world(&app.session)));
         assert!(scene.trans.is_empty(), "the ground shadow must not trigger order-independent transparency");
         assert_eq!(scene.shadow.len(), 48 * 5 * 3 * crate::gpu::TRI_SIZE, "all shadow rings are retained");
         let shadow_alpha = |v: &[u8]| {
@@ -7574,6 +7732,40 @@ mod tests {
             scene.palette.get(crate::gpu::PaletteIndex(i)).map(|c| c[3])
         };
         assert!(scene.shadow.as_chunks::<{ crate::gpu::TRI_SIZE }>().0.iter().any(|v| shadow_alpha(v).is_some_and(|a| a > 0)));
+        Ok(())
+    }
+
+    /// Two bodies apart get a shadow each, and the gap between them gets none of the darkest
+    /// middle (#10442); bodies that meet keep sharing one.
+    #[test]
+    fn ground_shadow_leaves_the_gap_between_bodies_apart() -> Result<(), Box<dyn std::error::Error>> {
+        use solidcraft_engine::geom::Aabb3;
+        let block = |x0: f64| Aabb3 { min: Vec3::new(x0, -30.0, 0.0), max: Vec3::new(x0 + 40.0, 30.0, 20.0) };
+        let (left, right) = (block(-60.0), block(20.0));
+        let groups = shadow_groups(vec![left, right]);
+        assert_eq!(groups, vec![left, right], "bodies 40 apart cast a shadow each");
+        let gap = Vec3::new(0.0, 0.0, 0.0);
+        for g in &groups {
+            let ((rx, ry), c) = (shadow_radii(g), g.center());
+            let r = (((gap.x - c.x) / rx).powi(2) + ((gap.y - c.y) / ry).powi(2)).sqrt();
+            assert!(r > 0.85, "the gap's middle is in a shadow's faint rim at most, not its dark middle: {r}");
+        }
+        // Touching, and a third body reaching both through a merged box: one shadow.
+        assert_eq!(shadow_groups(vec![block(-40.0), block(0.0)]).len(), 1);
+        let bridge = Aabb3 { min: Vec3::new(-25.0, 25.0, 0.0), max: Vec3::new(25.0, 40.0, 5.0) };
+        assert_eq!(shadow_groups(vec![left, right, bridge]).len(), 1, "a body touching both joins them");
+        // A crowd falls back to one shadow under it all.
+        let crowd: Vec<_> = (0..100).map(|i| block(f64::from(i) * 100.0)).collect();
+        assert_eq!(shadow_groups(crowd).len(), 1);
+
+        let mut session = solidcraft_engine::Session::default();
+        for x in [-60, 20] {
+            session.execute("solid.box", &json!({"length": 40, "width": 60, "height": 20, "corner": [x, -30, 0], "operation": "new"}))?;
+        }
+        let app = SolveApp::new(session, crate::Services::default());
+        let mut scene = GpuScene::default();
+        ground_shadow(&mut scene, &app, ground_boxes(&app, &app.session.world_state()?));
+        assert_eq!(scene.shadow.len(), 2 * 48 * 5 * 3 * crate::gpu::TRI_SIZE, "one ellipse under each body");
         Ok(())
     }
 
@@ -7657,7 +7849,7 @@ mod tests {
         let mut dialog = crate::dialogs::Dialog::for_command(&app, "construct.plane.at_angle").unwrap();
         dialog.inputs[0].items = vec![Sel::Plane { name: "XY".into() }];
         dialog.inputs[1].items = vec![selected];
-        if let crate::dialogs::Kind::AnglePlane { angle } = &mut dialog.kind {
+        if let crate::dialogs::Kind::AnglePlane { angle, .. } = &mut dialog.kind {
             *angle = "90 deg".into();
         }
         for (command, params) in crate::dialogs::apply_commands(&app, &dialog).unwrap() {
