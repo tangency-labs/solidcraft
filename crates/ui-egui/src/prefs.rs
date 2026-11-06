@@ -1067,6 +1067,9 @@ preference_settings! {
     /// left drag with the mapping's keys does: letting go of Shift partway through a Shift+middle
     /// orbit doesn't turn it into a pan (#9557). Off: the keys held decide on every frame, as before.
     nav_drag_keeps_mode: bool = true, PAGE_NAVIGATION => check_tr("nav.drag_keeps_mode.label");
+    /// An orbit drag that reaches the edge of the view moves the cursor to the opposite edge and
+    /// keeps turning; false stops the drag at the edge of the screen, as before.
+    orbit_cursor_wrap: bool = true, PAGE_NAVIGATION => check_tr("nav.orbit_cursor_wrap.label");
     /// View orientation widget: original signed axes (default) or compact cube.
     navigator_style: NavigatorStyle = NavigatorStyle::default(), PAGE_NAVIGATION;
     /// The custom view gizmo's colours: the cube's (themed) or the body's own (modeled).
@@ -9575,6 +9578,24 @@ mod tests {
             h.call("ui.prefs", json!({"button":"cancel"}));
             assert_eq!(h.app.preferences.orbit_around, OrbitAround::Cursor);
         }
+    }
+
+    #[test]
+    fn orbit_cursor_wrap_defaults_on_and_can_be_turned_off() {
+        let old: Prefs = serde_json::from_value(json!({"nav":"solidworks"})).unwrap();
+        assert!(old.orbit_cursor_wrap, "saved preferences from before the option wrap");
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"open":"Navigation"}));
+        h.step(&json!({"click":{"handle":"prefs:orbit_cursor_wrap"}})).unwrap();
+        assert!(!h.app.preferences.orbit_cursor_wrap);
+        h.call("ui.prefs", json!({"button":"apply"}));
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert!(!restored.preferences.orbit_cursor_wrap);
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(h.app.preferences.orbit_cursor_wrap);
+        h.call("ui.prefs", json!({"orbit_cursor_wrap":false,"button":"apply"}));
+        assert!(!h.app.preferences.orbit_cursor_wrap);
     }
 
     #[test]
