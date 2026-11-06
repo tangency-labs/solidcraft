@@ -1704,6 +1704,9 @@ preference_settings! {
     /// its half-axes and axes can be dimensioned. Off: the ellipse alone, and D on it gives its
     /// minor radius, labelled R, as before.
     ellipse_axes: bool = true, PAGE_SKETCH;
+    /// How large constraint glyphs are drawn: a multiple of their 15-pixel badge, letter and icon
+    /// included, so they can be read at any zoom (#10794). 1 (the default) is the size they always had.
+    constraint_glyph_scale: f32 = 1.0, PAGE_SKETCH, accept(crate::sketch_tools::GLYPH_SCALES) => slider("prefs.constraint_glyph_size", crate::sketch_tools::GLYPH_SCALES, 0.25, |v| format!("{:.0}%", v * 100.0), "prefs:constraint_glyph_size");
     /// Drive Joints shows the moved parts' old place as a ghost (its Show ghost box, #5905).
     drive_joints_ghost: bool = true, PAGE_TOOLS => check_tr("prefs.design_tools.ghost");
     /// While Move's triad drags a component drawn as a layer of its own, what is under the pointer
@@ -3841,6 +3844,9 @@ pub fn migrate(mut p: Prefs) -> Prefs {
     if !accepted::home_fit_size(&p) {
         p.home_fit_size = Prefs::default().home_fit_size;
     }
+    if !accepted::constraint_glyph_scale(&p) {
+        p.constraint_glyph_scale = Prefs::default().constraint_glyph_scale;
+    }
     if p.orbit_cursor {
         p.orbit_around = OrbitAround::Cursor;
         p.orbit_cursor = false;
@@ -4008,6 +4014,9 @@ fn prepare_preferences(
     }
     if !accepted::home_fit_size(&new) {
         return Err("`home_fit_size` must be 0.1…1".into());
+    }
+    if !accepted::constraint_glyph_scale(&new) {
+        return Err("`constraint_glyph_scale` must be 1…3".into());
     }
     let new = migrate(new);
     if !UNITS.contains(&new.default_units.as_str()) {
@@ -6324,6 +6333,7 @@ mod tests {
             ("select_hidden_edges", json!(true), PAGE_SKETCH),
             ("sketch_conflict_colour", json!(false), PAGE_SKETCH),
             ("hide_constraint_glyphs_zoomed_out", json!(false), PAGE_SKETCH),
+            ("constraint_glyph_scale", json!(2.0), PAGE_SKETCH),
             ("suppress_sketch_snap", json!(ModifierCombo::NONE), PAGE_SKETCH),
             ("sketch_state_icons", json!(false), PAGE_SKETCH),
             ("sketch_mirror_auto_line", json!(false), PAGE_SKETCH),
@@ -10618,6 +10628,21 @@ mod tests {
         set(&mut app, &json!({"orbit_cursor": true})).unwrap();
         assert_eq!(app.preferences.orbit_around, OrbitAround::Cursor, "the old key still moves the choice");
         assert!(!app.preferences.orbit_cursor, "and is folded away");
+    }
+
+    /// Constraint glyphs keep their size unless a larger one is chosen (#10794); `ui.prefs` takes
+    /// only the offered range, and a hand-edited file out of it reads as the default.
+    #[test]
+    fn constraint_glyph_size_defaults_to_the_old_size_and_stays_in_range() {
+        assert_eq!(Prefs::default().constraint_glyph_scale, 1.0);
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        set(&mut app, &json!({"constraint_glyph_scale": 2.0})).unwrap();
+        assert_eq!(app.preferences.constraint_glyph_scale, 2.0);
+        for bad in [0.5, 3.5, -1.0] {
+            assert!(set(&mut app, &json!({"constraint_glyph_scale": bad})).is_err(), "{bad} is refused");
+        }
+        assert_eq!(app.preferences.constraint_glyph_scale, 2.0, "a refused value changes nothing");
+        assert_eq!(migrate(lenient(&json!({"constraint_glyph_scale": 40.0}))).constraint_glyph_scale, 1.0);
     }
 
     #[test]

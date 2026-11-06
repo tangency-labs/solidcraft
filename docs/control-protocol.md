@@ -853,6 +853,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `browser_eye_left` (default false: each browser and History tree row's eye, handle `eye:<name>`, sits in a column at the rows' right end, clear of the fold arrow and the radio; true: between them, as before #8718)
 - `check_updates` (default true; [updates](book/src/guide/updates.md))
 - `color_vision` (`off` (default), `protan`, `deutan`, `tritan`: colour vision modes, #778)
+- `constraint_glyph_scale` (1…3, default 1: how large the open sketch's constraint glyphs are drawn, a multiple of their 15-pixel badge, letter and icon included; Preferences › Sketch › Constraint glyph size, #10794)
 - `default_units`
 - `dialog_buttons` (`bottom` (default), `top`: a feature dialog's OK, Cancel and Apply sit in its title row instead of under its inputs, #6708; the buttons keep their handles, and `dialog:close` is then Cancel's; the Sketch panel's Finish Sketch row moves above its options, #9860)
 - `dialog_place` (`edge` (default) or `left_column`: command dialogs open in the left column in place of the browser and the History, #6707)
