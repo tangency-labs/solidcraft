@@ -54,6 +54,12 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         crate::scenario::publish_target("prefs:extrude_view_return", response.rect);
                     });
                 });
+                create_row(ui, app.tr("prefs.dialogs_group"), &[], false, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        let response = setting::cancel_keeps_computing_ok(app, ui);
+                        crate::scenario::publish_target("prefs:cancel_keeps_computing_ok", response.rect);
+                    });
+                });
                 create_row(ui, app.tr("prefs.design_tools.placement_group"), &["rest", "boss", "snap_fit"], false, |ui| {
                     ui.horizontal_wrapped(|ui| {
                         let response = setting::placement_handles(app, ui).backing_on_hover_text(app.tr("ui.placement_handles_tip"));
