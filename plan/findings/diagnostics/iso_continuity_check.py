@@ -23,6 +23,7 @@ if args.native:
     assert set(replay) == {row["case"] for row in records}
 
 def labels(surface, coordinate):
+    """Derive runner continuity codes from the selected tensor knot multiplicities."""
     degree = surface["p" if coordinate == "u" else "q"]
     counts = sorted(Counter(surface[coordinate]).items())
     assert counts[0][1] == degree + 1 == counts[-1][1]
@@ -50,6 +51,7 @@ if args.goldens or args.baseline:
     assert args.goldens and args.baseline, "--goldens and --baseline must be supplied together"
 
     def golden_rows(path):
+        """Load a full IsoCurve golden capture and reject missing or duplicate cases."""
         rows = list(map(json.loads, path.read_text(encoding="utf-8-sig").splitlines()))
         assert rows[0] == {"format": 1, "unit": "curve.iso_curve"}
         result = {row["case"]: row for row in rows[1:]}

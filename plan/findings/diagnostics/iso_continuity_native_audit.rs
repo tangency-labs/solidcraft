@@ -39,6 +39,7 @@ struct Params0 {
     clamp: bool,
 }
 
+/// Preserve the fixture default that clamps the fixed isoparameter to its domain.
 fn yes() -> bool {
     true
 }
@@ -74,10 +75,12 @@ struct DbIn {
     form: u64,
 }
 
+/// Preserve the database fixture's default knot-type code.
 fn one() -> u64 {
     1
 }
 
+/// Preserve the database fixture's default surface-form code.
 fn nine() -> u64 {
     9
 }
@@ -125,6 +128,7 @@ struct Inputs {
     op: OpIn,
 }
 
+/// Replay inline continuity records from the supplied JSONL file as native results.
 fn main() {
     for line in std::fs::read_to_string(std::env::args().nth(1).unwrap())
         .unwrap()

@@ -8,6 +8,7 @@ use solidcore::{
     },
     Kernel,
 };
+/// Emit native knot points and continuity counts for the same-view metadata plot.
 fn main() {
     let k = Kernel::default();
     let rows = [0., 1.]

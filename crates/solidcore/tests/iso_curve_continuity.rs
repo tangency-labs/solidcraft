@@ -21,6 +21,7 @@ use solidcore::{
     Kernel,
 };
 
+/// Curve identity required by the public point-solver test API.
 #[derive(Clone, Copy, PartialEq)]
 struct Object;
 impl SolutionObject for Object {
@@ -29,6 +30,7 @@ impl SolutionObject for Object {
     }
 }
 
+/// Build a tensor isocurve whose varying direction has one extra interior knot.
 fn corner(fixed: SurfParamType, shallow: bool) -> Curve {
     let (a, y) = if shallow {
         (1.0 / 1024.0, 1.0 - 1.0 / 524288.0)
@@ -65,6 +67,7 @@ fn corner(fixed: SurfParamType, shallow: bool) -> Curve {
     Curve::from(IsoCurve::new(surface, fixed, 0.5, false, true))
 }
 
+/// Both fixed-coordinate choices must label the evaluated curve's varying knots.
 #[test]
 fn continuity_follows_each_varying_direction_with_unequal_knot_counts() {
     let k = Kernel::default();
@@ -93,6 +96,7 @@ fn continuity_follows_each_varying_direction_with_unequal_knot_counts() {
     }
 }
 
+/// A nearly smooth corner still requires one metadata entry per varying knot.
 #[test]
 fn original_shallow_corner_has_a_continuity_entry_for_each_varying_knot() {
     let k = Kernel::default();
@@ -105,6 +109,7 @@ fn original_shallow_corner_has_a_continuity_entry_for_each_varying_knot() {
     }
 }
 
+/// Public projected queries must traverse matched knot/continuity lists in both modes.
 #[test]
 fn projected_query_uses_the_varying_knot_without_a_list_mismatch() {
     let k = Kernel::default();
