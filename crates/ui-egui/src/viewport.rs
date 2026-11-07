@@ -4489,8 +4489,12 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                 }
             }
             Sel::Body { name } => {
+                // Scale's preview stands in for the body, so its old shape is not lit over the new
+                // one (a body scaled down stayed hidden inside its highlight). Other tools keep it lit.
+                let scaling = app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Scale { .. }));
                 if let Some(b) = by_name.get(name)
                     && app.body_visible(name)
+                    && !(scaling && replaced(name))
                 {
                     if let Some(m) = outlines.then(|| shown(b)).filter(|mesh| has_pickable_outline(mesh)) {
                         for (_, e) in m.edges.iter().enumerate().filter(|(ei, _)| m.edge_pickable(*ei)) {
