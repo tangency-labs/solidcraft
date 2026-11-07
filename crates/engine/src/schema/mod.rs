@@ -96,6 +96,7 @@ pub mod render_surface_resources;
 pub mod render_ui;
 pub mod section;
 pub mod sheet;
+pub mod silhouette;
 pub mod sketch;
 pub mod sketch_clipboard;
 pub mod sketch_constraints;
