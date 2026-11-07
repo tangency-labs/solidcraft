@@ -172,6 +172,19 @@ pub fn dim_frame(sk: &Sketch, k: &ConstraintKind) -> Option<DimFrame> {
     })
 }
 
+/// The frame of a dimension constraint drawn with its stored text `text` (frame-relative, as
+/// in [`encode_text`]). An angle between two lines measures the same value in two vertically
+/// opposite sectors around their crossing; its arc goes in the one the text sits in (#11800),
+/// otherwise in the one whose rays point at the lines, as [`dim_frame`] has it.
+pub fn dim_frame_at(sk: &Sketch, k: &ConstraintKind, text: Option<Vec2>) -> Option<DimFrame> {
+    let frame = dim_frame(sk, k)?;
+    let (ConstraintKind::Angle { .. }, DimFrame::Angular { vertex, d0, sweep }, Some(t)) = (k, frame, text) else {
+        return Some(frame);
+    };
+    let inside = |d0: Vec2| t.len() > 1e-12 && t.is_finite() && (t.angle() - d0.angle()).rem_euclid(std::f64::consts::TAU) <= sweep;
+    Some(if !inside(d0) && inside(-d0) { DimFrame::Angular { vertex, d0: -d0, sweep } } else { frame })
+}
+
 /// The stored text position for text centred at `at`.
 pub fn encode_text(f: &DimFrame, at: Vec2) -> Vec2 {
     match *f {
@@ -595,6 +608,31 @@ mod tests {
         let l = dim_layout(&DimFrame::Angular { vertex, d0, sweep }, None, 0.1, Vec2::ZERO);
         assert_eq!(l.arrows.len(), 2);
         assert!(l.text.x > 0.0 && l.text.y > 0.0);
+    }
+
+    #[test]
+    fn angle_frame_follows_its_text_into_the_opposite_sector() {
+        // #11800: a long base running left to the corner, a short line up and right from it.
+        // The 45° between the base's direction and the slanted one is drawn below left, past
+        // the slanted line, unless the text sits above right, past the base.
+        let mut sk = Sketch::new();
+        let a = sk.add_line(Vec2::new(-100.0, 0.0), Vec2::new(0.0, 0.0), None, None, None).unwrap_or(0);
+        let b = sk.add_line(Vec2::new(0.0, 0.0), Vec2::new(30.0, 30.0), Some(2), None, None).unwrap_or(0);
+        let k = ConstraintKind::Angle { a, b, value: std::f64::consts::FRAC_PI_4, flip: false };
+        let d0 = |text: Option<Vec2>| match dim_frame_at(&sk, &k, text) {
+            Some(DimFrame::Angular { d0, sweep, .. }) if (sweep - std::f64::consts::FRAC_PI_4).abs() < 1e-12 => d0,
+            other => panic!("{other:?}"),
+        };
+        assert!(close(d0(None), -Vec2::X));
+        assert!(close(d0(Some(Vec2::new(20.0, 5.0))), Vec2::X));
+        assert!(close(d0(Some(Vec2::new(-20.0, -5.0))), -Vec2::X));
+        // Text in a sector of the other angle, at the vertex or not finite: as without text.
+        for t in [Vec2::new(-5.0, 20.0), Vec2::ZERO, Vec2::new(f64::NAN, 1.0)] {
+            assert!(close(d0(Some(t)), -Vec2::X), "{t:?}");
+        }
+        // Other dimensions do not change with their text.
+        let len = ConstraintKind::Length { l: a, value: 100.0 };
+        assert_eq!(dim_frame_at(&sk, &len, Some(Vec2::new(0.0, -30.0))), dim_frame(&sk, &len));
     }
 
     #[test]
