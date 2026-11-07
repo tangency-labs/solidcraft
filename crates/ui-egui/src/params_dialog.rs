@@ -113,13 +113,15 @@ struct Row {
 impl Row {
     /// Whether the Filter box's text (lower case) is in the row's name, expression, text,
     /// comment or group. The expression lets a parameter's name find every one that uses it
-    /// (#9706).
+    /// (#9706). The name also matches by the starts of its words, in order: `toodia` finds
+    /// `tooth_outward_flange_diameter` (#11978).
     fn matches(&self, filter: &str) -> bool {
         filter.is_empty()
             || [&self.name, &self.expression, &self.comment, &self.group]
                 .into_iter()
                 .chain(self.text.as_ref())
                 .any(|field| field.to_ascii_lowercase().contains(filter))
+            || solidcraft_engine::doc::name_words_match(&self.name, filter)
     }
 }
 
@@ -924,9 +926,19 @@ pub(crate) fn suggestions_for(ctx: &egui::Context, word: &str, explicit: bool) -
     let offered = |s: &&Suggestion| (explicit || s.text.trim_end_matches('(') != word) && !(exact && s.kind == "unit");
     let starts = |s: &&Suggestion| s.text.to_ascii_lowercase().starts_with(&w);
     // A parameter is also offered for a word anywhere in its name (`side` finds
-    // `cab_side_thickness`, #2757), after the names that start with it.
-    let within = |s: &&Suggestion| !exact && s.kind == "parameter" && !starts(s) && s.text.to_ascii_lowercase().contains(&w);
-    all.iter().filter(|s| starts(s) && offered(s)).chain(all.iter().filter(|s| within(s) && offered(s))).take(8).cloned().collect()
+    // `cab_side_thickness`, #2757), after the names that start with it, and then by the starts
+    // of its words in order (`toodia` finds `tooth_outward_flange_diameter`, #11978). That last
+    // group comes after the others, so it never pushes an earlier match out of the eight.
+    let parameter = |s: &&Suggestion| !exact && s.kind == "parameter" && !starts(s);
+    let within = |s: &&Suggestion| parameter(s) && s.text.to_ascii_lowercase().contains(&w);
+    let words = |s: &&Suggestion| parameter(s) && !within(s) && solidcraft_engine::doc::name_words_match(&s.text, word);
+    all.iter()
+        .filter(|s| starts(s) && offered(s))
+        .chain(all.iter().filter(|s| within(s) && offered(s)))
+        .chain(all.iter().filter(|s| words(s) && offered(s)))
+        .take(8)
+        .cloned()
+        .collect()
 }
 
 /// The named parameters, in the order the list offers them (favourites and the design's own
@@ -1346,13 +1358,21 @@ mod tests {
     fn a_parameter_is_offered_for_any_part_of_its_name() {
         let ctx = egui::Context::default();
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
-        for (name, e) in [("cab_side_thickness", "18 mm"), ("sides", "4")] {
+        for (name, e) in [("cab_side_thickness", "18 mm"), ("sides", "4"), ("inner_diameter", "6 mm")] {
             let _ = app.run("parameters.add", json!({"name": name, "expression": e}));
         }
+        // A favourite is listed first in the cache, but a match by word starts alone still
+        // comes after every name that contains the word (#11978).
+        let _ = app.run("parameters.favorite", json!({"name": "inner_diameter", "favorite": true}));
         publish(&mut app, &ctx);
         let texts = |w: &str| suggestions(&ctx, w).into_iter().map(|s| s.text).collect::<Vec<_>>();
         assert_eq!(texts("side"), ["sides", "cab_side_thickness"]);
         assert_eq!(texts("Thick"), ["cab_side_thickness"]);
+        // #11978: the starts of the name's words, in order.
+        assert_eq!(texts("cabthi"), ["cab_side_thickness"]);
+        assert_eq!(texts("sidthi"), ["cab_side_thickness"]);
+        assert!(texts("thicab").is_empty());
+        assert_eq!(texts("id"), ["cab_side_thickness", "sides", "inner_diameter"]);
         assert!(!texts("in").iter().any(|t| t == "sin("), "functions match from the start");
     }
 
@@ -1481,19 +1501,29 @@ mod tests {
     }
 
     /// #9706: the Filter box reads expressions too, so a parameter's name lists every parameter
-    /// that uses it, and a value finds the parameter that holds it.
+    /// that uses it, and a value finds the parameter that holds it. #11978: the starts of a
+    /// name's words, in order, find it.
     #[test]
     fn the_filter_lists_the_parameters_that_use_a_name() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.call("ui.resize", json!({"width": 1600, "height": 1400}));
-        for (name, expression) in [("width", "40 mm"), ("height", "width * 2"), ("depth", "5 mm")] {
+        for (name, expression) in [("width", "40 mm"), ("height", "width * 2"), ("depth", "5 mm"), ("tooth_outward_flange_diameter", "8 mm")] {
             h.app.run("parameters.add", json!({"name": name, "expression": expression})).unwrap();
         }
         h.app.start("parameters.change");
         h.frames(6);
-        let all = ["width", "height", "depth"];
-        for (filter, expected) in [("width", vec!["width", "height"]), ("WIDTH *", vec!["height"]), ("5 mm", vec!["depth"]), ("", all.to_vec())] {
+        let all = ["width", "height", "depth", "tooth_outward_flange_diameter"];
+        let tooth = vec!["tooth_outward_flange_diameter"];
+        for (filter, expected) in [
+            ("width", vec!["width", "height"]),
+            ("WIDTH *", vec!["height"]),
+            ("5 mm", vec!["depth"]),
+            ("toodia", tooth.clone()),
+            ("OutDia", tooth.clone()),
+            ("diatoo", vec![]),
+            ("", all.to_vec()),
+        ] {
             h.app.params.as_mut().unwrap().filter = filter.into();
             h.frames(4);
             let shown: Vec<&str> = all.into_iter().filter(|n| crate::scenario::rect_of(&format!("dialog:table:user:{n}")).is_some()).collect();
