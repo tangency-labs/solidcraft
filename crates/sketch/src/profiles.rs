@@ -20,7 +20,9 @@ use crate::shape::{Shape, intersections_within};
 use crate::union_find::{find, union};
 
 const MERGE_TOL: f64 = 1e-6;
-/// Curve ends this close (mm) join into one corner of a profile.
+/// How far apart (mm) curve ends may be and still join into one corner of a profile. Two ends
+/// within it join only when each is the other's unique nearest end, so a third end as near
+/// leaves the gap open.
 pub const ENDPOINT_JOIN_TOL: f64 = MERGE_TOL * 100.0;
 const MAX_EDGES: usize = 50_000;
 
