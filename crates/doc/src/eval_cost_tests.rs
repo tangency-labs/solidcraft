@@ -1835,6 +1835,7 @@ fn a_hole_classifies_the_faces_it_reads_not_every_face_of_the_design() {
     // A point on a side wall drills into that wall.
     let side = super::hole_direction_at(&st, Vec3::new(252.0, 0.0, 5.0), &[]).unwrap();
     assert!((side - Vec3::new(-1.0, 0.0, 0.0)).len() < 1e-6, "into the side wall: {side:?}");
+}
 
 /// A cut whose target name is taken by another component's sheet, while a body of the cut's own
 /// component was asked for that name, is refused before the sheet is machined (#12141).

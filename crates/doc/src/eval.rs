@@ -3152,7 +3152,7 @@ pub(crate) fn named_target(doc: &Document, state: &ModelState, f: &Feature, name
     let i = state.bodies.iter().position(|b| b.name == name).ok_or_else(|| DocError::Unknown(format!("body `{name}`")))?;
     let Some(found) = state.bodies.get(i).filter(|b| b.component != f.component) else { return Ok(i) };
     let asked: Vec<&str> =
-        state.bodies.iter().filter(|b| b.component == f.component && asked_name(doc, state, b) == Some(name)).map(|b| b.name.as_str()).collect();
+        asked_names(doc, state).filter(|(b, asked)| b.component == f.component && *asked == Some(name)).map(|(b, _)| b.name.as_str()).collect();
     if asked.is_empty() {
         return Ok(i);
     }
@@ -3166,18 +3166,33 @@ pub(crate) fn named_target(doc: &Document, state: &ModelState, f: &Feature, name
     )))
 }
 
-/// The name body `b` was asked to be called: its slot of its feature's stored names. An
-/// Import's skipped solids make no body, so its bodies take the slots left, in order; any
-/// other feature's k-th body takes slot k. Siblings a later feature removed shift the count,
-/// so a body then reads a later slot's name (only ever refusing an ambiguous target).
-fn asked_name<'a>(doc: &'a Document, state: &ModelState, b: &ModelBody) -> Option<&'a str> {
-    let m = doc.feature(b.feature)?;
-    let j = state.bodies.iter().filter(|x| x.feature == m.id).position(|x| x.name == b.name)?;
-    let slot = match &m.kind {
-        FeatureKind::Import { skip, .. } => (0..m.body_names.len()).filter(|k| !skip.contains(&(*k as u64))).nth(j)?,
-        _ => j,
-    };
-    m.body_names.get(slot).map(String::as_str).filter(|n| !n.is_empty())
+/// Each body with the name it was asked to be called: its slot of its feature's stored names.
+/// An Import's skipped solids make no body, so its bodies take the slots left, in order; any
+/// other feature's k-th body takes slot k. Siblings a later feature removed shift the count, so
+/// a body then reads a later slot's name (only ever refusing an ambiguous target). One pass
+/// over the bodies, each feature's slots listed once, so a large import costs linear time.
+fn asked_names<'a, 's>(doc: &'a Document, state: &'s ModelState) -> impl Iterator<Item = (&'s ModelBody, Option<&'a str>)> {
+    let mut made: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
+    let mut slots: std::collections::HashMap<u64, Vec<usize>> = std::collections::HashMap::new();
+    state.bodies.iter().map(move |b| {
+        let j = made.entry(b.feature).or_insert(0);
+        let k = *j;
+        *j += 1;
+        let asked = doc.feature(b.feature).and_then(|m| {
+            let slot = match &m.kind {
+                FeatureKind::Import { skip, .. } => *slots
+                    .entry(m.id)
+                    .or_insert_with(|| {
+                        let skip: std::collections::HashSet<u64> = skip.iter().copied().collect();
+                        (0..m.body_names.len()).filter(|s| !skip.contains(&(*s as u64))).collect()
+                    })
+                    .get(k)?,
+                _ => k,
+            };
+            m.body_names.get(slot).map(String::as_str).filter(|n| !n.is_empty())
+        });
+        (b, asked)
+    })
 }
 
 /// Refuse the target names among `names` that [`named_target`] finds ambiguous, before any
@@ -9177,10 +9192,9 @@ mod world_placement_cache_tests {
         doc.feature_mut(id).unwrap().body_names = vec!["A".into(), "B".into()];
         let mut state = ModelState::default();
         state.bodies.push(ModelBody::new("B (2)".into(), kernel::box_solid(Vec3::ZERO, Vec3::new(1., 1., 1.)).unwrap(), id));
-        let b = state.bodies[0].clone();
-        assert_eq!(asked_name(&doc, &state, &b), Some("B"));
+        assert_eq!(asked_names(&doc, &state).next().unwrap().1, Some("B"));
         doc.feature_mut(id).unwrap().kind = FeatureKind::Import { file: "x.step".into(), step: "".into(), components: Vec::new(), skip: Vec::new() };
-        assert_eq!(asked_name(&doc, &state, &b), Some("A"));
+        assert_eq!(asked_names(&doc, &state).next().unwrap().1, Some("A"));
     }
 
     #[test]
