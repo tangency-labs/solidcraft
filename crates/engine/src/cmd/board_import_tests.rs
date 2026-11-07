@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 use solidcore_record::{Vec2, Vec3};
 use solidcraft_io::{DrillArc, DrillHit, DrillSlot, Drills, Geom2};
 
-use super::{Board, Origin, build_board};
+use super::{Board, Finish, Origin, build_board, trace_steps};
 use crate::Session;
 use crate::schema::board_import::BoardImportResult;
 
@@ -19,11 +19,21 @@ fn rectangle(at: Vec2, w: f64, h: f64) -> Vec<Geom2> {
 }
 
 fn hits(at: &[(f64, f64)], diameter: f64) -> Vec<DrillHit> {
-    at.iter().map(|(x, y)| DrillHit { at: v(*x, *y), diameter, plated: Some(true) }).collect()
+    at.iter().map(|(x, y)| DrillHit { at: v(*x, *y), diameter, plated: Some(true), via: None }).collect()
 }
 
 fn build(s: &mut Session, outline: &[Geom2], drills: &Drills, thickness: f64, origin: Origin) -> BoardImportResult {
-    let board = Board { outline, drills, thickness, name: "PCB", origin, outline_file: "pcb-Edge_Cuts.gm1", drill_files: &[] };
+    let board = Board {
+        outline,
+        drills,
+        thickness,
+        name: "PCB",
+        origin,
+        outline_file: "pcb-Edge_Cuts.gm1",
+        drill_files: &[],
+        layers: &[],
+        finish: Finish::Hasl,
+    };
     build_board(s, &board, Vec::new()).unwrap_or_else(|e| panic!("{e}"))
 }
 
@@ -132,10 +142,13 @@ fn inserting_a_board_from_its_files_is_one_undo_step() {
         body: r["body"].as_str().unwrap_or("").into(),
         bodies: Vec::new(),
         holes: 0,
+        vias: 0,
         slots: 0,
         skipped: 0,
         thickness: 0.0,
         offset: [0.0, 0.0],
+        layer_sketches: Vec::new(),
+        prints: Vec::new(),
         warnings: Vec::new(),
         param_warnings: Vec::new(),
     };
@@ -251,11 +264,11 @@ fn arcs_and_cut_outs_shape_the_board() {
         Geom2::Arc { c: v(r, r), a: v(0.0, r), b: v(r, 0.0) },
     ];
     outline.extend(rectangle(v(10.0, 5.0), 10.0, 10.0));
-    let drills = Drills { hits: hits(&[(0.3, 0.3), (15.0, 10.0), (5.0, 10.0)], 0.4), ..Drills::default() };
+    let drills = Drills { hits: hits(&[(0.3, 0.3), (15.0, 10.0), (5.0, 10.0)], 0.6), ..Drills::default() };
     let mut s = Session::default();
     let b = build(&mut s, &outline, &drills, 1.6, Origin::File);
     assert_eq!((b.holes, b.skipped), (1, 2), "{b:?}");
-    let area = w * h - 4.0 * (r * r - PI * r * r / 4.0) - 100.0 - PI * 0.2 * 0.2;
+    let area = w * h - 4.0 * (r * r - PI * r * r / 4.0) - 100.0 - PI * 0.3 * 0.3;
     near(volume(&mut s), area * 1.6);
 }
 
@@ -274,6 +287,8 @@ fn an_open_outline_is_refused_naming_the_gap() {
         origin: Origin::File,
         outline_file: "pcb.gm1",
         drill_files: &[],
+        layers: &[],
+        finish: Finish::Hasl,
     };
     let e = build_board(&mut s, &board, Vec::new()).map(|_| ()).unwrap_err().to_string();
     assert!(e.contains("not closed") && e.contains("gap of 0.5 mm") && e.contains("(0, 0.5)") && e.contains("(0, 0)"), "{e}");
@@ -281,6 +296,29 @@ fn an_open_outline_is_refused_naming_the_gap() {
     let e = build_board(&mut s, &empty, Vec::new()).map(|_| ()).unwrap_err().to_string();
     assert!(e.contains("draws nothing"), "{e}");
     assert!(s.doc.features.is_empty() && s.doc.components.is_empty(), "nothing was added");
+    // A 0.01 mm slip, as old files have, is closed with a line and a warning.
+    let mut slipped = rectangle(Vec2::ZERO, 30.0, 20.0);
+    slipped[3] = Geom2::Line(v(0.0, 20.0), v(0.0, 0.01));
+    let r = build_board(&mut s, &Board { outline: &slipped, ..board }, Vec::new()).unwrap_or_else(|e| panic!("{e}"));
+    assert!(r.warnings.iter().any(|w| w.contains("closed a gap of 0.01 mm")), "{:?}", r.warnings);
+}
+
+/// A drill file that doesn't give its number format, written with one more decimal place than
+/// the usual guess, is read so its holes land on the board, saying so.
+#[test]
+fn a_drill_file_without_its_number_format_is_read_to_fit_the_board() {
+    let mut s = Session::default();
+    let drill = "M48
+METRIC
+T1C1.0
+%
+T1
+X1100000Y600000
+M30
+";
+    let r = s.execute("file.insert_gerber", &json!({"outline_text": RECTANGLE_GERBER, "drills_text": drill})).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(r["holes"], 1, "{r}");
+    assert!(r["warnings"].to_string().contains("read with 4, not the usual 3"), "{r}");
 }
 
 /// Bad parameters are refused before any file is read, saying what is wrong.
@@ -288,7 +326,7 @@ fn an_open_outline_is_refused_naming_the_gap() {
 fn bad_parameters_are_refused() {
     let mut s = Session::default();
     let square = "%MOMM*%\nD10*\nX0Y0D02*\nX10000000Y0D01*\nM02*\n";
-    let cases: [(Value, &str); 10] = [
+    let cases: [(Value, &str); 14] = [
         (json!({}), "give `outline`"),
         (json!({"outline": "a.gm1", "outline_text": square}), "not both"),
         (json!({"outline_text": square, "thickness": 0}), "`thickness`"),
@@ -299,6 +337,10 @@ fn bad_parameters_are_refused() {
         (json!({"outline_text": 5}), "`outline_text`"),
         (json!({"outline_text": square, "drills": [3]}), "`drills`"),
         (json!({"outline_text": square, "drills_text": vec![square; 17]}), "at most 16"),
+        (json!({"outline_text": square, "layers": ["a.gtl"]}), "`layers` must be an object"),
+        (json!({"outline_text": square, "layers": {"inner_copper": "a.g2"}}), "no layer `inner_copper`"),
+        (json!({"outline_text": square, "layers": {"top_copper": "a.gtl"}, "layers_text": {"top_copper": square}}), "given twice"),
+        (json!({"outline_text": square, "finish": "osp"}), "`finish`"),
     ];
     for (p, want) in cases {
         let e = s.execute("file.insert_gerber", &p).map(|_| ()).unwrap_err().to_string();
@@ -307,4 +349,76 @@ fn bad_parameters_are_refused() {
     let e = s.execute("file.insert_gerber", &json!({"outline": "/nonexistent/board-Edge_Cuts.gm1"})).map(|_| ()).unwrap_err().to_string();
     assert!(e.contains("board-Edge_Cuts.gm1"), "{e}");
     assert!(s.doc.features.is_empty() && s.undo.is_empty(), "a refused insert changes nothing");
+}
+
+/// Copper, mask and silkscreen layers become hidden sketches in the board's component, and the top
+/// gets its printed look as an image on the top face.
+#[test]
+fn layers_become_hidden_sketches_and_a_printed_look() {
+    let mut s = Session::default();
+    let head = "%FSLAX46Y46*%%MOMM*%";
+    // A 2 mm square pad at (110, 60) and a 0.5 mm trace from it.
+    let copper = format!("{head}%ADD10R,2X2*%%ADD11C,0.5*%D10*X110000000Y60000000D03*D11*X110000000Y60000000D02*X120000000Y60000000D01*M02*");
+    let mask = format!("{head}%ADD10R,2.2X2.2*%D10*X110000000Y60000000D03*M02*");
+    let silk = format!("{head}%ADD10C,0.2*%D10*X105000000Y55000000D02*X125000000Y55000000D01*M02*");
+    let p = json!({"outline_text": RECTANGLE_GERBER, "layers_text": {"top_copper": copper, "top_mask": mask, "top_silk": silk}, "finish": "enig"});
+    let r = s.execute("file.insert_gerber", &p).unwrap_or_else(|e| panic!("{e}"));
+    let ids: Vec<u64> = r["layer_sketches"].as_array().map(|a| a.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
+    assert_eq!(ids.len(), 3, "{r}");
+    assert!(ids.iter().all(|id| s.visibility.hidden_sketches.contains(id)), "the layer sketches are hidden");
+    assert_eq!(r["prints"], json!(["Top print"]), "{r}");
+    let canvas = s.doc.canvases.iter().find(|c| c.name == "Top print").unwrap_or_else(|| panic!("no Top print"));
+    // The image covers the 30 by 20 mm board at 20 pixels a mm.
+    assert_eq!((canvas.pixels, canvas.width), ([600, 400], 30.0), "{canvas:?}");
+    let component = s.doc.components.iter().find(|c| c.id == r["component"].as_u64().unwrap_or(0)).unwrap_or_else(|| panic!("no component"));
+    assert_eq!(component.properties.get("pcb.top_mask").map(String::as_str), Some("top mask text"));
+    assert_eq!(canvas.component, component.id);
+}
+
+/// Vias are kept in a hidden sketch and drawn, not cut: a hole the drill file marks as a via,
+/// whatever its size, and an unmarked plated one of 0.5 mm or less. A marked component hole and
+/// an unplated one are cut however small.
+#[test]
+fn vias_are_kept_in_a_sketch_not_cut() {
+    let mut s = Session::default();
+    let hole = |x: f64, diameter: f64, plated: Option<bool>, via: Option<bool>| DrillHit { at: v(x, 5.0), diameter, plated, via };
+    let drills = Drills {
+        hits: vec![
+            hole(5.0, 0.4, Some(true), None),
+            hole(10.0, 1.0, Some(true), Some(true)),
+            hole(15.0, 0.4, Some(true), Some(false)),
+            hole(20.0, 0.4, Some(false), None),
+        ],
+        ..Drills::default()
+    };
+    let r = build(&mut s, &rectangle(Vec2::ZERO, 30.0, 20.0), &drills, 1.6, Origin::File);
+    assert_eq!((r.holes, r.vias), (2, 2), "{r:?}");
+    assert_eq!(r.layer_sketches.len(), 1, "{r:?}");
+    assert!(r.layer_sketches.iter().all(|id| s.visibility.hidden_sketches.contains(id)), "the vias' sketch is hidden");
+    near(volume(&mut s), (600.0 - 2.0 * PI * 0.2 * 0.2) * 1.6);
+}
+
+/// An outline whose rounded corners are drawn as hundreds of tiny lines, as some writers do, is
+/// read as the four lines and four arcs it traces, and builds the same board.
+#[test]
+fn an_outline_drawn_in_tiny_steps_is_read_as_its_arcs() {
+    let (w, h, r) = (30.0, 20.0, 2.0);
+    let corner = |c: Vec2, from: f64| -> Vec<Vec2> {
+        (0..=200).map(|k| c + v((from + PI / 2.0 * k as f64 / 200.0).cos(), (from + PI / 2.0 * k as f64 / 200.0).sin()) * r).collect()
+    };
+    let mut pts = Vec::new();
+    for (c, from) in [(v(w - r, r), -PI / 2.0), (v(w - r, h - r), 0.0), (v(r, h - r), PI / 2.0), (v(r, r), PI)] {
+        pts.extend(corner(c, from));
+    }
+    let first = pts[0];
+    pts.push(first);
+    let outline: Vec<Geom2> = pts.windows(2).map(|s| Geom2::Line(s[0], s[1])).collect();
+    let mut warnings = Vec::new();
+    let traced = trace_steps(&outline, &mut warnings);
+    let arcs = traced.iter().filter(|g| matches!(g, Geom2::Arc { .. })).count();
+    assert_eq!((traced.len(), arcs), (8, 4), "{traced:?}");
+    assert!(warnings.iter().any(|w| w.contains("800 short lines") && w.contains("the 4 arcs and lines")), "{warnings:?}");
+    let mut s = Session::default();
+    let _ = build(&mut s, &outline, &Drills::default(), 1.6, Origin::File);
+    near(volume(&mut s), (w * h - (4.0 - PI) * r * r) * 1.6);
 }

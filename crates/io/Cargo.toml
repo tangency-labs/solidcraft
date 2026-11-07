@@ -35,6 +35,9 @@ cadmpeg-registry = { workspace = true }
 # Gerber (RS-274X) parsing for PCB import (src/gerber.rs); pure Rust, MIT OR Apache-2.0, and
 # gives the full command set (apertures, regions, macros) later slices need for copper layers.
 gerber_parser = { version = "0.5.0", default-features = false }
+# Exact area of Gerber copper, mask and silkscreen layers (src/gerber_area.rs): closed polylines
+# with arc segments and booleans on them; pure Rust, no unsafe, MIT OR Apache-2.0.
+cavalier_contours = { version = "0.9.0", default-features = false }
 
 # The model cache's key (build.rs).
 [build-dependencies]

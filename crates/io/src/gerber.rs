@@ -6,20 +6,27 @@
 //! too long for its 64-bit arithmetic, formats with more than 6 decimals, and attributes
 //! (whose parser indexes missing arguments). The pre-pass reads the file attributes itself.
 //!
-//! This slice reads a board outline layer (the profile the board is cut along): the centre lines
-//! of its draws and arcs, or the boundary of a region, in millimetres with y up. Aperture shapes
-//! do not matter for a centre line, so apertures are selected but never read, and aperture
-//! macros are left out.
+//! It reads two things:
+//! - a board outline layer (the profile the board is cut along): the centre lines of its draws
+//!   and arcs, or the boundary of a region, in millimetres with y up. Aperture shapes do not
+//!   matter for a centre line, so apertures are selected but never read, and aperture macros are
+//!   left out;
+//! - an image layer (copper, solder mask, silkscreen): the area its flashes, strokes and regions
+//!   cover, dark and clear in file order, as exact contours (`gerber_area.rs`). Aperture
+//!   definitions and macros are read by the pre-pass, not the parser; the parser gets a stand-in
+//!   definition so it accepts the aperture's number.
 
+use std::collections::HashMap;
 use std::io::BufReader;
 
 use gerber_parser::gerber_types::{
-    ApertureBlock, AxisSelect, Command, CoordinateMode, CoordinateNumber, DCode, ExtendedCode, FunctionCode, GCode, ImageMirroring, ImageRotation,
-    InterpolationMode, MCode, Operation, QuadrantMode, StepAndRepeat, Unit,
+    ApertureBlock, AxisSelect, Command, CoordinateMode, CoordinateNumber, DCode, ExtendedCode, FunctionCode, GCode, ImageMirroring, ImagePolarity,
+    ImageRotation, InterpolationMode, MCode, Operation, Polarity, QuadrantMode, StepAndRepeat, Unit,
 };
 use gerber_parser::{ContentError, GerberParserErrorWithContext};
 use solidcore_record::Vec2;
 
+use crate::gerber_area::{self, Aperture, Item, Seg, Shape};
 use crate::sketch2d::{MAX_DRAWING_BYTES, MAX_ENTITIES};
 use crate::{Geom2, IoError, Result};
 
@@ -31,6 +38,21 @@ pub struct GerberOutline {
     /// Things read but not understood, or guessed, worded for a person.
     pub warnings: Vec<String>,
 }
+
+/// An image layer (copper, solder mask, silkscreen): the area it covers, in millimetres, y up.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct GerberLayer {
+    /// Closed contours of lines, arcs and circles. They never cross; nested ones alternate
+    /// between covered area and hole (even-odd).
+    pub loops: Vec<Vec<Geom2>>,
+    /// What the file says it is (`Copper,L1,Top`, `Soldermask,Top`...), when it says.
+    pub function: Option<String>,
+    /// Things read but not understood, or guessed, worded for a person.
+    pub warnings: Vec<String>,
+}
+
+/// Most aperture macros one file may define.
+const MAX_MACROS: usize = 10_000;
 
 /// Farthest a coordinate may be from the origin, in millimetres (a kilometre).
 const MAX_COORD_MM: f64 = 1e6;
@@ -49,10 +71,19 @@ const QUADRANT: f64 = std::f64::consts::FRAC_PI_2 + 1e-6;
 
 /// Read a Gerber board outline layer.
 pub fn read_gerber_outline(text: &str) -> Result<GerberOutline> {
+    read(text, false)?.finish()
+}
+
+/// Read a Gerber image layer (copper, solder mask, silkscreen): the area it covers.
+pub fn read_gerber_layer(text: &str) -> Result<GerberLayer> {
+    read(text, true)?.finish_layer()
+}
+
+fn read(text: &str, image: bool) -> Result<Reader> {
     if text.len() > MAX_DRAWING_BYTES {
         return Err(IoError::Invalid(format!("the Gerber file is too large (over {} MiB)", MAX_DRAWING_BYTES >> 20)));
     }
-    let mut r = Reader::default();
+    let mut r = Reader { image, ..Reader::default() };
     let lines = r.prepare(text)?;
     let doc = match gerber_parser::parse(BufReader::new(lines.as_bytes())) {
         Ok(doc) => doc,
@@ -70,7 +101,7 @@ pub fn read_gerber_outline(text: &str) -> Result<GerberOutline> {
             break;
         }
     }
-    r.finish()
+    Ok(r)
 }
 
 // ---- pre-pass: one command per line, nothing the parser cannot take ----
@@ -200,7 +231,12 @@ impl Warnings {
 
 #[derive(Default)]
 struct Reader {
+    /// Reading an image layer (its area), not an outline (its centre lines).
+    image: bool,
     // Pre-pass.
+    /// The unit the file has said (`MOIN` or `MOMM`): saying it again, as old files do with
+    /// both `%MOIN*%` and G70, changes nothing.
+    unit_said: Option<&'static str>,
     /// A format statement came before (coordinates need it).
     seen_format: bool,
     /// The format statement asks for incremental coordinates.
@@ -226,6 +262,16 @@ struct Reader {
     ended: bool,
     geom: Vec<Geom2>,
     warnings: Warnings,
+    // Image layers.
+    /// Aperture macros by name: their primitives, `*` between them.
+    macros: HashMap<String, String>,
+    apertures: HashMap<i32, Aperture>,
+    aperture: Option<i32>,
+    /// Clear polarity (`%LPC%`) is loaded.
+    clear: bool,
+    /// The region contour being drawn.
+    contour: Vec<Seg>,
+    items: Vec<Item>,
 }
 
 impl Reader {
@@ -238,6 +284,11 @@ impl Reader {
     }
 
     /// The file rewritten for the parser: one command per line, each one it can take.
+    /// The unit command for the parser, unless the file said that unit already.
+    fn say_unit(&mut self, unit: &'static str) -> Option<String> {
+        (self.unit_said.replace(unit) != Some(unit)).then(|| format!("%{unit}*%"))
+    }
+
     fn prepare(&mut self, text: &str) -> Result<String> {
         let mut out = String::with_capacity(text.len().saturating_add(text.len() / 4));
         for item in (Blocks { text, pos: 0 }) {
@@ -300,8 +351,8 @@ impl Reader {
                 55 | 90 => {}
                 1 | 2 | 3 | 36 | 37 | 54 | 74 | 75 => lines.push(format!("G{g:02}*")),
                 // Deprecated units; the parser reads only the extended form.
-                70 => lines.push("%MOIN*%".into()),
-                71 => lines.push("%MOMM*%".into()),
+                70 => lines.extend(self.say_unit("MOIN")),
+                71 => lines.extend(self.say_unit("MOMM")),
                 91 => {
                     return Err(IoError::Invalid("the Gerber file switches to incremental coordinates with G91, which is not supported".into()));
                 }
@@ -375,8 +426,16 @@ impl Reader {
             self.warn(format!("Skipped a command with characters that are not plain ASCII: `%{}%`", quote(body)));
             return Ok(Vec::new());
         }
-        // An aperture macro's body has `*` inside; aperture shapes do not change a centre line.
-        if body.starts_with("AM") {
+        // An aperture macro's body has `*` inside; aperture shapes do not change a centre line,
+        // and an image's are read here, not by the parser.
+        if let Some(def) = body.strip_prefix("AM") {
+            if self.image {
+                let (name, prims) = def.split_once('*').unwrap_or((def, ""));
+                if self.macros.len() >= MAX_MACROS {
+                    return Err(IoError::Invalid(format!("the Gerber file defines more than {MAX_MACROS} aperture macros")));
+                }
+                self.macros.insert(name.trim().to_string(), prims.to_string());
+            }
             return Ok(Vec::new());
         }
         let mut lines = Vec::new();
@@ -388,7 +447,8 @@ impl Reader {
             match cmd.get(..2).unwrap_or(cmd) {
                 "FS" => lines.push(self.format_statement(cmd)?),
                 "MO" => match cmd {
-                    "MOMM" | "MOIN" => lines.push(format!("%{cmd}*%")),
+                    "MOMM" => lines.extend(self.say_unit("MOMM")),
+                    "MOIN" => lines.extend(self.say_unit("MOIN")),
                     _ => {
                         return Err(IoError::Invalid(format!("the Gerber file uses an unknown unit `{}` (expected %MOMM*% or %MOIN*%)", quote(cmd))));
                     }
@@ -396,6 +456,7 @@ impl Reader {
                 "TF" => self.attribute(cmd),
                 // Other attributes, and the deprecated layer name, say nothing about geometry.
                 "TA" | "TO" | "TD" | "LN" => {}
+                "AD" if self.image => lines.extend(self.aperture_definition(cmd)),
                 "AD" | "AB" | "LP" | "LM" | "LR" | "LS" | "SR" | "IP" | "IN" | "OF" | "SF" | "MI" | "IR" | "AS" => {
                     lines.push(format!("%{cmd}*%"));
                 }
@@ -462,6 +523,20 @@ impl Reader {
         Ok(format!("%FS{zeros}{mode}X{int}{dec}Y{int}{dec}*%"))
     }
 
+    /// An image's aperture definition, read here; the parser gets a stand-in with its number.
+    fn aperture_definition(&mut self, cmd: &str) -> Option<String> {
+        match gerber_area::aperture(cmd.get(2..).unwrap_or(""), &self.macros) {
+            Ok((code, ap)) => {
+                self.apertures.insert(code, ap);
+                Some(format!("%ADD{code}C,0*%"))
+            }
+            Err(e) => {
+                self.warn(format!("Skipped an aperture: {e}."));
+                None
+            }
+        }
+    }
+
     /// A file attribute, `TF.<name>,<value>...` (from `%TF...%` or a `G04 #@! TF...` comment).
     fn attribute(&mut self, cmd: &str) {
         let Some(rest) = cmd.strip_prefix("TF") else { return };
@@ -480,6 +555,32 @@ impl Reader {
             Some((_, line)) => self.warn(format!("Skipped a command that could not be read: `{}`", quote(line))),
             None => self.warn(format!("Skipped a command that could not be read ({})", quote(&e.error.to_string()))),
         }
+    }
+
+    fn finish_layer(mut self) -> Result<GerberLayer> {
+        if self.in_region {
+            self.close_contour();
+            self.warn("The file ends inside a region (G36 without G37).".into());
+        }
+        if !self.has_end {
+            self.warn("The file has no end command (M02); it may be cut short.".into());
+        }
+        let unit = self.unit();
+        let mut warnings = self.warnings.into_vec();
+        let loops = gerber_area::build(&self.items, &self.apertures, unit, &mut warnings);
+        if loops.iter().map(Vec::len).sum::<usize>() > MAX_ENTITIES {
+            return Err(IoError::Invalid(format!("the Gerber layer has more than {MAX_ENTITIES} lines and arcs")));
+        }
+        Ok(GerberLayer { loops, function: self.file_function, warnings })
+    }
+
+    /// Add an object of an image.
+    fn item(&mut self, shape: Shape) -> Result<()> {
+        if self.items.len() >= MAX_ENTITIES {
+            return Err(IoError::Invalid(format!("the Gerber layer has more than {MAX_ENTITIES} objects")));
+        }
+        self.items.push(Item { clear: self.clear, shape });
+        Ok(())
     }
 
     fn finish(mut self) -> Result<GerberOutline> {
@@ -518,8 +619,8 @@ impl Reader {
         match c {
             Command::FunctionCode(FunctionCode::GCode(g)) => self.g_code(g),
             Command::FunctionCode(FunctionCode::DCode(DCode::Operation(op))) => return self.operate(op),
-            // Selects an aperture; its shape does not change a centre line.
-            Command::FunctionCode(FunctionCode::DCode(DCode::SelectAperture(_))) => {}
+            // Selects an aperture; its shape does not change a centre line, only an image.
+            Command::FunctionCode(FunctionCode::DCode(DCode::SelectAperture(code))) => self.aperture = Some(*code),
             Command::FunctionCode(FunctionCode::MCode(MCode::EndOfFile)) => self.ended = true,
             Command::ExtendedCode(e) => self.extended(e),
         }
@@ -567,6 +668,13 @@ impl Reader {
             ExtendedCode::OffsetImage(o) if o.a != 0.0 || o.b != 0.0 => self.image_setting("OF"),
             ExtendedCode::ScaleImage(s) if s.a != 1.0 || s.b != 1.0 => self.image_setting("SF"),
             ExtendedCode::AxisSelect(a) if *a != AxisSelect::AXBY => self.image_setting("AS"),
+            ExtendedCode::LoadPolarity(p) => self.clear = *p == Polarity::Clear,
+            ExtendedCode::ImagePolarity(ImagePolarity::Negative) if self.image => {
+                self.warn("The file asks for a negative image (%IPNEG%), which is not supported; it was read as positive.".into());
+            }
+            ExtendedCode::LoadMirroring(_) | ExtendedCode::LoadRotation(_) | ExtendedCode::LoadScaling(_) if self.image => {
+                self.warn("Mirrored, turned or scaled apertures (%LM%, %LR%, %LS%) are not supported; they were drawn as defined.".into());
+            }
             // Apertures, polarity, aperture transformations, attributes, image name and polarity:
             // none of them moves a centre line.
             _ => {}
@@ -645,19 +753,31 @@ impl Reader {
                 self.current = self.target(x, y)?;
                 if self.block_depth == 0 {
                     self.flashes = self.flashes.saturating_add(1);
-                    self.warn("Flashed apertures (D03, pads) are not part of an outline and were skipped.".into());
+                    if self.image {
+                        match self.aperture {
+                            Some(code) => return self.item(Shape::Flash(self.current, code)),
+                            None => self.warn("A flash comes before any aperture is selected; it was skipped.".into()),
+                        }
+                    } else {
+                        self.warn("Flashed apertures (D03, pads) are not part of an outline and were skipped.".into());
+                    }
                 }
                 Ok(())
             }
         }
     }
 
-    /// Ends the region's current contour, warning when it does not return to its start.
+    /// Ends the region's current contour, warning when it does not return to its start; an
+    /// image keeps the contour as a region.
     fn close_contour(&mut self) {
         if let Some(s) = self.contour_start.take()
             && s != self.current
         {
             self.warn("A region's contour does not end where it starts.".into());
+        }
+        if !self.contour.is_empty() {
+            let contour = std::mem::take(&mut self.contour);
+            self.items.push(Item { clear: self.clear, shape: Shape::Region(contour) });
         }
     }
 
@@ -676,19 +796,40 @@ impl Reader {
                 InterpolationMode::Linear
             }
         };
-        match mode {
-            InterpolationMode::Linear => {
-                if start != end {
-                    self.push(Geom2::Line(start, end))?;
-                }
-                Ok(())
-            }
+        let seg = match mode {
+            // A stroke of no length still marks a dot in an image.
+            InterpolationMode::Linear => (start != end || (self.image && !self.in_region)).then_some(Seg::Line(start, end)),
             InterpolationMode::ClockwiseCircular => self.arc(start, end, di, dj, false),
             InterpolationMode::CounterclockwiseCircular => self.arc(start, end, di, dj, true),
+        };
+        let Some(seg) = seg else { return Ok(()) };
+        if !self.image {
+            return self.push(match seg {
+                Seg::Line(a, b) => Geom2::Line(a, b),
+                Seg::Arc { from, to, c, .. } if from == to => Geom2::Circle(c, dist(c, from)),
+                // Geom2 arcs run counter-clockwise, so a clockwise arc runs from its end to its start.
+                Seg::Arc { from, to, c, ccw: true } => Geom2::Arc { c, a: from, b: to },
+                Seg::Arc { from, to, c, ccw: false } => Geom2::Arc { c, a: to, b: from },
+            });
+        }
+        if self.in_region {
+            if self.contour.len().saturating_add(self.items.len()) >= MAX_ENTITIES {
+                return Err(IoError::Invalid(format!("the Gerber layer has more than {MAX_ENTITIES} objects")));
+            }
+            self.contour.push(seg);
+            return Ok(());
+        }
+        match self.aperture {
+            Some(code) => self.item(Shape::Stroke(seg, code)),
+            None => {
+                self.warn("A line is drawn before any aperture is selected; it was skipped.".into());
+                Ok(())
+            }
         }
     }
 
-    fn arc(&mut self, start: Vec2, end: Vec2, di: f64, dj: f64, ccw: bool) -> Result<()> {
+    /// The arc from `start` to `end` whose centre the offsets give.
+    fn arc(&mut self, start: Vec2, end: Vec2, di: f64, dj: f64, ccw: bool) -> Option<Seg> {
         let multi_centre = Vec2::new(start.x + di, start.y + dj);
         let multi = match self.quadrant {
             Quadrant::Multi => true,
@@ -704,24 +845,19 @@ impl Reader {
         if !r.is_finite() || r <= 1e-9 {
             if start != end {
                 self.warn("An arc with zero radius was read as a straight line.".into());
-                self.push(Geom2::Line(start, end))?;
+                return Some(Seg::Line(start, end));
             }
-            return Ok(());
+            return None;
         }
         if start == end {
             // A full circle in multi-quadrant mode; a zero-length arc in single-quadrant mode.
-            if multi {
-                self.push(Geom2::Circle(centre, r))?;
-            }
-            return Ok(());
+            return multi.then_some(Seg::Arc { from: start, to: end, c: centre, ccw });
         }
         let off = (dist(centre, end) - r).abs();
         if off > tolerance(r) {
             self.warn(format!("An arc's end point is {off:.4} mm off its circle; read anyway."));
         }
-        // Geom2 arcs run counter-clockwise, so a clockwise arc runs from its end to its start.
-        let (a, b) = if ccw { (start, end) } else { (end, start) };
-        self.push(Geom2::Arc { c: centre, a, b })
+        Some(Seg::Arc { from: start, to: end, c: centre, ccw })
     }
 }
 

@@ -1,4 +1,4 @@
-//! Gerber outline reader tests. Every fixture is written by hand here, except the contributor's
+//! Gerber outline and image layer reader tests. Every fixture is written by hand here, except the contributor's
 //! own board outline in `tests/fixtures/pcb/`; expected values are worked out by hand.
 
 use super::*;
@@ -306,6 +306,9 @@ fn every_command_reaches_the_parser_on_its_own_line() {
     let o = read("%FSLAX24Y24*%G70*G01*X0Y0D02*X10000Y0D01*G55D03*M02*");
     let Geom2::Line(_, b) = o.geom[0] else { panic!("expected a line") };
     assert!(close(b, p(25.4, 0.0)), "{:?}", o.geom);
+    // The unit said twice, as `%MOIN*%` and G70, is no warning.
+    let o = read("%FSLAX24Y24*%%MOIN*%G70*G01*X0Y0D02*X10000Y0D01*M02*");
+    assert!(o.warnings.is_empty(), "{:?}", o.warnings);
 }
 
 #[test]
@@ -426,6 +429,12 @@ const FRAGMENTS: &[&str] = &[
     "%LPC*%",
     "%SRX2Y2I1J1*%",
     "%AMOC8*5,1,8,0,0,1.08239X$1,22.5*%",
+    "%AMRR*21,1,$1,$2,0,0,$3*1,0,($1-$2)x2,0,0*4,1,3,0,0,1,0,1,1,0,0,0*7,0,0,2,1,0.3,45*$4=$1/0*%",
+    "%ADD12RR,1X0.5X30*%",
+    "%ADD13RR*%",
+    "%ADD15O,1X2X0.3*%",
+    "%ADD16P,2X6X15*%",
+    "%LPD*%",
     "M02*",
     "*",
     "%",
@@ -439,9 +448,10 @@ const FRAGMENTS: &[&str] = &[
 fn hostile_input_never_panics() {
     let header = "%FSLAX46Y46*%%MOMM*%%ADD10C,0.1*%D10*G01*X0Y0D02*X1000000Y0D01*";
     for probe in PARSER_PANIC_PROBES {
-        let _ = read_gerber_outline(probe);
-        let _ = read_gerber_outline(&format!("{header}{probe}M02*"));
-        let _ = read_gerber_outline(&format!("{header}\n{probe}\nX0Y0D01*M02*"));
+        for text in [probe.to_string(), format!("{header}{probe}M02*"), format!("{header}\n{probe}\nX0Y0D01*M02*")] {
+            let _ = read_gerber_outline(&text);
+            let _ = read_gerber_layer(&text);
+        }
     }
     let mut rng = XorShift(0x9e37_79b9_7f4a_7c15);
     let number = |rng: &mut XorShift| {
@@ -467,6 +477,7 @@ fn hostile_input_never_panics() {
             }
         }
         let _ = read_gerber_outline(&text);
+        let _ = read_gerber_layer(&text);
     }
     let fixture: Vec<char> = include_str!("../tests/fixtures/pcb/treasure_hunt_outline.gko").chars().collect();
     for _ in 0..500 {
@@ -484,6 +495,109 @@ fn hostile_input_never_panics() {
             let at = at.min(text.len());
             text.splice(at..at, piece);
         }
-        let _ = read_gerber_outline(&text.into_iter().collect::<String>());
+        let text: String = text.into_iter().collect();
+        let _ = read_gerber_outline(&text);
+        let _ = read_gerber_layer(&text);
     }
+}
+
+// ---- image layers ----
+
+const LAYER_HEAD: &str = "%FSLAX46Y46*%%MOMM*%G75*";
+
+fn layer(body: &str) -> GerberLayer {
+    match read_gerber_layer(&format!("{LAYER_HEAD}{body}M02*")) {
+        Ok(l) => l,
+        Err(e) => panic!("expected a layer, got: {e}"),
+    }
+}
+
+/// A closed contour's signed area, arcs exact (counter-clockwise positive); its pieces run in
+/// order, each either way.
+fn loop_area(l: &[Geom2]) -> f64 {
+    if let [Geom2::Circle(_, r)] = l {
+        return std::f64::consts::PI * r * r;
+    }
+    let mut area = 0.0;
+    let mut at: Option<Vec2> = None;
+    for g in l {
+        let (a, b, bulge_area) = match *g {
+            Geom2::Line(a, b) => (a, b, 0.0),
+            Geom2::Arc { c, a, b } => {
+                let r = (a.x - c.x).hypot(a.y - c.y);
+                let sweep = ((b.y - c.y).atan2(b.x - c.x) - (a.y - c.y).atan2(a.x - c.x)).rem_euclid(std::f64::consts::TAU);
+                (a, b, r * r / 2.0 * (sweep - sweep.sin()))
+            }
+            _ => continue,
+        };
+        // Pieces run on from the previous end; a piece the other way round counts backwards.
+        let forward = at.is_none_or(|p| close(p, a));
+        let (a, b, seg) = if forward { (a, b, bulge_area) } else { (b, a, -bulge_area) };
+        area += (a.x * b.y - b.x * a.y) / 2.0 + seg;
+        at = Some(b);
+    }
+    area
+}
+
+/// The covered area: outer contours less holes (nesting by size is enough for these fixtures).
+fn covered(l: &GerberLayer) -> f64 {
+    let mut areas: Vec<f64> = l.loops.iter().map(|x| loop_area(x).abs()).collect();
+    areas.sort_by(|a, b| b.total_cmp(a));
+    areas.iter().enumerate().map(|(i, a)| if i == 0 { *a } else { -a }).sum::<f64>().abs()
+}
+
+#[test]
+fn overlapping_pads_join_into_one_area() {
+    let l = layer("%ADD10R,2X2*%D10*X0Y0D03*X1000000Y0D03*");
+    assert_eq!(l.loops.len(), 1, "{:?}", l.loops);
+    assert!((covered(&l) - 6.0).abs() < 1e-9, "{}", covered(&l));
+    assert!(l.warnings.is_empty(), "{:?}", l.warnings);
+}
+
+#[test]
+fn a_round_trace_is_a_stadium_with_exact_arcs() {
+    let l = layer("%ADD10C,1*%D10*G01*X0Y0D02*X10000000Y0D01*");
+    let arcs = l.loops.iter().flatten().filter(|g| matches!(g, Geom2::Arc { .. })).count();
+    assert_eq!((l.loops.len(), arcs), (1, 2), "{:?}", l.loops);
+    let want = 10.0 + std::f64::consts::PI * 0.25;
+    assert!((covered(&l) - want).abs() < 1e-9, "{} vs {want}", covered(&l));
+}
+
+#[test]
+fn clear_polarity_cuts_a_hole() {
+    let l = layer("G36*X0Y0D02*G01*X10000000Y0D01*Y10000000D01*X0D01*Y0D01*G37*%LPC*%%ADD10C,2*%D10*X5000000Y5000000D03*");
+    assert_eq!(l.loops.len(), 2, "{:?}", l.loops);
+    assert!((covered(&l) - (100.0 - std::f64::consts::PI)).abs() < 1e-9, "{}", covered(&l));
+}
+
+#[test]
+fn a_region_reaching_its_hole_by_a_cut_in_line_has_a_hole() {
+    // Outer square, in to the inner square along y = 3, round it the other way, and back out.
+    let l = layer(
+        "G36*G01*X0Y0D02*X10000000D01*Y10000000D01*X0D01*Y3000000D01*X3000000D01*Y7000000D01*X7000000D01*Y3000000D01*X3000000D01*X0D01*Y0D01*G37*",
+    );
+    assert_eq!(l.loops.len(), 2, "{:?}", l.loops);
+    assert!((covered(&l) - 84.0).abs() < 1e-9, "{}", covered(&l));
+}
+
+#[test]
+fn an_aperture_macro_with_expressions_and_an_erasing_primitive() {
+    // A 4 by 2 rectangle less a circle of diameter ($1 - $2) / 2 = 1 at its centre.
+    let l = layer("%AMBOX*21,1,$1,$2,0,0,0*$3=($1-$2)/2*1,0,$3,0,0*%%ADD10BOX,4X2*%D10*X0Y0D03*");
+    assert_eq!(l.loops.len(), 2, "{:?} {:?}", l.loops, l.warnings);
+    assert!((covered(&l) - (8.0 - std::f64::consts::PI * 0.25)).abs() < 1e-9, "{}", covered(&l));
+}
+
+#[test]
+fn a_circle_drawn_with_a_round_aperture_is_a_ring() {
+    let l = layer("%ADD10C,0.2*%D10*X2000000Y0D02*G03*X2000000Y0I-2000000J0D01*");
+    assert_eq!(l.loops.len(), 2, "{:?}", l.loops);
+    let want = std::f64::consts::PI * (2.1f64.powi(2) - 1.9f64.powi(2));
+    assert!((covered(&l) - want).abs() < 1e-9, "{} vs {want}", covered(&l));
+}
+
+#[test]
+fn objects_without_an_aperture_are_skipped_with_a_warning() {
+    let l = layer("D11*X0Y0D03*");
+    assert!(l.loops.is_empty() && l.warnings.iter().any(|w| w.contains("never defines")), "{:?}", l.warnings);
 }

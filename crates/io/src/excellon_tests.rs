@@ -56,7 +56,31 @@ fn metric_decimal_file_with_attributes() {
     // A decimal file writes a whole number without its `.0`.
     assert!(at(d.hits[2].at, 20.0, 30.5) && close(d.hits[2].diameter, 1.0));
     assert!(d.hits.iter().all(|h| h.plated == Some(true)));
+    // The hole function says which are vias.
+    assert_eq!(d.hits.iter().map(|h| h.via).collect::<Vec<_>>(), [Some(false), Some(false), Some(true)]);
     assert!(d.warnings.is_empty(), "{:?}", d.warnings);
+}
+
+/// A header that lists its plated tools under `;TYPE=PLATED` and its unplated ones under
+/// `;TYPE=NON_PLATED`, as Altium writes it, gives each tool its own plating.
+#[test]
+fn each_type_comment_plates_the_tools_after_it() {
+    let d = read(
+        "M48
+INCH,LZ
+;TYPE=PLATED
+T1C0.00984
+;TYPE=NON_PLATED
+T2C0.12795
+%
+T01
+X001000Y001000
+T02
+X002000Y001000
+M30
+",
+    );
+    assert_eq!(d.hits.iter().map(|h| h.plated).collect::<Vec<_>>(), [Some(true), Some(false)]);
 }
 
 #[test]
@@ -216,6 +240,44 @@ fn repeat_codes_step_from_the_last_hole() {
 }
 
 #[test]
+fn coordinates_read_with_guessed_decimal_places_say_so() {
+    let d = read(
+        "M48
+METRIC
+T1C1.0
+%
+T1
+X1100000Y600000
+M30
+",
+    );
+    assert_eq!(d.guessed_decimals, Some(3));
+    assert!(at(d.hits[0].at, 1100.0, 600.0));
+    let d = read(
+        "M48
+METRIC,TZ,000.0000
+T1C1.0
+%
+T1
+X1100000Y600000
+M30
+",
+    );
+    assert_eq!(d.guessed_decimals, None);
+    let d = read(
+        "M48
+METRIC
+T1C1.0
+%
+T1
+X110.0Y60.0
+M30
+",
+    );
+    assert_eq!(d.guessed_decimals, None, "decimal points need no guess");
+}
+
+#[test]
 fn an_overlong_digit_pattern_falls_back_to_the_usual_digits() {
     let d = read(&format!("M48\nMETRIC,LZ,{}\nT1C1.0\n%\nT1\nX012500Y-0030\nM30\n", "0".repeat(200)));
     assert!(at(d.hits[0].at, 12.5, -3.0));
@@ -365,7 +427,7 @@ fn slot_outline_is_one_closed_loop_with_shared_end_points() {
             assert!(mid.0 * away.0 + mid.1 * away.1 > 0.0, "arc {arc:?}");
         }
     }
-    let first = Drills { hits: vec![DrillHit { at: Vec2::new(1.0, 1.0), diameter: 0.8, plated: None }], ..Drills::default() };
+    let first = Drills { hits: vec![DrillHit { at: Vec2::new(1.0, 1.0), diameter: 0.8, plated: None, via: None }], ..Drills::default() };
     assert_eq!(first.to_geom(), vec![Geom2::Circle(Vec2::new(1.0, 1.0), 0.4)]);
     let dot = Drills { slots: vec![DrillSlot { a: Vec2::new(2.0, 3.0), b: Vec2::new(2.0, 3.0), diameter: 1.2, plated: None }], ..Drills::default() };
     assert_eq!(dot.to_geom(), vec![Geom2::Circle(Vec2::new(2.0, 3.0), 0.6)]);

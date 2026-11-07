@@ -35,6 +35,10 @@ name = "sketch_target_bench"
 required-features = ["solver-profiling"]
 
 [dependencies]
+# The printed look of an inserted circuit board (src/cmd/board_layers.rs): its layers drawn
+# into an image; both already in the tree (ui-egui, render).
+tiny-skia = { workspace = true }
+png = { workspace = true }
 solidcore-record = { workspace = true }
 solidcraft-geom = { workspace = true }
 solidcraft-sketch = { workspace = true }

@@ -21,6 +21,7 @@ macro_rules! planned {
 }
 
 mod board_import;
+mod board_layers;
 mod bom;
 pub(crate) mod browser;
 pub(crate) mod clearance;
