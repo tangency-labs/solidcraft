@@ -76,6 +76,7 @@ mod history_folds;
 pub(crate) mod history_rows;
 #[cfg(test)]
 mod hole_direction_ui_tests;
+pub(crate) mod hole_folder;
 pub(crate) mod hole_place;
 #[cfg(test)]
 mod hole_place_ui_tests;
@@ -518,6 +519,17 @@ pub struct PreSketchComponent {
     pub opened_in: u64,
 }
 
+/// The active component (and placement) before a feature row inside a placed component was
+/// double-clicked in the Browser, which activates the feature's own component (#12720), and the
+/// component the editor opened in.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreEditComponent {
+    pub feature: u64,
+    pub component: u64,
+    pub path: Option<Vec<u64>>,
+    pub opened_in: u64,
+}
+
 /// Which late UI handler has first refusal of this frame's Escape. Reserving input
 /// is distinct from having performed cancellation (`esc_handled`).
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -563,6 +575,9 @@ pub struct SolveApp {
     /// The component active before Edit Sketch activated the one the sketch is in (#8127);
     /// leaving the sketch makes it active again.
     pub pre_sketch_component: Option<PreSketchComponent>,
+    /// The component active before a Browser double-click activated the one a feature is in
+    /// (#12720); the end of that feature's editor makes it active again.
+    pub pre_edit_component: Option<PreEditComponent>,
     pub services: Services,
     file_picker: Option<file_picker::Pending>,
     /// A slicer started alone and waited for before the file is sent (Send to Slicer).
@@ -854,6 +869,7 @@ impl SolveApp {
             pre_extrude_cam: None,
             pre_command_cam: None,
             pre_sketch_component: None,
+            pre_edit_component: None,
             services,
             file_picker: None,
             slicer_wait: None,
@@ -1377,6 +1393,15 @@ impl SolveApp {
         if let Ok(v) = &r {
             match id {
                 "sketch.finish" | "sketch.cancel" => self.sketch_closed(v.get("sketch").and_then(Value::as_u64)),
+                // The sketch being edited has all new contents: a tool's picks named the old ones.
+                "sketch.replace" if v.get("sketch_id").and_then(Value::as_u64).is_some_and(|id| self.session.active_sketch == Some(id)) => {
+                    if let Some(tool) = self.tool.as_mut() {
+                        tool.pts.clear();
+                        tool.hover = None;
+                        tool.picks.clear();
+                        tool.point_picks.clear();
+                    }
+                }
                 "view.fit" | "view.home" => self.frame_view(id == "view.home"),
                 "view.tool" => {
                     self.viewport.nav = match v.get("tool").and_then(Value::as_str) {
@@ -1618,6 +1643,7 @@ impl SolveApp {
                     self.applying = None;
                     self.editing_state = None;
                     self.pending_feature_edit = None;
+                    self.pre_edit_component = None;
                     // So does what it had computing: none of it may land in the new design.
                     self.cancel_computing();
                     self.tool = None;
@@ -2348,6 +2374,48 @@ impl SolveApp {
     /// timeline back to just before themselves and reopen their dialog, filled in.
     pub fn edit_feature(&mut self, id: u64) {
         self.edit_feature_at(id, None);
+    }
+
+    /// [`Self::edit_feature`] from a feature row inside one placement of a component (the
+    /// Browser's Features folder): that component is active while the feature is edited, so the
+    /// edit happens in its placement, and the one active before comes back when the editor ends
+    /// (#12720), as a sketch opened the same way does (#8127). A feature of the design itself, or
+    /// of the component already active, is edited as it is.
+    pub fn edit_feature_in(&mut self, id: u64, placement: Option<(u64, &[u64])>) {
+        let Some((component, path)) = placement.filter(|(_, path)| !path.is_empty()) else {
+            self.edit_feature(id);
+            return;
+        };
+        // An editor still open from an earlier double-click ends first, giving back its own
+        // component, so the one remembered here is the one the user sees before this click.
+        dialogs::cancel(self);
+        self.return_from_feature_edit();
+        let context = (self.session.active_component, self.session.active_occurrence_path.clone());
+        let _ = self.run("component.activate", json!({"component": component, "occurrence": path.last(), "path": path}));
+        let opened_in = self.session.active_component;
+        let moved = (opened_in, &self.session.active_occurrence_path) != (context.0, &context.1);
+        self.pre_edit_component = moved.then_some(PreEditComponent { feature: id, component: context.0, path: context.1, opened_in });
+        self.edit_feature(id);
+        // Nothing opened (a feature without an editor goes to the command palette): the
+        // component comes back at once.
+        self.return_from_feature_edit();
+    }
+
+    /// Once the editor of the feature a Browser double-click activated a component for has ended,
+    /// however it ended (OK, Cancel, another command, a sketch finished), the component active
+    /// before the double-click is active again (#12720). Unless another component was activated
+    /// meanwhile: that one stays, as after a sketch.
+    fn return_from_feature_edit(&mut self) {
+        let Some(id) = self.pre_edit_component.as_ref().map(|pre| pre.feature) else { return };
+        let open = self.dialog.as_ref().is_some_and(|d| d.editing.is_some_and(|(feature, _)| feature == id))
+            || self.pending_feature_edit.as_ref().is_some_and(|pending| pending.feature() == Some(id))
+            || self.session.active_sketch == Some(id);
+        if open {
+            return;
+        }
+        if let Some(pre) = self.pre_edit_component.take().filter(|pre| pre.opened_in == self.session.active_component) {
+            self.restore_component(pre.component, pre.path);
+        }
     }
 
     /// [`Self::edit_feature`] opened from a click at `at` on what the feature made: the dialog's
@@ -3222,6 +3290,7 @@ impl SolveApp {
         self.drain_control(ctx);
         self.follow_view_request(true);
         self.return_from_extrude_view();
+        self.return_from_feature_edit();
         agent_cursor::step(self, ctx);
         browser::eye_drag_frame(self, ctx);
         if !self.synthetic.is_empty() || !self.held_click.is_empty() {

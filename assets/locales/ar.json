@@ -2556,6 +2556,8 @@
   "prefs.design_tools.double_click_help": "أو لتحرير مكوّن مرتبط في موضعه.",
   "prefs.design_tools.ghost": "إظهار الموضع القديم للأجزاء المنقولة كشبح",
   "prefs.design_tools.hole_moves_help": "اختيار الوجه مجددًا ينقل الثقب بدلًا من إزالته.",
+  "prefs.design_tools.hole_several": "عدة ثقوب على وجه واحد",
+  "prefs.design_tools.hole_several_help": "الاختيار في موضع آخر من الوجه يضيف ثقبًا آخر، واختيار ثقب يزيله.",
   "prefs.design_tools.hole_snaps_help": "منتصف الوجه ومراكز حوافه الدائرية.",
   "prefs.design_tools.imported_files": "الملفات المستوردة",
   "prefs.design_tools.note": "ملاحظة",

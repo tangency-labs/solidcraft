@@ -1503,11 +1503,11 @@ fn measure_line(
     for s in [sa, sb] {
         painter.circle(s, 3.5, t.manipulator, Stroke::new(1.0, Color32::WHITE));
     }
-    pick_numbers(painter, sa, sb);
     let mid = sa + (sb - sa) * 0.5;
     let galley = painter.layout_no_wrap(crate::prefs::show_mm(app, d, 1), egui::FontId::proportional(crate::theme::Tokens::get().font_label), t.text);
     let own = egui::Rect::from_min_size(mid + vec2(10.0, -14.0), galley.size() + vec2(10.0, 6.0));
     let rect = moved_label(proj, own, labels.offset(0));
+    pick_numbers(painter, sa, sb, rect);
     crate::scenario::publish_target("measure:label", rect);
     if app.preferences.measure_axis_distances {
         measure_components(app, ui, painter, proj, a, b, rect, labels);
@@ -1521,21 +1521,44 @@ fn measure_line(
 }
 
 /// "1" and "2" beside the measured line's ends (#6020), as the panel lists the picks: each just
-/// past its end, away from the line and its length in the middle.
-fn pick_numbers(painter: &egui::Painter, sa: Pos2, sb: Pos2) {
+/// past its end, away from the line and from the distance `label`.
+fn pick_numbers(painter: &egui::Painter, sa: Pos2, sb: Pos2, label: egui::Rect) {
     let t = Tokens::get();
-    let along = (sb - sa).normalized();
-    // Ends on one spot (or one behind the other): side by side above it.
-    let (out_a, out_b) = if along.is_finite() && along.length_sq() > 0.5 { (-along, along) } else { (vec2(-0.7, -0.7), vec2(0.7, -0.7)) };
-    for (n, at, out) in [("1", sa, out_a), ("2", sb, out_b)] {
-        let galley = painter.layout_no_wrap(n.to_string(), egui::FontId::proportional(t.font_label), t.text);
-        let size = galley.size() + vec2(8.0, 4.0);
-        let side = size.x.max(size.y);
-        let rect = egui::Rect::from_center_size(at + out * (side * 0.5 + 8.0), vec2(side, size.y));
+    let galleys = ["1", "2"].map(|n| painter.layout_no_wrap(n.to_string(), egui::FontId::proportional(t.font_label), t.text));
+    let size = galleys.iter().map(|g| g.size()).fold(egui::Vec2::ZERO, |a, b| a.max(b)) + vec2(8.0, 4.0);
+    let rects = pick_number_rects(sa, sb, size, label);
+    for ((n, galley), rect) in ["1", "2"].into_iter().zip(galleys).zip(rects) {
         painter.rect(rect, t.radius_sm.saturating_sub(1), t.overlay, Stroke::new(1.0, t.manipulator), egui::StrokeKind::Inside);
         painter.galley(rect.center() - galley.size() * 0.5, galley, t.text);
         crate::scenario::publish_target(&format!("measure:item:{n}"), rect);
     }
+}
+
+/// Where "1" and "2" go, each `size` (text and padding): just past its end of the line, away
+/// from it. Where that would cover the distance `label` or the other number (ends on one spot or
+/// a few pixels apart, as two faces measured at their shared corner, #11833), the first free spot
+/// around its end instead, so the two never hide each other.
+fn pick_number_rects(sa: Pos2, sb: Pos2, size: egui::Vec2, label: egui::Rect) -> [egui::Rect; 2] {
+    let side = size.x.max(size.y);
+    let reach = side * 0.5 + 8.0;
+    let along = (sb - sa).normalized();
+    // Ends on one spot (or one behind the other): side by side above it.
+    let (out_a, out_b) = if along.is_finite() && along.length_sq() > 0.5 { (-along, along) } else { (vec2(-0.7, -0.7), vec2(0.7, -0.7)) };
+    // Below, left, then the other ways round; the distance label sits up and to the right.
+    let around =
+        [vec2(0.0, 1.0), vec2(-1.0, 0.0), vec2(-0.7, 0.7), vec2(0.0, -1.0), vec2(-0.7, -0.7), vec2(1.0, 0.0), vec2(0.7, 0.7), vec2(0.7, -0.7)];
+    let place = |at: Pos2, out: egui::Vec2, taken: Option<egui::Rect>| {
+        let towards = |d: egui::Vec2| egui::Rect::from_center_size(at + d * reach, vec2(side, size.y));
+        let first = towards(out);
+        std::iter::once(first)
+            .chain(around.iter().map(|d| towards(*d)))
+            .chain(around.iter().map(|d| towards(*d * 2.0)))
+            .find(|r| !r.intersects(label) && taken.is_none_or(|t| !r.intersects(t)))
+            .unwrap_or(first)
+    };
+    let a = place(sa, out_a, None);
+    let b = place(sb, out_b, Some(a));
+    [a, b]
 }
 
 /// A world-axis-aligned chain between the same two measured points. Zero-length and
@@ -2066,6 +2089,34 @@ fn arrow(painter: &egui::Painter, a: Pos2, b: Pos2, col: Color32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// "1" and "2" never cover each other or the distance (#11833): ends on one spot (two faces
+    /// measured at their shared corner, a distance of 0), a few pixels apart, and a line long
+    /// enough that both keep their own place past their ends.
+    #[test]
+    fn pick_numbers_stay_apart_and_off_the_distance() {
+        let size = vec2(16.0, 18.0);
+        let label_at = |sa: Pos2, sb: Pos2| egui::Rect::from_min_size(sa + (sb - sa) * 0.5 + vec2(10.0, -14.0), vec2(70.0, 22.0));
+        let corner = egui::pos2(400.0, 300.0);
+        let mut cases = vec![(corner, corner)];
+        for d in [vec2(1.0, 0.0), vec2(0.5, -0.5), vec2(3.0, 2.0), vec2(-2.0, -4.0), vec2(6.0, 0.0), vec2(0.0, 7.0)] {
+            cases.push((corner, corner + d));
+        }
+        for (sa, sb) in cases {
+            let label = label_at(sa, sb);
+            let [a, b] = pick_number_rects(sa, sb, size, label);
+            assert!(!a.intersects(b), "{sa:?} {sb:?}: 1 {a:?} and 2 {b:?} overlap");
+            for (n, r, own) in [("1", a, sa), ("2", b, sb)] {
+                assert!(!r.intersects(label), "{sa:?} {sb:?}: {n} {r:?} covers the distance {label:?}");
+                assert!(r.center().distance(own) < 80.0, "{sa:?} {sb:?}: {n} strays from its end");
+            }
+        }
+        // A long line: each number just past its own end, as before.
+        let (sa, sb) = (egui::pos2(100.0, 400.0), egui::pos2(300.0, 200.0));
+        let [a, b] = pick_number_rects(sa, sb, size, label_at(sa, sb));
+        let along = (sb - sa).normalized();
+        assert!((a.center() - (sa - along * 17.0)).length() < 1e-3 && (b.center() - (sb + along * 17.0)).length() < 1e-3, "{a:?} {b:?}");
+    }
 
     /// The arrow's point on a picked edge: one point, a zero-length piece, a click past the end.
     #[test]

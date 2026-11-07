@@ -2556,6 +2556,8 @@
   "prefs.design_tools.double_click_help": "リンクされたコンポーネントをその場で編集することもできます。",
   "prefs.design_tools.ghost": "移動したパーツの元の位置をゴースト表示",
   "prefs.design_tools.hole_moves_help": "面をもう一度選ぶと穴を削除せずに移動します。",
+  "prefs.design_tools.hole_several": "1つの面に複数の穴",
+  "prefs.design_tools.hole_several_help": "面の別の場所を選ぶと穴を追加し、穴を選ぶとその穴を削除します。",
   "prefs.design_tools.hole_snaps_help": "面の中央と円形エッジの中心。",
   "prefs.design_tools.imported_files": "インポートしたファイル",
   "prefs.design_tools.note": "通知",

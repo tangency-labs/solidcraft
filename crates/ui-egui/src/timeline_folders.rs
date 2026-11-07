@@ -295,6 +295,7 @@ fn folder_menu(app: &mut SolveApp, ui: &mut egui::Ui, folder: &Folder, view: &cr
         crate::context_menu::start_rename(app, crate::context_menu::RenameWhat::TimelineGroup(folder.id), at);
         ui.close();
     }
+    crate::timeline::edit_holes_item(app, ui, folder.id);
     if crate::context_menu::button(ui, "Ungroup", "feature_group").backing_on_hover_text("Keep its features and folders in the history").clicked() {
         app.tree.picked_timeline_groups.retain(|g| *g != folder.id);
         let _ = app.run("timeline.ungroup", json!({ "group": folder.id }));

@@ -298,6 +298,7 @@ sketch.point3d                    2D sketch only (the sketch solver and engine t
 sketch.polygon.edge               2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.rectangle.three_point      2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.redefine                   2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.replace                    2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.scale                      2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.slot.arc_center            2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.slot.arc_three_point       2D sketch only (the sketch solver and engine tests); no kernel operation
