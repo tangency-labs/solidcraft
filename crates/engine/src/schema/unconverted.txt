@@ -13,7 +13,6 @@ doc.recovery_discard
 doc.recovery_list
 document.inspect
 engine.commands
-expr.evaluate
 face.delete
 file.export
 file.insert_mesh
@@ -47,13 +46,6 @@ occurrence.drag
 occurrence.ground
 occurrence.move
 occurrence.properties
-parameters.change
-parameters.complete
-parameters.export
-parameters.graph
-parameters.import
-parameters.list
-parameters.users
 render.aging.describe
 render.backends
 render.cancel
