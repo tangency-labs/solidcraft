@@ -1818,6 +1818,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "plastic.lip"
                 | "plastic.snap_fit"
                 | "plastic.rest"
+                | "frame.end_cap"
                 | "frame.member"
         );
     if !constructor {
@@ -1874,6 +1875,11 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     let shared = kept.clone().unwrap_or_default();
     trial.model.keep(Some(shared.clone()));
     trial.active_component = old.component;
+    if let FeatureKind::FrameEndCap { ends, .. } = &old.kind
+        && let Some(anchor) = ends.first().and_then(|e| super::sketch::face::anchor(&e.plane))
+    {
+        trial.active_occurrence_path = (!anchor.author_path.is_empty()).then(|| anchor.author_path.clone());
+    }
     if let FeatureKind::Emboss { face: Some(face), .. } = &old.kind {
         trial.active_occurrence_path = (!face.author_path.is_empty()).then(|| face.author_path.clone());
     }
@@ -1955,8 +1961,34 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     if made == s.doc.next_id && trial.doc.next_id == made.saturating_add(1) {
         trial.doc_mut().next_id = s.doc.next_id;
     }
+    // A cap's stored names go by end: each end kept keeps its own (the same member line and the
+    // same face), a new end has none yet, and a removed end's name is kept back as a renamed
+    // body's is (#4957), so no other cap is given it and what was set on it stays behind.
+    let cap_names = match (&old.kind, &new.kind) {
+        (FeatureKind::FrameEndCap { ends: before, .. }, FeatureKind::FrameEndCap { ends: after, .. }) => {
+            let key = |e: &solidcraft_doc::end_cap::End| (e.member.clone(), super::sketch::face::anchor(&e.plane).map(|a| a.target.key()));
+            let names = after
+                .iter()
+                .map(|e| before.iter().position(|b| key(b) == key(e)).and_then(|i| old.body_names.get(i)).cloned().unwrap_or_default())
+                .collect::<Vec<_>>();
+            let removed = before
+                .iter()
+                .zip(&old.body_names)
+                .filter(|(b, n)| !n.is_empty() && !after.iter().any(|e| key(e) == key(b)))
+                .map(|(_, n)| n.clone())
+                .collect::<Vec<_>>();
+            Some((names, removed))
+        }
+        _ => None,
+    };
+    if let Some((_, removed)) = &cap_names {
+        trial.doc_mut().reserved_body_names.extend(removed.iter().cloned());
+    }
     if let Some(slot) = trial.doc_mut().feature_mut(id) {
         slot.suppressed = old.suppressed;
+        if let Some((names, _)) = cap_names {
+            slot.body_names = names;
+        }
         slot.kind = new.kind;
         slot.edge_refs = new.edge_refs;
         slot.edge_names = new.edge_names;

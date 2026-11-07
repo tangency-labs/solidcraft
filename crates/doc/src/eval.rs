@@ -1875,6 +1875,24 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
                 reads.link(doc, st, &link.source);
             }
         }
+        // Each end is read as a sketch on a face is: in the frame it was capped in, its member
+        // through the placement it was picked at, so moving that occurrence rebuilds the cap.
+        FeatureKind::FrameEndCap { ends, .. } => {
+            for anchor in ends.iter().filter_map(|end| crate::face_anchor::plane_face_anchor(&end.plane)) {
+                match anchor.author_frame(doc, f.component) {
+                    Ok(m) => {
+                        hash_placement(&m, &mut h);
+                        frame.get_or_insert(m);
+                    }
+                    Err(e) => e.to_string().hash(&mut h),
+                }
+                if anchor.path.is_empty() {
+                    reads.components.insert(anchor.component);
+                } else {
+                    reads.paths.push(anchor.path.clone());
+                }
+            }
+        }
         _ => {}
     }
     if reads.is_empty() {
@@ -2827,7 +2845,7 @@ pub fn curve_pick_error(e: solidcraft_sketch::CurvePick, ids: &[String], sketch:
     }
 }
 
-fn new_name(state: &mut ModelState, f: &Feature, k: usize) -> String {
+pub(crate) fn new_name(state: &mut ModelState, f: &Feature, k: usize) -> String {
     if let Some(n) = f.body_names.get(k)
         && !n.is_empty()
         && state.body(n).is_none()
@@ -8151,6 +8169,7 @@ fn eval_feature(
             }
             Ok(())
         }
+        FeatureKind::FrameEndCap { .. } => crate::end_cap::evaluate(doc, vals, f, st),
         FeatureKind::FrameMember { .. } => frame_member::evaluate(doc, vals, f, st),
         FeatureKind::BoundingSolid { bodies, margin } => {
             let m = val(vals, margin, Kind::Length)?;

@@ -66,6 +66,7 @@ pub mod config;
 pub mod construct;
 pub mod diagnostics;
 pub mod edit;
+pub mod end_cap;
 pub mod features;
 pub mod file;
 pub mod inspect;

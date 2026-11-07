@@ -202,6 +202,11 @@ impl crate::Feature {
                     checked_link(&link.source, 0)?;
                 }
             }
+            K::FrameEndCap { ends, .. } => {
+                for end in ends {
+                    checked_plane(&end.plane, 0)?;
+                }
+            }
             K::ConstructionPlane { plane }
             | K::Split { plane, .. }
             | K::SplitFace { plane, .. }
@@ -270,6 +275,11 @@ impl crate::Feature {
                     for n in link.face_name.iter_mut().chain(&mut link.edge_name) {
                         *n = remap_topology(n, ids, bodies);
                     }
+                }
+            }
+            K::FrameEndCap { ends, .. } => {
+                for end in ends {
+                    remap_plane(&mut end.plane, ids, bodies, 0)?;
                 }
             }
             K::ConstructionPlane { plane }
