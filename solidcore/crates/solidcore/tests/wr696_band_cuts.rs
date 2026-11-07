@@ -24,12 +24,16 @@
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_executive::{FitKind, NoRoomReason};
 use solidcore::boolean::api_brep::boolean_difference;
+use solidcore::curve::curve::Curve;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::Point3;
+use solidcore::primitive::api_curves as curves;
 use solidcore::primitive::api_primitives::create_box;
+use solidcore::math::Vec3;
 use solidcore::query::api_queries::edge_closest_point;
+use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::p1::regions;
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::EdgeId;
@@ -214,4 +218,29 @@ fn a_chamfer_past_the_rim_over_the_opening_keeps_the_bridge() {
         (v - 480.5).abs() <= 1e-9 * 480.5,
         "{v} vs closed form 480.5"
     );
+}
+
+/// A sheet: two walls, the open profile (0, 0) -> (10, 0) -> (10, 10) swept 10 up without
+/// caps, their corner edge x = 10, y = 0 rounded r 1 on the default kernel. A sheet's edges
+/// bound no material, so there is no part for the band to cut, and the round builds. Before,
+/// `sm_BlendAddsMaterial` found no use of the edge on a material side and failed
+/// (`SM_ERR` from `IsConcaveEdge`), and the fillet with it (the goldens' `stubs4-*` rounds of
+/// upstream's open sheets, `test8.smb`, `shell_fillet.smb` and others).
+#[test]
+fn a_round_on_a_sheet_has_no_part_to_cut() {
+    let mut k = Kernel::default();
+    let p = Point3::new;
+    let profile = [
+        Curve::from(curves::create_line_segment(p(0.0, 0.0, 0.0), p(10.0, 0.0, 0.0)).unwrap()),
+        Curve::from(curves::create_line_segment(p(10.0, 0.0, 0.0), p(10.0, 10.0, 0.0)).unwrap()),
+    ];
+    let refs: Vec<Option<&Curve>> = profile.iter().map(Some).collect();
+    let mut b = create_linear_sweep(&mut k, &refs, Vec3::new(0.0, 0.0, 1.0), 10.0, false).unwrap();
+    let e = pick(&k, &b, p(10.0, 0.0, 5.0));
+    let mut session = FilletSession::new(&mut k, &mut b).unwrap();
+    session
+        .prepare_constant_radius_edges(&mut k, &[e], 1.0, 1, 1, 1.0)
+        .unwrap();
+    let done = session.do_fillet(&mut k);
+    assert!(done.is_ok(), "{done:?}: {}", session.error_info().comment);
 }

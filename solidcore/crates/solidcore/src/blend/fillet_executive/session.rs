@@ -3751,7 +3751,11 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
             None => None,
         };
         let edge = edge.ok_or_else(|| SolidError::null_pointer(OP))?;
-        if crate::blend::fillet_solver::p5::is_concave_edge(k, self.target, edge)? {
+        // a sheet's edge bounds no material: there is no part for the band to cut (not the
+        // fork's, whose `sm_BlendAddsMaterial` fails there, and the fillet with it)
+        if !crate::blend::fillet_solver::p5::edge_bounds_material(self.target, edge)?
+            || crate::blend::fillet_solver::p5::is_concave_edge(k, self.target, edge)?
+        {
             return Ok(None);
         }
         let Some(cut) = band_cuts::band_cuts_the_part_cached(
@@ -3796,7 +3800,11 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
             None => None,
         };
         let edge = edge.ok_or_else(|| SolidError::null_pointer(OP))?;
-        if crate::blend::fillet_solver::p5::is_concave_edge(k, self.target, edge)? {
+        // a sheet's edge bounds no material: there is no part for the band to cut (not the
+        // fork's, whose `sm_BlendAddsMaterial` fails there, and the fillet with it)
+        if !crate::blend::fillet_solver::p5::edge_bounds_material(self.target, edge)?
+            || crate::blend::fillet_solver::p5::is_concave_edge(k, self.target, edge)?
+        {
             return Ok(None);
         }
         let Some(cut) = band_cuts::band_breaks_through_the_part_cached(
