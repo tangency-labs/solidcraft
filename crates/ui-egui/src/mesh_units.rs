@@ -78,8 +78,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         ui_kit::Window::new(egui::Id::unique("sc_mesh_units"), "import", crate::i18n::tr("ui.point_cloud_units")).show(ctx, true, |ui| {
             ui_kit::text(ui, &file, ui_kit::Text::Report("file", false));
             ui_kit::choice_row(ui, crate::i18n::tr("ui.units"), "mesh_units", &mut ask.choice, &names);
-            ui_kit::checkbox(ui, crate::i18n::tr("ui.mesh_import_origin"), &mut ask.origin)
+            let origin = ui_kit::checkbox(ui, crate::i18n::tr("ui.mesh_import_origin"), &mut ask.origin)
                 .on_hover_text(crate::i18n::tr("ui.mesh_import_origin_tip"));
+            // Named like the dialog's buttons: outside a labelled row the checkbox's own handle
+            // is a bare `dialog:`, which scripts can't tell apart.
+            crate::scenario::publish_handle("mesh_units:origin", origin.rect.center());
         });
     for (handle, key) in [("mesh_units:ok", "dialog:ok"), ("mesh_units:cancel", "dialog:cancel")] {
         if let Some(at) = crate::scenario::handle_at(key) {
@@ -164,5 +167,15 @@ mod tests {
         held.choice = 3;
         let sent = request(&held);
         assert_eq!((sent.options.get("origin"), sent.options.get("units")), (Some(&json!(true)), Some(&json!("in"))));
+    }
+
+    #[test]
+    fn the_move_to_origin_checkbox_is_found_by_its_name() {
+        let mut h = crate::scenario::Harness::new();
+        assert!(ask(&mut h.app, "part.stl", true));
+        h.frames(3);
+        for handle in ["mesh_units:origin", "mesh_units:ok", "mesh_units:cancel"] {
+            assert!(crate::scenario::handle_at(handle).is_some(), "missing {handle}");
+        }
     }
 }
