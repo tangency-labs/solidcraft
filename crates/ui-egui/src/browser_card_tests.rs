@@ -2200,3 +2200,378 @@ fn parked_reveals_are_pruned_against_their_own_document_when_the_target_is_remov
     semantic_frame(&mut h, &[], Vec::new(), egui::Modifiers::NONE);
     assert_no_pending_reveals(&h);
 }
+
+/// Stage 2: every sketch row folds its contents open in the browser. Geometry groups start open,
+/// dimensions start closed, and collapsing the sketch hides the whole subtree again.
+#[test]
+fn expanding_a_sketch_shows_its_contents_groups_and_geometry_rows() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.ui.show_browser = true;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Contents"})).unwrap();
+    let sketch = h.app.session.active_sketch.unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[20,0]],"ids":["l1"]})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center":[30,0],"radius":5})).unwrap();
+    h.app.run("sketch.dimension", json!({"entities":["l1"],"value":20,"text_at":[10,8]})).unwrap();
+    let dimension = h.app.session.doc.sketch(sketch).unwrap().constraints.iter().find(|c| c.kind.is_dimension()).map(|c| c.id.clone()).unwrap();
+    h.app.finish_sketch();
+    h.settle();
+
+    let scope = format!("s:{sketch}");
+    let group = |slug: &str| format!("browser:sketch-contents-group:{scope}:{slug}");
+    let fold = |slug: &str| format!("browser:sketch-contents-fold:{scope}:{slug}");
+    assert!(handle_at(&group("lines")).is_none(), "a sketch starts folded");
+
+    h.step(&json!({"click":{"handle":"fold:Contents"}})).unwrap();
+    h.settle();
+    for slug in ["points", "lines", "circles", "dimensions"] {
+        assert!(handle_at(&group(slug)).is_some(), "missing {slug}: {:?}", crate::scenario::handles("browser:sketch-contents-group"));
+    }
+    assert!(handle_at(&format!("browser:sketch-contents-row:{scope}:lines:l1")).is_some(), "the line row shows with its lines group");
+    assert!(!crate::scenario::handles(&format!("browser:sketch-contents-row:{scope}:circles:")).is_empty(), "the circle row shows");
+    assert!(crate::scenario::handles(&format!("browser:sketch-contents-row:{scope}:dimensions:")).is_empty(), "dimensions start closed");
+    // What the rows say, not just what they are called internally.
+    h.frame();
+    let mut texts = Vec::new();
+    for clipped in &h.shapes {
+        crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+            if let egui::Shape::Text(text) = shape {
+                texts.push(text.galley.text().to_string());
+            }
+        });
+    }
+    for want in ["Points", "Lines", "Circles", "Dimensions", "Line l1"] {
+        assert!(texts.iter().any(|text| text == want), "no `{want}` in {texts:?}");
+    }
+
+    h.step(&json!({"click":{"handle":fold("dimensions")}})).unwrap();
+    h.settle();
+    assert!(
+        handle_at(&format!("browser:sketch-contents-row:{scope}:dimensions:{dimension}")).is_some(),
+        "the dimension row appears: {:?}",
+        crate::scenario::handles("browser:sketch-contents-row")
+    );
+
+    // The contents are built once and kept across frames, whatever else the browser draws.
+    let builds = h.app.tree.cache.as_ref().unwrap().builds;
+    h.frames(6);
+    assert_eq!(h.app.tree.cache.as_ref().unwrap().builds, builds, "contents are not rebuilt every frame");
+
+    h.step(&json!({"click":{"handle":"fold:Contents"}})).unwrap();
+    h.settle();
+    assert!(handle_at(&group("lines")).is_none(), "folding the sketch hides its contents again");
+}
+
+/// A sketch a feature has consumed keeps its row (and its fold arrow), and its contents still
+/// expand from the solved state.
+#[test]
+fn a_consumed_sketch_still_expands_to_its_contents() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.ui.show_browser = true;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Consumed"})).unwrap();
+    let sketch = h.app.session.active_sketch.unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+    h.app.finish_sketch();
+    h.app.run("solid.extrude", json!({"sketch":"Consumed","distance":5})).unwrap();
+    h.settle();
+    assert!(!crate::browser::sketch_visible(&h.app, sketch), "the extrude consumes the sketch's own display");
+
+    h.step(&json!({"click":{"handle":"fold:Consumed"}})).unwrap();
+    h.settle();
+    let scope = format!("s:{sketch}");
+    assert!(handle_at(&format!("browser:sketch-contents-group:{scope}:lines")).is_some(), "the consumed sketch folds its contents open");
+    let lines = crate::scenario::handles(&format!("browser:sketch-contents-row:{scope}:lines:"));
+    assert_eq!(lines.len(), 4, "the rectangle's four lines are listed: {lines:?}");
+    // Stage 3: its rows are external picks, and the viewport lights them through the external
+    // path even though the sketch's own display is consumed (no eye is toggled to show it).
+    let visibility = h.app.session.visibility.clone();
+    h.step(&json!({"click":{"handle":lines[0].0.clone()}})).unwrap();
+    let id = lines[0].0.rsplit(':').next().unwrap_or_default().to_string();
+    assert_eq!(h.app.session.selection, vec![Sel::ExternalSketchCurve { sketch, id }]);
+    assert_eq!(h.app.session.visibility, visibility, "a consumed sketch's eye is left alone");
+    assert!(!crate::browser::sketch_visible(&h.app, sketch));
+    let highlight = crate::viewport::build_highlight(&h.app).merged();
+    assert!(!highlight.overlay.is_empty() || !highlight.lines.is_empty(), "the consumed sketch's curve is lit in the view");
+}
+
+/// Large groups are capped: the browser draws a group's first rows and a Show all row instead of
+/// walking thousands of rows every frame.
+#[test]
+fn a_large_sketch_caps_its_groups_until_show_all() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.ui.show_browser = true;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Large"})).unwrap();
+    let sketch = h.app.session.active_sketch.unwrap();
+    for i in 0..400 {
+        let x = i as f64 * 10.0;
+        h.app.run("sketch.line", json!({"points":[[x,0],[x,5]]})).unwrap();
+    }
+    h.app.finish_sketch();
+    h.settle();
+    h.step(&json!({"click":{"handle":"fold:Large"}})).unwrap();
+    h.settle();
+
+    let scope = format!("s:{sketch}");
+    let shown = |slug: &str| crate::scenario::count_of(&format!("browser:sketch-contents-shown:{scope}:{slug}"));
+    assert_eq!(shown("lines"), Some(200.0), "the lines group is capped");
+    h.app.tree.expanded.insert(format!("s:{sketch}/contents/points"));
+    h.settle();
+    assert_eq!(shown("points"), Some(200.0), "the points group is capped");
+
+    h.app.tree.expanded.insert(format!("s:{sketch}/contents/lines/all"));
+    h.settle();
+    assert_eq!(shown("lines"), Some(400.0), "Show all lists the whole group");
+}
+
+/// Patterns keep their row and editor when the sketch's contents are open: they move into the
+/// Patterns group instead of being listed twice beside it.
+#[test]
+fn expanding_contents_keeps_pattern_rows_in_their_group() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.ui.show_browser = true;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Patterned"})).unwrap();
+    let sketch = h.app.session.active_sketch.unwrap();
+    h.app.run("sketch.line", json!({"points":[[10,5],[15,5]],"ids":["source"]})).unwrap();
+    let pattern =
+        h.app.run("sketch.pattern.rectangular", json!({"entities":["source"],"count":4,"spacing":20,"alignment":"center","reversed":true})).unwrap()
+            ["pattern"]
+            .as_str()
+            .unwrap()
+            .to_string();
+    h.app.finish_sketch();
+    h.settle();
+    let handle = format!("browser:sketch-pattern:{sketch}:{pattern}");
+    assert!(handle_at(&handle).is_some(), "a folded sketch keeps its quick pattern list");
+
+    h.step(&json!({"click":{"handle":"fold:Patterned"}})).unwrap();
+    h.settle();
+    assert!(handle_at(&handle).is_none(), "contents replace the quick list without repeating its rows");
+    h.step(&json!({"click":{"handle":format!("browser:sketch-contents-fold:s:{sketch}:patterns")}})).unwrap();
+    h.settle();
+    assert!(handle_at(&handle).is_some(), "the Patterns group lists the pattern row");
+}
+
+/// With sketch contents off, the sketch row's fold shows and hides its quick pattern list, as it
+/// did before the contents feature (#7917).
+#[test]
+fn turning_sketch_contents_off_keeps_the_pattern_fold() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.ui.show_browser = true;
+    h.app.preferences.sketch_contents = false;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Patterned"})).unwrap();
+    let sketch = h.app.session.active_sketch.unwrap();
+    h.app.run("sketch.line", json!({"points":[[10,5],[15,5]],"ids":["source"]})).unwrap();
+    let pattern =
+        h.app.run("sketch.pattern.rectangular", json!({"entities":["source"],"count":4,"spacing":20,"alignment":"center","reversed":true})).unwrap()
+            ["pattern"]
+            .as_str()
+            .unwrap()
+            .to_string();
+    h.app.finish_sketch();
+    h.settle();
+    let handle = format!("browser:sketch-pattern:{sketch}:{pattern}");
+    assert!(handle_at(&handle).is_some(), "the quick pattern list is shown");
+    h.step(&json!({"click":{"handle":"fold:Patterned"}})).unwrap();
+    h.settle();
+    assert!(handle_at(&handle).is_none(), "the fold hides the quick pattern list");
+}
+
+/// Stage 3: a contents row of the sketch being edited selects its own entity, so the viewport
+/// lights it and the view's own picks light the row back.
+#[test]
+fn contents_rows_select_the_active_sketchs_entities() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.ui.show_browser = true;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Editable"})).unwrap();
+    let sketch = h.app.session.active_sketch.unwrap();
+    let line = h.app.run("sketch.line", json!({"points":[[0,0],[20,0]],"ids":["l1"]})).unwrap()["curves"][0].as_str().unwrap().to_owned();
+    let point = h.app.run("sketch.point", json!({"point":[5,5],"id":"p1"})).unwrap()["point"].as_str().unwrap().to_owned();
+    let dimension =
+        h.app.run("sketch.dimension", json!({"entities":[line],"value":20})).unwrap()["created"]["dimensions"][0].as_str().unwrap().to_owned();
+    h.settle();
+    h.app.tree.expanded.insert(format!("s:{sketch}/contents"));
+    h.settle();
+
+    let row = |slug: &str, id: &str| format!("browser:sketch-contents-row:s:{sketch}:{slug}:{id}");
+    h.step(&json!({"click":{"handle":row("lines", &line)}})).unwrap();
+    assert_eq!(h.app.session.selection, vec![Sel::SketchCurve { id: line.clone(), sketch: None }]);
+    h.app.tree.expanded.insert(format!("s:{sketch}/contents/points"));
+    h.settle();
+    h.step(&json!({"click":{"handle":row("points", &point)}})).unwrap();
+    assert_eq!(h.app.session.selection, vec![Sel::SketchPoint { id: point }]);
+
+    h.step(&json!({"click":{"handle":format!("browser:sketch-contents-fold:s:{sketch}:dimensions")}})).unwrap();
+    h.settle();
+    h.step(&json!({"click":{"handle":row("dimensions", &dimension)}})).unwrap();
+    assert_eq!(h.app.session.selection, vec![Sel::SketchConstraint { id: dimension }]);
+}
+
+/// A Text row stands for the outlines the text generated: selecting it lights the letters, not
+/// the whole sketch.
+#[test]
+fn clicking_a_text_row_selects_its_outlines() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.ui.show_browser = true;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Text"})).unwrap();
+    let text = h.app.run("sketch.text", json!({"text":"II","at":[0,0],"height":10})).unwrap();
+    let link = text["link"].as_str().unwrap().to_owned();
+    let curve = text["curves"][0].as_str().unwrap().to_owned();
+    let sketch = h.app.session.active_sketch.unwrap();
+    h.settle();
+    h.app.tree.expanded.insert(format!("s:{sketch}/contents"));
+    h.app.tree.expanded.insert(format!("s:{sketch}/contents/text"));
+    h.settle();
+    h.step(&json!({"click":{"handle":format!("browser:sketch-contents-row:s:{sketch}:text:{link}")}})).unwrap();
+    assert!(
+        h.app.session.selection.iter().any(|sel| matches!(sel, Sel::SketchCurve { id, .. } if id == &curve)),
+        "the text row selects its outlines: {:?}",
+        h.app.session.selection
+    );
+}
+
+/// Stage 3: a row of a sketch that is not being edited is an external pick, which the viewport
+/// lights through the same path a viewport pick uses; its constraint row stands for the geometry
+/// it ties together, and its eye is untouched.
+#[test]
+fn contents_rows_of_a_finished_sketch_select_external_geometry() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.ui.show_browser = true;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Source"})).unwrap();
+    let sketch = h.app.session.active_sketch.unwrap();
+    let line = h.app.run("sketch.line", json!({"points":[[0,0],[20,0]],"ids":["l1"]})).unwrap()["curves"][0].as_str().unwrap().to_owned();
+    let point = h.app.run("sketch.point", json!({"point":[5,5],"id":"p1"})).unwrap()["point"].as_str().unwrap().to_owned();
+    let constraint = h.app.run("sketch.constraint.horizontal_vertical", json!({"line":line,"mode":"horizontal"})).unwrap()["constraint"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    h.app.finish_sketch();
+    h.app.run("sketch.create", json!({"plane":"YZ"})).unwrap();
+    h.settle();
+    let visibility = h.app.session.visibility.clone();
+
+    h.step(&json!({"click":{"handle":"fold:Source"}})).unwrap();
+    h.settle();
+    let row = |slug: &str, id: &str| format!("browser:sketch-contents-row:s:{sketch}:{slug}:{id}");
+    h.step(&json!({"click":{"handle":row("lines", &line)}})).unwrap();
+    assert_eq!(h.app.session.selection, vec![Sel::ExternalSketchCurve { sketch, id: line.clone() }]);
+    let at = handle_at(&row("lines", &line)).expect("the line row is drawn");
+    right_click(&mut h, at);
+    let Target::SketchContents { rows, editable, .. } = &h.app.menu.target else { panic!("no contents menu: {:?}", h.app.menu.target) };
+    assert!(!editable, "a finished sketch's row menu is read-only");
+    assert!(rows.contains(&line), "the right-clicked row is in the menu: {rows:?}");
+    let menu = crate::context_menu::items(&h.app, &h.app.menu.target);
+    assert!(!menu.iter().any(|item| item.id == "ui.delete" && item.enabled), "a finished sketch's rows cannot be deleted");
+    crate::context_menu::close(&mut h.app);
+    h.frames(2);
+    h.app.tree.expanded.insert(format!("s:{sketch}/contents/points"));
+    h.settle();
+    h.step(&json!({"click":{"handle":row("points", &point)}})).unwrap();
+    assert_eq!(h.app.session.selection, vec![Sel::ExternalSketchPoint { sketch, id: point }]);
+
+    h.step(&json!({"click":{"handle":format!("browser:sketch-contents-fold:s:{sketch}:constraints")}})).unwrap();
+    h.settle();
+    h.step(&json!({"click":{"handle":row("constraints", &constraint)}})).unwrap();
+    assert_eq!(h.app.session.selection, vec![Sel::ExternalSketchCurve { sketch, id: line }], "an inactive constraint lights the curve it holds");
+    assert_eq!(h.app.session.visibility, visibility, "selecting a row never shows or hides its sketch");
+}
+
+/// Stage 3: Ctrl toggles contents rows in and out of the selection, and Shift takes the range
+/// between the last clicked row and this one, in the tree's own order.
+#[test]
+fn contents_rows_take_ctrl_and_shift_over_their_range() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.ui.show_browser = true;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Rows"})).unwrap();
+    let sketch = h.app.session.active_sketch.unwrap();
+    let mut lines = Vec::new();
+    for (i, id) in ["l1", "l2", "l3"].into_iter().enumerate() {
+        let x = i as f64 * 10.0;
+        lines.push(h.app.run("sketch.line", json!({"points":[[x,0],[x,5]],"ids":[id]})).unwrap()["curves"][0].as_str().unwrap().to_owned());
+    }
+    h.settle();
+    h.app.tree.expanded.insert(format!("s:{sketch}/contents"));
+    h.settle();
+    let row = |id: &str| format!("browser:sketch-contents-row:s:{sketch}:lines:{id}");
+
+    h.step(&json!({"click":{"handle":row(&lines[0])}})).unwrap();
+    h.step(&json!({"click":{"handle":row(&lines[1])},"ctrl":true})).unwrap();
+    assert_eq!(
+        h.app.session.selection,
+        vec![Sel::SketchCurve { id: lines[0].clone(), sketch: None }, Sel::SketchCurve { id: lines[1].clone(), sketch: None }],
+        "Ctrl adds a row"
+    );
+    h.step(&json!({"click":{"handle":row(&lines[1])},"ctrl":true})).unwrap();
+    assert_eq!(h.app.session.selection, vec![Sel::SketchCurve { id: lines[0].clone(), sketch: None }], "Ctrl takes a picked row out");
+
+    h.step(&json!({"click":{"handle":row(&lines[0])}})).unwrap();
+    h.step(&json!({"click":{"handle":row(&lines[2])},"shift":true})).unwrap();
+    assert_eq!(
+        h.app.session.selection,
+        vec![
+            Sel::SketchCurve { id: lines[0].clone(), sketch: None },
+            Sel::SketchCurve { id: lines[1].clone(), sketch: None },
+            Sel::SketchCurve { id: lines[2].clone(), sketch: None },
+        ],
+        "Shift takes every contents row between the anchor and the click"
+    );
+}
+
+/// Stage 4b: right-clicking a contents row selects it and opens its sketch's entity menu; a row
+/// already in a multi-selection keeps the whole selection.
+#[test]
+fn right_clicking_contents_rows_opens_their_menu() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.ui.show_browser = true;
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Menu"})).unwrap();
+    let sketch = h.app.session.active_sketch.unwrap();
+    let mut lines = Vec::new();
+    for (i, id) in ["l1", "l2"].into_iter().enumerate() {
+        let x = i as f64 * 10.0;
+        lines.push(h.app.run("sketch.line", json!({"points":[[x,0],[x,5]],"ids":[id]})).unwrap()["curves"][0].as_str().unwrap().to_owned());
+    }
+    h.settle();
+    h.app.tree.expanded.insert(format!("s:{sketch}/contents"));
+    h.settle();
+    let row = |id: &str| format!("browser:sketch-contents-row:s:{sketch}:lines:{id}");
+
+    let at = handle_at(&row(&lines[0])).expect("the first line row is drawn");
+    right_click(&mut h, at);
+    assert_eq!(
+        h.app.menu.target,
+        Target::SketchContents { sketch, rows: vec![lines[0].clone()], editable: true },
+        "the right-click selects the row and names it in its menu"
+    );
+    let menu = crate::context_menu::items(&h.app, &h.app.menu.target);
+    assert!(menu.iter().any(|item| item.id == "ui.delete" && item.enabled), "an active row can be deleted");
+
+    // A second row joins the selection with Ctrl, and the menu of either row speaks for both.
+    crate::context_menu::close(&mut h.app);
+    h.frames(2);
+    h.step(&json!({"click":{"handle":row(&lines[1])},"ctrl":true})).unwrap();
+    assert_eq!(h.app.session.selection.len(), 2, "both rows are selected: {:?}", h.app.session.selection);
+    let at = handle_at(&row(&lines[1])).expect("the second line row is drawn");
+    right_click(&mut h, at);
+    let Target::SketchContents { rows, editable, .. } = &h.app.menu.target else { panic!("no contents menu: {:?}", h.app.menu.target) };
+    assert!(*editable);
+    assert_eq!(rows, &vec![lines[0].clone(), lines[1].clone()], "the whole multi-selection goes to the menu");
+}
+
+/// A right-click as the browser and the view receive it: the pointer moves over the row, then the
+/// secondary button goes down and up. A one-frame click can let the viewport's menu land over the
+/// browser's, so the frames are kept apart as a hand's are.
+fn right_click(h: &mut Harness, at: egui::Pos2) {
+    let press = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Secondary, pressed, modifiers: egui::Modifiers::NONE };
+    h.frame_with(vec![egui::Event::PointerMoved(at)]);
+    h.frame_with(vec![press(true)]);
+    h.frame_with(vec![press(false)]);
+    h.frames(3);
+}

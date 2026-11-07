@@ -1630,6 +1630,9 @@ preference_settings! {
     /// A sketch's icon in History and the browser takes the colour of its solve state, and its
     /// tooltip names the state (#7245). Off: every sketch has the same icon, as before.
     sketch_state_icons: bool = true, PAGE_SKETCH;
+    /// Show a sketch's current contents below its browser row. Off: the row's fold shows the
+    /// sketch's pattern list, as it did before (#7917).
+    sketch_contents: bool = true, PAGE_SKETCH;
     /// Show the construction-line family in Sketch CREATE; off restores the earlier menu.
     sketch_construction_lines: bool = true, PAGE_SKETCH;
     /// Use the only straight construction line in the preselection as Mirror's reference.

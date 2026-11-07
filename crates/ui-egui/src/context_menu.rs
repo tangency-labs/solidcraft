@@ -118,6 +118,13 @@ pub enum Target {
         folder: String,
         scope: String,
     },
+    /// Rows of a sketch's contents in the browser: curve, point or constraint ids. `editable` is
+    /// false for a sketch that is not being edited, whose rows are read-only.
+    SketchContents {
+        sketch: u64,
+        rows: Vec<String>,
+        editable: bool,
+    },
 }
 
 /// One menu entry: a command id (run with `params` when given, else started like a toolbar
@@ -417,6 +424,12 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         ],
         Target::Body { name } => body_items(app, std::slice::from_ref(name), true),
         Target::Sketch { id } => sketch_items(app, *id),
+        Target::SketchContents { sketch, rows, editable } => {
+            let selection = contents_selection(app, *sketch, rows);
+            // A row of a sketch that is not being edited can only read it, whatever the browser says.
+            let editable = *editable && app.session.active_sketch == Some(*sketch);
+            sketch_entity_items(app, *sketch, &selection, editable, None)
+        }
         Target::Feature { id } => feature_items(app, *id),
         Target::Plane { id } => plane_items(app, *id),
         Target::OriginPlane { name } => origin_plane_items(app, name),
@@ -519,6 +532,11 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
                 .collect()
         }
     };
+    // A contents row's menu is the sketch entity menu itself: the generic post-processing below
+    // only knows feature and body targets.
+    if matches!(target, Target::SketchContents { .. }) {
+        return v;
+    }
     if !crate::render_workspace::active(app) {
         v.extend(crate::browser::folded_folder_items(app, target));
     }
@@ -676,8 +694,8 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act("ui.selectOther", "Select Other…", "select").key("Hold click"));
         v.push(Item::sep());
     }
-    if app.session.active_sketch.is_some() {
-        v.extend(sketch_entity_items(app));
+    if let Some(sid) = app.session.active_sketch {
+        v.extend(sketch_entity_items(app, sid, &app.session.selection, true, menu_sketch_point(app, sid)));
         v.push(Item::sep());
         v.push(cmd(app, "sketch.trim", "Trim"));
         v.push(cmd(app, "sketch.offset", "Offset"));
@@ -1210,27 +1228,35 @@ fn break_link(app: &SolveApp, sk: &solidcraft_engine::sketch::Sketch, ents: &[St
     (!linked.is_empty()).then(|| cmd(app, "sketch.break_link", "Break Link").with(json!({ "entities": linked })))
 }
 
-fn alignment_items(selection: &[Sel]) -> Vec<Item> {
+fn alignment_items(selection: &[Sel], editable: bool) -> Vec<Item> {
     let Some(points) = crate::selection::alignment_points(selection) else { return Vec::new() };
     vec![
         act("ui.horizontalConstraint", "Horizontal Constraint", "c_hv")
-            .with(json!({"points": points, "mode": "horizontal", "if_redundant": "refuse"})),
-        act("ui.verticalConstraint", "Vertical Constraint", "c_hv").with(json!({"points": points, "mode": "vertical", "if_redundant": "refuse"})),
+            .with(json!({"points": points, "mode": "horizontal", "if_redundant": "refuse"}))
+            .on(editable),
+        act("ui.verticalConstraint", "Vertical Constraint", "c_hv")
+            .with(json!({"points": points, "mode": "vertical", "if_redundant": "refuse"}))
+            .on(editable),
     ]
 }
 
 /// Sketch entity items: construction, fix, delete, dimension and the constraints the selection
-/// can take.
-fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
+/// can take. `selection` is the sketch's own entities (a contents row builds it from its ids),
+/// `editable` is false for a sketch that is not being edited, and `at` is where a viewport menu
+/// opened (sketch coordinates), for the spline point under the cursor.
+fn sketch_entity_items(app: &SolveApp, sketch: u64, selection: &[Sel], editable: bool, at: Option<solidcore_record::Vec2>) -> Vec<Item> {
     use solidcraft_engine::sketch::{ConstraintKind, CurveKind};
-    let Some(sid) = app.session.active_sketch else { return Vec::new() };
     let st = crate::open_meshing::session_world(&app.session);
-    let Some(ss) = st.sketch(sid) else { return Vec::new() };
-    if app.session.selection.iter().any(|sel| matches!(sel, Sel::SketchMidpoint { .. })) {
+    let Some(ss) = st.sketch(sketch) else { return Vec::new() };
+    let head = sketch_contents_head(app, sketch, editable);
+    if selection.iter().any(|sel| matches!(sel, Sel::SketchMidpoint { .. })) {
         // A midpoint with a point or curve can also be made coincident with it (#10311).
-        let coincident = crate::selection::coincident_operands(&app.session.selection)
-            .map(|operands| cmd(app, "sketch.constraint.coincident", "Coincident").with(operands));
-        return coincident.into_iter().chain(alignment_items(&app.session.selection)).collect();
+        let coincident =
+            crate::selection::coincident_operands(selection).map(|operands| cmd(app, "sketch.constraint.coincident", "Coincident").with(operands));
+        let mut v: Vec<Item> = coincident.into_iter().chain(alignment_items(selection, editable)).collect();
+        v.splice(0..0, head);
+        sketch_contents_gate(&mut v, editable);
+        return v;
     }
     let mut lines = Vec::new();
     let mut rounds = Vec::new();
@@ -1238,7 +1264,7 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     let mut points = Vec::new();
     // Selection order: a two-entity constraint keeps the first and moves the second.
     let mut picked: Vec<String> = Vec::new();
-    for s in &app.session.selection {
+    for s in selection {
         match s {
             Sel::SketchCurve { id, .. } => {
                 picked.push(id.clone());
@@ -1260,9 +1286,7 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     // engine's `sketch.toggle_driven`, which takes one constraint, so the item appears for a
     // single selected dimension. Non-dimension constraints (coincident, tangent, ...) have no
     // driven state and get no item.
-    let dims: Vec<String> = app
-        .session
-        .selection
+    let dims: Vec<String> = selection
         .iter()
         .filter_map(|s| match s {
             Sel::SketchConstraint { id } => Some(id.clone()),
@@ -1273,6 +1297,12 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     let mut v = Vec::new();
     if curves.is_empty() && points.is_empty() {
         if dims.len() == 1 {
+            // A driving dimension's value opens in the inline editor; a driven one has none (the
+            // engine's toggle below can make it driving).
+            let driving = ss.sketch.constraints.iter().any(|c| c.id == dims[0] && c.param.is_some());
+            if driving {
+                v.push(act("ui.editDimensionValue", "Edit", "dimension").with(json!({ "sketch": sketch, "constraint": dims[0] })).on(editable));
+            }
             v.push(cmd(app, "sketch.toggle_driven", "Toggle Driven Dimension").with(json!({ "constraint": dims[0] })));
             // A circle's or an arc's radius or diameter switches to the other one (#7499).
             let round = |c: usize| matches!(ss.sketch.curves.get(c).map(|c| &c.kind), Some(CurveKind::Circle { .. } | CurveKind::Arc { .. }));
@@ -1285,11 +1315,11 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
                 v.push(cmd(app, "sketch.toggle_diameter", "Toggle Radius / Diameter").with(json!({ "constraint": dims[0] })));
             }
         }
-        if app.session.selection.iter().any(|s| matches!(s, Sel::SketchConstraint { .. })) {
-            v.push(act("ui.delete", "Delete", "delete").key("Del"));
+        if selection.iter().any(|s| matches!(s, Sel::SketchConstraint { .. })) {
+            v.push(act("ui.delete", "Delete", "delete").key("Del").on(editable));
             v.push(Item::sep());
         }
-        if crate::sketch_text::selected_entity(app).is_some() {
+        if editable && crate::sketch_text::selected_entity(app).is_some() {
             v.push(cmd(app, "sketch.edit_text", "Edit Text"));
             v.extend(explode_text(app));
         }
@@ -1298,23 +1328,36 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
         v.push(cmd(app, "sketch.circle.center", "Circle"));
         v.push(cmd(app, "sketch.dimension", "Sketch Dimension"));
         v.push(Item::sep());
-        v.push(act("ui.paste", "Paste", "paste").key("Ctrl+V").on(crate::edit_clipboard::can_paste_sketch(app)));
+        v.push(act("ui.paste", "Paste", "paste").key("Ctrl+V").on(editable && crate::edit_clipboard::can_paste_sketch(app)));
+        v.splice(0..0, head);
+        sketch_contents_gate(&mut v, editable);
         return v;
     }
     let ents: Vec<String> = curves.iter().chain(points.iter()).cloned().collect();
+    // Another sketch's geometry can be projected into the sketch being edited (#7917).
+    if !editable {
+        let refs: Vec<Value> = curves
+            .iter()
+            .map(|id| json!({ "sketch": sketch, "curve": id }))
+            .chain(points.iter().map(|id| json!({ "sketch": sketch, "point": id })))
+            .collect();
+        v.push(
+            cmd(app, "sketch.project", "Project").with(json!({ "refs": refs })).on(app.session.active_sketch.is_some_and(|active| active != sketch)),
+        );
+    }
     for pattern in &ss.sketch.patterns {
         if ents.iter().any(|id| pattern.contains(id))
-            || app.session.selection.iter().filter_map(|sel| crate::sketch_modify_ui::point_id(&app.session, sel)).any(|id| pattern.contains(id))
+            || selection.iter().filter_map(|sel| crate::sketch_modify_ui::point_id(&app.session, sel)).any(|id| pattern.contains(id))
         {
-            v.push(act("ui.editSketchPattern", "Edit Sketch Pattern", "sketch_circ_pattern").with(json!({"pattern":pattern.id})));
+            v.push(act("ui.editSketchPattern", "Edit Sketch Pattern", "sketch_circ_pattern").with(json!({"pattern":pattern.id})).on(editable));
         }
     }
-    if crate::sketch_text::selected_entity(app).is_some() {
+    if editable && crate::sketch_text::selected_entity(app).is_some() {
         v.push(cmd(app, "sketch.edit_text", "Edit Text"));
         v.extend(explode_text(app));
     }
     v.extend(break_link(app, &ss.sketch, &ents));
-    if let Some(curve) = crate::sketch_modify_ui::selected_equation(app) {
+    if let Some(curve) = crate::sketch_modify_ui::selected_equation(app).filter(|_| editable) {
         v.push(act("ui.editEquationCurve", "Edit Equation Curve", "equation_curve").with(json!({ "curve": curve })));
     }
     v.push(cmd(app, "sketch.move", "Move/Copy").key("M"));
@@ -1346,7 +1389,7 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
             .curve_index(curve)
             .and_then(|i| ss.sketch.curves.get(i))
             .is_some_and(|c| matches!(c.kind, CurveKind::Spline { control: false, .. }))
-        && let Some(at) = menu_sketch_point(app, &ss.plane)
+        && let Some(at) = at
     {
         v.push(cmd(app, "sketch.spline.insert_point", "Add Spline Point").with(json!({"curve": curve, "at": [at.x, at.y]})));
     }
@@ -1373,12 +1416,12 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     {
         v.push(cmd(app, "sketch.spline.remove_point", "Remove Spline Point").with(json!({ "curve": spline.id, "point": point })));
     }
-    v.push(act("ui.fix", "Fix/Unfix", "c_fix").with(json!({ "entities": ents })));
+    v.push(act("ui.fix", "Fix/Unfix", "c_fix").with(json!({ "entities": ents })).on(editable));
     // The clipboard beside Delete, as in every menu.
-    v.push(act("ui.cut", "Cut", "cut").key("Ctrl+X"));
-    v.push(act("ui.copy", "Copy", "copy").key("Ctrl+C"));
-    v.push(act("ui.paste", "Paste", "paste").key("Ctrl+V").on(crate::edit_clipboard::can_paste_sketch(app)));
-    v.push(act("ui.delete", "Delete", "delete").key("Del"));
+    v.push(act("ui.cut", "Cut", "cut").key("Ctrl+X").on(editable));
+    v.push(act("ui.copy", "Copy", "copy").key("Ctrl+C").on(editable));
+    v.push(act("ui.paste", "Paste", "paste").key("Ctrl+V").on(editable && crate::edit_clipboard::can_paste_sketch(app)));
+    v.push(act("ui.delete", "Delete", "delete").key("Del").on(editable));
     let mut dimension = json!({ "entities": ents });
     crate::dim_view::ellipse_as_before(app.preferences.ellipse_axes, &mut dimension);
     v.push(cmd(app, "sketch.dimension", "Sketch Dimension").with(dimension).on(ents.len() <= 2));
@@ -1396,7 +1439,7 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     }
     if p == 2 && n == 2 {
         c.push(cmd(app, "sketch.constraint.coincident", "Coincident").with(json!({ "a": points[0], "b": points[1] })));
-        c.extend(alignment_items(&app.session.selection));
+        c.extend(alignment_items(selection, editable));
     }
     if p == 1 && curves.len() == 1 && n == 2 {
         c.push(cmd(app, "sketch.constraint.coincident", "Coincident").with(json!({ "a": picked[0], "b": picked[1] })));
@@ -1442,12 +1485,65 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
         v.push(Item::heading("Constraints"));
         v.extend(c);
     }
+    v.splice(0..0, head);
+    sketch_contents_gate(&mut v, editable);
     v
 }
 
-/// Where on the active sketch's plane the viewport menu was opened (sketch coordinates).
-fn menu_sketch_point(app: &SolveApp, plane: &solidcore_record::Plane) -> Option<solidcore_record::Vec2> {
+/// The sketch-level items a contents row's menu leads with when its sketch is not being edited:
+/// open it, show or hide it, and read its report. Delete and the entity commands follow, disabled.
+fn sketch_contents_head(app: &SolveApp, sketch: u64, editable: bool) -> Vec<Item> {
+    if editable {
+        return Vec::new();
+    }
+    let visible = crate::browser::sketch_visible(app, sketch);
+    vec![
+        act("ui.editSketch", "Edit Sketch", "sketch").with(json!({ "sketch": sketch })),
+        act(if visible { "ui.hideSketch" } else { "ui.showSketch" }, "Show/Hide", "eye").with(json!({ "sketch": sketch })),
+        act("ui.properties", "Properties", "measure").with(json!({ "sketch": sketch })),
+        Item::sep(),
+    ]
+}
+
+/// Entity commands of a sketch that is not being edited would run on the active sketch, because
+/// `sketch.*` commands and the `ui.*` constraint actions only ask for *a* sketch and ids repeat
+/// from one sketch to the next. Project is the one that means the active sketch, so it stays on.
+fn sketch_contents_gate(items: &mut [Item], editable: bool) {
+    if editable {
+        return;
+    }
+    for item in items {
+        let edits = item.id.starts_with("sketch.") || matches!(item.id.as_str(), "ui.horizontalConstraint" | "ui.verticalConstraint");
+        if edits && item.id != "sketch.project" {
+            item.enabled = false;
+        }
+    }
+}
+
+/// The selects a contents target's row ids stand for: curves first, then points, then constraints.
+fn contents_selection(app: &SolveApp, sketch: u64, rows: &[String]) -> Vec<Sel> {
+    let st = crate::open_meshing::session_world(&app.session);
+    let stored = app.session.doc.sketch(sketch).ok();
+    let Some(sk) = st.sketch(sketch).map(|s| &s.sketch).or(stored) else { return Vec::new() };
+    rows.iter()
+        .filter_map(|id| {
+            if sk.curve_index(id).is_some() {
+                Some(Sel::SketchCurve { id: id.clone(), sketch: Some(sketch) })
+            } else if sk.resolve_point(id).is_some() {
+                Some(Sel::SketchPoint { id: id.clone() })
+            } else if sk.constraints.iter().any(|c| &c.id == id) {
+                Some(Sel::SketchConstraint { id: id.clone() })
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// Where on `sketch`'s plane the viewport menu was opened (sketch coordinates).
+fn menu_sketch_point(app: &SolveApp, sketch: u64) -> Option<solidcore_record::Vec2> {
     let (at, _) = app.menu.opened?;
+    let plane = crate::open_meshing::session_world(&app.session).sketch(sketch)?.plane;
     let proj = crate::viewport::projection(app, app.viewport.rect?);
     let (o, d) = proj.ray(at);
     Some(plane.to_local(plane.intersect_ray(o, d)?))
@@ -1565,6 +1661,11 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 crate::sketch_modify_ui::edit_equation(app, id);
             }
         }
+        "ui.editDimensionValue" => {
+            if let (Some(sketch), Some(constraint)) = (id_of(&p, "sketch"), p.get("constraint").and_then(Value::as_str)) {
+                crate::dim_view::open_for(app, sketch, constraint);
+            }
+        }
         "ui.editSketchPattern" => {
             if let Some(id) = p.get("pattern").and_then(Value::as_str) {
                 crate::sketch_modify_ui::edit_pattern(app, id);
@@ -1632,6 +1733,12 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             start_rename(app, what, at);
         }
         "ui.properties" => {
+            // A sketch's Properties is its Sketch Report (#6262); a contents row can name a
+            // finished sketch, whose report is read by id.
+            if let Some(sketch) = id_of(&p, "sketch") {
+                crate::sketch_report::open_for(app, Some(sketch));
+                return;
+            }
             let command = if p.get("occurrence").is_some() {
                 "occurrence.properties"
             } else if p.get("component").is_some() {
@@ -2325,6 +2432,9 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
         | Target::ViewGizmo => true,
         Target::Body { name } => crate::open_meshing::session_world(&app.session).body(name).is_some(),
         Target::Sketch { id } => doc.feature(*id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. })),
+        Target::SketchContents { sketch, rows, .. } => {
+            doc.feature(*sketch).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. })) && !contents_selection(app, *sketch, rows).is_empty()
+        }
         // Construction geometry, as the browser's Construction folder lists it.
         Target::Plane { id } => doc.feature(*id).is_some_and(|f| {
             matches!(f.kind, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })

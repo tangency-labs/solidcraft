@@ -327,6 +327,7 @@ fn marks(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
         });
+        check(ui, "sketch_contents", "prefs.sketch.contents", None, &mut app.preferences.sketch_contents);
     });
 }
 
