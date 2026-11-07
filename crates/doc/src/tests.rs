@@ -1202,3 +1202,215 @@ fn an_extruded_ellipse_or_spline_is_one_wall_named_by_its_curve() {
         assert_eq!(names(&Document::from_json(&doc.to_json()).unwrap()), first, "reopened");
     }
 }
+
+/// Freeze the persisted v4 face-role encoding independently of display-mesh fields and serde layout.
+#[test]
+fn reconstructed_mesh_roles_keep_the_versioned_binary_identity() {
+    let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(1., 1., 1.)).unwrap();
+    let positions = [Vec3::new(0., -0., 0.), Vec3::X, Vec3::Y];
+    let traced = crate::lineage::reconstructed_tool(body, &positions, &[[0, 1, 2]], 0.01);
+    let lineage = traced.lineage.unwrap();
+    let crate::lineage::Operand::Made(roles) = lineage.operands[0].as_ref() else { panic!("made faces") };
+    assert_eq!(roles.len(), 6);
+    for (face, names) in roles.iter().enumerate() {
+        assert_eq!(names, &[format!("mesh:a25b75f4027054604e22932a73d09f6373cecd85bd8a0e0633be33cc156e16f6:face:{face}")]);
+    }
+}
+
+/// A conversion saved before source-bound lineage keeps its geometry-derived face and edge references.
+#[test]
+fn legacy_mesh_conversion_preserves_saved_geometry_names() {
+    let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
+    let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
+    let mut doc = Document::new("legacy conversion");
+    doc.add_feature(
+        FeatureKind::MeshImport {
+            file: "legacy-box.stl".into(),
+            meshes: vec![MeshData {
+                name: "Mesh".into(),
+                positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
+                triangles: mesh.triangles.iter().flatten().copied().collect(),
+                color: None,
+            }],
+        },
+        None,
+    )
+    .unwrap();
+    // An existing record has no source-bound naming marker.
+    let kind = serde_json::from_value(serde_json::json!({"type":"mesh_convert","body":"Mesh","tolerance":"0.01 mm"})).unwrap();
+    let conversion = doc.add_feature(kind, None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    let state = model.state();
+    let converted = state.body("Mesh").unwrap();
+    // Reproduce the upstream ModelBody::new path, with the same naming origin and no traced roles.
+    let mut legacy = ModelBody::new(converted.name.clone(), converted.body.clone(), conversion);
+    legacy.names = crate::naming::NameCell::new(converted.names.origin.clone());
+    let faces = crate::naming::face_names(&legacy);
+    let edges = crate::naming::edge_names(&legacy);
+    assert!(faces.iter().all(|name| !name.contains(":mesh:")));
+    let face_point = crate::naming::face_spots(&legacy)[0].unwrap().point;
+    let edge = &legacy.mesh().edges[0];
+    let edge_point = (edge[0] + edge[edge.len() - 1]) * 0.5;
+    let saved = doc.to_json();
+    let value = serde_json::to_value(&doc.features[1]).unwrap();
+    assert!(value.get("source_bound_names").is_none() && value.get("reconstruction").is_none());
+    for replay in [&doc, &Document::from_json(&saved).unwrap()] {
+        let mut cold = Model::new();
+        cold.evaluate(replay);
+        assert!(cold.results.iter().all(|r| r.error.is_none()), "{:?}", cold.results);
+        let st = cold.state();
+        let body = st.body("Mesh").unwrap();
+        assert_eq!(crate::naming::face_names(body), faces, "existing MeshConvert faces keep their stored names");
+        assert_eq!(crate::naming::edge_names(body), edges, "existing MeshConvert edges keep their stored names");
+        assert_eq!(body.feature, conversion, "existing conversion keeps the conversion feature as its owner");
+        let face = crate::name_lookup::locate_face(&st, &faces[0], face_point).unwrap();
+        let edge = crate::name_lookup::locate_edge(body, &edges[0], edge_point).unwrap();
+        assert!(!face.verified && !edge.verified, "legacy geometry names must not pretend to be exact lineage");
+    }
+}
+
+/// Unversioned conversions replay their polygon walls and saved wall/edge references instead of fitting new partial arcs.
+#[test]
+fn legacy_partial_arc_conversion_preserves_saved_wall_and_edge_references() {
+    use solidcraft_geom::prelude::*;
+    let root3 = 3f64.sqrt();
+    let outline = [
+        Vec2::new(-4., -3.),
+        Vec2::new(4., -3.),
+        Vec2::new(4., 3.),
+        Vec2::new(2., 3.),
+        Vec2::new(root3, 2.),
+        Vec2::new(1., 3. - root3),
+        Vec2::new(0., 1.),
+        Vec2::new(-1., 3. - root3),
+        Vec2::new(-root3, 2.),
+        Vec2::new(-2., 3.),
+        Vec2::new(-4., 3.),
+    ];
+    let source = solidcraft_kernel::extrude_planar_regions(
+        &solidcore_record::Plane::XY,
+        &[solidcore_record::Region2 { outer: solidcore_record::Loop2::polygon(&outline), holes: vec![] }],
+        0.,
+        5.,
+    )
+    .unwrap();
+    let mesh = source.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
+    let mut doc = Document::new("legacy polygon notch");
+    doc.add_feature(
+        FeatureKind::MeshImport {
+            file: "polygon-notch.stl".into(),
+            meshes: vec![MeshData {
+                name: "Mesh".into(),
+                positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
+                triangles: mesh.triangles.iter().flatten().copied().collect(),
+                color: None,
+            }],
+        },
+        None,
+    )
+    .unwrap();
+    let conversion = doc
+        .add_feature(serde_json::from_value(serde_json::json!({"type":"mesh_convert","body":"Mesh","tolerance":"0.1 mm"})).unwrap(), None)
+        .unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    let (faces, edges, face_name, face_point, face_normal, edge_name, edge_point) = {
+        let st = model.state();
+        let body = st.body("Mesh").unwrap();
+        // Eleven polygon segments give thirteen planar faces and volume 42 * 5 in the original converter.
+        assert_eq!(body.body.face_count(), 13, "legacy partial-arc records keep their polygon wall topology");
+        assert!((measure(&body.body).unwrap().volume - 210.).abs() < 1e-6);
+        assert_eq!(body.feature, conversion);
+        let faces = crate::naming::face_names(body);
+        let edges = crate::naming::edge_names(body);
+        let (face, point, normal) = crate::naming::face_spots(body)
+            .into_iter()
+            .enumerate()
+            .find_map(|(i, s)| {
+                let s = s?;
+                let solidcraft_kernel::FaceSurface::Plane { normal, .. } = s.surface? else { return None };
+                (normal.z.abs() < 1e-8 && s.point.x.abs() < 1.99 && s.point.y > 0.9 && s.point.y < 2.99).then_some((i, s.point, normal.vec()))
+            })
+            .unwrap();
+        let display = body.mesh();
+        let (edge, points) = display
+            .edges
+            .iter()
+            .enumerate()
+            .find(|(_, p)| {
+                let (Some(a), Some(b)) = (p.first(), p.last()) else { return false };
+                (a.z - b.z).abs() > 4.9 && (a.x - b.x).abs() < 1e-8 && (a.y - b.y).abs() < 1e-8 && a.x.abs() < 1.99 && a.y > 0.9 && a.y < 2.99
+            })
+            .unwrap();
+        let point_on_edge = (points[0] + points[points.len() - 1]) * 0.5;
+        let face_name = faces[face].clone();
+        let edge_name = edges[edge].clone();
+        (faces, edges, face_name, point, normal, edge_name, point_on_edge)
+    };
+    let old_feature = serde_json::to_value(&doc.features[1]).unwrap();
+    assert!(old_feature.get("reconstruction").is_none());
+    let mut modern = doc.clone();
+    let plane = solidcore_record::Plane::from_normal(face_point, face_normal).unwrap();
+    let sketch = doc
+        .add_feature(
+            FeatureKind::Sketch {
+                plane: PlaneRef::Face { plane, at: face_point, name: Some(face_name.clone()), anchor: None },
+                sketch: Sketch::new(),
+            },
+            None,
+        )
+        .unwrap();
+    let axis = doc
+        .add_feature(
+            FeatureKind::ConstructionAxis {
+                def: crate::construct::AxisDef::Edge { edge: crate::construct::GeoRef::Edge { at: edge_point, name: Some(edge_name.clone()) } },
+            },
+            None,
+        )
+        .unwrap();
+    let saved = doc.to_json();
+    assert!(saved.contains(&face_name) && saved.contains(&edge_name));
+    for replay in [&doc, &Document::from_json(&saved).unwrap()] {
+        let mut cold = Model::new();
+        cold.evaluate(replay);
+        assert!(cold.results.iter().all(|r| r.error.is_none()), "{:?}", cold.results);
+        let st = cold.state();
+        let body = st.body("Mesh").unwrap();
+        assert_eq!(crate::naming::face_names(body), faces);
+        assert_eq!(crate::naming::edge_names(body), edges);
+        assert_eq!(body.body.face_count(), 13);
+        assert_eq!(body.feature, conversion);
+        let face = crate::name_lookup::locate_face(&st, &face_name, face_point).unwrap();
+        let edge = crate::name_lookup::locate_edge(body, &edge_name, edge_point).unwrap();
+        assert!(!face.verified && !edge.verified);
+        let attached = st.sketches.iter().find(|s| s.feature == sketch).unwrap();
+        assert!(attached.plane.normal().dot(face_normal) > 1. - 1e-8);
+        let constructed = st.construct.iter().find(|c| c.feature == axis).unwrap();
+        let crate::construct::ConstructGeom::Axis { origin, dir } = constructed.geom else { panic!("expected saved edge axis") };
+        assert!((edge_point - origin).cross(dir).len() < 1e-8 && dir.z.abs() > 1. - 1e-8);
+    }
+    modern.features[1].kind =
+        serde_json::from_value(serde_json::json!({"type":"mesh_convert","body":"Mesh","tolerance":"0.1 mm","reconstruction":"analytic_v1"})).unwrap();
+    let mut fresh = Model::new();
+    fresh.evaluate(&modern);
+    assert!(fresh.results.iter().all(|r| r.error.is_none()), "{:?}", fresh.results);
+    let modern_names = {
+        let st = fresh.state();
+        let body = st.body("Mesh").unwrap();
+        assert_eq!(body.body.face_count(), 8);
+        assert_eq!(measure(&body.body).unwrap().merged.face_types.get("cylinder"), Some(&1));
+        assert!((measure(&body.body).unwrap().volume - (240. - 10. * std::f64::consts::PI)).abs() < 1e-6);
+        crate::naming::face_names(body)
+    };
+    // The earlier unreleased Boolean marker still selects the same version and source-bound names.
+    modern.features[1].kind =
+        serde_json::from_value(serde_json::json!({"type":"mesh_convert","body":"Mesh","tolerance":"0.1 mm","source_bound_names":true})).unwrap();
+    assert_eq!(serde_json::to_value(&modern.features[1]).unwrap()["reconstruction"], serde_json::json!("analytic_v1"));
+    let mut from_alias = Model::new();
+    from_alias.evaluate(&modern);
+    assert!(from_alias.results.iter().all(|r| r.error.is_none()));
+    assert_eq!(crate::naming::face_names(from_alias.state().body("Mesh").unwrap()), modern_names);
+}

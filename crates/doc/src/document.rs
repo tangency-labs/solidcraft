@@ -676,6 +676,45 @@ impl AlignFrame {
     }
 }
 
+/// A saved mesh-conversion algorithm and naming contract; older records keep their original topology.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, solidcraft_derive::Walk)]
+#[serde(rename_all = "snake_case")]
+pub enum MeshReconstruction {
+    /// The original constant-section fitter, geometry-derived names and conversion feature owner.
+    #[default]
+    LegacyPrism,
+    /// Certified partial arcs and combined analytic parts, with v4 source-bound face identities.
+    AnalyticV1,
+}
+
+impl MeshReconstruction {
+    /// Leave original records unmarked when resaving them.
+    fn is_legacy(&self) -> bool {
+        matches!(self, Self::LegacyPrism)
+    }
+}
+
+impl<'de> Deserialize<'de> for MeshReconstruction {
+    /// Read canonical version names and the Boolean marker used by earlier unreleased drafts.
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Saved {
+            Version(String),
+            SourceBound(bool),
+        }
+        match Saved::deserialize(deserializer)? {
+            Saved::Version(version) => match version.as_str() {
+                "legacy_prism" => Ok(Self::LegacyPrism),
+                "analytic_v1" => Ok(Self::AnalyticV1),
+                _ => Err(serde::de::Error::unknown_variant(&version, &["legacy_prism", "analytic_v1"])),
+            },
+            Saved::SourceBound(false) => Ok(Self::LegacyPrism),
+            Saved::SourceBound(true) => Ok(Self::AnalyticV1),
+        }
+    }
+}
+
 /// Feature definitions.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -1956,6 +1995,9 @@ pub enum FeatureKind {
         body: BodyName,
         #[walk(length = "Tolerance")]
         tolerance: Expr,
+        /// Persist the reconstruction and naming version; absent records keep the original prism fitter.
+        #[serde(default, alias = "source_bound_names", skip_serializing_if = "MeshReconstruction::is_legacy")]
+        reconstruction: MeshReconstruction,
     },
     /// Mesh bodies imported from a 3MF or STL file, embedded in the design.
     MeshImport {

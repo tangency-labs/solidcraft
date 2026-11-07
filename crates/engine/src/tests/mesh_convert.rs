@@ -2,6 +2,7 @@ use super::*;
 use solidcore_record::Vec3;
 use solidcraft_doc::{Document, FeatureKind, MeshData};
 
+/// Import an original synthetic box mesh for command, persistence and face-attachment tests.
 fn imported_box() -> Session {
     let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
     let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
@@ -54,6 +55,12 @@ fn mesh_conversion_is_parametric_undoable_and_editable_after_cold_reopen() {
     run(&mut s, "solid.scale", json!({"bodies":["Mesh"],"factor":"size","name":"Mesh scale"}));
     run(&mut s, "mesh.convert", json!({"body":"Mesh","tolerance":"0.01 mm","name":"Reconstructed prism"}));
     let check = |s: &Session| {
+        let feature = s.doc.features.iter().find(|f| matches!(&f.kind, FeatureKind::MeshConvert { .. })).unwrap();
+        assert_eq!(
+            serde_json::to_value(feature).unwrap()["reconstruction"],
+            json!("analytic_v1"),
+            "new conversions persist their analytic reconstruction version"
+        );
         let state = s.model.state();
         let body = &state.body("Mesh").unwrap().body;
         assert!(!body.is_mesh());
@@ -630,4 +637,153 @@ fn conversion_from_another_branch_names_the_component_to_activate() {
     assert!(error.contains("activate component 'Mesh 1' first"), "{error}");
     assert_eq!(s.doc.to_json(), before);
     assert_eq!((s.active_component, s.active_occurrence_path.clone()), context);
+}
+
+/// Preserve perpendicular analytic bores and attached sketches through moves, undo and cache-free reopen.
+#[test]
+fn perpendicular_bores_survive_conversion_undo_and_cold_reopen() {
+    use solidcore_record::{Loop2, Plane, Region2, Vec2};
+    use solidcraft_kernel::{BoolOp, boolean, box_solid, extrude_planar_regions};
+    let base = box_solid(Vec3::ZERO, Vec3::new(20., 16., 2.)).unwrap();
+    let wall = box_solid(Vec3::new(4., 0., 2.), Vec3::new(8., 16., 12.)).unwrap();
+    let mut source = boolean(&base, &wall, BoolOp::Union).unwrap().unwrap();
+    let circle = |center| Region2 { outer: Loop2::circle(center, 2.), holes: vec![] };
+    for (plane, start, end, center) in [(Plane::XY, 0., 2., Vec2::new(14., 8.)), (Plane::YZ, 4., 8., Vec2::new(8., 8.))] {
+        let tool = extrude_planar_regions(&plane, &[circle(center)], start, end).unwrap();
+        source = boolean(&source, &tool, BoolOp::Cut).unwrap().unwrap();
+    }
+    let mesh = source.mesh(&solidcraft_kernel::MeshTolerance::chord(0.005)).unwrap();
+    let mut doc = Document::default();
+    doc.add_feature(
+        FeatureKind::MeshImport {
+            file: "analytic-bracket.stl".into(),
+            meshes: vec![MeshData {
+                name: "Bracket".into(),
+                positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
+                triangles: mesh.triangles.iter().flatten().copied().collect(),
+                color: None,
+            }],
+        },
+        Some("Imported bracket"),
+    )
+    .unwrap();
+    // File import pins its body's name before the first model-changing command.
+    doc.features.last_mut().unwrap().body_names = vec!["Bracket".into()];
+    let mut s = Session::new(doc);
+    let before = s.doc.to_json();
+    run(&mut s, "mesh.convert", json!({"body":"Bracket","tolerance":"0.05 mm"}));
+    let check = |s: &Session| {
+        let state = s.model.state();
+        let body = &state.body("Bracket").unwrap().body;
+        assert!(!body.is_mesh());
+        assert!(body.validity().is_empty());
+        let volume = solidcraft_kernel::measure(body).unwrap().volume;
+        assert!((volume - (1280. - 24. * std::f64::consts::PI)).abs() < 0.02, "{volume}");
+        assert!(solidcraft_kernel::measure(body).unwrap().merged.face_types.get("cylinder").copied().unwrap_or(0) >= 2);
+        assert!(s.model.results.iter().all(|r| r.error.is_none()));
+    };
+    check(&s);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before);
+    run(&mut s, "edit.redo", json!({}));
+    check(&s);
+    check(&Session::new(Document::from_json(&s.doc.to_json()).unwrap()));
+    run(&mut s, "parameters.add", json!({"name":"shift","expression":"0 mm"}));
+    run(&mut s, "solid.move", json!({"bodies":["Bracket"],"translate":["shift","shift","shift"]}));
+    let mut points = Vec::new();
+    for (i, normal) in [-Vec3::X, Vec3::Z].into_iter().enumerate() {
+        let (index, point) = {
+            let state = s.model.state();
+            let body = state.body("Bracket").unwrap();
+            let index =
+                body.body.faces(0.01).unwrap().into_iter().find(|face| face.plane_normal.is_some_and(|n| n.dot(normal) > 0.99)).unwrap().index;
+            (index, solidcraft_doc::naming::face_spot(body, index).unwrap().point)
+        };
+        points.push(point);
+        let name = format!("Attached{i}");
+        run(&mut s, "sketch.create", json!({"plane":{"body":"Bracket","face":point,"index":index},"project_edges":true,"name":name}));
+        let id = s.doc.find_feature(&name).unwrap().id;
+        assert!(matches!(
+            &s.doc.feature(id).unwrap().kind,
+            FeatureKind::Sketch { plane: solidcraft_doc::PlaneRef::Face { anchor: Some(_), .. }, .. }
+        ));
+        run(&mut s, "sketch.finish", json!({}));
+    }
+    let check_sketches = |s: &Session, shift: f64| {
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+        let state = s.model.state();
+        for (i, point) in points.iter().enumerate() {
+            let id = s.doc.find_feature(&format!("Attached{i}")).unwrap().id;
+            let plane = state.sketch(id).unwrap().plane;
+            assert!((*point + Vec3::new(shift, shift, shift) - plane.origin).dot(plane.normal()).abs() < 1e-7);
+        }
+    };
+    check_sketches(&s, 0.);
+    run(&mut s, "parameters.change", json!({"name":"shift","expression":"5 mm"}));
+    check_sketches(&s, 5.);
+    check_sketches(&Session::new(Document::from_json(&s.doc.to_json()).unwrap()), 5.);
+    run(&mut s, "edit.undo", json!({}));
+    check_sketches(&s, 0.);
+    run(&mut s, "edit.redo", json!({}));
+    check_sketches(&s, 5.);
+}
+
+/// Changed mesh inputs or fit tolerance must invalidate old face anchors instead of reusing an ordinal.
+#[test]
+fn reconstructed_face_attachments_do_not_retarget_when_reconstruction_inputs_change() {
+    let mut s = imported_box();
+    run(&mut s, "parameters.add", json!({"name":"size","expression":"1","unit":""}));
+    run(&mut s, "solid.scale", json!({"bodies":["Mesh"],"factor":"size"}));
+    run(&mut s, "parameters.add", json!({"name":"fit","expression":"0.01 mm"}));
+    run(&mut s, "mesh.convert", json!({"body":"Mesh","tolerance":"fit"}));
+    let index = s
+        .model
+        .state()
+        .body("Mesh")
+        .unwrap()
+        .body
+        .faces(0.01)
+        .unwrap()
+        .into_iter()
+        .find(|face| face.plane_normal.is_some_and(|normal| normal.x < -0.99))
+        .unwrap()
+        .index;
+    run(&mut s, "sketch.create", json!({"plane":{"body":"Mesh","face":[0,10,15],"index":index},"name":"Attached"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let id = s.doc.find_feature("Attached").unwrap().id;
+    run(&mut s, "parameters.change", json!({"name":"size","expression":"2"}));
+    assert!(s.model.results.iter().any(|r| r.id == id && r.error.is_some()), "a changed input must not reuse a recovered face ordinal");
+    let cold = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(cold.model.results.iter().any(|r| r.id == id && r.error.is_some()));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    run(&mut s, "parameters.change", json!({"name":"fit","expression":"0.02 mm"}));
+    assert!(s.model.results.iter().any(|r| r.id == id && r.error.is_some()), "a changed tolerance must not reuse a recovered face ordinal");
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+}
+
+/// Unused source vertices are absent from display meshes but still distinguish reconstruction inputs.
+#[test]
+fn reconstructed_face_identity_tracks_vertices_omitted_from_the_display_mesh() {
+    let mut first = imported_box().doc.as_ref().clone();
+    let FeatureKind::MeshImport { meshes, .. } = &mut first.features[0].kind else { panic!("mesh import") };
+    let mut positions = meshes[0].positions.to_vec();
+    positions.extend([1., 1., 1.]);
+    meshes[0].positions = positions.into();
+    let mut second = first.clone();
+    let FeatureKind::MeshImport { meshes, .. } = &mut second.features[0].kind else { panic!("mesh import") };
+    *std::sync::Arc::make_mut(&mut meshes[0].positions).last_mut().unwrap() = 2.;
+    let display = |doc: &Document| {
+        let s = Session::new(doc.clone());
+        serde_json::to_value(s.model.state().body("Mesh").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap()).unwrap()
+    };
+    assert_eq!(display(&first), display(&second), "the changed vertex is not used for display");
+    let names = |doc: Document| {
+        let mut s = Session::new(doc);
+        run(&mut s, "mesh.convert", json!({"body":"Mesh","tolerance":"0.01 mm"}));
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+        solidcraft_doc::naming::face_names(s.model.state().body("Mesh").unwrap()).as_ref().clone()
+    };
+    assert_ne!(names(first), names(second), "source changes must not reuse recovered face identities");
 }

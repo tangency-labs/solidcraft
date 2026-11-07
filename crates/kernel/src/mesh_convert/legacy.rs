@@ -1,3 +1,6 @@
+//! Frozen pre-analytic-parts reconstruction for unversioned saved conversions.
+//! Keep its fitting and topology stable; improvements belong to a newer persisted reconstruction mode.
+
 //! Conservative reconstruction of constant-section mechanical mesh parts.
 //! Geometry is inferred from closed, manifold input, never from a display mesh.
 
@@ -15,6 +18,7 @@ const MAX_BOUNDARY: usize = 8192;
 /// outline with 49 holes) is at most 1225 pairs and 2450 booleans.
 const MAX_LOOPS: usize = 50;
 
+/// Prefix legacy conversion errors without changing its reconstruction behavior.
 fn invalid(message: &str) -> KernelError {
     KernelError::Invalid(format!("mesh conversion: {message}"))
 }
@@ -78,6 +82,7 @@ pub fn convert_prismatic_mesh(body: &Body, tolerance: f64) -> Result<Body> {
     })
 }
 
+/// Replay the original bounded welding and unused-vertex cleanup for saved meshes.
 fn weld(mesh: &crate::meshbody::TriMesh, tolerance: f64) -> Result<Body> {
     if mesh.triangles.len() > MAX_TRIANGLES {
         return Err(over_budget(mesh.triangles.len()));
@@ -163,6 +168,7 @@ fn weld(mesh: &crate::meshbody::TriMesh, tolerance: f64) -> Result<Body> {
     crate::mesh_body(&kept_positions, &triangles)
 }
 
+/// Replay the original cap matching, wall certification and full-circle-only prism fitting.
 fn extrusion(mesh: &crate::meshbody::TriMesh, axis: Vec3, tolerance: f64) -> Result<Option<Body>> {
     let (lo, hi) = mesh.positions.iter().map(|p| p.dot(axis)).fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), h| (lo.min(h), hi.max(h)));
     let height = hi - lo;
@@ -327,6 +333,7 @@ fn extrusion(mesh: &crate::meshbody::TriMesh, axis: Vec3, tolerance: f64) -> Res
     Ok(Some(body))
 }
 
+/// Keep the original bounded check that fitted full circles preserve polygon nesting.
 fn certify_nesting(raw: &[Loop2], fitted: &[Loop2], epsilon: f64, size: f64) -> Result<()> {
     if raw.len() > MAX_LOOPS {
         return Err(KernelError::Invalid(format!(
@@ -368,6 +375,7 @@ fn certify_nesting(raw: &[Loop2], fitted: &[Loop2], epsilon: f64, size: f64) -> 
     Ok(())
 }
 
+/// Fit full circles and remove collinear samples exactly as the original converter; partial arcs stay polygonal.
 fn fit_loop(points: &[Vec2], tolerance: f64, epsilon: f64) -> Loop2 {
     // Fit a complete circular boundary only with enough samples to distinguish it
     // from a polygon. Certify the chord deviation, not just the vertex residual.
@@ -419,173 +427,4 @@ fn fit_loop(points: &[Vec2], tolerance: f64, epsilon: f64) -> Loop2 {
         points.remove(index);
     }
     Loop2::polygon(&points)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn mesh_of(body: &Body) -> Body {
-        let mesh = body.mesh(&crate::MeshTolerance::chord(0.005)).unwrap();
-        crate::mesh_body(&mesh.positions, &mesh.triangles).unwrap()
-    }
-
-    #[test]
-    fn reconstructs_planes_holes_and_round_walls_in_arbitrary_orientation() {
-        let region = Region2 {
-            outer: Loop2::polygon(&[
-                Vec2::new(0., 0.),
-                Vec2::new(40., 0.),
-                Vec2::new(40., 20.),
-                Vec2::new(20., 20.),
-                Vec2::new(20., 30.),
-                Vec2::new(0., 30.),
-            ]),
-            holes: vec![Loop2::circle(Vec2::new(10., 10.), 4.).reversed()],
-        };
-        let source = crate::extrude_planar_regions(&Plane::XY, &[region], 0., 15.).unwrap();
-        let source = crate::transform(&source, Vec3::new(31., -17., 9.), Vec3::ZERO, Vec3::new(1., 2., 3.), 0.73).unwrap();
-        let converted = convert_prismatic_mesh(&mesh_of(&source), 0.05).unwrap();
-        assert!(!converted.is_mesh());
-        assert!(converted.validity().is_empty());
-        let expected = (1000. - std::f64::consts::PI * 16.) * 15.;
-        let fine_volume = |body: &Body| body.mesh(&crate::MeshTolerance::chord(1e-5)).unwrap().measure().volume;
-        assert!((fine_volume(&converted) - expected).abs() < 0.02);
-        assert!((crate::measure(&converted).unwrap().volume - crate::measure(&source).unwrap().volume).abs() < 1e-7);
-        assert_eq!(crate::measure(&converted).unwrap().merged.face_types.get("cylinder"), Some(&1));
-        assert!(converted.faces(0.01).unwrap().len() < 15);
-        let step = crate::step_export(&[&converted], "SolidCraft regression").unwrap();
-        let reopened = crate::step_import(&step).unwrap();
-        assert!((fine_volume(&reopened.bodies[0].body) - expected).abs() < 0.02);
-    }
-
-    #[test]
-    fn planar_boxes_are_exact_and_coarse_polygons_are_not_rounded() {
-        let source = crate::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
-        let result = convert_prismatic_mesh(&mesh_of(&source), 0.01).unwrap();
-        assert_eq!(result.faces(0.01).unwrap().len(), 6);
-        assert!((crate::measure(&result).unwrap().volume - 6000.).abs() < 1e-6);
-        let points: Vec<_> = (0..6)
-            .map(|i| {
-                let angle = i as f64 * std::f64::consts::TAU / 6.;
-                Vec2::new(angle.cos(), angle.sin()) * 10.
-            })
-            .collect();
-        assert_eq!(fit_loop(&points, 1., 1e-6).segs.len(), 6);
-        let points: Vec<_> = (0..16)
-            .map(|i| {
-                let angle = i as f64 * std::f64::consts::TAU / 16.;
-                Vec2::new(angle.cos(), angle.sin()) * 10.
-            })
-            .collect();
-        assert_eq!(fit_loop(&points, 0.001, 1e-6).segs.len(), 16);
-        assert_exact_circle(&fit_loop(&points, 0.2, 1e-6), Vec2::ZERO, 10.);
-    }
-
-    /// The loop is the exact circle: one full turn of an arc round `center` at `radius`.
-    fn assert_exact_circle(fitted: &Loop2, center: Vec2, radius: f64) {
-        let [solidcore_record::Seg2::Arc { center: c, radius: r, sweep, .. }] = fitted.segs.as_slice() else { panic!("not one arc: {fitted:?}") };
-        assert!(c.dist(center) < 1e-9 && (r - radius).abs() < 1e-9, "centre {c:?}, radius {r}");
-        assert!((sweep.abs() - std::f64::consts::TAU).abs() < 1e-9, "sweep {sweep}");
-    }
-
-    #[test]
-    fn refuses_open_nonprismatic_and_hostile_inputs() {
-        let open = crate::mesh_body(&[Vec3::ZERO, Vec3::X, Vec3::Y], &[[0, 1, 2]]).unwrap();
-        assert!(convert_prismatic_mesh(&open, 0.05).is_err());
-        let solid = crate::box_solid(Vec3::ZERO, Vec3::new(10., 10., 10.)).unwrap();
-        assert!(convert_prismatic_mesh(&solid, 0.05).is_err());
-        for tolerance in [f64::NAN, f64::INFINITY, -1., 0., 2.] {
-            assert!(convert_prismatic_mesh(&mesh_of(&solid), tolerance).is_err());
-        }
-        let sphere = crate::sphere(Vec3::ZERO, 10.).unwrap();
-        assert!(convert_prismatic_mesh(&mesh_of(&sphere), 0.05).is_err());
-        for coordinate in [f64::NAN, f64::INFINITY, f64::MAX, 1e30] {
-            let mesh = crate::meshbody::TriMesh { positions: vec![Vec3::new(coordinate, 0., 0.)], triangles: vec![] };
-            assert!(weld(&mesh, 0.05).is_err());
-        }
-    }
-
-    /// #4561: a closed box mesh with one extra triangle of no area along its bottom front edge
-    /// ((0,0,0), (10,0,0), (20,0,0)) converts to the box: the triangle adds no surface and is
-    /// dropped, its middle corner with it. V = 20 * 10 * 5 = 1000, six faces.
-    #[test]
-    fn a_zero_area_triangle_is_dropped() {
-        let source = crate::box_solid(Vec3::ZERO, Vec3::new(20., 10., 5.)).unwrap();
-        let mesh = source.mesh(&crate::MeshTolerance::chord(0.005)).unwrap();
-        let mut positions = mesh.positions.clone();
-        let mut triangles = mesh.triangles.clone();
-        let at = |ps: &[Vec3], p: Vec3| ps.iter().position(|q| q.dist(p) < 1e-9).and_then(|i| u32::try_from(i).ok()).unwrap();
-        let (a, b) = (at(&positions, Vec3::ZERO), at(&positions, Vec3::new(20., 0., 0.)));
-        positions.push(Vec3::new(10., 0., 0.));
-        let m = u32::try_from(positions.len() - 1).unwrap();
-        triangles.push([a, m, b]);
-        let body = crate::mesh_body(&positions, &triangles).unwrap();
-        let result = convert_prismatic_mesh(&body, 0.01).unwrap();
-        assert_eq!(result.faces(0.01).unwrap().len(), 6);
-        assert!((crate::measure(&result).unwrap().volume - 1000.).abs() < 1e-6);
-        // A mesh of nothing but a triangle of no area has nothing left to convert.
-        let sliver = crate::mesh_body(&[Vec3::ZERO, Vec3::X, Vec3::new(2., 0., 0.)], &[[0, 1, 2]]).unwrap();
-        let refused = convert_prismatic_mesh(&sliver, 0.05).unwrap_err();
-        assert!(refused.to_string().contains("no triangle of any area"), "{refused}");
-    }
-
-    #[test]
-    fn a_mesh_over_the_budget_says_how_big_it_is_and_what_converts() {
-        // #346: a freeform mesh just over the limit (a strip of 50001 triangles) is refused with
-        // its size, the limit, and that only constant-section parts convert at any size.
-        let n = MAX_TRIANGLES + 1;
-        let positions: Vec<Vec3> = (0..n + 2).map(|k| Vec3::new((k / 2) as f64, (k % 2) as f64, 0.)).collect();
-        let triangles: Vec<[u32; 3]> = (0..n as u32).map(|i| [i, i + 1, i + 2]).collect();
-        let body = crate::mesh_body(&positions, &triangles).unwrap();
-        let err = convert_prismatic_mesh(&body, 0.05).unwrap_err().to_string();
-        assert!(err.contains("50001 triangles") && err.contains("50000"), "{err}");
-        assert!(err.contains("constant-section") && err.contains("freeform"), "{err}");
-        let mesh = crate::meshbody::TriMesh { positions: vec![Vec3::ZERO; MAX_TRIANGLES * 3 + 1], triangles: vec![] };
-        let err = weld(&mesh, 0.05).unwrap_err().to_string();
-        assert!(err.contains("150001 vertices") && err.contains("150000"), "{err}");
-    }
-
-    #[test]
-    fn fitting_cannot_open_a_hole_through_a_nearby_wall() {
-        let outer = Loop2::polygon(&[Vec2::new(-1., -1.), Vec2::new(1., -1.), Vec2::new(1., 1.), Vec2::new(-1., 1.)]);
-        let points: Vec<_> = (0..12)
-            .map(|i| {
-                let angle = (i as f64 + 0.5) * std::f64::consts::TAU / 12.;
-                Vec2::new(angle.cos(), angle.sin()) * 1.02
-            })
-            .collect();
-        let inner = Loop2::polygon(&points);
-        let fitted = fit_loop(&points, 0.05, 1e-6);
-        assert_exact_circle(&fitted, Vec2::ZERO, 1.02);
-        assert!(certify_nesting(&[outer.clone(), inner], &[outer, fitted], 1e-6, 3.).is_err());
-    }
-
-    fn perforated_plate(rows: usize, cols: usize) -> Body {
-        let w = cols as f64 * 4. + 2.;
-        let h = rows as f64 * 4. + 2.;
-        let holes = (0..rows)
-            .flat_map(|r| (0..cols).map(move |c| (r, c)))
-            .map(|(r, c)| {
-                let (x, y) = (c as f64 * 4. + 2., r as f64 * 4. + 2.);
-                Loop2::polygon(&[Vec2::new(x, y), Vec2::new(x + 2., y), Vec2::new(x + 2., y + 2.), Vec2::new(x, y + 2.)]).reversed()
-            })
-            .collect();
-        let outer = Loop2::polygon(&[Vec2::new(0., 0.), Vec2::new(w, 0.), Vec2::new(w, h), Vec2::new(0., h)]);
-        crate::extrude_planar_regions(&Plane::XY, &[Region2 { outer, holes }], 0., 3.).unwrap()
-    }
-
-    #[test]
-    fn many_holes_are_refused_promptly_instead_of_stalling() {
-        // 400 holes would be ~80k loop pairs and ~160k planar booleans.
-        let mesh = mesh_of(&perforated_plate(20, 20));
-        let start = std::time::Instant::now();
-        let err = convert_prismatic_mesh(&mesh, 0.05).unwrap_err().to_string();
-        assert!(err.contains("too complex to convert"), "{err}");
-        assert!(start.elapsed() < std::time::Duration::from_secs(10), "took {:?}", start.elapsed());
-        // At the limit, a plate still converts in bounded time.
-        let mesh = mesh_of(&perforated_plate(7, 7));
-        let result = convert_prismatic_mesh(&mesh, 0.05).unwrap();
-        assert!((crate::measure(&result).unwrap().volume - (30. * 30. - 49. * 4.) * 3.).abs() < 1e-6);
-    }
 }

@@ -16,7 +16,7 @@ crates/io/src/urdf.rs
 crates/kernel/src/iges_in.rs
 crates/kernel/src/iges_in/**
 crates/kernel/src/iges_out.rs
-crates/kernel/src/mesh_convert.rs
+crates/kernel/src/mesh_convert/**
 crates/kernel/src/meshbody.rs
 crates/kernel/src/sew.rs
 crates/kernel/src/splitface.rs
