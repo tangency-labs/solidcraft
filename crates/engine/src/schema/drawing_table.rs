@@ -154,6 +154,67 @@ pub struct DeleteResult {
     pub balloons: Vec<String>,
 }
 
+/// What `drawing.table.inspect` takes.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct InspectParams {
+    pub table: TableIdParam,
+}
+
+/// One row of a table placed.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct InspectRow {
+    /// What an override names it by.
+    pub key: String,
+    /// `[x0, y0, x1, y1]` on the sheet.
+    pub rect_mm: [f64; 4],
+}
+
+/// One cell an override shows in place of its value.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct InspectOverride {
+    pub row: String,
+    pub column: String,
+    pub text: String,
+    pub replaced: String,
+}
+
+/// One cell whose text doesn't fit its column.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct InspectWarning {
+    /// Its row's key; none in the heading.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub row: Option<String>,
+    pub column: String,
+    /// `width`: a word wider than the column; `height`: more lines than the row holds; `chars`: more
+    /// characters than the fit allows.
+    pub warning: &'static str,
+}
+
+/// What `drawing.table.inspect` returns: where a table sits and what it shows, or why it can't draw.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct InspectResult {
+    pub table: String,
+    pub sheet: String,
+    /// `ok`, or `failed` with why.
+    pub status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
+    /// `[x0, y0, x1, y1]` on the sheet.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outline_mm: Option<[f64; 4]>,
+    /// The rows it shows, in their order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rows: Vec<InspectRow>,
+    /// The rows it lists before its filter.
+    pub listed: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub overrides: Vec<InspectOverride>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<InspectWarning>,
+}
+
 #[cfg(test)]
 #[path = "drawing_table_tests.rs"]
 mod tests;

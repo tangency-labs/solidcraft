@@ -5,8 +5,9 @@
 //! ([`groups`]), so a view's lines draw over a photo; each view on the sheet, its lines as
 //! [`paper_group`] makes them; the labels of the views placed apart from their projection place
 //! ([`Drawing::label_text`]), and the dimensions and notes of those views
-//! ([`crate::drawing_dimension_paper`], [`crate::drawing_note_paper`]); the sheet's tables, once they
-//! join; the notes on the sheet itself; then its title block's logos, lines and projection symbol, in
+//! ([`crate::drawing_dimension_paper`], [`crate::drawing_note_paper`]); the sheet's parts lists and revision
+//! tables, each where its record places it, read with the title block's text
+//! ([`crate::drawing_table_paper`]); the notes on the sheet itself; then its title block's logos, lines and projection symbol, in
 //! the drawing's projection ([`TitleBlockLayout::paper`]), with its labels and values set on them
 //! ([`title_block_text`]). Within a band, groups paint in the order they join: views by id, their
 //! dimensions and notes by view and id. A shaded view's group holds its pictures under its lines;
@@ -79,6 +80,7 @@ use solidcraft_geom::{Aabb2, ArcMap};
 use solidcraft_sketch::PaperFonts;
 
 use crate::drawing_picture::{picture_items, view_parts};
+use crate::drawing_table_paper::SheetTables;
 use crate::drawing_view::{
     CHORD_MM, Choice, LineRequest, MIN_MODEL_CHORD_MM, Shown, ShownSet, Stats, Styles, Unmeasured, ViewSessions, copy_for, paper_lines,
 };
@@ -185,6 +187,18 @@ pub struct NoteState {
     pub why: Option<String>,
 }
 
+/// One table on the sheet: drawn, or why not.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TableState {
+    pub table: u64,
+    /// Whether its lines are in the scene.
+    pub drawn: bool,
+    /// Whether it can't be read or laid out, rather than only left out for room.
+    pub failed: bool,
+    /// Why it isn't drawn.
+    pub why: Option<String>,
+}
+
 /// Where one object of a sheet's scene sits on paper, for picking and marking it. Beside the scene,
 /// not in it, so no writer sees it.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -215,13 +229,15 @@ pub struct SheetScene {
     pub scene: Scene,
     /// Each view on the sheet, in id order.
     pub views: Vec<ViewState>,
-    /// The sheet's border, then each view on it, then each dimension and note drawn, in paint order:
+    /// The sheet's border, then each view on it, then each dimension, note and table drawn, in paint order:
     /// each that is on paper ([`SheetObject::on_paper`]).
     pub objects: Vec<SheetObject>,
     /// Each dimension of a view on the sheet, by view and id.
     pub dimensions: Vec<DimensionState>,
     /// Each note of a view on the sheet, by view and id, then each note on the sheet, by id.
     pub notes: Vec<NoteState>,
+    /// Each table on the sheet, by id.
+    pub tables: Vec<TableState>,
     /// The views, dimensions and notes a deferred drawing shows as they last were ([`as_shown`]).
     pub out_of_date: Vec<u64>,
     /// What each view whose lines are in the scene drew them from: its world state and its bodies.
@@ -262,7 +278,9 @@ pub struct SheetView {
     pub notes: Vec<NoteState>,
     /// The notes of views up to date that are out of date: [`step`] reads them with the dimensions.
     pub stale_notes: Vec<u64>,
-    /// A title block's, a dimension's or a note's text waits for the search for a font to fall back to: the
+    /// Each table on the sheet, by id, as it last was.
+    pub tables: Vec<TableState>,
+    /// A title block's, a dimension's, a note's or a table's text waits for the search for a font to fall back to: the
     /// page extracts again on its next tick, and the text is set once the search has answered.
     pub waiting_for_fonts: bool,
 }
@@ -395,6 +413,7 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     let (text, _) = block_text(record, &lettering, &cell_texts(s, drawing, sheet), true)?;
     let (notes, _) = sheet_notes(s, drawing, sheet, &lettering, true);
     let (labels, _) = view_labels(drawing, drawing.views.iter().map(|v| &**v).filter(|v| v.sheet == sheet), &lettering, true);
+    let tables = sheet_tables(s, drawing, record, &lettering, true);
     let (images, logos) = (crate::drawing_pictures::groups(drawing, sheet), crate::drawing_pictures::logo_items(drawing, sheet));
     let mut assembly = assemble(record, drawing.projection, &text, &images, &logos, &labels, drawn)?;
     // After the views, as they need the views' frames: one read for the sheet's dimensions, each on
@@ -404,6 +423,8 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     let group = |view: u64| on.binary_search_by_key(&view, |(id, ..)| *id).ok().and_then(|at| on.get(at)).map(|(_, v, _)| v.line_group.value);
     let dimensions = draw_dimensions(s, Some(&mut sessions), drawing, &wanted, |view| Some((*frames.get(&view)?, group(view)?)), true);
     assembly.add_dimensions(dimensions.iter());
+    // Tables paint in their own band, under the sheet's own notes, so a note placed on one stays readable.
+    let tables = assembly.add_tables(&tables);
     assembly.add_sheet_notes(&notes);
     let (scene, views, objects, dimensions, notes) = assembly.finish()?;
     // Drawn at once, so nothing is as it last was.
@@ -412,7 +433,7 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     // parts apart has its copy's, as the sheet shows them.
     let state_of = |choice: &Choice| Some(shown.get(choice)?.as_ref().ok()?.state.clone());
     let drawn = owners.into_iter().filter(|(id, ..)| in_scene(&views, *id)).filter_map(|(_, choice, of)| Some((state_of(&choice)?, of))).collect();
-    Ok(SheetScene { scene, views, objects, dimensions, notes, out_of_date, drawn })
+    Ok(SheetScene { scene, views, objects, dimensions, notes, tables, out_of_date, drawn })
 }
 
 /// Sheet `sheet` of `d`, the drawing open, as a command reads it: drawn at once ([`build`]), or for a
@@ -435,7 +456,7 @@ pub fn as_shown(s: &mut Session, d: &Drawing, sheet: u64) -> Result<SheetScene> 
     let entries = &s.drawing_scenes.views;
     let drawn_from = |view: &ViewState| entries.get(&view.view).and_then(|entry| Some((entry.state.clone(), entry.drawn.owners.clone()?)));
     let drawn = shown.views.iter().filter(|view| view.status == Status::Drawn).filter_map(drawn_from).collect();
-    Ok(SheetScene { scene, views: shown.views, objects, dimensions: shown.dimensions, notes: shown.notes, out_of_date, drawn })
+    Ok(SheetScene { scene, views: shown.views, objects, dimensions: shown.dimensions, notes: shown.notes, tables: shown.tables, out_of_date, drawn })
 }
 
 /// Draws what is waiting on the sheet last extracted, as the sheet page would: each view once, then
@@ -964,6 +985,30 @@ impl Assembly {
         }
     }
 
+    /// Adds the sheet's `tables`, each already where it stands on the sheet, in their own paint band
+    /// ([`ObjectKind::band`]), and gives each one's state. One that can't be read, or that would take
+    /// the scene past a paper scene's limits, is left out and says why; the rest still draw.
+    fn add_tables(&mut self, tables: &SheetTables) -> Vec<TableState> {
+        let mut states = Vec::with_capacity(tables.tables.len());
+        for (table, read) in &tables.tables {
+            let state = |drawn, failed, why| TableState { table: *table, drawn, failed, why };
+            states.push(match read {
+                Err(why) => state(false, true, Some(why.clone())),
+                Ok(group) => match self.add(group, &[], Vec2::ZERO, DrawnFor::Sheet) {
+                    Ok(bounds_mm) => {
+                        self.objects.extend(SheetObject::on_paper(*table, group.kind, bounds_mm, None).map(banded(DrawnFor::Sheet)));
+                        state(true, false, None)
+                    }
+                    Err(LeftOut::TooManyRecords) => {
+                        state(false, false, Some(format!("with its lines the sheet is more than a paper scene's {MAX_RECORDS} records")))
+                    }
+                    Err(LeftOut::Invalid(e)) => state(false, false, Some(e)),
+                },
+            });
+        }
+        states
+    }
+
     /// The scene with its groups in paint order, checked whole, and its objects in the same order.
     fn finish(self) -> Result<(Scene, Vec<ViewState>, Vec<SheetObject>, Vec<DimensionState>, Vec<NoteState>)> {
         let mut scene = self.scene;
@@ -1120,6 +1165,12 @@ fn block_text(record: &Sheet, lettering: &Lettering, cells: &[CellText], wait: b
     })
 }
 
+/// The tables of sheet `record` of `d`, read from `s`'s design and measured in `lettering`'s font
+/// and language, as [`block_text`] sets the block's text; `wait` as there.
+fn sheet_tables(s: &Session, d: &Drawing, record: &Sheet, lettering: &Lettering, wait: bool) -> SheetTables {
+    crate::drawing_table_paper::sheet_tables(s, d, record, &PaperFonts::new(&lettering.font, &lettering.language, wait))
+}
+
 /// Sheet `sheet` of `d`.
 fn sheet_of(d: &Drawing, sheet: u64) -> Result<&Sheet> {
     d.sheets.iter().map(|s| &**s).find(|s| s.id == sheet).ok_or_else(|| bad(CMD, format!("the drawing has no sheet {}", ids::encode(sheet))))
@@ -1251,8 +1302,10 @@ struct Assembled {
     notes: Arc<Vec<SheetNote>>,
     /// Its views' labels, set with its block.
     labels: Arc<Vec<SetLabel>>,
-    /// Whether a text of the block, of a note on the sheet or of a label waits for a font to fall back to: until it doesn't, the block is
-    /// set again on each [`extract`], and the sheet put together with it is never reused.
+    /// The sheet's tables, read with the block's text and for the same five.
+    tables: Arc<SheetTables>,
+    /// Whether a text of the block, of a note on the sheet, of a label or of a table waits for a font to fall back to: until it
+    /// doesn't, the block is set again on each [`extract`], and the sheet put together with it is never reused.
     pending: bool,
     serial: u64,
     inputs: Inputs,
@@ -1495,17 +1548,19 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
     {
         return Ok(last.answer.clone());
     }
-    // The title block's cells, the sheet's notes and its views' labels are read and set again only for
-    // another sheet, drawing, design, model or lettering (a name or a mass can change them), not for
-    // each view drawn.
-    let (cells, text, notes, labels, pending) = match last {
-        Some(last) => (last.cells.clone(), last.text.clone(), last.notes.clone(), last.labels.clone(), false),
+    // The title block's cells, the sheet's notes, its views' labels and its tables are read and set again only for another
+    // sheet, drawing, design, model or lettering (a name or a mass can change them), not for each view drawn.
+    let (cells, text, notes, labels, tables, pending) = match last {
+        Some(last) => (last.cells.clone(), last.text.clone(), last.notes.clone(), last.labels.clone(), last.tables.clone(), false),
         None => {
             let cells = cell_texts(s, &d, sheet);
-            let (text, block_pending) = block_text(sheet_of(&d, sheet)?, &lettering, &cells, false)?;
+            let record = sheet_of(&d, sheet)?;
+            let (text, block_pending) = block_text(record, &lettering, &cells, false)?;
             let (notes, notes_pending) = sheet_notes(s, &d, sheet, &lettering, false);
             let (labels, labels_pending) = view_labels(&d, d.views.iter().map(|v| &**v).filter(|v| v.sheet == sheet), &lettering, false);
-            (cells, Arc::new(text), Arc::new(notes), Arc::new(labels), block_pending || notes_pending || labels_pending)
+            let tables = sheet_tables(s, &d, record, &lettering, false);
+            let pending = block_pending || notes_pending || labels_pending || tables.pending;
+            (cells, Arc::new(text), Arc::new(notes), Arc::new(labels), Arc::new(tables), pending)
         }
     };
     let doc = s.doc.clone();
@@ -1520,7 +1575,7 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
     let (stale_dimensions, stale_notes) = (stale_dimensions.iter().map(Annotation::id).collect(), stale_notes.iter().map(Annotation::id).collect());
     let waiting_for_fonts = pending || handed_back || !cache.waiting_dimensions(&d, &on, &state, &lettering, revision).is_empty();
     let inputs = cache.inputs(&d, record, &on);
-    let (scene, views, objects, dimensions, notes_drawn, generation) = match cache.last.take() {
+    let (scene, views, objects, dimensions, notes_drawn, table_states, generation) = match cache.last.take() {
         // Text set while a font was looked for can differ with the same cells and faces.
         Some(last)
             if !last.pending
@@ -1529,10 +1584,11 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
                 && last.cells == cells
                 && last.text.faces() == text.faces()
                 && last.notes == notes
-                && last.labels == labels =>
+                && last.labels == labels
+                && last.tables == tables =>
         {
             let answer = last.answer;
-            (answer.scene, answer.views, answer.objects, answer.dimensions, answer.notes, answer.generation)
+            (answer.scene, answer.views, answer.objects, answer.dimensions, answer.notes, answer.tables, answer.generation)
         }
         _ => {
             // Views, dimensions and notes no longer in the drawing are forgotten: each holds a world state.
@@ -1542,16 +1598,42 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
             let drawn = on.iter().filter_map(|(id, _, centre)| cache.views.get(id).map(|e| (*id, *centre, &e.drawn)));
             let mut assembly = assemble(record, d.projection, &text, &inputs.images, &inputs.logos, &labels, drawn)?;
             assembly.add_dimensions(inputs.dimensions.iter().filter_map(|(id, _)| cache.dimensions.get(id).map(|e| &e.drawn)));
+            let table_states = assembly.add_tables(&tables);
             assembly.add_sheet_notes(&notes);
             let (scene, views, objects, dimensions, notes) = assembly.finish()?;
-            (Arc::new(scene), views, objects.into(), dimensions, notes, GENERATION.fetch_add(1, Ordering::Relaxed).wrapping_add(1))
+            (Arc::new(scene), views, objects.into(), dimensions, notes, table_states, GENERATION.fetch_add(1, Ordering::Relaxed).wrapping_add(1))
         }
     };
-    let answer =
-        SheetView { scene, generation, views, stale, objects, dimensions, stale_dimensions, notes: notes_drawn, stale_notes, waiting_for_fonts };
+    let answer = SheetView {
+        scene,
+        generation,
+        views,
+        stale,
+        objects,
+        dimensions,
+        stale_dimensions,
+        notes: notes_drawn,
+        stale_notes,
+        tables: table_states,
+        waiting_for_fonts,
+    };
     let serial = cache.serial;
-    cache.last =
-        Some(Assembled { sheet, drawing: d, doc, state, lettering, cells, text, notes, labels, pending, serial, inputs, answer: answer.clone() });
+    cache.last = Some(Assembled {
+        sheet,
+        drawing: d,
+        doc,
+        state,
+        lettering,
+        cells,
+        text,
+        notes,
+        labels,
+        tables,
+        pending,
+        serial,
+        inputs,
+        answer: answer.clone(),
+    });
     Ok(answer)
 }
 

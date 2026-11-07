@@ -1,4 +1,5 @@
 use serde_json::json;
+use solidcore_record::Vec2;
 
 use super::*;
 use crate::schema::tests::conforms;
@@ -40,6 +41,38 @@ fn id_of(reply: &Value) -> u64 {
     ids::decode(reply["table"].as_str().unwrap()).unwrap()
 }
 
+fn inspected(s: &mut Session, id: u64) -> Value {
+    let reply = s.execute(INSPECT, &json!({"table": ids::encode(id)})).unwrap();
+    let schema = output_schema_for::<InspectResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+    reply
+}
+
+/// The open drawing's first sheet drawn: what it says of table `id`, and the box round its lines.
+fn on_sheet(s: &Session, id: u64) -> (crate::drawing_scene::TableState, Option<Aabb2>) {
+    let d = s.drawing("test").unwrap().clone();
+    let built = crate::drawing_scene::build(s, &d, d.sheets[0].id).unwrap();
+    let state = built.tables.iter().find(|t| t.table == id).cloned().unwrap();
+    (state, built.objects.iter().find(|o| o.object == id).map(|o| o.bounds_mm))
+}
+
+/// Where the open drawing's first sheet anchors its tables.
+fn space(s: &Session) -> Aabb2 {
+    crate::drawing_table_paper::drawing_space(&s.drawing("test").unwrap().sheets[0])
+}
+
+fn near(a: Vec2, b: Vec2) -> bool {
+    (a.x - b.x).abs() < 1e-9 && (a.y - b.y).abs() < 1e-9
+}
+
+/// Table `id` of `s`'s drawing with `change` made to its record, put in as a design file could hold it.
+fn put_table(s: &mut Session, id: u64, change: impl FnOnce(&mut SheetTable)) {
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let at = d.tables.index_of(id).unwrap();
+    change(Arc::make_mut(d.tables.get_mut(at).unwrap()));
+    s.doc_mut().put_drawing(Arc::new(d));
+}
+
 /// The new parts list starts as the plan says: top right, headings on top, QTY, rows of 7 mm, listing
 /// the design. A revision table starts at the bottom left. Each is one undo step, and reads back.
 #[test]
@@ -54,7 +87,7 @@ fn a_new_table_has_its_defaults_and_saves() {
     assert_eq!((&record["table"]["heading"], &record["table"]["row_height_mm"]), (&json!("top"), &json!(7.0)));
     assert_eq!(record["table"]["columns"][1]["heading"], json!("QTY"));
     assert_eq!((&record["table"]["columns"][6]["name"], &record["table"]["columns"][6]["printed"]), (&json!("ballooned"), &json!(false)));
-    // Never on paper: until the sheet draws tables (P8) this guards that it never draws this one.
+    // Never on paper: the sheet draws the list, but never this column.
     let svg = s.execute("drawing.export", &json!({"sheet": sheet, "format": "svg"})).unwrap();
     assert!(!svg["svg"].as_str().unwrap().to_lowercase().contains("ballooned"), "{svg}");
     assert_eq!(record["kind"]["parts_list"]["of"]["component"], json!(0));
@@ -74,6 +107,193 @@ fn a_new_table_has_its_defaults_and_saves() {
     assert_eq!(s.drawing("test").unwrap().tables.len(), 1);
     s.execute("edit.redo", &json!({})).unwrap();
     assert_eq!(*s.drawing("test").unwrap().clone(), *d);
+}
+
+/// A parts list draws at the top right of the drawing space, its heading and two rows 7 mm each by
+/// the defaults; a revision table with no rows yet at the bottom left. Each is its own kind of object
+/// in the scene, and the scene and an export both say each one is drawn.
+#[test]
+fn a_table_draws_where_its_record_says() {
+    use solidcraft_geom::paper::ObjectKind;
+
+    let mut s = assembly();
+    let sheet = sheet_of(&s);
+    let list = id_of(&run(&mut s, ADD, json!({"sheet": sheet, "kind": "parts_list"})));
+    let revisions = id_of(&run(&mut s, ADD, json!({"sheet": sheet, "kind": "revision"})));
+    let drawing = space(&s);
+
+    let (state, bounds) = on_sheet(&s, list);
+    assert_eq!((state.drawn, state.failed, &state.why), (true, false, &None), "{state:?}");
+    let bounds = bounds.unwrap();
+    assert!(near(bounds.max, drawing.max), "{bounds:?} {drawing:?}");
+    assert!((bounds.size().y - 3.0 * 7.0).abs() < 1e-9 && bounds.size().x > 0.0, "a heading and two rows: {bounds:?}");
+    let (state, bounds) = on_sheet(&s, revisions);
+    assert!(state.drawn, "{state:?}");
+    assert!(near(bounds.unwrap().min, drawing.min), "{bounds:?} {drawing:?}");
+    let d = s.drawing("test").unwrap().clone();
+    let built = crate::drawing_scene::build(&s, &d, d.sheets[0].id).unwrap();
+    // A sheet's tables paint in id order, and ids don't follow the order the tables were added.
+    let kinds: Vec<_> = built.objects.iter().filter(|o| o.object == list || o.object == revisions).map(|o| (o.object, o.kind)).collect();
+    let mut by_id = vec![(list, ObjectKind::PartsList), (revisions, ObjectKind::RevisionTable)];
+    by_id.sort_by_key(|(id, _)| *id);
+    assert_eq!(kinds, by_id);
+
+    let schema = output_schema_for::<crate::schema::drawing_scene::SheetSceneResult>();
+    let scene = s.execute("drawing.scene", &json!({"sheet": sheet})).unwrap();
+    assert!(conforms(schema.as_value(), schema.as_value(), &scene), "{scene}");
+    let words = |reply: &Value| reply["tables"].as_array().unwrap().iter().map(|t| (t["status"].clone(), t["drawn"].clone())).collect::<Vec<_>>();
+    assert_eq!(words(&scene), vec![(json!("ok"), json!(true)); 2], "{scene}");
+    let exported = s.execute("drawing.export", &json!({"sheet": sheet, "format": "svg"})).unwrap();
+    assert_eq!(words(&exported), words(&scene), "{exported}");
+    assert_eq!(exported["svg"], s.execute("drawing.export", &json!({"sheet": sheet, "format": "svg"})).unwrap()["svg"], "the same bytes");
+}
+
+/// An offset moves an anchored table; a heading at the bottom keeps the same corner of the outline;
+/// a free place names the outline's top left. A change of paper takes an anchored table along and
+/// leaves a free one where it was.
+#[test]
+fn a_tables_place_follows_its_record_and_the_paper() {
+    let mut s = assembly();
+    let sheet = sheet_of(&s);
+    let table = id_of(&run(&mut s, ADD, json!({"sheet": sheet, "kind": "parts_list"})));
+    let free = id_of(&run(&mut s, ADD, json!({"sheet": sheet, "kind": "parts_list", "set": {"place": {"at": [30, 200]}}})));
+    let at = on_sheet(&s, table).1.unwrap();
+    let was_free = on_sheet(&s, free).1.unwrap();
+    assert!(near(Vec2::new(was_free.min.x, was_free.max.y), Vec2::new(30.0, 200.0)), "{was_free:?}");
+
+    run(&mut s, EDIT, json!({"table": ids::encode(table), "set": {"place": {"anchor": {"corner": "top_right", "offset_mm": [-5, -7]}}}}));
+    let moved = on_sheet(&s, table).1.unwrap();
+    assert!(near(moved.max, at.max + Vec2::new(-5.0, -7.0)), "{moved:?} {at:?}");
+    run(&mut s, EDIT, json!({"table": ids::encode(table), "set": {"heading": "bottom"}}));
+    let bottom = on_sheet(&s, table).1.unwrap();
+    assert!(near(bottom.max, moved.max) && near(bottom.min, moved.min), "the same outline: {bottom:?} {moved:?}");
+
+    // An assembly's drawing starts on A2: the paper grows to A1, set as a user sets it.
+    let a2 = space(&s);
+    s.execute("drawing.sheet.set", &json!({"sheet": sheet, "size": {"standard": "a1"}})).unwrap();
+    let grown = space(&s).max - a2.max;
+    assert!(grown.x > 0.0, "{grown:?}");
+    assert!(near(on_sheet(&s, table).1.unwrap().max, bottom.max + grown), "it follows the paper");
+    assert_eq!(on_sheet(&s, free).1, Some(was_free), "a free one stays");
+}
+
+/// Tables are anchored inside a sheet's drawing border, and on its paper when it has none.
+#[test]
+fn a_tables_space_is_inside_the_drawing_border() {
+    let s = assembly();
+    let mut sheet = (*s.drawing("test").unwrap().sheets[0]).clone();
+    let paper = sheet.sheet.size_mm().unwrap();
+    let border = sheet.border.as_ref().unwrap().layout(&sheet.sheet).unwrap().drawing_border;
+    let space = crate::drawing_table_paper::drawing_space(&sheet);
+    assert_eq!((space.min, space.max), (border.min, border.max));
+    assert!(space.min.x > 0.0 && space.max.x < paper.x, "{space:?}");
+    sheet.border = None;
+    let bare = crate::drawing_table_paper::drawing_space(&sheet);
+    assert_eq!((bare.min, bare.max), (Vec2::ZERO, paper));
+}
+
+/// A list of a component the design no longer has can't be read: it says why and draws nothing, the
+/// sheet's other table still draws, and inspect says the same.
+#[test]
+fn a_table_that_cant_be_read_says_why_and_the_sheet_still_draws() {
+    let mut s = assembly();
+    let sheet = sheet_of(&s);
+    let good = id_of(&run(&mut s, ADD, json!({"sheet": sheet, "kind": "parts_list"})));
+    let bad = id_of(&run(&mut s, ADD, json!({"sheet": sheet, "kind": "parts_list"})));
+    put_table(&mut s, bad, |table| {
+        if let Kind::PartsList(list) = &mut table.kind {
+            list.of.component = 999_999;
+        }
+    });
+    let (state, bounds) = on_sheet(&s, bad);
+    assert_eq!((state.drawn, state.failed, bounds), (false, true, None), "{state:?}");
+    assert!(state.why.as_deref().is_some_and(|why| why.contains("999999")), "{state:?}");
+    assert!(on_sheet(&s, good).0.drawn);
+    let reply = inspected(&mut s, bad);
+    assert_eq!((reply["status"].as_str(), reply.get("outline_mm")), (Some("failed"), None), "{reply}");
+    assert_eq!(reply["why"].as_str(), state.why.as_deref());
+    let scene = s.execute("drawing.scene", &json!({"sheet": sheet})).unwrap();
+    let said = scene["tables"].as_array().unwrap().iter().find(|t| t["table"] == json!(ids::encode(bad))).cloned().unwrap();
+    assert_eq!((said["status"].as_str(), said["drawn"].as_bool()), (Some("failed"), Some(false)), "{said}");
+}
+
+/// Inspect gives what a placed table shows: its outline (the scene's box round it), each row with its
+/// key and rectangle, a cell an override changed with the value it replaced, named by its column even
+/// past a column that isn't printed, a filter that leaves nothing, and a word wider than its column.
+/// It changes nothing.
+#[test]
+fn inspect_says_where_a_table_is_and_what_it_shows() {
+    let mut s = assembly();
+    let sheet = sheet_of(&s);
+    let table = id_of(&run(&mut s, ADD, json!({"sheet": sheet, "kind": "parts_list"})));
+    let before = s.drawing("test").unwrap().to_json().unwrap();
+    let steps = s.undo.len();
+    let reply = inspected(&mut s, table);
+    assert_eq!((reply["status"].as_str(), reply["listed"].as_u64()), (Some("ok"), Some(2)), "{reply}");
+    assert_eq!((s.drawing("test").unwrap().to_json().unwrap(), s.undo.len()), (before, steps));
+    let bounds = on_sheet(&s, table).1.unwrap();
+    let outline: Vec<f64> = reply["outline_mm"].as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect();
+    assert_eq!(outline, [bounds.min.x, bounds.min.y, bounds.max.x, bounds.max.y]);
+    let rows = reply["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    let top = |row: &Value| row["rect_mm"][3].as_f64().unwrap();
+    assert!((top(&rows[0]) - (outline[3] - 7.0)).abs() < 1e-9 && (top(&rows[1]) - (outline[3] - 14.0)).abs() < 1e-9, "{reply}");
+
+    // DESCRIPTION, before MATERIAL, off the paper: the override still names MATERIAL.
+    let mut columns = s.drawing("test").unwrap().tables.by_id(table).unwrap().table.columns.clone();
+    columns.iter_mut().filter(|c| c.name == "description").for_each(|c| c.printed = false);
+    let key = rows[0]["key"].as_str().unwrap().to_string();
+    let overrides = json!([{"row": key, "column": "material", "text": "By hand"}]);
+    let set = json!({"columns": serde_json::to_value(&columns).unwrap(), "overrides": overrides});
+    run(&mut s, EDIT, json!({"table": ids::encode(table), "set": set}));
+    let reply = inspected(&mut s, table);
+    let changed = &reply["overrides"][0];
+    assert_eq!((&changed["row"], &changed["column"], &changed["text"]), (&json!(key), &json!("material"), &json!("By hand")), "{reply}");
+
+    let filter = json!({"text": [{"column": "name", "contains": "no such part"}]});
+    run(&mut s, EDIT, json!({"table": ids::encode(table), "set": {"filter": filter, "overrides": []}}));
+    let reply = inspected(&mut s, table);
+    assert_eq!((reply["listed"].as_u64(), reply.get("rows")), (Some(2), None), "the filter leaves nothing: {reply}");
+
+    columns.iter_mut().filter(|c| c.name == "name").for_each(|c| c.width_mm = Some(3.0));
+    run(&mut s, EDIT, json!({"table": ids::encode(table), "set": {"filter": {}, "columns": serde_json::to_value(&columns).unwrap()}}));
+    let reply = inspected(&mut s, table);
+    assert!(reply["warnings"].as_array().unwrap().iter().any(|w| w["column"] == "name" && w["warning"] == "width"), "{reply}");
+}
+
+/// The window's sheet keeps its tables until what they read changes: drawn as a build draws them,
+/// read again for a table's edit and not for nothing, and showing a part's new name once it opens again.
+#[test]
+fn the_window_keeps_a_table_until_what_it_reads_changes() {
+    let mut s = assembly();
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let table = id_of(&run(&mut s, ADD, json!({"sheet": ids::encode(sheet), "kind": "parts_list"})));
+    let settled = |s: &mut Session| {
+        crate::drawing_scene::extract(s, sheet).unwrap();
+        while crate::drawing_scene::step(s) {}
+        let view = crate::drawing_scene::extract(s, sheet).unwrap();
+        let d = s.drawing("test").unwrap().clone();
+        assert_eq!(*view.scene, crate::drawing_scene::build(s, &d, sheet).unwrap().scene, "as a build draws it");
+        view
+    };
+    let first = settled(&mut s);
+    assert!(first.tables.iter().any(|t| t.table == table && t.drawn), "{:?}", first.tables);
+    assert_eq!(settled(&mut s).generation, first.generation, "nothing read again");
+
+    run(&mut s, EDIT, json!({"table": ids::encode(table), "set": {"row_height_mm": 9.0}}));
+    let edited = settled(&mut s);
+    assert_ne!(edited.generation, first.generation);
+    // The model changes only with the drawing closed. Opened again, the list reads the part's new name.
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    s.execute("drawing.close", &json!({})).unwrap();
+    s.execute("component.rename", &json!({"component": "Bolt", "name": "Long bolt"})).unwrap();
+    s.execute("drawing.open", &json!({"drawing": drawing})).unwrap();
+    settled(&mut s);
+    let d = s.drawing("test").unwrap().clone();
+    let lettering = PaperFonts::new(&d.font, &d.language, true);
+    let placed = place(&s, &d, d.tables.by_id(table).unwrap(), drawing_space(&d.sheets[0]), &lettering).ok().unwrap();
+    let names: Vec<_> = placed.layout.rows.iter().flat_map(|row| &row.cells).flat_map(|cell| &cell.lines).map(|line| line.text.as_str()).collect();
+    assert!(names.contains(&"Long bolt"), "the list shows the part's new name: {names:?}");
 }
 
 /// A list's sheet documents the component it starts with.

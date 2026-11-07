@@ -3,7 +3,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::drawing_scene::{SheetSceneDimension, SheetSceneNote, SheetSceneView};
+use super::drawing_scene::{SheetSceneDimension, SheetSceneNote, SheetSceneTable, SheetSceneView};
 use super::drawing_sheet::sheet_ref;
 
 /// Write one sheet of the open drawing to a file, or return it.
@@ -143,6 +143,9 @@ pub struct ExportResult {
     /// Each note on the sheet or its views, as `drawing.scene` reports it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<SheetSceneNote>,
+    /// Each table on the sheet, as `drawing.scene` reports it: one that isn't drawn leaves the file
+    /// written, and says why here.
+    pub tables: Vec<SheetSceneTable>,
     /// What a deferred drawing wrote as it last was, as `drawing.scene` reports it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub out_of_date: Vec<String>,

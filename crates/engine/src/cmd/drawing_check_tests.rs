@@ -353,17 +353,23 @@ fn what_leaves_the_sheet_is_listed_one_sheet_at_a_time() {
     assert!(s.execute(CHECK, &json!({"sheet": "Nowhere"})).is_err());
 }
 
-/// A dimension whose line is moved off the paper is outside the sheet, as a table would be: the
-/// check reads them from the sheet's objects, where images aren't.
+/// A dimension whose line is moved off the paper is outside the sheet, as a table is, whatever it
+/// lists: the check reads them from the sheet's objects, where images aren't.
 #[test]
 fn a_dimension_off_the_paper_is_listed() {
     let (mut s, _) = plate();
-    let (_, view) = drawn(&mut s);
+    let (sheet, view) = drawn(&mut s);
     let dimension = length(&mut s, view, [50.0, 0.0, 8.0]);
     assert!(of_kind(&checked(&mut s, json!({})), "outside_sheet").is_empty());
     run(&mut s, "drawing.dimension.edit", json!({"dimension": dimension, "set": {"offset_mm": 1000}}));
     let reply = checked(&mut s, json!({}));
     assert_eq!(of_kind(&reply, "outside_sheet"), [named("dimension", &dimension)], "{reply}");
+    for kind in ["parts_list", "revision"] {
+        let set = json!({"place": {"at": [-500, 100]}});
+        let table = run(&mut s, "drawing.table.add", json!({"sheet": ids::encode(sheet), "kind": kind, "set": set}))["table"].clone();
+        let reply = checked(&mut s, json!({}));
+        assert!(of_kind(&reply, "outside_sheet").contains(&named("table", &table)), "{kind}: {reply}");
+    }
 }
 
 /// The check changes nothing: the design and the undo steps are as they were. Its answer is the
