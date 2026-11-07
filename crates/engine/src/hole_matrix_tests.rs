@@ -1137,3 +1137,19 @@ fn a_countersink_on_a_bore_floor_keeps_its_rim_on_the_floor() {
     assert!(solid_at(&s, Vec3::new(7.9, 5.0, 5.05)), "the bore's wall above the floor is cut");
     assert!(!solid_at(&s, Vec3::new(7.4, 5.0, 4.95)), "the countersink's rim is not on the floor");
 }
+
+/// #10695: on a round bar the counterbore's floor is measured from its rim's lowest point, so
+/// the hole's entry point lies just inside the bar: the bar's rise over it is the face being
+/// drilled, cut as before, not material standing over the face.
+#[test]
+fn a_counterbore_on_a_round_bar_drills_its_whole_rim() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 100, "height": 40, "name": "Bar"})).unwrap();
+    let hole = json!({"position": [100, 0, 20], "diameter": 3, "depth": 4, "type": "counterbore", "cb_diameter": 5, "cb_depth": 1});
+    run(&mut s, "solid.hole", hole).unwrap();
+    // On the axis, under the bar's surface (x 100) and over the rim's lowest point (x 99.969).
+    assert!(!solid_at(&s, Vec3::new(99.985, 0.0, 20.0)), "the bar's cap over the counterbore is left");
+    assert!(!solid_at(&s, Vec3::new(99.95, 0.0, 20.0)), "the counterbore is not cut");
+    // Beside the counterbore (radius 2.5), under the surface (x 99.964 at y 2.7).
+    assert!(solid_at(&s, Vec3::new(99.95, 2.7, 20.0)), "the bar beside the counterbore is cut");
+}
