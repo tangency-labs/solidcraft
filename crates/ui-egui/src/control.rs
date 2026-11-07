@@ -318,6 +318,7 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
             | "view.grid"
             | "view.ground_shadow"
             | "view.navigation_bar"
+            | "view.parts_library"
             | "view.ribbon_tabs_only"
             | "view.next_tab"
             | "view.previous_tab"
@@ -836,6 +837,10 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             }
             ok(json!({"workspace":if crate::render_workspace::active(app) {"render"} else {"design"}}))
         }
+        "ui.library" => match crate::library::control(app, p) {
+            Ok(v) => ok(v),
+            Err(e) => err(e),
+        },
         "engine.execute" | "command" => {
             let Some(id) = s("command").or(s("id")) else { return err("missing `command`") };
             wrap(execute(app, id, step_params(p)))

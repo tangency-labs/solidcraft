@@ -1982,7 +1982,8 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                     && (resp.is_pointer_button_down_on()
                         || (ribbon_shows_pressed(app, selected.id) && !(persistent && app.preferences.persistent_ribbon_pressed))
                         || family_open
-                        || (selected.id == "view.shots_strip" && app.preferences.render_shots_strip))
+                        || (selected.id == "view.shots_strip" && app.preferences.render_shots_strip)
+                        || (selected.id == "view.parts_library" && app.preferences.library_open))
                 {
                     egui::Shape::Rect(egui::epaint::RectShape::new(
                         whole,
@@ -2098,7 +2099,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                     );
                     let info = crate::render_workspace::interactive_command_info(app, c);
                     let resp = ui.interact(cell, ui.scope_id().with(("cmd", c.id)), Sense::click_and_drag());
-                    let active = ribbon_shows_pressed(app, c.id);
+                    let active = ribbon_shows_pressed(app, c.id) || (c.id == "view.parts_library" && app.preferences.library_open);
                     let accent = crate::theme::TabAccent::for_tab(&t, &tab);
                     painter.rect(
                         cell,

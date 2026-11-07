@@ -2020,6 +2020,7 @@
   "help.view.list": "Liệt kê các góc nhìn đã lưu trong thiết kế. Dùng để tìm góc nhìn bạn đã lưu trước đó.",
   "help.view.navigate": "Xoay, dịch hoặc thu phóng khung nhìn theo từng bước, chẳng hạn xoay một phần tư vòng sang trái. Dùng để điều khiển camera chính xác thay vì kéo chuột.",
   "help.view.navigation_bar": "Hiện hoặc ẩn thanh điều hướng ở cuối khung nhìn. Ẩn đi để có thêm chỗ, hiện ra để dùng các công cụ xem bằng chuột.",
+  "help.view.parts_library": "Hiện hoặc ẩn thư viện chi tiết. Kéo một chi tiết đã lưu từ thư mục của nó vào thiết kế.",
   "help.view.rename": "Đặt tên mới cho một góc nhìn đã lưu. Bản thân góc nhìn không đổi.",
   "help.view.ribbon_tabs_only": "Thu gọn ribbon chỉ còn hàng thẻ, để khung nhìn có thêm chỗ mà các bảng từng chiếm. Bấm một thẻ để hiện các bảng của nó đè lên khung nhìn; chọn lại lệnh này để luôn hiện toàn bộ ribbon.",
   "help.view.save": "Lưu vị trí camera hiện tại thành một góc nhìn có tên trong thiết kế. Dùng để quay lại đúng góc đó sau này, chẳng hạn khi chụp ảnh màn hình.",

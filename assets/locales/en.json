@@ -2020,6 +2020,7 @@
   "help.view.list": "Lists the named views saved in the design. Use it to find a view you saved earlier.",
   "help.view.navigate": "Turns, pans or zooms the view by steps, such as a quarter turn left. Use it to move the camera precisely instead of dragging.",
   "help.view.navigation_bar": "Shows or hides the navigation bar at the bottom of the viewport. Hide it for more room, show it to reach the view tools by mouse.",
+  "help.view.parts_library": "Shows or hides the parts library. Drag a saved part from its folder into the design.",
   "help.view.rename": "Gives a saved named view a new name. The view itself stays the same.",
   "help.view.ribbon_tabs_only": "Folds the ribbon to its tab row, so the view gets the room its panels took. Click a tab to show its panels over the view; choose this again to keep the whole ribbon shown.",
   "help.view.save": "Saves the current camera position as a named view in the design. Use it to come back to the same angle later, for example for screenshots.",

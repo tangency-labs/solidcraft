@@ -150,6 +150,7 @@ fn occluding_rects(app: &SolveApp, fitting: bool, input: bool, include_confirm: 
     }
     if !app.universal_panel_host_enabled() {
         rects.extend(app.shell.history.filter(|_| app.ui.show_timeline));
+        rects.extend(app.library.shown);
         if app.ui.show_timeline && app.preferences.timeline_left {
             rects.extend(app.shell.history.map(|card| crate::ui_kit::HistorySeam::new(card).pill));
         }

@@ -1205,6 +1205,14 @@ fn reveal_tab(ui: &egui::Ui, card: Rect, opacity: f32) {
     ui.painter().rect_filled(tab, t.space_3 / 2.0, t.text_dim.gamma_multiply(opacity));
 }
 
+/// The offset the Browser's title band drags it by, while docked beside the parts library.
+pub(crate) const DRAG_KEY: &str = "sc_browser_card";
+
+/// The Browser's title band drags it across the docked parts library: they trade places.
+fn grip(app: &SolveApp) -> bool {
+    crate::library::docked(app) && !crate::timeline_left::stacked(app) && !reveals(app) && !crate::render_workspace::active(app)
+}
+
 /// One content-hugging browser; the shared container supplies floating or flush compact chrome.
 pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
     sync_reveals(app);
@@ -1222,7 +1230,7 @@ pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
     let vertical = app.ui.show_timeline && app.preferences.timeline_left;
     let mut available = available;
     if !stacked {
-        available.min.x += crate::agent_chat::left_inset(app, available);
+        available.min.x += crate::agent_chat::left_inset(app, available) + crate::library::left_inset(app);
     }
     if vertical
         && !stacked
@@ -1253,7 +1261,8 @@ pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
         let frame = container.frame(ui.ctx(), fill, crate::frame::Side::Left).inner_margin(CARD_INSET as i8);
         let inner_width = (bounds.width() - frame.total_margin().sum().x).max(0.0);
         let inner_height = (bounds.height() - frame.total_margin().sum().y).max(0.0);
-        let card = Container::new(ui.ctx(), Surface::Panel).area(egui::Id::unique("sc_browser_card")).fixed_pos(bounds.min).show(ui.ctx(), |ui| {
+        let dragged = if grip(app) { crate::frame::dock_offset(ui.ctx(), DRAG_KEY) } else { egui::Vec2::ZERO };
+        let card = Container::new(ui.ctx(), Surface::Panel).area(egui::Id::unique("sc_browser_card")).fixed_pos(bounds.min + dragged).show(ui.ctx(), |ui| {
             let limits = Rect::from_min_max(available.min, pos2(available.right(), bounds.bottom()));
             let response = ui
                 .scope(|ui| {
@@ -1281,6 +1290,15 @@ pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         });
         let rect = card.response.rect;
+        // Let go: before or after the parts library, then back to its place in that order.
+        if dragged != egui::Vec2::ZERO && !ui.ctx().input(|i| i.pointer.any_down()) {
+            crate::library::browser_dropped(app, rect);
+            crate::frame::set_dock_offset(ui.ctx(), DRAG_KEY, egui::Vec2::ZERO);
+            ui.ctx().request_repaint();
+        }
+        if !grip(app) && crate::frame::dock_offset(ui.ctx(), DRAG_KEY) != egui::Vec2::ZERO {
+            crate::frame::set_dock_offset(ui.ctx(), DRAG_KEY, egui::Vec2::ZERO);
+        }
         app.shell.browser = Some(rect);
         crate::scenario::publish_rect("browser:card", rect);
         // Preserve the overlay handle used by main's automation.
@@ -1472,6 +1490,13 @@ fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
     let collapsible = collapsible && !reveals(app);
     let t = Tokens::get();
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), HEADER_H), Sense::hover());
+    // Beside the docked parts library, the band drags the Browser to its other side (before the
+    // header's own click, which it leaves alone).
+    let grip = grip(app);
+    if grip {
+        let offset = crate::frame::dock_offset(ui.ctx(), DRAG_KEY);
+        crate::frame::drag_dock_named(ui, "browser:grip", rect, DRAG_KEY, offset, offset);
+    }
     let response = ui.interact(rect, ui.scope_id().with("browser_header"), if collapsible { Sense::click() } else { Sense::hover() });
     crate::scenario::publish_target("browser:header", rect);
     let vertical = app.ui.show_timeline && app.preferences.timeline_left;
@@ -1488,7 +1513,15 @@ fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
     let kind = if collapsible { egui::Role::Button } else { egui::Role::Label };
     response.widget_info(|| egui::WidgetInfo::labeled(kind, true, &title));
     let galley = ui.painter().layout_no_wrap(title, crate::fonts::semibold(t.font_heading), t.text);
-    ui.painter().galley(pos2(rect.left() + t.space_6, rect.center().y - galley.size().y / 2.0), galley, t.text);
+    let mut left = rect.left() + t.space_6;
+    if grip {
+        // Two columns of three dots: the band drags.
+        for (dx, dy) in [(0.0, -4.0), (0.0, 0.0), (0.0, 4.0), (4.0, -4.0), (4.0, 0.0), (4.0, 4.0)] {
+            ui.painter().circle_filled(pos2(left + 1.0 + dx, rect.center().y + dy), 1.1, t.text_dim);
+        }
+        left += t.space_10;
+    }
+    ui.painter().galley(pos2(left, rect.center().y - galley.size().y / 2.0), galley, t.text);
     let mut right = rect.right() - t.space_6;
     if collapsible {
         crate::ui_kit::disclosure(ui.painter(), pos2(right - t.form_section_icon_size / 2.0, rect.center().y), !collapsed, t.text_dim);
