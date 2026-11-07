@@ -79,6 +79,7 @@ drawing.create                    a drawing: its tests in crates/engine/src/cmd/
 drawing.delete                    a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.dimension.add             a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.dimension.edit            a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.dimension.from_model      a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.dimension.inspect         a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.dimension.repair          a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.export                    a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs

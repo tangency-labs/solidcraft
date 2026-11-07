@@ -41,6 +41,7 @@ mod drawing_check;
 mod drawing_dimension;
 mod drawing_export;
 mod drawing_image;
+mod drawing_model_dimensions;
 mod drawing_note;
 mod drawing_revision;
 mod drawing_scene;
@@ -430,6 +431,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(drawing_image::COMMANDS.iter());
     v.extend(drawing_note::COMMANDS.iter());
     v.extend(drawing_dimension::COMMANDS.iter());
+    v.extend(drawing_model_dimensions::COMMANDS.iter());
     v.extend(drawing_export::COMMANDS.iter());
     v.extend(drawing_revision::COMMANDS.iter());
     v.extend(drawing_table::COMMANDS.iter());

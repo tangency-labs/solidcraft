@@ -43,7 +43,9 @@
 //! drawing saves (a whole number past it reads, then saves as one the file's check refuses); the
 //! offset and the text place are on paper ([`is_paper_coordinate`]); at most [`MAX_DECIMALS`]
 //! decimals; an override text of 1 to [`MAX_TEXT_BYTES`] bytes; a last good value from 0 to
-//! [`MAX_REAL`]; at most [`MAX_DIMENSIONS`] dimensions, listed by id.
+//! [`MAX_REAL`]; a model dimension's constraint id or parameter label of 1 to
+//! [`MAX_MODEL_NAME_BYTES`] bytes; at most [`MAX_DIMENSIONS`] dimensions, listed by id. Two
+//! dimensions that show one model dimension aren't refused, so a file a hand edit doubled opens.
 //!
 //! [`Document::resolve_dimensions`] finds what a dimension measures again, strictly: an edge by
 //! its name, or the one edge between the faces it names, never the piece nearest an old pick; a
@@ -121,6 +123,8 @@ pub const MAX_CANDIDATES: usize = 16;
 pub const MAX_TEXT_BYTES: usize = 1024;
 /// The most points a chain of dimensions runs through.
 pub const MAX_CHAIN_POINTS: usize = 64;
+/// The longest constraint id or parameter label a model dimension names, in bytes.
+pub const MAX_MODEL_NAME_BYTES: usize = 256;
 /// What a diameter's number follows: Ø (U+00D8), as tolerance texts write it. The diameter sign
 /// U+2300 isn't in the bundled fonts, so it would print as a missing glyph.
 const DIAMETER_SIGN: &str = "Ø";
@@ -147,6 +151,30 @@ pub struct Dimension {
     /// What it last read (model millimetres, or radians for an angle), as of the last save.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_good: Option<f64>,
+    /// The model dimension it shows, when it was brought in from the model: each shows once on the
+    /// drawing ([`Drawing::showing`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_model: Option<ModelDimension>,
+}
+
+/// One of the model's own dimensions, by what defines it: ids, so it is still the same one after
+/// the model is edited.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum ModelDimension {
+    /// A sketch's dimension: the sketch's feature and the constraint's own id.
+    Sketch { sketch: u64, constraint: String },
+    /// A feature's parameter: the feature and the parameter's label (`Distance`).
+    Feature { feature: u64, param: String },
+}
+
+impl ModelDimension {
+    /// The constraint id or the parameter label.
+    pub fn name(&self) -> &str {
+        match self {
+            ModelDimension::Sketch { constraint: name, .. } | ModelDimension::Feature { param: name, .. } => name,
+        }
+    }
 }
 
 /// What a dimension measures.
@@ -295,6 +323,12 @@ impl Drawing {
         self.dimension_index(id).and_then(|i| self.dimensions.get(i)).map(|d| &**d)
     }
 
+    /// The dimension that shows model dimension `model`, if one does: the first, on any view of any
+    /// sheet.
+    pub fn showing(&self, model: &ModelDimension) -> Option<u64> {
+        self.dimensions.iter().find(|d| d.from_model.as_ref() == Some(model)).map(|d| d.id)
+    }
+
     /// Where dimension `id` is in [`Drawing::dimensions`].
     pub fn dimension_index(&self, id: u64) -> Option<usize> {
         self.dimensions.binary_search_by_key(&id, |d| d.id).ok()
@@ -356,6 +390,13 @@ impl Drawing {
         require(is_paper_coordinate(d.offset_mm) && text, off_paper)?;
         require(d.decimals <= MAX_DECIMALS, || format!("it shows at most {MAX_DECIMALS} decimals"))?;
         require(d.last_good.is_none_or(is_last_good), || format!("its last good value is from 0 to {MAX_REAL}"))?;
+        let name_fits = |model: &ModelDimension| {
+            let name = model.name();
+            !name.is_empty() && name.len() <= MAX_MODEL_NAME_BYTES && !name.chars().any(char::is_control)
+        };
+        require(d.from_model.as_ref().is_none_or(name_fits), || {
+            format!("the model dimension it shows is named in 1 to {MAX_MODEL_NAME_BYTES} bytes, without control characters")
+        })?;
         match &d.override_text {
             Some(text) => require(!text.is_empty() && text.len() <= MAX_TEXT_BYTES, || {
                 format!("the text shown instead of its number is 1 to {MAX_TEXT_BYTES} bytes")

@@ -209,6 +209,7 @@ pub(crate) fn placed(s: &mut Session, record: &Drawing, cmd: &str, new: NewDimen
         decimals: new.decimals.unwrap_or(DEFAULT_DECIMALS),
         override_text: new.override_text,
         last_good: None,
+        from_model: None,
     };
     // Read before it is added: a dimension its view can't measure would show nothing.
     let mut staged = Drawing::clone(record);

@@ -263,18 +263,28 @@ impl Document {
     /// Every length input of every feature as the geometry reads it (mm; a unit-less result is
     /// in the design's units), for checking that an edit moves nothing.
     pub fn length_inputs(&self) -> Vec<Option<f64>> {
+        let read = self.length_reader();
+        self.features.iter().flat_map(|f| f.kind.inputs()).filter(|(_, _, k)| *k == Kind::Length).map(|(_, e, _)| read(&e)).collect()
+    }
+
+    /// Feature `feature`'s length input `label` as the geometry reads it, as [`Document::length_inputs`]
+    /// reads each; `None` when it has none so labelled, or it doesn't evaluate.
+    pub fn length_input(&self, feature: u64, label: &str) -> Option<f64> {
+        let inputs = self.feature(feature)?.kind.inputs();
+        let (_, e, _) = inputs.iter().find(|(l, _, k)| *l == label && *k == Kind::Length)?;
+        self.length_reader()(e)
+    }
+
+    /// How a length expression reads, with the design's parameters as they are now: the one rule
+    /// of [`Document::length_inputs`] and [`Document::length_input`].
+    fn length_reader(&self) -> impl Fn(&str) -> Option<f64> {
         let (vals, _) = self.param_values();
         let scale = expr::unit_info(self.units.trim()).filter(|(k, _)| *k == Kind::Length).map(|(_, s)| s).unwrap_or(1.0);
-        let look = |n: &str| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`")));
-        self.features
-            .iter()
-            .flat_map(|f| f.kind.inputs())
-            .filter(|(_, _, k)| *k == Kind::Length)
-            .map(|(_, e, _)| {
-                let d = if expr::is_literal(&e) { expr::Defaults::default() } else { expr::Defaults { len: scale, ..expr::Defaults::default() } };
-                expr::eval_with_defaults(&e, &look, d).and_then(|v| v.to_kind_in(Kind::Length, d)).ok()
-            })
-            .collect()
+        move |e: &str| {
+            let look = |n: &str| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`")));
+            let d = if expr::is_literal(e) { expr::Defaults::default() } else { expr::Defaults { len: scale, ..expr::Defaults::default() } };
+            expr::eval_with_defaults(e, &look, d).and_then(|v| v.to_kind_in(Kind::Length, d)).ok()
+        }
     }
 
     pub fn change_param(&mut self, name: &str, expr_s: &str, unit: Option<&str>, comment: Option<&str>) -> Result<()> {

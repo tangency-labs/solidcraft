@@ -135,6 +135,7 @@ impl Fixture {
             decimals: 2,
             override_text,
             last_good: None,
+            from_model: None,
         })]);
         self.d.validate().unwrap();
         id
