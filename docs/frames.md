@@ -25,9 +25,9 @@ gussets, welds and the cut list follow.
 Members are ordinary bodies: mirror, pattern, move, drill and combine them with the usual
 commands. Where members meet they overlap until corner treatments land.
 
-The **Weldments** ribbon tab gathers the frame commands: New Sketch, Frame Member and
-Parameters. Like Sheet Metal it is always there, and it selects itself when a frame member is
-the selected body (or the last body of the active component).
+The **Weldments** ribbon tab gathers the frame commands: New Sketch, Frame Member, Mounting
+Plate and Parameters. Like Sheet Metal it is always there, and it selects itself when a frame
+member or mounting plate is the selected body (or the last body of the active component).
 
 ## The Frame Member dialog
 
