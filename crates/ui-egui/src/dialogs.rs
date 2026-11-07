@@ -943,7 +943,8 @@ impl Dialog {
             "solid.align" => {
                 let components = s.selection.iter().any(|x| matches!(x, Sel::Occurrence { .. }));
                 // Bodies also take sketch points and circles: a frame the bodies follow (#6257).
-                let picks = if components { FACES | EDGES | selection::VERTICES | PLANES | selection::ORIGIN } else { ALIGN_PICKS };
+                let picks =
+                    if components { FACES | EDGES | selection::VERTICES | PLANES | selection::ORIGIN } else { ALIGN_PICKS } | selection::SNAP_POINTS;
                 Dialog::new(
                     Kind::Align { flip: false, components, axes: [true; 3], angle: String::new() },
                     vec![
@@ -1006,7 +1007,8 @@ impl Dialog {
                         | PLANES
                         | AXES
                         | selection::CONSTRUCTION_POINTS
-                        | selection::ORIGIN,
+                        | selection::ORIGIN
+                        | selection::SNAP_POINTS,
                     true,
                 )],
             ),
@@ -2937,17 +2939,25 @@ pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames
             format!("{body} · circle centre")
         }
         Sel::Edge { body, index, .. } => format!("{body} · edge {index}"),
-        // A point of the model: a vertex, or the centre a round edge stands for.
-        Sel::Vertex { body, .. } if !body.is_empty() => format!("{body} · point"),
+        // A point of the model: a vertex, a snapped centre or middle, or the centre a round edge
+        // stands for. Where it is tells two picks on one body apart.
+        Sel::Vertex { body, point } if !body.is_empty() => format!("{body} · {}", crate::snap_wake::label(*point)),
         Sel::Feature { id } => s.doc.feature(*id).map(|f| f.name.clone()).unwrap_or_else(|| format!("Feature {id}")),
         Sel::Occurrence { path } if path.is_empty() => s.doc.name.clone(),
         Sel::Occurrence { path } => s.occurrence_placement(path).map(|p| p.name).unwrap_or_else(|_| "Component".into()),
-        Sel::Vertex { body, point } if body.is_empty() => {
+        Sel::Vertex { point, .. } => {
             let state = crate::open_meshing::session_world(s);
-            let p = s.active_sketch.and_then(|id| state.sketch(id)).map(|sk| sk.plane.to_local(*point)).unwrap_or_default();
-            format!("({:.2}, {:.2}) mm", p.x, p.y)
+            match s.active_sketch.and_then(|id| state.sketch(id)) {
+                // A point on the sketch's plane: where it is in the sketch.
+                Some(sk) if (sk.plane.to_world(sk.plane.to_local(*point)) - *point).len() < 1e-6 => {
+                    let p = sk.plane.to_local(*point);
+                    format!("({:.2}, {:.2}) mm", p.x, p.y)
+                }
+                // A snap point (a centre, a middle) off the sketch's plane or outside a sketch:
+                // where it is in the model.
+                _ => crate::snap_wake::label(*point),
+            }
         }
-        Sel::Vertex { body, .. } => format!("{body} · vertex"),
     }
 }
 
@@ -5645,8 +5655,11 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     }
                     (Some(Sel::Face { point, .. }), _) => p[format!("{key}_face")] = pt(*point),
                     (Some(Sel::Edge { point, .. }), _) => p[key] = json!({"snap": "edge_mid", "at": pt(*point)}),
-                    // The origin point (a vertex of no body) stays the origin.
-                    (Some(Sel::Vertex { body, .. }), _) if body.is_empty() => p[key] = json!("origin"),
+                    // The origin point (a vertex of no body at the origin) stays the origin; a snap
+                    // point of no body elsewhere (a sketch line's middle) is where it is.
+                    (Some(Sel::Vertex { body, point }), _) if body.is_empty() && [point.x, point.y, point.z].iter().all(|v| v.abs() < 1e-9) => {
+                        p[key] = json!("origin")
+                    }
                     (Some(Sel::Vertex { point, .. }), _) => p[key] = pt(*point),
                     // A plane stays a plane, so the bodies follow it when it moves.
                     (Some(Sel::Plane { name }), _) => p[format!("{key}_plane")] = json!(name),

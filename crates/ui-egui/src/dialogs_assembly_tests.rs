@@ -1471,6 +1471,93 @@ fn interference_checks_off_the_window_thread_and_drops_a_check_of_a_changed_desi
     assert_eq!(state(&app), (None, 0, false), "a check of the design before the change is dropped");
 }
 
+/// The Joint dialog over two boxes, Component 1 taking a pick, in the harness (a real viewport).
+fn joint_picking_component_1() -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    h.app = two_boxes();
+    h.app.cam.distance = 160.0;
+    h.settle();
+    h.app.start("joint.create");
+    h
+}
+
+/// Hovering an edge wakes all its snap points in a joint input (#11227); its middle, clicked from
+/// past the edge's own reach, is the edge as a joint keeps it: the same origin a pick of the edge
+/// makes.
+#[test]
+fn a_woken_middle_picks_the_edge_a_joint_keeps() {
+    let mut h = joint_picking_component_1();
+    h.step(&json!({ "move": { "world": [15, 0, 10] } })).unwrap();
+    let middle = Vec3::new(10.0, 0.0, 10.0);
+    let woken: Vec<Vec3> = h.app.viewport.woken.points.iter().map(|p| p.at).collect();
+    for p in [middle, Vec3::new(0.0, 0.0, 10.0), Vec3::new(20.0, 0.0, 10.0)] {
+        assert!(woken.iter().any(|w| w.dist(p) < 1e-6), "{p:?} in {woken:?}");
+    }
+    let at = h.call("ui.at", json!({ "world": [10, 0, 10] }))["result"].clone();
+    let below = json!([at[0].as_f64().unwrap(), at[1].as_f64().unwrap() + 12.0]);
+    h.step(&json!({ "click": below })).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    let picked = d.inputs[0].items.clone();
+    assert!(matches!(picked.as_slice(), [Sel::Edge { body, .. }] if body == "Body1"), "{picked:?}");
+    let edge = edge_sel(&h.app.session, middle).unwrap();
+    let (got, want) = (snap_of(&h.app.session, &picked[0]).unwrap(), snap_of(&h.app.session, &edge).unwrap());
+    assert_eq!(got.kind, SnapKind::EdgeMid);
+    assert_eq!(got.param, want.param, "stored as an edge pick is");
+}
+
+/// A woken point that is not its item's own snap (a straight edge's end) stays a point, and a
+/// face's centre is the face; with no woken item a vertex is a vertex, as before.
+#[test]
+fn woken_points_stand_for_their_item_only_where_its_snap_is() {
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let edge = edge_sel(&app.session, Vec3::new(10.0, 0.0, 10.0)).unwrap();
+    let corner = Sel::Vertex { body: "Body1".into(), point: Vec3::new(0.0, 0.0, 10.0) };
+    assert_eq!(woken_pick(&app, true, corner.clone()), corner, "nothing woken");
+    app.viewport.woken = crate::snap_wake::Woken {
+        item: Some(edge.clone()),
+        points: solidcraft_engine::snap::snap_points(&app.session, &edge),
+        revision: app.session.revision,
+        ..Default::default()
+    };
+    assert_eq!(woken_pick(&app, true, corner.clone()), corner, "an end stays a point");
+    assert_eq!(woken_pick(&app, true, Sel::Vertex { body: "Body1".into(), point: Vec3::new(10.0, 0.0, 10.0) }), edge);
+    // Another body's point at the same place stays that body's.
+    let other = Sel::Vertex { body: "Body2".into(), point: Vec3::new(10.0, 0.0, 10.0) };
+    assert_eq!(woken_pick(&app, true, other.clone()), other, "a point of another body");
+    // The dialog the caller has decides, not the app's: one whose input doesn't take snaps keeps
+    // the point.
+    let mut moved = app.dialog.clone().unwrap();
+    assert!(takes_snaps(&moved));
+    moved.inputs[0].accept = FACES;
+    assert!(!takes_snaps(&moved));
+    let mid = Sel::Vertex { body: "Body1".into(), point: Vec3::new(10.0, 0.0, 10.0) };
+    assert_eq!(woken_pick(&app, takes_snaps(&moved), mid.clone()), mid);
+    let face = face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    app.viewport.woken = crate::snap_wake::Woken {
+        item: Some(face.clone()),
+        points: solidcraft_engine::snap::snap_points(&app.session, &face),
+        revision: app.session.revision,
+        ..Default::default()
+    };
+    assert_eq!(woken_pick(&app, true, Sel::Vertex { body: "Body1".into(), point: Vec3::new(10.0, 10.0, 10.0) }), face);
+}
+
+/// A face of the rim's own body crossed on the way to its centre adds its centre to the rim's
+/// points; that centre, picked, is the face, and the rim's middle is still the rim.
+#[test]
+fn a_crossed_faces_centre_is_the_face() {
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let edge = edge_sel(&app.session, Vec3::new(10.0, 0.0, 10.0)).unwrap();
+    let face = face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+    let mut points = solidcraft_engine::snap::snap_points(&app.session, &edge);
+    points.extend(solidcraft_engine::snap::snap_points(&app.session, &face));
+    app.viewport.woken = crate::snap_wake::Woken { item: Some(edge.clone()), face: Some(face.clone()), points, revision: app.session.revision };
+    assert_eq!(woken_pick(&app, true, Sel::Vertex { body: "Body1".into(), point: Vec3::new(10.0, 10.0, 10.0) }), face);
+    assert_eq!(woken_pick(&app, true, Sel::Vertex { body: "Body1".into(), point: Vec3::new(10.0, 0.0, 10.0) }), edge);
+}
+
 #[test]
 fn joint_dialog_applies_custom_name_or_falls_back_to_type_default() {
     // 1. Empty name field: commands() generates payload without "name", backend creates "Rigid Joint1"
