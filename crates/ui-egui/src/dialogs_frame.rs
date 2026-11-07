@@ -1,6 +1,6 @@
-//! Frame Member (`frame.member`): structural members along the lines of a frame sketch. The lines
-//! are picked in the view; the section is a built-in profile with its dimensions, or the profiles
-//! picked in another sketch. Anchor, angle and mirror place the section on each line.
+//! Frame Member (`frame.member`): separate curves or one continuous line/arc path from a frame
+//! sketch. The curves are picked in the view; the section is a built-in profile with its
+//! dimensions, or profiles picked in another sketch. Anchor, angle and mirror place the section.
 
 use serde_json::{Map, Value, json};
 use solidcraft_engine::Sel;
@@ -33,6 +33,7 @@ const ANCHORS: &[(&str, &str)] = &[
 pub struct Member {
     /// Every line of the frame sketch, now and as lines are added, not only the lines picked.
     pub all: bool,
+    pub continuous: bool,
     /// The built-in profile (an index into `frame::profile_kinds`), used when no section is picked.
     pub kind: usize,
     /// Each built-in profile's dimensions, its required ones then its optional ones; kept per
@@ -59,7 +60,7 @@ impl Member {
             .collect();
         // A rectangular tube is the most common member.
         let kind = frame::profile_kinds().iter().position(|k| k.kind == "rect_tube").unwrap_or(0);
-        Member { all: false, kind, dims, whole: None, anchor: 0, angle: String::new(), mirror: false, name: String::new() }
+        Member { all: false, continuous: false, kind, dims, whole: None, anchor: 0, angle: String::new(), mirror: false, name: String::new() }
     }
 }
 
@@ -77,6 +78,8 @@ fn tr(text: &str) -> &str {
 pub fn rows(app: &SolveApp, ui: &mut egui::Ui, m: &mut Member, inputs: &[SelInput]) -> bool {
     let mut enter = false;
     form_row(ui, "All Lines", |ui| check(ui, &mut m.all));
+    let continuous_label = app.tr("ui.frame.continuous").to_string();
+    form_row(ui, &continuous_label, |ui| check(ui, &mut m.continuous));
     let picked = !crate::selection::items(inputs, 1).is_empty();
     if let Some(sketch) = m.whole.filter(|_| !picked) {
         let name = app.session.doc.feature(sketch).map(|f| f.name.clone()).unwrap_or_default();
@@ -135,6 +138,12 @@ pub fn commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<Str
     }
     let sketch = known.or_else(|| curves_sketch(app, &lines, section_sketch)).ok_or("the lines must be in one sketch, not the section's")?;
     let mut p = json!({"sketch": sketch});
+    if m.continuous {
+        if m.all {
+            return Err(app.tr("ui.frame.continuous_requires_selection").into());
+        }
+        p["continuous"] = json!(true);
+    }
     if !m.all {
         p["lines"] = json!(lines);
     }
@@ -173,11 +182,12 @@ pub fn commands(app: &SolveApp, m: &Member, inputs: &[SelInput], extra: &Map<Str
 
 /// The dialog editing a frame member feature, filled from it.
 pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelInput>, Map<String, Value>)> {
-    let FeatureKind::FrameMember { path_sketch, lines, profile, anchor, angle, mirror, body_name, .. } = kind else { return None };
+    let FeatureKind::FrameMember { path_sketch, lines, continuous, profile, anchor, angle, mirror, body_name, .. } = kind else { return None };
     let (_, mut inputs) = start(app, "frame.member")?;
     let st = app.session.model.state();
     let mut m = Member::new();
     m.all = lines.is_empty();
+    m.continuous = *continuous;
     let ids = if m.all { frame::member_line_ids(&st, kind).unwrap_or_default() } else { lines.clone() };
     if let Some(i) = inputs.get_mut(0) {
         i.items = ids.into_iter().map(|id| Sel::ExternalSketchCurve { sketch: path_sketch.0, id }).collect();

@@ -49,6 +49,7 @@ const AHEAD_AREAS: &[&str] = &[
     "explode",
     "expr",
     "face",
+    "frame",
     "joint",
     "material",
     "mesh",
@@ -67,8 +68,16 @@ const AHEAD_AREAS: &[&str] = &[
 const NAMES_A_FILE: &[&str] = &["path", "paths", "file", "files", "dir", "folder", "url", "out"];
 
 /// Commands that change nothing in the design and write a file: they run on a copy.
-const ANSWERED_ON_A_COPY: &[&str] =
-    &["file.export", "file.export_3mf", "file.export_obj", "file.export_step", "file.export_stl", "file.export_urdf", "file.save_mesh"];
+const ANSWERED_ON_A_COPY: &[&str] = &[
+    "file.export",
+    "file.export_3mf",
+    "file.export_obj",
+    "file.export_step",
+    "file.export_stl",
+    "file.export_urdf",
+    "file.save_mesh",
+    "frame.export_cope_dxf",
+];
 
 /// Commands that only read the design, which can take long on a large one (a measure of every
 /// body, an inspection that measures them, #4604; a clearance or interference check of every pair

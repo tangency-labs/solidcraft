@@ -46,6 +46,7 @@ impl Walk for crate::newer_file::RawFeature {}
 impl Walk for ProfileSel {}
 impl Walk for std::collections::BTreeMap<String, String> {}
 impl Walk for crate::frame::Anchor {}
+impl Walk for crate::frame_cope::End {}
 impl Walk for solidcraft_sketch::Sketch {}
 impl Walk for solidcraft_sketch::PatternAlignment {}
 impl Walk for solidcraft_kernel::StepNode {}

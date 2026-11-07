@@ -1156,14 +1156,18 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         targets: Vec<BodyName>,
     },
-    /// Structural members (#4003): one body per straight line of a frame sketch (2D sketch lines
-    /// and 3D sketch lines), its cross-section the profile, square to the line from end to end.
+    /// Structural members (#4003): separate selected lines/arcs, or one continuous tangent
+    /// path, including exact 3D sketch arcs. The all-lines default selects straight lines.
     FrameMember {
         path_sketch: SketchId,
         /// The lines, by curve id; none: every straight line drawn in the sketch (not
         /// construction, not projected or otherwise linked, not of no length).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         lines: Vec<String>,
+        /// The explicitly selected curves form one open, tangent line/arc chain, in selection
+        /// order. Otherwise each selected curve makes a separate member.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        continuous: bool,
         profile: crate::frame::MemberProfile,
         /// The profile point that sits on the line.
         #[serde(default, skip_serializing_if = "crate::frame::Anchor::is_origin")]
@@ -1183,6 +1187,12 @@ pub enum FeatureKind {
         /// come and go (`frame::member_names`).
         #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
         names: std::collections::BTreeMap<String, String>,
+    },
+    /// Cope a round tube against the outside envelopes of straight mating round members.
+    FrameCope {
+        member: BodyName,
+        tools: Vec<BodyName>,
+        end: crate::frame_cope::End,
     },
     /// Raise or sink profiles on a planar face, or wrap them on a selected cylindrical wall.
     Emboss {
@@ -2665,6 +2675,7 @@ impl FeatureKind {
             FeatureKind::BoundingSolid { .. } => "BoundingSolidFeature",
             FeatureKind::Pipe { .. } => "PipeFeature",
             FeatureKind::FrameMember { .. } => "FrameMemberFeature",
+            FeatureKind::FrameCope { .. } => "FrameCopeFeature",
             FeatureKind::Emboss { .. } => "EmbossFeature",
             FeatureKind::Boss { .. } => "BossFeature",
             FeatureKind::Lip { groove: false, .. } => "LipFeature",
@@ -2747,6 +2758,7 @@ impl FeatureKind {
             FeatureKind::BoundingSolid { .. } => "bounding_solid",
             FeatureKind::Pipe { .. } => "pipe",
             FeatureKind::FrameMember { .. } => "frame_member",
+            FeatureKind::FrameCope { .. } => "frame_cope",
             FeatureKind::Emboss { .. } => "emboss",
             FeatureKind::Rib { .. } => "rib",
             FeatureKind::ReplaceFace { .. } => "replace_face",
@@ -2831,6 +2843,7 @@ impl FeatureKind {
             "BoundingSolidFeature" => "bounding_solid",
             "PipeFeature" => "pipe",
             "FrameMemberFeature" => "frame_member",
+            "FrameCopeFeature" => "frame_cope",
             "EmbossFeature" => "emboss",
             "BossFeature" => "boss",
             "LipFeature" | "GrooveFeature" => "lip",
@@ -2914,6 +2927,7 @@ impl FeatureKind {
             FeatureKind::BoundingSolid { .. } => "BoundingSolid",
             FeatureKind::Pipe { .. } => "Pipe",
             FeatureKind::FrameMember { .. } => "Member",
+            FeatureKind::FrameCope { .. } => "Cope",
             FeatureKind::Emboss { .. } => "Emboss",
             FeatureKind::Boss { .. } => "Boss",
             FeatureKind::Lip { groove: false, .. } => "Lip",
