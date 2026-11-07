@@ -2943,9 +2943,13 @@ pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames
         Sel::Occurrence { path } if path.is_empty() => s.doc.name.clone(),
         Sel::Occurrence { path } => s.occurrence_placement(path).map(|p| p.name).unwrap_or_else(|_| "Component".into()),
         Sel::Vertex { body, point } if body.is_empty() => {
+            // In a sketch, the point in the sketch's plane; otherwise where it is in the model
+            // (a saved point reopened by Edit Feature, #12022), not a meaningless (0, 0).
             let state = crate::open_meshing::session_world(s);
-            let p = s.active_sketch.and_then(|id| state.sketch(id)).map(|sk| sk.plane.to_local(*point)).unwrap_or_default();
-            format!("({:.2}, {:.2}) mm", p.x, p.y)
+            match s.active_sketch.and_then(|id| state.sketch(id)).map(|sk| sk.plane.to_local(*point)) {
+                Some(p) => format!("({:.2}, {:.2}) mm", p.x, p.y),
+                None => format!("({:.2}, {:.2}, {:.2}) mm", point.x, point.y, point.z),
+            }
         }
         Sel::Vertex { body, .. } => format!("{body} · vertex"),
     }
@@ -2959,7 +2963,12 @@ fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::pref
 
 /// Saved vectors/axes are real inputs even when they have no origin-axis selection chip.
 fn stored_input_reference_key(d: &Dialog, index: usize) -> Option<&'static str> {
-    if let Kind::Construct { command: "construct.plane.axis_point", keys, .. } = &d.kind {
+    if let Kind::Construct {
+        command: "construct.plane.axis_point" | "construct.plane.two_edges" | "construct.plane.three_points" | "construct.plane.perpendicular",
+        keys,
+        ..
+    } = &d.kind
+    {
         return keys.get(index).copied();
     }
     if matches!(d.kind, Kind::Section { .. }) && index == 0 {
@@ -6603,6 +6612,24 @@ pub(crate) fn model_axis_sel(s: &Session, g: &solidcraft_engine::doc::construct:
     }
 }
 
+/// A saved construction reference shown as the pick it stands for. Edit Feature keeps the
+/// reference itself until a new pick replaces it, so a fixed point or the origin has a pick too.
+fn saved_pick(s: &Session, reference: &solidcraft_engine::doc::construct::GeoRef) -> Option<Sel> {
+    use solidcraft_engine::doc::construct::GeoRef;
+    Some(match reference {
+        GeoRef::World { axis } => Sel::Axis { name: axis.clone() },
+        GeoRef::Axis { name } => Sel::Axis { name: name.to_string() },
+        GeoRef::ConstructPoint { name } => Sel::ConstructionPoint { name: name.to_string() },
+        GeoRef::SketchPoint { sketch, point } => Sel::SketchPoint { id: format!("{sketch}:{point}") },
+        GeoRef::SketchCurve { sketch, curve } => Sel::SketchCurve { id: curve.clone(), sketch: Some(*sketch) },
+        GeoRef::Vertex { at, .. } => Sel::Vertex { body: String::new(), point: *at },
+        GeoRef::Point { p } => Sel::Vertex { body: String::new(), point: *p },
+        GeoRef::Origin => Sel::Vertex { body: String::new(), point: Vec3::ZERO },
+        GeoRef::Plane { plane } => plane_sel(s, plane)?,
+        other => model_axis_sel(s, other)?,
+    })
+}
+
 /// A stored construction reference back into a dialog pick.
 fn geo_sel(s: &Session, g: &solidcraft_engine::doc::construct::GeoRef) -> Option<Sel> {
     match g {
@@ -7415,30 +7442,27 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::ConstructionPlane { plane: PlaneRef::AxisPoint { .. } } => {
+        FeatureKind::ConstructionPlane {
+            plane: PlaneRef::AxisPoint { .. } | PlaneRef::TwoEdges { .. } | PlaneRef::ThreePoints { .. } | PlaneRef::Perpendicular { .. },
+        } => {
             let mut world = f.kind.clone();
             world.transform_geometry(&feature_frame(s, f.component));
-            let FeatureKind::ConstructionPlane { plane: PlaneRef::AxisPoint { axis, point } } = world else { return None };
-            let mut d = start("construct.plane.axis_point")?;
-            for (input, reference) in d.inputs.iter_mut().zip([&axis, &point]) {
-                // Keep the exact saved references when no new pick has replaced them.
-                // Fixed points also need a visible pick to keep the shared form complete.
-                input.items = vec![match reference.as_ref() {
-                    solidcraft_engine::doc::construct::GeoRef::World { axis } => Sel::Axis { name: axis.clone() },
-                    solidcraft_engine::doc::construct::GeoRef::Axis { name } => Sel::Axis { name: name.to_string() },
-                    solidcraft_engine::doc::construct::GeoRef::ConstructPoint { name } => Sel::ConstructionPoint { name: name.to_string() },
-                    solidcraft_engine::doc::construct::GeoRef::SketchPoint { sketch, point } => Sel::SketchPoint { id: format!("{sketch}:{point}") },
-                    solidcraft_engine::doc::construct::GeoRef::SketchCurve { sketch, curve } => {
-                        Sel::SketchCurve { id: curve.clone(), sketch: Some(*sketch) }
-                    }
-                    solidcraft_engine::doc::construct::GeoRef::Vertex { at, .. } => Sel::Vertex { body: String::new(), point: *at },
-                    solidcraft_engine::doc::construct::GeoRef::Point { p } => Sel::Vertex { body: String::new(), point: *p },
-                    solidcraft_engine::doc::construct::GeoRef::Origin => Sel::Vertex { body: String::new(), point: Vec3::ZERO },
-                    other => model_axis_sel(s, other)?,
-                }];
+            let FeatureKind::ConstructionPlane { plane } = &world else { return None };
+            let (command, refs) = solidcraft_engine::cmd::picked_plane_refs(plane)?;
+            let mut d = start(command)?;
+            let keys = match &d.kind {
+                Kind::Construct { keys, .. } => keys.clone(),
+                _ => return None,
+            };
+            for (key, reference) in refs {
+                // Keep the exact saved references when no new pick has replaced them. Fixed
+                // points also need a visible pick to keep the shared form complete; a reference
+                // that cannot be shown now leaves its row empty to pick again.
+                let Some(input) = keys.iter().position(|k| *k == key).and_then(|i| d.inputs.get_mut(i)) else { continue };
+                let (Some(pick), Ok(saved)) = (saved_pick(s, reference), serde_json::to_value(reference)) else { continue };
+                input.items = vec![pick];
+                d.extra.insert(key.into(), saved);
             }
-            d.extra.insert("axis".into(), serde_json::to_value(axis).ok()?);
-            d.extra.insert("point".into(), serde_json::to_value(point).ok()?);
             d
         }
         FeatureKind::ConstructionPlane { plane: PlaneRef::Tangent { face, reference, .. } } => {

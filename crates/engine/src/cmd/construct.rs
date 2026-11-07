@@ -376,28 +376,47 @@ fn plane_mid(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn plane_edges(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "construct.plane.two_edges";
-    let (a, b) = (geo(s, p.get("a"), cmd, "a")?, geo(s, p.get("b"), cmd, "b")?);
-    plane(s, p, PlaneRef::TwoEdges { a: Box::new(a), b: Box::new(b) })
+    plane_of_picks(s, p, "construct.plane.two_edges")
 }
 
 fn plane_axis_point(s: &mut Session, p: &Value) -> Result<Value> {
-    let kind = plane_axis_point_kind(s, p)?;
-    add_feature(s, p, kind)
-}
-
-/// Shared parser for the constructor and its world-to-authoring-frame boundary.
-pub(crate) fn plane_axis_point_kind(s: &Session, p: &Value) -> Result<FeatureKind> {
-    let cmd = "construct.plane.axis_point";
-    let axis = geo(s, p.get("axis"), cmd, "axis")?;
-    let point = geo(s, p.get("point"), cmd, "point")?;
-    Ok(FeatureKind::ConstructionPlane { plane: PlaneRef::AxisPoint { axis: Box::new(axis), point: Box::new(point) } })
+    plane_of_picks(s, p, "construct.plane.axis_point")
 }
 
 fn plane_points(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "construct.plane.three_points";
-    let (a, b, c) = (geo(s, p.get("a"), cmd, "a")?, geo(s, p.get("b"), cmd, "b")?, geo(s, p.get("c"), cmd, "c")?);
-    plane(s, p, PlaneRef::ThreePoints { a: Box::new(a), b: Box::new(b), c: Box::new(c) })
+    plane_of_picks(s, p, "construct.plane.three_points")
+}
+
+fn plane_of_picks(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
+    let made = picked_plane(s, cmd, p)?.ok_or_else(|| bad(cmd, "not a plane made of picks"))?;
+    plane(s, p, made)
+}
+
+/// The construction planes made of picks alone, read from `cmd`'s parameters as that command
+/// reads them (`None`: `cmd` makes no such plane). Shared by the constructors and the
+/// world-to-authoring-frame boundary, which maps an edit's saved references once (`frames`).
+pub(crate) fn picked_plane(s: &Session, cmd: &str, p: &Value) -> Result<Option<PlaneRef>> {
+    let pick = |key: &str| geo(s, p.get(key), cmd, key).map(Box::new);
+    Ok(Some(match cmd {
+        "construct.plane.two_edges" => PlaneRef::TwoEdges { a: pick("a")?, b: pick("b")? },
+        "construct.plane.axis_point" => PlaneRef::AxisPoint { axis: pick("axis")?, point: pick("point")? },
+        "construct.plane.three_points" => PlaneRef::ThreePoints { a: pick("a")?, b: pick("b")?, c: pick("c")? },
+        "construct.plane.perpendicular" => PlaneRef::Perpendicular { plane: pick("plane")?, line: pick("line")? },
+        _ => return Ok(None),
+    }))
+}
+
+/// A plane made of picks as its command and saved references, each under the parameter of
+/// the command that takes it ([`picked_plane`] backwards; `None`: not such a plane). Edit
+/// Feature fills the command's form from it.
+pub fn picked_plane_refs(plane: &PlaneRef) -> Option<(&'static str, Vec<(&'static str, &GeoRef)>)> {
+    Some(match plane {
+        PlaneRef::TwoEdges { a, b } => ("construct.plane.two_edges", vec![("a", &**a), ("b", &**b)]),
+        PlaneRef::AxisPoint { axis, point } => ("construct.plane.axis_point", vec![("axis", &**axis), ("point", &**point)]),
+        PlaneRef::ThreePoints { a, b, c } => ("construct.plane.three_points", vec![("a", &**a), ("b", &**b), ("c", &**c)]),
+        PlaneRef::Perpendicular { plane, line } => ("construct.plane.perpendicular", vec![("plane", &**plane), ("line", &**line)]),
+        _ => return None,
+    })
 }
 
 fn plane_tangent(s: &mut Session, p: &Value) -> Result<Value> {
@@ -432,7 +451,5 @@ fn plane_along(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn plane_perpendicular(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "construct.plane.perpendicular";
-    let (base, line) = (geo(s, p.get("plane"), cmd, "plane")?, geo(s, p.get("line"), cmd, "line")?);
-    plane(s, p, PlaneRef::Perpendicular { plane: Box::new(base), line: Box::new(line) })
+    plane_of_picks(s, p, "construct.plane.perpendicular")
 }

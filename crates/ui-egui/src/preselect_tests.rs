@@ -3110,6 +3110,108 @@ fn plane_through_axis_and_point_edit_in_a_moved_component_keeps_its_fixed_point(
     assert_eq!(h.app.session.doc.to_json(), before, "editing maps saved local references through world and back once");
 }
 
+/// #12022: Plane Through Two Edges, Plane Through Three Points and Perpendicular Plane reopen
+/// their own form from Edit Feature (not the command box with an empty `timeline.edit`), every
+/// pick shown, and OK unchanged keeps the saved references exactly.
+#[test]
+fn every_plane_made_of_picks_reopens_its_form_and_ok_keeps_its_references() {
+    let cases = [
+        ("construct.plane.two_edges", json!({"a": {"edge": [20, 0, 0]}, "b": {"edge": [20, 30, 20]}})),
+        ("construct.plane.three_points", json!({"a": {"vertex": [0, 0, 20]}, "b": {"vertex": [40, 0, 20]}, "c": {"point": [0, 30, 0]}})),
+        (
+            "construct.plane.three_points",
+            json!({"a": {"vertex": [0, 0, 20]}, "b": {"construct_point": "Peg"}, "c": {"sketch": "Marks", "point": "m"}}),
+        ),
+        ("construct.plane.perpendicular", json!({"plane": {"face": [20, 15, 0]}, "line": {"edge": [20, 0, 0]}})),
+        ("construct.plane.perpendicular", json!({"plane": "XZ", "line": {"axis": "Z"}})),
+        ("construct.plane.axis_point", json!({"axis": {"edge": [0, 0, 10]}, "point": {"vertex": [40, 30, 20]}})),
+    ];
+    for (command, params) in cases {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        h.app.run("construct.point.vertex", json!({"point": {"vertex": [40, 30, 0]}, "name": "Peg"})).unwrap();
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Marks"})).unwrap();
+        h.app.run("sketch.point", json!({"point": [0, 30], "id": "m"})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let id = h.app.run(command, params.clone()).unwrap()["feature"].as_u64().unwrap();
+        h.frames(2);
+        let before = h.app.session.doc.to_json();
+        h.app.edit_feature(id);
+        h.frames(2);
+        assert!(!h.app.ui.palette_open, "{command} {params}: no command box");
+        let d = h.app.dialog.as_ref().unwrap_or_else(|| panic!("{command} {params}: the plane's form"));
+        assert!(matches!(&d.kind, crate::dialogs::Kind::Construct { command: c, .. } if *c == command), "{command}: {:?}", d.kind);
+        assert!(d.inputs.iter().all(|i| i.items.len() == 1), "{command} {params}: every pick shown: {:?}", d.inputs);
+        h.step(&json!({"key": "Enter"})).unwrap();
+        assert!(h.app.dialog.is_none(), "{command} {params}: {:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+        assert_eq!(h.app.session.doc.to_json(), before, "{command} {params}: OK unchanged keeps the saved references");
+    }
+}
+
+/// #12022: a new pick in a reopened Plane Through Three Points replaces only its own point.
+#[test]
+fn plane_through_three_points_edit_replaces_only_the_picked_point() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    let made = h
+        .app
+        .run(
+            "construct.plane.three_points",
+            json!({"a": {"vertex": [0, 0, 20]}, "b": {"vertex": [40, 0, 20]}, "c": {"point": [0, 30, 20]}, "name": "Lid"}),
+        )
+        .unwrap();
+    h.app.edit_feature(made["feature"].as_u64().unwrap());
+    h.frames(1);
+    {
+        // A saved point shows where it is in the model, not a sketch's (0, 0).
+        let d = h.app.dialog.as_ref().unwrap();
+        let labels: Vec<String> = d
+            .inputs
+            .iter()
+            .map(|i| crate::dialogs::selection_label(&h.app.session, h.app.preferences.origin_plane_names, d, i, &i.items[0]))
+            .collect();
+        assert_eq!(labels, ["(0.00, 0.00, 20.00) mm", "(40.00, 0.00, 20.00) mm", "(0.00, 30.00, 20.00) mm"]);
+    }
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.active = 2;
+        d.pick(&h.app.session, Sel::Vertex { body: "Body1".into(), point: Vec3::new(40., 30., 0.) });
+    }
+    h.step(&json!({"key": "Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    let definition = h.app.run("timeline.inspect", json!({"feature": "Lid"})).unwrap();
+    let plane = &definition["definition"]["plane"];
+    assert_eq!(plane["a"]["type"], "vertex", "{plane}");
+    assert_eq!(plane["a"]["at"], json!([0., 0., 20.]), "{plane}");
+    assert_eq!(plane["c"]["at"], json!([40., 30., 0.]), "the new pick: {plane}");
+    let (_, _, pl) = solidcraft_engine::view::construction_planes(&h.app.session).into_iter().find(|(_, n, _)| n == "Lid").unwrap();
+    assert!(pl.normal().dot(Vec3::Z).abs() < 1. - 1e-6, "the plane tilts to the new point: {pl:?}");
+}
+
+/// #12022: in a moved component, an unchanged edit of a plane through three points maps its
+/// saved references through the world and back once.
+#[test]
+fn plane_through_three_points_edit_in_a_moved_component_keeps_its_points() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("component.create", json!({"name": "Part", "grounded": false})).unwrap();
+    h.app.run("occurrence.move", json!({"occurrence": "Part:1", "translate": [50, 20, 0]})).unwrap();
+    let made = h
+        .app
+        .run(
+            "construct.plane.three_points",
+            json!({"a": {"point": [50, 20, 0]}, "b": {"point": [60, 20, 0]}, "c": {"point": [50, 20, 10]}, "name": "Wall"}),
+        )
+        .unwrap();
+    let before = h.app.session.doc.to_json();
+    h.app.edit_feature(made["feature"].as_u64().unwrap());
+    h.frames(1);
+    assert!(h.app.dialog.is_some(), "the plane's form");
+    h.step(&json!({"key": "Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    assert_eq!(h.app.session.doc.to_json(), before, "editing maps saved local references through world and back once");
+}
+
 /// Point Along Path asks for its position too, and a missing pick names the input.
 #[test]
 fn point_along_path_has_its_position_and_missing_picks_are_named() {
