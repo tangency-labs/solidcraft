@@ -3420,16 +3420,21 @@ fn button_jobs_that_read<'de, D: serde::Deserializer<'de>>(
         .collect())
 }
 
-/// Every theme the Theme list offers, as (id, name): the modes, the built-in theme files, then
-/// the imported ones.
+/// Every theme the Theme list offers, as (id, name): Light and Dark first, then the theme files,
+/// built in and imported together, by name ignoring case, then by id (#8637).
 fn theme_choices(app: &SolveApp) -> Vec<(String, String)> {
     let modes = THEMES.iter().filter(|(id, _)| *id != "system").map(|(id, label)| ((*id).to_string(), crate::i18n::tr_label(label).to_string()));
     let files = crate::theme_files::builtin().iter().chain(&app.preferences.custom_themes).map(|t| (t.id.clone(), t.name.clone()));
     let mut choices: Vec<_> = modes.chain(files).collect();
-    choices.sort_by_key(|(id, _)| match id.as_str() {
-        "light" => 0,
-        "dark" => 1,
-        _ => 2,
+    choices.sort_by_cached_key(|(id, name)| {
+        let rank = match id.as_str() {
+            "light" => 0,
+            "dark" => 1,
+            _ => 2,
+        };
+        // The modes keep their own order; only the files sort by name.
+        let name = if rank < 2 { String::new() } else { name.to_lowercase() };
+        (rank, name, id.clone())
     });
     choices
 }
@@ -4429,6 +4434,27 @@ mod tests {
         assert!(state.night && state.tone == Some(true));
         state.aim(false);
         assert!(!state.night && state.tone == Some(false));
+    }
+
+    /// #8637: Light and Dark stay first; the theme files follow by name, ignoring case, built in
+    /// and imported together, whatever the built-in `order` says.
+    #[test]
+    fn theme_choices_keep_the_modes_first_and_sort_the_files_by_name() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        for name in ["Zz last", "aardvark"] {
+            let file = crate::theme_files::from_value(&json!({"format":"solidcraft-theme/1", "name":name, "base":"dark"})).unwrap();
+            crate::theme_files::add(&mut app.preferences.custom_themes, file).unwrap();
+        }
+        let choices = theme_choices(&app);
+        let ids: Vec<&str> = choices.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids[..2], ["light", "dark"], "{ids:?}");
+        let names: Vec<String> = choices[2..].iter().map(|(_, name)| name.to_lowercase()).collect();
+        assert!(names.windows(2).all(|w| w[0] <= w[1]), "{names:?}");
+        // Built-in names starting with a digit (1-bit) come before it.
+        let first_letter = names.iter().find(|n| n.starts_with(|c: char| c.is_alphabetic()));
+        assert_eq!(first_letter.map(String::as_str), Some("aardvark"), "imported files sort with the built-in ones");
+        assert_eq!(names.last().map(String::as_str), Some("zz last"));
+        assert_eq!(choices.len(), crate::theme_files::builtin().len() + 4);
     }
 
     #[test]
