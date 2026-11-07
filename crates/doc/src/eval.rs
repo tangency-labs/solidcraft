@@ -143,7 +143,7 @@ impl ModelBody {
 
     /// Face measurements for joint origins, at their original chord tolerance. Pose changes
     /// and scratch copies share them; a geometry edit makes a new body and cache.
-    pub(crate) fn joint_faces(&self) -> Result<Arc<[kernel::FaceInfo]>> {
+    pub fn joint_faces(&self) -> Result<Arc<[kernel::FaceInfo]>> {
         let measure = || {
             #[cfg(test)]
             cost_tests::count(|c| c.joint_faces += 1);
@@ -8765,6 +8765,7 @@ impl PlacedBodies {
             let mut fresh = ModelBody::new(name.to_string(), placed.body.clone(), b.feature);
             fresh.mesh = placed.mesh.clone();
             fresh.measured = placed.measured.clone();
+            fresh.joint_faces = placed.joint_faces.clone();
             fresh.mesh_placement = placed.mesh_placement.clone();
             fresh.plan = placed.plan.clone();
             fresh.plan_mesh = placed.plan_mesh.clone();
