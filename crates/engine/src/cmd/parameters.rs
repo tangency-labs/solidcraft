@@ -563,12 +563,13 @@ fn complete(s: &mut Session, p: &Value) -> Result<Value> {
     // `cab_side_thickness`, #2757) or by the starts of its words in order (`toodia` finds
     // `tooth_outward_flange_diameter`, #11978); functions, constants and units match from the
     // start.
-    let within = |n: &str| word.is_empty() || n.to_ascii_lowercase().contains(&lower) || solidcraft_doc::name_words_match(n, &word);
+    let contains = |n: &str| word.is_empty() || n.to_ascii_lowercase().contains(&lower);
+    let within = |n: &str| contains(n) || solidcraft_doc::name_words_match(n, &word);
     let mut out: Vec<Value> = Vec::new();
     let mut rows: Vec<solidcraft_doc::ParamRow> = s.doc.param_rows().into_iter().filter(|r| within(&r.name)).collect();
-    // Names that start with the word, then the rest; within each, favourites, then user
-    // parameters, then the others.
-    rows.sort_by_key(|r| (!starts(&r.name), !r.favorite, r.source != "user"));
+    // Names that start with the word, then names that contain it, then names matched only by
+    // the starts of their words; within each, favourites, then user parameters, then the others.
+    rows.sort_by_key(|r| (!starts(&r.name), !contains(&r.name), !r.favorite, r.source != "user"));
     for r in rows.into_iter().take(200) {
         // The completion shows the parameter's own unit, so it reads `display_value`.
         let v = r.display_value.or(r.value).map(|v| format!("{v:.4} {}", r.unit).trim().to_string()).unwrap_or_else(|| "error".into());

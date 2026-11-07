@@ -926,15 +926,19 @@ pub(crate) fn suggestions_for(ctx: &egui::Context, word: &str, explicit: bool) -
     let offered = |s: &&Suggestion| (explicit || s.text.trim_end_matches('(') != word) && !(exact && s.kind == "unit");
     let starts = |s: &&Suggestion| s.text.to_ascii_lowercase().starts_with(&w);
     // A parameter is also offered for a word anywhere in its name (`side` finds
-    // `cab_side_thickness`, #2757) or by the starts of its words in order (`toodia` finds
-    // `tooth_outward_flange_diameter`, #11978), after the names that start with it.
-    let within = |s: &&Suggestion| {
-        !exact
-            && s.kind == "parameter"
-            && !starts(s)
-            && (s.text.to_ascii_lowercase().contains(&w) || solidcraft_engine::doc::name_words_match(&s.text, word))
-    };
-    all.iter().filter(|s| starts(s) && offered(s)).chain(all.iter().filter(|s| within(s) && offered(s))).take(8).cloned().collect()
+    // `cab_side_thickness`, #2757), after the names that start with it, and then by the starts
+    // of its words in order (`toodia` finds `tooth_outward_flange_diameter`, #11978). That last
+    // group comes after the others, so it never pushes an earlier match out of the eight.
+    let parameter = |s: &&Suggestion| !exact && s.kind == "parameter" && !starts(s);
+    let within = |s: &&Suggestion| parameter(s) && s.text.to_ascii_lowercase().contains(&w);
+    let words = |s: &&Suggestion| parameter(s) && !within(s) && solidcraft_engine::doc::name_words_match(&s.text, word);
+    all.iter()
+        .filter(|s| starts(s) && offered(s))
+        .chain(all.iter().filter(|s| within(s) && offered(s)))
+        .chain(all.iter().filter(|s| words(s) && offered(s)))
+        .take(8)
+        .cloned()
+        .collect()
 }
 
 /// The named parameters, in the order the list offers them (favourites and the design's own
@@ -1354,9 +1358,12 @@ mod tests {
     fn a_parameter_is_offered_for_any_part_of_its_name() {
         let ctx = egui::Context::default();
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
-        for (name, e) in [("cab_side_thickness", "18 mm"), ("sides", "4")] {
+        for (name, e) in [("cab_side_thickness", "18 mm"), ("sides", "4"), ("inner_diameter", "6 mm")] {
             let _ = app.run("parameters.add", json!({"name": name, "expression": e}));
         }
+        // A favourite is listed first in the cache, but a match by word starts alone still
+        // comes after every name that contains the word (#11978).
+        let _ = app.run("parameters.favorite", json!({"name": "inner_diameter", "favorite": true}));
         publish(&mut app, &ctx);
         let texts = |w: &str| suggestions(&ctx, w).into_iter().map(|s| s.text).collect::<Vec<_>>();
         assert_eq!(texts("side"), ["sides", "cab_side_thickness"]);
@@ -1365,6 +1372,7 @@ mod tests {
         assert_eq!(texts("cabthi"), ["cab_side_thickness"]);
         assert_eq!(texts("sidthi"), ["cab_side_thickness"]);
         assert!(texts("thicab").is_empty());
+        assert_eq!(texts("id"), ["cab_side_thickness", "sides", "inner_diameter"]);
         assert!(!texts("in").iter().any(|t| t == "sin("), "functions match from the start");
     }
 
