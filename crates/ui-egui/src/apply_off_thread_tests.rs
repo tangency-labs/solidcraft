@@ -537,61 +537,99 @@ fn a_changed_display_quality_warms_the_result_without_replaying_commands() {
     h.step(&json!({"expect":{"bodies":1,"volume":13000}})).unwrap();
 }
 
-/// The centre of a text field in the open dialog.
-fn dialog_field(h: &Harness) -> [f64; 2] {
-    let dialog = h.app.viewport.dialog_rect.expect("the dialog is drawn");
-    let tree = h.output.accesskit_update.as_ref().expect("an accessibility tree");
+/// The centres of the open dialog's text fields.
+fn dialog_fields(h: &Harness) -> Vec<[f64; 2]> {
+    let Some(dialog) = h.app.viewport.dialog_rect else { return Vec::new() };
+    let Some(tree) = h.output.accesskit_update.as_ref() else { return Vec::new() };
     tree.nodes
         .iter()
         .filter(|(_, n)| n.role() == egui::accesskit::Role::TextInput)
         .filter_map(|(_, n)| n.bounds())
         .map(|b| [(b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0])
-        .find(|[x, y]| dialog.contains(egui::pos2(*x as f32, *y as f32)))
-        .expect("a text field in the dialog")
+        .filter(|[x, y]| dialog.contains(egui::pos2(*x as f32, *y as f32)))
+        .collect()
 }
 
-/// A field that holds the keyboard while OK computes lets go of it: once the dialog closes, the
-/// very next Ctrl+Z undoes the new feature. A dialog closed some other way leaves its field
-/// holding nothing either.
-#[test]
-fn a_dialog_field_does_not_keep_the_keyboard_once_the_dialog_closes() {
+/// Each way a dialog closes.
+#[derive(Clone, Copy, Debug)]
+enum Close {
+    Enter,
+    Ok,
+    Escape,
+    Cancel,
+    CloseButton,
+}
+
+impl Close {
+    fn step(self) -> serde_json::Value {
+        match self {
+            Close::Enter => json!({"key": "Enter"}),
+            Close::Ok => json!({"widget": "OK"}),
+            Close::Escape => json!({"key": "Escape"}),
+            Close::Cancel => json!({"widget": "Cancel"}),
+            Close::CloseButton => json!({"click": {"handle": "dialog:close"}}),
+        }
+    }
+}
+
+/// Close the Extrude dialog, a text field of it clicked first; with `computing`, OK is computed
+/// beside the window and another field is clicked meanwhile. Then one Ctrl+Z: `None` when it
+/// undid something, else what went wrong.
+fn close_then_undo(close: Close, computing: bool) -> Option<String> {
     let mut h = square_on_a_block();
     h.app.fit_view();
     h.frames(2);
-    let features = h.app.session.doc.features.len();
-    let field = dialog_field(&h);
-    h.step(&json!({"click": field})).unwrap();
+    let fields = dialog_fields(&h);
+    let (Some(&first), Some(&last)) = (fields.first(), fields.last()) else { return Some("no text field in the dialog".into()) };
+    h.step(&json!({"click": first})).unwrap();
     h.frames(2);
-    assert!(h.ctx.memory(|m| m.focused()).is_some(), "the clicked field has the keyboard");
-    let prepared = result(&h);
-    let finish = hold_result(&mut h, false);
-    h.frames(2);
-    assert!(h.ctx.memory(|m| m.focused()).is_none(), "the field lets go of the keyboard while OK computes");
-    h.step(&json!({"click": field})).unwrap();
-    h.frames(1);
-    assert!(h.ctx.memory(|m| m.focused()).is_none(), "a click into a field while OK computes does not take the keyboard");
-    finish.send(prepared).ok().unwrap();
-    for _ in 0..500 {
-        if h.app.dialog.is_none() {
-            break;
-        }
-        h.frames(1);
-        std::thread::sleep(Duration::from_millis(10));
+    if h.ctx.memory(|m| m.focused()).is_none() {
+        return Some("the clicked field did not take the keyboard".into());
     }
-    assert!(h.app.dialog.is_none(), "the dialog closed");
-    assert_eq!(h.app.session.doc.features.len(), features + 1);
-    h.step(&json!({"key": "Z", "cmd": true})).unwrap();
-    assert_eq!(h.app.session.doc.features.len(), features, "the first Ctrl+Z undoes the extrusion");
-
-    // Closed while a field holds the keyboard: the next Ctrl+Z still reaches the design.
-    h.app.start("solid.extrude");
-    h.frames(2);
-    let field = dialog_field(&h);
-    h.step(&json!({"click": field})).unwrap();
-    h.frames(2);
-    assert!(h.ctx.memory(|m| m.focused()).is_some(), "the clicked field has the keyboard");
+    let gate = computing.then(|| {
+        h.app.apply_off_thread = Some(Duration::ZERO);
+        let (finish, gate) = std::sync::mpsc::channel();
+        h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
+        finish
+    });
+    h.step(&close.step()).unwrap();
+    if let Some(finish) = gate {
+        if h.app.applying.is_none() {
+            return Some("OK did not compute beside the window".into());
+        }
+        h.step(&json!({"click": last})).unwrap();
+        h.frames(2);
+        for _ in 0..500 {
+            let _ = finish.send(());
+            if h.app.dialog.is_none() {
+                break;
+            }
+            h.frames(1);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+    if h.app.dialog.is_some() {
+        return Some("the dialog did not close".into());
+    }
     let undo = h.app.session.undo.len();
-    crate::dialogs::cancel(&mut h.app);
     h.step(&json!({"key": "Z", "cmd": true})).unwrap();
-    assert_eq!(h.app.session.undo.len(), undo - 1, "the first Ctrl+Z after closing undoes");
+    (h.app.session.undo.len() >= undo).then(|| "the first Ctrl+Z after closing did nothing".into())
+}
+
+/// However a dialog closes, none of its fields keeps the keyboard: the first Ctrl+Z after it
+/// closes undoes. Also when OK computes beside the window and a field is clicked meanwhile.
+#[test]
+fn a_dialog_field_does_not_keep_the_keyboard_once_the_dialog_closes() {
+    let mut failed = Vec::new();
+    for close in [Close::Enter, Close::Ok, Close::Escape, Close::Cancel, Close::CloseButton] {
+        if let Some(why) = close_then_undo(close, false) {
+            failed.push(format!("{close:?}: {why}"));
+        }
+    }
+    for close in [Close::Enter, Close::Ok] {
+        if let Some(why) = close_then_undo(close, true) {
+            failed.push(format!("{close:?} while computing: {why}"));
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
 }

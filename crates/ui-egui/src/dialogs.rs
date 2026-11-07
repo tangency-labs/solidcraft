@@ -3006,7 +3006,7 @@ fn surrender_keyboard_focus(ui: &egui::Ui) {
 /// its value box in the view.
 fn release_dialog_keyboard(ctx: &egui::Context, rect: egui::Rect) {
     let Some(id) = ctx.memory(|memory| memory.focused()) else { return };
-    let value_box = id == egui::Id::new("sc_canvas_value") || id == egui::Id::new("sc_canvas_value2");
+    let value_box = id == egui::Id::unique("sc_canvas_value") || id == egui::Id::unique("sc_canvas_value2");
     if value_box || ctx.read_response(id).is_some_and(|response| rect.contains(response.rect.center())) {
         ctx.memory_mut(|memory| memory.surrender_focus(id));
     }
