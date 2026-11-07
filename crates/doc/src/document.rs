@@ -945,6 +945,12 @@ pub enum FeatureKind {
         /// part changes. `position` keeps where it was placed.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         references: Vec<HoleReference>,
+        /// Holes at sketch points as older builds drilled them: a point inside a body moves back
+        /// to the body's surface whatever plane the sketch lies on. Designs saved before #11538
+        /// carry it, so their holes rebuild where they were; new holes leave it off, and Edit
+        /// Hole keeps it.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        old_surface_start: bool,
     },
     /// A thread on a cylindrical face. Cosmetic by default (no geometry change; drawn and
     /// exported as an annotation); `modeled` cuts the real helical ISO profile into the face.

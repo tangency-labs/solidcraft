@@ -621,3 +621,26 @@ fn patterned_copy_of_an_offset_plane_hole_starts_at_the_plane_too() {
         assert!(solid_at(&s, x, 20.0, 6.5) && !solid_at(&s, x, 20.0, 7.5) && !solid_at(&s, x, 20.0, 11.5) && solid_at(&s, x, 20.0, 14.5), "x {x}");
     }
 }
+
+/// A design saved before #11538 keeps its hole from a sketch on an offset plane inside the part
+/// where it was: starting at the top face (z 20) and 5 mm deep, also after an edit.
+#[test]
+fn a_saved_offset_plane_hole_keeps_starting_at_the_surface() {
+    let mut s = Session::default();
+    box_part(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": "12 mm", "name": "Pts"}));
+    run(&mut s, "sketch.point", json!({"point": [20, 20], "id": "p1"}));
+    run(&mut s, "sketch.finish", json!({}));
+    drill(&mut s, &["p1".to_string()], json!({"depth": 5}));
+    // As the release before saved it: the last folded format, none of today's pending changes.
+    let mut v: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    v["format"] = json!("solidcraft/50");
+    v.as_object_mut().unwrap().remove("format_pending");
+    let mut opened = Session::new(solidcraft_doc::Document::from_json(&v.to_string()).unwrap());
+    let from_surface = |s: &Session| {
+        !solid_at(s, 20.0, 20.0, 19.0) && !solid_at(s, 20.0, 20.0, 15.5) && solid_at(s, 20.0, 20.0, 14.0) && solid_at(s, 20.0, 20.0, 11.5)
+    };
+    assert!(from_surface(&opened));
+    run(&mut opened, "timeline.edit", json!({"feature": "H", "set": {"diameter": 8}}));
+    assert!(from_surface(&opened), "an edited saved hole still starts at the surface");
+}

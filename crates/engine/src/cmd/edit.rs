@@ -1852,6 +1852,14 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         parameters.entry("old_auto_size").or_insert_with(|| json!(true));
     }
+    // A hole saved before a sketch on a derived plane started its holes at that plane keeps
+    // starting at the surface when it is edited (#11538).
+    if let FeatureKind::Hole { old_surface_start: true, .. } = &old.kind
+        && cid == "solid.hole"
+        && let Some(parameters) = params.as_object_mut()
+    {
+        parameters.entry("old_surface_start").or_insert_with(|| json!(true));
+    }
     // Members keep their names through an edit, unless it gives them another name.
     if let FeatureKind::FrameMember { names, body_name, .. } = &old.kind
         && cid == "frame.member"

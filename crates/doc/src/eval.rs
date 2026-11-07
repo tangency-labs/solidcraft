@@ -4564,9 +4564,10 @@ fn hole_spots(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, f
 }
 
 /// Whether a hole's spots that lie inside a body move back to its surface: not for the points
-/// of a sketch on a derived plane (#11538).
+/// of a sketch on a derived plane (#11538), unless the hole was saved before that.
 fn hole_from_inside(doc: &Document, f: &Feature) -> bool {
     match &f.kind {
+        FeatureKind::Hole { old_surface_start: true, .. } => true,
         FeatureKind::Hole { points: Some(sp), .. } if !sp.single => sketch_plane_follows_face(doc, sp.sketch.0),
         _ => true,
     }
