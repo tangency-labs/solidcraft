@@ -1,0 +1,15 @@
+[package]
+name = "solidcraft-sim"
+description = "SolidCraft simulation (analysis): mesh a B-rep solid, assign document materials and loads, solve linear heat/elasticity on GPU, return results for the viewport"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+solidcraft-geom = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }

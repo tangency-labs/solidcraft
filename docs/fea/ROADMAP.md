@@ -1,74 +1,51 @@
-# SolidCraft FEA — Roadmap
+# SolidCraft Simulation — Roadmap
 
-Planning document only. No benchmarks or test results are claimed here;
-pass criteria below are targets to be measured, not results.
+Planning only; no benchmarks or results claimed. Each phase ends with
+a result viewable in the SolidCraft viewport (and `.vtu` export).
 
-## Phase 0 — CPU reference heat solver (4–6 weeks)
+## Phase 0 — CPU reference heat solver in `crates/sim` (4–6 weeks)
 
-- **Inputs:** structured hexahedral mesh generator (in-house for tests
-  only, not a production mesher), Gmsh/`meshio` ingestion for external
-  meshes later; material properties (scalar conductivity $k$), Dirichlet
-  + Neumann boundary conditions; analytic manufactured solution.
-- **Outputs:** CPU reference steady-state linear heat solver
-  (Galerkin FEM, assembled sparse system, PCG), `.vtu` export readable
-  in ParaView, mesh/convergence test harness.
-- **Benchmark test:** 1D/2D/3D manufactured solution; mesh-refinement
-  study measuring $L^2$ error vs. $h$.
-- **Pass criteria:** observed convergence order matches theory for
-  linear hex elements (2 in $L^2$ for temperature); solver residual
-  reduced to the requested tolerance on all test cases; results
-  reproducible in CI without a GPU.
+- **Inputs:** a SolidCraft solid (kernel B-rep) mesh — structured
+  hex for tests, Gmsh hex for real parts; material $k$ from the
+  document; Dirichlet/Neumann BCs as engine commands.
+- **Outputs:** steady linear heat solve on CPU, results written back
+  to the document/viewport, `.vtu` export.
+- **Benchmark:** manufactured solution, refinement study ($L^2$ vs $h$).
+- **Pass:** convergence order matches theory (2 for linear hex);
+  residual to tolerance; runs in CI without GPU.
 
-## Phase 1 — wgpu matrix-free PCG for heat (8–10 weeks)
+## Phase 1 — GPU matrix-free PCG for heat (8–10 weeks)
 
-- **Inputs:** Phase 0 mesh, element data, and BCs; GPU device via
-  `wgpu` (Vulkan/DX12/Metal-first); FP32 + FP64 iterative refinement
-  for development.
-- **Outputs:** matrix-free WGSL kernels (assembly, matvec, dot, axpy),
-  host-side PCG loop, GPU-resident solution, CPU fallback path.
-- **Benchmark test:** 500k DOF heat problem, GPU PCG vs. CPU PCG
-  (Phase 0) on identical mesh/BCs; count PCIe transfers per solve.
-- **Pass criteria:** GPU solution matches CPU reference within the
-  precision policy tolerance (FP32+refinement in dev); exactly one
-  H2D and one D2H transfer per solve (no per-iteration copies);
-  speedup vs. CPU PCG reported with hardware named — no invented
-  numbers if hardware is unavailable.
+- **Inputs:** Phase 0 mesh/BCs; `wgpu` device via `crates/gpu`.
+- **Outputs:** WGSL assembly/matvec/dot/axpy kernels, host PCG loop,
+  GPU-resident solution, CPU fallback.
+- **Benchmark:** 500k DOF vs CPU PCG, identical mesh; PCIe transfers
+  counted.
+- **Pass:** matches CPU reference within precision policy; 1 H2D +
+  1 D2H per solve; speedup reported with hardware named.
 
-## Phase 2 — Vector linear elasticity (implicit PCG)
+## Phase 2 — Linear elasticity (static stress)
 
-- **Inputs:** Phase 1 operators; 3 DOF/node; elasticity tensor
-  $D(E, \nu)$; body forces and traction BCs in addition to Dirichlet.
-- **Outputs:** element stiffness $k_e = \int B^T D B \, d\Omega$ via
-  the same matrix-free assembly path; displacement/stress/strain
-  recovery; `.vtu` output.
-- **Benchmark test:** cantilever beam and a NAFEMS elasticity
-  benchmark (e.g. NAFEMS II.1-series) compared against CalculiX /
-  Code_Aster run externally on the same mesh.
-- **Pass criteria:** displacement/stress agree with the external
-  oracle within the benchmark's published tolerance band; patch test
-  and rigid-body-mode tests pass; no contact or plasticity exercised.
+- **Inputs:** 3 DOF/node, $D(E,\nu)$ from document materials,
+  $k_e=\int B^TDB$; body forces + tractions.
+- **Outputs:** displacement, von Mises stress, strain — shown in
+  viewport with legend.
+- **Benchmark:** cantilever + NAFEMS benchmark vs CalculiX /
+  Code_Aster / ANSYS run externally on the same mesh.
+- **Pass:** within oracle tolerance band; patch/rigid-body tests pass.
 
-## Phase 3 — Explicit elastodynamics
+## Phase 3 — Explicit dynamics + modal/thermal studies
 
-- **Inputs:** Phase 2 spatial discretisation; mass lumping; stable
-  time-step estimate ($\Delta t \le 2/\omega_{\max}$).
-- **Outputs:** explicit central-difference integrator, GPU-resident
-  throughout; energy-balance diagnostics.
-- **Benchmark test:** 1D elastic wave / vibration benchmark against
-  analytic solution and an external oracle.
-- **Pass criteria:** total energy drift within tolerance over the
-  benchmark duration; stable at the computed CFL-limited step;
-  results match analytic frequency within tolerance.
+- Explicit dynamics: lumped mass, CFL step, energy diagnostics.
+- Modal and transient thermal as study types reusing Phase 1–2.
+- **Pass:** energy drift and frequency within tolerance vs analytic
+  and external oracle.
 
 ## Cross-cutting
 
-- NAFEMS benchmarks added to CI as external-oracle comparisons
-  (CalculiX / Code_Aster as separate processes, never linked in).
-- Every phase: `.vtu` output + ParaView check; convergence/residual
-  reported, not just final fields.
-- NO implicit contact/plasticity in any MVP phase.
+NAFEMS in CI · every phase: viewport check + `.vtu` · no contact /
+plasticity in MVP · ANSYS/Fusion code never enters this repo.
 
 ## Open questions
 
-See `CONTEXT.md`: WGSL FP64 availability, Gmsh FFI vs. `meshio`-only,
-Ginkgo FFI timing, first benchmark GPU vendor.
+See `CONTEXT.md` (volume meshing, WGSL FP64, result-to-viewport mapping).

@@ -1,102 +1,82 @@
-# SolidCraft FEA — Context
+# SolidCraft Simulation (Analysis) — Context
 
-> Status: proposal / planning only. No solver code in this PR beyond a
-> compiling scaffold under `fea/`. This is a clean-room, from-scratch
-> project inspired by the *category* of tools such as ANSYS Mechanical /
-> Fluent. It is **not** a copy, port, or decompilation of ANSYS or any
-> other commercial solver. ANSYS installed locally may be used only as
-> a reference/validation oracle on the same meshes.
+> Status: proposal / planning only, plus a compiling `crates/sim`
+> scaffold in this PR. No solver is implemented yet.
 
-## Vision
+## What this is
 
-A GPU-first finite-element / CFD solver in Rust, differentiated from
-primarily CPU-solved incumbents by a matrix-free, iterative,
-GPU-resident architecture: one PCIe transfer in, one out, and the hot
-loop never leaves the GPU.
+SolidCraft is an open-source parametric 3D CAD application in Rust —
+an alternative to Fusion 360. This work adds its **analysis /
+simulation tool**, in the spirit of Fusion 360's Simulation workspace
+and comparable in scope to ANSYS (static stress, thermal, modal),
+built clean-room from public literature. It is **not** a copy, port,
+or decompilation of ANSYS or Fusion 360, and contains no commercial
+solver code. ANSYS installed locally may be used only as an external
+validation oracle on the same mesh.
 
-MVP physics, in order:
+## User workflow (inside SolidCraft, not a separate app)
 
-1. Linear heat conduction (steady, then transient).
-2. Linear elasticity (implicit, preconditioned conjugate gradients).
-3. Explicit elastodynamics (Phase 3, not MVP).
+1. Model a part in SolidCraft (sketch → features on the timeline).
+2. Open **Simulation**, select solid body/bodies from the document.
+3. Assign materials (from the document's material definitions:
+   $E$, $\nu$, $k$, density), loads, and constraints — as engine
+   commands, so undo/redo, CLI, and the MCP server all see them.
+4. Mesh the solid (see Architecture — volume hex meshing is the key
+   integration gap) and solve on GPU.
+5. View results in the SolidCraft viewport (von Mises stress,
+   displacement, temperature), with a legend — the same viewport
+   used for CAD, via `crates/render` / `crates/gpu`.
+6. Optionally export `.vtu` for ParaView, or the same mesh to
+   ANSYS/CalculiX for external comparison.
+
+MVP physics, in order: linear heat → linear elasticity (implicit
+PCG) → explicit dynamics. No implicit contact/plasticity in MVP.
 
 ## Non-goals (MVP)
 
-- No copying, decompilation, reverse engineering, or reuse of ANSYS
-  (or other commercial) code, file formats, or proprietary algorithms.
-- No implicit contact, plasticity, or large-deformation formulations
-  in the MVP — those kill schedules.
-- No CAD kernel and no mesher of our own (see Stack).
-- No GUI and no built-in viewer in the MVP. Visualisation is by
-  writing `.vtu` and viewing in ParaView.
-- No CPU direct-solver port to GPU (no GPU Cholesky). The path is
-  matrix-free matvec + iterative PCG.
+- No ANSYS/Fusion code copying, reverse engineering, or solver
+  binary embedding. ANSYS is a validation oracle only.
+- No CAD kernel, mesher, or viewer of our own: geometry comes from
+  `crates/kernel`, meshing from Gmsh (FFI) / `meshio`, viewing from
+  the existing viewport + ParaView for `.vtu`.
+- No GPU direct solver (no GPU Cholesky): matrix-free matvec + PCG.
 
-## Architecture (CPU/GPU split)
+## Architecture (where `crates/sim` sits)
 
 ```text
-+------------------------------- CPU (host) ------------------------------+
-|  Gmsh (FFI) / meshio  ->  mesh import, BCs, setup, orchestration        |
-|  Validation drivers (CalculiX / Code_Aster as external oracles)         |
-|  PCG control loop (host): convergence checks, reductions orchestration  |
-+-------------------------- one upload (H2D) ------------------------------+
-|                           GPU (device, wgpu/WGSL)                       |
-|  Element assembly (matrix-free) -> matvec -> PCG kernels (dot, axpy)    |
-|  Solution field stays GPU-resident across all iterations                |
-+-------------------------- one download (D2H) -----------------------------+
-|  Write .vtu -> ParaView                                                  |
-+-------------------------------------------------------------------------+
+crates/kernel  B-rep solid (solidcore) ─┐
+crates/geom    meshes, measures         ├─> crates/sim (NEW)   mesh → solve → results
+crates/doc     materials, parameters,   ┘         │
+               timeline, bodies                   ├─> crates/gpu (wgpu/WGSL)  GPU PCG
+                                                  └─> crates/render           viewport results
+crates/engine  commands (study, load, constraint, solve) — undo, CLI, MCP
 ```
 
-Fallback: if no GPU is available, the same algorithms run on CPU
-(`faer` / `nalgebra-sparse` / `rayon`) so development and CI never
-require a GPU. See `ARCHITECTURE.md` for data layout and kernels.
+`crates/sim` is a normal workspace member (`crates/*`), following the
+same conventions as `crates/dynamics`: `#[forbid(unsafe_code)]`,
+validated inputs, capped sizes, errors as values. Units follow
+SolidCraft: mm, kg, s — so stress is N/mm² (MPa), forces mN.
 
-## Precision
+## Precision / GPU
 
-FP64 is required for FEA accuracy. Consumer GPUs deliver roughly
-1/32–1/64 of FP32 throughput in FP64, so:
+GPU-first via existing `wgpu` (Vulkan/DX12/Metal): one upload, one
+download, hot loop GPU-resident. FP64 required for FEA accuracy;
+FP32 + FP64 iterative refinement in dev, FP64 target on A100/H100/
+RTX PRO class. CPU fallback (`faer`/`rayon`) for CI/headless.
 
-- Development: FP32 with FP64 iterative refinement.
-- Production target: FP64 on FP64-capable parts (A100/H100/RTX PRO
-  class). WGSL/`wgpu` FP64 feature support is an open question
-  (see below) — the scaffold is precision-agnostic by design.
+## Stack
 
-## Stack (reuse, do not reinvent)
-
-| Concern | Choice | Licence note |
-|---|---|---|
-| Meshing / IO | Gmsh via FFI, Rust `meshio` / `sprs` | Permissive |
-| GPU sparse algebra / preconditioner | Ginkgo via FFI (PCG + Jacobi/AMG); CPU fallback `faer`, `nalgebra-sparse`, `rayon` | Permissive |
-| GPU compute | `wgpu` + WGSL (Vulkan/DX12/Metal-first); CUDA/`cudarc` only if we later lock to NVIDIA | Permissive |
-| CPU kernels / math types | `wgpu`, `bytemuck`, `glam` | Permissive |
-| Validation oracle | CalculiX (CCX), Code_Aster, NAFEMS benchmarks in CI | GPL — external validators only, do not copy into closed-source code |
-| Prototyping math (optional) | FEniCSx in Python | GPL — prototyping only |
-| Visualisation | Write `.vtu`, view in ParaView | — |
-
-Architectural references to *study* (do not copy code; GPL warning):
-PyFR (GPU CFD), SPECFEM++/SeisSol (GPU explicit), MFEM (GPU FEM
-assembly), deal.II (matrix-free). Ginkgo/MFEM/Gmsh are permissive;
-CalculiX/Code_Aster/OpenFOAM/Elmer are GPL — use as external
-validators, never copy into this codebase.
-
-## Clean-room / licence guardrails
-
-- All algorithms documented from public literature and textbooks
-  (e.g. Hughes, Bathe, Zienkiewicz & Taylor) before implementation.
-- No commercial solver binaries in the build or test path; oracles run
-  as separate external processes on identical meshes.
-- New dependencies must be checked against `deny.toml` / existing
-  licence policy in this repository before being added.
+Gmsh FFI + `meshio`/`sprs` (mesh/IO) · Ginkgo FFI (PCG/AMG) with CPU
+fallback · `wgpu`/WGSL, `bytemuck`, `glam` · CalculiX/Code_Aster +
+ANSYS as external validation oracles (GPL/commercial — never linked
+or copied) · NAFEMS benchmarks in CI · ParaView for `.vtu`.
 
 ## Open questions
 
-- WGSL FP64: which wgpu backends/devices expose `f64`, and what is the
-  fallback strategy on consumer GPUs? (Target for Phase 1 spike.)
-- Gmsh FFI vs. `meshio`-only ingestion for Phase 0: which gives us
-  structured hex meshes fastest?
-- Ginkgo FFI: link strategy (system vs. vendored build) and whether a
-  pure-WGSL Jacobi preconditioner is sufficient for Phase 1 before
-  pulling in Ginkgo.
-- Primary GPU vendor for first benchmark hardware (not yet decided;
-  portability via wgpu is the default assumption).
+- Volume meshing: kernel surface tessellation → Gmsh hex mesh is
+  the main integration gap. Which path gives reliable hex meshes
+  from SolidCraft B-reps fastest?
+- WGSL FP64 availability per backend; Ginkgo FFI vs. WGSL Jacobi
+  preconditioner for Phase 1.
+- Result mapping: nodal results → existing render tessellation
+  (per-vertex colour/legend) without a second viewer.
