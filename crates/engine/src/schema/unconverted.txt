@@ -91,9 +91,7 @@ plastic.rest
 plastic.snap_fit
 render.aging.describe
 render.backends
-render.cancel
 render.effects.describe
-render.export
 render.library.appearance.apply
 render.library.environment.apply
 render.library.physical.prepare
@@ -101,13 +99,10 @@ render.library.studio.apply
 render.library.studio.prepare
 render.library.surface.prepare
 render.preflight
-render.result.pin
-render.result.regrade
 render.scene
 render.settings.get
 render.settings.set
 render.start
-render.status
 select.clear
 select.set
 selection.delete
