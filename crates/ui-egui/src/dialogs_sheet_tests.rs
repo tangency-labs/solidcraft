@@ -394,6 +394,7 @@ fn bend_table_picker_writes_the_current_body() {
 /// made with it, and the dialog shows it the next time.
 #[test]
 fn rules_dialog_picks_the_corner_relief_shape() {
+    use solidcraft_engine::doc::develop::{CornerRelief, JointKind, Relief};
     for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
         let mut h = crate::scenario::Harness::new();
         h.call("ui.set", json!({"layout":mode}));
@@ -408,10 +409,12 @@ fn rules_dialog_picks_the_corner_relief_shape() {
         h.app.run("sketch.finish", json!({})).unwrap();
         h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
         h.app.run("sheet.flange", json!({"edges": [[60, 0, 2], [120, 45, 2], [60, 90, 2], [0, 45, 2]], "height": 20, "angle": "72 deg"})).unwrap();
-        // The rounds in the base of the tray, and the shape the open dialog shows.
+        // The tray's corners relieved with a round (a corner's relief belongs to the two bends that
+        // meet there, and is cut from the flat wherever it reaches; the flat-first sheet drew it
+        // in the base's outline), and the shape the open dialog shows.
         let rounds = |app: &SolveApp| {
             let state = app.session.model.state();
-            state.sheets.last().map(|s| s.base.outer.segs.iter().filter(|g| matches!(g, solidcore_record::Seg2::Arc { .. })).count())
+            state.surface_sheets.last().map(|s| s.sheet.corners.iter().filter(|c| c.relief == CornerRelief::Round).count())
         };
         let shown = |app: &SolveApp| match app.dialog.as_ref().map(|d| &d.kind) {
             Some(Kind::Sheet(Sm::Rules { relief, .. })) => Some(*relief),
@@ -438,7 +441,14 @@ fn rules_dialog_picks_the_corner_relief_shape() {
         h.step(&json!({"widget": "OK"})).unwrap();
         assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
         assert_eq!(h.app.session.doc.sheet_rule(None).corner_relief_shape, "tear");
-        let torn = h.app.session.model.state().sheets.last().map(|s| s.flanges.iter().filter(|f| f.tear == (true, true)).count());
+        // Both ends of a bend are its joint's: each of the four bends is torn at both its corners.
+        let torn = h.app.session.model.state().surface_sheets.last().map(|s| {
+            s.sheet
+                .joints
+                .iter()
+                .filter(|j| matches!(&j.kind, JointKind::Bend(b) if matches!(b.relief, (Relief::Tear { .. }, Relief::Tear { .. }))))
+                .count()
+        });
         assert_eq!((rounds(&h.app), torn), (Some(0), Some(4)));
     }
 }
@@ -492,6 +502,7 @@ fn rules_dialog_sets_how_bend_angles_read() {
 /// the size the dialog shows reach the part, the bends and the flat pattern.
 #[test]
 fn the_rule_manager_relieves_a_corner_that_is_not_square() {
+    use solidcraft_engine::doc::develop::CornerRelief;
     let mut h = crate::scenario::Harness::new();
     h.app
         .run(
@@ -510,17 +521,27 @@ fn the_rule_manager_relieves_a_corner_that_is_not_square() {
             json!({"edges": [[60, 0, 2], [142.5, 38.9711431703, 2], [105, 77.9422863406, 2], [22.5, 38.9711431703, 2]], "height": 38.6, "angle": "90 deg"}),
         )
         .unwrap();
-    // The base of the notch has its four corners, and the bends run the whole length of the edges.
-    let base = |app: &SolveApp| {
-        let state = app.session.model.state();
-        state.sheets.last().map(|s| (s.base.outer.segs.len(), s.flanges.iter().map(|f| s.zone_span(f).1 - s.zone_span(f).0).collect::<Vec<_>>()))
+    // The corners a relief cuts (a round or a square: a corner's relief belongs to the two bends
+    // that meet there and is cut from the flat wherever it reaches; the flat-first sheet drew a
+    // kite in its base's outline), and the bends' lengths in the flat pattern's bend table.
+    let base = |app: &mut SolveApp| {
+        let cut = app
+            .session
+            .model
+            .state()
+            .surface_sheets
+            .last()
+            .map(|s| s.sheet.corners.iter().filter(|c| matches!(c.relief, CornerRelief::Round | CornerRelief::Square)).count())?;
+        let flat = app.session.execute("sheet.flat_pattern", &json!({})).ok()?;
+        let bends: Vec<f64> = flat["bends"].as_array()?.iter().map(|b| b["length"].as_f64().unwrap_or(f64::NAN)).collect();
+        Some((cut, bends))
     };
     let shown = |app: &SolveApp| match app.dialog.as_ref().map(|d| &d.kind) {
         Some(Kind::Sheet(Sm::Rules { relief, .. })) => Some(*relief),
         _ => None,
     };
-    let (segs, notch_bends) = base(&h.app).expect("the sheet");
-    assert_eq!(segs, 4, "the notch cuts nothing out of the base");
+    let (cut, notch_bends) = base(&mut h.app).expect("the sheet");
+    assert_eq!(cut, 0, "the notch cuts nothing out of the flat");
     h.step(&json!({"start": "sheet.manage_rules"})).unwrap();
     h.frames(3);
     assert_eq!(shown(&h.app), Some(0), "a rule starts with the notch");
@@ -534,11 +555,21 @@ fn the_rule_manager_relieves_a_corner_that_is_not_square() {
     assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
     assert_eq!(h.app.session.doc.sheet_rule(None).corner_relief_shape, "rectangular");
     assert_eq!(h.app.session.doc.sheet_rule(None).corner_relief, "8 mm");
-    // A kite at each of the four corners: two more edges than the notch's four.
-    let (segs, relieved) = base(&h.app).expect("the sheet");
-    assert_eq!(segs, 12, "a kite at each corner of the base");
+    // A relief at each of the four corners: a parallelogram centered where the two zones' center
+    // lines cross, c = 3 − π/2 in from both edges (the tangent lines R + T = 3 in, the zones
+    // BA = π wide outside them), its sides along the two bends 4 from there. The notch ends each
+    // zone square across from where the tangent lines cross, (π/2)/tan(α/2) along the bend past
+    // the zones' crossing (α the corner's angle), and the relief's side along the other bend
+    // crosses the bend's center line 4/sin α past it: each end is 4/sin α − (π/2)/tan(α/2)
+    // shorter. Each bend has a 60° end and a 120° end, so it is
+    // (4/sin 60° − (π/2)/tan 30°) + (4/sin 120° − (π/2)/tan 60°) = (16 − 2π)/√3 shorter (the
+    // flat-first kite, set on the base's corner, took 4 off each end).
+    let (cut, relieved) = base(&mut h.app).expect("the sheet");
+    assert_eq!(cut, 4, "a relief at each corner of the base");
+    let shorter = (16.0 - 2.0 * std::f64::consts::PI) / 3f64.sqrt();
+    assert!(notch_bends.len() == 4 && relieved.len() == 4, "{notch_bends:?} and {relieved:?}");
     for (was, now) in notch_bends.iter().zip(&relieved) {
-        assert!((was - now - 8.0).abs() < 1e-6, "{notch_bends:?} and {relieved:?}: the bends are 8 mm shorter");
+        assert!((was - now - shorter).abs() < 1e-6, "{notch_bends:?} and {relieved:?}: the bends are {shorter} mm shorter");
     }
     // The flat pattern is one loop, and the part folds.
     let flat = h.app.session.execute("sheet.flat_pattern", &json!({})).expect("the flat pattern");
@@ -599,13 +630,16 @@ fn flange_dialog_picks_a_corner_relief_of_its_own() {
         assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
         assert_eq!(relief(&h.app), Some((Some("round".into()), Some("6 mm".into()))));
         assert!(h.app.session.model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", h.app.session.model.results);
+        // The corners relieved with a round: a corner's relief belongs to the two bends that meet
+        // there and is cut from the flat wherever it reaches (the flat-first sheet drew it as an
+        // arc of its base's outline). The two flanges make one corner, at the origin.
         let arcs = |app: &SolveApp| {
             app.session
                 .model
                 .state()
-                .sheets
+                .surface_sheets
                 .last()
-                .map(|s| s.base.outer.segs.iter().filter(|g| matches!(g, solidcore_record::Seg2::Arc { .. })).count())
+                .map(|s| s.sheet.corners.iter().filter(|c| c.relief == solidcraft_engine::doc::develop::CornerRelief::Round).count())
         };
         assert_eq!(arcs(&h.app), Some(1), "the round is cut at the one corner the two flanges make");
         // Edit Feature shows both again; Rule and an empty size take the feature back to the rule's relief.

@@ -834,17 +834,25 @@ pub(super) fn sheet_eval(
                 };
             let n0 = sk.sheet.panels.len();
             let several = picks.len() > 1;
-            let mut made = Vec::with_capacity(picks.len());
-            for (k, (edge, height, angle)) in picks.into_iter().enumerate() {
-                // Each edge's error names it, among several.
-                let joint = sk.add_flange_on(edge, height, angle, rr, position, from, *flip).map_err(|e| match e {
+            // Each edge's error names it, among several.
+            let named = |k: usize| {
+                move |e: DocError| match e {
                     DocError::Invalid(m) if several => DocError::Invalid(format!("edge {}: {m}", k + 1)),
                     e => e,
-                })?;
+                }
+            };
+            // Every flange is added before any corner is closed: a flange on a wall's end edge
+            // is there when the flange beside the wall closes the corner the three bends make.
+            let mut made = Vec::with_capacity(picks.len());
+            for (k, (edge, height, angle)) in picks.into_iter().enumerate() {
+                let joint = sk.flange_on(edge, height, angle, rr, position, from, *flip).map_err(named(k))?;
                 if let Some((relief, size)) = own {
                     sk.corner_reliefs.push((joint, relief, size));
                 }
                 made.push(joint);
+            }
+            for (k, joint) in made.iter().enumerate() {
+                sk.close_flange_corners(std::slice::from_ref(joint)).map_err(named(k))?;
             }
             sk.clear_of_neighbours(&made)?;
             tag_panels(&mut sk, Some(&before), n0, f.id);

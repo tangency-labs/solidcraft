@@ -270,6 +270,32 @@ impl SurfaceSheet {
                 .any(|j| matches!(j.kind, JointKind::Rip(_)) && ((j.a.panel == i && j.b.panel == k) || (j.a.panel == k && j.b.panel == i)))
     }
 
+    /// The bend anchored at its sharps that joins panels `i` and `k`, if one does.
+    fn bridge(&self, i: usize, k: usize) -> Option<usize> {
+        if i == k {
+            return None;
+        }
+        self.sheet.joints.iter().position(|j| {
+            matches!(&j.kind, JointKind::Bend(b) if b.datum == Datum::Sharp)
+                && ((j.a.panel == i && j.b.panel == k) || (j.a.panel == k && j.b.panel == i))
+        })
+    }
+
+    /// Whether a bend other than `skip`'s stands on panel `w` across the line through `at` along
+    /// `along` (in the panel's chart), its anchor passing within `reach` of `at`: there the
+    /// panel's side is that bend's, as where a flange stands on a wall's end edge beside the
+    /// wall's own bend. A bend running along the line (a hem along the wall's far edge) holds no
+    /// side there.
+    fn held_at(&self, w: usize, at: Vec2, along: Vec2, skip: [usize; 2], reach: f64) -> bool {
+        self.sheet.joints.iter().enumerate().any(|(m, j)| {
+            let JointKind::Bend(bend) = &j.kind else { return false };
+            !skip.contains(&m)
+                && [&j.a, &j.b].into_iter().any(|an| {
+                    an.panel == w && an.dir.cross(along).abs() > 0.1 && dist_to_segment(at, an.origin, an.origin + an.dir * bend.length) <= reach
+                })
+        })
+    }
+
     /// The joint that runs along the edge `a`–`b` of panel `i`: its anchor line holds both ends,
     /// or, a bend's, the edge lies beside the bend in the strip its band takes, up to a thickness
     /// past its anchor away from the panel's material (where the bend's sharp was drawn inside the
@@ -393,6 +419,26 @@ impl SurfaceSheet {
         from: HeightFrom,
         flip: bool,
     ) -> Result<usize> {
+        let joint = self.flange_on(edge, height, angle, radius, position, from, flip)?;
+        self.close_corners(joint)?;
+        Ok(joint)
+    }
+
+    /// Closes the corners of the bends `made`, a feature's flanges all added first (see
+    /// [`SurfaceSheet::flange_on`]), each against the bends before it (see `close_corners`).
+    pub fn close_flange_corners(&mut self, made: &[usize]) -> Result<()> {
+        for &j in made {
+            self.close_corners(j)?;
+        }
+        Ok(())
+    }
+
+    /// The flange of [`SurfaceSheet::add_flange_on`] with its corners not closed yet. A feature on
+    /// several edges adds all its flanges first and then closes their corners
+    /// ([`SurfaceSheet::close_flange_corners`]), so a flange that stands on another's side edge
+    /// (side flanges across a bend) is there when the corner the three bends make is closed.
+    #[allow(clippy::too_many_arguments)]
+    pub fn flange_on(&mut self, edge: FreeEdge, height: f64, angle: f64, radius: f64, position: &str, from: HeightFrom, flip: bool) -> Result<usize> {
         if !(angle > 1e-6 && angle <= std::f64::consts::PI - 1e-6) {
             return err("the flange angle must be between 0 and 180°");
         }
@@ -465,9 +511,7 @@ impl SurfaceSheet {
             let corners = [Vec2::new(p0, 0.0), Vec2::new(q0, -depth), Vec2::new(q1, -depth), Vec2::new(p1, 0.0)];
             panel.region = Region2 { outer: Loop2::polygon(&corners).ccw(), holes: Vec::new() };
         }
-        let joint = self.sheet.joints.len() - 1;
-        self.close_corners(joint)?;
-        Ok(joint)
+        Ok(self.sheet.joints.len() - 1)
     }
 
     /// Closes the corners the bend `j`, a flange's just added, makes with the other bends standing
@@ -480,6 +524,13 @@ impl SurfaceSheet {
     /// along it, as far as both reach. Whatever made the other bend (Convert, Thicken or another
     /// flange), its panel is met alike. A panel whose side at the corner is no straight edge from
     /// its bend keeps it, and the corner stays open.
+    ///
+    /// Three bends can meet at one corner: a wall's bend on a panel, a flange on the panel's edge
+    /// beside it, and a flange on the wall's end edge (side flanges across a bend). There neither
+    /// new flange is closed against the other's panel, whose side at the corner the third bend
+    /// holds; the two new flanges are closed against each other, across the wall's bend, and that
+    /// bend runs to the corner too. Only bends before `j` are met: a later flange of the same
+    /// feature meets `j` when its own corners are closed.
     fn close_corners(&mut self, j: usize) -> Result<()> {
         let t = self.sheet.thickness;
         let dev = develop(&self.sheet, 0).map_err(|e| DocError::Invalid(e.to_string()))?;
@@ -490,23 +541,30 @@ impl SurfaceSheet {
             let Some(Joint { a: on_p, b: on_f, kind: JointKind::Bend(nb) }) = self.sheet.joints.get(j).cloned() else { return Ok(()) };
             let p = on_p.panel;
             let Some(Joint { a, b, kind: JointKind::Bend(ob) }) = self.sheet.joints.get(k).cloned() else { continue };
-            if k == j || ob.datum != Datum::Sharp {
+            if k >= j || ob.datum != Datum::Sharp {
                 continue;
             }
             // The other bend's anchor on the panel and on its flange, and the side of each its
-            // material lies on (1 on the left). Across a rip, the bend that stands on the panel
-            // beside (its first anchor's).
+            // material lies on (1 on the left). Across a rip, or across a bend (side flanges across
+            // a bend), the bend that stands on the panel beside.
             let (on_q, on_w, side_q) = if a.panel == p {
                 (a, b, 1.0)
             } else if b.panel == p {
                 (b, a, -1.0)
-            } else if self.ripped(p, a.panel) {
+            } else if self.ripped(p, a.panel) || self.bridge(p, a.panel).is_some() {
                 (a, b, 1.0)
+            } else if self.bridge(p, b.panel).is_some() {
+                (b, a, -1.0)
             } else {
                 continue;
             };
             let across = on_q.panel != p;
             let (w, f) = (on_w.panel, on_f.panel);
+            if self.ripped(f, w) {
+                continue;
+            }
+            // Across a bend, that bend: it ends at the corner with the other two.
+            let bridged = if across && !self.ripped(p, on_q.panel) { self.bridge(p, on_q.panel) } else { None };
             if !matches!(self.sheet.panels.get(w).map(|x| &x.surface), Some(Surface::Plane)) {
                 continue;
             }
@@ -542,6 +600,26 @@ impl SurfaceSheet {
             if !across && !(into2.dot(on_p.dir.perp()) > 1e-9 && into1.dot(on_q.dir.perp() * side_q) > 1e-9) {
                 continue;
             }
+            // The other panel's side at the corner held by a third bend (a flange on its end edge):
+            // the new flange closes against that bend's flange, across the other bend, instead.
+            if !across && self.held_at(w, on_w.origin + on_w.dir * s2, on_w.dir, [j, k], reach) {
+                continue;
+            }
+            // The bend across, from its anchor on the panel: where the corner lies along it, and its
+            // end there.
+            let bridged = match bridged {
+                Some(m) => {
+                    let Some(Joint { a: ma, b: mb, kind: JointKind::Bend(mbend) }) = self.sheet.joints.get(m) else { continue };
+                    let on = if ma.panel == p { ma } else { mb };
+                    let at = (c1 - on.origin).dot(on.dir);
+                    let end = nearer(at, mbend.length);
+                    if (at - end).abs() > reach {
+                        continue;
+                    }
+                    Some((m, at, end))
+                }
+                None => None,
+            };
             // The line the two flanges' planes meet along, from the corner into the new flange's
             // material (on the right of its anchor), and into the other's too. Flanges in one plane
             // (returns on two walls) meet on the line halving the corner between their bends.
@@ -614,6 +692,11 @@ impl SurfaceSheet {
             }
             if let Some(Joint { a, b, kind: JointKind::Bend(bend) }) = self.sheet.joints.get_mut(k) {
                 to_corner(a, b, bend, s2, e2);
+            }
+            if let Some((m, at, end)) = bridged
+                && let Some(Joint { a, b, kind: JointKind::Bend(bend) }) = self.sheet.joints.get_mut(m)
+            {
+                to_corner(a, b, bend, at, end);
             }
             let [f0, f1] = ef;
             let [w0, w1] = ew;

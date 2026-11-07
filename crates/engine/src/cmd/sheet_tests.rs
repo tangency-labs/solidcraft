@@ -94,7 +94,29 @@ fn side_edge_flanges_across_a_bend_keep_their_relief_through_rebuild_and_reopen(
             assert!(no_errors_or_warnings(&s), "{shape}, reverse={reverse}: {:?}", s.model.results);
             let formed = volume(&mut s);
             let pattern = flat(&mut s);
-            assert_eq!(pattern["cutouts"].as_array().map(Vec::len), Some(1), "{pattern}");
+            // Three bends meet at the base's corner (120, 0): the wall's (on the base's edge y = 0)
+            // and the two new ones (on the base's edge x = 120 and on the wall's end). Their zones,
+            // BA = (π/2)(R + K·T) = π wide outside the tangent lines R + T = 3 in from the edges,
+            // end notched there, and the two new flanges, in one plane, are parted by the rule's
+            // gap on the line halving their corner. So the corner lies open to that slit in the
+            // flat, and the relief is cut from its open notch: no cut-out (the flat-first sheet
+            // kept material all round it, a slot of its own). It is centered where the zones'
+            // center lines cross, c = 3 − π/2 in from the edges y = 0 and x = 120 (the two new
+            // bends' center lines are one line in the flat): a round of radius 2 about
+            // (120 − c, c), or a square of side 4 along the bends, whose corners toward the base and
+            // the wall lie in them, at (120 − c − 2, c + 2) and (120 − c − 2, c − 2).
+            assert_eq!(pattern["cutouts"].as_array().map(Vec::len), Some(0), "{pattern}");
+            let c = 3.0 - FRAC_PI_2;
+            let (arcs, ends) = relief_drawing(&mut s);
+            let at = |p: &solidcore_record::Vec2, x: f64, y: f64| (p.x - x).abs() < 1e-6 && (p.y - y).abs() < 1e-6;
+            if shape == "round" {
+                assert!(arcs.len() == 1 && at(&arcs[0].0, 120.0 - c, c) && (arcs[0].1 - 2.0).abs() < 1e-6, "{shape}, reverse={reverse}: {arcs:?}");
+            } else {
+                assert!(arcs.is_empty(), "{shape}, reverse={reverse}: {arcs:?}");
+                for y in [c + 2.0, c - 2.0] {
+                    assert!(ends.iter().any(|p| at(p, 120.0 - c - 2.0, y)), "{shape}, reverse={reverse}: no corner at y = {y}: {ends:?}");
+                }
+            }
             let body = &s.model.state().bodies[0].body;
             assert!(body.validity().is_empty() && body.shell_count() == 1);
             run(&mut s, "edit.undo", json!({}));
@@ -4438,7 +4460,7 @@ fn corner_relief_takes(deg: f64, round: bool, d: f64) -> f64 {
 /// through its ends x(w) (see [`hand_panels`], with φ = θ). The relief is centered where the zones'
 /// center lines cross, s0 − BA/2 in from the edges: a disc of radius d/2, or a square of side d
 /// along the bends. Its area over that material, summed in strips across it.
-fn corner_relief_takes_with((t, r, k, g): (f64, f64, f64, f64), deg: f64, round: bool, d: f64) -> f64 {
+pub(super) fn corner_relief_takes_with((t, r, k, g): (f64, f64, f64, f64), deg: f64, round: bool, d: f64) -> f64 {
     let th = deg.to_radians();
     let (s0, ba) = ((r + t) * (th / 2.0).tan(), th * (r + k * t));
     let cc = th.cos() * th.cos();

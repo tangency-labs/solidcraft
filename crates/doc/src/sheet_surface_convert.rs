@@ -94,6 +94,13 @@ impl Reliefs {
             depth: rule.relief_depth,
         }
     }
+
+    /// The relief at a free end of a bend that a panel runs on past: the rule's bend relief, a
+    /// slot `width` wide cut from `depth` inside the panel's tangent line. The joint holds it (see
+    /// [`settle`]); a feature that ends a bend short of its edge cuts nothing itself.
+    pub fn bend_end(&self) -> Relief {
+        Relief::Slot { width: self.width, depth: self.depth }
+    }
 }
 
 /// A rule's corner relief as a sheet's corner has it.
@@ -1719,7 +1726,9 @@ pub fn convert_surfaces(
 /// their tangent lines on it cross, with the corner's relief (`chosen` for the two bend joints,
 /// else the rule's): a notch, a round or a square relief belonging to the corner, or a tear tight
 /// against the rip that parts their other panels. Where a rip cuts a panel the bend joins, its
-/// metal ends at the rip's plane, kept off it as a mitre keeps its panels. Elsewhere the rule's bend relief is cut in whichever panel runs
+/// metal ends at the rip's plane, kept off it as a mitre keeps its panels; so does a notched end at
+/// a corner a third bend meets, where a rip parts its flange from the third's (side flanges across
+/// a bend). Elsewhere the rule's bend relief ([`Reliefs::bend_end`]) is cut in whichever panel runs
 /// on past the end. A bend's edge is its anchors' first [`Bend::length`], so a sheet settled again
 /// ends its bends where it did; the corners are the sheet's again. Why any relief asked for was
 /// not cut comes back; `at` names a point in what is said.
@@ -1736,10 +1745,36 @@ pub(crate) fn settle(
     // Where each bend ends, and what is cut there: (along its `a` anchor, along its `b` anchor,
     // the relief), at its start and at its end.
     let near = |p: Vec3, q: Vec3| p.dist(q) <= tol * 10.0;
-    let slot = Relief::Slot { width: reliefs.width, depth: reliefs.depth };
+    let slot = reliefs.bend_end();
     let mut ends: Vec<[(f64, f64, Relief); 2]> = bent.iter().map(|e| [(0.0, 0.0, slot), (e.len, e.len, slot)]).collect();
     let (mut notes, mut corners) = (Vec::new(), Vec::new());
     let found = bend_corners(&bent, near);
+    // How far bend `b`'s end `e` is cut back from its corner to keep its metal off the rips that
+    // end there (see `bend_cut`), of those `side` takes (1 where the bend keeps the rip's `a` side,
+    // -1 its `b` side, from the rip's two panels). A rip that carries on along the bend's edge,
+    // tangent to it, runs alongside the bend rather than across its end, and cuts nothing off it.
+    // A mitre keeps the bend's metal as far off its plane as the panels it parts (two returns
+    // mitred at a corner, their bends meeting there, stay its gap apart).
+    let rip_cut = |b: &BendEdge, e: usize, side: &dyn Fn(usize, usize) -> Option<f64>| -> Option<f64> {
+        let d = (b.ends[1] - b.ends[0]).normalized()?;
+        let (v, into) = if e == 0 { (b.ends[0], d) } else { (b.ends[1], -d) };
+        rips.iter()
+            .filter_map(|(r, ends, planes, ways)| {
+                let end = ends.iter().position(|p| near(*p, v))?;
+                if ways.get(end).is_some_and(|w| w.dot(into).abs() > ALONGSIDE) {
+                    return None;
+                }
+                let m = planes.get(end).copied().flatten()?;
+                let rip = sheet.joints.get(*r)?;
+                let gap = match &rip.kind {
+                    JointKind::Rip(Rip { lap: Lap::Miter { gap }, .. }) => *gap,
+                    _ => 0.0,
+                };
+                Some((m * side(rip.a.panel, rip.b.panel)?, gap))
+            })
+            .filter_map(|(m, gap)| bend_cut(v, into, m, b.normals, b.toward, b.radius, t, gap))
+            .reduce(f64::max)
+    };
     for k in &found {
         let notched = || k.at.map(|a| (a, a, Relief::Notch));
         let joints = k.ends.map(|(i, _)| bent.get(i).map_or(usize::MAX, |b| b.joint));
@@ -1770,44 +1805,54 @@ pub(crate) fn settle(
         if matches!(relief, CornerRelief::Notch | CornerRelief::Tear) {
             corners.push(Corner { joints, relief, size });
         }
-        for ((i, e), value) in k.ends.iter().zip(values) {
+        // Each bend's far panel round the corner (its flange). Where three bends meet (a flange on
+        // a wall's end edge, the wall's bend, and a flange beside the wall), a notched end also
+        // keeps its metal off a rip there that parts its own flange from a panel other than its
+        // partner's, as a free end does. At a tray's corner the rip parts the two bends' own
+        // flanges, and the ends stay as the corner leaves them.
+        let walls = k.ends.map(|(i, _)| bent.get(i).and_then(|b| b.other(k.panel)).map(|(an, _)| an.panel));
+        for (n, ((i, e), mut value)) in k.ends.iter().zip(values).enumerate() {
+            if let (Relief::Notch, Some(b), Some(Some(wall))) = (value.2, bent.get(*i), walls.get(n).copied()) {
+                let partner = walls.get(1 - n).copied().flatten();
+                let side = |ra: usize, rb: usize| {
+                    if ra == wall && Some(rb) != partner {
+                        Some(1.0)
+                    } else if rb == wall && Some(ra) != partner {
+                        Some(-1.0)
+                    } else {
+                        None
+                    }
+                };
+                if let Some(s) = rip_cut(b, *e, &side) {
+                    let a = if *e == 0 { value.0.max(s) } else { value.0.min(b.len - s) };
+                    value = (a, a, Relief::Notch);
+                }
+            }
             if let Some(slot) = ends.get_mut(*i).and_then(|x| x.get_mut(*e)) {
                 *slot = value;
             }
         }
     }
     for (i, b) in bent.iter().enumerate() {
-        let Some(d) = (b.ends[1] - b.ends[0]).normalized() else { continue };
+        if (b.ends[1] - b.ends[0]).normalized().is_none() {
+            continue;
+        }
         for e in 0..2 {
             if found.iter().any(|k| k.ends.contains(&(i, e))) {
                 continue;
             }
-            let (v, into) = if e == 0 { (b.ends[0], d) } else { (b.ends[1], -d) };
-            // A rip that carries on along the bend's edge, tangent to it, runs alongside the bend
-            // rather than across its end, and cuts nothing off it.
-            // A mitre keeps the bend's metal as far off its plane as the panels it parts (two
-            // returns mitred at a corner, their bends meeting there, stay its gap apart).
-            let planes = rips.iter().filter_map(|(r, ends, planes, ways)| {
-                let end = ends.iter().position(|p| near(*p, v))?;
-                if ways.get(end).is_some_and(|w| w.dot(into).abs() > ALONGSIDE) {
-                    return None;
-                }
-                let m = planes.get(end).copied().flatten()?;
-                let rip = sheet.joints.get(*r)?;
-                let gap = match &rip.kind {
-                    JointKind::Rip(Rip { lap: Lap::Miter { gap }, .. }) => *gap,
-                    _ => 0.0,
-                };
-                let mine = |p: usize| p == b.a.panel || p == b.b.panel;
-                if mine(rip.a.panel) {
-                    Some((m, gap))
-                } else if mine(rip.b.panel) {
-                    Some((-m, gap))
+            // The rips that cut either of the bend's panels.
+            let mine = |p: usize| p == b.a.panel || p == b.b.panel;
+            let side = |ra: usize, rb: usize| {
+                if mine(ra) {
+                    Some(1.0)
+                } else if mine(rb) {
+                    Some(-1.0)
                 } else {
                     None
                 }
-            });
-            if let Some(s) = planes.filter_map(|(m, gap)| bend_cut(v, into, m, b.normals, b.toward, b.radius, t, gap)).reduce(f64::max) {
+            };
+            if let Some(s) = rip_cut(b, e, &side) {
                 let a = if e == 0 { s } else { b.len - s };
                 if let Some(slot) = ends.get_mut(i).and_then(|x| x.get_mut(e)) {
                     *slot = (a, a, Relief::Notch);

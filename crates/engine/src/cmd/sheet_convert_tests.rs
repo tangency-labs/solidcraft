@@ -1566,24 +1566,34 @@ fn outline_has(s: &mut Session, want: &[[f64; 2]]) -> bool {
 /// The corners of a converted tray are a flanged tray's: closed with the rule's gap and given the
 /// rule's corner relief, in the folded part and the flat pattern. The shelled tray of [`tray`] and
 /// the same tray made from a base and four 30 mm edge flanges, T 2, R 2, K 0.44, gap 0.5, a relief
-/// 8 mm across: the bends meet at the base's corners, R + T = 4 in from the sharps, and are
-/// BA = π/2 (R + K T) = 1.44 π wide in the flat. A notch leaves them there (92 and 52 long); a
-/// round or a square relief takes 4 off each bend at each corner and r²·π/4 or r² (r = 4) of the
-/// base; a tear runs each bend on to its corner and cuts its end from there to where its wall's
-/// closed end starts, g/√2 + T from the sharp: R − g/√2 longer. The conversion used to bend every
-/// corner as a notch, whatever the rule said.
+/// 8 mm across: the bends meet at the base's corners, s0 = R + T = 4 in from the sharps, and are
+/// BA = π/2 (R + K T) = 1.44 π wide in the flat. A notch leaves them there (92 and 52 long). A round
+/// or a square relief is centered where the two zones' center lines cross, c = s0 − BA/2 in from
+/// the sharps, and its side (or its round) crosses each bend's center line r = 4 past that: each
+/// end is cut c + r − s0 = 4 − BA/2 short of the corner of the bends, so the bends are
+/// 92 − 8 + BA and 52 − 8 + BA long; what it takes of the base, the two zones and the two walls
+/// there is `super::tests::corner_relief_takes_with`. A tear runs each bend on to its corner and
+/// cuts its end from there to where its wall's closed end starts, g/√2 + T from the sharp, tight
+/// against the walls' mitre: at each turn φ its metal keeps (g/2)·φ/θ off the mitre, its inside
+/// radius R·sin φ back from the tangent line, so the end lies R·sin φ − √2·(g/2)·φ/θ past the
+/// notch, φ·(R + K T) across the zone. The bend's center line is R − g/√2 longer, and each bend end
+/// gives back (R + K T)(R (1 − cos θ) − √2 (g/2) θ/2) of flat, θ = π/2 (as `tear_gives`). The
+/// conversion used to bend every corner as a notch, whatever the rule said; and the flat-first
+/// relief this test used to read sat at the base's corner, s0 in, taking 4 off each bend.
 #[test]
-#[ignore = "compares with a tray built from flanges, whose corner reliefs sit at its base's corners where a sheet made from surfaces centers them on the bends' center lines: compare again once flanges build sheets from surfaces (#6748)"]
 fn a_converted_trays_corners_are_closed_and_relieved_as_a_flanged_trays_are() {
     let (t, r, k, gap) = (2.0, 2.0, 0.44, 0.5);
     let ba = FRAC_PI_2 * (r + k * t);
     let grow = r - gap / SQRT_2;
+    // What a tear gives back at a corner: two bend ends, θ = π/2.
+    let torn = 2.0 * (r + k * t) * (r - SQRT_2 * (gap / 2.0) * FRAC_PI_2 / 2.0);
+    let takes = |round: bool| super::tests::corner_relief_takes_with((t, r, k, gap), 90.0, round, 8.0);
     // (bend lengths, flat area taken off the notch's at each corner)
     let cases = [
         ("notch", (92.0, 52.0), 0.0),
-        ("round", (84.0, 44.0), 4.0 * PI + 8.0 * ba),
-        ("rectangular", (84.0, 44.0), 16.0 + 8.0 * ba),
-        ("tear", (92.0 + grow, 52.0 + grow), -grow * ba),
+        ("round", (84.0 + ba, 44.0 + ba), takes(true)),
+        ("rectangular", (84.0 + ba, 44.0 + ba), takes(false)),
+        ("tear", (92.0 + grow, 52.0 + grow), -torn),
     ];
     let cut = t + gap / SQRT_2;
     let walls = 26.0 * 2.0 * ((100.0 - 2.0 * cut) + (60.0 - 2.0 * cut));
@@ -1627,21 +1637,27 @@ fn a_converted_trays_corners_are_closed_and_relieved_as_a_flanged_trays_are() {
         assert!((flat_v - want).abs() < 0.1, "{shape}: flat {flat_v} vs {want}");
         run(&mut s, "sheet.refold", json!({}));
         assert!((volume(&mut s) - v).abs() < 1e-6 * v, "{shape}");
-        // A round relief is an arc of radius 4 about each point where two bends meet: the base's
-        // corners R + T in from the sharps, 92 and 52 apart.
+        // A round relief is a circle of radius 4 about each point where two zones' center lines
+        // cross, c = 4 − BA/2 in from the sharps: 100 − 2c = 92 + BA and 60 − 2c = 52 + BA apart.
+        // It keeps an arc in each piece of the flat it cuts, as the folded sheet keeps an edge in
+        // each, so each circle is counted once.
         if shape == "round" {
             let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or_default().to_string();
-            let arcs: Vec<(solidcore_record::Vec2, f64)> = solidcraft_io::read_dxf(&dxf)
-                .unwrap_or_default()
-                .iter()
-                .filter_map(|g| if let solidcraft_io::Geom2::Arc { c, a, .. } = g { Some((*c, a.dist(*c))) } else { None })
-                .collect();
+            let mut arcs: Vec<(solidcore_record::Vec2, f64)> = Vec::new();
+            for g in solidcraft_io::read_dxf(&dxf).unwrap_or_default() {
+                if let solidcraft_io::Geom2::Arc { c, a, .. } = g {
+                    let rr = a.dist(c);
+                    if !arcs.iter().any(|(o, q)| o.dist(c) < 1e-6 && (q - rr).abs() < 1e-6) {
+                        arcs.push((c, rr));
+                    }
+                }
+            }
             assert_eq!(arcs.len(), 4, "{arcs:?}");
             let lo = solidcore_record::Vec2::new(
                 arcs.iter().map(|(c, _)| c.x).fold(f64::MAX, f64::min),
                 arcs.iter().map(|(c, _)| c.y).fold(f64::MAX, f64::min),
             );
-            for (x, y) in [(0.0, 0.0), (92.0, 0.0), (92.0, 52.0), (0.0, 52.0)] {
+            for (x, y) in [(0.0, 0.0), (92.0 + ba, 0.0), (92.0 + ba, 52.0 + ba), (0.0, 52.0 + ba)] {
                 let at = lo + solidcore_record::Vec2::new(x, y);
                 assert!(arcs.iter().any(|(c, r)| c.dist(at) < 1e-6 && (r - 4.0).abs() < 1e-6), "({x}, {y}): {arcs:?}");
             }
