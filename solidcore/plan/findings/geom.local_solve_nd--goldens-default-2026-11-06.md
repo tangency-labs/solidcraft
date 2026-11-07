@@ -45,8 +45,9 @@ infinities are not new infinite geometric coordinates or proof of a successful o
 ## Geometry, inspected independently
 
 Renders use `diagnostics`/`solidcore-tess`, the same view, size and framing before and after.
-The observer patch beside this record exports the selected runner's exact result after its
-measurements; it is applied only in an isolated worktree, never in production or CI.
+The images archive the selected runner's exact result after its measurements.
+Rendering and measurement commands belong in the PR description; this record keeps the
+view, measured outputs and validation data.
 `validation.json` records the Level-2 reports. `checker-control.txt` also compares the default
 checker with the existing #1515 repeated-knot pole correction.
 
