@@ -137,8 +137,6 @@ fn corpus_parses() {
     );
 }
 
-/// The STEP files in the repository parse to every instance they hold, each id once: a parser
-/// that dropped or merged instances would change the counts (the instance lines in the files).
 /// A length factor's name (millimetres per unit).
 fn length_name(f: f64) -> String {
     match f {
