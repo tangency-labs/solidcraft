@@ -95,20 +95,39 @@ pub fn start(app: &mut SolveApp, dir: &std::path::Path, interval: std::time::Dur
     }
 }
 
-/// The app is closing: keep unsaved work for the next launch, drop everything else.
-pub fn close(app: &mut SolveApp) {
-    if let Some(mut a) = app.autosave.take() {
-        for slot in app.docs.background_mut() {
-            let _ = save_slot(&a.dir, &mut slot.autosave, &slot.session, true, true);
-            if let Some(saver) = slot.autosave.take() {
-                saver.close(&slot.session);
+/// The app is closing: keep unsaved work for the next launch, drop everything else. Returns the
+/// designs whose unsaved changes couldn't be kept, as "name: why": a write that failed, or
+/// autosave off (no recovery folder). A restart the app forces (a lost or hung GPU) can't ask
+/// about them, so its next start says which they were instead of "kept for recovery" (#3321).
+pub fn close(app: &mut SolveApp) -> Vec<String> {
+    let mut unkept = Vec::new();
+    let mut lost = |session: &Session, why: String| {
+        let name = if session.doc.name.trim().is_empty() { "Untitled" } else { session.doc.name.trim() };
+        unkept.push(format!("{name}: {why}"));
+    };
+    let Some(mut a) = app.autosave.take() else {
+        for session in app.docs.background().chain([&app.session]) {
+            if session.is_dirty() {
+                lost(session, "autosave is off".into());
             }
         }
-        let _ = a.save(&app.session);
-        if let Some(saver) = a.active.take() {
-            saver.close(&app.session);
+        return unkept;
+    };
+    for slot in app.docs.background_mut() {
+        if let Err(e) = save_slot(&a.dir, &mut slot.autosave, &slot.session, true, true) {
+            lost(&slot.session, e.to_string());
+        }
+        if let Some(saver) = slot.autosave.take() {
+            saver.close(&slot.session);
         }
     }
+    if let Err(e) = a.save(&app.session) {
+        lost(&app.session, e.to_string());
+    }
+    if let Some(saver) = a.active.take() {
+        saver.close(&app.session);
+    }
+    unkept
 }
 
 pub(crate) fn ago(secs: u64) -> String {
@@ -475,11 +494,52 @@ mod tests {
                 documents::answer_prompt(&mut app, documents::Answer::DontSave);
                 assert!(app.quit_requested);
             }
-            close(&mut app);
+            assert_eq!(close(&mut app), Vec::<String>::new(), "every unsaved design kept");
             assert_eq!(recovery::orphans(&dir).len(), if discard { 0 } else { 2 });
             assert!(app.docs.background_mut().all(|s| s.autosave.is_none()), "shutdown releases every lock");
             fs::remove_dir_all(dir).unwrap();
         }
+    }
+
+    /// Closing names each design whose unsaved changes it couldn't keep, and why: a restart the
+    /// app forces after a lost or hung GPU tells the next start, instead of claiming they were
+    /// kept (#3321). With autosave off (no recovery folder), that is every unsaved design.
+    #[test]
+    fn close_names_the_designs_whose_unsaved_changes_it_could_not_keep() {
+        let (mut app, dir) = app("unkept", Duration::from_secs(3600));
+        name(&mut app, "Bracket");
+        edit(&mut app);
+        documents::new_tab(&mut app);
+        name(&mut app, "Plate");
+        edit(&mut app);
+        documents::new_tab(&mut app); // A third tab, in view, with nothing unsaved.
+        // Writes fail: the recovery folder's path is a file now. A tab that left the view took
+        // the active saver with it (`documents`), so every tab's saver is dropped: each write
+        // needs a new one there.
+        let blocked = dir.join("not-a-folder");
+        fs::write(&blocked, b"").unwrap();
+        for slot in app.docs.background_mut() {
+            slot.autosave = None;
+        }
+        let a = app.autosave.as_mut().unwrap();
+        a.dir = blocked;
+        a.active = None;
+        let mut unkept = close(&mut app);
+        unkept.sort();
+        assert_eq!(unkept.len(), 2, "{unkept:?}");
+        assert!(unkept[0].starts_with("Bracket: ") && unkept[1].starts_with("Plate: "), "{unkept:?}");
+        fs::remove_dir_all(dir).unwrap();
+
+        let mut off = SolveApp::new(Session::default(), Services::default());
+        assert!(close(&mut off).is_empty(), "nothing unsaved, nothing to say");
+        name(&mut off, "Bracket");
+        edit(&mut off);
+        documents::new_tab(&mut off);
+        name(&mut off, "Plate");
+        edit(&mut off);
+        let mut unkept = close(&mut off);
+        unkept.sort();
+        assert_eq!(unkept, ["Bracket: autosave is off", "Plate: autosave is off"]);
     }
 
     #[test]
