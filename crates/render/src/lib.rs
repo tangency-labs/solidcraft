@@ -22,6 +22,7 @@ mod raster;
 #[cfg(feature = "raytrace-cpu")]
 pub mod raytrace;
 mod scene;
+mod silhouette;
 pub mod stage;
 pub mod studio;
 pub mod surface;
@@ -44,3 +45,4 @@ pub use gif::gif;
 pub use product::{FaceAppearance, ProductMesh, ProductScene};
 pub use raster::{Canvas, render, render_png, render_transparent};
 pub use scene::{MIN_ALPHA, Rgb, SECTION_CAP, SECTION_HATCH, SEE_THROUGH, Scene, SceneLine, SceneMesh, png};
+pub use silhouette::{PreparedSilhouettes, SilhouetteBuilder, SilhouetteEdge, SilhouetteView};
