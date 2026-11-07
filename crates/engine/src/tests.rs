@@ -1919,9 +1919,17 @@ fn measure_items() {
     let r = run(&mut s, "inspect.measure", json!({"items": [face(ft, [20.0, 15.0, 20.0]), face(fb, [20.0, 15.0, 0.0])]}));
     assert!((r["distance_mm"].as_f64().unwrap() - 20.0).abs() < 1e-9, "{r}");
     assert!((r["angle_deg"].as_f64().unwrap() - 180.0).abs() < 1e-6, "{r}");
+    // The ends of a distance are real points (#11833: NaN ends hid the Distance row): one on
+    // each face, straight across.
+    let end = |k: &str| -> Vec3 { serde_json::from_value(r[k].clone()).unwrap_or_else(|e| panic!("{k}: {e} in {r}")) };
+    let (from, to) = (end("from"), end("to"));
+    assert!((from.z - 20.0).abs() < 1e-9 && to.z.abs() < 1e-9 && (to - from).cross(Vec3::Z).len() < 1e-9, "{r}");
     let r = run(&mut s, "inspect.measure", json!({"items": [face(ft, [20.0, 15.0, 20.0]), face(ff, [20.0, 0.0, 10.0])]}));
     assert!(r["distance_mm"].as_f64().unwrap() < 1e-9);
     assert!((r["angle_deg"].as_f64().unwrap() - 90.0).abs() < 1e-6);
+    for k in ["from", "to"] {
+        assert!(serde_json::from_value::<Vec3>(r[k].clone()).is_ok_and(|p| p.is_finite()), "{k} in {r}");
+    }
     let r = run(&mut s, "inspect.measure", json!({"items": [face(ft, [20.0, 15.0, 20.0])]}));
     assert!((r["items"][0]["area_mm2"].as_f64().unwrap() - 1200.0).abs() < 1e-6, "{r}");
     let v = json!({"type": "vertex", "body": "Body1", "point": [0, 0, 0]});
