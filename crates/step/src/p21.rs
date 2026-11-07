@@ -184,6 +184,18 @@ impl<'a> Lexer<'a> {
     fn expect(&mut self, c: u8) -> Result<(), String> {
         if self.eat(c)? { Ok(()) } else { self.fail(&format!("expected `{}`", c as char)) }
     }
+    /// Where the next line after `from` that starts with a keyword begins.
+    fn next_header_line(&self, from: usize) -> Option<usize> {
+        let rest = self.s.get(from..)?;
+        let mut at = rest.iter().position(|&c| c == b'\n')? + 1;
+        loop {
+            let line = at + rest.get(at..)?.iter().take_while(|c| matches!(c, b' ' | b'\t' | b'\r')).count();
+            if rest.get(line)?.is_ascii_uppercase() {
+                return Some(from + line);
+            }
+            at += rest.get(at..)?.iter().position(|&c| c == b'\n')? + 1;
+        }
+    }
     fn keyword(&mut self) -> Result<String, String> {
         self.ws()?;
         let st = self.i;
@@ -443,14 +455,30 @@ pub fn parse_with(text: &str, watch: Option<&dyn Progress>) -> Result<Exchange, 
             "HEADER" => {
                 lx.expect(b';')?;
                 loop {
-                    let k = lx.keyword()?;
-                    if k == "ENDSEC" {
+                    // The header only describes the file, and other CAD systems read past a
+                    // record that does not parse (#11650): skip to the next line that starts
+                    // with a keyword. If there is none, the file is not readable.
+                    let start = lx.i;
+                    let record = (|| {
+                        let k = lx.keyword()?;
+                        if k == "ENDSEC" {
+                            lx.expect(b';')?;
+                            return Ok(None);
+                        }
+                        lx.expect(b'(')?;
+                        let params = lx.list_rest(1)?;
                         lx.expect(b';')?;
-                        break;
-                    }
-                    lx.expect(b'(')?;
-                    let params = lx.list_rest(1)?;
-                    lx.expect(b';')?;
+                        Ok(Some((k, params)))
+                    })();
+                    let (k, params) = match record {
+                        Ok(Some(record)) => record,
+                        Ok(None) => break,
+                        Err(e) => {
+                            let Some(next) = lx.next_header_line(start) else { return Err(e) };
+                            lx.i = next;
+                            continue;
+                        }
+                    };
                     match k.as_str() {
                         "FILE_SCHEMA" => {
                             if let Some(Param::List(v)) = params.first() {
