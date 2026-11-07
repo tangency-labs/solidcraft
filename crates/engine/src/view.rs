@@ -1761,6 +1761,15 @@ mod tests {
         let p = sketch_grid_point(Vec2::new(21.2, 20.0), 5.0, 0.5);
         assert!(p.dist(Vec2::new(21.0, 20.0)) < 1e-9, "the point lands at {p:?}");
     }
+
+    /// The nested cross-fade: while the finer level still draws its own lines, the crossings the
+    /// user sees are the finer ones, so a point snaps to them (#9843).
+    #[test]
+    fn a_nested_cross_fade_snaps_to_the_visible_crossing() {
+        let (minor, fine) = sketch_grid_step(110.0);
+        assert_eq!(minor, 5.0, "the finer level's lines are still drawn");
+        assert_eq!(sketch_grid_point(Vec2::new(5.7, 10.0), minor, fine), Vec2::new(5.0, 10.0));
+    }
 }
 
 #[cfg(test)]
