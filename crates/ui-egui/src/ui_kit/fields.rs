@@ -196,6 +196,7 @@ struct Scrub {
 }
 
 fn end_scrub(ui: &Ui, id: egui::Id, state: &Scrub) {
+    ui.ctx().data_mut(|d| d.remove::<u64>(egui::Id::unique("sc_scrub_drag_frame")));
     // On Wayland, setting the cursor position while locked sets the compositor hint so the cursor
     // returns to its starting point when the lock is lifted.
     ui.ctx().send_viewport_cmd(ViewportCommand::CursorPosition(state.start_pos));
@@ -204,6 +205,13 @@ fn end_scrub(ui: &Ui, id: egui::Id, state: &Scrub) {
     ui.ctx().send_viewport_cmd(ViewportCommand::CursorPosition(state.start_pos));
     ui.ctx().send_viewport_cmd(ViewportCommand::CursorVisible(true));
     ui.ctx().data_mut(|data| data.remove::<Scrub>(id));
+}
+
+/// Whether a numeric value label scrub drag is currently active.
+pub(crate) fn is_scrubbing(ctx: &egui::Context) -> bool {
+    let frame = ctx.cumulative_frame_nr();
+    ctx.data(|d| d.get_temp::<u64>(egui::Id::unique("sc_scrub_drag_frame"))).is_some_and(|at| at >= frame.saturating_sub(1))
+        && ctx.input(|i| i.pointer.any_down())
 }
 
 /// Dragging a row's label sideways changes the literal value in its field: Shift for a tenth of
@@ -229,6 +237,9 @@ pub(super) fn scrub(ui: &Ui, label: &Response, value: &mut String) -> bool {
         }
         return false;
     }
+
+    let frame = ui.ctx().cumulative_frame_nr();
+    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_scrub_drag_frame"), frame));
 
     // While dragging, hide and lock the cursor so scrubbing continues infinitely without hitting screen boundaries.
     ui.ctx().set_cursor_icon(CursorIcon::None);
@@ -271,6 +282,12 @@ pub(super) fn scrub(ui: &Ui, label: &Response, value: &mut String) -> bool {
         }
         None => Scrub { anchor: now.number, start_pos, accumulated: 0.0, step: scrub_step(now.number) * factor },
     };
+
+    if let Some(pos) = ui.input(|i| i.pointer.latest_pos())
+        && (pos - state.start_pos).length() > 4.0
+    {
+        ui.ctx().send_viewport_cmd(ViewportCommand::CursorPosition(state.start_pos));
+    }
 
     let text = scrub_text(scrubbed(state.anchor, state.accumulated, state.step), state.step, &now);
     ui.ctx().data_mut(|data| data.insert_temp(id, state));
