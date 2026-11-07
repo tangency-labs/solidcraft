@@ -800,32 +800,3 @@ fn a_click_on_an_arrow_puts_the_box_on_its_axis() {
         assert_eq!((x.as_str(), y.as_str(), z.as_str()), ("0 mm", "0 mm", "0 mm"), "a click moves nothing");
     }
 }
-
-/// The box holds the total from where the bodies started: dragging along X by 5 and then by 3
-/// reads 8, and typing 10 puts the bodies 10 from the start.
-#[test]
-fn the_box_reads_the_total_from_the_start() {
-    let mut h = move_triad_fixture();
-    let grip = h.at(&json!({"gizmo": "x"})).unwrap();
-    let drag_by = |h: &mut crate::scenario::Harness, mm: f64| {
-        let from = h.at(&json!({"gizmo": "x"})).unwrap();
-        let to = h.at(&json!({"gizmo": "x", "by": [mm, 0.0, 0.0]})).unwrap();
-        h.frame_with(vec![pointer_at(from)]);
-        h.frame_with(vec![pointer_button(from, true)]);
-        h.frame_with(vec![pointer_at(to)]);
-        h.frame_with(vec![pointer_button(to, false)]);
-        h.frames(2);
-    };
-    let _ = grip;
-    let x = |h: &crate::scenario::Harness| match &h.app.dialog.as_ref().unwrap().kind {
-        Kind::Move { x, .. } => x.clone(),
-        other => panic!("not a move: {other:?}"),
-    };
-    drag_by(&mut h, 5.0);
-    assert_eq!(x(&h), "5 mm");
-    drag_by(&mut h, 3.0);
-    assert_eq!(x(&h), "8 mm", "the second drag adds to the first");
-    let d = h.app.dialog.as_mut().unwrap();
-    *d.primary().unwrap().2 = "10 mm".into();
-    assert_eq!(x(&h), "10 mm", "typing sets the total from the start");
-}

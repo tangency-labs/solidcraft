@@ -282,7 +282,6 @@ pub fn handles_region(proj: &Proj, t: &Triad) -> Option<egui::Rect> {
     Some(egui::Rect::from_min_max(min, max).expand(HIT_TOLERANCE))
 }
 
-/// Draw the triad and run a drag on it. `step` is the distance snap step.
 /// The handle a press landed on this frame without starting a drag, if any: a click, or a press
 /// and release that arrived in one frame, which no drag ever begins from. Read it once per frame
 /// after [`show`], with the same `id`; it moves nothing.
@@ -295,6 +294,7 @@ pub fn take_click(ui: &egui::Ui, id: egui::Id) -> Option<Handle> {
     })
 }
 
+/// Draw the triad and run a drag on it. `step` is the distance snap step.
 pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::Id, t: &Triad, step: f64) -> Option<Drag> {
     let tk = Tokens::get();
     ui.data_mut(|d| d.remove::<Handle>(id.with("click")));
