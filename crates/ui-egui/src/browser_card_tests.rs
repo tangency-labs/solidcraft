@@ -118,14 +118,12 @@ fn a_refused_inline_rename_keeps_the_editor_and_shows_the_error() {
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"B"})).unwrap();
     h.app.preferences.browser_bodies_folders = crate::prefs::BodiesFolders::Always;
     h.settle();
-    h.app.menu.rename = Some(crate::context_menu::Rename {
-        what: crate::context_menu::RenameWhat::Body("B".into()),
-        text: "A".into(),
-        at: egui::Pos2::ZERO,
-        focused: true,
-        inline: true,
-    });
-    h.frames(2);
+    // Open B's name for editing in its row (a delayed second click) and type a taken name.
+    h.step(&json!({"click":{"handle":"row:B"}})).unwrap();
+    h.frames(30);
+    h.step(&json!({"click":{"handle":"row:B"}})).unwrap();
+    assert!(h.app.menu.rename.as_ref().is_some_and(|r| r.inline), "B's row is being renamed");
+    h.step(&json!({"text":"A"})).unwrap();
     h.step(&json!({"key":"Enter"})).unwrap();
     h.frames(2);
     assert!(h.app.menu.rename.is_some(), "the editor stays open after a refused rename");
@@ -264,6 +262,84 @@ fn browser_body_clicks_respect_the_active_dialog_input() {
     h.step(&json!({"click":{"handle":"row:One"}})).unwrap();
     assert!(h.app.dialog.as_ref().unwrap().inputs.iter().all(|i| i.items.is_empty()), "a body is not an edge");
     assert!(h.app.session.selection.is_empty(), "an incompatible pick does not leak into the global selection");
+}
+
+#[test]
+fn browser_name_rows_rename_on_a_delayed_second_click() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"One"})).unwrap();
+    h.app.tree.expanded.insert("c0/features".into());
+    h.settle();
+
+    h.step(&json!({"click":{"handle":"row:One"}})).unwrap();
+    assert!(h.app.menu.rename.is_none(), "the first click only selects the body");
+    h.frames(30);
+    h.step(&json!({"click":{"handle":"row:One"}})).unwrap();
+    assert!(matches!(
+        h.app.menu.rename.as_ref(),
+        Some(crate::context_menu::Rename { what: crate::context_menu::RenameWhat::Body(name), inline: true, .. }) if name == "One"
+    ));
+
+    h.step(&json!({"key":"Escape"})).unwrap();
+    let feature = h.app.session.doc.features.first().map(|feature| feature.id).unwrap();
+    let feature_row = format!("row:browser-feature:c0:{feature}");
+    h.step(&json!({"click":{"handle":feature_row}})).unwrap();
+    assert!(h.app.menu.rename.is_none(), "the first click only selects the feature");
+    h.frames(30);
+    h.step(&json!({"click":{"handle":feature_row}})).unwrap();
+    assert!(matches!(
+        h.app.menu.rename.as_ref(),
+        Some(crate::context_menu::Rename { what: crate::context_menu::RenameWhat::Feature(id), inline: true, .. }) if *id == feature
+    ));
+    let feature_name = h.app.session.doc.feature(feature).map(|feature| feature.name.clone()).unwrap_or_default();
+    assert!(crate::scenario::handle_at(&format!("rename:{feature_name}")).is_some(), "the feature name is edited in its row");
+    h.step(&json!({"text":"Renamed feature"})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert_eq!(h.app.session.doc.feature(feature).map(|feature| feature.name.as_str()), Some("Renamed feature"));
+}
+
+/// With no dialog open a construction row is selected like any other row, so a delayed second
+/// click renames it.
+#[test]
+fn a_construction_row_renames_on_a_delayed_second_click() {
+    let mut h = Harness::new();
+    h.app.run("construct.plane.offset", json!({"base":"XY","offset":20})).unwrap();
+    h.app.tree.expanded.insert("c0/construction".into());
+    h.settle();
+    let feature = h.app.session.doc.features.last().map(|feature| feature.id).unwrap();
+    let name = h.app.session.doc.feature(feature).map(|feature| feature.name.clone()).unwrap_or_default();
+    let row = format!("row:{name}");
+    h.step(&json!({"click":{"handle":row}})).unwrap();
+    assert!(h.app.menu.rename.is_none(), "the first click only selects the plane");
+    h.frames(30);
+    h.step(&json!({"click":{"handle":row}})).unwrap();
+    assert!(
+        matches!(h.app.menu.rename.as_ref(), Some(crate::context_menu::Rename { inline: true, .. })),
+        "{:?}",
+        h.app.menu.rename.as_ref().map(|r| &r.what)
+    );
+}
+
+#[test]
+fn browser_sketch_rename_stays_inline() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Profile"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.tree.expanded.insert("c0/sketches".into());
+    h.settle();
+
+    h.step(&json!({"click":{"handle":"row:Profile"}})).unwrap();
+    assert!(h.app.menu.rename.is_none(), "the first click only selects the sketch");
+    h.frames(30);
+    h.step(&json!({"click":{"handle":"row:Profile"}})).unwrap();
+    assert!(matches!(
+        h.app.menu.rename.as_ref(),
+        Some(crate::context_menu::Rename { what: crate::context_menu::RenameWhat::Feature(_), inline: true, .. })
+    ));
+    assert!(crate::scenario::handle_at("rename:Profile").is_some(), "the sketch name is edited in its row");
+    h.step(&json!({"text":"Profile renamed"})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert_eq!(h.app.session.doc.features.first().map(|feature| feature.name.as_str()), Some("Profile renamed"));
 }
 
 #[test]

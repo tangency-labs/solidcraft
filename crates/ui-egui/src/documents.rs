@@ -1293,6 +1293,7 @@ fn start_tab_rename(app: &mut SolveApp, name: &str, tab: Rect) {
         at: tab.left_bottom(),
         focused: false,
         inline: true,
+        inline_id: None,
     });
 }
 
