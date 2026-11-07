@@ -26,12 +26,24 @@
 //! edge (its sector angle varies) and at each corner. Faces whose offsets never meet, a knife
 //! edge's (`c = −1` for equal offsets) or tangent faces offset apart (`c = 1`, `dF ≠ dG`),
 //! add nothing: no extension makes them meet.
+//!
+//! An extension meets its distance at the middle of each side, and a reach is needed at every
+//! station. [`shortest_across`] bounds the length across a B-spline's sides from below, for
+//! the executive to ask again where the rows narrow along a side (#2908; the measurements and
+//! the choice of asking again are `MarkusReichart`'s on #2926). Analytic faces are left as
+//! they were.
 
 use crate::error::{Result, SolidError};
+use crate::geom::extent2d::Extent2d;
 use crate::geom::vector3d::{sqrt, Vec3};
 use crate::kernel::Kernel;
-use crate::math::EFF_ZERO;
+use crate::math::{Point2, EFF_ZERO};
+use crate::nurbs::b_spline_surface::p1::SurfParamType;
+use crate::nurbs::b_spline_surface::p2::IsoCurveOptions;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::surface::extend::{ExtendedSides, SideExtension};
+use crate::surface::side::BoxSide;
+use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::edgeuse::{p1 as eu, p3 as eu3};
 use crate::topology::{edge, loopuse, Brep, EdgeuseId, FaceId, FaceuseId};
 
@@ -207,11 +219,130 @@ pub fn extension_reach(
     Ok(met.then_some(reach))
 }
 
+/// A lower bound of the distance from each extended side of `base`'s B-spline to the same
+/// side of `extended`, over the side's stations on `base`'s box: `None` where `base` is no
+/// B-spline or the offset of one, a side's two rows differ in weights, or the bound is not positive. Each row is a
+/// curve in the same parameter and basis, with the same weights, so the difference at a
+/// station is a convex combination of the differences of their control points, and its length
+/// is at least the least of those along their mean direction. Past the box's corners the
+/// rows go on narrowing, to nothing at a ruled face's apex; the margin's one offset past the
+/// reach is what stands for them.
+///
+/// # Errors
+///
+/// Those of the domains and the iso curves.
+pub(super) fn shortest_across(
+    k: &Kernel,
+    base: &Surface,
+    extended: &ExtendedSides,
+) -> Result<Option<f64>> {
+    // an offset surface is the offset of its base extended: the rows are its base's
+    let (near_surface, far_surface) = match (base.kind(), extended.surface.kind()) {
+        (SurfaceKind::OffsetSurface(a), SurfaceKind::OffsetSurface(b)) => {
+            (a.base_surface(), b.base_surface())
+        }
+        _ => (base, &extended.surface),
+    };
+    let (SurfaceKind::BSpline(_), SurfaceKind::BSpline(net)) =
+        (near_surface.kind(), far_surface.kind())
+    else {
+        return Ok(None);
+    };
+    let from = near_surface.natural_uv_domain_with_nurb(k)?;
+    let to = far_surface.natural_uv_domain_with_nurb(k)?;
+    let mut shortest = f64::INFINITY;
+    for (&side, done) in BoxSide::ALL.iter().zip(&extended.sides) {
+        if !matches!(done, SideExtension::Extended(_)) {
+            continue;
+        }
+        let along = if side.is_u() {
+            SurfParamType::U
+        } else {
+            SurfParamType::V
+        };
+        // the side's stations on the source's box, the row wherever it lies
+        let box_of_row = if side.is_u() {
+            Extent2d::from_points(
+                Point2::new(to.min().x, from.min().y),
+                Point2::new(to.max().x, from.max().y),
+            )
+        } else {
+            Extent2d::from_points(
+                Point2::new(from.min().x, to.min().y),
+                Point2::new(from.max().x, to.max().y),
+            )
+        };
+        let row = |at: f64| {
+            let options = IsoCurveOptions {
+                domain: Some(box_of_row),
+                uv_iso_curve: false,
+            };
+            net.create_iso_parametric_curve(k, along, at, options)?
+                .curve
+                .canonical()
+        };
+        let (near, far) = (row(side.at(&from))?, row(side.at(&to))?);
+        if near.control_points.len() != far.control_points.len() || near.weights != far.weights {
+            return Ok(None);
+        }
+        let mut mean = Vec3::ZERO;
+        for (a, b) in near.control_points.iter().zip(&far.control_points) {
+            mean += *b - *a;
+        }
+        let Ok(direction) = mean.unitize() else {
+            return Ok(None);
+        };
+        for (a, b) in near.control_points.iter().zip(&far.control_points) {
+            shortest = shortest.min((*b - *a).dot(direction));
+        }
+    }
+    Ok((shortest.is_finite() && shortest > 0.0).then_some(shortest))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::math::Point3;
     use crate::topology::brep::p1 as bp1;
+
+    /// The basin's ruled side: rows 46 long at its rim and 20 at its floor.
+    #[test]
+    fn a_narrowing_side_is_short_of_its_distance_where_it_narrows() {
+        use crate::nurbs::b_spline_curve::KnotType;
+        use crate::nurbs::b_spline_surface::{
+            BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData,
+        };
+        use crate::surface::extend::Continuity;
+        let k = Kernel::default();
+        let base = Surface::from(
+            BSplineSurface::create_canonical(&CanonicalSurfaceData {
+                u_degree: 1,
+                v_degree: 1,
+                control_points: &[
+                    Point3::new(20.0, 4.0, 30.0),
+                    Point3::new(20.0, 50.0, 30.0),
+                    Point3::new(30.0, 20.0, 10.0),
+                    Point3::new(30.0, 40.0, 10.0),
+                ],
+                form: BSplineSurfaceForm::Unspecified,
+                u_multiplicities: &[2, 2],
+                v_multiplicities: &[2, 2],
+                u_knots: &[0.0, 1.0],
+                v_knots: &[0.0, 1.0],
+                knot_type: KnotType::Unspecified,
+                weights: None,
+                uv_domain: None,
+            })
+            .unwrap(),
+        );
+        let made = base
+            .extended_sides_keeping_parameters(&k, &BoxSide::ALL, Continuity::Ruled, 11.24)
+            .unwrap();
+        // the rows are 33 at the side's middle, where the extension meets its distance, and
+        // 20 at the floor, so the v sides reach 11.24 * 20 / 33 at the floor's end
+        let shortest = shortest_across(&k, &base, &made).unwrap().unwrap();
+        assert!((shortest - 11.24 * 20.0 / 33.0).abs() <= 1e-6, "{shortest}");
+    }
 
     fn box_faceuses(k: &mut Kernel, inset: bool) -> (Brep, Vec<(FaceId, FaceuseId)>) {
         let brep = crate::primitive::api_primitives::create_box(

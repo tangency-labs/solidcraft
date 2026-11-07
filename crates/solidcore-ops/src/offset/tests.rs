@@ -85,6 +85,92 @@ fn a_cylinder_shells_open_at_its_top() {
     assert!(rel(volume(&c), PI * 25.0 * 10.0 - PI * 16.0 * 9.0) < 1e-9);
 }
 
+/// A basin: a 100 x 60 x 30 slab less a ruled pocket (60 x 46 at the top, 4 from the front, 40 x
+/// 20 at its floor 20 down), shelled open at its bottom, each wall moved in by t with sharp
+/// edges. The cavity is the slab shrunk by t (open at z = 0) less the pocket grown by t, each
+/// sloped side moved out along its normal; the volume, slab - pocket - cavity, is a cubic in z
+/// integrated by hand. From t ~ 2.70 the front side's offset passes the front wall's below the
+/// 4 mm rim, and the rim stays solid: the cavity's front stops at y = t (from
+/// z = (28 - (1 + sqrt 1.64) t) / 0.8 up).
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn a_basin_shells_past_its_rim_to_its_closed_form() {
+    session::set_fixes(
+        solidcore::kernel::UpstreamFixes::NAMES
+            .iter()
+            .copied()
+            .filter(|n| {
+                !matches!(
+                    *n,
+                    "fillet_refuse_rounds_breaking_through" | "fillet_round_ends_on_outline"
+                )
+            }),
+    )
+    .unwrap();
+    let rect = |x0: f64, y0: f64, x1: f64, y1: f64, z: f64| {
+        let p = [[x0, y0, z], [x1, y0, z], [x1, y1, z], [x0, y1, z]];
+        (0..4)
+            .map(|i| crate::sweep::Curve::Line {
+                start: p[i],
+                end: p[(i + 1) % 4],
+            })
+            .collect::<Vec<_>>()
+    };
+    let pocket = crate::sweep::loft(
+        &[
+            rect(20.0, 4.0, 80.0, 50.0, 30.0),
+            rect(30.0, 20.0, 70.0, 40.0, 10.0),
+        ],
+        1,
+        true,
+    )
+    .unwrap();
+    let slab = make_box([0.0; 3], [100.0, 60.0, 30.0]).unwrap();
+    let basin = crate::boolean::boolean(slab, pocket, crate::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    // The pocket grown by t at height z: x from 35 - z/2 - t sqrt5/2 to 65 + z/2 + t sqrt5/2, y
+    // from 28 - 0.8 z - t sqrt1.64 (or y = t, where that is less) to 35 + z/2 + t sqrt5/2, for
+    // z = 10 - t ... 30 - t; its sides stay inside the shrunk slab in x and at the back for t <= 6.
+    let (r5, r164) = (5f64.sqrt(), 1.64f64.sqrt());
+    let integral = |c: [f64; 3], lo: f64, hi: f64| {
+        c[0] * (hi - lo) + c[1] * (hi * hi - lo * lo) / 2.0 + c[2] * (hi.powi(3) - lo.powi(3)) / 3.0
+    };
+    // (w0 + z)(h0 + h1 z) as coefficients in z.
+    let product = |w0: f64, h0: f64, h1: f64| [w0 * h0, w0 * h1 + h0, h1];
+    let grown = |t: f64| {
+        let (lo, hi, w0) = (10.0 - t, 30.0 - t, 30.0 + r5 * t);
+        let full = product(w0, 7.0 + t * (r5 / 2.0 + r164), 1.3);
+        let z0 = ((28.0 - r164 * t - t) / 0.8).clamp(lo, hi);
+        integral(full, lo, z0) + integral(product(w0, 35.0 + (r5 / 2.0 - 1.0) * t, 0.5), z0, hi)
+    };
+    let closed = |t: f64| {
+        100.0 * 60.0 * 30.0 - grown(0.0) - (100.0 - 2.0 * t) * (60.0 - 2.0 * t) * (30.0 - t)
+            + grown(t)
+    };
+    assert!(rel(volume(&basin), 180_000.0 - grown(0.0)) < 1e-9);
+    for (t, want) in [
+        (1.0, 17_105.624_041_5),
+        (4.0, 63_560.249_228_4),
+        (6.0, 90_113.920_210_1),
+    ] {
+        assert!(rel(closed(t), want) < 1e-12, "the closed form at {t}");
+        let b = basin.copy().unwrap();
+        let o = order(&b);
+        let bottom = face(&b, &o, |bx| {
+            bx.min().z.abs() < 1e-9 && bx.max().z.abs() < 1e-9
+        });
+        shell(&b, &o, &[bottom], -t).unwrap_or_else(|e| panic!("t {t}: {e:?}"));
+        assert!(
+            rel(volume(&b), want) < 1e-6,
+            "t {t}: {} vs {want}",
+            volume(&b)
+        );
+        let report = b.check(crate::CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "t {t}: {}", report.text);
+    }
+}
+
 #[test]
 fn a_wall_with_no_room_is_refused_before_the_kernel() {
     all_fixes();

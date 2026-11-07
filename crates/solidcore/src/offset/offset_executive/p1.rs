@@ -767,13 +767,31 @@ impl OffsetExecutive {
                 let extension = if margin == 0.0 {
                     base.clone()
                 } else {
-                    base.extended_sides_keeping_parameters(
-                        kernel,
-                        &BoxSide::ALL,
-                        Continuity::Ruled,
-                        margin,
-                    )?
-                    .surface
+                    let extend = |asked: f64| {
+                        base.extended_sides_keeping_parameters(
+                            kernel,
+                            &BoxSide::ALL,
+                            Continuity::Ruled,
+                            asked,
+                        )
+                    };
+                    // An extension meets its distance at the middle of each side; a margin is
+                    // needed at every station of it (#2908): where the rows narrow along a side
+                    // it is asked again, scaled by the shortest length across (Ruled: the
+                    // lengths at a station grow together).
+                    let mut made = extend(margin)?;
+                    if let Some(shortest) = super::reach::shortest_across(kernel, base, &made)? {
+                        if shortest < margin * (1.0 - 1.0e-9) {
+                            // a surface that cannot go that far keeps what it has: the extension
+                            // above is what its faces have always had
+                            match extend(margin * margin / shortest) {
+                                Ok(grown) => made = grown,
+                                Err(SolidError::ExtendRefused { .. }) => {}
+                                Err(e) => return Err(e),
+                            }
+                        }
+                    }
+                    made.surface
                 };
                 Ok(entry.insert(extension))
             }

@@ -250,7 +250,12 @@ face's surface and intersects neighbouring offsets instead of filling convex edg
 - **The extension** (`get_create_extended_surface`, `p1.rs`) is the exact extension
   `extended_sides_keeping_parameters` with `Continuity::Ruled` on every side
   (definitions-and-certificates.md §6.5): analytic kinds and ball patches as themselves, a
-  procedural blend by its definition, an offset surface as the offset of its extended base.
+  procedural blend by its definition, an offset surface as the offset of its extended base. It
+  meets its distance at the middle of each side, so where a B-spline's rows narrow along a side
+  (`shortest_across`, `reach.rs`: a bound from the two rows' control points, over the side's
+  stations on the face's box) it is asked again, scaled by the shortest length. Past the box's
+  corners, where the rows go on narrowing, it stays the first-order margin above, not a
+  certificate of the reach. A surface that refuses the longer ask keeps the first extension.
 - **The mitre** (`OffsetGeometryCreation::mate_edges`, `offset_geometry_creation.rs`) intersects
   the two extended offsets at a quarter of the body's tolerance and 20°, keeps the intersection
   curve whose trimmed midpoint is nearest the original edge's, trims it and gives it to both offset
