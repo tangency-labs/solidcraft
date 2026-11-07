@@ -6,7 +6,7 @@
 //! [`paper_group`] makes them; the labels of the views placed apart from their projection place
 //! ([`Drawing::label_text`]), and the dimensions and notes of those views
 //! ([`crate::drawing_dimension_paper`], [`crate::drawing_note_paper`]); the sheet's parts lists and revision
-//! tables, each where its record places it, read with the title block's text
+//! tables, each where its record places it, with its words, read with the title block's text
 //! ([`crate::drawing_table_paper`]); the notes on the sheet itself; then its title block's logos, lines and projection symbol, in
 //! the drawing's projection ([`TitleBlockLayout::paper`]), with its labels and values set on them
 //! ([`title_block_text`]). Within a band, groups paint in the order they join: views by id, their
@@ -994,10 +994,10 @@ impl Assembly {
             let state = |drawn, failed, why| TableState { table: *table, drawn, failed, why };
             states.push(match read {
                 Err(why) => state(false, true, Some(why.clone())),
-                Ok(group) => match self.add(group, &[], Vec2::ZERO, DrawnFor::Sheet) {
+                Ok(on_paper) => match self.add(&on_paper.group, &on_paper.fonts, Vec2::ZERO, DrawnFor::Sheet) {
                     Ok(bounds_mm) => {
-                        self.objects.extend(SheetObject::on_paper(*table, group.kind, bounds_mm, None).map(banded(DrawnFor::Sheet)));
-                        state(true, false, None)
+                        self.objects.extend(SheetObject::on_paper(*table, on_paper.group.kind, bounds_mm, None).map(banded(DrawnFor::Sheet)));
+                        state(true, false, on_paper.why.clone())
                     }
                     Err(LeftOut::TooManyRecords) => {
                         state(false, false, Some(format!("with its lines the sheet is more than a paper scene's {MAX_RECORDS} records")))
