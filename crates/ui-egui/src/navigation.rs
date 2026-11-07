@@ -1310,21 +1310,47 @@ pub fn orbit(app: &mut SolveApp, rect: egui::Rect, dx: f64, dy: f64, press: Opti
         return;
     }
     // The drag's whole turn so far, applied to the camera it began with: the view depends on
-    // where the pointer is, not on the path it took, so fast or erratic drags (a pitch held at
-    // straight up or down for a while, many tiny steps) can't drift. Anything else that moves
+    // where the pointer is, not on the path it took (once the view is upright; while it stands
+    // up, each step turns through the roll it has then), so fast or erratic drags (a pitch held
+    // at straight up or down for a while, many tiny steps) can't drift. Anything else that moves
     // the camera meanwhile (a wheel zoom, a new pivot) starts the sum again from there.
     let from = match app.viewport.orbit_from {
         Some(f) if f.last == app.cam && f.pivot == pivot => f,
         _ => OrbitFrom { start: app.cam, dx: 0.0, dy: 0.0, pivot, last: app.cam },
     };
-    let (dx, dy) = (from.dx + dx, from.dy + dy);
+    if !app.preferences.upright_orbit_unrolls {
+        // Off: a rolled view keeps its roll and turns about the world's up axis, as before.
+        let (dx, dy) = (from.dx + dx, from.dy + dy);
+        app.cam = from.start;
+        match pivot {
+            Some(p) => app.cam.orbit_about(dx, dy, p),
+            None => app.cam.orbit(dx, dy),
+        }
+        app.viewport.orbit_from = Some(OrbitFrom { dx, dy, last: app.cam, ..from });
+        return;
+    }
+    // A rolled view (facing a sketch on a tilted plane rolls it to square the sketch's axes)
+    // stands upright again as the pointer moves: the upright orbit turns about the world's up
+    // axis, and kept rolled (upside down, say) the model turned against the pointer and never
+    // stood up again. Each step turns the way it goes on screen through the roll the view has,
+    // and takes the roll a step nearer upright at a steady rate, so short strokes add up as one
+    // long drag does.
+    let roll = (app.cam.roll + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+    let (sin, cos) = roll.sin_cos();
+    let unroll = (dx.hypot(dy) * std::f64::consts::PI / UNROLL_TRAVEL).min(roll.abs());
+    let (dx, dy) = (from.dx + dx * cos + dy * sin, from.dy + dy * cos - dx * sin);
     app.cam = from.start;
-    match pivot {
-        Some(p) => app.cam.orbit_about(dx, dy, p),
-        None => app.cam.orbit(dx, dy),
+    let keep = pivot.map(|p| (p, app.cam.frame_coords(p)));
+    app.cam.orbit(dx, dy);
+    app.cam.roll = roll - roll.signum() * unroll;
+    if let Some((p, coords)) = keep {
+        app.cam.place(p, coords);
     }
     app.viewport.orbit_from = Some(OrbitFrom { dx, dy, last: app.cam, ..from });
 }
+
+/// How far (points) the pointer goes in an upright orbit while an upside-down view stands upright.
+const UNROLL_TRAVEL: f64 = 240.0;
 
 /// What continuous orbit turns about, by Orbit around: the view's centre (none), the world origin,
 /// or around the cursor the model point in the middle of the view (else the middle of the bodies
@@ -1345,8 +1371,8 @@ fn spin_pivot(app: &mut SolveApp, rect: Rect) -> Option<Vec3> {
     }
 }
 
-/// An orbit drag so far: the camera it began with, the pointer's total motion since, the pivot
-/// and the camera that produced.
+/// An orbit drag so far: the camera it began with, its total turn since (the pointer's motion,
+/// taken through the view's roll), the pivot and the camera that produced.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct OrbitFrom {
     start: Camera,
@@ -1581,6 +1607,99 @@ mod tests {
         }
     }
 
+    /// The upright orbit on a rolled view (#12458): the model turns the way the pointer goes on
+    /// screen, the roll eases to zero within 240 points of travel in one drag or many strokes, an
+    /// unrolled view orbits as before, and a Look At sketch view that comes out upside down
+    /// stands upright and can then be turned to look from above.
+    #[test]
+    fn upright_orbit_from_a_rolled_view_turns_with_the_pointer_and_stands_up() {
+        use super::*;
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
+        // Where a point in front of the view centre goes on screen for a short drag right (on the
+        // view's axis, so the roll easing off does not move it).
+        let first_step = |roll: f64| {
+            let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
+            app.preferences.orbit_around = OrbitAround::ViewCentre;
+            app.cam = Camera { yaw: 0.4, pitch: 0.5, roll, ..Default::default() };
+            let p = app.cam.target + app.cam.back() * 10.0;
+            let before = app.cam.to_screen(p, 800.0, 600.0, 100.0);
+            orbit(&mut app, rect, 4.0, 0.0, None);
+            let after = app.cam.to_screen(p, 800.0, 600.0, 100.0);
+            match (before, after) {
+                (Some(b), Some(a)) => (a.0 - b.0, a.1 - b.1),
+                _ => panic!("point left the screen"),
+            }
+        };
+        let (upright, rolled) = (first_step(0.0), first_step(std::f64::consts::PI));
+        let dot = (upright.0 * rolled.0 + upright.1 * rolled.1) / (upright.0.hypot(upright.1) * rolled.0.hypot(rolled.1));
+        assert!(dot > 0.99, "a rolled view turns against the pointer: {upright:?} vs {rolled:?}");
+        // One long drag, or many short strokes (each a new drag), stand it up within 240 points.
+        for strokes in [false, true] {
+            for roll in [std::f64::consts::PI, -2.0, 0.9] {
+                let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
+                app.preferences.orbit_around = OrbitAround::ViewCentre;
+                app.cam = Camera { yaw: 0.4, pitch: 0.5, roll, ..Default::default() };
+                for _ in 0..16 {
+                    if strokes {
+                        app.viewport.orbit_from = None;
+                    }
+                    orbit(&mut app, rect, 15.0, 0.0, None);
+                }
+                assert!(app.cam.roll.abs() < 1e-9, "roll {roll} stays {} (strokes {strokes})", app.cam.roll);
+                assert!(app.cam.up_dir().z > 0.0);
+            }
+        }
+        // An unrolled view orbits exactly as before.
+        let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
+        app.preferences.orbit_around = OrbitAround::ViewCentre;
+        app.cam = Camera { yaw: 0.4, pitch: 0.5, ..Default::default() };
+        let mut expected = app.cam;
+        expected.orbit(30.0, -20.0);
+        orbit(&mut app, rect, 10.0, -5.0, None);
+        orbit(&mut app, rect, 20.0, -15.0, None);
+        assert!(app.cam.back().dist(expected.back()) < 1e-9);
+        assert_eq!(app.cam.roll, 0.0);
+        // Look At a sketch on XY turned -130° about X comes out upside down (#12458): a drag up
+        // and a little sideways stands it upright, and dragging down then looks from above.
+        let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
+        app.preferences.orbit_around = OrbitAround::ViewCentre;
+        let (sin, cos) = (-130f64).to_radians().sin_cos();
+        let (x, y) = (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, cos, sin));
+        app.cam = crate::dialogs::square_sketch_axes(app.cam.looking_from(x.cross(y)), x, y);
+        assert!(app.cam.roll.abs() > 3.0, "the sketch view is not upside down: roll {}", app.cam.roll);
+        for (dx, dy, steps) in [(4.0, -16.0, 16), (2.0, 16.0, 10), (0.0, 16.0, 20)] {
+            for _ in 0..steps {
+                orbit(&mut app, rect, dx, dy, None);
+            }
+        }
+        assert!(app.cam.roll.abs() < 1e-9, "the sketch view stays rolled: {}", app.cam.roll);
+        assert!(app.cam.up_dir().z > 0.0 && app.cam.pitch > 0.5, "not looking from above: pitch {}", app.cam.pitch);
+        // Off, the upright orbit is the one before: a rolled view keeps its roll and turns about
+        // the world's up axis, about the view centre, the origin or the point under the cursor
+        // alike, in orthographic and perspective.
+        let cursor = Vec3::new(5.0, -1.0, 2.0);
+        for fov in [0.0, 0.6] {
+            for around in [OrbitAround::ViewCentre, OrbitAround::Origin, OrbitAround::Cursor] {
+                let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
+                assert!(app.preferences.upright_orbit_unrolls, "standing a rolled view up is the default");
+                app.preferences.upright_orbit_unrolls = false;
+                app.preferences.orbit_around = around;
+                app.viewport.orbit_pivot = Some(cursor);
+                app.cam = Camera { target: Vec3::new(2.0, 3.0, 4.0), yaw: 0.4, pitch: 0.5, roll: std::f64::consts::PI, fov, ..Default::default() };
+                let mut expected = app.cam;
+                match around {
+                    OrbitAround::ViewCentre => expected.orbit(30.0, -20.0),
+                    OrbitAround::Origin => expected.orbit_about(30.0, -20.0, Vec3::ZERO),
+                    OrbitAround::Cursor => expected.orbit_about(30.0, -20.0, cursor),
+                }
+                orbit(&mut app, rect, 10.0, -5.0, None);
+                orbit(&mut app, rect, 20.0, -15.0, None);
+                assert_eq!(app.cam, expected, "the old upright orbit changed ({around:?}, fov {fov})");
+                assert_eq!(app.cam.roll, std::f64::consts::PI);
+            }
+        }
+    }
+
     #[test]
     fn clamped_drag_stays_reversible_and_restarts_after_free_orbit() {
         use super::*;
@@ -1588,7 +1707,8 @@ mod tests {
         for fov in [0.0, 0.6] {
             let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
             app.preferences.orbit_around = OrbitAround::Origin;
-            app.cam = Camera { target: Vec3::new(2.0, 3.0, 4.0), pitch: 1.4, roll: 0.7, fov, ..Default::default() };
+            // Unrolled: a rolled view stands upright as the drag goes, so it does not come back rolled.
+            app.cam = Camera { target: Vec3::new(2.0, 3.0, 4.0), pitch: 1.4, fov, ..Default::default() };
             let start = app.cam;
             for (dx, dy) in [(120.0, 400.0), (90.0, -200.0), (-210.0, -200.0)] {
                 orbit(&mut app, rect, dx, dy, None);
@@ -1598,12 +1718,14 @@ mod tests {
             app.preferences.free_orbit = true;
             orbit(&mut app, rect, 0.0, 80.0, None);
             assert!((app.cam.back().dot(start.back()) - 0.64_f64.cos()).abs() < 1e-9);
+            // Free orbit left the view rolled: the upright drag that follows turns the way the
+            // pointer goes on screen, through that roll.
             let mut next = app.cam;
-            next.orbit_about(10.0, 20.0, Vec3::ZERO);
+            let (sin, cos) = app.cam.roll.sin_cos();
+            next.orbit_about(10.0 * cos + 20.0 * sin, 20.0 * cos - 10.0 * sin, Vec3::ZERO);
             app.preferences.free_orbit = false;
             orbit(&mut app, rect, 10.0, 20.0, None);
             assert!(app.cam.back().dist(next.back()) < 1e-9);
-            assert!(app.cam.target.dist(next.target) < 1e-9);
         }
     }
 
