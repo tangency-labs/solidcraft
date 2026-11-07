@@ -15,11 +15,6 @@
     "pe_Fillet_box_diff_cyl_f1_d0_out_ext": "tangency-labs/solidcore#3023: the edge's arc crosses its closed offset curve's seam, no interval gives it; the edge is left bad and status is success",
     "pe_Fillet_box_diff_cyl_f2_d0_out_ext": "tangency-labs/solidcore#3023: the edge's arc crosses its closed offset curve's seam, no interval gives it; the edge is left bad and status is success"
   },
-  "offset.offset_geometry_creation": {
-    "gen0049": "tangency-labs/solidcore#3002: the result has an edge whose pcurve interval differs from its 3D curve's, after the local-operation change",
-    "gen0732": "tangency-labs/solidcore#3001: the offset result's edge pcurve interval differs from its 3D curve's, on main as well",
-    "gen0779": "tangency-labs/solidcore#3002: the result has an edge whose pcurve interval differs from its 3D curve's, after the local-operation change"
-  },
   "primitive.primitive_creation_p2": {
     "gen0092": "tangency-labs/solidcore#2794: a circle of radius 1e-3 swept along two 1e-2 legs at a right angle returns success, but the body fails check_brep level 2 (vertex 1.8284271e-3 off its faces); a refusal or the valid body of volume 6.2832e-8 is right; fix in #2840",
     "gen0189": "tangency-labs/solidcore#2794: the same input as gen0092 (circle of radius 1e-3 swept along two 1e-2 legs at a right angle) returns success with an invalid body (vertex 1.8284271e-3 off its faces); fix in #2840"

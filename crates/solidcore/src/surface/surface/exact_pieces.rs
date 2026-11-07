@@ -157,7 +157,7 @@ impl SurfaceIntersection {
                 // each trim may snap the interval to a knot of its curve: the three are
                 // trimmed to the one interval none of them snaps, so the 3D piece and its
                 // UV curves end at the same parameters
-                let ivl = common_trim_interval(k, [&piece, &piece1, &piece2], ivl, OP)?;
+                let ivl = common_trim_interval(k, &[&piece, &piece1, &piece2], ivl, OP)?;
                 for c in [&mut piece, &mut piece1, &mut piece2] {
                     trim_unsnapped(k, c, ivl, OP)?;
                 }
@@ -202,14 +202,14 @@ const TRIM_SNAP_ROUNDS: usize = 4;
 /// [`TRIM_SNAP_ROUNDS`] rounds (two curves pulling an end onto knots of their own).
 pub(crate) fn common_trim_interval(
     k: &Kernel,
-    curves: [&Curve; 3],
+    curves: &[&Curve],
     ivl: Extent1d,
     op: &'static str,
 ) -> Result<Extent1d> {
     let mut ivl = ivl;
     for _ in 0..TRIM_SNAP_ROUNDS {
         let start = ivl;
-        for c in curves {
+        for &c in curves {
             c.copy(k)?.trim(k, &mut ivl, TrimMode::IntervalOnly)?;
         }
         if ivl == start {
@@ -837,7 +837,7 @@ mod tests {
         let uv1 = line(2, vec![0.0, 0.0, 1.0, 1.0], 2);
         let uv2 = line(2, vec![0.0, 0.0, knot, 1.0, 1.0], 3);
         let ivl = Extent1d::from_min_max(0.25, 0.5);
-        let common = common_trim_interval(&k, [&piece, &uv1, &uv2], ivl, OP).unwrap();
+        let common = common_trim_interval(&k, &[&piece, &uv1, &uv2], ivl, OP).unwrap();
         assert_eq!((common.min(), common.max()), (0.25, knot));
         let ends: Vec<f64> = [piece, uv1, uv2]
             .into_iter()
@@ -898,7 +898,7 @@ mod tests {
         );
         assert_eq!((in_turn[2].min(), in_turn[2].max()), (start, end));
 
-        let common = common_trim_interval(&k, [&c3, &uv1, &uv2], ivl, OP).unwrap();
+        let common = common_trim_interval(&k, &[&c3, &uv1, &uv2], ivl, OP).unwrap();
         assert_eq!((common.min(), common.max()), (start, end));
         for c in [&c3, &uv1, &uv2] {
             let mut c = c.copy(&k).unwrap();

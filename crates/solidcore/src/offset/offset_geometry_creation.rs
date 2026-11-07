@@ -3726,26 +3726,28 @@ impl OffsetGeometryCreation {
             return Err(sm_err(OP_EXTEND));
         };
 
-        // Trim the 3 curves to the common interval (may snap sIvl by tol to existing knots:
-        // the snapped interval is what the next trim gets)
-        let mut ti = trim_ivl;
-        {
-            let c = brep
-                .curve_mut(lifted_h)
-                .ok_or(dangling("curve handle cannot be resolved"))?;
-            c.trim(k, &mut ti, TrimMode::Notify)?;
-        }
-        {
-            let c = brep
-                .curve_mut(uv_curve_extended_h)
-                .ok_or(dangling("curve handle cannot be resolved"))?;
-            c.trim(k, &mut ti, TrimMode::Notify)?;
-        }
+        // Trim the curves to the common interval so the 3D curve and its UV curves end together
+        let c_lifted = curve_of(brep, lifted_h)?;
+        let c_uv = curve_of(brep, uv_curve_extended_h)?;
+        let mut curves_to_trim = vec![c_lifted, c_uv];
         if let Some(other) = other_uv_h {
+            curves_to_trim.push(curve_of(brep, other)?);
+        }
+        let ti = crate::surface::surface::exact_pieces::common_trim_interval(
+            k,
+            &curves_to_trim,
+            trim_ivl,
+            OP_EXTEND,
+        )?;
+        let mut handles = vec![lifted_h, uv_curve_extended_h];
+        if let Some(other) = other_uv_h {
+            handles.push(other);
+        }
+        for h in handles {
             let c = brep
-                .curve_mut(other)
+                .curve_mut(h)
                 .ok_or(dangling("curve handle cannot be resolved"))?;
-            c.trim(k, &mut ti, TrimMode::Notify)?;
+            crate::surface::surface::exact_pieces::trim_unsnapped(k, c, ti, OP_EXTEND)?;
         }
 
         let lifted_copy = curve_of(brep, lifted_h)?.copy(k)?;
@@ -4093,7 +4095,7 @@ impl OffsetGeometryCreation {
         // interval none of their trims snaps.
         let ti = crate::surface::surface::exact_pieces::common_trim_interval(
             k,
-            [
+            &[
                 curve_of(brep, curve_3d_found)?,
                 curve_of(brep, uv_curve1_found)?,
                 curve_of(brep, uv_curve2_found)?,
