@@ -809,6 +809,13 @@ fn transfer_into_copy(kind: &mut FeatureKind, components: &BTreeMap<u64, u64>) -
             *transform = solidcraft_doc::IDENTITY;
         }
     }
+    if let FeatureKind::Pattern { components: patterned, occurrences, .. } = kind {
+        for id in patterned.iter_mut() {
+            *id = *components.get(id).ok_or_else(|| bad(CMD, "patterned component is outside the copied graph"))?;
+        }
+        // Occurrence ids are of the source design; the copy's reconcile makes its own.
+        occurrences.clear();
+    }
     Ok(())
 }
 

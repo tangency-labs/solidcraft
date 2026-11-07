@@ -1287,6 +1287,10 @@ impl Session {
         if self.model.evaluate_shared(&self.doc) {
             self.evaluations = self.evaluations.saturating_add(1);
         }
+        // Component Pattern features keep their count/spacing expressions; place their copies
+        // after the model rebuild so a parameter change updates the placements (#12116).
+        let state = self.model.state();
+        let _ = solidcraft_doc::reconcile_component_patterns(self.doc_mut(), &state);
         self.revision += 1;
         self.prune_occurrence_state();
         // Looked at only when what the groups can name has changed, not on every refresh.

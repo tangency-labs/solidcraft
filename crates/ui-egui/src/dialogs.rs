@@ -6057,6 +6057,17 @@ fn set_thin(inputs: &mut [SelInput], thin: bool) {
 fn pattern_objects(s: &Session, objects: &[Sel], p: &mut Value) {
     if objects.iter().any(|x| matches!(x, Sel::Feature { .. })) {
         p["features"] = json!(pattern_features(s, objects));
+    } else if objects.iter().any(|x| matches!(x, Sel::Occurrence { .. })) {
+        let mut names = Vec::new();
+        for x in objects {
+            let Sel::Occurrence { path } = x else { continue };
+            let Ok(place) = s.occurrence_placement(path) else { continue };
+            let Some(name) = s.doc.components.iter().find(|c| c.id == place.component).map(|c| c.name.clone()) else { continue };
+            if !names.contains(&name) {
+                names.push(name);
+            }
+        }
+        p["components"] = json!(names);
     } else {
         p["bodies"] = json!(objects.body_names());
     }
@@ -7238,13 +7249,15 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Pattern { features, pattern, bodies: copied } => {
+        FeatureKind::Pattern { features, pattern, bodies: copied, components, .. } => {
             let ids: Vec<u64> = features.iter().map(|f| f.0).collect();
             let bodies: Vec<Sel> = if copied.is_empty() {
                 st.bodies.iter().filter(|b| ids.contains(&b.feature)).map(|b| Sel::Body { name: b.name.clone() }).collect()
             } else {
                 copied.iter().map(|name| Sel::Body { name: name.to_string() }).collect()
             };
+            let component_sels: Vec<Sel> =
+                components.iter().filter_map(|id| s.doc.occurrence_of(*id).map(|o| Sel::Occurrence { path: vec![o.id] })).collect();
             let mut d = match pattern {
                 PatternKind::Rectangular { dir1, count1, spacing1, dir2, count2, spacing2, alignment, alignment2, reversed, reversed2 } => {
                     let mut d = start("solid.pattern.rectangular")?;
@@ -7328,6 +7341,11 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     inp.accept = selection::FEATURES;
                     inp.label = objects_label(inp.accept);
                     inp.items = ids.iter().map(|id| Sel::Feature { id: *id }).collect();
+                } else if !component_sels.is_empty() {
+                    // Same accept as Align of components: bodies/occurrences resolve to placements.
+                    inp.accept = BODIES;
+                    inp.label = "Components";
+                    inp.items = component_sels;
                 } else {
                     inp.accept = BODIES;
                     inp.label = objects_label(inp.accept);
