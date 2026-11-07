@@ -4933,13 +4933,17 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         || app.viewport.spin
         || app.cam_anim.is_some();
     let joint_handle_pointer = hover.is_some_and(|p| inside && crate::joint_handles::owns_pointer(app, &proj, p));
+    let canvas_handle_pointer = hover.is_some_and(|p| inside && crate::browser_canvas::owns_pointer(app, &proj, p));
+    // Calibration markers keep their own click path. Only Edit Canvas grips block a click here.
+    let canvas_grip_pointer = (canvas_handle_pointer || app.tree.canvas_panel.as_ref().is_some_and(|p| p.edit_drag.is_some()))
+        && !app.tree.canvas_panel.as_ref().is_some_and(|panel| panel.calibrate);
     // Nor while a component's triad drags it as a layer, unless the preference asks for the
     // highlight (`drag_layer::holds_pointer`). A part dragged along its joint owns the pointer
     // too: nothing under it lights up (#5137).
     let dragging_layer = drag_layer::holds_pointer(app, layered, manipulator_dragging);
     let hits = hover
         .filter(|_| {
-            inside && app.viewport.boxsel.is_none() && !crate::joint_drag::active(app) && !joint_handle_pointer && !navigating && !dragging_layer
+            inside && app.viewport.boxsel.is_none() && !crate::joint_drag::active(app) && !joint_handle_pointer && !canvas_handle_pointer && !navigating && !dragging_layer
         })
         .map(|p| pick_cached(app, &proj, p))
         .unwrap_or_default();
@@ -4960,9 +4964,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // held Space owns drags, not a still press, so only a navigation that has started cancels
     // it. A preset's modifier binding (Maya Alt, Alias Shift+Alt) or Ctrl+left orbit is a
     // gesture to navigate from the press on, so it still cancels the hold at once.
-    let navigating_from_press = mode.is_some() || app.viewport.primary_nav.is_some() || joint_handle_pointer;
+    let navigating_from_press = mode.is_some() || app.viewport.primary_nav.is_some() || joint_handle_pointer || canvas_handle_pointer;
     let held = crate::select_other::track_hold(app, ui.ctx(), &proj, inside, primary_pressed, primary_down, hover, navigating_from_press);
     crate::select_other::hover_override(app);
+    let canvas_dragging = crate::browser_canvas::drag(app, &proj, hover.filter(|_| inside), primary_pressed, primary_down);
     list_hover(app);
     let painter = ui.painter_at(rect);
     crate::gpu::paint_background(&painter, rect, &t);
@@ -5245,7 +5250,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         {
             dialog.restore_value_focus = true;
         }
-        if resp.clicked() && !held && !reference_pick && !joint_handle_pointer && !app.viewport.draw_drag_handled {
+        if resp.clicked() && !held && !reference_pick && !joint_handle_pointer && !canvas_grip_pointer && !canvas_dragging && !app.viewport.draw_drag_handled {
             if crate::browser_canvas::click(app, &proj, p) {
                 // Calibrate Canvas: the click sets Point A or B on the image (#9108).
             } else if app.tool.is_some() {
@@ -5542,7 +5547,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // Dragging a part moves its free chain (outside sketches), or reaches within its joints
     // when the chain is anchored. Shift, Ctrl/Cmd or Alt held as the drag starts
     // draws a selection box instead, as a drag from empty space does.
-    if app.tool.is_none() && app.dialog.is_none() && primary_nav.is_none() && mode.is_none() && app.session.active_sketch.is_none() && !held {
+    if app.tool.is_none() && app.dialog.is_none() && primary_nav.is_none() && mode.is_none() && app.session.active_sketch.is_none() && !held && !canvas_dragging {
         if resp.drag_started_by(egui::PointerButton::Primary)
             // Physical Ctrl on macOS is not the primary click-selection modifier, but must
             // still keep a modified drag from moving a part.
@@ -5603,6 +5608,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         && !crate::joint_drag::active(app)
         && !crate::joint_handles::active(app)
         && !joint_handle_pointer
+        && !canvas_dragging
         && !crate::occurrence_drag::active(app)
         && !crate::drag_extrude::started(app)
         && !crate::dim_view::dragging()

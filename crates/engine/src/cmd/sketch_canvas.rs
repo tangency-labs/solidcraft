@@ -176,15 +176,26 @@ fn calibrate(s: &mut Session, p: &Value) -> Result<Value> {
     let i = find(s, p, cmd)?;
     let (a, b) = (p.get("a").and_then(vec2), p.get("b").and_then(vec2));
     let (Some(a), Some(b)) = (a, b) else { return Err(bad(cmd, "`a` and `b` must be points [x,y]")) };
-    let d = num(p, "distance").filter(|d| *d > 1e-9).ok_or_else(|| bad(cmd, "`distance` must be positive"))?;
+    if !a.x.is_finite() || !a.y.is_finite() || !b.x.is_finite() || !b.y.is_finite() {
+        return Err(bad(cmd, "`a` and `b` must contain finite coordinates"));
+    }
+    let d = num(p, "distance")
+        .filter(|d| d.is_finite() && *d > 1e-9)
+        .ok_or_else(|| bad(cmd, "`distance` must be positive"))?;
     let now = a.dist(b);
-    if now < 1e-9 {
+    if !now.is_finite() || now < 1e-9 {
         return Err(bad(cmd, "the points must differ"));
     }
     let k = d / now;
+    let old = s.doc.canvases.get(i).ok_or_else(|| bad(cmd, "canvas"))?;
+    let width = old.width * k;
+    let center = a + (old.center - a) * k;
+    if !(width > 1e-6 && width < 1e7 && width.is_finite() && center.x.is_finite() && center.y.is_finite()) {
+        return Err(bad(cmd, "the calibrated canvas size is outside the supported range"));
+    }
     let c = s.doc_mut().canvases.get_mut(i).ok_or_else(|| bad(cmd, "canvas"))?;
-    c.width *= k;
-    c.center = a + (c.center - a) * k;
+    c.width = width;
+    c.center = center;
     canvas_reply(cmd, CanvasCalibrated { canvas: c.id, width: c.width, param_warnings: Vec::new() })
 }
 
@@ -232,8 +243,12 @@ mod tests {
         assert_eq!(c.pixels, [400, 200]);
         assert!((c.height() - 40.0).abs() < 1e-12);
         // Two points 20 apart on the image are really 50 apart.
-        s.execute("canvas.calibrate", &json!({"canvas": id, "a": [0, 0], "b": [20, 0], "distance": 50})).unwrap();
+        let calibrated = s.execute("canvas.calibrate", &json!({"canvas": id, "a": [0, 0], "b": [20, 0], "distance": 50})).unwrap();
         assert!((s.doc.canvases[0].width - 200.0).abs() < 1e-9);
+        assert!((calibrated["scale"].as_f64().unwrap() - 2.5).abs() < 1e-12);
+        // Point A is the calibration anchor: its position on the canvas does not move.
+        assert!((s.doc.canvases[0].center.x - c.center.x * 2.5).abs() < 1e-9);
+        assert!((s.doc.canvases[0].center.y - c.center.y * 2.5).abs() < 1e-9);
         s.execute("canvas.edit", &json!({"canvas": "Canvas1", "opacity": 0.8, "angle": 90})).unwrap();
         // Undo-able and saved with the design.
         let back = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
@@ -247,5 +262,60 @@ mod tests {
         s.execute("solid.box", &json!({"length": 30, "width": 30, "height": 10})).unwrap();
         let r = s.execute("canvas.decal", &json!({"data": png(10, 10), "face": [15, 15, 10], "width": 20})).unwrap();
         assert!(r["canvas"].is_u64());
+    }
+
+    #[test]
+    fn calibrate_maths_and_validation() {
+        let mut s = Session::default();
+        let r = s.execute("canvas.insert", &json!({"data": png(200, 100), "plane": "XY", "width": 100})).unwrap();
+        let id = r["canvas"].as_u64().unwrap();
+        let orig_c = s.doc.canvases[0].clone();
+
+        // 1. Valid calibration with non-origin anchor Point A:
+        // A is at (10, 20), B is at (40, 60). Distance measured = 50.
+        // True desired distance = 100. Scale k = 2.0.
+        let cal = s.execute("canvas.calibrate", &json!({
+            "canvas": id,
+            "a": [10.0, 20.0],
+            "b": [40.0, 60.0],
+            "distance": 100.0
+        })).unwrap();
+        assert_eq!(cal["width"].as_f64().unwrap(), 200.0);
+        assert_eq!(s.doc.canvases[0].width, 200.0);
+
+        // Point A position on image must stay fixed: center' = A + (center - A) * k
+        let expected_center_x = 10.0 + (orig_c.center.x - 10.0) * 2.0;
+        let expected_center_y = 20.0 + (orig_c.center.y - 20.0) * 2.0;
+        assert!((s.doc.canvases[0].center.x - expected_center_x).abs() < 1e-9);
+        assert!((s.doc.canvases[0].center.y - expected_center_y).abs() < 1e-9);
+
+        // 2. Reject identical points (zero distance):
+        assert!(s.execute("canvas.calibrate", &json!({
+            "canvas": id, "a": [5.0, 5.0], "b": [5.0, 5.0], "distance": 50.0
+        })).is_err());
+
+        // 3. Reject non-positive distance:
+        assert!(s.execute("canvas.calibrate", &json!({
+            "canvas": id, "a": [0.0, 0.0], "b": [10.0, 0.0], "distance": 0.0
+        })).is_err());
+        assert!(s.execute("canvas.calibrate", &json!({
+            "canvas": id, "a": [0.0, 0.0], "b": [10.0, 0.0], "distance": -10.0
+        })).is_err());
+
+        // 4. Reject NaN / infinite coordinates:
+        assert!(s.execute("canvas.calibrate", &json!({
+            "canvas": id, "a": [f64::NAN, 0.0], "b": [10.0, 0.0], "distance": 50.0
+        })).is_err());
+        assert!(s.execute("canvas.calibrate", &json!({
+            "canvas": id, "a": [0.0, 0.0], "b": [10.0, f64::INFINITY], "distance": 50.0
+        })).is_err());
+        assert!(s.execute("canvas.calibrate", &json!({
+            "canvas": id, "a": [0.0, 0.0], "b": [10.0, 0.0], "distance": f64::INFINITY
+        })).is_err());
+
+        // 5. Reject extreme out-of-range sizes:
+        assert!(s.execute("canvas.calibrate", &json!({
+            "canvas": id, "a": [0.0, 0.0], "b": [10.0, 0.0], "distance": 1e8
+        })).is_err());
     }
 }
