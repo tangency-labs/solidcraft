@@ -3,15 +3,16 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::types::{AngleExpr, FaceRef, LengthExpr, NumberExpr, Point2, StringList};
+use super::types::{AngleExpr, FaceRef, LengthExpr, NumberExpr, PlaneParam, Point2, StringList};
 
 /// Largest side of the rectangle, and the largest coordinate of its corner, in mm.
 pub const MAX_SIZE: f64 = 1e6;
 
-/// Lay solid bodies out side by side on a rectangle of the XY plane, as on a build plate or a
-/// sheet to cut from. Each body keeps its height and only turns about Z, unless it is laid on a
+/// Lay solid bodies out side by side on a sheet, as on a build plate or a sheet to cut from: a
+/// rectangle on the XY plane or a given plane, or a flat face at any tilt. Each body keeps its
+/// height above the sheet and only turns about the sheet's normal, unless it is laid on a
 /// flat side first (`bottoms`, `lay_flat`); its footprint is the
-/// outline it covers seen from above, from its exact edges and silhouettes. Each body that fits
+/// outline it covers seen from above the sheet, from its exact edges and silhouettes. Each body that fits
 /// gets a Move feature; the whole arrangement is one undo step. Bodies that don't fit stay where
 /// they are and are listed in `unplaced`. A hole through a body is not used for other bodies.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -25,8 +26,8 @@ pub struct ArrangeParams {
     /// The rectangle's size along Y: above 0, at most 1 000 000 mm. Needed unless `sheet` is given.
     #[serde(default)]
     pub length: Option<LengthExpr>,
-    /// A level flat face of a body that is not arranged, to lay the bodies out on in place of the
-    /// rectangle: its outline and holes, at its height.
+    /// A flat face, at any tilt, of a body that is not arranged, to lay the bodies out on in place
+    /// of the rectangle: its outline and holes, in its plane.
     #[serde(default)]
     pub sheet: Option<FaceRef>,
     /// How many of each body to lay out: the body and copies of it, 1 to 1 000. Default: 1.
@@ -39,7 +40,11 @@ pub struct ArrangeParams {
     /// The gap between one sheet and the next: 0 to 100 000 mm. Default: 10 mm.
     #[serde(default)]
     pub sheet_spacing: Option<LengthExpr>,
-    /// The rectangle's lower-left corner, [x, y] in mm. Default: [0, 0].
+    /// The plane the rectangle lies on, along its X and Y from its origin, the bodies on its
+    /// normal side. Default: XY.
+    #[serde(default)]
+    pub plane: Option<PlaneParam>,
+    /// The rectangle's lower-left corner on its plane, [x, y] in mm. Default: [0, 0].
     #[serde(default)]
     pub origin: Option<Point2>,
     /// Least distance between two bodies' footprints: 0 to 100 000 mm. Default: 1 mm.
@@ -60,16 +65,21 @@ pub struct ArrangeParams {
     #[serde(default)]
     pub improve: Option<f64>,
     /// Lay each body on the flat side it rests on with the most of it touching, of the sides
-    /// nothing of it hangs below, before it is placed, standing on z = 0. A body with no such
-    /// side stays as it is. Default: false.
+    /// nothing of it hangs below, before it is placed, standing on the sheet. A body with no such
+    /// side stays as it is. Default: true.
     #[serde(default)]
     pub lay_flat: Option<bool>,
     /// Leave the bodies where they are and lay out copies of them instead. Default: false (the
     /// bodies themselves are moved; copies are made only for a `quantity` above 1).
     #[serde(default)]
     pub copy: Option<bool>,
+    /// Keep clear of the other bodies on the sheet, of the originals left by `copy`, and of a
+    /// body that does not fit and stays where it is. Default: true; false lays out as if the
+    /// sheet were empty.
+    #[serde(default)]
+    pub avoid: Option<bool>,
     /// Flat faces to lay bodies on, at most one on each body: that body is laid on the plane of
-    /// the face, standing on z = 0, whatever `lay_flat` says.
+    /// the face, standing on the sheet, whatever `lay_flat` says.
     #[serde(default)]
     pub bottoms: Option<Vec<FaceRef>>,
 }
@@ -101,9 +111,17 @@ pub struct ArrangedBody {
     pub angle_deg: f64,
     /// When the body was laid on a flat side: that side's outward normal before the move. The
     /// body was first turned about the origin to point it down, then by `angle_deg`, moved by
-    /// `x` and `y`, and raised to stand on z = 0; the move feature holds it as one turn.
+    /// `x` and `y`, and raised to stand on the sheet; the move feature holds it as one turn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bottom: Option<[f64; 3]>,
+}
+
+/// One sheet seen from above.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SheetOutline {
+    pub outer: Vec<[f64; 2]>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub holes: Vec<Vec<[f64; 2]>>,
 }
 
 /// What `solid.arrange` returns.
@@ -122,6 +140,30 @@ pub struct ArrangeReply {
     /// How far a footprint may be from the true outline, in mm; the spacing and margin were
     /// widened by it.
     pub footprint_error_mm: f64,
+    /// Each sheet asked for, seen from above: its outer ring and its holes as [x, y] points, mm.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sheet_outlines: Vec<SheetOutline>,
+    /// The height the sheets lie at, mm.
+    #[serde(default)]
+    pub sheet_z: f64,
+    /// A tilted sheet's frame: along it, across it and out of it (unit, world). The outlines,
+    /// `x`, `y` and `sheet_z` are in it: a point is `x e1 + y e2 + sheet_z n`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sheet_frame: Option<[[f64; 3]; 3]>,
+    /// The margin kept from each sheet's edges, mm.
+    #[serde(default)]
+    pub margin_mm: f64,
+    /// The bodies whose outline from above could not be found: they were placed by their box.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub boxed: Vec<String>,
+    /// The browser groups the copies were put in (one per component they are in), by name.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub copy_groups: Vec<String>,
+    /// The layout ran long and hurried to finish within its time budget (about 30 s, 6 s on the web): some parts
+    /// may be packed by their box, less tightly, or left unplaced, and the same call may lay out
+    /// differently next time.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hurried: bool,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

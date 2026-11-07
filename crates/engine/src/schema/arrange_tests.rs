@@ -11,6 +11,7 @@ fn schemas_and_the_key_check_agree() {
         input_schema_for::<ArrangeParams>(),
         &[
             "angle_step",
+            "avoid",
             "bodies",
             "bottoms",
             "copy",
@@ -20,6 +21,7 @@ fn schemas_and_the_key_check_agree() {
             "margin",
             "method",
             "origin",
+            "plane",
             "quantity",
             "sheet",
             "sheet_spacing",
