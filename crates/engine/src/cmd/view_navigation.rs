@@ -549,31 +549,45 @@ fn navigate(_s: &mut Session, p: &Value) -> Result<Value> {
         }
     } else {
         use std::f64::consts::FRAC_PI_2;
-        let (r, u, b) = cam.basis();
-        // Left, right, up and down turn the view a quarter turn (the navigation cube's arrows),
-        // or `degrees` (the arrow keys' 15° steps, #1541).
-        let (sin, cos) = match p.get("degrees") {
-            None => (1.0, 0.0),
-            Some(d) => d
-                .as_f64()
-                .filter(|d| d.is_finite() && *d > 0.0 && *d <= 180.0)
-                .map(|d| if d == 90.0 { (1.0, 0.0) } else { d.to_radians().sin_cos() })
-                .ok_or_else(|| bad(cmd, "degrees must be a number above 0 and at most 180"))?,
+        let (r, u, _) = cam.basis();
+        // The navigation cube's arrows turn a quarter turn toward the camera's own right and up.
+        // Arrow keys pass `degrees` (#1541) and stay on one axis: left and right yaw about the
+        // up axis, and up and down change only pitch, so a pitched view does not lean (#12995).
+        let degrees = match p.get("degrees") {
+            None => None,
+            Some(d) => Some(
+                d.as_f64()
+                    .filter(|d| d.is_finite() && *d > 0.0 && *d <= 180.0)
+                    .ok_or_else(|| bad(cmd, "degrees must be a number above 0 and at most 180"))?,
+            ),
         };
-        let turn = |toward: solidcore_record::Vec3| cam.looking_from(b * cos + toward * sin);
-        match p.get("action").and_then(Value::as_str) {
-            Some("left") => cam = turn(-r),
-            Some("right") => cam = turn(r),
-            Some("up") => cam = turn(u),
-            Some("down") => cam = turn(-u),
-            Some("clockwise") => cam.roll = (cam.roll + FRAC_PI_2).rem_euclid(std::f64::consts::TAU),
-            Some("counterclockwise") => cam.roll = (cam.roll - FRAC_PI_2).rem_euclid(std::f64::consts::TAU),
-            Some("home") => {
-                cam.set_view(StandardView::Iso);
-                fit = true;
+        let axis = degrees.map(|d| if d == 90.0 { FRAC_PI_2 } else { d.to_radians() });
+        let action = p.get("action").and_then(Value::as_str);
+        if let Some(angle) = axis
+            && matches!(action, Some("left" | "right" | "up" | "down"))
+        {
+            match action {
+                Some("left") => cam.yaw += angle,
+                Some("right") => cam.yaw -= angle,
+                Some("up") => cam.pitch = (cam.pitch + angle).clamp(-FRAC_PI_2, FRAC_PI_2),
+                Some("down") => cam.pitch = (cam.pitch - angle).clamp(-FRAC_PI_2, FRAC_PI_2),
+                _ => {}
             }
-            Some("fit") => fit = true,
-            _ => return Err(bad(cmd, "unknown navigation action")),
+        } else {
+            match action {
+                Some("left") => cam = cam.looking_from(-r),
+                Some("right") => cam = cam.looking_from(r),
+                Some("up") => cam = cam.looking_from(u),
+                Some("down") => cam = cam.looking_from(-u),
+                Some("clockwise") => cam.roll = (cam.roll + FRAC_PI_2).rem_euclid(std::f64::consts::TAU),
+                Some("counterclockwise") => cam.roll = (cam.roll - FRAC_PI_2).rem_euclid(std::f64::consts::TAU),
+                Some("home") => {
+                    cam.set_view(StandardView::Iso);
+                    fit = true;
+                }
+                Some("fit") => fit = true,
+                _ => return Err(bad(cmd, "unknown navigation action")),
+            }
         }
     }
     typed_reply(cmd, NavigateResult { camera: cam, fit, continuous: None, param_warnings: Vec::new() })
@@ -874,6 +888,41 @@ mod tests {
         for bad in [json!(0), json!(-15), json!(181), json!(f64::NAN.to_string()), json!("15"), json!(null)] {
             assert!(turn("left", Some(bad.clone())).is_err(), "{bad}");
         }
+    }
+
+    /// #12995: an arrow-key step (`degrees`) changes only yaw or only pitch, from a pitched view.
+    #[test]
+    fn arrow_steps_change_only_yaw_or_only_pitch() {
+        let mut s = Session::default();
+        let cam = Camera { roll: 0.4, ..Camera::default() };
+        let mut step = |action: &str, degrees: f64| {
+            let result = s.execute("view.navigate", &json!({"camera": cam, "action": action, "degrees": degrees})).unwrap();
+            serde_json::from_value::<Camera>(result["camera"].clone()).unwrap()
+        };
+        let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
+        let left = step("left", 15.0);
+        assert!(close(left.yaw, cam.yaw + 15.0_f64.to_radians()), "yaw {}", left.yaw);
+        assert!(close(left.pitch, cam.pitch) && close(left.roll, cam.roll));
+        let right = step("right", 15.0);
+        assert!(close(right.yaw, cam.yaw - 15.0_f64.to_radians()));
+        assert!(close(right.pitch, cam.pitch) && close(right.roll, cam.roll));
+        let up = step("up", 15.0);
+        assert!(close(up.pitch, cam.pitch + 15.0_f64.to_radians()), "pitch {}", up.pitch);
+        assert!(close(up.yaw, cam.yaw) && close(up.roll, cam.roll));
+        let down = step("down", 15.0);
+        assert!(close(down.pitch, cam.pitch - 15.0_f64.to_radians()));
+        assert!(close(down.yaw, cam.yaw) && close(down.roll, cam.roll));
+        let keyed = step("left", 90.0);
+        assert!(close(keyed.yaw, cam.yaw + std::f64::consts::FRAC_PI_2) && close(keyed.pitch, cam.pitch));
+        // The cube's quarter turn (no degrees) still aims toward its own arrow.
+        let cube = s.execute("view.navigate", &json!({"camera": cam, "action": "left"})).unwrap();
+        let cube: Camera = serde_json::from_value(cube["camera"].clone()).unwrap();
+        assert!((cube.pitch - cam.pitch).abs() > 1e-3, "cube pitch {}", cube.pitch);
+        let top = Camera { pitch: std::f64::consts::FRAC_PI_2, ..cam };
+        let stuck = s.execute("view.navigate", &json!({"camera": top, "action": "up", "degrees": 15})).unwrap();
+        let stuck: Camera = serde_json::from_value(stuck["camera"].clone()).unwrap();
+        assert!(close(stuck.pitch, std::f64::consts::FRAC_PI_2));
+        assert_eq!((stuck.target, stuck.distance, stuck.roll), (cam.target, cam.distance, cam.roll));
     }
 
     /// #10091: a turn asked to frame the model reports `fit`, as home does; a motion can't.
