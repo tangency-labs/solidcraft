@@ -104,3 +104,35 @@ fn the_unconverted_list_is_sorted_and_names_real_commands() {
     let stale: Vec<&str> = ids.into_iter().filter(|id| !registered.contains(id)).collect();
     assert!(stale.is_empty(), "unconverted.txt names commands that don't exist (remove their lines): {stale:?}");
 }
+
+/// Tool clients check calls against the published schemas with JavaScript's regular
+/// expressions (ECMA-262), which have no inline flags such as `(?i)`: a pattern with one fails to
+/// compile there, and a client can reject the whole schema. Case is spelled with classes
+/// (`[Xx]`) instead.
+#[test]
+fn no_published_pattern_uses_an_inline_flag() {
+    fn patterns(v: &serde_json::Value, out: &mut Vec<String>) {
+        match v {
+            serde_json::Value::Object(m) => {
+                for (k, x) in m {
+                    match (k.as_str(), x) {
+                        ("pattern", serde_json::Value::String(p)) => out.push(p.clone()),
+                        _ => patterns(x, out),
+                    }
+                }
+            }
+            serde_json::Value::Array(a) => a.iter().for_each(|x| patterns(x, out)),
+            _ => {}
+        }
+    }
+    let mut bad = Vec::new();
+    for c in command_specs() {
+        let Some(contract) = c.contract else { continue };
+        let mut found = Vec::new();
+        patterns(&contract.input_schema().to_value(), &mut found);
+        // `(?:`, `(?=`, `(?!` and `(?<` are JavaScript groups too; a letter after `(?` is a flag.
+        let flagged = |p: &str| p.match_indices("(?").any(|(i, _)| p[i + 2..].starts_with(|ch: char| ch.is_ascii_alphabetic() || ch == '-'));
+        bad.extend(found.into_iter().filter(|p| flagged(p)).map(|p| format!("`{}`: {p}", c.id)));
+    }
+    assert!(bad.is_empty(), "patterns JavaScript can't compile:\n{}", bad.join("\n"));
+}

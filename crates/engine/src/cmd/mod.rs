@@ -30,6 +30,7 @@ mod compare_picture;
 #[cfg(test)]
 mod compare_picture_tests;
 mod component;
+pub(crate) use component::mirror::{MirrorAs, follow as follow_mirrors, mirror_as_form, mirror_symmetry_form};
 mod component_clone;
 mod component_clone_assembly;
 mod construct;
