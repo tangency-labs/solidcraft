@@ -64,6 +64,7 @@ use solidcraft_geom::paper::text::{Font, TextRun, font_in};
 use solidcraft_geom::paper::{Group, Item, MAX_RECORDS, ObjectKind, Picture, Scene};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::{Aabb2, ArcMap};
+use solidcraft_sketch::PaperFonts;
 
 use crate::drawing_picture::{picture_items, view_parts};
 use crate::drawing_view::{CHORD_MM, LineRequest, MIN_MODEL_CHORD_MM, Shown, ShownSet, Stats, Styles, Unmeasured, paper_lines};
@@ -465,10 +466,11 @@ fn draw_dimensions(
 ) -> Vec<DrawnDimension> {
     let ids: Vec<u64> = wanted.iter().map(|record| record.id).collect();
     let read = s.doc.resolve_dimensions(&s.model, d, &ids);
+    let lettering = PaperFonts::new(&d.font, &d.language, wait);
     let one = |at: usize, record: &Arc<Dimension>| match read.as_ref().map(|all| all.get(at)) {
         Ok(Some(resolved)) => {
             let paper = frame(record.view)
-                .and_then(|(frame, lines)| crate::drawing_dimension_paper::paper_group(record, resolved, &frame, lines, &d.font, &d.language, wait));
+                .and_then(|(frame, lines)| crate::drawing_dimension_paper::paper_group(record, resolved, &frame, lines, &lettering));
             let drawn = |group, fonts, why, pending| DrawnDimension {
                 dimension: record.id,
                 view: record.view,
@@ -704,7 +706,7 @@ fn cell_texts(s: &Session, d: &Drawing, sheet: u64) -> Vec<CellText> {
 fn block_text(record: &Sheet, lettering: &Lettering, cells: &[CellText], wait: bool) -> Result<(Set, bool)> {
     Ok(match (&record.title_block, record.title_block_layout().map_err(|e| bad(CMD, e.to_string()))?) {
         (Some(block), Some(placed)) => {
-            let laid = title_block_text::lay(block, &placed, &lettering.font, &lettering.language, cells, wait);
+            let laid = title_block_text::lay(block, &placed, &PaperFonts::new(&lettering.font, &lettering.language, wait), cells);
             (laid.set(), laid.pending)
         }
         _ => (Set::default(), false),

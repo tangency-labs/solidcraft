@@ -22,7 +22,7 @@ use solidcraft_geom::cell::{HAlign, Part, Source, Warning, place_lines};
 use solidcraft_geom::paper::text::{Font, TextRun};
 use solidcraft_geom::title_block::{CellKind, TextCell, TitleBlock, TitleBlockLayout};
 use solidcraft_geom::{Aabb2, EPS};
-use solidcraft_sketch::{PaperLines, SketchError, TextAlign, TextStyle, font_dirs, paper_lines, paper_lines_now};
+use solidcraft_sketch::{Outcome, PaperFonts, PaperLines, SketchError, TextAlign, TextStyle};
 
 /// A text cell as its sheet shows it: its name, its text, and the value typed text hides.
 #[derive(Clone, Debug, PartialEq)]
@@ -108,33 +108,23 @@ fn format_mass(grams: f64) -> String {
     format!("{:.2} kg", grams / 1000.0)
 }
 
-/// `block`'s labels, and its text cells' values as `shown` gives them, measured in the font `family`
-/// and `language` (the drawing's; an empty family: the built-in font) where `layout` places them.
-/// `wait`: fonts to fall back to are searched for here; else the search's thread is asked, for the
-/// window's sheet.
-pub fn lay(block: &TitleBlock, layout: &TitleBlockLayout, family: &str, language: &str, shown: &[CellText], wait: bool) -> Laid {
-    let dirs = if wait { Vec::new() } else { font_dirs() };
-    let measure = |text: &str, cap_mm: f64, wrap: Option<f64>, style: &TextStyle| {
-        if wait {
-            paper_lines(text, Some(family), language, cap_mm, wrap, style)
-        } else {
-            paper_lines_now(&dirs, text, Some(family), language, cap_mm, wrap, style)
-        }
-    };
+/// `block`'s labels, and its text cells' values as `shown` gives them, measured in the drawing's
+/// lettering (`fonts`) where `layout` places them.
+pub fn lay(block: &TitleBlock, layout: &TitleBlockLayout, fonts: &PaperFonts, shown: &[CellText]) -> Laid {
     let mut out = Laid::default();
     for (cell, placed) in block.cells.iter().zip(&layout.cells) {
         let mut notes = Vec::new();
         let label = cell.label.as_ref().zip(placed.label_at);
-        let label = label.map(|(label, at)| measure(&label.text, label.cap_mm, None, &TextStyle::default()).map(|lines| (lines, at)));
+        let label = label.map(|(label, at)| fonts.lines(&label.text, label.cap_mm, None, &TextStyle::default()).map(|lines| (lines, at)));
         let value = match (&cell.kind, shown.iter().find(|shown| shown.name == cell.name)) {
-            (CellKind::Text(text), Some(value)) => Some(value_lines(text, placed.value_box, measure, &value.text, &mut notes)),
+            (CellKind::Text(text), Some(value)) => Some(value_lines(text, placed.value_box, fonts, &value.text, &mut notes)),
             _ => None,
         };
         for text in [label, value].into_iter().flatten() {
-            match text {
-                Ok(text) => out.texts.push(text),
-                Err(SketchError::FontPending) => out.pending = true,
-                Err(e) => notes.push(Note::Refused(e.to_string())),
+            match Outcome::from(text) {
+                Outcome::Set(text) => out.texts.push(text),
+                Outcome::Pending => out.pending = true,
+                Outcome::Refused(why) => notes.push(Note::Refused(why)),
             }
         }
         out.notes.extend(notes.into_iter().map(|note| (cell.name.clone(), note)));
@@ -142,15 +132,9 @@ pub fn lay(block: &TitleBlock, layout: &TitleBlockLayout, family: &str, language
     out
 }
 
-/// `value`'s lines in `value_box`, as `measure` sets them, by the cell text rule, and where the
+/// `value`'s lines in `value_box`, as `fonts` sets them, by the cell text rule, and where the
 /// first starts; what doesn't fit is added to `notes`.
-fn value_lines(
-    text: &TextCell,
-    value_box: Aabb2,
-    measure: impl Fn(&str, f64, Option<f64>, &TextStyle) -> Result<PaperLines, SketchError>,
-    value: &str,
-    notes: &mut Vec<Note>,
-) -> Result<(PaperLines, Vec2), SketchError> {
+fn value_lines(text: &TextCell, value_box: Aabb2, fonts: &PaperFonts, value: &str, notes: &mut Vec<Note>) -> Result<(PaperLines, Vec2), SketchError> {
     let width = value_box.size().x;
     let align = match text.align {
         HAlign::Left => TextAlign::Left,
@@ -158,7 +142,7 @@ fn value_lines(
         HAlign::Right => TextAlign::Right,
     };
     let style = TextStyle { align, ..TextStyle::default() };
-    let lines = measure(value, text.cap_mm, text.fit.wrap.then_some(width), &style)?;
+    let lines = fonts.lines(value, text.cap_mm, text.fit.wrap.then_some(width), &style)?;
     notes.extend(text.fit.warn_chars(value).map(Note::Fit));
     if lines.lines.iter().any(|(_, w)| *w > width + EPS) {
         notes.push(Note::Fit(Warning::Width));
