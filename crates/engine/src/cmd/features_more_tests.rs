@@ -2704,3 +2704,41 @@ fn an_emboss_that_works_has_no_warning() {
         run(&mut s, "edit.undo", json!({}));
     }
 }
+
+/// A 40 x 10 stadium (two lines, two tangent arcs) extruded 10 mm. The top rim runs on smoothly
+/// through the points where a line meets an arc, so picking one of those points names the rim,
+/// not an ambiguous corner (#12215).
+fn stadium_block() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.line", json!({"points":[[5.0,0.0],[35.0,0.0]],"closed":false}));
+    run(&mut s, "sketch.arc.center_point", json!({"center":[35.0,5.0],"start":[35.0,0.0],"end":[35.0,10.0]}));
+    run(&mut s, "sketch.line", json!({"points":[[35.0,10.0],[5.0,10.0]],"closed":false}));
+    run(&mut s, "sketch.arc.center_point", json!({"center":[5.0,5.0],"start":[5.0,10.0],"end":[5.0,0.0]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance":10.0}));
+    s
+}
+
+#[test]
+fn chamfer_picked_where_a_line_meets_a_tangent_arc_takes_the_whole_rim() {
+    let mut s = stadium_block();
+    let before = volume(&mut s);
+    run(&mut s, "solid.chamfer", json!({"edges": [[35.0, 0.0, 10.0]], "distance": 0.2}));
+    let rim = 2.0 * 30.0 + 2.0 * std::f64::consts::PI * 5.0;
+    let removed = before - volume(&mut s);
+    let want = 0.5 * 0.2 * 0.2 * rim;
+    assert!((removed - want).abs() < 0.02 * want, "removed {removed} vs {want}");
+}
+
+/// A box corner is not a tangent join: a pick there still says several edges meet (#5173).
+#[test]
+fn chamfer_picked_at_a_box_corner_is_still_refused() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0.0,0.0],"p1":[20.0,10.0]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance":10.0}));
+    let err = s.execute("solid.chamfer", &json!({"edges": [[20.0, 0.0, 10.0]], "distance": 0.2})).unwrap_err().to_string();
+    assert!(err.contains("edges meet"), "{err}");
+}
