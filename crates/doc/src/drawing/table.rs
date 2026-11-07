@@ -5,6 +5,7 @@
 //! - **A parts list** lists one bill of materials view of a component of the drawing's design,
 //!   with the options [`crate::bom::ItemNumbers`] saves. Its source is checked against the
 //!   drawing's sources; a component deleted since is for what draws it to report.
+//!   [`PartsList::rows`] gives a list's rows as a table reads them.
 //! - **Where it sits** is a corner of the sheet's drawing space with an offset, so a change of
 //!   paper takes it along and moves nothing else, or a free place on paper.
 //!
@@ -16,11 +17,13 @@ use serde::{Deserialize, Serialize};
 use solidcraft_geom::cell::{Content, Format, HAlign, Part, Source};
 use solidcraft_geom::drawing_view::is_paper_coordinate;
 use solidcraft_geom::paper::MAX_SIDE_MM;
-use solidcraft_geom::table::{BALLOONED, Column, Filter, Heading, Table};
+use solidcraft_geom::table::{self, BALLOONED, Column, Filter, Heading, Table};
 
 use super::by_id::Record;
 use super::{Drawing, SheetComponent, require};
-use crate::bom::{Group, Request, View};
+use crate::assembly::BomType;
+use crate::bom::{self, Bom, Group, Mass, Quantity, Request, View};
+use crate::display_units::{NumberFormat, format_length, format_number};
 use crate::{DocError, Result, ids};
 
 /// The most tables a drawing may have.
@@ -125,6 +128,51 @@ impl PartsList {
             mass: false,
             purchased_contents: self.purchased_contents,
         }
+    }
+
+    /// Each row of `list` as a table reads it, each followed by the rows listed under it, with its
+    /// values formatted. A length is shown in `units`. A value the row doesn't have is left out, so the
+    /// cell shows [`solidcraft_geom::cell::MISSING`]: a mass not weighed or not known, or a quantity that doesn't add up.
+    pub fn rows(&self, list: &Bom, units: &str) -> Vec<table::Row> {
+        let row = |(item, row): (Vec<u32>, &bom::Row)| {
+            // Free properties first, so that none takes the place of a value below.
+            let mut fields = row.properties.clone();
+            let values = [
+                ("item", bom::item_text(&item)),
+                ("part_number", row.part_number.clone()),
+                ("name", row.names.join("; ")),
+                ("description", row.description.clone()),
+                ("revision", row.revision.clone()),
+                ("material", row.materials.join("; ")),
+                ("count", row.count.to_string()),
+            ];
+            fields.extend(values.map(|(key, value)| (key.to_string(), value)));
+            // In one of the row it is listed under, as a list reads; `count` has them all.
+            let quantity = match row.quantity {
+                Quantity::Count => Some(row.each.to_string()),
+                Quantity::Pieces(n) => Some(n.to_string()),
+                Quantity::Length(mm) => Some(format_length(mm, units, 2)),
+                Quantity::Unknown(_) => None,
+            };
+            let values = [("quantity", quantity), ("mass", self.mass.text(row.mass))];
+            fields.extend(values.into_iter().filter_map(|(key, value)| Some((key.to_string(), value?))));
+            let kind = if row.assembly { table::RowKind::Assembly } else { table::RowKind::Part };
+            table::Row { key: row.key.text(), kind, purchased: row.bom_type == BomType::Purchased, fields }
+        };
+        list.rows_deep().into_iter().map(row).collect()
+    }
+}
+
+impl MassFormat {
+    /// A mass as this format shows it, without its unit: the column's heading says that.
+    fn text(self, mass: Mass) -> Option<String> {
+        let Mass::Grams(grams) = mass else { return None };
+        let in_grams = match self.unit {
+            MassUnit::G => 1.0,
+            MassUnit::Kg => 1000.0,
+            MassUnit::Lb => 453.592_37,
+        };
+        format_number(grams / in_grams, self.decimals, &NumberFormat::default()).ok().map(|shown| shown.text)
     }
 }
 

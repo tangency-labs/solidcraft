@@ -317,7 +317,10 @@ fn hostile_tables_are_refused() {
             with(&|t| t.overrides = vec![Override { row: "plate".into(), column: "item".into(), text: "x".into() }; 2]),
             "no two overrides are for one cell",
         ),
-        (with(&|t| t.overrides.push(Override { row: "k".repeat(257), column: "item".into(), text: "x".into() })), "a row's key is at most 256 bytes"),
+        (
+            with(&|t| t.overrides.push(Override { row: "k".repeat(2049), column: "item".into(), text: "x".into() })),
+            "a row's key is at most 2048 bytes",
+        ),
         (
             with(&|t| t.overrides.push(Override { row: "plate".into(), column: "item".into(), text: "a\u{7}".into() })),
             "a cell's text has no control character but a line break",
@@ -390,7 +393,8 @@ fn hostile_rows_and_measures_are_refused() {
     assert_eq!(layout(&many), Err(Invalid("a table lists at most 10,000 rows")));
     assert_eq!(layout(&many[..MAX_ROWS]).unwrap().rows.len(), MAX_ROWS);
     assert_eq!(layout(&[plain("a".into()), plain("a".into())]), Err(Invalid("no two rows have the same key")));
-    assert_eq!(layout(&[plain("k".repeat(257))]), Err(Invalid("a row's key is at most 256 bytes")));
+    assert_eq!(layout(&[plain("k".repeat(2049))]), Err(Invalid("a row's key is at most 2048 bytes")));
+    assert_eq!(layout(&[plain("k".repeat(2048))]).unwrap().rows.len(), 1);
     let keyed = row("a", RowKind::Part, false, &[(&"k".repeat(257), "1")]);
     assert_eq!(layout(&[keyed]), Err(Invalid("a row field's key is at most 256 bytes")));
     let bell = row("a", RowKind::Part, false, &[("item", "1\u{7}")]);
