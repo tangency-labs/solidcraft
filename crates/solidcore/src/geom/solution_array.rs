@@ -88,7 +88,7 @@
 //! - **Storage.** The array is a `Vec`; slots past the size are never visible
 //!   upstream (every growth path zeroes them), so the allocation size
 //!   (`m_lMaxSize`) and borrowed arrays (`m_bIsBorrowed`) have no counterpart.
-//!   [`SolutionArray::with_capacity`] only reserves. The `try_` variants
+//!   [`SolutionArray::with_capacity`] grows on demand. The `try_` variants
 //!   ([`SolutionArray::try_set_size`], [`SolutionArray::try_insert_at`],
 //!   [`SolutionArray::try_with_capacity`]) take caller-chosen sizes and return
 //!   [`SolidError::InvalidInput`] when the slots cannot be allocated or would take
@@ -1417,16 +1417,13 @@ impl<O: SolutionObject> SolutionArray<O> {
         Self { data: Vec::new() }
     }
 
-    /// An empty array with room for `capacity` solutions
-    /// (`SmSolutionArray(nDataSize, NULL)`).
+    /// An empty array (`SmSolutionArray(nDataSize, NULL)`).
     ///
-    /// For small capacities; use [`SolutionArray::try_with_capacity`] for
-    /// capacities that come from caller input.
+    /// The capacity hint is not preallocated: solutions grow as they are added.
+    /// Use [`SolutionArray::try_with_capacity`] to reserve fallibly up front.
     #[must_use]
-    pub fn with_capacity(capacity: usize) -> Self {
-        Self {
-            data: Vec::with_capacity(capacity),
-        }
+    pub fn with_capacity(_capacity: usize) -> Self {
+        Self::new()
     }
 
     /// [`SolutionArray::with_capacity`] for capacities that come from caller input.
@@ -2132,6 +2129,16 @@ mod tests {
         assert_eq!(a.len(), 5);
         assert_eq!(a.get(1).unwrap().start.solution_value, 9.0);
         assert_eq!(a.get(4).unwrap().solution_type, SolutionType::NodesOnly);
+    }
+
+    #[test]
+    fn capacity_hint_does_not_allocate_from_caller_count() {
+        let mut a = SolutionArray::<Obj>::with_capacity(usize::MAX);
+        assert!(a.is_empty());
+        let solution = single(3.0, &[1.0]);
+        a.add(&solution);
+        assert_eq!(a.len(), 1);
+        assert_eq!(a.get(0), Some(&solution));
     }
 
     #[test]

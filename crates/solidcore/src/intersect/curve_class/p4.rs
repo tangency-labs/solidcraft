@@ -1940,8 +1940,8 @@ impl<O: ClassObject> CurveClassification<O> {
             vertexuses = kept;
 
             // for every Vertex->Vertexuse - Compute UVSector Props
-            let mut sectors = Vec::with_capacity(vertexuses.len());
-            let mut sector_ivl_rad = Vec::with_capacity(vertexuses.len());
+            let mut sectors = Vec::new();
+            let mut sector_ivl_rad = Vec::new();
             for &vu in &vertexuses {
                 let sector = vertexuse_compute_uv_sector(c.k, c.geometry, vu)?;
                 let beg_rad = ccw_angle(sector.beg_edge_uv_tan)?;

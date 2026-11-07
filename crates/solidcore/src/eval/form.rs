@@ -127,7 +127,7 @@ fn arcs_between(a0: f64, a1: f64) -> Option<(Vec<f64>, Vec<([f64; 2], f64)>)> {
     let phi = span / n as f64;
     let w = (0.5 * phi).cos();
     let at = |a: f64| [a.cos(), a.sin()];
-    let mut pts = Vec::with_capacity(2 * n + 1);
+    let mut pts = Vec::new();
     let mut knots = vec![0.0; 3];
     for k in 0..n {
         let start = a0 + phi * k as f64;
@@ -185,7 +185,7 @@ fn face_arcs(
 /// control points (as `(cos, sin)` factors on the unit circle's plane) with weights.
 fn arcs(q0: f64, n: usize) -> (Vec<f64>, Vec<([f64; 2], f64)>) {
     let at = |a: f64| [a.cos(), a.sin()];
-    let mut pts = Vec::with_capacity(2 * n + 1);
+    let mut pts = Vec::new();
     let mut knots = vec![q0; 3];
     for k in 0..n {
         let q = q0 + k as f64;

@@ -52,7 +52,7 @@
 //! by the halvings.
 
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{ignored, Result};
+use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::tol::ZONE_TOL_3D;
@@ -658,14 +658,20 @@ struct UvData {
 /// control point shared): `None` when the pieces jump across the seam, a curve point
 /// is outside `uv_domain` (by more than `uv_tol`, else it is moved onto it), the
 /// curve is an iso-parameter line or the weights do not fit NLib's range.
-fn join(pieces: &[Piece], uv_domain: &Extent2d, uv_tol: f64) -> Option<UvData> {
-    let degree = pieces.first()?.ctrl.len().checked_sub(1)?;
+/// Returns `InvalidInput` for a NaN domain bound at an endpoint to be clamped.
+fn join(pieces: &[Piece], uv_domain: &Extent2d, uv_tol: f64) -> Result<Option<UvData>> {
+    let Some(first) = pieces.first() else {
+        return Ok(None);
+    };
+    let Some(degree) = first.ctrl.len().checked_sub(1) else {
+        return Ok(None);
+    };
     // Constant pieces have no endpoint stride and are outside the non-iso construction.
     if degree == 0 {
-        return None;
+        return Ok(None);
     }
     let mut data = UvData {
-        knots: vec![pieces.first()?.t[0]],
+        knots: vec![first.t[0]],
         multiplicities: vec![degree + 1],
         points: Vec::new(),
         weights: Vec::new(),
@@ -674,15 +680,17 @@ fn join(pieces: &[Piece], uv_domain: &Extent2d, uv_tol: f64) -> Option<UvData> {
     let mut prev: Option<(usize, [f64; 3])> = None;
     for piece in pieces {
         if piece.ctrl.len() != degree + 1 {
-            return None;
+            return Ok(None);
         }
-        let first = *piece.ctrl.first()?;
+        let Some(&first) = piece.ctrl.first() else {
+            return Ok(None);
+        };
         let scale = match prev {
             None => 1.0,
             Some((segment, last)) => {
                 // across the seam the circle's parameter jumps
                 if segment.abs_diff(piece.segment) > 1 {
-                    return None;
+                    return Ok(None);
                 }
                 last[2] / first[2]
             }
@@ -694,7 +702,9 @@ fn join(pieces: &[Piece], uv_domain: &Extent2d, uv_tol: f64) -> Option<UvData> {
                 .push(Point3::new(u * scale / w, v * scale / w, 0.0));
             data.weights.push(w);
         }
-        let last = *piece.ctrl.last()?;
+        let Some(&last) = piece.ctrl.last() else {
+            return Ok(None);
+        };
         prev = Some((
             piece.segment,
             [last[0] * scale, last[1] * scale, last[2] * scale],
@@ -713,7 +723,13 @@ fn join(pieces: &[Piece], uv_domain: &Extent2d, uv_tol: f64) -> Option<UvData> {
     for p in data.points.iter_mut().step_by(degree) {
         for (c, ivl) in [(&mut p.x, u_ivl), (&mut p.y, v_ivl)] {
             if *c < ivl.min() - uv_tol || *c > ivl.max() + uv_tol {
-                return None;
+                return Ok(None);
+            }
+            if ivl.min().is_nan() || ivl.max().is_nan() {
+                return Err(SolidError::invalid_input(
+                    "intersect::surface_drop_lib::cylinder_section::join",
+                    "NaN UV domain bound",
+                ));
             }
             *c = c.clamp(ivl.min(), ivl.max());
         }
@@ -730,20 +746,20 @@ fn join(pieces: &[Piece], uv_domain: &Extent2d, uv_tol: f64) -> Option<UvData> {
     let (u_lo, u_hi) = range(|p| p.x);
     let (v_lo, v_hi) = range(|p| p.y);
     if u_hi - u_lo <= uv_tol || v_hi - v_lo <= uv_tol {
-        return None;
+        return Ok(None);
     }
     // weights in NLib's range
     let w_max = data.weights.iter().copied().fold(0.0_f64, f64::max);
     if !w_max.is_finite() || w_max <= 0.0 {
-        return None;
+        return Ok(None);
     }
     for w in &mut data.weights {
         *w /= w_max;
         if *w < WEIGHT_MIN || *w > WEIGHT_MAX {
-            return None;
+            return Ok(None);
         }
     }
-    Some(data)
+    Ok(Some(data))
 }
 
 /// The exact UV curve on the cylinder `surface` of `curve` over `interval` (see the
@@ -752,7 +768,8 @@ fn join(pieces: &[Piece], uv_domain: &Extent2d, uv_tol: f64) -> Option<UvData> {
 ///
 /// # Errors
 ///
-/// [`crate::error::SolidError::Unported`] from the evaluations only.
+/// [`SolidError::InvalidInput`] for a NaN UV domain bound at an endpoint to be clamped;
+/// [`SolidError::Unported`] from the evaluations.
 pub(crate) fn exact_uv_curve(
     k: &Kernel,
     surface: &Surface,
@@ -778,7 +795,7 @@ pub(crate) fn exact_uv_curve(
                 .u_interval()
                 .length()
                 .min(uv_domain.v_interval().length()));
-    let Some(data) = join(&pieces, uv_domain, uv_tol) else {
+    let Some(data) = join(&pieces, uv_domain, uv_tol)? else {
         return Ok(None);
     };
     let Some(uv_curve) = ignored(BSplineCurve::create_canonical(&CanonicalData {
@@ -836,6 +853,26 @@ mod tests {
 
     use super::*;
     use crate::curve::ellipse::{Ellipse, EllipseOptions};
+
+    #[test]
+    fn join_rejects_nan_domain_bounds() {
+        let pieces = [Piece {
+            t: [0.0, 1.0],
+            segment: 0,
+            ctrl: vec![[0.0, 0.0, 1.0], [1.0, 1.0, 1.0]],
+        }];
+        for domain in [
+            Extent2d::from_bounds(f64::NAN, 0.0, 1.0, 1.0),
+            Extent2d::from_bounds(0.0, 0.0, f64::NAN, 1.0),
+            Extent2d::from_bounds(0.0, f64::NAN, 1.0, 1.0),
+            Extent2d::from_bounds(0.0, 0.0, 1.0, f64::NAN),
+        ] {
+            assert!(matches!(
+                join(&pieces, &domain, 0.0),
+                Err(SolidError::InvalidInput { .. })
+            ));
+        }
+    }
 
     /// Check test #15's pole tolerance (`SM_ZONE_TOL_3D / 10`).
     const CHECK_POLE: f64 = ZONE_TOL_3D / 10.0;
@@ -1008,9 +1045,7 @@ mod tests {
             let interval = Extent1d::from_min_max(0.0, 1.0);
             let out = s.drop_curve_base::<Obj>(&k, &domain, &curve, &interval, 1e-6, false, None);
             assert_eq!(
-                out.as_ref()
-                    .err()
-                    .and_then(crate::error::SolidError::sm_status),
+                out.as_ref().err().and_then(SolidError::sm_status),
                 Some(crate::error::SM_ERR_NULL_POINTER),
                 "exact UV enabled: {enabled}"
             );

@@ -552,7 +552,7 @@ impl<O> Tree<O> {
         if self.owner_surface.is_some() || self.lists.iter().any(|l| l.object.is_some()) {
             return None;
         }
-        let mut nodes = Vec::with_capacity(self.nodes.len());
+        let mut nodes = Vec::new();
         for n in &self.nodes {
             let data = match &n.data {
                 NodeData::None => NodeData::None,
@@ -990,8 +990,8 @@ impl<O: Copy + PartialEq> Tree<O> {
             }
             let all = self.object_list()?;
             let mut union = *extent;
-            let mut objects = Vec::with_capacity(all.len());
-            let mut extents = Vec::with_capacity(all.len());
+            let mut objects = Vec::new();
+            let mut extents = Vec::new();
             for id in all {
                 let item = self.list(id)?;
                 objects.push(item.object);

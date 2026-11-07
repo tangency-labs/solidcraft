@@ -693,7 +693,7 @@ impl<O: ClassObject> CurveClassification<O> {
         &self,
         f: &mut dyn FnMut(O) -> Result<P>,
     ) -> Result<CurveClassification<P>> {
-        let mut data = Vec::with_capacity(self.data.len());
+        let mut data = Vec::new();
         for d in &self.data {
             data.push(CurveInterval {
                 interval: d.interval,
@@ -702,7 +702,7 @@ impl<O: ClassObject> CurveClassification<O> {
                 end: d.end.map_objects(&mut *f)?,
             });
         }
-        let mut tgt_loops = Vec::with_capacity(self.tgt_loops.len());
+        let mut tgt_loops = Vec::new();
         for l in &self.tgt_loops {
             tgt_loops.push(f(*l)?);
         }

@@ -110,7 +110,7 @@ fn insert(
     if k < p || k + 1 >= knots.len() || s >= p {
         return Err(invalid("a knot off the range"));
     }
-    let mut out = Vec::with_capacity(pts.len() + 1);
+    let mut out = Vec::new();
     for i in 0..=pts.len() {
         let q = if i + p <= k {
             pts.get(i).copied()
