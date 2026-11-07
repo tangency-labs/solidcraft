@@ -530,6 +530,26 @@ and selection colours stay authored. At 100% the transform is exactly unchanged.
 Only one such effect is allowed per theme; other effects and non-range bindings are rejected.
 The custom option keeps its authored label and order, after the standard controls.
 
+#### Theme layouts
+
+A theme can also arrange the workspace, in an optional `layout` object beside its `colors`.
+Its `preferences` section sets some of your preferences while the theme is on: the workspace
+layout (`layout`: `floating` or `compact`), where dialogs open (`dialog_place`), the navigation
+bar (`navigation_bar`, any of its settings) and the ribbon's labels (`ribbon_labels`). They are
+set once, when you turn the theme on, so you can still change them while it is on. When you turn
+on another theme, your own values come back. A theme that sets part of the navigation bar, such
+as `idle`, keeps the rest of yours, such as its buttons. For example:
+
+```json
+"layout": {
+  "preferences": {"layout": "floating", "ribbon_labels": true, "navigation_bar": {"idle": "always"}}
+}
+```
+
+A value a preference doesn't take is an import error. A preference a theme can't set, or a
+section this version doesn't know, is kept in the theme and exported again, but not used, so a
+theme made for a newer SolidCraft still imports.
+
 #### Follow a theme file
 
 In the desktop app, **Follow a theme file** (under the themes) takes a theme file that another

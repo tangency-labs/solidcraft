@@ -1288,6 +1288,12 @@ preference_settings! {
     /// Imported theme files (`theme_files`), kept here so they also work in the browser.
     #[serde(deserialize_with = "themes_that_read")]
     custom_themes: Vec<crate::theme_files::ThemeFile> = Vec::new();
+    /// The theme whose `layout.preferences` were set last (`apply_theme_preferences`): they are
+    /// set once when it is turned on, not again at every start.
+    theme_applied: String = String::new();
+    /// The user's own values of the preferences that theme set, given back when another theme
+    /// is turned on.
+    theme_saved: BTreeMap<String, serde_json::Value> = BTreeMap::new();
     /// Desktop: a `solidcraft-theme/1` file another tool writes, followed as the theme and
     /// reloaded when it changes (#7573). Empty (the default): no file is followed.
     theme_follow: String = String::new(), PAGE_APPEARANCE;
@@ -2343,6 +2349,9 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     // followed file (#7573) wins while it is followed and has read completely once.
     follow_theme_file(app, ctx);
     let file = active_theme_file(app);
+    // What the theme arranges besides its colours (`theme_layout`).
+    crate::theme_layout::set_current(file.map(|f| &f.layout));
+    let theme_id = file.map(|f| f.id.clone()).unwrap_or_default();
     let custom = crate::theme::prepare_tabs(ctx, file, file.and_then(|f| app.preferences.theme_options.get(&f.id)), || {
         file.map(|f| effective_theme_options(&app.preferences, f).0).unwrap_or_default()
     });
@@ -2359,6 +2368,7 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     if crate::theme::set_logo_accent(app.preferences.logo_accent) {
         app.styled = false;
     }
+    apply_theme_preferences(app, &theme_id);
     // egui's end-of-frame shortcuts only change its context; the saved preference would
     // overwrite that change next frame. Consume the desktop shortcuts into the preference.
     if ctx.options(|o| o.zoom_with_keyboard) && !crate::keymap::capturing(app) {
@@ -3432,6 +3442,41 @@ fn theme_choices(app: &SolveApp) -> Vec<(String, String)> {
         _ => 2,
     });
     choices
+}
+
+/// A theme's `layout.preferences` (`theme_layout::THEMEABLE`), set once when the theme `id` is
+/// turned on: first the values the theme on before replaced are given back, then the ones this
+/// theme replaces are kept to give back in turn. The user may change them while it is on.
+fn apply_theme_preferences(app: &mut SolveApp, id: &str) {
+    if app.preferences.theme_applied == id {
+        return;
+    }
+    let saved = std::mem::take(&mut app.preferences.theme_saved);
+    if !saved.is_empty()
+        && let Err(e) = set(app, &serde_json::Value::Object(saved.into_iter().collect()))
+    {
+        log::warn!("theme preferences: giving back the user's own values: {e}");
+    }
+    let mut values = crate::theme_layout::with(|layout| layout.preferences.as_ref().map(|p| p.values.clone())).unwrap_or_default();
+    if !values.is_empty() {
+        if let Ok(now) = serde_json::to_value(&app.preferences) {
+            app.preferences.theme_saved = values.keys().filter_map(|k| Some((k.clone(), now.get(k)?.clone()))).collect();
+            // A theme that sets part of an object (the navigation bar's `idle`) keeps the rest
+            // of the user's (its buttons).
+            for (key, value) in &mut values {
+                if let (Some(theirs), Some(own)) = (value.as_object(), now.get(key).and_then(serde_json::Value::as_object)) {
+                    let mut merged = own.clone();
+                    merged.extend(theirs.iter().map(|(k, v)| (k.clone(), v.clone())));
+                    *value = serde_json::Value::Object(merged);
+                }
+            }
+        }
+        if let Err(e) = set(app, &serde_json::Value::Object(values.into_iter().collect())) {
+            log::warn!("theme preferences of `{id}`: {e}");
+            app.preferences.theme_saved.clear();
+        }
+    }
+    app.preferences.theme_applied = id.to_string();
 }
 
 /// Turn a theme on (a mode or a theme file's id); dark follows it.
