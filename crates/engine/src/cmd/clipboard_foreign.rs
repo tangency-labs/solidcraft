@@ -278,6 +278,28 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> Result<Value> {
                 let matrix = if wire.space == solidcraft_sketch::WireSpace::Component { transform } else { &world_shift };
                 solidcraft_doc::map_wire(wire, matrix);
             }
+            // Their 3D constraints go with them (#10608): a fixed point where its curve now is,
+            // an axis the one the copy now runs along. One whose axis the paste turns away from
+            // every axis goes.
+            let component: std::collections::HashSet<String> =
+                sketch.wires.iter().filter(|w| w.space == solidcraft_sketch::WireSpace::Component).map(|w| w.id.clone()).collect();
+            let matrix = |wire: &str| if component.contains(wire) { transform } else { &world_shift };
+            sketch.wire_constraints.retain_mut(|c| match &mut c.kind {
+                solidcraft_sketch::WireConstraintKind::Fix { p, at } => {
+                    *at = solidcraft_doc::apply_point(matrix(&p.wire), *at);
+                    true
+                }
+                solidcraft_sketch::WireConstraintKind::AlongAxis { line, axis } => {
+                    match solidcraft_sketch::Axis::along(solidcraft_doc::apply_vector(matrix(line), axis.unit())) {
+                        Some(a) => {
+                            *axis = a;
+                            true
+                        }
+                        None => false,
+                    }
+                }
+                _ => true,
+            });
             // Patterns and text words have expressions outside FeatureKind's numeric inputs.
             for pattern in &mut sketch.patterns {
                 for e in pattern.count_expression.iter_mut().chain(pattern.expressions.values_mut()) {

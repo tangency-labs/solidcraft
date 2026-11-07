@@ -7423,12 +7423,17 @@ fn eval_feature(
             // The stored sketch is solved for its stored values, with its links where they
             // were stored: a link that moved must not change the side a dimension from it is on.
             let stored = sk.driving_values();
-            let report = doc.solve_sketch(vals, &mut sk, &stored, Some(sketch))?;
+            let mut report = doc.solve_sketch(vals, &mut sk, &stored, Some(sketch))?;
+            doc.discount_traces(f.id, &sk, &mut report);
             if !report.keeps_orientation() {
                 warns.insert(0, report.failure(|f| format!("the sketch constraints conflict ({f})")));
             } else {
                 // The solve may have moved the curve a text runs along.
                 warns.extend(crate::project::relay_path_texts(&mut sk));
+            }
+            // 3D constraints that fail leave the 3D curves where they were (#10608).
+            if let Some(w) = report.wires.as_ref().filter(|w| !w.ok) {
+                warns.push(w.failure(|f| format!("the 3D sketch constraints conflict ({f})")));
             }
             if !warns.is_empty() {
                 *warning = Some(warns.join("; "));

@@ -547,7 +547,9 @@ fn glyphs(s: &mut Session, p: &Value) -> Result<Value> {
             })
         })
         .collect();
-    Ok(json!({"sketch": id, "glyphs": list, "dof": ss.report.dof, "fully_constrained": ss.report.fully_constrained(), "conflicts": failing}))
+    Ok(
+        json!({"sketch": id, "glyphs": list, "dof": ss.report.shown_dof(), "planar_dof": ss.report.dof, "fully_constrained": ss.report.shown_dof() == 0, "conflicts": failing}),
+    )
 }
 
 /// Snap inference for a click at `at`: the nearest sketch point (coincident), the midpoint of a

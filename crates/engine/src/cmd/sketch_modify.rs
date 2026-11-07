@@ -3700,6 +3700,7 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
     let rotate_constraints = bool_(p, "rotate_constraints").unwrap_or(true);
     let selection = string_list(cmd, p, "entities")?;
     let (planar, drawn) = if copy { drawn_copy_selection(s, p, selection)? } else { (selection, Vec::new()) };
+    let target = sketch_store::target(s, p, cmd)?;
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let (mut cs, mut ps) =
             if planar.is_empty() && !drawn.is_empty() { (Vec::new(), Vec::new()) } else { entities(sk, &json!({"entities": planar}), cmd)? };
@@ -3724,10 +3725,16 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
             let (mut m, _) = copy_through(sk, &cs, &ps, &f, false, &|_| false, 1.0)?;
             m.extend(text_curves);
             let mut ids = ids_of(sk, &m);
+            let mut wires = Vec::new();
             for (wire, plane) in &drawn {
                 let fit: Vec<_> = wire.fit.iter().map(|&q| plane.to_world(f(plane.to_local(q))) + plane.normal() * plane.height(q)).collect();
-                ids.push(if wire.arc.is_some() { sk.add_drawn_arc_in(&fit, wire.space)? } else { sk.add_drawn_wire_in(&fit, wire.space)? });
+                wires.push(if wire.arc.is_some() { sk.add_drawn_arc_in(&fit, wire.space)? } else { sk.add_drawn_wire_in(&fit, wire.space)? });
             }
+            // Copied 3D curves are joined where they meet, as drawn ones are (#10608).
+            if !wires.is_empty() {
+                super::sketch_3d::join_in(sk, doc, target, &wires)?;
+            }
+            ids.extend(wires);
             return Ok(ids);
         }
         with_ellipse_axes(sk, &mut cs);
