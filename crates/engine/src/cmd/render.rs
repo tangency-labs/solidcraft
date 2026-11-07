@@ -9,6 +9,7 @@ use solidcraft_doc::render_settings::{RenderSettings, RenderSetup};
 use super::CommandSpec;
 use crate::params::bad;
 use crate::schema::render_camera::{CameraApplied, CameraFitted, CameraInfo, CameraSet, RenderCamera};
+use crate::schema::render_info::{Bounds, CpuResourceProfile, RenderBackends, RenderObject, RenderSceneInfo, SceneBody};
 use crate::{Result, Session};
 
 mod clear_coat;
@@ -78,9 +79,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&crate::schema::TypedContract::<crate::schema::render_lights::ListParams>::new())
         .output(crate::schema::output_schema_for::<crate::schema::render_lights::ListResult>)
         .params("setup?: saved setup name OR settings?: complete RenderSetup snapshot; neither uses defaults. Returns {lights:[{id,kind,name,name_key,number,implicit,intensity,colour,...spatial fields}]}. IDs are kind:zero-based-source-slot, stable across numerical edits but not family changes/reordering/removal/rig replacement; point and spot share punctual slots. Includes implicit default/preset lights. GPU RGB radiance is factored as colour * intensity; area edges are full world-mm vectors. Read-only, no host, camera change, save, render, model evaluation or undo. See docs/render-settings.md."),
-    CommandSpec::new("render.aging.describe","Layered Surface Aging",effects::aging).icon("appearance").noundo().doc_only()
+    CommandSpec::new("render.aging.describe","Layered Surface Aging",crate::checked!("render.aging.describe", effects::aging)).icon("appearance").noundo().doc_only()
+        .contract(&crate::schema::TypedContract::<crate::schema::render_info::NoParams>::new())
+        .output(crate::schema::output_schema_for::<crate::schema::render_info::AgingDescription>)
         .params("Empty object. Read-only original Rust/patina/dust/grime/scratch/chip/fading presets and exact GPU aging contract. UI activation opens the shared Aging tab; edits remain a saved render draft, never engineering geometry or material-property mutation."),
-    CommandSpec::new("render.effects.describe","Lens and Creative Effects",effects::presentation).icon("camera").noundo().doc_only()
+    CommandSpec::new("render.effects.describe","Lens and Creative Effects",crate::checked!("render.effects.describe", effects::presentation)).icon("camera").noundo().doc_only()
+        .contract(&crate::schema::TypedContract::<crate::schema::render_info::NoParams>::new())
+        .output(crate::schema::output_schema_for::<crate::schema::render_info::EffectsDescription>)
         .params("Empty object. Read-only original photographic/creative filter defaults and constraints. UI activation opens shared Effects controls. Saved finishing and exact-master regrading preserve raw EXR bytes; no physical lens or branded-film calibration is implied."),
     CommandSpec::new("render.coat.bind", "Save Clear Coat", crate::checked!("render.coat.bind", coat_bindings::bind)).icon("appearance").doc_only()
         .contract(&crate::schema::TypedContract::<crate::schema::render::CoatBindParams>::new())
@@ -206,7 +211,9 @@ CommandSpec::new("render.result.copy", "Copy Render Image", jobs::copy).icon("co
     .params("job?: completed JobId (default selected result). Validates the retained PNG for app clipboard copying (max 4096 per side, 4194304 pixels); headless returns frame metadata only. Never copies a provisional image or starts a job."),
 CommandSpec::new("render.export", "Export Render Image", jobs::export).icon("export").noundo().doc_only()
     .params("job?: {session, serial, generation} (default selected result), path: destination matching format?: png (default) or exr, overwrite?: false. EXR requires an opt-in raw linear master retained by that completed CPU or GPU job; never converts PNG pixels. Exports a retained completed image atomically; an existing destination is preserved on failure. See docs/render-jobs.md"),
-CommandSpec::new("render.backends", "Render Backends", backends).icon("list")
+CommandSpec::new("render.backends", "Render Backends", crate::checked!("render.backends", backends)).icon("list")
+    .contract(&crate::schema::TypedContract::<crate::schema::render_info::NoParams>::new())
+    .output(crate::schema::output_schema_for::<crate::schema::render_info::RenderBackends>)
     .noundo()
     .doc_only()
     .params("No parameters. Returns {schema_version: 1, default_backend: builtin, backends: [{id, label, availability, executors: [{id, availability, profiles, limits, scratch}]}]}. Metadata only; does not start rendering or probe a GPU. See docs/render-backends.md"),
@@ -214,7 +221,9 @@ CommandSpec::new("render.settings.get", "Render Settings", get_settings).icon("s
     .params("name?: saved setup. Without name returns {setups, defaults}; with name returns {name, setup}. Does not evaluate the model or apply a camera. See docs/render-settings.md"),
 CommandSpec::new("render.settings.set", "Save Render Settings", set_settings).icon("settings").doc_only()
     .params("name: setup name, set: object of fields to replace (backend, mode, camera, width, height, format, exposure_ev, environment_rotation, environment_intensity, background, job, surfaces, optics, coats, stage). job?: typed active raster/cpu_raytrace/gpu_path configuration with optional validated embedded HDR reference; omitted preserves, null clears, object replaces the complete job. Creates from defaults and saves without a host, validates atomically, one undo step; identical edits are no-ops. See docs/render-settings.md"),
-CommandSpec::new("render.scene", "Inspect Render Scene", scene).noundo().at("RENDER", "SCENE").icon("render_scene")
+CommandSpec::new("render.scene", "Inspect Render Scene", crate::checked!("render.scene", scene)).noundo().at("RENDER", "SCENE").icon("render_scene")
+    .contract(&crate::schema::TypedContract::<crate::schema::render_info::NoParams>::new())
+    .output(crate::schema::output_schema_for::<crate::schema::render_info::RenderSceneInfo>)
     .params("No parameters. Authoritative product-scene metadata, without modelling overlays or mesh payloads. Explicitly settles stale geometry; does not render an image. See docs/render-workspace.md"),
 CommandSpec::new("render.settings.apply", "Apply Render Camera", crate::checked!("render.settings.apply", apply_settings)).icon("camera").noundo().doc_only()
     .contract(&crate::schema::TypedContract::<crate::schema::render_camera::ApplyParams>::new())
@@ -286,15 +295,37 @@ fn scene(s: &mut Session, params: &Value) -> Result<Value> {
             return Err(bad("render.scene", "ambiguous stable occurrence name"));
         }
     }
-    let bodies: Vec<_> = scene
+    let bounds = |b: solidcraft_geom::Aabb3| Bounds { min: b.min.into(), max: b.max.into() };
+    let bodies = scene
         .meshes
         .iter()
         .enumerate()
-        .map(|(ordinal,m)| json!({"ordinal":ordinal,"name":m.name,"stable_target":stable.get(&m.name),"triangles":m.mesh.triangles.len(),"color":m.color,"opacity":m.opacity,"face_appearances":m.faces.len(),"bounds":{"min":m.mesh.bounds().min,"max":m.mesh.bounds().max}}))
-        .collect();
-    Ok(
-        json!({"bodies":bodies,"bounds":if scene.bounds.is_empty() { Value::Null } else { json!({"min":scene.bounds.min,"max":scene.bounds.max}) },"overlays":false}),
-    )
+        .map(|(ordinal, m)| {
+            let stable_target = stable.get(&m.name).map(serde_json::to_value).transpose().map_err(|e| bad("render.scene", e.to_string()))?;
+            Ok(SceneBody {
+                ordinal,
+                name: m.name.clone(),
+                stable_target,
+                triangles: m.mesh.triangles.len(),
+                color: m.color,
+                opacity: m.opacity,
+                face_appearances: m.faces.len(),
+                bounds: bounds(m.mesh.bounds()),
+            })
+        })
+        .collect::<Result<_>>()?;
+    let reply =
+        RenderSceneInfo { bodies, bounds: (!scene.bounds.is_empty()).then(|| bounds(scene.bounds)), overlays: false, param_warnings: Vec::new() };
+    typed_reply("render.scene", reply)
+}
+
+/// A render crate value as a JSON object, for a reply that publishes it as one
+/// ([`crate::schema::render_info::RenderObject`]).
+fn render_object(cmd: &str, value: &impl serde::Serialize) -> Result<RenderObject> {
+    match serde_json::to_value(value).map_err(|e| bad(cmd, e.to_string()))? {
+        Value::Object(fields) => Ok(fields),
+        _ => Err(bad(cmd, "a render description is not an object")),
+    }
 }
 
 fn apply_settings(s: &mut Session, params: &Value) -> Result<Value> {
@@ -370,8 +401,22 @@ fn backends(s: &mut Session, params: &Value) -> Result<Value> {
     if !params.as_object().is_some_and(|p| p.is_empty()) {
         return Err(bad("render.backends", "expected an empty parameter object"));
     }
-    Ok(json!({"schema_version": 1, "default_backend": "builtin", "backends": [s.render_backend()],
-        "cpu_resource_profiles": solidcraft_render::job::CpuBudget::ALL.map(|budget| json!({"id":budget,"limits":budget.limits()}))}))
+    let cmd = "render.backends";
+    let profiles = solidcraft_render::job::CpuBudget::ALL
+        .iter()
+        .map(|budget| {
+            let id = serde_json::to_value(budget).map_err(|e| bad(cmd, e.to_string()))?;
+            Ok(CpuResourceProfile { id, limits: render_object(cmd, &budget.limits())? })
+        })
+        .collect::<Result<_>>()?;
+    let reply = RenderBackends {
+        schema_version: 1,
+        default_backend: "builtin".into(),
+        backends: vec![render_object(cmd, &s.render_backend())?],
+        cpu_resource_profiles: profiles,
+        param_warnings: Vec::new(),
+    };
+    typed_reply(cmd, reply)
 }
 
 #[cfg(test)]
