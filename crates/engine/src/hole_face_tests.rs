@@ -576,3 +576,48 @@ fn a_hole_placed_on_another_parts_face_drills_its_own_part_behind_it() {
     assert!(hole_direction(&opened, "H").z > 0.999);
     drilled_base_only(&mut opened);
 }
+
+/// #11538: a sketch on an offset plane inside the part is where the hole starts, not the part's
+/// top face above it. A 5 mm blind hole from z 12 removes z 7..12.
+#[test]
+fn hole_from_a_sketch_on_an_offset_plane_inside_the_part_starts_at_the_plane() {
+    let mut s = Session::default();
+    box_part(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": "12 mm", "name": "Pts"}));
+    run(&mut s, "sketch.point", json!({"point": [20, 20], "id": "p1"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let base = volume(&mut s);
+    drill(&mut s, &["p1".to_string()], json!({"depth": 5}));
+    // The tool runs a hair past its start, so the walls are checked, not the volume.
+    assert!(solid_at(&s, 20.0, 20.0, 6.5) && !solid_at(&s, 20.0, 20.0, 7.5) && !solid_at(&s, 20.0, 20.0, 11.5));
+    assert!(solid_at(&s, 20.0, 20.0, 14.5) && solid_at(&s, 20.0, 20.0, 18.0) && base - volume(&mut s) < pi() * 25.0 * 6.0);
+}
+
+/// A sketch on a standard plane through the middle of a part keeps drilling from the part's
+/// surface, as before #11538 limited the new rule to derived planes.
+#[test]
+fn hole_from_a_sketch_on_a_standard_plane_inside_the_part_still_starts_at_the_surface() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 20, "corner": [-20, -20, -10], "name": "Part"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Pts"}));
+    run(&mut s, "sketch.point", json!({"point": [0, 0], "id": "p1"}));
+    run(&mut s, "sketch.finish", json!({}));
+    drill(&mut s, &["p1".to_string()], json!({"depth": 5}));
+    // Starts at the top (z 10) going down, not at z 0.
+    assert!(!solid_at(&s, 0.0, 0.0, 7.5) && solid_at(&s, 0.0, 0.0, 3.0) && solid_at(&s, 0.0, 0.0, -3.0));
+}
+
+/// The copies of a hole from a sketch on an offset plane start at the plane too (#11538).
+#[test]
+fn patterned_copy_of_an_offset_plane_hole_starts_at_the_plane_too() {
+    let mut s = Session::default();
+    box_part(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": "12 mm", "name": "Pts"}));
+    run(&mut s, "sketch.point", json!({"point": [10, 20], "id": "p1"}));
+    run(&mut s, "sketch.finish", json!({}));
+    drill(&mut s, &["p1".to_string()], json!({"depth": 5}));
+    run(&mut s, "solid.pattern.rectangular", json!({"features": ["H"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 15, "name": "Row"}));
+    for x in [10.0, 25.0] {
+        assert!(solid_at(&s, x, 20.0, 6.5) && !solid_at(&s, x, 20.0, 7.5) && !solid_at(&s, x, 20.0, 11.5) && solid_at(&s, x, 20.0, 14.5), "x {x}");
+    }
+}
