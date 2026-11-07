@@ -4856,10 +4856,12 @@ const RUN_ON_CLEAR: f64 = 0.2;
 /// enters rises above the face's plane around the entry when the face is curved or slants across
 /// the axis: those parts of it, touching the entry point, are drilled as before. Exact: a body
 /// that may reach above the face is intersected with the run-on's column; one whose exact box
-/// lies wholly below the face (the part being drilled, as a rule) costs nothing more.
-fn hole_run_on(st: &ModelState, plane: &Plane, reach: f64, top: f64) -> Result<(f64, Vec<Body>)> {
+/// lies wholly below the face (the part being drilled, as a rule) costs nothing more. Best
+/// effort: where the kernel cannot answer for a body (or for the column), that body keeps the
+/// run-on in its way as before, so a hole that drilled before never fails over a neighbour.
+fn hole_run_on(st: &ModelState, plane: &Plane, reach: f64, top: f64) -> (f64, Vec<Body>) {
     let disc = Region2 { outer: solidcore_record::Loop2::circle_from(Vec2::ZERO, reach, 0.0), holes: vec![] };
-    let column = kernel::extrude(plane, &[disc], 0.0, top)?.pop().ok_or_else(|| DocError::Invalid("hole tool".into()))?;
+    let Some(column) = kernel::extrude(plane, &[disc], 0.0, top).ok().and_then(|mut c| c.pop()) else { return (top, Vec::new()) };
     let column_box = more::exact_box(&column);
     let (o, n, x) = (plane.origin, plane.normal(), plane.x);
     let y = n.cross(x);
@@ -4887,22 +4889,37 @@ fn hole_run_on(st: &ModelState, plane: &Plane, reach: f64, top: f64) -> Result<(
                 continue;
             }
         }
-        let Some(piece) = kernel::boolean(&b.body, &column, BoolOp::Intersect)? else { continue };
-        // The body being drilled, around the entry point: drilled as before.
-        let probe = (b.body.size() * 1e-5).max(10.0 * slack);
-        let entered =
-            b.body.classify_point(o)? == kernel::PointClass::OnBoundary && b.body.classify_point(o - n * probe)? == kernel::PointClass::Inside;
-        if entered && piece.classify_point(o)? == kernel::PointClass::OnBoundary {
+        // The same in the hole's frame, where the box is tight about its axis: a convex face (a
+        // radial hole into a round bar) has all its body below the face's plane. Much cheaper
+        // than the intersect below; unknown goes on to it.
+        if kernel::transform_matrix(&b.body, frame).and_then(|t| t.exact_bounds()).is_ok_and(|t| t.max.z <= 2.0 * slack) {
             continue;
         }
-        let low = kernel::transform_matrix(&piece, frame)?.exact_bounds()?.min.z;
+        // The piece of the body in the column and how high its lowest point is, or nothing.
+        let found = || -> Result<Option<(Body, f64)>> {
+            let Some(piece) = kernel::boolean(&b.body, &column, BoolOp::Intersect)? else { return Ok(None) };
+            // The body being drilled, around the entry point: drilled as before. The entry point
+            // lies on the face, or just inside the body under a curved face's rim (a counterbore
+            // on a round bar measures from the rim's lowest point): the piece over it is the
+            // face's own rise, the hole's to cut.
+            if piece.classify_point(o)? != kernel::PointClass::Outside {
+                let probe = (b.body.size() * 1e-5).max(10.0 * slack);
+                if b.body.classify_point(o - n * probe)? == kernel::PointClass::Inside {
+                    return Ok(None);
+                }
+            }
+            let low = kernel::transform_matrix(&piece, frame)?.exact_bounds()?.min.z;
+            Ok(Some((piece, low)))
+        };
+        // A kernel error for this body: it keeps the run-on in its way, as before.
+        let Ok(Some((piece, low))) = found() else { continue };
         if low >= RUN_ON_CLEAR {
             lowest = lowest.min(low);
         } else {
             near.push(piece);
         }
     }
-    Ok((if lowest.is_finite() { top.min(lowest / 2.0) } else { top }, near))
+    (if lowest.is_finite() { top.min(lowest / 2.0) } else { top }, near)
 }
 
 /// [`hole_tools`], each with its exact geometry when it is a straight cylinder along the axis
@@ -4934,7 +4951,7 @@ fn hole_tools_and_prisms(
         }
         HoleKind::Simple | HoleKind::Drilled { .. } => r,
     };
-    let (top, above) = hole_run_on(st, &plane, if wide.is_finite() { wide } else { r }, (size * 0.01).max(0.1))?;
+    let (top, above) = hole_run_on(st, &plane, if wide.is_finite() { wide } else { r }, (size * 0.01).max(0.1));
     let bottom = match depth {
         Some(d) => -val(vals, d, Kind::Length)?,
         None => -(size * 2.0 + 1.0),
@@ -5052,10 +5069,11 @@ fn hole_tools_and_prisms(
     let mut kept = Vec::with_capacity(tools.len());
     for (mut tool, mut prism) in tools {
         for piece in &above {
-            if kernel::boolean(&tool.body, piece, BoolOp::Intersect)?.is_none() {
+            // Best effort: where the kernel cannot answer, the tool stays as it was before.
+            if !matches!(kernel::boolean(&tool.body, piece, BoolOp::Intersect), Ok(Some(_))) {
                 continue;
             }
-            let cut = kernel::boolean(&tool.body, piece, BoolOp::Cut)?.ok_or_else(|| DocError::Invalid("hole tool".into()))?;
+            let Ok(Some(cut)) = kernel::boolean(&tool.body, piece, BoolOp::Cut) else { continue };
             tool = Traced::step(cut, &[&tool, &Traced::unnamed(piece.clone())]);
             prism = None;
         }
