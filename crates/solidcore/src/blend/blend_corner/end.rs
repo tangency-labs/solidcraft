@@ -12,6 +12,7 @@
 //! | `ball_touching_at` (private)      | `SmBlendCorner::BallTouchingAt` (54a4ee7 splits it out of 41a39ec's `RadiusReachingSideEdgeEnd`, bit for bit) |
 //! | `radius_reaching_side_edge_end` (private) | `SmBlendCorner::RadiusReachingSideEdgeEnd` |
 //! | `refuse_end_past_side_edge` (private) | `SmBlendCorner::RefuseEndPastSideEdge` |
+//! | `blend_runs_out_past_vertex` (private) | none (a round run on past a smooth vertex keeps going past its side edge's end) |
 //! | [`describe_end_past_side_edge`]   | `SmBlendCorner::DescribeEndPastSideEdge`  |
 //! | `refuse_end_overflowing_side_edge` (private), [`describe_end_overflowing_side_edge`] | `SmBlendCorner::RefuseEndOverflowingSideEdge` (54a4ee7, 63c7962) |
 //! | [`side_edgeuse_across_seam_vertex`] | `sm_SideEdgeuseAcrossSeamVertex` (`SmBlendCorner.cpp`, 63c7962) |
@@ -597,6 +598,38 @@ fn end_face_runs_on_past_side_edge(
     }
     let eu = eu1::primary_edgeuse(target, e3)?.ok_or_else(nul)?;
     check_tangential_edgeuse_at_vertex(k, target, eu, far, rad_to_deg(corner.tangency_tol_radians))
+}
+
+/// Not the fork's (SolidCraft's `smooth_edges_and_unfinished_tangent_chains_are_refused_saying_why`,
+/// after #2656): whether this End is one where the blended edge runs on tangentially at the
+/// vertex into an edge not blended, and the blend run on runs out of the part
+/// ([`continuing_edges`] with and without that test). Such a round has no end rib to stop at:
+/// a rail past its side edge's far end goes on until the round leaves the material, and the
+/// global merge cuts it there, as it does where the rail stays on the side edge.
+///
+/// # Errors
+/// `SM_ERR_NULL_POINTER` without the corner's blended edge use, edge uses or vertex; those of
+/// [`continuing_edges`].
+fn blend_runs_out_past_vertex(
+    k: &Kernel,
+    target: &mut Brep,
+    corner: &FilletCorner,
+) -> Result<bool> {
+    let (Some(eus), Some(all), Some(vertex)) = (
+        corner.solver_eus.as_ref(),
+        corner.all_eus.as_ref(),
+        corner.vertex,
+    ) else {
+        return Err(nul());
+    };
+    let &fil_eu = eus.first().ok_or_else(nul)?;
+    let tol = rad_to_deg(corner.tangency_tol_radians);
+    let continues = continuing_edges(k, target, vertex, fil_eu, all, tol, &[], true, false)?;
+    if continues.is_empty() {
+        return Ok(false);
+    }
+    let capped = continuing_edges(k, target, vertex, fil_eu, all, tol, &[], true, true)?;
+    Ok(capped.is_empty())
 }
 
 /// The fork's `SmBlendCorner::DescribeEndPastSideEdge` (41a39ec): the reason of a refusal
@@ -1673,13 +1706,14 @@ pub fn calc_end_edge_geom(
         corner.edges.clear();
     } else if !runs_on
         && !both_miss
-        && end_face_runs_on_past_side_edge(
-            k,
-            target,
-            corner,
-            side_eu,
-            rail_face(fil_faces, side_faces),
-        )?
+        && (blend_runs_out_past_vertex(k, target, corner)?
+            || end_face_runs_on_past_side_edge(
+                k,
+                target,
+                corner,
+                side_eu,
+                rail_face(fil_faces, side_faces),
+            )?)
     {
         // Not the fork's: the end face runs on tangentially past the side edge's far end
         // (`end_face_runs_on_past_side_edge`): the end rib is deleted and the global merge
