@@ -87,6 +87,48 @@ pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, Str
     }
 }
 
+/// Find a saved Sketch Project edge in its body. Older designs can name the edge between
+/// numbered pieces of faces that now evaluate whole (`F4:side:l6#2|F4:side:l7#2`, now
+/// `F4:side:l6|F4:side:l7`). Recover it only when the faces it separates are whole, the saved
+/// point lies on it, and its name is exact. Other edge references still require the stored
+/// name as picked.
+pub(crate) fn locate_projected_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, String> {
+    locate_edge(b, name, near).or_else(|miss| recover_numbered_projected_edge(b, name, near).ok_or(miss))
+}
+
+fn recover_numbered_projected_edge(b: &ModelBody, name: &str, near: Vec3) -> Option<EdgeHit> {
+    if b.body.is_mesh() || !near.is_finite() {
+        return None;
+    }
+    // Each face of the name without its piece number (`F4:side:l6#2` is `F4:side:l6`).
+    let mut numbered = false;
+    let whole: Vec<&str> = name
+        .split('|')
+        .map(|part| match part.rsplit_once('#') {
+            Some((stem, number))
+                if !stem.is_empty()
+                    && strip_piece(stem) == stem
+                    && !number.is_empty()
+                    && !number.starts_with('0')
+                    && number.bytes().all(|digit| digit.is_ascii_digit()) =>
+            {
+                numbered = true;
+                stem
+            }
+            _ => part,
+        })
+        .collect();
+    if !numbered {
+        return None;
+    }
+    let hit = locate_edge(b, &whole.join("|"), near).ok().filter(|hit| hit.verified && hit.on_point)?;
+    // Each face it separates is whole: no other piece of it is left to be the one picked.
+    let mesh = b.mesh();
+    let faces = mesh.edge_faces.get(hit.edge)?;
+    let names = face_names(b);
+    faces.iter().all(|f| names.get(*f as usize).is_some_and(|n| faces_with_stem(b, n).len() == 1)).then_some(hit)
+}
+
 /// Whether a face found at `level` is exactly the face a name named: the very name (or another
 /// name of that very face: a face its feature made from several roles has each), or the named
 /// piece told apart by the faces around it. A face the named one was merged into, or a face of

@@ -297,3 +297,74 @@ fn an_edge_named_by_a_piece_of_a_face_that_is_whole_again_is_found() {
     let gone = whole.replace("F2:side:l4", "F2:side:l4#[F2:side:l2]");
     assert!(crate::name_lookup::locate_edge(body, &gone, near).is_err(), "{gone}");
 }
+
+/// A ring turned from a rectangle on YZ about Z: each side of the rectangle makes one round face.
+fn ring() -> Document {
+    let doc = Document {
+        features: serde_json::from_value(serde_json::json!([
+            {
+                "id": 1, "name": "Sketch1", "type": "sketch", "plane": {"name": "YZ", "type": "origin"},
+                "sketch": {
+                    "points": [
+                        {"fixed": true, "id": "origin", "pos": [0., 0.]},
+                        {"fixed": false, "id": "p1", "pos": [10., 0.]},
+                        {"fixed": false, "id": "p2", "pos": [20., 0.]},
+                        {"fixed": false, "id": "p3", "pos": [20., 5.]},
+                        {"fixed": false, "id": "p4", "pos": [10., 5.]}
+                    ],
+                    "curves": [
+                        {"a": 1, "b": 2, "construction": false, "id": "l1", "type": "line"},
+                        {"a": 2, "b": 3, "construction": false, "id": "l2", "type": "line"},
+                        {"a": 3, "b": 4, "construction": false, "id": "l3", "type": "line"},
+                        {"a": 4, "b": 1, "construction": false, "id": "l4", "type": "line"}
+                    ],
+                    "constraints": [],
+                    "counters": {"l": 4, "p": 4}
+                }
+            },
+            {
+                "id": 2, "name": "Revolve1", "type": "revolve", "body_names": ["Ring"], "angle": "360 deg",
+                "axis": {"axis": "Z", "type": "world"}, "convention": "sketch_normal",
+                "operation": "new_body", "profiles": {"type": "all"}, "sketch": 1
+            }
+        ]))
+        .unwrap(),
+        ..Document::default()
+    };
+    crate::format::read(&doc.to_json()).unwrap()
+}
+
+#[test]
+fn numbered_edge_projection_recovers_the_edge_between_whole_faces() {
+    // 0.30.1 split each round face of a revolve into numbered pieces; the edge between two of
+    // them is now the edge between the two whole faces, at the same place.
+    let doc = ring();
+    let mut model = crate::Model::new();
+    model.evaluate(&doc);
+    let state = model.state();
+    let at = Vec3::new(0., -20., 5.);
+    let source = LinkSource::Edge { body: "Ring".into(), at };
+    let resolved = crate::project::resolve(&doc, &BTreeMap::new(), &state, &Plane::XY, LinkKind::Project, &source).unwrap();
+    let mut sketch = Sketch::default();
+    let link = sketch.add_link(LinkKind::Project, source, &resolved.geom).unwrap();
+    let numbered = "F2:side:l2#2|F2:side:l3#2";
+    sketch.links[0].edge_name = Some(numbered.into());
+    let curves = sketch.link_curves(&link).len();
+    let saved = sketch.clone();
+
+    let warnings = crate::project::refresh_links(&doc, &BTreeMap::new(), &state, &Plane::XY, &mut sketch).unwrap();
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert!(!sketch.links[0].lost);
+    assert_eq!(sketch.links[0].edge_name.as_deref(), Some(numbered));
+    assert_eq!(sketch.link_curves(&link).len(), curves);
+
+    // Edges picked by fillets, holes and joints keep the name as picked.
+    let body = state.body("Ring").unwrap();
+    assert!(crate::naming::locate_edge(body, numbered, at).is_err(), "ordinary lookup stays strict");
+
+    // The saved point on another edge (the inner rim): not this edge, so it asks to reselect.
+    let mut elsewhere = saved;
+    elsewhere.links[0].source = LinkSource::Edge { body: "Ring".into(), at: Vec3::new(0., -10., 5.) };
+    let error = crate::project::refresh_links(&doc, &BTreeMap::new(), &state, &Plane::XY, &mut elsewhere).unwrap_err();
+    assert!(matches!(&error, crate::DocError::Reselect { reference, .. } if reference == numbered), "{error}");
+}

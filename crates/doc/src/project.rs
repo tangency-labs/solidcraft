@@ -754,8 +754,12 @@ fn lost(reference: &str) -> DocError {
 /// The edge a link's stored name finds, and the body it is on: the link's body, or, when no
 /// body has that name any more (it was joined into another), the one body on which the name
 /// finds an edge.
-fn locate_named_edge(st: &ModelState, body: &str, name: &str, at: Vec3) -> Option<(String, crate::naming::EdgeHit)> {
-    let hit = |b: &crate::ModelBody| crate::naming::locate_edge(b, name, at).ok().map(|hit| (b.name.clone(), hit));
+fn locate_named_edge(st: &ModelState, kind: LinkKind, body: &str, name: &str, at: Vec3) -> Option<(String, crate::naming::EdgeHit)> {
+    let locate = |b: &crate::ModelBody| match kind {
+        LinkKind::Project => crate::name_lookup::locate_projected_edge(b, name, at),
+        _ => crate::naming::locate_edge(b, name, at),
+    };
+    let hit = |b: &crate::ModelBody| locate(b).ok().map(|hit| (b.name.clone(), hit));
     match st.body(body) {
         Some(b) => hit(b),
         None => {
@@ -1077,7 +1081,7 @@ fn refresh_links_in(
         // edge has the name any more no other edge is taken for it: the sketch fails.
         let mut named_edge = None;
         if let (Some(name), LinkSource::Edge { body, at }) = (&l.edge_name, &source) {
-            let Some((body, hit)) = locate_named_edge(st, body, name, *at) else {
+            let Some((body, hit)) = locate_named_edge(st, l.kind, body, name, *at) else {
                 lose_named(sk, &l.id, name, lost_names, &mut warn)?;
                 continue;
             };
