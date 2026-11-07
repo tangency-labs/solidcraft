@@ -4,9 +4,9 @@
 //!
 //! The handlers read their parameters from the raw JSON, so each key here reads as its handler
 //! reads it and fails with its message. `study` reuses the motion study commands' reader, and
-//! the parts Motion Interference checks read as Sweep Joint's and Find Joint Limits' do (the
-//! same `checked_pairs`). Whether the study, joints and occurrences exist, and whether there are
-//! parts to check, stay the handlers' to check.
+//! the parts Motion Interference checks, `occurrences` and `against`, read as its
+//! `checked_pairs` reads them ([`PartList`]). Whether the study, joints and occurrences exist,
+//! and whether there are parts to check, stay the handlers' to check.
 
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::Error as _;
@@ -15,7 +15,7 @@ use serde_json::{Map, Value, json};
 use solidcraft_geom::Vec3Geom;
 
 use super::check::whole;
-use super::motion::{JointRef, PartRef, require, some_study, study_ref_schema};
+use super::motion::{JointRef, PartList, require, some_study, study_ref_schema};
 
 /// The most samples either command takes (`MAX_SAMPLES` in `cmd/motion_analysis.rs`).
 const MAX_SAMPLES: f64 = 1000.0;
@@ -93,11 +93,12 @@ pub struct InterferenceParams {
     /// The parts checked against each other (two or more, or one with `against`). Default:
     /// every occurrence.
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Vec<PartRef>")]
-    pub occurrences: Option<Vec<PartRef>>,
+    #[schemars(with = "PartList")]
+    pub occurrences: Option<PartList>,
     /// The parts that must be missed: each of `occurrences` is checked only against these.
+    /// Default (or `null`): none.
     #[serde(default)]
-    pub against: Option<Vec<PartRef>>,
+    pub against: Option<PartList>,
     /// Check the pairs of the design's contact sets instead (not with `occurrences`).
     #[serde(default)]
     pub contact_sets: Option<bool>,

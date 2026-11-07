@@ -44,12 +44,14 @@ fn schemas_and_the_key_check_agree() {
 /// #12852: calls that fail today get the same message in strict: the handlers' for a study,
 /// `samples`, `duration`, `joints`, the followed occurrence and point, and `budget_s` of the wrong
 /// shape (`study`, `occurrence` and `point` left out included: the schema requires them, and
-/// the types leave them to the handlers), and the handlers' own for what the design lacks. They
-/// need the rail's studies, so the shared helper (on a sketch) doesn't fit.
+/// the types leave them to the handlers), the part lists' (`occurrences` and `against`), and the
+/// handlers' own for what the design lacks. They need the rail's studies, so the shared helper
+/// (on a sketch) doesn't fit.
 #[test]
 fn strict_keeps_todays_errors() {
     let many_joints = vec![json!("Rail"); 257];
     let long_path = vec![json!(1); 65];
+    let too_many_parts = vec![json!("A"); 10_001];
     for (id, p) in [
         ("motion.plot", json!({})),
         ("motion.plot", json!({"study": null})),
@@ -84,6 +86,15 @@ fn strict_keeps_todays_errors() {
         ("motion.interference", json!({"study": "Push", "occurrences": ["A", "B"], "contact_sets": true})),
         ("motion.interference", json!({"study": "Push", "against": ["A"]})),
         ("motion.interference", json!({"study": "Push", "contact_sets": true})),
+        // The part lists: not a list, `null`, an entry that is neither an id nor a name, more
+        // than 10000; `against` is read the same way, with the same messages.
+        ("motion.interference", json!({"study": "Push", "occurrences": 5})),
+        ("motion.interference", json!({"study": "Push", "occurrences": null})),
+        ("motion.interference", json!({"study": "Push", "occurrences": ["A", true]})),
+        ("motion.interference", json!({"study": "Push", "occurrences": too_many_parts.clone()})),
+        ("motion.interference", json!({"study": "Push", "occurrences": ["A"], "against": 5})),
+        ("motion.interference", json!({"study": "Push", "occurrences": ["A"], "against": [true]})),
+        ("motion.interference", json!({"study": "Push", "occurrences": ["A"], "against": too_many_parts})),
     ] {
         let error = |level: ParamCheck| {
             let mut s = rail();
@@ -105,6 +116,7 @@ fn strict_keeps_todays_errors() {
 fn the_checks_take_what_the_schemas_allow() {
     let schemas = [("motion.plot", input_schema_for::<PlotParams>()), ("motion.interference", input_schema_for::<InterferenceParams>())];
     let schema = |id: &str| schemas.iter().find(|(name, _)| *name == id).map(|(_, s)| s.as_value().clone()).unwrap_or_default();
+    let too_many_parts = vec![json!("A"); 10_001];
     for (id, p, takes) in [
         ("motion.plot", json!({"study": "Push"}), true),
         ("motion.plot", json!({"study": 1}), true),
@@ -133,6 +145,12 @@ fn the_checks_take_what_the_schemas_allow() {
         ("motion.interference", json!({"study": "Push", "budget_s": 86401}), false),
         ("motion.interference", json!({"study": "Push", "occurrences": null}), false),
         ("motion.interference", json!({"study": "Push", "contact_sets": "yes"}), false),
+        ("motion.interference", json!({"study": "Push", "occurrences": [1], "against": null}), true),
+        ("motion.interference", json!({"study": "Push", "occurrences": 5}), false),
+        ("motion.interference", json!({"study": "Push", "occurrences": ["A", true]}), false),
+        ("motion.interference", json!({"study": "Push", "occurrences": too_many_parts.clone()}), false),
+        ("motion.interference", json!({"study": "Push", "occurrences": ["A"], "against": "B"}), false),
+        ("motion.interference", json!({"study": "Push", "occurrences": ["A"], "against": too_many_parts}), false),
     ] {
         let issues = crate::schema::issues(id, &p);
         assert_eq!(issues.is_empty(), takes, "{id} {p}: {issues:?}");
