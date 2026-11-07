@@ -69,6 +69,7 @@ pub mod edit;
 pub mod features;
 pub mod file;
 pub mod inspect;
+pub mod joint_sweep;
 pub mod joints;
 pub mod libraries;
 pub mod mass_properties;

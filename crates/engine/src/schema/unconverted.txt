@@ -61,7 +61,6 @@ joint.reach
 joint.rigid_group
 joint.screw
 joint.solve
-joint.sweep
 material.assign
 material.list
 mesh.convert
