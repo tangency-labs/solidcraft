@@ -377,6 +377,9 @@ pub struct Borders {
     pub primary_inset: Option<InsetBorder>,
     /// Optional directional chrome. Absent themes keep their flat strokes.
     pub bevel: Option<Bevel>,
+    /// Optional glass finish over see-through surfaces and buttons (`crate::glass`). Absent
+    /// themes keep their flat surfaces.
+    pub glass: Option<crate::glass::Glass>,
 }
 
 /// Two directional edge bands, shared by raised chrome and recessed editors.
@@ -441,6 +444,7 @@ impl Borders {
         control: None,
         primary_inset: None,
         bevel: None,
+        glass: None,
     };
 
     pub fn stroke(self, role: BorderRole, fallback: Stroke) -> Stroke {
@@ -473,11 +477,18 @@ impl Tokens {
 
     /// Compound controls supply the same corner geometry as their selected fill.
     pub fn button_bevel_with_radius(&self, ui: &egui::Ui, response: &egui::Response, selected: bool, radius: impl Into<egui::CornerRadius>) {
-        if let Some(bevel) = self.borders.bevel {
-            let pressed = response.enabled()
+        let pressed = || {
+            response.enabled()
                 && (response.is_pointer_button_down_on()
-                    || (response.has_focus() && ui.input(|i| i.key_down(egui::Key::Space) || i.key_down(egui::Key::Enter))));
-            bevel.paint(ui.painter(), response.rect, radius, selected || pressed, response.enabled());
+                    || (response.has_focus() && ui.input(|i| i.key_down(egui::Key::Space) || i.key_down(egui::Key::Enter))))
+        };
+        let radius: egui::CornerRadius = radius.into();
+        if let Some(bevel) = self.borders.bevel {
+            bevel.paint(ui.painter(), response.rect, radius, selected || pressed(), response.enabled());
+        }
+        // A glass theme's buttons are glossy (`Glass::paint_gloss`).
+        if let Some(glass) = self.borders.glass {
+            glass.paint_gloss(ui.painter(), response.rect.shrink(1.0), radius, selected || pressed(), response.enabled());
         }
     }
 

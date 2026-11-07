@@ -7,6 +7,26 @@ use egui::{Color32, Context, Frame, Id, Stroke, WidgetText};
 
 pub(super) type Background = fn(&egui::Painter, Frame, egui::Rect, egui::Shape) -> egui::Shape;
 
+/// Whether surfaces get a backing under their contents: blur behind the main window's
+/// surfaces, or a glass theme's light (`crate::glass`).
+fn backed(ctx: &Context) -> bool {
+    (crate::blur::enabled() && ctx.viewport_id() == egui::ViewportId::ROOT) || Tokens::get().borders.glass.is_some()
+}
+
+/// A surface's backing, under its contents: `shape` (its frame, or nothing when egui paints the
+/// frame itself) with blur behind it, then a glass theme's light over its fill.
+fn backing(painter: &egui::Painter, frame: Frame, content: egui::Rect, shape: egui::Shape) -> egui::Shape {
+    let shape = if crate::blur::enabled() && painter.ctx().viewport_id() == egui::ViewportId::ROOT {
+        crate::blur::decorate(painter, frame, content, shape)
+    } else {
+        shape
+    };
+    match Tokens::get().borders.glass {
+        Some(glass) => glass.backing(painter, frame, content, shape),
+        None => shape,
+    }
+}
+
 /// A reserved background slot for native hosts whose Frame is painted by egui.
 pub(super) struct BackingSlot {
     painter: egui::Painter,
@@ -15,7 +35,7 @@ pub(super) struct BackingSlot {
 
 impl BackingSlot {
     pub(super) fn reserve(ctx: &Context, layer: egui::LayerId) -> Option<Self> {
-        if !crate::blur::enabled() || ctx.viewport_id() != egui::ViewportId::ROOT {
+        if !backed(ctx) {
             return None;
         }
         let painter = ctx.layer_painter(layer);
@@ -27,7 +47,7 @@ impl BackingSlot {
         let frame = *ui.stack().frame();
         let painter = ui.painter().clone();
         let result = body(ui);
-        self.painter.set(self.slot, crate::blur::decorate(&painter, frame, ui.min_rect(), egui::Shape::Noop));
+        self.painter.set(self.slot, backing(&painter, frame, ui.min_rect(), egui::Shape::Noop));
         result
     }
 }
@@ -40,7 +60,7 @@ pub(super) fn show_combo<R>(
     combo: egui::ComboBox,
     body: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::InnerResponse<Option<R>> {
-    if !crate::blur::enabled() || ui.ctx().viewport_id() != egui::ViewportId::ROOT {
+    if !backed(ui.ctx()) {
         return combo.show_ui(ui, body);
     }
     let popup = widget.with("popup");
@@ -62,7 +82,7 @@ pub(super) fn show_combo<R>(
         body(ui)
     });
     if let (Some(slot), Some((painter, frame)), Some(response)) = (slot, host, ui.ctx().read_response(popup)) {
-        slot.painter.set(slot.slot, crate::blur::decorate(&painter, frame, response.rect - frame.total_margin(), egui::Shape::Noop));
+        slot.painter.set(slot.slot, backing(&painter, frame, response.rect - frame.total_margin(), egui::Shape::Noop));
     }
     shown
 }
@@ -716,24 +736,20 @@ impl Container {
 
     /// Stock Frame path for backing cards; no additional inset chrome is introduced.
     pub(crate) fn show_backing<R>(ui: &mut egui::Ui, frame: Frame, body: impl FnOnce(&mut egui::Ui) -> R) -> egui::InnerResponse<R> {
-        if !crate::blur::enabled()
-            || frame.fill.a() == 0
-            || (frame.fill.a() == 255 && ui.painter().opacity() >= 1.0)
-            || ui.ctx().viewport_id() != egui::ViewportId::ROOT
-        {
+        if !backed(ui.ctx()) || frame.fill.a() == 0 || (frame.fill.a() == 255 && ui.painter().opacity() >= 1.0) {
             return frame.show(ui, body);
         }
         let slot = ui.painter().add(egui::Shape::Noop);
         let mut prepared = frame.begin(ui);
         let inner = body(&mut prepared.content_ui);
-        ui.painter().set(slot, crate::blur::decorate(ui.painter(), frame, prepared.content_ui.min_rect(), egui::Shape::Noop));
+        ui.painter().set(slot, backing(ui.painter(), frame, prepared.content_ui.min_rect(), egui::Shape::Noop));
         egui::InnerResponse { inner, response: prepared.end(ui) }
     }
 
     /// Fill an already-reserved backing slot, preserving its original paint ordering.
     pub(crate) fn set_backing(painter: &egui::Painter, slot: egui::layers::ShapeIdx, frame: Frame, content: egui::Rect) {
         let shape = frame.paint(content);
-        painter.set(slot, if crate::blur::enabled() { crate::blur::decorate(painter, frame, content, shape) } else { shape });
+        painter.set(slot, backing(painter, frame, content, shape));
     }
 
     pub(crate) fn show_central<R>(
@@ -742,11 +758,7 @@ impl Container {
         frame: Frame,
         body: impl FnOnce(&mut egui::Ui) -> R,
     ) -> egui::InnerResponse<R> {
-        if !crate::blur::enabled()
-            || frame.fill.a() == 0
-            || (frame.fill.a() == 255 && ui.painter().opacity() >= 1.0)
-            || ui.ctx().viewport_id() != egui::ViewportId::ROOT
-        {
+        if !backed(ui.ctx()) || frame.fill.a() == 0 || (frame.fill.a() == 255 && ui.painter().opacity() >= 1.0) {
             return panel.frame(frame).show(ui, body);
         }
         let slot = BackingSlot::reserve(ui.ctx(), ui.layer_id());
@@ -758,7 +770,7 @@ impl Container {
 
     fn background(self, ctx: &Context, frame: Frame) -> Option<Background> {
         // Keep the off path to boundary checks only: no painter, shape slot or allocation.
-        if crate::blur::enabled() && ctx.viewport_id() == egui::ViewportId::ROOT && frame.fill.a() > 0 { Some(crate::blur::decorate) } else { None }
+        if backed(ctx) && frame.fill.a() > 0 { Some(backing) } else { None }
     }
 
     pub(super) fn show_frame_background<R>(
@@ -831,14 +843,14 @@ impl Container {
     /// Manually painted chrome uses exactly the same outer and inset policy as hosts.
     pub(crate) fn paint_frame(painter: &egui::Painter, frame: Frame, content: egui::Rect) {
         let shape = frame.paint(content);
-        painter.add(if crate::blur::enabled() { crate::blur::decorate(painter, frame, content, shape) } else { shape });
+        painter.add(backing(painter, frame, content, shape));
         Self::paint_inset(painter, frame.widget_rect(content), frame);
     }
 
     /// Semantic manually painted workspace surface; HUDs keep `paint_frame`.
     pub(crate) fn paint_background(self, painter: &egui::Painter, frame: Frame, content: egui::Rect) {
         let shape = frame.paint(content);
-        painter.add(if crate::blur::enabled() { crate::blur::decorate(painter, frame, content, shape) } else { shape });
+        painter.add(backing(painter, frame, content, shape));
     }
 
     pub(crate) fn paint_panel_frame(painter: &egui::Painter, frame: Frame, content: egui::Rect) {
