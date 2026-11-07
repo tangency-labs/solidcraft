@@ -131,8 +131,11 @@ retained data or recovery intent reject atomically. Restoration uses the foundat
 decoder and reappearance logic. Storage preparation finishes before live dispatch;
 catalogue publication is infallible after successful native/controller guards.
 Revision changes during staging reject the staged catalogue. No fallible storage
-write after live commit is treated as an atomic success. The shipped catalogue is
-in-memory; production preference durability and migrations remain peer work.
+write after live commit is treated as an atomic success. The default catalogue is
+in-memory. An explicitly enabled application preference adapter stores its
+existing bounded snapshot under `panel_layout` in `SolveApp::prefs`; native and
+web use their existing writers for the same value. This does not enable the
+production panel migration or change Classic defaults.
 
 Atomic layout batches contain 1..64 commands, using the same parser/executor and
 one final guarded Apply or Replace plus one catalogue publication. Queries and
@@ -181,6 +184,18 @@ Every count/string/record is bounded before allocation, and hydration rejects
 duplicate names across users/built-ins, duplicate workspace keys, corrupt framing,
 trailing data, invalid envelope identities and all existing aggregate/node/depth
 limits before a candidate can be published. This seam performs no disk storage.
+
+With application panel preferences enabled, the existing Layout preferences page
+uses these commands for workspace selection, named layout save/apply and reset.
+Reset changes only the current workspace and keeps the named layout library.
+Preferences Cancel restores the layout and catalogue through runtime admission;
+if restoration is refused, the dialog and its saved baseline stay open. Periodic
+preference writes retain that baseline until Apply. Settings profiles carry the
+selected layout workspace and each workspace's current arrangement, excluding
+the named library and machine-specific native window geometry. Page defaults
+preserve all arrangements and the library. None of these operations changes the
+design or camera. Names compare case-insensitively; `layout.save {name,replace:true}`
+explicitly replaces a user layout. The legacy `overwrite` flag remains accepted.
 
 Reading a retained envelope does not consume quarantine merely because the registry
 has grown. `decode_retained_record` validates an already-retained record exactly;
@@ -248,16 +263,18 @@ actual current Session without another service tick. Runtime inspection remains
 read-only. The shared host adds no production command registration beyond the
 application-layout commands above.
 
-For native host evidence, `ui.panel_fixture {enabled?, preset?}` installs bounded
+For native host evidence, `ui.panel_fixture {enabled?, preset?, remember?}` installs bounded
 synthetic content in the real `SolveApp` workspace host. The normal connection
-authentication applies. It is off by default; no environment switch, preference,
-design change, production content registration or native panel window is added.
+authentication applies. It is off by default and ephemeral unless explicitly
+enabled with `remember:true`. It adds no design change, production content
+registration or native panel window.
 
 | Request | Effect |
 | --- | --- |
 | `{}` | Read current host/probe/Session observations without ticking services or dispatching actions. |
 | `{"enabled":true}` | Enable the `docks` specimen if no runtime exists. |
 | `{"preset":"tabs"}` | Enable the named specimen if no runtime exists. |
+| `{"preset":"tabs","remember":true}` | Enable the specimen and its application preference catalogue. Restore a saved record after valid host dimensions are available. |
 | `{"enabled":false}` | Preflight and tear down only the specimen runtime; refusal leaves it intact. |
 
 Presets are `docks` (Left/Right/Bottom, with two Left sections), `tabs` (two groups
@@ -274,6 +291,14 @@ To change preset, disable successfully first, then enable the next preset. Enabl
 stages the runtime, first tick and host before publishing any of them; teardown
 preflights every retained controller. Wrong types, unknown parameters/presets and
 `enabled:false` combined with `preset` fail before mutation.
+
+`remember` is an opt-in enable parameter, not a switch on an existing runtime.
+To review restart persistence, save through the normal application preference
+writer, restart with the same isolated settings, then explicitly enable the same
+specimen with `remember:true`. Loading settings alone never starts specimen
+content. A failed restore retains the saved record and reports a recovery notice.
+Any Modelling, Sketch, Render, Review or Classic arrangements registered by this
+fixture are synthetic demonstrations, not production workspace presets.
 
 Replies include `enabled`, `runtime` when the specimen runtime exists, `host`
 (null before its first rendered frame), and `session`. `runtime` contains the
@@ -895,6 +920,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `navigator_texture` (`themed` (default): the custom view navigator in the cube's colours; `modeled`: in its body's own appearance and edge colour)
 - `offer_stand_up`
 - `orbit_around` (`view_centre` (default: what Pan moves and Fit frames), `origin` (the world origin stays still on screen), `cursor` (the model point under the pointer when the drag began); the older `orbit_cursor` boolean still sets `cursor` when true)
+- `orbit_cursor_wrap` (default true: an orbit drag that reaches the edge of the view moves the cursor to the opposite edge and keeps turning)
 - `orbit_reverse` (default false: Shift with two-finger scrolling orbits the other way)
 - `origin_plane_names` (`xyz` (default) or `top_front_right`: the browser, dialogs and lists call the origin planes Top, Front and Right; their ids, commands and saved designs keep XY, XZ and YZ)
 - `pan_reverse_x` (default false: horizontal scrolling pans the other way)

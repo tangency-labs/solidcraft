@@ -221,13 +221,14 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.tr("prefs.structure.layout_note"),
             Some(crate::settings_profiles::tag),
         );
+        super::panel_layout::show(app, ui);
         // Retain the section key for existing reveal/open callers.
         ui_kit::settings_section(ui, "layout", app.tr("prefs.layout_page.window"), |ui| {
             ui_kit::settings_pair(
                 ui,
                 |ui| {
                     ui_kit::settings_form(ui, t.form_label_width + t.space_16, |ui| {
-                        ui_kit::row(ui, app.tr("prefs.workspace"), |ui| {
+                        ui_kit::row(ui, app.tr("ui.panel_layout.panel_style"), |ui| {
                             let mut selected = usize::from(app.ui.layout == crate::shell::LayoutMode::Docked);
                             if ui_kit::segmented(
                                 ui,

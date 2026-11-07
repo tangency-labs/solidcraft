@@ -308,6 +308,18 @@ fn split_at(sk: &mut Sketch, ci: usize, ts: &[f64], cmd: &str) -> Result<(Vec<us
     Ok((pieces, pts))
 }
 
+/// Points placed at a share of curve `ci`'s length (Divide Curve) stay on what is left of it, free to
+/// slide: a trim or a break changes the length they share, and holding the shares would move them.
+pub(super) fn loosen_along(sk: &mut Sketch, ci: usize) {
+    for k in &mut sk.constraints {
+        if let ConstraintKind::PointAlong { p, c, .. } = k.kind
+            && c == ci
+        {
+            k.kind = ConstraintKind::PointOnCurve { p, c };
+        }
+    }
+}
+
 /// Keep the pieces of a split tied together: lines collinear, arcs on one circle.
 fn tie(sk: &mut Sketch, pieces: &[usize]) -> Result<()> {
     for w in pieces.windows(2) {
@@ -687,6 +699,7 @@ fn hold_cut(sk: &mut Sketch, before: Option<&Sketch>, midpoints: &[usize], pi: u
 /// side, or the whole curve when nothing crosses it. Returns what `sketch.trim` reports and the
 /// removed piece as a polyline.
 fn remove_piece(sk: &mut Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<(Value, Vec<Vec2>)> {
+    loosen_along(sk, ci);
     let id = sk.curves.get(ci).map(|c| c.id.clone()).unwrap_or_default();
     if sk.curves.get(ci).is_some_and(|c| c.infinite) {
         return Err(bad(cmd, "an infinite line has no ends to trim back to: make it a normal line first"));
@@ -929,6 +942,7 @@ fn break_cmd(s: &mut Session, p: &Value) -> Result<Value> {
             separate_end(sk, ci, end)?;
             return Ok(ids_of(sk, &[ci]));
         }
+        loosen_along(sk, ci);
         if sk.curves.get(ci).is_some_and(|c| c.kind.is_freeform()) {
             let r = if let Some(points) = &points {
                 super::sketch_freeform::break_at_points(sk, ci, points, cmd)?
@@ -1382,7 +1396,7 @@ fn arc_end_held(sk: &Sketch, ci: usize, end: usize) -> bool {
         use solidcraft_sketch::ConstraintKind::*;
         match c.kind {
             Coincident { p, q } => p == end || q == end,
-            Fix { p } | PointOnCurve { p, .. } | Midpoint { p, .. } => p == end,
+            Fix { p } | PointOnCurve { p, .. } | PointAlong { p, .. } | Midpoint { p, .. } => p == end,
             HorizontalPoints { p, q } | VerticalPoints { p, q } | Symmetric { p, q, .. } => p == end || q == end,
             _ => false,
         }
@@ -1500,7 +1514,7 @@ fn grow_line(sk: &mut Sketch, ci: usize, aim: LineAim) -> Result<String> {
         match c.kind {
             Coincident { p, q } => p == end || q == end,
             Fix { p } => p == end,
-            PointOnCurve { p, .. } => p == end,
+            PointOnCurve { p, .. } | PointAlong { p, .. } => p == end,
             Midpoint { p, .. } => p == end,
             HorizontalPoints { p, q } | VerticalPoints { p, q } => p == end || q == end,
             Symmetric { p, q, .. } => p == end || q == end,

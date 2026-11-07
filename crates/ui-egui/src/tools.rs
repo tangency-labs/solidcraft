@@ -732,7 +732,7 @@ pub(crate) fn constraint_preselection(
         (unique.len() == ids.len()).then_some(ids)
     };
     match (command, selection) {
-        ("sketch.constraint.fix", _) => selected_ids(false, 1).map(|ids| json!({"entities":ids})),
+        ("sketch.constraint.fix", _) => fix_preselection(selection).map(|ids| json!({"entities":ids})),
         ("sketch.constraint.polygon", _) => selected_ids(true, 3).map(|ids| json!({"lines":ids})),
         // Three or more curves: all of them equal, in pick order (#4985). Two keep the `a, b` form.
         ("sketch.constraint.equal", _) if selection.len() >= 3 => selected_ids(true, 3).map(|ids| json!({"curves":ids})),
@@ -770,6 +770,30 @@ pub(crate) fn constraint_preselection(
         }
         _ => None,
     }
+}
+
+/// The sketch points and curves Fix takes from a selection (#11663). A box drawn over a sketch
+/// also takes its dimensions and constraint icons; those cannot be fixed and are passed over, so
+/// the geometry boxed with them is still fixed at once. Anything else selected (a body, a
+/// midpoint, a curve of another sketch) leaves the choice to the pick tool. As many entities as the command takes.
+fn fix_preselection(selection: &[solidcraft_engine::Sel]) -> Option<Vec<&str>> {
+    use solidcraft_engine::Sel::{SketchConstraint, SketchCurve, SketchPoint};
+    const MAX_ENTITIES: usize = 10_000;
+    let mut ids = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for s in selection {
+        let id = match s {
+            SketchCurve { id, sketch: None } | SketchPoint { id } => id.as_str(),
+            // A curve of another sketch: its id alone would name a curve of this one (#3726).
+            SketchCurve { .. } => return None,
+            SketchConstraint { .. } => continue,
+            _ => return None,
+        };
+        if seen.insert(id) {
+            ids.push(id);
+        }
+    }
+    (1..=MAX_ENTITIES).contains(&ids.len()).then_some(ids)
 }
 
 pub(crate) fn projection_preselection(selection: &[solidcraft_engine::Sel]) -> Option<Vec<Value>> {
