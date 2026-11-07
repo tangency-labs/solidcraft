@@ -2,7 +2,7 @@
 //!
 //! A plugin is a directory of `{data}/plugins/<id>/plugin.json`. The page searches that list.
 //! It reads `plugin.json` and records which ids are turned off. It does not load or run anything
-//! from the folder. Running a plugin (the wasm host in docs/plugins.md) is a later step; it will
+//! from the folder. Running a plugin (the wasm host in docs/rfcs/0002-plugins.md) is a later step; it will
 //! honour `disabled_plugins`.
 
 use std::path::{Path, PathBuf};
