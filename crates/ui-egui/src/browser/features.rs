@@ -147,9 +147,36 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
         if id.is_some_and(|id| lit.contains(&id) || from_view.contains(&Some(id))) { Mark::Here } else { Mark::None }
     };
     if !compact {
+        let marker = app.session.doc.marker.unwrap_or_else(|| app.session.doc.features.len());
+        let all: Vec<usize> = app.session.doc.features.iter().enumerate().filter_map(|(i, f)| (f.component == component).then_some(i)).collect();
+        let plan = history_plan(app, &all, marker);
+        let drag_id = ui.scope_id().with(("sc_browser_features_drag", &scope));
+        let mut dragged = app.tree.content.current_mut().feature_drags.get(&drag_id).cloned();
+        let mut drops = Vec::new();
+        let mut last_group = None;
+        let mut end_position = None;
         for index in indices.into_iter().take_while(|&index| index < shown) {
-            let _ = feature_row(app, ui, acts, &here, index, depth + 1, None, mark(app, index), None);
+            if let Some(feature) = app.session.doc.features.get(index) {
+                last_group = crate::timeline_left::group_for(&app.session.doc.timeline_groups, feature.id);
+                end_position = Some(index + 1);
+                drops.push(DropSlot { y: ui.cursor().min.y, position: index, group: last_group });
+            }
+            let allow_drag = path.is_empty() && app.dialog.is_none() && app.preferences.browser_feature_drag;
+            let _ = feature_row(app, ui, acts, &here, index, depth + 1, None, mark(app, index), allow_drag.then_some(&mut dragged));
         }
+        if let Some(position) = end_position {
+            // The end slot stays immediately after the last visible feature; hidden rows and the
+            // marker are not valid drop targets in this layout.
+            drops.push(DropSlot { y: ui.cursor().min.y, position, group: last_group });
+        }
+        if dragged
+            .as_ref()
+            .is_some_and(|drag| drag.features.iter().any(|id| app.session.doc.feature(*id).is_none_or(|feature| feature.component != component)))
+        {
+            app.tree.content.current_mut().feature_drags.remove(&drag_id);
+            dragged = None;
+        }
+        drag_rows(app, ui, &plan, drag_id, dragged, &drops, ui.cursor().min.y);
         return;
     }
     let n = app.session.doc.features.len();
@@ -349,7 +376,7 @@ fn feature_row(
     if let Some(at) = r.secondary {
         acts.menu = Some((at, if is_sketch { Target::Sketch { id } } else { Target::Feature { id } }));
     }
-    // In the History: a drag of the row (not of its fold arrow or eye) moves the feature (#9565).
+    // Dragging a History or ordinary Features row reorders it; controls keep their own actions.
     if let Some(drag) = drag
         && !r.on_control
         && r.resp.as_ref().is_some_and(egui::Response::drag_started)
@@ -408,6 +435,10 @@ fn drag_rows(
     marker_y: f32,
 ) {
     let Some(drag) = dragged else { return };
+    if !app.preferences.history_in_browser && (app.dialog.is_some() || !app.preferences.browser_feature_drag) {
+        app.tree.content.current_mut().feature_drags.remove(&drag_id);
+        return;
+    }
     if !crate::semantic_content::source_present(app, drag.source) {
         app.tree.content.current_mut().feature_drags.remove(&drag_id);
         return;
@@ -430,7 +461,24 @@ fn drag_rows(
         .and_then(|p| drops.iter().min_by(|a, b| (a.y - p.y).abs().total_cmp(&(b.y - p.y).abs())).copied());
     if released {
         if let Some(drop) = slot {
-            crate::timeline_left::drop_items(app, plan, &drag.features, &[], drop.group, drop.position, drop.y < marker_y);
+            if app.preferences.history_in_browser {
+                crate::timeline_left::drop_items(app, plan, &drag.features, &[], drop.group, drop.position, drop.y < marker_y);
+            } else {
+                // This folder has no marker or timeline folders to target. Preserve both.
+                let features = plan.with_listed(&drag.features);
+                let preserves_active_features = app.session.doc.marker.is_none_or(|marker| {
+                    features.iter().all(|id| {
+                        app.session.doc.feature_index(*id).is_some_and(
+                            |index| {
+                                if index < marker { drop.position <= marker } else { drop.position >= marker }
+                            },
+                        )
+                    })
+                });
+                if preserves_active_features {
+                    let _ = app.run_heavy("timeline.reorder_many", json!({ "features": features, "position": drop.position }));
+                }
+            }
         }
         return;
     }
@@ -574,6 +622,173 @@ mod tests {
         assert_eq!(at["ok"], true, "{at}");
         assert_eq!(h.app.session.doc.to_json(), saved);
         assert_eq!(h.app.session.undo.len(), undo);
+    }
+
+    #[test]
+    fn browser_feature_rows_drag_reorders_and_undoes() {
+        let mut h = Harness::new();
+        let mut ids = Vec::new();
+        for (name, x) in [("First", 0), ("Second", 20), ("Third", 40)] {
+            ids.push(
+                h.app
+                    .run(
+                        "solid.box",
+                        json!({"length":10,"width":10,"height":10,"corner":[x,0,0],"operation":"new_body","name":name,"body_name":format!("{name}Body")}),
+                    )
+                    .unwrap()["feature"]
+                    .as_u64()
+                    .unwrap(),
+            );
+        }
+        h.app.tree.expanded.insert("c0/features".into());
+        h.frames(2);
+
+        let from = crate::scenario::handle_at(&format!("row:browser-feature:c0:{}", ids[2])).unwrap();
+        let first = crate::scenario::rect_of("row_label:First").unwrap();
+        h.step(&json!({"drag":[[from.x,from.y],[first.center().x,first.top()+2.0]]})).unwrap();
+        settle_heavy(&mut h);
+        let order = |h: &Harness| h.app.session.doc.features.iter().map(|feature| feature.id).collect::<Vec<_>>();
+        assert_eq!(order(&h), vec![ids[2], ids[0], ids[1]], "dragging a Browser feature row reorders the timeline");
+
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(order(&h), ids, "one undo restores the original order");
+    }
+
+    #[test]
+    fn browser_feature_drag_preserves_active_features_and_can_be_disabled() {
+        let mut h = Harness::new();
+        let mut ids = Vec::new();
+        for name in ["First", "Second", "Third", "Fourth"] {
+            ids.push(
+                h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"name":name,"body_name":name})).unwrap()["feature"].as_u64().unwrap(),
+            );
+        }
+        h.app.run("timeline.roll_to", json!({"position":2})).unwrap();
+        h.app.tree.expanded.insert("c0/features".into());
+        h.settle();
+        let before = h.app.session.doc.to_json();
+        let drag = |h: &mut Harness, id: u64, target: &str, after: bool| {
+            let from = crate::scenario::handle_at(&format!("row:browser-feature:c0:{id}")).unwrap();
+            let row = crate::scenario::rect_of(&format!("row_label:{target}")).unwrap();
+            let y = if after { row.bottom() - 1.0 } else { row.top() + 1.0 };
+            h.step(&json!({"drag":[[from.x,from.y],[row.center().x,y]]})).unwrap();
+            settle_heavy(h);
+        };
+        h.app.preferences.browser_feature_drag = false;
+        drag(&mut h, ids[0], "Second", true);
+        assert_eq!(h.app.session.doc.to_json(), before);
+        h.app.preferences.browser_feature_drag = true;
+        drag(&mut h, ids[0], "Second", true);
+        assert_eq!(h.app.session.doc.features.iter().map(|f| f.id).collect::<Vec<_>>(), [ids[1], ids[0], ids[2], ids[3]]);
+        assert_eq!(h.app.session.doc.marker, Some(2));
+        assert_eq!(h.app.session.doc.features.iter().take(2).map(|f| f.id).collect::<BTreeSet<_>>(), BTreeSet::from([ids[0], ids[1]]));
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.settle();
+        assert_eq!(h.app.session.doc.to_json(), before);
+
+        let undo = h.app.session.undo.len();
+        drag(&mut h, ids[0], "Fourth", false);
+        assert_eq!(h.app.session.doc.to_json(), before, "an active feature cannot be dragged past the hidden marker");
+        assert_eq!(h.app.session.undo.len(), undo);
+        drag(&mut h, ids[3], "First", false);
+        assert_eq!(h.app.session.doc.to_json(), before, "a rolled-back feature cannot become active through this folder");
+        assert_eq!(h.app.session.undo.len(), undo);
+
+        drag(&mut h, ids[3], "Third", false);
+        assert_eq!(h.app.session.doc.features.iter().map(|f| f.id).collect::<Vec<_>>(), [ids[0], ids[1], ids[3], ids[2]]);
+        assert_eq!(h.app.session.doc.marker, Some(2));
+        assert_eq!(h.app.session.doc.features.iter().take(2).map(|f| f.id).collect::<Vec<_>>(), [ids[0], ids[1]]);
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(h.app.session.doc.to_json(), before);
+    }
+
+    #[test]
+    fn browser_feature_drag_keeps_mixed_selection_on_its_side_of_the_marker_at_the_boundary() {
+        let mut h = Harness::new();
+        let ids: Vec<u64> = ["First", "Second", "Third", "Fourth"]
+            .into_iter()
+            .map(|name| {
+                h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"name":name,"body_name":name})).unwrap()["feature"].as_u64().unwrap()
+            })
+            .collect();
+        h.app.run("timeline.roll_to", json!({"position":2})).unwrap();
+        h.app.session.selection = vec![Sel::Feature { id: ids[0] }, Sel::Feature { id: ids[2] }];
+        h.app.tree.expanded.insert("c0/features".into());
+        h.settle();
+
+        let from = crate::scenario::handle_at(&format!("row:browser-feature:c0:{}", ids[0])).unwrap();
+        let boundary = crate::scenario::rect_of("row_label:Third").unwrap();
+        h.step(&json!({"drag":[[from.x,from.y],[boundary.center().x,boundary.top()+1.0]]})).unwrap();
+        settle_heavy(&mut h);
+
+        assert_eq!(h.app.session.doc.features.iter().map(|f| f.id).collect::<Vec<_>>(), [ids[1], ids[0], ids[2], ids[3]]);
+        assert_eq!(h.app.session.doc.marker, Some(2), "the exact boundary keeps the mixed selection split across active and rolled-back history");
+        assert_eq!(h.app.session.doc.features.iter().take(2).map(|f| f.id).collect::<BTreeSet<_>>(), BTreeSet::from([ids[0], ids[1]]));
+    }
+
+    #[test]
+    fn browser_feature_drag_moves_its_listed_sketch_and_preserves_folder_membership() {
+        let mut h = Harness::new();
+        let sketch = h.app.run("sketch.create", json!({"plane":"XY","name":"Profile"})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20,15]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let pad = h.app.run("solid.extrude", json!({"distance":10,"name":"Pad","body_name":"Plate"})).unwrap()["feature"].as_u64().unwrap();
+        let block =
+            h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"name":"Block","body_name":"Block"})).unwrap()["feature"].as_u64().unwrap();
+        let other =
+            h.app.run("solid.box", json!({"length":6,"width":6,"height":6,"name":"Other","body_name":"Other"})).unwrap()["feature"].as_u64().unwrap();
+        h.app.run("timeline.group", json!({"name":"Parts","features":["Profile","Pad","Block","Other"]})).unwrap();
+        h.app.preferences.history_sketches = crate::prefs::HistorySketches::UnderFeature;
+        h.app.preferences.history_in_browser = false;
+        h.app.tree.expanded.insert("c0/features".into());
+        h.settle();
+
+        let all = (0..h.app.session.doc.features.len()).collect::<Vec<_>>();
+        let plan = history_plan(&h.app, &all, h.app.session.doc.features.len());
+        assert_eq!(plan.with_listed(&[pad]), [pad, sketch], "the sketch is part of the moved feature block");
+        let pad_name = h.app.session.doc.feature(pad).unwrap().name.clone();
+        let from = crate::scenario::rect_of(&format!("row_label:{pad_name}")).unwrap().center();
+        let edit = crate::scenario::handle_at(&format!("action:{pad_name}")).unwrap();
+        assert!(edit.x > from.x, "start from the label centre, before the inline edit action: label={from:?}, edit={edit:?}");
+        let target = crate::scenario::rect_of("row_label:Other").unwrap();
+        h.step(&json!({"drag":[[from.x,from.y],[target.center().x,target.bottom()-1.0]]})).unwrap();
+        settle_heavy(&mut h);
+
+        assert_eq!(
+            h.app.session.doc.features.iter().map(|f| f.id).collect::<Vec<_>>(),
+            [block, other, sketch, pad],
+            "ordinary Features drag should move the listed sketch with Pad; status={:?}, undo={}",
+            h.app.status,
+            h.app.session.undo.len()
+        );
+        let group = h.app.session.doc.timeline_groups.iter().find(|group| group.name == "Parts").unwrap();
+        assert_eq!(group.features.iter().copied().collect::<BTreeSet<_>>(), BTreeSet::from([sketch, pad, block, other]));
+        assert!(
+            h.app.session.doc.feature_index(sketch).unwrap() < h.app.session.doc.feature_index(pad).unwrap(),
+            "the listed sketch moves with its feature"
+        );
+    }
+
+    #[test]
+    fn browser_feature_rows_refuse_a_drag_that_breaks_a_dependent_feature() {
+        let mut h = Harness::new();
+        let base = h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"name":"Base","body_name":"Plate"})).unwrap()["feature"]
+            .as_u64()
+            .unwrap();
+        let round = h.app.run("solid.fillet", json!({"edges":[[0,5,10]],"radius":1,"name":"Round"})).unwrap()["feature"].as_u64().unwrap();
+        h.app.tree.expanded.insert("c0/features".into());
+        h.frames(2);
+        let before = h.app.session.doc.to_json();
+        let undo = h.app.session.undo.len();
+
+        let from = crate::scenario::handle_at(&format!("row:browser-feature:c0:{base}")).unwrap();
+        let last = crate::scenario::rect_of("row_label:Round").unwrap();
+        h.step(&json!({"drag":[[from.x,from.y],[last.center().x,last.bottom()+8.0]]})).unwrap();
+        settle_heavy(&mut h);
+
+        assert_eq!(h.app.session.doc.to_json(), before, "a move that breaks the fillet is refused");
+        assert_eq!(h.app.session.undo.len(), undo, "a refused drag adds no undo entry");
+        assert!(h.app.session.doc.feature_index(base).unwrap() < h.app.session.doc.feature_index(round).unwrap());
     }
 
     #[test]

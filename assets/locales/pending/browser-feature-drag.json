@@ -1,0 +1,6 @@
+{
+  "en": {
+    "prefs.browser_feature_drag": "Drag Browser features to reorder history",
+    "prefs.browser_feature_drag_note": "Drag rows in the Browser's Features folder to reorder within the active or rolled-back features, if dependencies allow it. Use History to move across the rollback marker. Off: reorder in History only. Sketches and bodies keep their Browser display ordering."
+  }
+}
