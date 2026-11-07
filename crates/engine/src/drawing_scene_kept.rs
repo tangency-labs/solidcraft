@@ -1,15 +1,14 @@
 //! What the sheet scene's provider keeps of a drawing once it closes: each view's last lines, how the
 //! view drew them and what they showed, and each dimension's last reading, so the drawing opened
-//! again starts from them. No world state is held, so a closed drawing keeps no model. Only in
-//! memory, never saved.
+//! again starts from them, and each note's of a view, which rides with them. No world state is held,
+//! so a closed drawing keeps no model. Only in memory, never saved.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use solidcraft_doc::drawing::dimension::Dimension;
 use solidcraft_doc::drawing::view::ResolvedView;
 
-use super::{Drawn, DrawnDimension, Lettering, SourceKey};
+use super::{Annotation, Drawn, DrawnDimension, Lettering, SourceKey};
 
 /// Each closed drawing's last lines, by drawing.
 #[derive(Default)]
@@ -30,10 +29,11 @@ pub(super) struct KeptView {
     pub(super) shows: Option<Arc<SourceKey>>,
 }
 
-/// A dimension's last reading: of `record`, on its view's drawing `view_serial`, with `lettering`.
+/// A dimension's last reading, or a note's: of `record`, on its view's drawing `view_serial`, with
+/// `lettering`.
 #[derive(Clone)]
 pub(super) struct KeptDimension {
-    pub(super) record: Arc<Dimension>,
+    pub(super) record: Annotation,
     pub(super) view_serial: u64,
     pub(super) lettering: Lettering,
     pub(super) drawn: DrawnDimension,
