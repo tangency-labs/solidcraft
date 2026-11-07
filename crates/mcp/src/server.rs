@@ -66,6 +66,8 @@ pub struct Server {
     options: Options,
     /// The options the app's Preferences ask for, once it has answered (`None`: not yet).
     app_options: Option<Options>,
+    /// Where script mode runs scripts (`solidcraft-cli mcp` sets a worker process).
+    scx_runner: crate::scx::Runner,
 }
 
 /// The design files a call opens or saves (#7181): `open` and `save`, and the commands they run
@@ -100,7 +102,7 @@ fn error(id: Value, code: i64, message: impl Into<String>) -> Value {
 
 impl Server {
     pub fn new(backend: Box<dyn Backend>) -> Self {
-        Self { backend, initialized: false, scope: None, options: Options::default(), app_options: None }
+        Self { backend, initialized: false, scope: None, options: Options::default(), app_options: None, scx_runner: crate::scx::Runner::default() }
     }
     /// Confine the files tool calls may reach to `scope` (`None`: anywhere). `solidcraft-cli mcp`
     /// always sets one unless started with `--allow-any-path` (docs/mcp.md).
@@ -113,6 +115,12 @@ impl Server {
     /// turn an option on too ([`Server::options`]).
     pub fn with_options(mut self, options: Options) -> Self {
         self.options = options;
+        self
+    }
+    /// Run script-mode scripts with `runner` (default: in this process). `solidcraft-cli mcp`
+    /// runs each in a `solidcraft-cli scx-worker` child, capped in memory and time.
+    pub fn with_scx_runner(mut self, runner: crate::scx::Runner) -> Self {
+        self.scx_runner = runner;
         self
     }
     /// The options tools use now: the server's own, with what the app's Preferences turn on. The
@@ -239,7 +247,11 @@ impl Server {
                     "protocolVersion": version,
                     "capabilities": {"tools": {"listChanged": false}, "resources": {"listChanged": false}},
                     "serverInfo": {"name": "solidcraft", "title": "SolidCraft", "version": env!("CARGO_PKG_VERSION")},
-                    "instructions": format!("{INSTRUCTIONS} Backend: {}.", self.backend.describe()),
+                    "instructions": if self.options().scx {
+                        format!("{}Backend: {}.", crate::scx::INSTRUCTIONS, self.backend.describe())
+                    } else {
+                        format!("{INSTRUCTIONS} Backend: {}.", self.backend.describe())
+                    },
                 }))
             }
             "ping" => Ok(json!({})),
@@ -258,7 +270,10 @@ impl Server {
                 self.scope = self.scope.take().map(|s| s.with_design(open.as_deref()));
                 let scope = self.scope.clone();
                 let backend = self.backend.as_mut();
-                let mut result = vfs::scoped(scope, || call_tool_with(backend, name, &args, options));
+                let runner = &self.scx_runner;
+                let mut result = vfs::scoped(scope, || {
+                    if options.scx { crate::scx::call(backend, name, &args, options, runner) } else { call_tool_with(backend, name, &args, options) }
+                });
                 // So does the folder of each design file the call opened or saved: the call reached
                 // it, so it was one of the agent's folders already. Only paths given in full: a
                 // running app resolves a relative one against its own working folder.

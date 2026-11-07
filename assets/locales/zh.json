@@ -5648,6 +5648,8 @@
   "ui.mcp_agents": "通过 MCP 连接的代理",
   "ui.mcp_compact": "紧凑输出",
   "ui.mcp_compact_note": "适用于通过 MCP 服务器 (solidcraft-cli mcp) 连接的代理：inspect_design 汇总草图，工具结果不做美化排版，从而占用更少的 token。更改后新开始的代理会话生效；--compact 或 SOLIDCRAFT_MCP_COMPACT=1 也会开启它。",
+  "ui.mcp_scx": "脚本模式 (scx)",
+  "ui.mcp_scx_note": "适用于通过 MCP 服务器 (solidcraft-cli mcp) 连接的智能体：智能体不再使用常规工具，而是使用 run、design 和 look，以 CAD 词汇编写简短的 Python 脚本来建模。脚本在沙箱中运行，无法访问文件、网络或其他程序。在测试中，它将一次建模会话的成本降低了 20-59 %。对更改后开始的智能体会话生效；--scx 或 SOLIDCRAFT_MCP_SCX=1 也可开启。",
   "ui.measure": "测量",
   "ui.mesh_format_3mf": "3MF",
   "ui.mesh_format_3mf_tagged": "带面标签的 3MF",

@@ -5648,6 +5648,8 @@
   "ui.mcp_agents": "סוכנים דרך MCP",
   "ui.mcp_compact": "פלט מקוצר",
   "ui.mcp_compact_note": "לסוכנים שמחוברים דרך שרת ה-MCP ‏(solidcraft-cli mcp): ‏inspect_design מסכם סקיצות ותוצאות הכלים אינן מעוצבות, כך שהן צורכות פחות טוקנים. חל על הפעלות סוכן שמתחילות אחרי השינוי; גם ‎--compact או SOLIDCRAFT_MCP_COMPACT=1 מפעילים אותו.",
+  "ui.mcp_scx": "מצב סקריפטים (scx)",
+  "ui.mcp_scx_note": "לסוכנים המחוברים דרך שרת ה-MCP ‏(solidcraft-cli mcp): במקום הכלים הרגילים הסוכן מקבל run‏, design ו-look, ובונה בעזרת סקריפטים קצרים של Python באוצר מילים של CAD. הסקריפטים רצים בארגז חול ללא גישה לקבצים, לרשת או לתוכנות אחרות. בבדיקות זה הוזיל סשן מידול ב-20-59 %. חל על סשנים של סוכנים שמתחילים אחרי השינוי; ‎--scx או SOLIDCRAFT_MCP_SCX=1 מפעילים אותו גם כן.",
   "ui.measure": "מדידה",
   "ui.mesh_format_3mf": "3MF",
   "ui.mesh_format_3mf_tagged": "3MF עם תגי פאות",

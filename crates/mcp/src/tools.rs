@@ -103,8 +103,11 @@ pub fn tool_definitions() -> Vec<Value> {
 }
 
 /// Every tool, with its JSON schema, for these [`Options`] (`compact` changes `inspect_design`'s
-/// arguments).
+/// arguments; `scx` lists the script-mode tools instead).
 pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
+    if opts.scx {
+        return crate::scx::tool_definitions();
+    }
     vec![
         tool(
             "list_commands",

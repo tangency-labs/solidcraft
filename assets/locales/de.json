@@ -5364,6 +5364,8 @@
   "ui.mcp_agents": "Agenten über MCP",
   "ui.mcp_compact": "Kompakte Ausgabe",
   "ui.mcp_compact_note": "Für Agenten, die über den MCP-Server (solidcraft-cli mcp) verbunden sind: inspect_design fasst Skizzen zusammen und Werkzeugergebnisse werden nicht formatiert, sodass sie weniger Tokens verbrauchen. Gilt für Agentensitzungen, die nach der Änderung beginnen; --compact oder SOLIDCRAFT_MCP_COMPACT=1 schalten es ebenfalls ein.",
+  "ui.mcp_scx": "Skriptmodus (scx)",
+  "ui.mcp_scx_note": "Für Agenten, die über den MCP-Server (solidcraft-cli mcp) verbunden sind: Statt der üblichen Werkzeuge erhält der Agent run, design und look und modelliert mit kurzen Python-Skripten in einem CAD-Vokabular. Skripte laufen in einer Sandbox ohne Zugriff auf Dateien, das Netzwerk oder andere Programme. In Tests senkte das die Kosten einer Modellierungssitzung um 20-59 %. Gilt für Agentensitzungen, die nach der Änderung beginnen; --scx oder SOLIDCRAFT_MCP_SCX=1 schalten es ebenfalls ein.",
   "ui.measure": "Messen",
   "ui.mesh_format_3mf": "3MF",
   "ui.mesh_format_3mf_tagged": "3MF mit Flächenmarken",

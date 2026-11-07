@@ -6,8 +6,18 @@ edition.workspace = true
 license.workspace = true
 default-run = "solidcraft-cli"
 
-[lints]
-workspace = true
+# The workspace lints, except unsafe_code: denied, not forbidden, so that src/scx_worker.rs (the
+# Windows Job Object that caps a script worker's memory) can allow it: it has no safe API. Keep the
+# rest in sync with [workspace.lints].
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+too_many_arguments = "allow"
+type_complexity = "allow"
+neg_cmp_op_on_partial_ord = "allow"
 
 [[bin]]
 name = "solidcraft-cli"
@@ -34,6 +44,13 @@ solidcraft-gpu = { workspace = true }
 solidcraft-mcp = { workspace = true }
 log = { workspace = true }
 serde_json = { workspace = true }
+
+# The memory cap of a script worker (src/scx_worker.rs): a Job Object on Windows, RLIMIT_AS elsewhere.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
+
+[target.'cfg(unix)'.dependencies]
+nix = { workspace = true, features = ["resource"] }
 
 [dev-dependencies]
 # Snapshot tests decode the pictures to compare them with a tolerance.

@@ -11,12 +11,13 @@
 
 mod backend;
 mod options;
+pub mod scx;
 mod server;
 mod skill_reference;
 mod tools;
 
 pub use backend::{Auto, Backend, Headless, Remote};
-pub use options::{COMPACT_ENV, COMPACT_FLAG, Options};
+pub use options::{COMPACT_ENV, COMPACT_FLAG, Options, SCX_ENV, SCX_FLAG};
 pub use server::{PROTOCOL_VERSION, SUPPORTED_VERSIONS, Server};
 pub use tools::{call_tool, call_tool_with, tool_definitions, tool_definitions_with};
 

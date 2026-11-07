@@ -725,6 +725,11 @@ fn mcp_section(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::scenario::publish_handle("prefs:mcp_compact", response.rect.center());
             ui_kit::help_icon(ui, tr("ui.mcp_compact_note"));
         });
+        ui.horizontal(|ui| {
+            let response = ui_kit::checkbox(ui, tr("ui.mcp_scx"), &mut app.preferences.mcp_scx).backing_on_hover_text(tr("ui.mcp_scx_note"));
+            crate::scenario::publish_handle("prefs:mcp_scx", response.rect.center());
+            ui_kit::help_icon(ui, tr("ui.mcp_scx_note"));
+        });
     });
 }
 
