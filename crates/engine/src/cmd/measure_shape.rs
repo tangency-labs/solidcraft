@@ -289,15 +289,12 @@ pub(crate) fn plane_plane(p1: Vec3, n1: UnitVec3, p2: Vec3, n2: UnitVec3, anchor
     if !meet {
         return None;
     }
-    // The point of both planes nearest the first plane's point: on the line through
-    // `c1·n1 + c2·n2` along `n1 × n2`.
-    let k = v1.dot(v2);
-    let (d1, d2) = (v1.dot(p1), v2.dot(p2));
-    let det = 1.0 - k * k;
-    let base = v1 * ((d1 - d2 * k) / det) + v2 * ((d2 - d1 * k) / det);
-    let dir = across.normalized()?;
-    let p = base + dir * (p1 - base).dot(dir);
-    Some((0.0, p, p))
+    // The point of both planes nearest the first plane's point: from `p1` across the first
+    // plane, square to the line `n1 × n2`, until it reaches the second plane. Worked from the
+    // cross product, not `1 - (n1·n2)²`, which cancels when the planes are nearly parallel.
+    let w = across.cross(v1);
+    let p = p1 + w * ((p2 - p1).dot(v2) / across.dot(across));
+    p.is_finite().then_some((0.0, p, p))
 }
 
 /// A slot's sizes: width (the ends' diameter), the distance between the ends' centres and the
@@ -560,5 +557,15 @@ mod tests {
         assert!(from.is_finite() && (from.z - 5.0).abs() < 1e-12 && (from - p2).dot(n2.vec()).abs() < 1e-12, "{from:?}");
         assert!(plane_plane(p1, UnitVec3::Z, p2, n2, p1, false).is_none());
         assert!(plane_plane(p1, UnitVec3::Z, p2, UnitVec3::X, p1, true).is_some_and(|(_, p, _)| p.is_finite()));
+        // Just past parallel and far from the origin: the point still lies on both planes.
+        for (tilt, z1, z2) in [(2e-6, 0.0, 20.0), (2e-6, 100.0, 120.0), (1.01e-6, 1e5, 100_020.0)] {
+            let (p1, p2) = (Vec3::new(3.0, -4.0, z1), Vec3::new(-7.0, 2.0, z2));
+            let n2 = UnitVec3::new(Vec3::new(tilt, 0.0, 1.0)).unwrap();
+            let (d, p, _) = plane_plane(p1, UnitVec3::Z, p2, n2, p1, true).unwrap();
+            let scale = 1.0 + p.len();
+            assert_eq!(d, 0.0);
+            assert!((p.z - z1).abs() < 1e-9 * scale, "tilt {tilt}: {p:?} off the first plane");
+            assert!((p - p2).dot(n2.vec()).abs() < 1e-9 * scale, "tilt {tilt}: {p:?} off the second plane");
+        }
     }
 }
