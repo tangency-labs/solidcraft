@@ -20,6 +20,8 @@
 //! | [`IsoCurve::is_kind_of`]               | `SmIsoCurve::IsKindOf`                         |
 //!
 //! Deviations:
+//! - Continuity is inherited along the varying surface coordinate, matching the
+//!   evaluator and knot list, rather than the fixed iso coordinate.
 //! - **Surface.** The borrowed C++ surface is an owned, boxed [`Surface`] copy.
 //!   [`IsoCurve::new`] retains the B-spline constructor; [`IsoCurve::from_surface`]
 //!   also supports the other concrete surface kinds through the same virtual dispatch.
@@ -318,7 +320,7 @@ impl IsoCurve {
     }
 
     /// The minimum continuity and the continuities at the knots, inherited from the
-    /// surface in the iso direction (`CalculateContinuities`).
+    /// surface along the varying coordinate (`CalculateContinuities`).
     ///
     /// # Errors
     ///
@@ -327,8 +329,7 @@ impl IsoCurve {
         &self,
         k: &Kernel,
     ) -> Result<(ContinuityType, Vec<ContinuityType>)> {
-        // pass the call along
-        surface_calculate_continuities(k, &self.surface, self.surf_param)
+        surface_calculate_continuities(k, &self.surface, self.varying_direction())
     }
 
     /// The natural interval: the surface domain across the iso direction
@@ -341,6 +342,15 @@ impl IsoCurve {
             return Extent1d::from_min_max(uv_domain.min().y, uv_domain.max().y);
         }
         Extent1d::from_min_max(uv_domain.min().x, uv_domain.max().x)
+    }
+
+    /// The surface coordinate varied by the evaluator and indexed by curve knots.
+    fn varying_direction(&self) -> SurfParamType {
+        if self.surf_param == SurfParamType::U {
+            SurfParamType::V
+        } else {
+            SurfParamType::U
+        }
     }
 
     /// The surface parameter of curve parameter `t`.
@@ -408,12 +418,7 @@ impl IsoCurve {
     ///
     /// Those of [`BSplineSurface::knots`] (`SM_ERR` without NURB).
     pub fn knots(&self, interval: Option<&Extent1d>) -> Result<(Vec<f64>, Vec<usize>)> {
-        let sp = if self.surf_param == SurfParamType::U {
-            SurfParamType::V
-        } else {
-            SurfParamType::U
-        };
-        self.surface.knots(sp, interval)
+        self.surface.knots(self.varying_direction(), interval)
     }
 
     /// Reads an iso curve from `db` (`ReadFromDB`): direction, iso parameter and flag,
