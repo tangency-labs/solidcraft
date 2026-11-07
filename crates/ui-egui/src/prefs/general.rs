@@ -41,6 +41,25 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
             });
         });
+        ui_kit::settings_section(ui, "startup", app.tr("ui.on_startup"), |ui| {
+            ui_kit::settings_form(ui, labels, |ui| {
+                ui_kit::row(ui, app.tr("ui.on_startup"), |ui| {
+                    let selected = app.tr(if app.preferences.show_home_on_startup { "ui.home" } else { "ui.new_design" }).to_string();
+                    let choice = ui_kit::dropdown_menu(ui, "pref_startup", &selected, |ui| {
+                        for (home, key) in [(true, "ui.home"), (false, "ui.new_design")] {
+                            let response = ui_kit::list_picker(ui, key, crate::i18n::tr(key), app.preferences.show_home_on_startup == home);
+                            crate::scenario::publish_rect(if home { "prefs:startup_home" } else { "prefs:startup_design" }, response.rect);
+                            if response.clicked() {
+                                app.preferences.show_home_on_startup = home;
+                                ui.close();
+                            }
+                        }
+                    });
+                    crate::scenario::publish_rect("prefs:startup", choice.rect);
+                });
+                ui_kit::text(ui, app.tr("ui.on_startup_note"), ui_kit::Text::Note("startup"));
+            });
+        });
         ui_kit::settings_section(ui, "saving", app.tr("prefs.saving"), |ui| {
             ui_kit::checkbox(ui, app.tr("Reopen the designs that were open when SolidCraft was last closed"), &mut app.preferences.reopen_designs);
             // Only the web app keeps designs in the browser (#10220).

@@ -26,6 +26,7 @@ pub mod limits;
 mod mutate;
 mod native_cad;
 pub use native_cad::{NATIVE_CAD_EXTS, is_native_cad_path, native_cad_to_step};
+pub mod library_files;
 pub mod paper;
 mod ply;
 mod ply_complex;

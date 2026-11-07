@@ -71,6 +71,17 @@ pub(super) fn show_combo<R>(
 pub struct BackingPopup<'a>(egui::Popup<'a>);
 
 impl<'a> BackingPopup<'a> {
+    pub fn get_id(&self) -> Id {
+        self.0.get_id()
+    }
+    pub fn open_bool(mut self, value: &'a mut bool) -> Self {
+        self.0 = self.0.open_bool(value);
+        self
+    }
+    pub fn at_position(mut self, value: egui::Pos2) -> Self {
+        self.0 = self.0.at_position(value);
+        self
+    }
     pub fn frame(mut self, frame: Frame) -> Self {
         self.0 = self.0.frame(frame);
         self

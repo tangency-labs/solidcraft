@@ -507,7 +507,7 @@ fn general_profile_rows_save_replace_apply_and_show_real_state_in_both_themes() 
             assert!((computer.top() - held.bottom() - 8.0).abs() < 0.5);
         }
         assert!((profiles.top() - heading.bottom() - 38.0).abs() < 0.5, "{theme}: the first section has the same breathing room as later sections");
-        for (previous, next) in [("profiles", "language"), ("language", "saving")] {
+        for (previous, next) in [("profiles", "language"), ("language", "startup"), ("startup", "saving")] {
             let previous_body = crate::scenario::rect_of(&format!("prefs:section:{previous}:body")).unwrap();
             let next_header = crate::scenario::rect_of(&format!("prefs:section:{next}")).unwrap();
             assert!((next_header.top() - previous_body.bottom() - 38.0).abs() < 0.5, "{theme}: {previous} to {next}");
