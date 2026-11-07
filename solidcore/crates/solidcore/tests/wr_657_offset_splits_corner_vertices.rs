@@ -22,7 +22,6 @@ mod offset_fixture;
 
 use offset_fixture::{offset_full, planar_faces_at, report, shell, Notifications};
 use solidcore::blend::fillet_executive::api::fillet_edges;
-use solidcore::error::SM_ERR;
 use solidcore::offset::offset_executive::p2::{api_offset_brep_full, OffsetOptions};
 use solidcore::primitive::api_primitives::{create_box, create_sphere};
 use solidcore::topology::brep::p1 as bp1;
@@ -31,10 +30,6 @@ use solidcore::{Brep, FaceId, Kernel, Point3};
 
 /// Relative tolerance of the volumes (the port lands within 1e-12 of each).
 const REL: f64 = 1e-9;
-
-fn kernel(_fixed: bool) -> Kernel {
-    Kernel::default()
-}
 
 /// The box with `edges` (indices into its edge list; `None`: every edge) chamfered 2.
 fn chamfered(k: &mut Kernel, edges: Option<&[usize]>) -> Brep {
@@ -107,26 +102,13 @@ fn no_loop_gaps(k: &mut Kernel, b: &Brep) -> bool {
 fn wr_657_two_chamfers_shell_inward_open_at_a_wall() {
     // the reported case: shelled 1 inward open at the wall at x = 30
     let want = 1806.1797017478002;
-    let shell_x30 = |fixed: bool| {
-        let mut k = kernel(fixed);
-        let b = chamfered(&mut k, Some(&[0, 9]));
-        let open = x30(&k, &b);
-        let result = shell(&mut k, b, -1.0, &[open]);
-        (k, result)
-    };
-    let (k, result) = shell_x30(true);
+    let mut k = Kernel::default();
+    let b = chamfered(&mut k, Some(&[0, 9]));
+    let open = x30(&k, &b);
+    let result = shell(&mut k, b, -1.0, &[open]);
     assert!(report(
         &k,
         "wr_657 two chamfers shell -1 x30",
-        result,
-        Some(want),
-        REL
-    ));
-    // upstream (the pinned C++ too): Ok, no closed solid, volume 0
-    let (k, result) = shell_x30(false);
-    assert!(!report(
-        &k,
-        "wr_657 two chamfers shell -1 x30 default",
         result,
         Some(want),
         REL
@@ -144,7 +126,7 @@ fn wr_657_two_chamfers_shells_at_each_corner_face() {
         (chamfer_9, 1.0, 2226.2751561773057),
     ];
     for (i, (open, d, want)) in cases.into_iter().enumerate() {
-        let mut k = kernel(true);
+        let mut k = Kernel::default();
         let b = chamfered(&mut k, Some(&[0, 9]));
         let open = open(&k, &b);
         let result = shell(&mut k, b, d, &[open]);
@@ -163,11 +145,14 @@ fn wr_657_two_chamfers_shell_outward_has_no_loop_gaps() {
     // upstream's volume is right (2152.620538, the C++ too) but two loops have a gap
     // of sqrt(2)
     let want = 2152.6205383941633;
-    let mut k = kernel(true);
+    let mut k = Kernel::default();
     let b = chamfered(&mut k, Some(&[0, 9]));
     let open = x30(&k, &b);
     let result = shell(&mut k, b, 1.0, &[open]).unwrap();
-    assert!(no_loop_gaps(&mut k, &result), "loop gaps with the opt-in");
+    assert!(
+        no_loop_gaps(&mut k, &result),
+        "loop gaps on the default path"
+    );
     assert!(report(
         &k,
         "wr_657 two chamfers shell +1 x30",
@@ -175,17 +160,12 @@ fn wr_657_two_chamfers_shell_outward_has_no_loop_gaps() {
         Some(want),
         REL
     ));
-    let mut k = kernel(false);
-    let b = chamfered(&mut k, Some(&[0, 9]));
-    let open = x30(&k, &b);
-    let result = shell(&mut k, b, 1.0, &[open]).unwrap();
-    assert!(!no_loop_gaps(&mut k, &result), "upstream leaves loop gaps");
 }
 
 #[test]
 fn wr_657_three_chamfers_offsets() {
     for (d, want) in [(1.0, 8238.532227977406), (-1.0, 3979.9694554143525)] {
-        let mut k = kernel(true);
+        let mut k = Kernel::default();
         let mut b = chamfered(&mut k, Some(&[0, 9, 8]));
         let result = offset_full(&mut k, &mut b, d);
         assert!(report(
@@ -196,24 +176,12 @@ fn wr_657_three_chamfers_offsets() {
             REL
         ));
     }
-    // upstream: Ok with loop gaps and volume 0 at +1, refused (1001) at -1. With each plane's
-    // extension on the plane itself the default reaches the closed form at +1 too.
-    let mut k = kernel(false);
-    let mut b = chamfered(&mut k, Some(&[0, 9, 8]));
-    let result = offset_full(&mut k, &mut b, 1.0);
-    assert!(report(
-        &k,
-        "wr_657 three chamfers offset +1 default",
-        result,
-        Some(8238.532227977406),
-        REL
-    ));
 }
 
 #[test]
 fn wr_657_three_chamfers_shells() {
     // open at the wall at x = 30 (1 each way) and at the corner's triangle (1 outward)
-    let mut k = kernel(true);
+    let mut k = Kernel::default();
     let b = chamfered(&mut k, Some(&[0, 9, 8]));
     let open = x30(&k, &b);
     let result = shell(&mut k, b, -1.0, &[open]);
@@ -224,7 +192,7 @@ fn wr_657_three_chamfers_shells() {
         Some(1807.385883644974),
         REL
     ));
-    let mut k = kernel(true);
+    let mut k = Kernel::default();
     let b = chamfered(&mut k, Some(&[0, 9, 8]));
     let open = x30(&k, &b);
     let result = shell(&mut k, b, 1.0, &[open]);
@@ -235,7 +203,7 @@ fn wr_657_three_chamfers_shells() {
         Some(2155.9012941491765),
         REL
     ));
-    let mut k = kernel(true);
+    let mut k = Kernel::default();
     let b = chamfered(&mut k, Some(&[0, 9, 8]));
     let open = face_at(&k, &b, [28.0 + 2.0 / 3.0, 4.0 / 3.0, 8.0 + 2.0 / 3.0]);
     let result = shell(&mut k, b, 1.0, &[open]);
@@ -251,7 +219,7 @@ fn wr_657_three_chamfers_shells() {
 #[test]
 fn wr_657_fully_chamfered_box() {
     for (d, want) in [(1.0, 7654.848301953257), (-1.0, 3831.755643314821)] {
-        let mut k = kernel(true);
+        let mut k = Kernel::default();
         let mut b = chamfered(&mut k, None);
         let result = offset_full(&mut k, &mut b, d);
         assert!(report(
@@ -280,7 +248,7 @@ fn wr_657_fully_chamfered_box() {
         ([29.0, 10.0, 9.0], 1.0, 2009.1803204583593),
     ];
     for (at, d, want) in cases {
-        let mut k = kernel(true);
+        let mut k = Kernel::default();
         let b = chamfered(&mut k, None);
         let open = face_at(&k, &b, at);
         let result = shell(&mut k, b, d, &[open]);
@@ -295,25 +263,26 @@ fn wr_657_fully_chamfered_box() {
 }
 
 /// An inset of a chamfer's width leaves the cavity meeting the open chamfer along a line
-/// only (the body is no manifold solid): refused, not returned.
+/// only (the body is no manifold solid): the default four-face split detects a
+/// vanishing edge before the final manifold-result guard, and refuses it by name.
 #[test]
 fn wr_657_fully_chamfered_box_inset_open_at_a_chamfer_is_refused() {
-    let mut k = kernel(true);
+    let mut k = Kernel::default();
     let b = chamfered(&mut k, None);
     let open = face_at(&k, &b, [29.0, 10.0, 9.0]);
     match shell(&mut k, b, -1.0, &[open]) {
-        Err(e) => assert_eq!(e.sm_status(), Some(SM_ERR)),
-        other => panic!("SM_ERR expected: {other:?}"),
+        Err(e) => assert_eq!(e.sm_status(), Some(1043)),
+        other => panic!("SM_ERR_OFFSET_EDGE_VANISHES expected: {other:?}"),
     }
 }
 
 /// An offset asked not to merge leaves its overlapping faces (`OffsetBrep`, `bDoSelfInt`), so a
 /// result that is no closed solid is what was asked for: a 10 mm cube inset 1, convex edges
-/// not extended, comes back as with the flags off, as it does from the fork at d01d7b0.
+/// not extended, still comes back with faces on the default split path.
 #[test]
 fn wr_657_unmerged_offset_is_not_refused() {
-    let faces = |fixed: bool| {
-        let mut k = kernel(fixed);
+    let faces = || {
+        let mut k = Kernel::default();
         let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
         let mut n = Notifications::new(&mut b);
         let options = OffsetOptions {
@@ -322,13 +291,11 @@ fn wr_657_unmerged_offset_is_not_refused() {
             merge_results: false,
         };
         api_offset_brep_full(&mut k, Some(&mut b), options, &mut n.context())
-            .unwrap_or_else(|e| panic!("fixed {fixed}: {e:?}"))
+            .unwrap_or_else(|e| panic!("{e:?}"))
             .face_list()
             .len()
     };
-    let with_flags = faces(true);
-    assert!(with_flags > 0);
-    assert_eq!(with_flags, faces(false));
+    assert!(faces() > 0);
 }
 
 /// #2092: a sphere of radius 10 offset by -10 (convex edges not extended) leaves nothing.

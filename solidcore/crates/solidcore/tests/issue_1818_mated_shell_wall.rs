@@ -4,7 +4,7 @@
 //! edges, merged results and the offset solid made (as SolidCraft's `smlib_shell` calls
 //! `SmApiShellBrepFull`).
 //!
-//! Upstream (default fixes) refuses the shell: the merge fails with `SM_ERR` (1001) in
+//! Pinned upstream refuses the shell: the merge fails with `SM_ERR` (1001) in
 //! `make_faceuse` (pinned C++ agrees, `offset.offset_executive_p2` case
 //! `issue1818_square_to_circle_loft_api_shell_1_top`). With the flag alone, on the fitted
 //! side extensions, the difference returned ten faces, no manifold solid, volume 0 (the
@@ -14,6 +14,8 @@
 //! its volume the loft's less the cavity's, measured independently ([`assert_sound`]).
 //! solidcore is the reference here, not the fork's refusal. The circle-to-circle loft
 //! (a cone frustum r 15) is the control: it shells to the closed form under the flag.
+//! With loop-gap closure and the vertex splits always enabled, the default fixes
+//! now build the same sound eleven-face shell; the old flag-off refusal is gone.
 
 #![allow(
     clippy::unwrap_used,
@@ -28,7 +30,6 @@ mod offset_fixture;
 use offset_fixture::{offset_full, planar_faces_at, volume, Notifications};
 use solidcore::curve::curve::Curve;
 use solidcore::curve::ellipse::Ellipse;
-use solidcore::error::SM_ERR;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::kernel::UpstreamFixes;
@@ -125,36 +126,12 @@ fn mated() -> UpstreamFixes {
     f
 }
 
-fn assert_sm_err(result: solidcore::Result<Brep>, operation: &str, label: &str) {
-    match result {
-        Err(e) if e.sm_status().is_some() => {
-            assert_eq!(e.sm_status(), Some(SM_ERR), "{label}");
-            assert_eq!(e.operation(), operation, "{label}");
-        }
-        Err(other) => panic!("{label}: SM_ERR expected, got {other}"),
-        Ok(mut wall) => {
-            wall.refresh_cached_topology();
-            panic!(
-                "{label}: SM_ERR expected, got Ok: {} faces, manifold {:?}",
-                wall.face_list().len(),
-                brep_is_manifold_solid(&wall)
-            );
-        }
-    }
-}
-
-/// Upstream's refusal (the default path, at parity with the pinned C++).
+/// Default loop-gap closure now reaches the shell difference rather than the old early refusal.
 #[test]
-fn default_fixes_refuse_the_square_to_circle_shell() {
-    let (_, result) = shell(&UpstreamFixes::default(), true);
-    // The early merge refusal happens before shell_difference takes ownership.
-    assert!(result.retained_input.is_some());
-    assert!(!result.input_ownership_transferred());
-    assert_sm_err(
-        result.result,
-        "boolean::merge::p2::make_faceuse",
-        "default fixes",
-    );
+fn default_fixes_shell_the_square_to_circle_loft() {
+    let (mut k, result) = shell(&UpstreamFixes::default(), true);
+    assert!(result.input_ownership_transferred());
+    assert_sound(&mut k, result.result.unwrap(), "default fixes");
 }
 
 /// The shell of the square-to-circle loft is sound: eleven faces, no failure at any check
@@ -222,26 +199,8 @@ fn mated_offsets_alone_shell_the_square_to_circle_loft() {
     );
 }
 
-/// With WR-578's loop-gap closing too (the default path since #2981), the offset is
-/// still refused, by WR-578's guard
-/// (an offset of a solid that is no closed solid) and no longer by the gap closing itself:
-/// at each top corner the side faces close their rim arcs' gaps to the lateral edge's
-/// vertex, while the open top's face closes the same corner by a chord between the two
-/// arcs' ends, so the closing edges are not shared. That inconsistency is the gap
-/// closing's own; the default path builds the sound shell above.
-#[test]
-fn mated_offsets_with_loop_gaps_still_refuse() {
-    let fixes = mated();
-    let (_, result) = shell(&fixes, true);
-    assert_sm_err(
-        result.result,
-        "offset::offset_executive::p2::shell_brep",
-        "offset_extended_edges_mated + offset_closes_loop_gaps",
-    );
-}
-
 /// SolidCraft's fixes (`issue_1476_swept_bar_shell.rs`, which include the flag and WR-454's
-/// `shell_empty_cavity_fails`, not WR-578's loop gaps): the same sound body.
+/// `shell_empty_cavity_fails`): the same sound body, with loop-gap closure unconditional.
 #[test]
 fn solidcraft_fixes_shell_the_square_to_circle_loft() {
     let (mut k, result) = shell(&solidcraft_fixes(), true);

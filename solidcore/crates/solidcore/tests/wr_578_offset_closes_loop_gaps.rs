@@ -39,10 +39,6 @@ use solidcore::{Brep, Kernel};
 
 const SHELL_1494: f64 = 8864.598272772;
 
-fn kernel(_fixed: bool) -> Kernel {
-    Kernel::default()
-}
-
 /// The box joined with the cylinder, its seam `seam_deg` from +y towards +z.
 fn box_and_cylinder(k: &mut Kernel, seam_deg: f64) -> Brep {
     let body = create_box(k, Point3::new(0.0, 0.0, 0.0), 47.5, 45.0, 30.0).unwrap();
@@ -60,8 +56,8 @@ fn box_and_cylinder(k: &mut Kernel, seam_deg: f64) -> Brep {
     b
 }
 
-fn shell_1494(fixed: bool, seam_deg: f64) -> (Kernel, solidcore::Result<Brep>) {
-    shell_1494_with(kernel(fixed), seam_deg)
+fn shell_1494(seam_deg: f64) -> (Kernel, solidcore::Result<Brep>) {
+    shell_1494_with(Kernel::default(), seam_deg)
 }
 
 fn shell_1494_with(mut k: Kernel, seam_deg: f64) -> (Kernel, solidcore::Result<Brep>) {
@@ -79,7 +75,7 @@ fn shell_1494_with(mut k: Kernel, seam_deg: f64) -> (Kernel, solidcore::Result<B
 #[ignore = "open: volume 2.7e-7 / 7.7e-7 off the fork's (WR-578)"]
 fn wr_578_box_and_cylinder_shell_closes_the_loop_gaps() {
     for seam in [30.0, 55.0] {
-        let (k, result) = shell_1494(true, seam);
+        let (k, result) = shell_1494(seam);
         assert!(report(
             &k,
             &format!("wr_578 shell/1494 seam {seam}"),
@@ -90,12 +86,12 @@ fn wr_578_box_and_cylinder_shell_closes_the_loop_gaps() {
     }
 }
 
-/// Seam 200 with the opt-in alone: each face's surface extended by its offset's reach (not
+/// Seam 200 on the default path: each face's surface extended by its offset's reach (not
 /// five offsets), the shell is sound as at seams 30 and 55 (manifold, integrity clean), its
 /// volume 1.5e-7 off the fork's closed form as theirs are (WR-578's divergence).
 #[test]
 fn wr_578_seam_200_shells_sound() {
-    let (k, result) = shell_1494(true, 200.0);
+    let (k, result) = shell_1494(200.0);
     assert!(report(
         &k,
         "wr_578 shell/1494 seam 200",
@@ -111,7 +107,7 @@ fn wr_578_seam_200_shells_sound() {
 #[ignore = "open: the port returns a non-manifold body for these seams (WR-578)"]
 fn wr_578_box_and_cylinder_shell_other_seams() {
     for seam in [125.0, 200.0] {
-        let (k, result) = shell_1494(true, seam);
+        let (k, result) = shell_1494(seam);
         assert!(report(
             &k,
             &format!("wr_578 shell/1494 seam {seam}"),
@@ -127,7 +123,7 @@ fn wr_578_box_and_cylinder_shell_other_seams() {
 /// its base edge runs along, and the shell is sound as at seam 200.
 #[test]
 fn wr_578_seam_125_shells_sound() {
-    let (k, result) = shell_1494(true, 125.0);
+    let (k, result) = shell_1494(125.0);
     assert!(report(
         &k,
         "wr_578 shell/1494 seam 125",
@@ -137,11 +133,11 @@ fn wr_578_seam_125_shells_sound() {
     ));
 }
 
-/// Without the opt-in the shell is not that sound body (upstream refuses it, 1001).
+/// Loop-gap closure is now the default, so the formerly refused shell is sound.
 #[test]
-fn wr_578_box_and_cylinder_shell_without_the_opt_in() {
-    let (k, result) = shell_1494(false, 30.0);
-    assert!(!report(
+fn wr_578_box_and_cylinder_shell_on_the_default_path() {
+    let (k, result) = shell_1494(30.0);
+    assert!(report(
         &k,
         "wr_578 shell/1494 default",
         result,
@@ -160,7 +156,7 @@ fn notched(k: &mut Kernel) -> Brep {
 
 #[test]
 fn wr_578_shell_thicker_than_a_step_is_edge_vanishes() {
-    let mut k = kernel(true);
+    let mut k = Kernel::default();
     let b = notched(&mut k);
     let strip = planar_faces_at(&k, &b, 1, 35.0);
     assert_eq!(strip.len(), 1, "the far side under the notch");
@@ -172,7 +168,7 @@ fn wr_578_shell_thicker_than_a_step_is_edge_vanishes() {
 
 #[test]
 fn wr_578_notched_box_open_at_the_floor_shells() {
-    let mut k = kernel(true);
+    let mut k = Kernel::default();
     let b = notched(&mut k);
     let floor = planar_faces_at(&k, &b, 2, 2.5);
     assert_eq!(floor.len(), 1, "the notch's floor");
@@ -190,7 +186,7 @@ fn wr_578_notched_box_open_at_the_floor_shells() {
 /// a half circle r 10 (x < 0), a blind hole r 5 along x through the round side at
 /// (y, z) = (12.5, 12.5) from x = -10 to 7.5, shelled 2 inward, open at x = 42.5, on a
 /// clean operand. A prior mass-properties query on the operand changes what the shell
-/// reads (UV trims, a snapped trim, gap caches: WR-583), and the opt-in then refuses it;
+/// reads (UV trims, a snapped trim, gap caches: WR-583), and closure then refuses it;
 /// nothing here measures the operand.
 fn plate_1528(k: &mut Kernel) -> Brep {
     // the profile swept 27.5 along z (one curved side face), as the #1528 fixture builds it
@@ -218,8 +214,8 @@ fn plate_1528(k: &mut Kernel) -> Brep {
     b
 }
 
-fn shell_1528(fixed: bool) -> (Kernel, solidcore::Result<Brep>) {
-    let mut k = kernel(fixed);
+fn shell_1528() -> (Kernel, solidcore::Result<Brep>) {
+    let mut k = Kernel::default();
     let b = plate_1528(&mut k);
     let open = planar_faces_at(&k, &b, 0, 42.5);
     assert_eq!(open.len(), 1, "the far end");
@@ -229,24 +225,13 @@ fn shell_1528(fixed: bool) -> (Kernel, solidcore::Result<Brep>) {
 
 #[test]
 fn wr_578_issue_1528_plate_shells_on_a_clean_operand() {
-    let (k0, default) = shell_1528(false);
-    let default = default.unwrap();
-    assert_eq!(default.face_list().len(), 16, "the default shell's faces");
-    assert_eq!(default.edge_list().len(), 37, "the default shell's edges");
-    assert!(report(
-        &k0,
-        "wr_578 #1528 plate default",
-        Ok(default),
-        None,
-        0.0
-    ));
-    let (k, fixed) = shell_1528(true);
+    let (k, fixed) = shell_1528();
     let fixed = fixed.unwrap();
-    assert_eq!(fixed.face_list().len(), 16, "the opt-in shell's faces");
-    assert_eq!(fixed.edge_list().len(), 36, "the opt-in shell's edges");
+    assert_eq!(fixed.face_list().len(), 16, "the default shell's faces");
+    assert_eq!(fixed.edge_list().len(), 36, "the default shell's edges");
     assert!(report(
         &k,
-        "wr_578 #1528 plate opt-in",
+        "wr_578 #1528 plate default",
         Ok(fixed),
         // since #2890 (precise properties integrate from the trims' base): +4.8e-4 from the
         // closed form 10400.212373846494 (issue_1950's), within the volume's accuracy
