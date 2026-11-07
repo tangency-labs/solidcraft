@@ -297,7 +297,8 @@ fn a_views_line_group_follows_its_sheet_and_links_with_its_parent() {
     assert_eq!(inspect_view(&mut s, right)["settings"]["line_group"]["from"], "sheet", "linking clears it");
     edit_view(&mut s, right, json!({"linked": false}));
     assert_eq!(inspect_view(&mut s, right)["settings"]["line_group"]["set"], "0.35", "unlinking keeps the value it had");
-    assert!(edit_refused(&mut s, front, json!({"line_group": "0.6"})).contains("line_group"));
+    let why = edit_refused(&mut s, front, json!({"line_group": "0.6"}));
+    assert!(why.ends_with("`set.line_group` must be one of 0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2"), "{why}");
 }
 
 /// A copy is one undo step of new views, independent of the ones it came from: with its linked

@@ -7,7 +7,6 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use solidcraft_doc::drawing::{Units, Updates};
 use solidcraft_geom::cell::Projection;
-use solidcraft_geom::paper::line::LineGroup;
 use solidcraft_geom::revision::Numbering;
 
 use super::check::whole;
@@ -39,9 +38,9 @@ pub struct DrawingCreateParams {
     #[schemars(schema_with = "projection_schema")]
     pub projection: Option<Projection>,
     /// The ISO 128 line group its lines are drawn in (the template's when not given).
-    #[serde(default, deserialize_with = "line_group", skip_serializing_if = "Option::is_none")]
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "LineGroupParam")]
-    pub line_group: Option<LineGroup>,
+    pub line_group: Option<LineGroupParam>,
     /// The font family its text is set in, by name, never a file ("": the built-in font).
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String")]
@@ -71,9 +70,9 @@ pub struct DrawingSetParams {
     #[schemars(schema_with = "updates_schema")]
     pub updates: Option<Updates>,
     /// The ISO 128 line group its lines are drawn in; a sheet or a view may choose another.
-    #[serde(default, deserialize_with = "line_group", skip_serializing_if = "Option::is_none")]
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "LineGroupParam")]
-    pub line_group: Option<LineGroup>,
+    pub line_group: Option<LineGroupParam>,
     /// The font family its text is set in, by name, never a file ("": the built-in font).
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String")]
@@ -94,11 +93,6 @@ fn units<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Units>, D::Error> {
 
 fn units_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({"description": "\"follow_model\" (the model's unit), or one length unit such as \"mm\".", "type": "string"})
-}
-
-/// A `line_group` as given, in the words a sheet's is refused with.
-fn line_group<'de, D: Deserializer<'de>>(d: D) -> Result<Option<LineGroup>, D::Error> {
-    crate::cmd::line_group_of(&Value::deserialize(d)?).map(Some).map_err(|e| D::Error::custom(whole(e)))
 }
 
 /// `projection` as given: first or third angle.

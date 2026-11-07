@@ -76,7 +76,7 @@ fn a_sheet_sets_its_own_line_group_or_follows_the_drawing() {
     assert_eq!((sheets(&s)[0].line_group, s.undo.len()), (None, steps + 2));
     for bad in [json!("0.6"), json!(1), json!("Mm1"), json!([])] {
         let why = refused(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "line_group": bad}));
-        assert!(why.contains("`line_group` is one of"), "{bad}: {why}");
+        assert!(why.ends_with("`line_group` must be one of 0.25, 0.35, 0.5, 0.7, 1, 1.4 or 2"), "{bad}: {why}");
     }
 }
 

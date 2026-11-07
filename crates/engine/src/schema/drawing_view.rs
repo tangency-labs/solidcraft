@@ -217,10 +217,19 @@ impl JsonSchema for TangentEdgesParam {
     }
 }
 
-/// An ISO 128 line group, by its wide line.
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
-#[serde(transparent)]
+/// An ISO 128 line group, by its wide line. Every command that takes one refuses anything else in
+/// these words, after the key.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LineGroupParam(pub LineGroup);
+
+impl<'de> Deserialize<'de> for LineGroupParam {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        serde_json::from_value(Value::deserialize(d)?).map(LineGroupParam).map_err(|_| {
+            let (last, rest) = LineGroup::NAMES.split_last().map_or(("", &[][..]), |(last, rest)| (*last, rest));
+            serde::de::Error::custom(format!("must be one of {} or {last}", rest.join(", ")))
+        })
+    }
+}
 
 impl JsonSchema for LineGroupParam {
     fn schema_name() -> Cow<'static, str> {
