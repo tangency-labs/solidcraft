@@ -188,7 +188,7 @@ fn corpus_units() {
             .to_string();
         let ex = match std::fs::read(path)
             .map_err(|e| e.to_string())
-            .and_then(|b| p21::parse(&String::from_utf8_lossy(&b)))
+            .and_then(|b| p21::parse(&String::from_utf8_lossy(&b)).map_err(|e| e.to_string()))
         {
             Ok(ex) => ex,
             Err(e) => {
@@ -450,7 +450,7 @@ fn corpus_geometry() {
             .to_string();
         let ex = match std::fs::read(path)
             .map_err(|e| e.to_string())
-            .and_then(|b| p21::parse(&String::from_utf8_lossy(&b)))
+            .and_then(|b| p21::parse(&String::from_utf8_lossy(&b)).map_err(|e| e.to_string()))
         {
             Ok(ex) => ex,
             Err(e) => {
@@ -609,7 +609,7 @@ fn corpus_product() {
             .to_string();
         let ex = match std::fs::read(path)
             .map_err(|e| e.to_string())
-            .and_then(|b| p21::parse(&String::from_utf8_lossy(&b)))
+            .and_then(|b| p21::parse(&String::from_utf8_lossy(&b)).map_err(|e| e.to_string()))
         {
             Ok(ex) => ex,
             Err(e) => {
