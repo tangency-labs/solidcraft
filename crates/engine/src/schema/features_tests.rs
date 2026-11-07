@@ -1,8 +1,8 @@
 use serde_json::{Value, json};
 
 use super::{
-    BoundingSolidParams, BoxParams, ConeParams, CylinderParams, ExtrudeParams, FeatureResult, FilletParams, FilletResult, OffsetPlaneParams,
-    PipeParams, PlaneAtAngleParams, ScaleParams, SphereParams, TorusParams,
+    BoundingSolidParams, BoxParams, ConeParams, CylinderParams, ExtrudeParams, FeatureResult, FilletParams, FilletResult, MoveParams, MoveResult,
+    OffsetPlaneParams, PipeParams, PlaneAtAngleParams, ScaleParams, SphereParams, TorusParams,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms, sketch_rectangle};
@@ -10,6 +10,24 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
+    assert_keys(
+        input_schema_for::<MoveParams>(),
+        &[
+            "angle",
+            "axis",
+            "bodies",
+            "body_name",
+            "body_names",
+            "copy",
+            "matrix",
+            "name",
+            "occurrences",
+            "origin",
+            "participants",
+            "tolerance",
+            "translate",
+        ],
+    );
     assert_keys(
         input_schema_for::<BoxParams>(),
         &["body_name", "body_names", "center", "corner", "height", "length", "name", "operation", "participants", "targets", "touching", "width"],
@@ -372,4 +390,41 @@ fn converted_primitives_and_body_commands_reply_with_feature_result() {
     let r = s.execute("solid.sphere", &json!({"radius": 1, "center": [22, 0, 0], "operation": "intersect"})).unwrap_or_else(|e| panic!("{e}"));
     let (changed, removed) = (r["changed_bodies"].as_array().cloned(), r["removed_bodies"].as_array().cloned());
     assert!(changed.is_some_and(|c| c.contains(&json!("Bounding"))) && removed.is_some_and(|r| r.contains(&json!("Peg"))), "{r}");
+}
+
+#[test]
+fn move_contract_accepts_transforms_and_reports_unknown_keys() {
+    let mut s = Session { param_check: ParamCheck::Strict, ..Default::default() };
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "body_name": "B"})).unwrap();
+    for p in [json!({"bodies": ["B"], "origin": [5, 5, 0], "angle": "90 deg"}), json!({"bodies": ["B"], "matrix": [[1,0,0,2], [0,1,0,0], [0,0,1,0]]})]
+    {
+        let output = s.execute("solid.move", &p).unwrap();
+        let schema = output_schema_for::<MoveResult>();
+        assert!(conforms(schema.as_value(), schema.as_value(), &output), "{output}");
+    }
+    let saved = s.doc.to_json();
+    assert!(s.execute("solid.move", &json!({"bodies": ["B"], "orgin": [5,5,0]})).is_err());
+    assert_eq!(s.doc.to_json(), saved);
+    s.param_check = ParamCheck::Warn;
+    let output = s.execute("solid.move", &json!({"bodies": ["B"], "orgin": [5,5,0]})).unwrap();
+    assert!(output["param_warnings"].as_array().is_some_and(|v| !v.is_empty()));
+}
+
+#[test]
+fn move_contract_accepts_component_copies_with_and_without_split_body_features() {
+    let mut s = Session { param_check: ParamCheck::Strict, ..Default::default() };
+    let made = s.execute("component.create", &json!({"name": "Part", "grounded": false})).unwrap();
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "body_name": "Peg"})).unwrap();
+    s.execute("occurrence.move", &json!({"occurrence": made["occurrence"], "translate": [100, 0, 0]})).unwrap();
+    s.execute("component.activate", &json!({"component": "root"})).unwrap();
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "body_name": "Top"})).unwrap();
+    let output = s.execute("solid.move", &json!({"occurrences": [[made["occurrence"]]], "copy": true, "translate": [20, 0, 0]})).unwrap();
+    assert_eq!(output["occurrences"].as_array().map(Vec::len), Some(1));
+    let schema = output_schema_for::<MoveResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &output), "{output}");
+    let output =
+        s.execute("solid.move", &json!({"bodies": ["Peg", "Top"], "occurrences": [[made["occurrence"]]], "copy": true, "angle": "90 deg"})).unwrap();
+    assert_eq!(output["features"].as_array().map(Vec::len), Some(2));
+    assert_eq!(output["occurrences"].as_array().map(Vec::len), Some(1));
+    assert!(conforms(schema.as_value(), schema.as_value(), &output), "{output}");
 }
