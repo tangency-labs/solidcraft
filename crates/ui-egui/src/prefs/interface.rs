@@ -1,6 +1,7 @@
 //! Appearance and Layout settings composition, using shared controls and previews.
 use super::*;
 
+/// Renders the Appearance preferences page, configuring theme, viewport background, and visual styling.
 pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
     ui_kit::settings_page(ui, |ui| {
         ui_kit::settings_heading_with_tag(
@@ -212,6 +213,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
     });
 }
 
+/// Renders the Layout & Panels preferences page, configuring interface density, window layout, dock placement, and timeline display style.
 pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     ui_kit::settings_page(ui, |ui| {
@@ -458,7 +460,68 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     &mut app.preferences.browser_eye_left,
                     "browser_eye_left",
                 );
+                layout_check(ui, app.tr("prefs.timeline_2d"), app.tr("prefs.timeline_2d_note"), &mut app.preferences.timeline_2d, "timeline_2d");
             });
+            if app.preferences.timeline_2d {
+                ui_kit::settings_form(ui, t.form_label_width + t.space_24 * 3.0, |ui| {
+                    ui_kit::row(ui, "", |ui| {
+                        let check = ui_kit::checkbox(ui, app.tr("prefs.timeline_2d_cell_dots"), &mut app.preferences.timeline_2d_cell_dots)
+                            .backing_on_hover_text(app.tr("prefs.timeline_2d_cell_dots_note"));
+                        crate::scenario::publish_target("prefs:timeline_2d_cell_dots", check.rect);
+                    });
+                    if app.preferences.timeline_2d_cell_dots {
+                        ui_kit::row(ui, app.tr("prefs.timeline_2d_dot_opacity"), |ui| {
+                            ui_kit::slider(
+                                ui,
+                                &mut app.preferences.timeline_2d_dot_opacity,
+                                0.05..=1.0,
+                                ui_kit::Slider { format: |v| format!("{:.0}%", v * 100.0), step: Some(0.05), ..Default::default() },
+                            )
+                        });
+                    }
+                    ui_kit::row(ui, "", |ui| {
+                        let check = ui_kit::checkbox(
+                            ui,
+                            app.tr("prefs.timeline_2d_component_activation"),
+                            &mut app.preferences.timeline_2d_component_activation,
+                        )
+                        .backing_on_hover_text(app.tr("prefs.timeline_2d_component_activation_note"));
+                        crate::scenario::publish_target("prefs:timeline_2d_component_activation", check.rect);
+                    });
+                    ui_kit::row(ui, app.tr("prefs.timeline_2d_dependency_colors"), |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(app.tr("prefs.timeline_2d_prereqs"));
+                            ui_kit::color_field(ui, &mut app.preferences.timeline_2d_prereq_color);
+                            ui.add_space(8.0);
+                            ui.label(app.tr("prefs.timeline_2d_dependents"));
+                            ui_kit::color_field(ui, &mut app.preferences.timeline_2d_dependent_color);
+                        });
+                    });
+                    ui_kit::row(ui, app.tr("prefs.timeline_2d_unsuppress"), |ui| {
+                        use crate::prefs::Timeline2dUnsuppressMode;
+                        let mut selected = match app.preferences.timeline_2d_unsuppress_mode {
+                            Timeline2dUnsuppressMode::RestoreState => 0,
+                            Timeline2dUnsuppressMode::UnsuppressAll => 1,
+                        };
+                        let segments = ui.scope(|ui| {
+                            ui_kit::segmented(
+                                ui,
+                                &mut selected,
+                                &[app.tr("prefs.timeline_2d_unsuppress_restore"), app.tr("prefs.timeline_2d_unsuppress_all")],
+                                ui_kit::Segments { proportional: true, compact: true, ..Default::default() },
+                            )
+                        });
+                        crate::scenario::publish_target("prefs:timeline_2d_unsuppress", segments.response.rect);
+                        if segments.inner {
+                            app.preferences.timeline_2d_unsuppress_mode =
+                                if selected == 0 { Timeline2dUnsuppressMode::RestoreState } else { Timeline2dUnsuppressMode::UnsuppressAll };
+                        }
+                    });
+                    ui_kit::row(ui, "", |ui| {
+                        ui_kit::text(ui, app.tr("prefs.timeline_2d_unsuppress_note"), ui_kit::Text::Hint("timeline_2d_unsuppress"));
+                    });
+                });
+            }
         });
         ui_kit::settings_section(ui, "dialogs", app.tr("prefs.dialogs"), |ui| {
             ui_kit::settings_form(ui, t.form_label_width + t.space_24, |ui| {

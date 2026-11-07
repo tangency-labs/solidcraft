@@ -26,6 +26,7 @@ enum Finish {
     Artwork,
     Ink(Color32),
     Danger,
+    Greyscale,
 }
 
 /// Textures already rasterised: one per (master, look, pixel size, finish).
@@ -104,6 +105,17 @@ pub fn paint_accented(p: &Painter, r: Rect, name: &str, accent: Option<&str>, op
     paint_resolved(p, r, resolved, look, opacity, Finish::Artwork, Mirror::None);
 }
 
+/// Draw palette-owned icon artwork converted to greyscale, preserving facet shading, highlights and outlines.
+pub fn paint_greyscale(p: &Painter, r: Rect, name: &str, accent: Option<&str>, opacity: f32) {
+    let resolved = icon_svg::resolve(name);
+    let accent = match accent {
+        Some(name) => icon_svg::accent_index(name).or(resolved.accent),
+        None => None,
+    };
+    let look = Look::themed(p.ctx().global_style().visuals.dark_mode, accent, crate::theme::vision());
+    paint_resolved(p, r, resolved, look, opacity, Finish::Greyscale, Mirror::None);
+}
+
 /// Shared destructive-action artwork: red shaded faces, normal outlines and cutouts.
 /// Unlike a single-colour mask, this also tints a master's passive faces through
 /// the constraint ramp without flattening the lid, handle or other details.
@@ -113,6 +125,7 @@ pub(crate) fn paint_danger(p: &Painter, r: Rect, name: &str, opacity: f32) {
     paint_resolved(p, r, resolved, look, opacity, Finish::Danger, Mirror::None);
 }
 
+/// Rasterises and renders a resolved icon with specified look, opacity, finish, and mirror options.
 fn paint_resolved(p: &Painter, r: Rect, resolved: icon_svg::Resolved, look: Look, opacity: f32, finish: Finish, mirror: Mirror) {
     let ctx = p.ctx();
     let ppp = ctx.pixels_per_point().max(0.5);
@@ -135,6 +148,12 @@ fn paint_resolved(p: &Painter, r: Rect, resolved: icon_svg::Resolved, look: Look
         if let Finish::Ink(ink) = finish {
             for pixel in &mut image.pixels {
                 *pixel = ink.gamma_multiply(f32::from(pixel.a()) / 255.0);
+            }
+        } else if finish == Finish::Greyscale {
+            for pixel in &mut image.pixels {
+                let [r, g, b, a] = pixel.to_array();
+                let y = ((r as u32 * 54 + g as u32 * 183 + b as u32 * 19) >> 8) as u8;
+                *pixel = Color32::from_rgba_premultiplied(y, y, y, a);
             }
         }
         slot.insert(ctx.load_texture(format!("icon:{}:{px}", resolved.master), image, TextureOptions::LINEAR));
@@ -276,6 +295,7 @@ mod tests {
         theme::set_vision(previous);
     }
 
+    /// Tests that per-call accent colors preserve icon semantic roles and share texture cache entries.
     #[test]
     fn per_call_accents_preserve_roles_and_share_the_existing_cache() {
         let previous = theme::vision();
@@ -365,6 +385,7 @@ mod tests {
         theme::set_vision(previous);
     }
 
+    /// Verifies that danger-styled and accent-styled icon textures maintain distinct cache slots.
     #[test]
     fn danger_and_accent_only_textures_do_not_share_a_cache_entry() {
         for dark in [false, true] {
@@ -395,6 +416,32 @@ mod tests {
                 output.textures_delta.clear();
             }
             assert_ne!(textures[&false], textures[&true], "matching Look values must not mix ordinary gray bins with shaded red bins");
+        }
+    }
+
+    /// Verifies that greyscale finish converts all color channels equally to desaturate artwork pixels.
+    #[test]
+    fn greyscale_finish_desaturates_artwork_pixels() {
+        let ctx = crate::fonts::test_context();
+        let draw = |ui: &mut egui::Ui| {
+            let r = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(32.0, 32.0));
+            paint_greyscale(ui.painter(), r, "extrude", None, 1.0);
+        };
+        let mut out = ctx.run_ui(egui::RawInput::default(), draw);
+        let pixels = out
+            .textures_delta
+            .set
+            .values()
+            .flat_map(|deltas| deltas.iter().map(|d| &d.image))
+            .find_map(|data| match data {
+                egui::ImageData::Color(image) if image.size == [32, 32] => Some(image.pixels.clone()),
+                _ => None,
+            })
+            .expect("greyscale icon texture");
+        out.textures_delta.clear();
+        for pixel in &pixels {
+            assert_eq!(pixel.r(), pixel.g(), "greyscale pixels must have equal red and green channels");
+            assert_eq!(pixel.g(), pixel.b(), "greyscale pixels must have equal green and blue channels");
         }
     }
 }

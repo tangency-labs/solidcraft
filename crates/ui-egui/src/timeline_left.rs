@@ -828,7 +828,7 @@ pub fn reveal_feature(app: &mut SolveApp, feature: u64) {
 }
 
 /// The features of these folders and of the folders nested in them, in timeline order.
-fn folder_features(app: &SolveApp, roots: &[u64]) -> Vec<u64> {
+pub(crate) fn folder_features(app: &SolveApp, roots: &[u64]) -> Vec<u64> {
     let groups = &app.session.doc.timeline_groups;
     let inside = |feature: u64| {
         group_for(groups, feature).is_some_and(|group| roots.contains(&group) || roots.iter().any(|root| group_is_descendant(groups, group, *root)))

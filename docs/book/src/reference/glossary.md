@@ -33,6 +33,17 @@ later pull requests, one topic at a time, each pointing at its entry here.
 
 ## Terms
 
+### 2D Timeline
+
+A view of the timeline that draws each feature in the row of the component it changes, with one
+column for each step.
+
+- **In SolidCraft:** the `timeline_2d` preference (Preferences › Layout › 2D Timeline) and the other
+  `timeline_2d_*` preferences; its two parts are the *modeling track* and the *assembly track*.
+- **Don't use:** 2D history, matrix timeline.
+- **Elsewhere:** multi-track timeline.
+- **For translators:** not a 2D sketch. Keep "2D" as written.
+
 ### abbe number
 
 Number measuring optical dispersion as `(nd - 1) / (nF - nC)` at the Fraunhofer d, F and C wavelengths.
@@ -52,6 +63,15 @@ An appearance sets colour and surface finish only. It has no effect on mass or s
 - **Don't use:** look, colour (for the whole appearance), render material.
 - **Elsewhere:** appearance, visual material, colour.
 - **For translators:** not the physical material.
+
+### assembly track
+
+The part of the 2D Timeline that lists a design's joints in order, with a row for each component.
+
+- **In SolidCraft:** the "Assembly & Joints" heading of the 2D Timeline.
+- **Don't use:** joint timeline, assembly history.
+- **Elsewhere:** joint track.
+- **For translators:** not an assembly, which is a design with several components.
 
 ### bill of materials
 
@@ -299,6 +319,16 @@ A material sets mass, centre of gravity and strength values. How the body looks 
 - **Elsewhere:** material, physical material.
 - **For translators:** not an appearance.
 
+### modeling track
+
+The part of the 2D Timeline that lists a design's features in timeline order, with a row for each
+component.
+
+- **In SolidCraft:** the "Modeling Features" heading of the 2D Timeline.
+- **Don't use:** feature track, feature lane.
+- **Elsewhere:** feature track.
+- **For translators:** not the Model workspace or its toolbar tab.
+
 ### moment of inertia
 
 How a body's mass resists turning about an axis: the mass times the square of its distance from
@@ -314,6 +344,19 @@ them. The *first moments* are the mass times the centre of mass.
 - **Don't use:** rotational inertia, second moment of mass, mass moment.
 - **Elsewhere:** moment of inertia, inertia tensor, mass moment of inertia.
 - **For translators:** not the second moment of area of a cross-section, a different quantity.
+
+### movable corridor
+
+The range of timeline steps where the selected feature can move without coming before a feature
+it depends on or after a feature that depends on it.
+
+- **In SolidCraft:** the green `[ ... ]` brackets of the 2D Timeline; a feature dropped on a step
+  outside its movable corridor stays where it was, and the target cell turns red while the pointer
+  is over such a step. A pointer past either end of the grid counts as the first or last step, so a
+  drop there moves the feature to that step when it is inside the corridor.
+- **Don't use:** safe range, drop range, corridor on its own in labels.
+- **Elsewhere:** reorder range.
+- **For translators:** not a path, a sweep or a hallway.
 
 ### occurrence
 
@@ -406,6 +449,17 @@ feature follows its edges when the part changes.
 - **Elsewhere:** reference edge, edge offset, distance from edge.
 - **For translators:** an edge of a body, not a construction axis or a reference plane; the
   distance is a length, not a reference value for light or material.
+
+### restore state
+
+The unsuppress mode in which unsuppressing a feature in the 2D Timeline leaves suppressed the
+dependents that were suppressed separately there in the same session.
+
+- **In SolidCraft:** `timeline_2d_unsuppress_mode: "restore_state"` (the default); Preferences ›
+  Layout › 2D Timeline › DAG unsuppress › Restore State. The other mode is `unsuppress_all`.
+- **Don't use:** restore, undo suppression.
+- **Elsewhere:** keep suppression state.
+- **For translators:** not Undo and not opening a saved version of a design.
 
 ### rollback marker
 

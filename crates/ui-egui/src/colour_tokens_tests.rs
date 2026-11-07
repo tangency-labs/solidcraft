@@ -161,7 +161,7 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("dialogs_assembly.rs", 1, "the interference fill, shaded from its token"),
     ("dialogs_motion.rs", 1, "a white outline"),
     ("gizmo.rs", 2, "the gizmo's neutral grey ball"),
-    ("icons.rs", 1, "the white tint that carries an icon image's opacity"),
+    ("icons.rs", 2, "the white tint that carries an icon image's opacity, and greyscale desaturation"),
     ("ref_images.rs", 1, "a reference image's opacity tint"),
     ("theme_files.rs", 1, "a colour read from a theme file, which sets tokens"),
     ("titlebar.rs", 2, "the window close button's red hover (the system's convention) and white ink"),
