@@ -8,8 +8,6 @@ component.create
 component.delete
 component.from_bodies
 component.list
-component.metadata
-component.metadata.set
 component.move_bodies
 component.move_sketches
 component.paste_new
