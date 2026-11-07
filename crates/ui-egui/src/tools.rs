@@ -344,17 +344,20 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
             // Symmetry's third pick may be an origin axis lying along the sketch's own x or y
             // (#1075); the command names those `x` / `y`.
             let axis_ok = tool.cmd == "sketch.constraint.symmetry" && tool.picks.len() == 2;
+            let active = app.session.active_sketch;
             let entity = hits.iter().find_map(|h| match h {
-                Hit::SketchPoint { id, .. } | Hit::SketchCurve { id, .. } => Some(id.clone()),
+                Hit::SketchPoint { sketch, id, .. } | Hit::SketchCurve { sketch, id, .. } if Some(*sketch) == active => Some(id.clone()),
                 Hit::Axis { name } if axis_ok => sketch_axis_of(app, name).map(str::to_string),
                 _ => None,
             });
-            // With nothing of the sketch there, a body's edge or vertex is picked (kept as its
-            // reference): the command projects it, so any body can be constrained to, a mirrored
-            // copy too (#6348). Projected geometry is already fixed, so Fix takes sketch entities.
+            // With nothing of the sketch there, a body's edge or vertex, or a curve or point of
+            // another sketch (one of another component's, say), is picked (kept as its
+            // reference): the command projects it, so anything shown can be constrained to, a
+            // mirrored copy too (#6348). Projected geometry is already fixed, so Fix takes sketch
+            // entities.
             let model = || {
                 hits.iter()
-                    .filter(|h| tool.cmd != "sketch.constraint.fix" && matches!(h, Hit::Edge { .. } | Hit::Vertex { .. }))
+                    .filter(|h| tool.cmd != "sketch.constraint.fix" && takes_projected(h, active))
                     .find_map(|h| crate::sketch_tools::model_ref(app, h))
                     .map(|r| r.to_string())
             };
@@ -869,6 +872,22 @@ fn symmetry_args(picks: &[Value], sketch: Option<&solidcraft_engine::sketch::Ske
     let mut rest = (0..3).filter(|i| *i != line).filter_map(|i| picks.get(i));
     let (a, b, line) = (rest.next()?, rest.next()?, picks.get(line)?);
     (a != b).then(|| json!({"a": a, "b": b, "line": line}))
+}
+
+/// What a constraint pick projects into the sketch when nothing of the sketch is under the
+/// pointer: a body's edge or vertex, or a curve or point of another sketch than `active`.
+fn takes_projected(h: &Hit, active: Option<u64>) -> bool {
+    match h {
+        Hit::Edge { .. } | Hit::Vertex { .. } => true,
+        Hit::SketchCurve { sketch, .. } | Hit::SketchPoint { sketch, .. } => Some(*sketch) != active,
+        _ => false,
+    }
+}
+
+/// Whether `tool` picks the points of other sketches too: the constraint pick tools, which
+/// project another sketch's point they are given (Fix takes only the sketch's own).
+pub(crate) fn picks_other_sketch_points(tool: &Tool) -> bool {
+    matches!(tool.kind, Kind::Pick(_)) && tool.cmd != "sketch.constraint.fix"
 }
 
 fn run_pick(app: &mut SolveApp, t: &Tool) {

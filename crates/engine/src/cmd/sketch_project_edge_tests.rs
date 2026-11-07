@@ -241,6 +241,50 @@ fn line_of(s: &Session, curve: &str) -> (Vec2, Vec2) {
     }
 }
 
+/// A curve or point of another sketch (here another component's) is constrained to as a body's
+/// edge is: the constraint projects it into the sketch first and ties to the projection, in one
+/// undo step. A second constraint to the same curve uses that projection again.
+#[test]
+fn a_constraint_to_another_components_sketch_projects_what_it_ties_to() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Frame"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Guide"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 40], [100, 40]], "ids": ["rail"], "connect": false}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "component.create", json!({"name": "Part"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Top"}));
+    run(&mut s, "sketch.line", json!({"points": [[10, 0], [20, 30]], "connect": false}));
+    let own = s.doc.find_feature("Top").unwrap().id;
+    let links = |s: &Session| s.doc.sketch(own).unwrap().links.clone();
+
+    // The line's end onto the other sketch's line: the line is projected and the end lies on it.
+    let before = s.doc.to_json();
+    let out = run(&mut s, "sketch.constraint.coincident", json!({"a": "l1.end", "b": {"sketch": "Guide", "curve": "rail"}}));
+    assert_eq!(out["created"]["curves"].as_array().map(Vec::len), Some(1), "the projected line: {out}");
+    let linked = links(&s);
+    assert_eq!(linked.len(), 1);
+    assert!(matches!(&linked[0].source, LinkSource::SketchCurve { curve, .. } if curve == "rail"), "{:?}", linked[0].source);
+    let (_, end) = line_of(&s, "l1");
+    assert!((end.y - 40.0).abs() < 1e-6, "the end lies on the rail: {end:?}");
+    // Undone in one step: the projection and the constraint together.
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before);
+    run(&mut s, "edit.redo", json!({}));
+
+    // The start onto the same line: no second copy of it.
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "l1.start", "b": {"sketch": "Guide", "curve": "rail"}}));
+    assert_eq!(links(&s).len(), 1, "the projection is used again");
+    let (start, _) = line_of(&s, "l1");
+    assert!((start.y - 40.0).abs() < 1e-6, "the start lies on the rail too: {start:?}");
+
+    // A point of the other sketch: projected, and the start goes onto it.
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "l1.start", "b": {"sketch": "Guide", "point": "rail.start"}}));
+    assert!(links(&s).iter().any(|l| matches!(&l.source, LinkSource::SketchPoint { point, .. } if point == "rail.start")));
+    let (start, _) = line_of(&s, "l1");
+    assert!(start.dist(Vec2::new(0.0, 40.0)) < 1e-6, "{start:?}");
+}
+
 /// An edge of a mirrored body is constrained to like any other body's edge (#6348). The plate
 /// mirrored about YZ gives a copy from x = -width to 0. Collinear with the copy's outer top
 /// edge (x = -width) projects that edge into the sketch and holds the line on it, in one step;
