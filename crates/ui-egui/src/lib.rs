@@ -2686,11 +2686,18 @@ impl SolveApp {
         self.set_status(text, false);
     }
 
-    pub fn open_path(&mut self, path: &str) {
+    /// Open the design (or file) at `path` here and now: it is read and evaluated before this
+    /// returns, which blocks the thread for a large design. The app opens through
+    /// [`Self::open_path_async`] or [`Self::open_path_answered`] (progress and Cancel, #10198);
+    /// this is for tests.
+    #[cfg(test)]
+    pub(crate) fn open_path(&mut self, path: &str) {
         self.open_path_with(path, &Default::default());
     }
 
-    /// [`Self::open_path`] with the import options of the request (`units` of an STL or OBJ file).
+    /// Open the design (or file) at `path` here and now, with the import options of the request
+    /// (`units` of an STL or OBJ file). The web file loader uses it for its own formats that have
+    /// no staged open.
     pub fn open_path_with(&mut self, path: &str, options: &serde_json::Map<String, Value>) {
         match documents::reuse_path(self, path) {
             Ok(true) => return,
