@@ -4,6 +4,7 @@ use crate::ui_kit;
 use crate::ui_kit::{choice_row, expr_row, hint_row};
 use solidcraft_engine::kernel::Continuity;
 
+/// The command whose icon and label head a dialog of `kind`, when it has one.
 pub(super) fn command(kind: &Kind) -> Option<&'static str> {
     match kind {
         Kind::Material { .. } => Some("material.assign"),
@@ -43,6 +44,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::Midplane => Some("construct.plane.midplane"),
         Kind::MeshConvert { .. } => Some("mesh.convert"),
         Kind::Construct { command, .. } => Some(command),
+        Kind::ConstructAuto { command, .. } => Some(command),
         Kind::PathPlane { .. } => Some("construct.plane.along_path"),
         Kind::Split => Some("solid.split_body"),
         Kind::DeleteFaces => Some("face.delete"),
@@ -337,6 +339,7 @@ fn choose_fillet_type(extra: &mut serde_json::Map<String, Value>, index: usize, 
     }
 }
 
+/// The dialog's form: its hints, inputs and value rows. True when Enter was pressed in a field.
 pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     let t = Tokens::get();
     let mut enter = false;
@@ -375,6 +378,10 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
     };
     if let Some(key) = manage_hint {
         ui_kit::text(ui, tr(key), ui_kit::Text::Hint("manage"));
+    }
+    // Plane, Axis or Point: which method its picks chose, and that more picks choose again.
+    if let Some(hint) = d.auto.as_ref().map(super::auto::hint) {
+        ui_kit::text(ui, &hint, ui_kit::Text::Hint("auto"));
     }
     placement_row(d, ui, app);
     if crate::hole_refs::takes(d) {

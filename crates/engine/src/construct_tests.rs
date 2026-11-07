@@ -908,3 +908,82 @@ fn construction_on_a_moved_body_moves_with_it() {
     let (o, d) = axis(&s, "Tether");
     assert!(on_line(o, d, Vec3::new(0.0, 0.0, 20.0)) && on_line(o, d, Vec3::new(0.0, 50.0, 20.0)), "{o:?} {d:?}");
 }
+
+/// Plane, Axis and Point build with the first method of their family that takes the references:
+/// the feature is that method's own, and the reply names it.
+#[test]
+fn plane_axis_and_point_build_with_the_first_method_that_takes_the_references() {
+    let mut s = part();
+    let top = json!({"face": [20, 15, 20]});
+    let x_edge = json!({"edge": [20, 0, 0]});
+    let corner = json!({"vertex": [40, 30, 20]});
+    let cases = [
+        ("construct.plane", json!({"refs": [top], "with": {"offset": 5, "name": "Lid"}}), "construct.plane.offset"),
+        ("construct.plane", json!({"refs": [corner, {"plane": "XY"}], "with": {"name": "Corner"}}), "construct.plane.offset"),
+        ("construct.plane", json!({"refs": [{"plane": "XY"}, top], "with": {"name": "Mid"}}), "construct.plane.midplane"),
+        (
+            "construct.plane",
+            json!({"refs": [{"plane": "XY"}, {"axis": "X"}], "with": {"angle": "90 deg", "name": "Turned"}}),
+            "construct.plane.at_angle",
+        ),
+        (
+            "construct.plane",
+            json!({"refs": [{"point": [0, 0, 7]}, {"point": [1, 0, 7]}, {"point": [0, 1, 7]}], "with": {"name": "Three"}}),
+            "construct.plane.three_points",
+        ),
+        ("construct.axis", json!({"refs": [{"face": [65, 0, 5]}], "with": {"name": "Bore"}}), "construct.axis.through_cylinder"),
+        ("construct.axis", json!({"refs": [{"plane": "XZ"}, {"plane": "YZ"}], "with": {"name": "Meet"}}), "construct.axis.two_planes"),
+        ("construct.point", json!({"refs": [corner], "with": {"name": "Tip"}}), "construct.point.vertex"),
+        (
+            "construct.point",
+            json!({"refs": [{"plane": "XY"}, {"plane": "XZ"}, {"plane": "YZ"}], "with": {"name": "Zero"}}),
+            "construct.point.three_planes",
+        ),
+        ("construct.point", json!({"refs": [x_edge], "with": {"t": 0.5, "name": "Half"}}), "construct.point.along_path"),
+    ];
+    for (id, p, method) in cases {
+        let features = s.doc.features.len();
+        assert_eq!(run(&mut s, id, p.clone())["method"], method, "{id} {p}");
+        assert_eq!(s.doc.features.len(), features + 1, "{id} {p}: one feature, the method's own");
+    }
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let lid = plane(&s, "Lid");
+    assert!(parallel(lid.normal(), Vec3::Z) && on_plane(&lid, Vec3::new(1.0, 1.0, 25.0)), "{lid:?}");
+    let corner_plane = plane(&s, "Corner");
+    assert!(on_plane(&corner_plane, Vec3::new(1.0, 1.0, 20.0)), "{corner_plane:?}");
+    let mid = plane(&s, "Mid");
+    assert!(on_plane(&mid, Vec3::new(1.0, 1.0, 10.0)), "{mid:?}");
+    let turned = plane(&s, "Turned");
+    assert!(parallel(turned.normal(), Vec3::Y), "{turned:?}");
+    let three = plane(&s, "Three");
+    assert!(on_plane(&three, Vec3::new(5.0, 5.0, 7.0)), "{three:?}");
+    let (o, d) = axis(&s, "Bore");
+    assert!(parallel(d, Vec3::Z) && on_line(o, d, Vec3::new(60.0, 0.0, 3.0)), "{o:?} {d:?}");
+    let (o, d) = axis(&s, "Meet");
+    assert!(parallel(d, Vec3::Z) && on_line(o, d, Vec3::ZERO), "{o:?} {d:?}");
+    assert!(near(point(&s, "Tip"), Vec3::new(40.0, 30.0, 20.0)));
+    assert!(near(point(&s, "Zero"), Vec3::ZERO));
+    assert!(near(point(&s, "Half"), Vec3::new(20.0, 0.0, 0.0)), "{:?}", point(&s, "Half"));
+    // One undo step takes the feature away.
+    let features = s.doc.features.len();
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.features.len(), features - 1);
+}
+
+/// References no method builds from, and a `with` key no method takes, are refused and leave the
+/// design as it was.
+#[test]
+fn plane_axis_and_point_refuse_references_no_method_takes() {
+    let mut s = part();
+    let before = (*s.doc).clone();
+    for (id, p) in [
+        ("construct.plane", json!({"refs": [{"point": [0, 0, 0]}, {"point": [1, 0, 0]}]})),
+        ("construct.plane", json!({"refs": [{"plane": "XY"}, {"plane": "XZ"}], "with": {"bogus": 1}})),
+        ("construct.axis", json!({"refs": [{"vertex": [40, 30, 20]}]})),
+        ("construct.point", json!({"refs": [{"plane": "XY"}]})),
+        ("construct.plane", json!({"refs": []})),
+    ] {
+        assert!(s.execute(id, &p).is_err(), "{id} {p}");
+        assert_eq!(*s.doc, before, "{id} {p}: a refusal changes nothing");
+    }
+}

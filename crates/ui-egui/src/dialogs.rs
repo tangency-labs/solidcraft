@@ -25,6 +25,8 @@ use crate::theme::Tokens;
 use crate::tool_modifiers::{Audit, Scope, ToolModifiers};
 use crate::viewport::Hit;
 
+#[path = "dialogs_auto.rs"]
+mod auto;
 #[path = "dialogs_dense.rs"]
 mod dense;
 #[cfg(test)]
@@ -255,6 +257,9 @@ crate::dialog_descriptor::dialog_descriptors! {
                 keys: Vec<&'static str>,
                 t: Option<String>,
             },
+            /// Plane, Axis or Point (`construct.plane|axis|point`) while no method takes its picks;
+            /// once one does, the dialog is that method's own (`dialogs_auto`).
+            ConstructAuto { command: &'static str },
             /// A plane perpendicular to one selected path at a fractional distance.
             PathPlane {
                 t: String,
@@ -556,6 +561,9 @@ pub struct Dialog {
     pub press_pull: bool,
     /// The operation the window chooses by itself (#6901).
     pub op_auto: crate::op_auto::OpAuto,
+    /// Plane, Axis or Point standing in for the method its picks call for: this dialog is that
+    /// method's, and picks go to the tool, which chooses the method again (dialogs_auto).
+    pub(crate) auto: Option<auto::Auto>,
     /// Where the face that reopened this fillet or chamfer was clicked (Press Pull): its arrow
     /// sits on the edge nearest it. UI state only, never saved.
     pub(crate) anchor_hint: Option<Vec3>,
@@ -793,6 +801,8 @@ impl Dialog {
         self.error = Some(error);
     }
 
+    /// A dialog of `kind` with these inputs and every other field at its starting value: no picks
+    /// taken yet beyond the inputs' own, no error, and not standing in for Plane, Axis or Point.
     pub(crate) fn new(kind: Kind, inputs: Vec<SelInput>) -> Dialog {
         let chain_applied = matches!(kind, Kind::Fillet { chain: true, .. });
         Dialog {
@@ -824,6 +834,7 @@ impl Dialog {
             press_pull: false,
             op_auto: Default::default(),
             anchor_hint: None,
+            auto: None,
         }
     }
 
@@ -873,6 +884,9 @@ impl Dialog {
         }
     }
 
+    /// The dialog a toolbar click on command `id` opens, filled from the current selection where
+    /// its inputs take it; Plane, Axis and Point open as the method their picks call for
+    /// (`dialogs_auto`). `None` for a command that has no dialog.
     pub fn for_command(app: &SolveApp, id: &str) -> Option<Dialog> {
         let s = &app.session;
         let has_bodies = !crate::open_meshing::session_world(s).bodies.is_empty();
@@ -962,6 +976,8 @@ impl Dialog {
                 Kind::MeshConvert { tolerance: crate::length_input::model(&s.doc, 0.05) },
                 vec![SelInput::new("Mesh body", BODIES, false)],
             ),
+            // Plane, Axis and Point open as the method their picks call for (`dialogs_auto`).
+            _ if solidcraft_engine::cmd::is_construct_tool(id) => return auto::start(app, id),
             "construct.plane.midplane" => Dialog::new(
                 Kind::Midplane,
                 vec![SelInput::new("First plane", PLANES | PLANAR_FACES, false), SelInput::new("Second plane", PLANES | PLANAR_FACES, false)],
@@ -1591,6 +1607,10 @@ impl Dialog {
         if matches!(self.kind, Kind::SketchModify(_)) {
             return crate::sketch_modify_ui::candidate(self, s, h);
         }
+        // Plane, Axis and Point take whatever a method of theirs builds from.
+        if self.auto.is_some() {
+            return auto::candidate(s, h);
+        }
         if let Some(target) = self.extrude_target(s, h) {
             return Some(target);
         }
@@ -1762,6 +1782,13 @@ impl Dialog {
     pub fn pick(&mut self, s: &Session, sel: Sel) {
         self.awaiting_pick = false;
         self.pick_refused = None;
+        // Plane, Axis and Point: the pick is the tool's, which chooses the method again.
+        if let Some(a) = &mut self.auto {
+            a.toggle(sel);
+            self.error = None;
+            self.focus = true;
+            return;
+        }
         if self.take_extrude_target(s, &sel) {
             return;
         }
@@ -2563,6 +2590,7 @@ fn publish_check(ui: &egui::Ui, response: &egui::Response, selected: bool) {
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), selected, tr(crate::ui_kit::row_label(ui))));
 }
 
+/// The dialog's heading for `k`: a message id or label the header translates.
 fn title(k: &Kind) -> &'static str {
     match k {
         Kind::Sketch => "CREATE SKETCH",
@@ -2578,6 +2606,9 @@ fn title(k: &Kind) -> &'static str {
         Kind::Midplane => "MIDPLANE",
         Kind::MeshConvert { .. } => "CONVERT MESH",
         Kind::Construct { title, .. } => title,
+        Kind::ConstructAuto { command: "construct.plane", .. } => "cmd.construct.plane",
+        Kind::ConstructAuto { command: "construct.axis", .. } => "cmd.construct.axis",
+        Kind::ConstructAuto { .. } => "cmd.construct.point",
         Kind::PathPlane { .. } => "PLANE ALONG PATH",
         Kind::Rib { web: false, .. } => "RIB",
         Kind::Rib { web: true, .. } => "WEB",
@@ -3758,6 +3789,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     crate::sketch_text::sync_path(&mut d);
+    auto::sync(app, &mut d);
     let _language = crate::i18n::scope(&app.preferences.language);
     if let Kind::TextMove(k) = &d.kind
         && !crate::sketch_text_move::valid(app, k)
@@ -5526,6 +5558,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             }
             (*command, Value::Object(p))
         }
+        Kind::ConstructAuto { .. } => return Err(auto::refusal(d)),
         Kind::PathPlane { t, sketch } => {
             need(0, "a path")?;
             let path = match sels(d, 0).first() {
