@@ -1,0 +1,34 @@
+{
+  "ar": {
+    "ui.scaled_length_defaults": "تبدأ الأطوال الجديدة بالحجم الذي تُسلَّم به الأداة",
+    "ui.scaled_length_defaults_help": "يبدأ حقل الطول الجديد في حوار عملية بالحجم الذي تُسلَّم به أداته، معروضًا بوحدات التصميم: سحب لمقدار 10 مم يبدأ عند \"10 مم\" أو \"1 سم\" أو \"0.4 بوصة\". عند الإيقاف: تُقرأ الرقم بوحدات التصميم (\"10 بوصة\"). تحتفظ حوارات الأشكال الأساسية بأحجامها بوحدات التصميم."
+  },
+  "de": {
+    "ui.scaled_length_defaults": "Neue Längen mit der Größe beginnen, mit der das Werkzeug ausgeliefert wird",
+    "ui.scaled_length_defaults_help": "Ein neues Längenfeld in einem Operationsdialog beginnt mit der Größe, mit der sein Werkzeug ausgeliefert wird, in den Einheiten des Designs: ein Extruden von 10 mm beginnt bei \"10 mm\", \"1 cm\" oder \"0.4 in\". Aus: Die Zahl wird in den Einheiten des Designs gelesen (\"10 in\"). Die Dialoge der Grundkörper behalten ihre Größen in den Einheiten des Designs."
+  },
+  "en": {
+    "ui.scaled_length_defaults": "Start new lengths with the size their tool ships with",
+    "ui.scaled_length_defaults_help": "A new length field in an operation dialog starts with the size its tool ships with, shown in the design's units: an extrude of 10 mm starts at \"10 mm\", \"1 cm\" or \"0.4 in\". Off: the number is read in the design's units (\"10 in\"). The primitive dialogs keep their sizes in the design's units."
+  },
+  "he": {
+    "ui.scaled_length_defaults": "אורכים חדשים מתחילים בגודל שבו הכלי נמסר",
+    "ui.scaled_length_defaults_help": "שדה אורך חדש בחלון פעולה מתחיל בגודל שבו הכלי שלו נמסר, מוצג ביחידות התכנון: מתיחה של 10 מ\"מ מתחילה ב-\"10 מ\"מ\", \"1 ס\"מ\" או \"0.4 אינץ\". כשהוא כבוי: המספר נקרא ביחידות התכנון (\"10 אינץ\"). חלונות הגופים הפשוטים שומרים על גודליהם ביחידות התכנון."
+  },
+  "ja": {
+    "ui.scaled_length_defaults": "新しい長さはツールの本来の寸法で始める",
+    "ui.scaled_length_defaults_help": "操作ダイアログの新しい長さの欄は、そのツールの本来の寸法を設計の単位に換算して表示して始まります：10 mm の押し出しは「10 mm」「1 cm」「0.4 in」で始まります。オフの場合：数値は設計の単位として読み取られます（「10 in」）。基本形状のダイアログはサイズを設計の単位のまま表示します。"
+  },
+  "ko": {
+    "ui.scaled_length_defaults": "새 길이는 도구가 기본으로 제공하는 크기로 시작",
+    "ui.scaled_length_defaults_help": "작업 대화상자의 새 길이 입력란은 도구가 기본으로 제공하는 크기를 설계 단위로 표시하며 시작합니다: 10 mm 압출은 \"10 mm\", \"1 cm\" 또는 \"0.4 in\"으로 시작합니다. 끄면: 숫자는 설계 단위로 읽힙니다 (\"10 in\"). 기본 도형 대화상자는 크기를 설계 단위 그대로 유지합니다."
+  },
+  "vi": {
+    "ui.scaled_length_defaults": "Các chiều dài mới bắt đầu bằng kích thước mà công cụ được giao",
+    "ui.scaled_length_defaults_help": "Một ô chiều dài mới trong hộp thoại thao tác bắt đầu bằng kích thước mà công cụ của nó được giao, hiển thị theo đơn vị của thiết kế: một lệnh kéo chiều dài 10 mm bắt đầu ở \"10 mm\", \"1 cm\" hoặc \"0.4 in\". Khi tắt: số được đọc theo đơn vị của thiết kế (\"10 in\"). Các hộp thoại hình cơ bản giữ kích thước theo đơn vị của thiết kế."
+  },
+  "zh": {
+    "ui.scaled_length_defaults": "新长度以工具自带的尺寸开始",
+    "ui.scaled_length_defaults_help": "操作对话框中新的长度输入框以该工具自带的尺寸开始，并按设计的单位显示：10 毫米的拉伸以 \"10 mm\"、\"1 cm\" 或 \"0.4 in\" 开始。关闭时：数字按设计的单位读取（\"10 in\"）。基本体对话框的尺寸仍按设计的单位显示。"
+  }
+}

@@ -1233,7 +1233,8 @@ fn inch_joint_offsets_limits_and_drive_values_keep_their_units() {
     let Kind::Assembly(Asm::Joint(f)) = &mut d.kind else { panic!("no joint") };
     f.kind = TYPES.iter().position(|t| *t == "slider").unwrap();
     f.fit_limits(&app.session.doc);
-    assert_eq!((f.limits[0].1.as_str(), f.limits[0].2.as_str()), ("0 in", "20 in"));
+    // The limits' default is the 20 mm the tool ships with, in the design's units (#12418).
+    assert_eq!((f.limits[0].1.as_str(), f.limits[0].2.as_str()), ("0 in", "0.8 in"));
     f.offset[0] = "0.25".into();
     f.offset[2] = "2 mm".into();
     f.limits[0] = (true, "0".into(), "0.5".into());

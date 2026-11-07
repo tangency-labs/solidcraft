@@ -84,8 +84,15 @@ The design's units (Document Settings in the browser: mm, cm, m, in or ft) set h
 or unitless arithmetic expression typed into a length field is read. In an inch design `0.25`
 and `1 / 4` mean 0.25 in. A new user parameter given no unit (`parameters.add` or
 `parameters.import` without `unit`) is a length in the design's units, as the Parameters dialog
-makes it: `40/2` is 20 in. Operation dialogs start with lengths in the design's units, including
-secondary distances, wall thicknesses, gaps, offsets and radii. Canvas handles and live sketch
+makes it: `40/2` is 20 in. Operation dialogs start with the size their tool ships with, shown in
+the design's units, including secondary distances, wall thicknesses, gaps, offsets and radii: an
+extrude of 10 mm starts at `10 mm` in a millimetre design, `1 cm` in a centimetre one and `0.4 in`
+in an inch one. A metric unit converts exactly; an imperial one keeps the size within 2% of it, so
+the part is the part the tool intends. Preferences (Design, *Start new lengths with the size their
+tool ships with*) can turn this off, and the number the tool ships with is then read in the
+design's units (`10 in`), as before. The primitive dialogs (Box, Cylinder, Sphere, Torus, Cone,
+Coil) keep their sizes in the design's units, as they always have: a box of `20` is 20 in in an
+inch design. Canvas handles and live sketch
 values use the same units as the operation. Angles, counts and scale factors keep their own
 units. Preferences selects the default units for new designs; existing designs use their own
 Document Settings.

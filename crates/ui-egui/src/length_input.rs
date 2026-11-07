@@ -1,21 +1,140 @@
 //! Lengths at the UI boundary. Bare values use the current design unit; explicit units and
 //! parameter expressions keep their meaning. The engine and saved geometry remain in mm.
 
+use std::cell::Cell;
+
 use solidcraft_engine::doc::{
     Document,
     expr::{Kind, unit_info},
 };
+
+/// How far a size shown in another unit may drift from the size the tool ships with: 2% keeps
+/// an inch design's "0.4 in" for 10 mm, close enough to be the same size, and short enough to
+/// read in the design's own units.
+const CONVERSION_TOLERANCE: f64 = 0.02;
+
+/// The most digits a size written in another unit is given.
+const MAX_DIGITS: usize = 6;
+
+thread_local! {
+    /// Whether a new length field starts with the size its tool ships with (#12418). Off: it
+    /// starts with the number the tool ships with, read in the design's units ("10 in" in an
+    /// inch design), the behaviour before #12418. The preference is handed to the thread that
+    /// draws the frame, which is the one that builds the dialogs.
+    static SCALED_LENGTH_DEFAULTS: Cell<bool> = const { Cell::new(true) };
+}
+
+/// Take the preference from the preferences window (#12418).
+pub(crate) fn set_scaled_length_defaults(scaled: bool) {
+    SCALED_LENGTH_DEFAULTS.with(|cell| cell.set(scaled));
+}
+
+/// Whether new length fields keep the size their tool ships with (#12418).
+fn scaled_length_defaults() -> bool {
+    SCALED_LENGTH_DEFAULTS.with(Cell::get)
+}
 
 pub(crate) fn unit(doc: &Document) -> &str {
     solidcraft_engine::doc::expr::length_unit_or_mm(&doc.units)
 }
 
 /// A new field follows the same numeric-default policy as the primitive and sketch dialogs.
+/// The number is a size in millimetres, the unit the tools ship with, shown in the design's
+/// unit: "10 mm" in a millimetre design, "1 cm" in a centimetre one and "0.4 in" in an inch
+/// one (#12418). Off, the number is read in the design's unit instead ("10 in").
 pub(crate) fn default(doc: &Document, number: &str) -> String {
+    let number = number.trim();
+    match shipped_size(doc, number) {
+        Some(size) => size,
+        None => format!("{number} {}", unit(doc)),
+    }
+}
+
+/// A primitive's size: the number in the design's units ("20 in"), the way the primitive dialogs
+/// have always shown it (#630). A primitive is a size the user asks for, not a tool's preset, so
+/// its size keeps the design's units and the preference that scales the operation dialogs does
+/// not reach it (#12418).
+pub(crate) fn primitive_default(doc: &Document, number: &str) -> String {
     format!("{} {}", number.trim(), unit(doc))
 }
 
+/// The size a tool ships with, in millimetres, shown in the design's unit (#12418). The size
+/// keeps the millimetres the tool ships with, so an extrude of 10 mm is 10 mm in every design,
+/// and it is written with as few digits as the design's unit allows, so that an inch design
+/// reads "0.4 in" and not "0.39370079 in".
+fn shipped_size(doc: &Document, number: &str) -> Option<String> {
+    if !scaled_length_defaults() {
+        return None;
+    }
+    let millimetres: f64 = number.parse().ok()?;
+    if !millimetres.is_finite() {
+        return None;
+    }
+    let unit = unit(doc);
+    let scale = unit_info(unit).map(|(_, scale)| scale)?;
+    let value = millimetres / scale;
+    // A metric unit converts exactly; an imperial one has no exact short form, so it keeps
+    // the size within 2% of the millimetres the tool ships with.
+    let text = if matches!(unit, "mm" | "cm" | "m") { exact_number(value) } else { short_number(value) };
+    Some(format!("{text} {unit}"))
+}
+
+/// The shortest number of digits that writes `value` exactly: "0.15", not "0.15000000000000002".
+fn exact_number(value: f64) -> String {
+    if value == 0.0 {
+        return "0".to_string();
+    }
+    for digits in 1..=MAX_DIGITS {
+        let rounded = round_significant(value, digits);
+        if (rounded - value).abs() <= 1e-9 * value.abs() {
+            return format_significant(rounded, digits);
+        }
+    }
+    format_significant(value, MAX_DIGITS)
+}
+
+/// The shortest number of digits that keeps `value` within [`CONVERSION_TOLERANCE`] of it:
+/// "0.4" for 0.39370079, "0.08" for 0.07874016.
+fn short_number(value: f64) -> String {
+    if value == 0.0 {
+        return "0".to_string();
+    }
+    for digits in 1..=MAX_DIGITS {
+        let rounded = round_significant(value, digits);
+        if (rounded - value).abs() <= CONVERSION_TOLERANCE * value.abs() {
+            return format_significant(rounded, digits);
+        }
+    }
+    format_significant(value, MAX_DIGITS)
+}
+
+/// `value` rounded to `digits` significant digits. Crate-visible so that a test can ask whether
+/// a shorter form would still keep the size (#12418).
+pub(crate) fn round_significant(value: f64, digits: usize) -> f64 {
+    if value == 0.0 {
+        return 0.0;
+    }
+    let factor = 10f64.powi(digits as i32 - 1 - exponent(value));
+    (value * factor).round() / factor
+}
+
+/// The power of ten of `value`'s leading digit: 0 for 1, 1 for 20, -1 for 0.4.
+fn exponent(value: f64) -> i32 {
+    value.abs().log10().floor() as i32
+}
+
+/// `value` written with `digits` significant digits, without trailing zeros.
+fn format_significant(value: f64, digits: usize) -> String {
+    let decimals = (digits as i32 - 1 - exponent(value)).max(0) as usize;
+    let text = format!("{value:.decimals$}");
+    if decimals == 0 {
+        return text;
+    }
+    text.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
 /// Apply the design unit to numeric defaults from declarative dialog descriptors.
+/// The number is a size in millimetres, shown in the design's unit (#12418).
 /// Called only for new dialogs; stored expressions keep their original units.
 pub(crate) fn defaults(doc: &Document, mut kind: crate::dialogs::Kind) -> crate::dialogs::Kind {
     for value in fields(doc, &mut kind) {
@@ -246,6 +365,49 @@ pub(crate) fn extra(extra: &mut serde_json::Map<String, serde_json::Value>, mut 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_new_length_keeps_the_size_its_tool_ships_with() {
+        // #12418: the number a tool ships with is a size in millimetres, shown in the design's
+        // unit: an inch design's extrude of 10 mm starts at "0.4 in", not "10 in".
+        for (units, want) in [("mm", "10 mm"), ("cm", "1 cm"), ("m", "0.01 m"), ("in", "0.4 in"), ("ft", "0.033 ft")] {
+            let doc = Document { units: units.into(), ..Document::default() };
+            assert_eq!(default(&doc, "10"), want, "{units}");
+        }
+        let doc = Document { units: "in".into(), ..Document::default() };
+        assert_eq!(default(&doc, "2"), "0.08 in");
+        assert_eq!(default(&doc, "5"), "0.2 in");
+        assert_eq!(default(&doc, "0"), "0 in");
+    }
+
+    #[test]
+    fn a_shown_size_is_the_size_the_tool_ships_with() {
+        // A size shown in another unit keeps the size the tool ships with: exactly for a metric
+        // unit, within 2% for an imperial one, so the part is the part the tool intends.
+        for units in ["mm", "cm", "m", "in", "ft"] {
+            let doc = Document { units: units.into(), ..Document::default() };
+            for millimetres in ["0", "1", "1.5", "2", "3", "5", "8", "9", "10", "20", "40"] {
+                let shown = default(&doc, millimetres);
+                assert!(shown.ends_with(&format!(" {units}")), "{shown}");
+                let millimetres: f64 = millimetres.parse().unwrap();
+                let value = eval(&doc, &shown, Kind::Length).unwrap();
+                let exact = matches!(units, "mm" | "cm" | "m");
+                let drift = (value - millimetres).abs();
+                assert!(drift <= if exact { 1e-9 } else { 0.02 * millimetres }, "{shown} is {value} mm, the tool ships {millimetres} mm");
+            }
+        }
+    }
+
+    #[test]
+    fn the_old_default_is_kept_behind_a_preference() {
+        // With the preference off, the number the tool ships with is read in the design's units,
+        // as before #12418.
+        let doc = Document { units: "in".into(), ..Document::default() };
+        set_scaled_length_defaults(false);
+        assert_eq!(default(&doc, "10"), "10 in");
+        set_scaled_length_defaults(true);
+        assert_eq!(default(&doc, "10"), "0.4 in");
+    }
 
     #[test]
     fn a_decimal_comma_survives_the_design_unit() {

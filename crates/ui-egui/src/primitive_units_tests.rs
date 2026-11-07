@@ -279,8 +279,10 @@ fn editing_a_coil_reopens_its_dialog_filled_in_and_ok_redefines_it() {
 }
 
 /// #3271: cover secondary and optional lengths as well as each tool's primary canvas value.
+/// #12418: each default is the size the tool ships with, shown in the design's units.
 #[test]
 fn operation_length_defaults_follow_every_design_unit() {
+    use solidcraft_engine::doc::expr::Kind as K;
     const CASES: &[(&str, &[&str])] = &[
         ("solid.extrude", &["10", "10", "", "", "2", "1"]),
         ("solid.fillet", &["2", "2"]),
@@ -324,13 +326,51 @@ fn operation_length_defaults_follow_every_design_unit() {
     ];
     for units in ["mm", "cm", "m", "in", "ft"] {
         let h = design(units);
+        let metric = matches!(units, "mm" | "cm" | "m");
+        // How many millimetres a design unit holds.
+        let scale = solidcraft_engine::doc::expr::unit_info(units).unwrap().1;
         for &(command, numbers) in CASES {
             let mut d = crate::dialogs::Dialog::for_command(&h.app, command).unwrap_or_else(|| panic!("no dialog for {command}"));
             let values: Vec<_> = crate::length_input::fields(&h.app.session.doc, &mut d.kind).into_iter().map(|v| v.clone()).collect();
-            let expected: Vec<_> = numbers.iter().map(|n| if n.is_empty() { String::new() } else { format!("{n} {units}") }).collect();
-            assert_eq!(values, expected, "{command} in {units}");
+            assert_eq!(values.len(), numbers.len(), "{command} in {units}");
+            for (value, number) in values.iter().zip(numbers) {
+                if number.is_empty() {
+                    assert!(value.is_empty(), "{command} in {units}: {value:?} should be empty");
+                    continue;
+                }
+                let (text, unit) = value.split_once(' ').unwrap_or_else(|| panic!("{command} in {units}: {value:?} has no unit"));
+                assert_eq!(unit, units, "{command} in {units}: {value}");
+                // The number a tool ships with is a size in millimetres, shown in the design's
+                // units: exactly for a metric one, within 2% for an imperial one.
+                let millimetres: f64 = number.parse().unwrap();
+                let shown = crate::length_input::eval(&h.app.session.doc, value, K::Length).unwrap();
+                let drift = (shown - millimetres).abs();
+                assert!(
+                    drift <= if metric { 1e-9 * millimetres.abs().max(1.0) } else { 0.02 * millimetres },
+                    "{command} in {units}: {value} is {shown} mm, the tool ships {millimetres} mm"
+                );
+                if !metric {
+                    // An imperial size is as short as it can be and still the size the tool ships
+                    // with (#12418): the fewest significant digits that keep it within 2%. Two
+                    // digits hold every size but 5 mm in feet, which is "0.0164 ft": "0.016 ft"
+                    // would be 2.5% off, more than the size may drift.
+                    let exact = millimetres / scale;
+                    for digits in 1..significant_digits(text) {
+                        let shorter = crate::length_input::round_significant(exact, digits);
+                        assert!(
+                            (shorter - exact).abs() > 0.02 * exact.abs(),
+                            "{command} in {units}: {value} carries more digits than the size needs"
+                        );
+                    }
+                }
+            }
         }
     }
+}
+
+/// The significant digits a number is written with: "0.035" has two, "0.1" one, "0" none.
+fn significant_digits(text: &str) -> usize {
+    text.chars().filter(char::is_ascii_digit).skip_while(|c| *c == '0').count()
 }
 
 #[test]

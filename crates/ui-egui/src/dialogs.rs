@@ -1041,7 +1041,11 @@ impl Dialog {
             "solid.box" => Dialog::new(
                 Kind::Primitive {
                     cmd: "solid.box",
-                    fields: vec![("length", length_default(s, "20")), ("width", length_default(s, "20")), ("height", length_default(s, "20"))],
+                    fields: vec![
+                        ("length", primitive_length_default(s, "20")),
+                        ("width", primitive_length_default(s, "20")),
+                        ("height", primitive_length_default(s, "20")),
+                    ],
                     operation: 0,
                     at: None,
                     refs: Default::default(),
@@ -1051,7 +1055,7 @@ impl Dialog {
             "solid.cylinder" => Dialog::new(
                 Kind::Primitive {
                     cmd: "solid.cylinder",
-                    fields: vec![("diameter", length_default(s, "20")), ("height", length_default(s, "20"))],
+                    fields: vec![("diameter", primitive_length_default(s, "20")), ("height", primitive_length_default(s, "20"))],
                     operation: 0,
                     at: None,
                     refs: Default::default(),
@@ -1061,7 +1065,7 @@ impl Dialog {
             "solid.sphere" => Dialog::new(
                 Kind::Primitive {
                     cmd: "solid.sphere",
-                    fields: vec![("diameter", length_default(s, "20"))],
+                    fields: vec![("diameter", primitive_length_default(s, "20"))],
                     operation: 0,
                     at: None,
                     refs: Default::default(),
@@ -1071,7 +1075,7 @@ impl Dialog {
             "solid.torus" => Dialog::new(
                 Kind::Primitive {
                     cmd: "solid.torus",
-                    fields: vec![("major", length_default(s, "20")), ("minor", length_default(s, "5"))],
+                    fields: vec![("major", primitive_length_default(s, "20")), ("minor", primitive_length_default(s, "5"))],
                     operation: 0,
                     at: None,
                     refs: Default::default(),
@@ -1082,9 +1086,9 @@ impl Dialog {
                 Kind::Primitive {
                     cmd: "solid.cone",
                     fields: vec![
-                        ("diameter", length_default(s, "20")),
-                        ("top_diameter", length_default(s, "0")),
-                        ("height", length_default(s, "20")),
+                        ("diameter", primitive_length_default(s, "20")),
+                        ("top_diameter", primitive_length_default(s, "0")),
+                        ("height", primitive_length_default(s, "20")),
                     ],
                     operation: 0,
                     at: None,
@@ -1096,10 +1100,10 @@ impl Dialog {
                 Kind::Primitive {
                     cmd: "solid.coil",
                     fields: vec![
-                        ("diameter", length_default(s, "40")),
+                        ("diameter", primitive_length_default(s, "40")),
                         ("revolutions", "4".into()),
-                        ("pitch", length_default(s, "8")),
-                        ("section_size", length_default(s, "3")),
+                        ("pitch", primitive_length_default(s, "8")),
+                        ("section_size", primitive_length_default(s, "3")),
                     ],
                     operation: 0,
                     at: None,
@@ -4616,11 +4620,18 @@ fn fillet_kind(size: &str, chamfer: bool) -> Kind {
     Kind::Fillet { radius: size.into(), chamfer, chain: true, ctype: 0, distance2: size.into(), angle: "45 deg".into(), flip: false, setback: None }
 }
 
-/// A length field's first text: `number` in the design's units, with the unit written out so the
-/// field shows it as the other dialogs show theirs ("20 mm", "20 in"). OK makes the size the bare
-/// number would.
+/// A length field's first text: `number` is the size the tool ships with, in millimetres, shown
+/// in the design's units ("20 mm", "0.8 in"), with the unit written out so the field shows it as
+/// the other dialogs show theirs. OK makes that size.
 pub(crate) fn length_default(s: &Session, number: &str) -> String {
     crate::length_input::default(&s.doc, number)
+}
+
+/// A primitive's size: the number in the design's units ("20 in"), as the primitive dialogs have
+/// always shown it (#630). A primitive is a size the user asks for, not a tool's preset, so the
+/// preference that scales the operation dialogs' defaults does not reach it (#12418).
+pub(crate) fn primitive_length_default(s: &Session, number: &str) -> String {
+    crate::length_input::primitive_default(&s.doc, number)
 }
 
 /// A feature's length as its edit field shows it. A bare number is kept in millimetres: where the
