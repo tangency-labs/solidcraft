@@ -908,3 +908,26 @@ fn construction_on_a_moved_body_moves_with_it() {
     let (o, d) = axis(&s, "Tether");
     assert!(on_line(o, d, Vec3::new(0.0, 0.0, 20.0)) && on_line(o, d, Vec3::new(0.0, 50.0, 20.0)), "{o:?} {d:?}");
 }
+
+/// #11469: a tangent plane picked on an inserted STL said only "no face at …", as if the pick
+/// had missed. A mesh body has no faces to pick; the error says the pick lies on one and what
+/// gives it faces (Convert Mesh), and a pick in empty space keeps the plain message.
+#[test]
+fn plane_tangent_on_a_mesh_body_says_it_has_no_faces() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-mesh-tangent-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("cube.stl");
+    let mut cube = Session::default();
+    run(&mut cube, "solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [0, 0, 0], "body_name": "Cube"}));
+    run(&mut cube, "file.export", json!({"path": stl.to_string_lossy()}));
+    let mut s = Session::default();
+    run(&mut s, "file.insert_mesh", json!({"path": stl.to_string_lossy()}));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mesh = s.world_state().unwrap().bodies.iter().find(|b| b.body.is_mesh()).map(|b| b.name.clone()).expect("a mesh body");
+
+    let on = s.execute("construct.plane.tangent", &json!({"face": {"face": [10, 10, 20]}, "name": "T"})).expect_err("a mesh has no face").to_string();
+    assert!(on.contains(&mesh) && on.contains("mesh") && on.contains("Convert Mesh"), "{on}");
+    let off = s.execute("construct.plane.tangent", &json!({"face": {"face": [100, 100, 100]}, "name": "T"})).expect_err("nothing there").to_string();
+    assert!(off.contains("no face at") && !off.contains("Convert Mesh"), "{off}");
+}
