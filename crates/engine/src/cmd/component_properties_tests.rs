@@ -569,7 +569,9 @@ fn perforated_sheet_hexagonal_and_slotted_holes_come_off_as_prisms_of_their_outl
     }
     let density = s.doc.density("Panel");
     tensor_close(&result["total"]["inertia_g_mm2"], inertia.map(|row| row.map(|v| v * density / 1000.0)), 1e-9);
-    // A fold made after hexagons, through them, is not integrated yet; the flat keeps its holes.
+    // A fold made after hexagons, through them, bends them with the sheet (see
+    // `perforated_sheet_hexagon_or_slot_a_later_fold_runs_through_weighs_as_the_same_hole_cut_and_folded`);
+    // the flat keeps its holes.
     let mut s = Session::default();
     panel_blank(&mut s, 30.0, 20.0);
     run(&mut s, "sheet.perforate", hexagons);
@@ -579,8 +581,7 @@ fn perforated_sheet_hexagonal_and_slotted_holes_come_off_as_prisms_of_their_outl
         json!({"points": [[13, 0, 0], [13, 20, 0]], "angle": "90 deg", "radius": "0.8", "position": "centerline", "fixed": [2, 10, 0]}),
     );
     assert_eq!(run(&mut s, "sheet.flat_pattern", json!({}))["perforations"][0]["count"], 6);
-    let refused = s.execute("component.properties", &json!({})).map(|_| ()).unwrap_err().to_string();
-    assert!(refused.contains("not supported yet"), "{refused}");
+    assert!(run(&mut s, "component.properties", json!({}))["total"]["volume_mm3"].as_f64().unwrap() < 480.0);
 }
 
 /// A hexagon beside a bend's end, in line with the bend's zone but clear of it, lies on its flat
@@ -831,6 +832,77 @@ fn perforated_sheet_hole_on_a_tab_a_cut_leaves_of_a_bend_is_a_cylinder_through_i
         let want = (v0 * c0 - 0.8 * pi * at) / v;
         let got = a["total"]["center_of_mass"][k].as_f64().unwrap();
         assert!((got - want).abs() < 1e-8, "centre of mass {k}: {got} vs {want}");
+    }
+}
+
+/// A hexagonal or slotted perforation hole that a fold made after its field runs through is bent
+/// with the sheet, as a round one is: the sheet weighs as with the same hole cut through its flat
+/// and folded with it, which the kernel measures exactly. A 60 x 40 x 0.8 plate folded 90° at R 8
+/// (its zone about 13 wide) about x = 30, its joint along y, or about y = 20, along x; a hexagon 4
+/// across its flats, corner up, and a slot 4 wide and 10 long along x, so across the first fold
+/// and along the second: each wholly in the zone, and across its tangent line. Each field is a
+/// single hole, its outline a box round it. (The inertia of a body is a tessellation's, so that
+/// agrees to 2e-4.)
+#[test]
+fn perforated_sheet_hexagon_or_slot_a_later_fold_runs_through_weighs_as_the_same_hole_cut_and_folded() {
+    let (m, root3) = (0.5, 3f64.sqrt());
+    let fold = |a: [f64; 2], b: [f64; 2], fixed: [f64; 2]| json!({"points": [[a[0], a[1], 0], [b[0], b[1], 0]], "angle": "90 deg", "radius": "8", "position": "centerline", "fixed": [fixed[0], fixed[1], 0]});
+    let (along_y, along_x) = (fold([30.0, 0.0], [30.0, 40.0], [5.0, 20.0]), fold([0.0, 20.0], [60.0, 20.0], [30.0, 5.0]));
+    let hexagon = json!({"diameter": 4, "shape": "hex"});
+    let slot = json!({"diameter": 4, "shape": "slot", "length": 10});
+    // Each case: the hole, half its width and height, the fold, and its centres in the zone and
+    // across the zone's tangent line (x = 30 + 6.56, or y = 20 + 6.56).
+    let cases = [
+        ("a hexagon, the joint along y", &hexagon, (2.0, 4.0 / root3), &along_y, [[30.0, 20.0], [36.0, 20.0]]),
+        ("a hexagon, the joint along x", &hexagon, (2.0, 4.0 / root3), &along_x, [[30.0, 20.0], [30.0, 26.0]]),
+        ("a slot across the bend", &slot, (5.0, 2.0), &along_y, [[30.0, 20.0], [37.0, 20.0]]),
+        ("a slot along the bend", &slot, (5.0, 2.0), &along_x, [[30.0, 20.0], [30.0, 26.0]]),
+    ];
+    for (what, hole, (hx, hy), fold, centres) in cases {
+        for [xc, yc] in centres {
+            let mut perforated = Session::default();
+            panel_blank(&mut perforated, 60.0, 40.0);
+            run(&mut perforated, "sketch.create", json!({"plane": "XY", "name": "Spot"}));
+            run(&mut perforated, "sketch.rectangle.two_point", json!({"p0": [xc - hx - m, yc - hy - m], "p1": [xc + hx + m, yc + hy + m]}));
+            run(&mut perforated, "sketch.finish", json!({}));
+            let mut field = hole.clone();
+            for (key, value) in [("pitch", json!(30)), ("margin", json!(m)), ("pattern", json!("square")), ("sketch", json!("Spot"))] {
+                field[key] = value;
+            }
+            run(&mut perforated, "sheet.perforate", field);
+            run(&mut perforated, "sheet.fold", fold.clone());
+            assert_eq!(run(&mut perforated, "sheet.flat_pattern", json!({}))["perforations"][0]["count"], 1, "{what} at {xc}, {yc}");
+            // The same hole cut through the flat, laid out, and folded again.
+            let mut cut = Session::default();
+            panel_blank(&mut cut, 60.0, 40.0);
+            run(&mut cut, "sheet.fold", fold.clone());
+            run(&mut cut, "sheet.unfold", json!({}));
+            run(&mut cut, "sketch.create", json!({"plane": {"origin": [0, 0, 2], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Hole"}));
+            if hole["shape"] == "hex" {
+                let corners: Vec<[f64; 2]> = (0..6)
+                    .map(|k| {
+                        let angle = std::f64::consts::PI / 6.0 + k as f64 * std::f64::consts::PI / 3.0;
+                        [xc + 4.0 / root3 * angle.cos(), yc + 4.0 / root3 * angle.sin()]
+                    })
+                    .collect();
+                run(&mut cut, "sketch.line", json!({"points": corners, "closed": true}));
+            } else {
+                run(&mut cut, "sketch.slot.center_to_center", json!({"p0": [xc - 3.0, yc], "p1": [xc + 3.0, yc], "width": 4}));
+            }
+            run(&mut cut, "sketch.finish", json!({}));
+            run(&mut cut, "solid.extrude", json!({"sketch": "Hole", "distance": "4", "direction": "negative", "operation": "cut"}));
+            run(&mut cut, "sheet.refold", json!({}));
+            let (a, b) = (run(&mut perforated, "component.properties", json!({})), run(&mut cut, "component.properties", json!({})));
+            for key in ["volume_mm3", "area_mm2"] {
+                let (x, y) = (a["total"][key].as_f64().unwrap(), b["total"][key].as_f64().unwrap());
+                assert!((x - y).abs() < 1e-9 * y, "{what} at {xc}, {yc}: {key} {x} vs {y}");
+            }
+            for k in 0..3 {
+                let (x, y) = (a["total"]["center_of_mass"][k].as_f64().unwrap(), b["total"]["center_of_mass"][k].as_f64().unwrap());
+                assert!((x - y).abs() < 1e-8, "{what} at {xc}, {yc}: centre of mass {k}: {x} vs {y}");
+            }
+            tensor_close(&a["total"]["inertia_g_mm2"], tensor(&b["total"]["inertia_g_mm2"]), 2e-4);
+        }
     }
 }
 
