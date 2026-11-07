@@ -72,6 +72,9 @@ pub struct Request {
     /// Insert the file as a mesh whatever its extension says: a PLY goes to `pointcloud.insert`
     /// unless the person chose Insert Mesh for it (then it needs its faces).
     pub mesh: bool,
+    /// Insert the board this file (a zip, or any file in its folder) belongs to: its Gerber and
+    /// Excellon files as one (`file.insert_gerber` with the file as its `set`).
+    pub gerber: bool,
     /// The level the caller's own `param_check` named and the warnings it found before the run:
     /// the reply says both (#9184).
     pub(crate) param_check: Option<(solidcraft_engine::schema::ParamCheck, Vec<String>)>,
@@ -93,6 +96,7 @@ impl Request {
             design: None,
             chat_turn: None,
             mesh: false,
+            gerber: false,
             param_check: None,
             note: None,
             serial: crate::operations::serial(),
@@ -115,6 +119,11 @@ impl Request {
     fn command(&self) -> (&'static str, Value) {
         match &self.kind {
             Kind::Open => ("doc.open", self.params()),
+            Kind::Insert if self.gerber => {
+                let mut params = self.options.clone();
+                params.insert("set".into(), json!(self.path));
+                ("file.insert_gerber", Value::Object(params))
+            }
             Kind::Insert if self.mesh || solidcraft_engine::io::is_mesh_path(&self.path) => ("file.insert_mesh", self.params()),
             Kind::Insert if solidcraft_engine::io::is_point_cloud_path(&self.path) => ("pointcloud.insert", self.params()),
             Kind::Insert => (insert_command(&self.path), self.params()),
@@ -394,6 +403,10 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
             return Ok(());
         }
         let r = match &request.kind {
+            Kind::Insert if request.gerber => {
+                let (command, params) = request.command();
+                app.run(command, params)
+            }
             Kind::Insert => {
                 app.insert_path_with(&request.path, &request.options, request.mesh);
                 Ok(Value::Null)
@@ -559,6 +572,7 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         design: None,
         chat_turn: req.chat_turn,
         mesh: false,
+        gerber: false,
         param_check,
         note: None,
         serial: crate::operations::serial(),
@@ -1625,6 +1639,50 @@ mod tests {
         assert!(reply.try_recv().is_ok_and(|r| r["ok"] == json!(false)), "the caller hears it failed");
     }
 
+    /// Insert PCB inserts the board the picked file belongs to straight away, beside the window:
+    /// each file's layer is found from what it says, and one undo removes the board (#12797).
+    #[test]
+    fn insert_pcb_inserts_the_picked_files_board_in_one_undo_step() {
+        const OUTLINE: &str = "%FSLAX46Y46*%
+%MOMM*%
+%ADD10C,0.1*%
+D10*
+X0Y0D02*
+X30000000Y0D01*
+X30000000Y20000000D01*
+X0Y20000000D01*
+X0Y0D01*
+M02*
+";
+        const DRILLS: &str = "M48
+METRIC
+T1C3.0
+%
+T1
+X5.0Y5.0
+X25.0Y5.0
+M30
+";
+        let dir = std::env::temp_dir().join(format!("solidcraft-insert-pcb-{}", std::process::id())).join("Picked");
+        let _ = std::fs::create_dir_all(&dir);
+        for (file, text) in [("board.GKO", OUTLINE), ("board.DRL", DRILLS), ("notes.txt", "hello")] {
+            std::fs::write(dir.join(file), text).unwrap();
+        }
+        let picked = dir.join("board.DRL").to_string_lossy().into_owned();
+        let mut h = crate::scenario::Harness::new();
+        h.app.services.pick_open = Some(Box::new(move |_| Box::pin(std::future::ready(Some(picked.clone())))));
+        h.app.start("file.insert_gerber");
+        h.frames(3);
+        assert!(h.app.dialog.is_none(), "no window to fill in");
+        h.settle();
+        let c = h.app.session.doc.components.iter().find(|c| c.name == "Picked").unwrap_or_else(|| panic!("no board: {:?}", h.app.status));
+        assert_eq!(c.properties.get("pcb.outline").map(String::as_str), Some("board.GKO"));
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.settle();
+        assert!(!h.app.session.doc.components.iter().any(|c| c.name == "Picked"), "one undo removes the board");
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap_or(&dir));
+    }
+
     #[test]
     fn a_ply_is_a_point_cloud_unless_inserted_as_a_mesh() {
         let mut request = Request::new("scan.ply", Kind::Insert);
@@ -1632,6 +1690,10 @@ mod tests {
         assert_eq!(Request::new("scan.ply", Kind::Open).command().0, "doc.open");
         request.mesh = true;
         assert_eq!(request.command().0, "file.insert_mesh");
+        // Insert PCB: the picked file is the board's set.
+        let mut request = Request::new("board.zip", Kind::Insert);
+        request.gerber = true;
+        assert_eq!(request.command(), ("file.insert_gerber", json!({"set": "board.zip"})));
     }
 
     #[test]

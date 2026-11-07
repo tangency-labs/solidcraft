@@ -45,7 +45,6 @@ pub mod dialogs_end_cap;
 pub mod dialogs_frame;
 mod dialogs_hole;
 pub mod dialogs_insert_drawing;
-pub mod dialogs_insert_pcb;
 pub mod dialogs_library;
 pub mod dialogs_motion;
 pub mod dialogs_move;
@@ -2116,11 +2115,15 @@ impl SolveApp {
             return;
         }
         if id == "file.insert_gerber" {
-            // Like Insert SVG: the board's zip, or any file in its folder, is picked, then the
-            // dialog lists the files found and the layer each is read as before OK inserts it.
+            // Like Insert STEP: the board's zip, or any file in its folder, is picked and the
+            // board goes in beside the window, each file's layer found from what it says.
             self.pick_open_for(&["zip", "gbr", "gko", "gm1", "gtl", "gbl", "drl"], |app, path| {
                 if let Some(path) = path {
-                    dialogs_insert_pcb::open(app, path);
+                    let mut request = file_load::Request::new(&path, file_load::Kind::Insert);
+                    request.gerber = true;
+                    if let Err(e) = file_load::begin_request(app, request) {
+                        app.set_status(e, true);
+                    }
                 }
             });
             return;
