@@ -102,15 +102,9 @@ pub struct Chain {
 pub fn chain(basis: &Plane, points: &[Vec3], direction: LinearDirection) -> Result<Chain> {
     let (Some(first), Some(last)) = (points.first(), points.last()) else { return Err(Invalid("a chain has no points")) };
     require(points.len() >= 3, "a chain is at least 3 points: 2 make one linear dimension")?;
-    let whole = segment(basis, *first, *last)?;
+    let line = line_of(basis, *first, *last, direction)?;
     let shown = |d: Vec3| Vec2::new(d.dot(basis.x), d.dot(basis.y));
-    let line = match direction {
-        LinearDirection::Horizontal => Vec2::new(1.0, 0.0),
-        LinearDirection::Vertical => Vec2::new(0.0, 1.0),
-        LinearDirection::Aligned => shown(whole).normalized().ok_or(Invalid("the chain's first and last points are one point in this view"))?,
-        LinearDirection::Along(along) => along.normalized().ok_or(Invalid("the direction to measure along is zero or not finite"))?,
-    };
-    let line = if shown(whole).dot(line) < 0.0 { -line } else { line };
+    let whole = segment(basis, *first, *last)?;
     let members = points
         .iter()
         .zip(points.iter().skip(1))
@@ -123,6 +117,22 @@ pub fn chain(basis: &Plane, points: &[Vec3], direction: LinearDirection) -> Resu
         .collect::<Result<Vec<_>>>()?;
     let overall = Measured { value: shown(whole).dot(line), foreshortened: members.iter().any(|m| m.foreshortened) };
     Ok(Chain { members, overall })
+}
+
+/// The unit direction, on the view through `basis`, of the line a set of dimensions from `first` to
+/// `last` (model points) measures along: `direction` as [`linear`] takes it, aligned being from
+/// `first` to `last`, and turned to run the way `first` to `last` goes. One rule for a chain and a
+/// set measured from one origin.
+pub fn line_of(basis: &Plane, first: Vec3, last: Vec3, direction: LinearDirection) -> Result<Vec2> {
+    let whole = segment(basis, first, last)?;
+    let shown = Vec2::new(whole.dot(basis.x), whole.dot(basis.y));
+    let line = match direction {
+        LinearDirection::Horizontal => Vec2::new(1.0, 0.0),
+        LinearDirection::Vertical => Vec2::new(0.0, 1.0),
+        LinearDirection::Aligned => shown.normalized().ok_or(Invalid("the line's first and last points are one point in this view"))?,
+        LinearDirection::Along(along) => along.normalized().ok_or(Invalid("the direction to measure along is zero or not finite"))?,
+    };
+    Ok(if shown.dot(line) < 0.0 { -line } else { line })
 }
 
 /// The way from a cylinder's axis to its silhouette on one side, on the view through `basis` (the
