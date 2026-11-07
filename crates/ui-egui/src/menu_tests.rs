@@ -279,6 +279,52 @@ fn body_menu_isolates_renames_locks_and_deletes() {
     assert_eq!(app.session.model.state().bodies.len(), n - 1);
 }
 
+/// #12341: Rename on a body row that is part of a selection of several bodies renames the whole
+/// selection: the first body takes the name, the others the numbered names after it. A body
+/// alone still renames on its own.
+#[test]
+fn body_menu_rename_on_a_selection_renames_every_selected_body() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    for (i, n) in ["A", "B", "C"].iter().enumerate() {
+        app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [10 * i, 0, 0], "body_name": n})).unwrap();
+    }
+    let names = |app: &SolveApp| app.session.model.state().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
+    app.run("select.set", json!({"items": [{"type": "body", "name": "A"}, {"type": "body", "name": "C"}]})).unwrap();
+    // The row right-clicked is C, one of the two selected bodies.
+    let items = context_menu::items(&app, &Target::Body { name: "C".into() });
+    assert!(find(&items, "Rename").enabled);
+    context_menu::run_item(&mut app, &find(&items, "Rename"), pos2(10.0, 10.0));
+    assert!(context_menu::finish_rename(&mut app, Some("Red"), true));
+    assert_eq!(names(&app), ["Red", "B", "Red (2)"]);
+    // A row outside the selection renames only itself.
+    let items = context_menu::items(&app, &Target::Body { name: "B".into() });
+    context_menu::run_item(&mut app, &find(&items, "Rename"), pos2(10.0, 10.0));
+    assert!(context_menu::finish_rename(&mut app, Some("Blue"), true));
+    assert_eq!(names(&app), ["Red", "Blue", "Red (2)"]);
+}
+
+/// #12341: F2 on several selected bodies opens one Rename box, and Enter renames them all.
+#[test]
+fn f2_on_several_selected_bodies_renames_them_all() {
+    let mut h = crate::scenario::Harness::new();
+    for (i, n) in ["A", "B", "C"].iter().enumerate() {
+        h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [10 * i, 0, 0], "body_name": n})).unwrap();
+    }
+    let all = ["A", "B", "C"].map(|n| json!({"type": "body", "name": n}));
+    h.app.run("select.set", json!({"items": all})).unwrap();
+    h.frames(2);
+    h.step(&json!({"key": "F2"})).unwrap();
+    h.frames(2);
+    assert!(h.app.menu.rename.is_some(), "F2 opens the Rename box");
+    h.step(&json!({"key": "A", "cmd": true})).unwrap();
+    h.step(&json!({"text": "Test"})).unwrap();
+    h.frames(1);
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.frames(2);
+    let names: Vec<String> = h.app.session.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(names, ["Test", "Test (2)", "Test (3)"], "status {:?}", h.app.status);
+}
+
 #[test]
 fn properties_measure_the_body() {
     let mut app = sample_app();
