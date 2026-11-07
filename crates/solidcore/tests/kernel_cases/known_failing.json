@@ -5,11 +5,6 @@
     "reason": "the round of the loft's circular rim is not a closed solid"
   },
   {
-    "case": "fillets/12342-round-wall-and-ledge-edges-r2-5",
-    "issue": "solidcore#2845",
-    "reason": "status 1001 instead of a closed solid"
-  },
-  {
     "case": "fillets/12342-round-wall-and-ledge-edges-r5-refused",
     "issue": "solidcore#2845",
     "reason": "status 1001 instead of the refusal naming the size that fits"

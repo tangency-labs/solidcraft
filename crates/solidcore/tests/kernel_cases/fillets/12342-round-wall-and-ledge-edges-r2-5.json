@@ -8,11 +8,13 @@
   },
   "calls": [
     {
-      "error": "solidcore failed (status 1001)",
       "inputs": [
         "b1"
       ],
       "op": "blend_dropping",
+      "outputs": [
+        "b2"
+      ],
       "params": {
         "edges": {
           "kind": "edge",
@@ -84,18 +86,22 @@
       "rel": 1e-09
     },
     "volume_mm3": 9450.25440310417,
-    "what": "an L body: a 4 mm wall (x 16..20, y -20..20, z -40..2) on a 7 mm base (x 16..23, z -50..-40), so the base stands 3 mm proud of the wall as a ledge at z = -40; the wall's outer vertical edge at x = 20, y = 20 and the ledge's at x = 23, y = 20, both convex edges between the back face y = 20 and the faces x = 20 and x = 23. Both edges rounded R2.5, a size that fits each: one closed solid; it fails with status 1001 (R3 the same), while each edge alone builds"
+    "what": "an L body: a 4 mm wall (x 16..20, y -20..20, z -40..2) on a 7 mm base (x 16..23, z -50..-40), so the base stands 3 mm proud of the wall as a ledge at z = -40; the wall's outer vertical edge at x = 20, y = 20 and the ledge's at x = 23, y = 20, both convex edges between the back face y = 20 and the faces x = 20 and x = 23. Both edges rounded R2.5, a size that fits each: one closed solid (R3 the same), as each edge alone builds"
   },
   "expressible": true,
-  "gallery_note": "the back face y = 20 and the ledge top highlighted: R2.5 fits each edge alone, but the two together fail with status 1001",
+  "gallery_note": "R2.5 fits each edge alone and the two together: the rounds end apart on the stepped back face",
   "operation_expressible": true,
   "records": "12342-round-wall-and-ledge-edges-r2-5.bodies.json.gz",
-  "result": [],
+  "result": [
+    {
+      "made": "b2"
+    }
+  ],
   "sources": [
     "tangency-labs/solidcraft#12342",
     "tangency-labs/solidcore#2845"
   ],
   "ungraded": [],
-  "what": "an L body: a 4 mm wall (x 16..20, y -20..20, z -40..2) on a 7 mm base (x 16..23, z -50..-40), so the base stands 3 mm proud of the wall as a ledge at z = -40; the wall's outer vertical edge at x = 20, y = 20 and the ledge's at x = 23, y = 20, both convex edges between the back face y = 20 and the faces x = 20 and x = 23. Both edges rounded R2.5, a size that fits each: one closed solid; it fails with status 1001 (R3 the same), while each edge alone builds",
+  "what": "an L body: a 4 mm wall (x 16..20, y -20..20, z -40..2) on a 7 mm base (x 16..23, z -50..-40), so the base stands 3 mm proud of the wall as a ledge at z = -40; the wall's outer vertical edge at x = 20, y = 20 and the ledge's at x = 23, y = 20, both convex edges between the back face y = 20 and the faces x = 20 and x = 23. Both edges rounded R2.5, a size that fits each: one closed solid (R3 the same), as each edge alone builds",
   "why_not": []
 }

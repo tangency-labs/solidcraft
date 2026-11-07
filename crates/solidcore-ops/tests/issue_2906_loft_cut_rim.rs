@@ -27,12 +27,9 @@ fn slab_less_loft() -> f64 {
     900.0 * 480.0 * 160.0 - 4.0 / 6.0 * (top + 4.0 * middle + bottom)
 }
 
-/// SolidCraft's set: every fix but two.
+/// SolidCraft's set: every fix but one.
 fn fixes() {
-    let off = [
-        "fillet_refuse_rounds_breaking_through",
-        "fillet_round_ends_on_outline",
-    ];
+    let off = ["fillet_round_ends_on_outline"];
     let on = solidcore::kernel::UpstreamFixes::NAMES
         .iter()
         .copied()
@@ -55,6 +52,15 @@ fn blended(kind: Blend, p: [f64; 3]) -> f64 {
     blend(&b, kind, &[e], &[8.0], &[], Corners::Filled).unwrap();
     assert!(b.check(CheckLevel::All).unwrap().is_valid(), "{p:?}");
     volume(&b)
+}
+
+/// SolidCraft's `loft_cut_beside_round_hole`: the same cut from a pocket's floor, a hole beside it.
+fn beside_a_hole() -> Body {
+    Body::from_smb(
+        include_bytes!("data/issue_2906_loft_cut_beside_hole.smb").to_vec(),
+        false,
+    )
+    .unwrap()
 }
 
 /// The operand's volume to 1e-8, so the closed forms are held to 2e-10 of the body (0.014 mm3).
@@ -98,5 +104,53 @@ fn the_rest_of_the_rim_builds() {
             println!("RIM {p:?} {kind:?}: {made:.6}");
             assert!(made > v, "{p:?}");
         }
+    }
+}
+
+/// The same floor edges from a pocket's floor: the same closed forms on the operand's volume.
+#[test]
+fn the_cut_from_a_pocket_floor_takes_the_same_closed_forms() {
+    fixes();
+    let v = volume(&beside_a_hole());
+    let phi = (4.0_f64 / 9.5).atan();
+    let round = 80.0 * 64.0 * ((phi / 2.0).tan() - phi / 2.0);
+    let chamfer = 80.0 * 32.0 * phi.sin();
+    for y in [-61.16, -141.16] {
+        for (kind, added) in [(Blend::Round, round), (Blend::Chamfer, chamfer)] {
+            let b = beside_a_hole();
+            let e = edge_at(&b, [450.0, y, 726.0]);
+            blend(&b, kind, &[e], &[8.0], &[], Corners::Filled).unwrap();
+            assert!(b.check(CheckLevel::All).unwrap().is_valid(), "{y}");
+            let made = volume(&b);
+            assert!((made - (v + added)).abs() <= TOL * v, "{made}");
+        }
+    }
+    for p in [[290.83, -56.41, 728.0], [609.17, -145.91, 728.0]] {
+        let b = beside_a_hole();
+        let e = edge_at(&b, p);
+        blend(&b, Blend::Round, &[e], &[8.0], &[], Corners::Filled).unwrap();
+        assert!(b.check(CheckLevel::All).unwrap().is_valid(), "{p:?}");
+    }
+}
+
+/// Writes the operand and each blended body for the PR's pictures, when asked.
+#[test]
+#[ignore = "writes the bodies for the PR's pictures"]
+fn bodies_for_the_pictures() {
+    fixes();
+    let dir = std::env::var("ISSUE_2906_OUT").unwrap();
+    let write = |name: &str, b: &Body| {
+        std::fs::write(format!("{dir}/{name}.smb"), b.to_smb(false).unwrap()).unwrap();
+    };
+    write("before", &operand());
+    for (name, kind, p) in [
+        ("round", Blend::Round, [450.0, 418.84, 156.0]),
+        ("chamfer", Blend::Chamfer, [450.0, 418.84, 156.0]),
+        ("side", Blend::Round, [290.83, 423.59, 158.0]),
+    ] {
+        let b = operand();
+        let e = edge_at(&b, p);
+        blend(&b, kind, &[e], &[8.0], &[], Corners::Filled).unwrap();
+        write(name, &b);
     }
 }
