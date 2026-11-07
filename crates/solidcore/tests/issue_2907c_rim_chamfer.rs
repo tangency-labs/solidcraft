@@ -99,7 +99,7 @@ fn a_chamfered_rim_on_a_curved_face_builds() {
     assert!(is_manifold_solid(&b).unwrap());
     assert_eq!(b.face_list().len(), faces + 7);
     let gained = volume(&k, &mut b) - before;
-    assert!((gained - 80.05891).abs() < 1e-3, "{gained}");
+    assert!((gained - 80.0551).abs() < 1e-3, "{gained}");
     let report = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
     assert!(report.is_valid(), "{report:?}");
 }

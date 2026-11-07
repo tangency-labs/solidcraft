@@ -1546,6 +1546,12 @@ fn c2_edge_end_section(
     let end_param = if end == 0 { st.ivl.min() } else { st.ivl.max() };
     let base0 = st.base_surfaces[0].clone();
     let (pnt, tangent) = binormal_guess_point(ops, cx, &base0, end_param, true)?;
+    // The section at the edge's end is in the plane through that end, square to the edge. The
+    // guess is a first-order step in the face's parameters: on a twisted patch (a loft's side,
+    // its rows fanning out) it lands far along the edge, and a plane through it is another
+    // section altogether.
+    let on_edge = st.edge_curve.evaluate_point(cx.k, end_param)?;
+    let pnt = pnt - tangent * ((pnt - on_edge).dot(tangent) / tangent.length_squared());
     // solved where the trace itself runs (its base surfaces' extended domains), or on the
     // faces' own surfaces
     let mut domain1 = st.base_surfaces[0].natural_uv_domain_if_built();
