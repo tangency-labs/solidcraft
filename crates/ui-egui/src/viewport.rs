@@ -4520,8 +4520,11 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
             }
             // Not while a dimension's value is typed: the design's profile would show over the
             // sketch drawn at it (as for the hovered one below). Other sketches are drawn where
-            // they are.
-            Sel::Profile { sketch, index } if crate::dim_view::previewed_sketch(app) != Some(*sketch) => {
+            // they are. Not a hidden sketch's either, as a hidden body's edge isn't drawn: hiding
+            // the sketch leaves nothing of it on screen (#13026).
+            Sel::Profile { sketch, index }
+                if crate::dim_view::previewed_sketch(app) != Some(*sketch) && solidcraft_engine::view::sketch_shown(&app.session, *sketch) =>
+            {
                 profile_fill(&mut feedback, app, *sketch, *index, t.sel_profile, t.sel_profile_edge)
             }
             // A 3D sketch curve, in the sketch it names, or whichever sketch has it.
@@ -10774,6 +10777,20 @@ mod tests {
         app.cam.orbit(25.0, 10.0);
         assert_ne!(highlight_key(&app), key, "profile feedback still follows the projected curves and lift toward the eye");
         assert_ne!(before.trans, build_highlight(&app).merged().trans);
+    }
+
+    #[test]
+    fn a_selected_profile_is_not_drawn_once_its_sketch_is_hidden() {
+        let mut app = hover_app(true);
+        let sketch = app.session.active_sketch.unwrap();
+        app.run("sketch.circle.center", json!({"center":[0,0],"radius":5})).unwrap();
+        app.finish_sketch();
+        crate::browser::set_sketch_visible(&mut app, sketch, true);
+        app.session.selection = vec![Sel::Profile { sketch, index: 0 }];
+        assert!(!build_highlight(&app).merged().trans.is_empty(), "a shown sketch's picked profile is filled");
+        crate::browser::set_sketch_visible(&mut app, sketch, false);
+        assert!(!solidcraft_engine::view::sketch_shown(&app.session, sketch));
+        assert!(build_highlight(&app).merged().trans.is_empty(), "a hidden sketch leaves no filled profile behind");
     }
 
     #[test]

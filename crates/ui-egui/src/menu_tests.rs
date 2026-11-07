@@ -925,6 +925,18 @@ fn menus_follow_fusion_order() {
 }
 
 #[test]
+fn v_on_a_selected_profile_toggles_its_sketch() {
+    let mut app = sample_app();
+    let sk = app.session.doc.features.iter().find(|f| f.name == "Base").unwrap().id;
+    crate::browser::set_sketch_visible(&mut app, sk, true);
+    app.session.selection = vec![solidcraft_engine::Sel::Profile { sketch: sk, index: 0 }];
+    context_menu::toggle_visibility(&mut app);
+    assert!(!crate::browser::sketch_visible(&app, sk), "V on a picked profile hides its sketch");
+    context_menu::toggle_visibility(&mut app);
+    assert!(crate::browser::sketch_visible(&app, sk), "and shows it again");
+}
+
+#[test]
 fn v_toggles_what_is_selected() {
     let mut app = sample_app();
     let b = body(&app);

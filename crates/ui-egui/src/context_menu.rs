@@ -2030,7 +2030,7 @@ pub fn press_shortcut(app: &mut SolveApp, key: &str) -> bool {
 }
 
 /// Show/Hide (the V key): what is selected in the viewport or picked in the browser flips its
-/// visibility (bodies, faces' and edges' bodies, sketches, construction and origin planes and
+/// visibility (bodies, faces' and edges' bodies, sketches and profiles' sketches, construction and origin planes and
 /// axes, components' bodies, canvases, joints' glyphs). When some are shown and some hidden, all are hidden.
 /// A clicked folder takes precedence, and toggles its own visibility without changing its items.
 pub fn toggle_visibility(app: &mut SolveApp) {
@@ -2048,13 +2048,19 @@ pub fn toggle_visibility(app: &mut SolveApp) {
     for c in app.tree.picked_components.clone() {
         bodies.extend(component_bodies(app, c));
     }
-    let sketches: Vec<u64> = app
+    // A picked profile stands for its sketch, as a picked face stands for its body (#13026).
+    let mut sketches: Vec<u64> = app
         .session
         .selection
         .iter()
-        .filter_map(|s| if let Sel::Feature { id } = s { Some(*id) } else { None })
+        .filter_map(|s| match s {
+            Sel::Feature { id } | Sel::Profile { sketch: id, .. } => Some(*id),
+            _ => None,
+        })
         .filter(|id| app.session.doc.feature(*id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. })))
         .collect();
+    sketches.sort_unstable();
+    sketches.dedup();
     let origin: Vec<String> = app
         .session
         .selection
