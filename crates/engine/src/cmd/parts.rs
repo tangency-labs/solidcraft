@@ -1228,6 +1228,32 @@ mod tests {
         assert!(s.model.state().threads.iter().any(|t| t.designation == "M8" && (t.pitch - 1.25).abs() < 1e-9));
     }
 
+    /// #12393: a command that runs other commands is one undo step, and a failed one leaves the
+    /// undo and redo lists as they were.
+    #[test]
+    fn a_command_built_from_commands_is_one_undo_step() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length":40,"width":40,"height":10,"body_name":"Plate"}));
+        let (undo, before) = (s.undo.len(), s.doc.clone());
+        run(&mut s, "parts.insert", json!({"family":"socket_head_cap_screw","size":"M6","length":20}));
+        assert_eq!(s.undo.len(), undo + 1, "parts.insert");
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(s.doc, before, "one undo removes the whole screw");
+        // A combine into a new component is "Combine" alone.
+        run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"corner":[50,0,0],"operation":"new","body_name":"Block"}));
+        let undo = s.undo.len();
+        run(&mut s, "solid.combine", json!({"target":"Plate","tools":["Block"],"operation":"join","new_component":true}));
+        assert_eq!(s.undo.len(), undo + 1, "solid.combine new_component");
+        // A failed command: no inner step stays, and redo is kept.
+        run(&mut s, "edit.undo", json!({}));
+        let (undo, redo, doc) = (s.undo.len(), s.redo.len(), s.doc.clone());
+        assert!(redo > 0);
+        let failed = s.execute("parts.insert", &json!({"family":"socket_head_cap_screw","size":"M6","length":20,"at":[20,20,10]}));
+        assert!(failed.is_err());
+        assert_eq!((s.undo.len(), s.redo.len()), (undo, redo), "a failed insert leaves the history alone");
+        assert_eq!(s.doc, doc);
+    }
+
     #[test]
     fn a_screw_seats_on_a_translated_washer() {
         for z in [11.6, 11.2] {

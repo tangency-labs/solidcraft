@@ -1688,6 +1688,9 @@ impl Session {
         // Picks in the world go into their component's frame (once: commands run by commands
         // already have them there).
         let (_nested, outermost) = frames::Nested::enter(spec.id);
+        if outermost {
+            frames::reset_inner_undoable();
+        }
         let mapped = if outermost {
             frames::forget_picks();
             frames::to_local(self, spec.id, params)?
@@ -1765,7 +1768,18 @@ impl Session {
                     let render_only = self.replacements == replacements && self.render_only_change(&before);
                     let display_only = !changed && hidden;
                     let previous_doc = before.doc.clone();
-                    if spec.undoable {
+                    // One undo step per command: the outermost one saves it, for itself or for an
+                    // undoable command it ran (#12393), unless it replaced the session (opening a design starts
+                    // a fresh history). A command run inside another saves none.
+                    let saves = if outermost {
+                        spec.undoable || (frames::inner_undoable() && self.replacements == replacements)
+                    } else {
+                        if spec.undoable {
+                            frames::note_inner_undoable();
+                        }
+                        false
+                    };
+                    if saves {
                         self.undo.push(before);
                         if self.undo.len() > MAX_UNDO {
                             self.undo.remove(0);
