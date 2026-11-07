@@ -58,7 +58,10 @@ pub fn groups(tab: &str, panel: &str) -> &'static [CommandGroup] {
                 label: "Faces",
                 ids: &["solid.press_pull", "solid.draft", "solid.offset_face", "solid.replace_face", "solid.split_face", "face.delete"],
             },
-            CommandGroup { label: "Bodies", ids: &["solid.shell", "solid.combine", "solid.split_body", "solid.scale", "solid.remove", "solid.arrange"] },
+            CommandGroup {
+                label: "Bodies",
+                ids: &["solid.shell", "solid.combine", "solid.split_body", "solid.scale", "solid.remove", "solid.arrange"],
+            },
             CommandGroup { label: "Specialise", ids: &["sheet.convert"] },
         ],
         _ => &[],

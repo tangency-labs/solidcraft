@@ -9,6 +9,7 @@ arc_center	false
 arc_slot	false
 arc_slot_center	false
 arc_tangent	false
+arrange	false
 as_built	false
 assistant	false
 auto_constrain	false

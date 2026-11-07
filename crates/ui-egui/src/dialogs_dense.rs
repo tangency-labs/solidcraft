@@ -381,6 +381,8 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
     if crate::hole_refs::takes(d) {
         // Each reference edge with its distance (#37, #6380).
         enter |= crate::hole_refs::input_rows(d, ui, &app.session, app.preferences.origin_plane_names, app.preferences.length_decimals);
+    } else if matches!(d.kind, Kind::Arrange { .. }) {
+        // Arrange shows its picks among its own sections.
     } else {
         input_rows(d, ui, &app.session, app.preferences.origin_plane_names);
     }
@@ -740,6 +742,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             let to_object = to_object_on(&d.inputs);
             enter |= crate::dialogs_hole::rows(ui, &mut d.kind, to_object, &eval);
         }
+        Kind::Arrange { .. } => enter |= arrange_rows(app, d, ui),
         _ => enter |= additional_rows(app, d, ui),
     }
     error_rows(app, ctx, d, ui);
@@ -826,10 +829,120 @@ fn coil_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> b
     enter
 }
 
+/// The Arrange dialog: the parts, then the sheet (a rectangle or a picked flat face), how the parts
+/// are placed (the gap, their turns, the side they lie on, with the bottom faces when picked), the
+/// copies, and what the preview could not place. A hidden pick keeps what it holds.
+fn arrange_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
+    use crate::dialogs::{ARRANGE_BOTTOMS, ARRANGE_FACE, ARRANGE_PARTS, ARRANGE_PLANE, ARRANGE_TURNS};
+    let mut enter = false;
+    let names = app.preferences.origin_plane_names;
+    let shown = |d: &Dialog| match &d.kind {
+        Kind::Arrange { on_face, lay_flat, .. } => (*on_face, !*lay_flat),
+        _ => (false, false),
+    };
+    // Clicks in the view never go to a pick that is not shown.
+    let (on_face, picking) = shown(d);
+    if (d.active == ARRANGE_FACE && !on_face) || (d.active == ARRANGE_PLANE && on_face) || (d.active == ARRANGE_BOTTOMS && !picking) {
+        d.active = ARRANGE_PARTS;
+    }
+    input_rows_range(d, ui, &app.session, names, ARRANGE_PARTS..ARRANGE_PARTS + 1);
+
+    ui_kit::section(ui, "arrange_sheet", "arrange.sheet", true, |ui| {
+        if let Kind::Arrange { on_face, .. } = &mut d.kind {
+            let mut i = usize::from(*on_face);
+            ui_kit::segmented(ui, &mut i, &["arrange.rectangle", "arrange.flat_face"], Default::default());
+            if (i == 1) != *on_face {
+                *on_face = i == 1;
+                d.active = if *on_face { ARRANGE_FACE } else { ARRANGE_PARTS };
+            }
+        }
+        if shown(d).0 {
+            input_rows_range(d, ui, &app.session, names, ARRANGE_FACE..ARRANGE_FACE + 1);
+            ui_kit::status_line(ui, "arrange.face_hint", ui_kit::StatusTone::Dim);
+        } else {
+            input_rows_range(d, ui, &app.session, names, ARRANGE_PLANE..ARRANGE_PLANE + 1);
+            ui_kit::status_line(ui, "arrange.plane_hint", ui_kit::StatusTone::Dim);
+        }
+        if let Kind::Arrange { on_face, width, length, margin, .. } = &mut d.kind {
+            if !*on_face {
+                enter |= expr_row(ui, "ui.width", width);
+                enter |= expr_row(ui, "ui.length", length);
+            }
+            enter |= expr_row(ui, "arrange.edge_margin", margin);
+        }
+    });
+
+    ui_kit::section(ui, "arrange_placement", "arrange.placement", true, |ui| {
+        if let Kind::Arrange { spacing, turn, lay_flat, .. } = &mut d.kind {
+            enter |= expr_row(ui, "Gap", spacing);
+            let labels = ARRANGE_TURNS.map(|(_, label)| label);
+            choice_row(ui, "arrange.rotation", "arrange_turn", turn, &labels);
+            let old = *lay_flat;
+            form_row(ui, "arrange.lay_flat", |ui| crate::dialogs::check(ui, lay_flat));
+            if *lay_flat != old {
+                if !*lay_flat {
+                    d.active = ARRANGE_BOTTOMS;
+                } else if d.active == ARRANGE_BOTTOMS {
+                    d.active = ARRANGE_PARTS;
+                }
+            }
+        }
+        if shown(d).1 {
+            input_rows_range(d, ui, &app.session, names, ARRANGE_BOTTOMS..ARRANGE_BOTTOMS + 1);
+            ui_kit::status_line(ui, "arrange.bottoms_hint", ui_kit::StatusTone::Dim);
+        } else {
+            ui_kit::status_line(ui, "arrange.lay_flat_hint", ui_kit::StatusTone::Dim);
+        }
+    });
+
+    ui_kit::section(ui, "arrange_copies", "arrange.copies", true, |ui| {
+        if let Kind::Arrange { on_face, keep, avoid, quantity, sheets, .. } = &mut d.kind {
+            enter |= quantity_row(ui, &app.session.doc, "arrange.copies_of_each", quantity);
+            // A face is one sheet.
+            if !*on_face {
+                enter |= count_row_to(ui, &app.session.doc, "arrange.sheets", sheets, 100);
+            }
+            form_row(ui, "arrange.keep", |ui| crate::dialogs::check(ui, keep));
+            form_row(ui, "arrange.avoid", |ui| crate::dialogs::check(ui, avoid));
+        }
+    });
+
+    // What the preview could not place, before OK.
+    if let Some(reply) = app.preview.reply.as_ref() {
+        for line in arrange_notes(reply) {
+            ui_kit::status_line(ui, &line, ui_kit::StatusTone::Warning);
+        }
+    }
+    enter
+}
+
+/// What an Arrange reply says did not go as asked, in the UI's language: the parts that did not
+/// fit, the copies that did not, the parts placed by their box, and a layout hurried to finish.
+pub(crate) fn arrange_notes(reply: &serde_json::Value) -> Vec<String> {
+    use serde_json::Value;
+    let names = |k: &str| -> Vec<&str> { reply.get(k).and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).collect() };
+    let mut out = Vec::new();
+    let left = names("unplaced");
+    if !left.is_empty() {
+        out.push(crate::i18n::format("arrange.left_out", &[("count", &left.len().to_string()), ("names", &left.join(", "))]));
+    }
+    let copies = reply.get("copies_left").and_then(Value::as_u64).unwrap_or(0);
+    if copies > 0 {
+        out.push(crate::i18n::format("arrange.copies_left", &[("count", &copies.to_string())]));
+    }
+    let boxed = names("boxed");
+    if !boxed.is_empty() {
+        out.push(crate::i18n::format("arrange.boxed", &[("names", &boxed.join(", "))]));
+    }
+    if reply.get("hurried").and_then(Value::as_bool) == Some(true) {
+        out.push(crate::i18n::tr("arrange.hurried").to_string());
+    }
+    out
+}
+
 fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     let mut enter = false;
     let through_point = offset_through_point(d).is_some();
-    let on_face = matches!(d.kind, Kind::Arrange { .. }) && d.inputs.get(2).is_some_and(|i| !i.items.is_empty());
     match &mut d.kind {
         Kind::Revolve { angle, operation, .. } => {
             let cur = usize::from(to_object_on(&d.inputs));
@@ -990,22 +1103,6 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         }
         Kind::Stock { margin } => {
             enter |= expr_row(ui, "Margin", margin);
-        }
-        Kind::Arrange { width, length, spacing, margin, angle_step, method, lay_flat, keep, quantity, sheets } => {
-            // A picked sheet face is the sheet: its size is the face's.
-            if !on_face {
-                enter |= expr_row(ui, "ui.width", width);
-                enter |= expr_row(ui, "ui.length", length);
-            }
-            enter |= expr_row(ui, "ui.spacing", spacing);
-            enter |= expr_row(ui, "Margin", margin);
-            enter |= expr_row(ui, "arrange.turn_step", angle_step);
-            let labels = crate::dialogs::ARRANGE_METHODS.map(|(_, label)| label);
-            choice_row(ui, "arrange.fit", "arrange_method", method, &labels);
-            form_row(ui, "arrange.lay_flat", |ui| crate::dialogs::check(ui, lay_flat));
-            form_row(ui, "arrange.keep", |ui| crate::dialogs::check(ui, keep));
-            enter |= quantity_row(ui, &app.session.doc, "Quantity", quantity);
-            enter |= count_row_to(ui, &app.session.doc, "arrange.sheets", sheets, 100);
         }
         Kind::Scale { factor, per_axis, factor_y, factor_z } => {
             form_row(ui, "Type", |ui| {

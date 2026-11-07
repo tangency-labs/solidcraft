@@ -303,12 +303,6 @@ fn representative(h: &Harness, command: &str) -> Dialog {
     if let Kind::Thread { designation, .. } = &mut d.kind {
         *designation = "M20x2.5".into();
     }
-    // With a sheet face picked the rectangle's size is not asked for.
-    if let Kind::Arrange { .. } = &d.kind
-        && let Some(sheet) = d.inputs.get_mut(2)
-    {
-        sheet.items.clear();
-    }
     if let Kind::Assembly(crate::dialogs_assembly::Asm::Cam(f)) = &mut d.kind {
         f.b = s.doc.assembly.joints[2].id;
     }
@@ -340,7 +334,7 @@ fn check_form(command: &str, labels: &[&str]) {
         h.output = out.platform_output;
     }
     let nodes = &h.output.accesskit_update.as_ref().unwrap().nodes;
-    for input in &d.inputs {
+    for input in d.inputs.iter().filter(|i| input_shown(&d, i.label)) {
         assert!(scenario::rect_of(&format!("dialog:field:{}", input.label)).is_some(), "{command}: selection field {}", input.label);
         assert!(
             nodes.iter().any(|(_, n)| n.role() == egui::accesskit::Role::Button && n.label() == Some(input.label)),
@@ -388,7 +382,7 @@ fn check_form(command: &str, labels: &[&str]) {
     assert_eq!(scenario::count_of("dialog:ok:enabled"), Some(1.0), "{command}");
     assert_eq!(apply_commands(&h.app, &d).unwrap(), expected, "{command}: drawing is lossless");
     let mut label_width: Option<f32> = None;
-    for label in d.inputs.iter().map(|i| i.label).chain(labels.iter().copied()) {
+    for label in d.inputs.iter().map(|i| i.label).filter(|l| input_shown(&d, l)).chain(labels.iter().copied()) {
         let row = scenario::rect_of(&format!("dialog:row:{label}")).unwrap_or_else(|| panic!("{command}: missing dense row {label}"));
         let label_rect = scenario::rect_of(&format!("dialog:label:{label}")).unwrap();
         let control = scenario::rect_of(&format!("dialog:control:{label}")).unwrap();
@@ -415,6 +409,17 @@ fn check_form(command: &str, labels: &[&str]) {
     assert_eq!(scenario::count_of("dialog:ok:enabled"), Some(0.0), "{command}");
 }
 
+/// Whether the dialog draws the selection input `label` as it is set: Arrange hides the picks its
+/// choices make no use of.
+fn input_shown(d: &Dialog, label: &str) -> bool {
+    match (&d.kind, label) {
+        (Kind::Arrange { on_face, .. }, "Face") => *on_face,
+        (Kind::Arrange { on_face, .. }, "Plane") => !*on_face,
+        (Kind::Arrange { lay_flat, .. }, "Bottom Faces") => !*lay_flat,
+        _ => true,
+    }
+}
+
 fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
     use egui::accesskit::Role;
     Some(match label {
@@ -428,8 +433,10 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
         | "Nut" | "Cam" | "Follower" | "Anchor" => Role::ComboBox,
         "Radius" if command == "joint.rack_pinion" => Role::Label,
         "Pitch" | "Form" | "Hand" | "Starts" | "Extent" | "Start" | "End" if command == "solid.thread" => Role::ComboBox,
-        "arrange.fit" => Role::ComboBox,
-        "Automatic size" | "Reverse" | "Other side" | "All Lines" | "Mirror" | "arrange.lay_flat" | "arrange.keep" => Role::CheckBox,
+        "arrange.rotation" => Role::ComboBox,
+        "Automatic size" | "Reverse" | "Other side" | "All Lines" | "Mirror" | "arrange.avoid" | "arrange.keep" | "arrange.lay_flat" => {
+            Role::CheckBox
+        }
         "Animate" => Role::Button,
         "Ratio" if command.starts_with("joint.") && command != "joint.motion_link" => return None,
         _ => Role::TextInput,
@@ -686,14 +693,14 @@ form_case!(
     [
         "ui.width",
         "ui.length",
-        "ui.spacing",
-        "Margin",
-        "arrange.turn_step",
-        "arrange.fit",
+        "arrange.edge_margin",
+        "Gap",
+        "arrange.rotation",
         "arrange.lay_flat",
+        "arrange.copies_of_each",
+        "arrange.sheets",
         "arrange.keep",
-        "Quantity",
-        "arrange.sheets"
+        "arrange.avoid"
     ]
 );
 form_case!(frame_member, "frame.member", ["All Lines", "Anchor", "Angle", "Mirror", "Name"]);

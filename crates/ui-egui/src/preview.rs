@@ -101,6 +101,8 @@ pub struct Built {
     /// The reply of a previewed drive that stopped short of the asked values (the dialog says
     /// where and why, in the UI's language).
     pub stopped: Option<serde_json::Value>,
+    /// The previewed command's last reply (what Arrange placed and left out, for its dialog).
+    pub reply: Option<serde_json::Value>,
 }
 
 type Job = Result<Built, String>;
@@ -146,6 +148,8 @@ pub struct PreviewState {
     pub applied: Option<(f64, f64)>,
     /// The reply of a previewed drive that stopped short (see [`Built::stopped`]).
     pub stopped: Option<serde_json::Value>,
+    /// The previewed command's last reply (see [`Built::reply`]).
+    pub reply: Option<serde_json::Value>,
     /// The radius splines the previewed fillet tapered its edges with.
     pub tapered: Vec<(Vec3, solidcraft_engine::kernel::Taper)>,
     straight: crate::extrude_preview::StraightPreview,
@@ -180,6 +184,7 @@ impl PreviewState {
         self.error = None;
         self.applied = None;
         self.stopped = None;
+        self.reply = None;
         self.tapered.clear();
         self.sketches.clear();
         self.busy = false;
@@ -216,6 +221,7 @@ impl PreviewState {
                 self.error = b.error;
                 self.applied = b.applied;
                 self.stopped = b.stopped;
+                self.reply = b.reply;
                 self.tapered = b.tapered;
                 self.set_scene(b.scene);
             }
@@ -227,6 +233,7 @@ impl PreviewState {
                 self.error = Some(e);
                 self.applied = None;
                 self.stopped = None;
+                self.reply = None;
                 self.tapered.clear();
             }
         }
@@ -513,6 +520,7 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
             let features = || p.replies.iter().filter_map(|r| r.get("feature").and_then(Value::as_u64));
             b.applied = features().find_map(|id| p.after.fitted_range(id));
             b.tapered = features().find_map(|id| p.after.tapered(id)).map(<[_]>::to_vec).unwrap_or_default();
+            b.reply = p.replies.last().cloned();
             Ok(b)
         }
     }
@@ -629,6 +637,7 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
         applied: None,
         tapered: Vec::new(),
         stopped: None,
+        reply: None,
     }
 }
 
@@ -777,7 +786,7 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
         }
     }
     let sketches = after.sketches.iter().filter_map(|sketch| sketch_changes(before.sketch(sketch.feature), sketch)).collect();
-    Built { scene: sc, sketches, replaced, error: None, bounds: Aabb3::EMPTY, applied: None, tapered: Vec::new(), stopped: None }
+    Built { scene: sc, sketches, replaced, error: None, bounds: Aabb3::EMPTY, applied: None, tapered: Vec::new(), stopped: None, reply: None }
 }
 
 /// Does the triangle lie on the surface `index` holds: its corners, the middles of its sides
@@ -1081,6 +1090,7 @@ mod tests {
             applied: None,
             tapered: Vec::new(),
             stopped: None,
+            reply: None,
         }
     }
 
