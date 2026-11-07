@@ -85,12 +85,9 @@ round at zero, rebuilds its JSON record bit for bit, reverses, swaps and
 reparameterizes its net, and rejects records with a moved support or spine.
 The neighboring conic and other exact-round tests retain their expectations.
 
-`blend.fillet_exact--2508-nodal-bernstein/observe.py` reproduces the actual-body
-measurements and renders without modifying kernel sources. Run it from isolated
-base and corrected checkouts after the builds in its header. The view is
-azimuth -140°, elevation 10°; the close frame is centred at (2, 2, 0) with width
-6 mm. The round is highlighted and meshed by `solidcore-tess` through the existing
-diagnostics renderer. Only the temporary renderer's camera frame is specified.
+The pictures are the actual body drawn by `solidcore-diag` from the same view before and
+after: azimuth -140°, elevation 10°; the close frame is centred at (2, 2, 0) with
+width 6 mm. The round is highlighted and meshed by `solidcore-tess`.
 The discrepancy is subnanometre, so the pictures identify the affected round;
 the geometric identities establish the correction.
 
@@ -129,7 +126,7 @@ and 1.4210854715202004e-14 mm; Level-2 validity is clean.
 The change is rebased onto main
 `b34bb3e376c4f9c49238373d7b6bd30c8b4534b2`, including the merged unequal-chamfer
 correction. Its `round_rows` signature, two radii and contact construction are
-unchanged by this diff. Rerunning `observe.py` on this base with the nodal
+unchanged by this diff. Rerunning the measurements and the render on this base with the nodal
 correction reproduces the corrected measurements above exactly, and the close
 render is byte-identical to the attached after image. The earlier base named at
 the top remains the control for the tests-first failures and before measurements.
@@ -156,7 +153,7 @@ fixtures required (`SOLIDCORE_REQUIRE_UPSTREAM=1`).
 - The nodal kernel case was run separately with `kernel_cases --exact --ignored`
   and `KERNEL_CASES_CASE=cov-fillet-exact-cylinders-touching-at-a-point-r1`:
   one case passed, no known failure.
-- Rebuilt diagnostics and reran `observe.py` on the final base. Both corrected
+- Rebuilt diagnostics and reran the measurements on the final base. Both corrected
   errors above are unchanged, Level-2 validity is clean, and the close render is
   byte-identical to the committed after image.
 
@@ -240,8 +237,4 @@ All four known failures already occur in this base: the earlier three and
 The missing test/helper docstrings are added as requested by CodeRabbit; its
 review of `666a05b6a` reports **100% documentation coverage**. At that revision,
 both Python scripts' executable syntax trees were identical to `9e47df04a`
-after removing docstrings. Revision `f2208043e` also adds an explicit usage
-guard to `observe.py`: six invalid invocations, including with `python -O`,
-exit with usage without reaching compilation or execution. Valid invocations'
-build/run behavior is unchanged. The maintainer's separate security review
-remains for its stated follow-up.
+after removing docstrings.
