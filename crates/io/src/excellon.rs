@@ -41,6 +41,9 @@ pub struct DrillHit {
     pub diameter: f64,
     /// Plated through, when the file says (`None`: not stated).
     pub plated: Option<bool>,
+    /// A via (`Some(true)`) or a component or mechanical hole (`Some(false)`), when the file
+    /// says with a `#@! TA.AperFunction` attribute (`None`: not stated).
+    pub via: Option<bool>,
 }
 
 /// One routed slot: the tool moved from `a` to `b`, cutting a slot as wide as the tool.
@@ -89,6 +92,9 @@ pub struct Drills {
     pub arcs: Vec<DrillArc>,
     /// Things read but not understood, or guessed, worded for a person.
     pub warnings: Vec<String>,
+    /// The decimal places coordinates written without a decimal point were read with, when the
+    /// file doesn't say (its numbers are then a power of ten out if the guess is wrong).
+    pub guessed_decimals: Option<usize>,
 }
 
 impl Drills {
@@ -202,6 +208,7 @@ enum Tool {
     Ok {
         diameter: f64,
         plated: Option<bool>,
+        via: Option<bool>,
     },
     /// Defined with a size we do not believe.
     Refused,
@@ -228,6 +235,8 @@ struct Reader {
     incremental: bool,
     /// The file writes coordinates with decimal points: one without is a whole number.
     decimal_points: bool,
+    /// The decimal places guessed for a coordinate, when the file didn't say.
+    guessed: std::cell::Cell<Option<usize>>,
     in_header: bool,
     rout: bool,
     motion: Motion,
@@ -238,6 +247,9 @@ struct Reader {
     tools: BTreeMap<u32, Tool>,
     file_plated: Option<bool>,
     pending_plated: Option<bool>,
+    pending_via: Option<bool>,
+    /// The plating a `;TYPE=` comment gives the tools defined after it.
+    section_plated: Option<bool>,
     out: Drills,
     dropped_warnings: usize,
     unknown: BTreeSet<String>,
@@ -280,6 +292,7 @@ impl Reader {
             digits_from_command: false,
             incremental: false,
             decimal_points: false,
+            guessed: std::cell::Cell::new(None),
             in_header: false,
             rout: false,
             motion: Motion::Move,
@@ -289,6 +302,8 @@ impl Reader {
             tools: BTreeMap::new(),
             file_plated: None,
             pending_plated: None,
+            pending_via: None,
+            section_plated: None,
             out: Drills::default(),
             dropped_warnings: 0,
             unknown: BTreeSet::new(),
@@ -369,8 +384,15 @@ impl Reader {
                     "nonplated" => self.pending_plated = Some(false),
                     _ => {}
                 }
+                let fields: Vec<&str> = f.split(',').map(str::trim).collect();
+                if fields.contains(&"viadrill") {
+                    self.pending_via = Some(true);
+                } else if fields.iter().any(|f| matches!(*f, "componentdrill" | "mechanicaldrill" | "backdrill" | "otherdrill")) {
+                    self.pending_via = Some(false);
+                }
             } else if rest.starts_with("td") {
                 self.pending_plated = None;
+                self.pending_via = None;
             }
         } else if let Some(rest) = lower.strip_prefix("format") {
             let rest = rest.trim_start().trim_start_matches('=').trim_start();
@@ -401,10 +423,18 @@ impl Reader {
         } else if let Some(rest) = lower.strip_prefix("file_format") {
             self.comment_digits(rest.trim_start().trim_start_matches('=').trim());
         } else if let Some(rest) = lower.strip_prefix("type") {
-            match rest.trim_start().trim_start_matches('=').trim() {
-                "plated" => self.file_plated = Some(true),
-                "non_plated" | "nonplated" | "non-plated" => self.file_plated = Some(false),
-                _ => {}
+            // A header can list its plated tools under `;TYPE=PLATED` and the rest under
+            // `;TYPE=NON_PLATED`: each applies to the tools after it, and the first to the file.
+            let plated = match rest.trim_start().trim_start_matches('=').trim() {
+                "plated" => Some(true),
+                "non_plated" | "nonplated" | "non-plated" => Some(false),
+                _ => None,
+            };
+            if plated.is_some() {
+                self.section_plated = plated;
+                if self.file_plated.is_none() {
+                    self.file_plated = plated;
+                }
             }
         }
     }
@@ -634,7 +664,7 @@ impl Reader {
             return;
         }
         // Checked once for the whole run, so a huge count costs nothing when nothing is made.
-        let Some((diameter, plated)) = self.current_tool(n) else {
+        let Some((diameter, plated, via)) = self.current_tool(n) else {
             return;
         };
         // One more than there is room for, so the limit is reported.
@@ -648,7 +678,7 @@ impl Reader {
                 self.far = self.far.saturating_add(n.saturating_sub(done));
                 return;
             }
-            self.out.hits.push(DrillHit { at: Vec2::new(next.0, next.1), diameter, plated });
+            self.out.hits.push(DrillHit { at: Vec2::new(next.0, next.1), diameter, plated, via });
             self.pos = next;
         }
     }
@@ -673,7 +703,7 @@ impl Reader {
         if !self.room() {
             return;
         }
-        let Some((diameter, plated)) = self.current_tool(1) else {
+        let Some((diameter, plated, _)) = self.current_tool(1) else {
             return;
         };
         if !(path_radius - diameter / 2.0 > 1e-9) {
@@ -732,9 +762,10 @@ impl Reader {
         }
         self.looks_like_drill = true;
         let mm = d * self.scale();
-        let plated = self.pending_plated.take();
+        let plated = self.pending_plated.take().or(self.section_plated);
+        let via = self.pending_via.take();
         let tool = if mm.is_finite() && mm > 0.0 && mm <= MAX_DIAMETER_MM {
-            Tool::Ok { diameter: mm, plated }
+            Tool::Ok { diameter: mm, plated, via }
         } else {
             if d.is_finite() {
                 self.warn(format!("tool T{n} has an unusable size `C{}`; its holes are skipped", clip(text)));
@@ -744,15 +775,15 @@ impl Reader {
         self.tools.insert(n, tool);
     }
 
-    /// The current tool's diameter and plating, or `None` when holes cannot be made (the
-    /// `count` holes that wanted it are counted for the warnings).
-    fn current_tool(&mut self, count: usize) -> Option<(f64, Option<bool>)> {
+    /// The current tool's diameter, plating and via flag, or `None` when holes cannot be made
+    /// (the `count` holes that wanted it are counted for the warnings).
+    fn current_tool(&mut self, count: usize) -> Option<(f64, Option<bool>, Option<bool>)> {
         let Some(n) = self.tool else {
             self.no_tool = self.no_tool.saturating_add(count);
             return None;
         };
         match self.tools.get(&n).copied() {
-            Some(Tool::Ok { diameter, plated }) => Some((diameter, plated.or(self.file_plated))),
+            Some(Tool::Ok { diameter, plated, via }) => Some((diameter, plated.or(self.file_plated), via)),
             Some(Tool::Refused) => {
                 let c = self.refused.entry(n).or_insert(0);
                 *c = c.saturating_add(count);
@@ -785,8 +816,8 @@ impl Reader {
             return;
         }
         self.looks_like_drill = true;
-        if let Some((diameter, plated)) = self.current_tool(1) {
-            self.out.hits.push(DrillHit { at: Vec2::new(at.0, at.1), diameter, plated });
+        if let Some((diameter, plated, via)) = self.current_tool(1) {
+            self.out.hits.push(DrillHit { at: Vec2::new(at.0, at.1), diameter, plated, via });
         }
     }
 
@@ -795,7 +826,7 @@ impl Reader {
             return;
         }
         self.looks_like_drill = true;
-        if let Some((diameter, plated)) = self.current_tool(1) {
+        if let Some((diameter, plated, _)) = self.current_tool(1) {
             self.out.slots.push(DrillSlot { a: Vec2::new(a.0, a.1), b: Vec2::new(b.0, b.1), diameter, plated });
         }
     }
@@ -823,9 +854,13 @@ impl Reader {
         let value = if body.contains('.') || self.decimal_points {
             plain_number(body)?
         } else {
-            let (int, dec) = self.digits.unwrap_or(match self.units {
-                Units::Mm => (3, 3),
-                Units::Inch => (2, 4),
+            let (int, dec) = self.digits.unwrap_or_else(|| {
+                let usual = match self.units {
+                    Units::Mm => (3, 3),
+                    Units::Inch => (2, 4),
+                };
+                self.guessed.set(Some(usual.1));
+                usual
             });
             implied(body, int, dec, self.zeros)?
         };
@@ -834,6 +869,7 @@ impl Reader {
     }
 
     fn finish(mut self) -> Result<Drills> {
+        self.out.guessed_decimals = self.guessed.get();
         if self.no_tool > 0 {
             let n = self.no_tool;
             self.warn(format!("{n} hole(s) came before any tool was chosen; they were skipped"));

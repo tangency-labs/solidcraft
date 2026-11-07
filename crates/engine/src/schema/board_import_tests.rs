@@ -6,7 +6,10 @@ use crate::schema::{input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<InsertGerberParams>(), &["drills", "drills_text", "name", "origin", "outline", "outline_text", "thickness"]);
+    assert_keys(
+        input_schema_for::<InsertGerberParams>(),
+        &["drills", "drills_text", "finish", "layers", "layers_text", "name", "origin", "outline", "outline_text", "thickness"],
+    );
 }
 
 #[test]
@@ -36,10 +39,13 @@ fn a_board_reply_matches_its_schema() {
         body: "Board".into(),
         bodies: vec!["Board".into()],
         holes: 4,
+        vias: 0,
         slots: 1,
         skipped: 1,
         thickness: 1.6,
         offset: [-10.0, 0.0],
+        layer_sketches: vec![3, 4],
+        prints: vec!["Top print".into()],
         warnings: vec!["skipped the 3.2 mm hole at (40, 10): it is not wholly inside the board".into()],
         param_warnings: Vec::new(),
     };

@@ -27,6 +27,7 @@ use solidcraft_geom::prelude::*;
 use solidcraft_io::{Drills, Geom2, MAX_DRAWING_BYTES};
 
 use super::CommandSpec;
+use super::board_layers::{self, Finish, Layer};
 use super::sketch::{edit, ids_of};
 use super::sketch_import::{add_geometry, bounds_of};
 use crate::params::{bad, string_list};
@@ -34,7 +35,7 @@ use crate::schema::board_import::{BoardImportResult, InsertGerberParams};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
-const CMD: &str = "file.insert_gerber";
+pub(super) const CMD: &str = "file.insert_gerber";
 const CONTRACT: TypedContract<InsertGerberParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("file.insert_gerber", "Insert PCB (Gerber)", crate::checked!("file.insert_gerber", insert_gerber))
@@ -42,7 +43,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("file.insert_gerber", "
     .icon("import")
     .contract(&CONTRACT)
     .output(output_schema_for::<BoardImportResult>)
-    .params("outline: path of the board outline Gerber (RS-274X) layer | outline_text: its text; drills?: path or [paths] of Excellon drill files (up to 16) and/or drills_text?: text or [texts]; thickness?: mm (default 1.6, more than 0, at most 20); name?: the new component's (default: the outline file's name without its extension, or Board); origin?: file (default: keep the files' coordinates) | corner (the lower-left corner of the box around the outline at the origin) → {component, component_name, sketch, feature, body, bodies, holes, slots, skipped, thickness, offset: [x, y] added to the files' coordinates, warnings}: a new component in the active one, named after the board, holding a sketch Outline on XY with the outline (closed loops inside it are cut-outs) and every hole and slot wholly inside the board, and one extrude of the board by its thickness as the body Board; its properties pcb.outline, pcb.drills and pcb.thickness name the files and the thickness; a hole or slot outside the board or across its edge is skipped with a warning; an outline that is not closed is refused, naming the gap. A sketch being edited is finished first. One undo step")];
+    .params("outline: path of the board outline Gerber (RS-274X) layer | outline_text: its text; drills?: path or [paths] of Excellon drill files (up to 16) and/or drills_text?: text or [texts]; thickness?: mm (default 1.6, more than 0, at most 20); name?: the new component's (default: the outline file's name without its extension, or Board); origin?: file (default: keep the files' coordinates) | corner (the lower-left corner of the box around the outline at the origin); layers?: {top_copper?, bottom_copper?, top_mask?, bottom_mask?, top_silk?, bottom_silk?: path of that Gerber layer} and/or layers_text?: the same keys with the layers' text; finish?: hasl (default) | enig, how bare copper looks → {component, component_name, sketch, feature, body, bodies, holes, slots, skipped, thickness, offset: [x, y] added to the files' coordinates, layer_sketches?: ids, prints?: names, warnings}: a new component in the active one, named after the board, holding a sketch Outline on XY with the outline (closed loops inside it are cut-outs) and every hole and slot wholly inside the board, and one extrude of the board by its thickness as the body Board; its properties pcb.outline, pcb.drills and pcb.thickness name the files and the thickness; a hole or slot outside the board or across its edge is skipped with a warning; gaps in the outline up to 0.05 mm are closed with a line and a warning, a wider gap is refused, naming it; each layer given is kept exactly as hidden sketches in the component (Top copper, Bottom mask...) and the board gets each side's printed look (solder mask, copper, finish, silkscreen) as an image on its face, Top print and Bottom print; component properties pcb.<layer> name the layer files. A sketch being edited is finished first. One undo step")];
 
 /// End points closer than this (mm) are one point. Fabrication files give coordinates to a
 /// micrometre or finer, and a drawn outline's ends meet exactly.
@@ -53,6 +54,19 @@ const MAX_DRILL_FILES: usize = 16;
 /// Board a hole must keep between itself and the outline to count as inside (mm): a hole that
 /// touches the edge would leave a sliver the kernel can't build.
 const CLEAR: f64 = 1e-4;
+/// Gaps in an outline up to this wide (mm) are closed with a line: drafting slips and rounding
+/// in the files leave them, and board makers close them too.
+const BRIDGE: f64 = 0.05;
+const MAX_BRIDGED_ENDS: usize = 64;
+/// Lines of the outline this short or shorter (mm) may be steps of a curve: some writers draw
+/// a rounded corner as hundreds of tiny lines rather than an arc.
+const STEP: f64 = 0.5;
+/// How far a run of steps may lie from the arc or line it is read as (mm).
+const TRACE: f64 = 0.05;
+/// A plated hole the drill file doesn't mark as a via or not is taken as one when this small or
+/// smaller (mm). This only spares the body hundreds of tiny cuts, which make it slow to build and
+/// to show: every via is still a hole to drill, at its own size, in the `Vias` sketch.
+const VIA_MAX: f64 = 0.5;
 /// The longest board name taken.
 const MAX_NAME: usize = 200;
 
@@ -79,6 +93,9 @@ pub(super) struct Board<'a> {
     pub outline_file: &'a str,
     /// Where the drills came from, in order.
     pub drill_files: &'a [String],
+    /// Copper, mask and silkscreen layers, read.
+    pub layers: &'a [Layer],
+    pub finish: Finish,
 }
 
 /// The board's sketch and body, inside its component.
@@ -111,6 +128,7 @@ fn insert_gerber(s: &mut Session, p: &Value) -> Result<Value> {
     if drill_paths.len() + drill_texts.len() > MAX_DRILL_FILES {
         return Err(bad(CMD, format!("give at most {MAX_DRILL_FILES} drill files")));
     }
+    let (layer_sources, finish) = board_layers::params(p)?;
     // Every parameter is checked before any file is read.
     let (outline_name, outline_text) = match (outline_path, outline_text) {
         (Some(_), Some(_)) => return Err(bad(CMD, "give `outline` or `outline_text`, not both")),
@@ -133,8 +151,12 @@ fn insert_gerber(s: &mut Session, p: &Value) -> Result<Value> {
         }
         sources.push((format!("drill text {}", i + 1), text.clone()));
     }
+    let outline_box = bounds_of(&read.geom);
     for (label, text) in &sources {
-        let d = solidcraft_io::read_excellon(text).map_err(|e| EngineError::Other(format!("{label}: {e}")))?;
+        let mut d = solidcraft_io::read_excellon(text).map_err(|e| EngineError::Other(format!("{label}: {e}")))?;
+        if let (Some(dec), Some(bounds)) = (d.guessed_decimals, outline_box) {
+            fit_guessed_places(&mut d, dec, bounds, label, &mut warnings);
+        }
         drills.hits.extend(d.hits);
         drills.slots.extend(d.slots);
         drills.arcs.extend(d.arcs);
@@ -146,6 +168,7 @@ fn insert_gerber(s: &mut Session, p: &Value) -> Result<Value> {
         .filter(|stem| !stem.is_empty())
         .unwrap_or_else(|| "Board".to_string());
     let drill_files: Vec<String> = sources.into_iter().map(|(label, _)| label).collect();
+    let layers = board_layers::read(&layer_sources, &mut warnings)?;
     let board = Board {
         outline: &read.geom,
         drills: &drills,
@@ -154,12 +177,45 @@ fn insert_gerber(s: &mut Session, p: &Value) -> Result<Value> {
         origin,
         outline_file: &outline_name,
         drill_files: &drill_files,
+        layers: &layers,
+        finish,
     };
     let reply = build_board(s, &board, warnings).map_err(|e| match e {
         EngineError::Other(msg) if msg.starts_with("the board outline") => EngineError::Other(format!("{outline_name}: {msg}")),
         e => e,
     })?;
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+/// A drill file that doesn't say how many decimal places its coordinates have was read with
+/// the usual number; a file written with one more or one fewer is ten times out, its holes off
+/// the board. Of the three readings, the one that puts the most holes in the box round the
+/// outline is kept (the usual one when they tie).
+fn fit_guessed_places(d: &mut Drills, dec: usize, (lo, hi): (Vec2, Vec2), label: &str, warnings: &mut Vec<String>) {
+    let inside = |p: Vec2| p.x >= lo.x && p.x <= hi.x && p.y >= lo.y && p.y <= hi.y;
+    let count =
+        |k: f64| d.hits.iter().map(|h| h.at).chain(d.slots.iter().map(|s| s.a)).chain(d.arcs.iter().map(|a| a.a)).filter(|p| inside(*p * k)).count();
+    let usual = count(1.0);
+    let (more, fewer) = (count(0.1), count(10.0));
+    let (k, places) = if more > usual && more >= fewer {
+        (0.1, dec.saturating_add(1))
+    } else if fewer > usual {
+        (10.0, dec.saturating_sub(1))
+    } else {
+        return;
+    };
+    for h in &mut d.hits {
+        h.at = h.at * k;
+    }
+    for s in &mut d.slots {
+        (s.a, s.b) = (s.a * k, s.b * k);
+    }
+    for a in &mut d.arcs {
+        (a.c, a.a, a.b) = (a.c * k, a.a * k, a.b * k);
+    }
+    warnings.push(format!(
+        "{label}: the file doesn't say how many decimal places its coordinates have; they were read with {places}, not the usual {dec}, which puts the holes on the board"
+    ));
 }
 
 /// A text parameter: absent, `null` or a string.
@@ -171,11 +227,11 @@ fn text_key<'a>(p: &'a Value, key: &str) -> Result<Option<&'a str>> {
     }
 }
 
-fn file_name(path: &str) -> String {
+pub(super) fn file_name(path: &str) -> String {
     std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_string())
 }
 
-fn read_text(path: &str) -> Result<String> {
+pub(super) fn read_text(path: &str) -> Result<String> {
     if path.trim().is_empty() || path.len() >= 4096 {
         return Err(bad(CMD, "a file path must be a path"));
     }
@@ -186,7 +242,8 @@ fn read_text(path: &str) -> Result<String> {
 /// Build the board from parsed data: its component, sketch and extrude, in the open command's
 /// undo step. `warnings` are the readers' own, passed on in front of the import's.
 pub(super) fn build_board(s: &mut Session, board: &Board, mut warnings: Vec<String>) -> Result<BoardImportResult> {
-    let outline = Outline::new(board.outline, &mut warnings)?;
+    let traced = trace_steps(board.outline, &mut warnings);
+    let outline = Outline::new(&traced, &mut warnings)?;
     let offset = match board.origin {
         Origin::File => Vec2::ZERO,
         Origin::Corner => {
@@ -213,6 +270,27 @@ pub(super) fn build_board(s: &mut Session, board: &Board, mut warnings: Vec<Stri
     s.active_component = component;
     s.revision += 1;
     let built = build_in(s, &outline, &holes, offset, board.thickness);
+    let mut layer_sketches = Vec::new();
+    let mut prints = Vec::new();
+    if built.is_ok() && !holes.vias.is_empty() {
+        match board_layers::via_sketch(s, &holes.vias, offset, board.thickness) {
+            Ok(id) => layer_sketches.push(id),
+            Err(e) => warnings.push(format!("The vias could not be kept as a sketch: {e}")),
+        }
+    }
+    if built.is_ok() && !board.layers.is_empty() {
+        match board_layers::sketches(s, board.layers, offset, board.thickness) {
+            Ok(ids) => layer_sketches.extend(ids),
+            Err(e) => warnings.push(format!("The layers could not be kept as sketches: {e}")),
+        }
+        let mut board_loops: Vec<Vec<Geom2>> =
+            outline.loops().iter().map(|(edges, _)| edges.iter().filter_map(|i| outline.edges.get(*i)).map(Edge::geom).collect()).collect();
+        if let Ok(cut) = Outline::new(&holes.geom, &mut Vec::new()) {
+            board_loops
+                .extend(cut.loops().iter().map(|(edges, _)| edges.iter().filter_map(|i| cut.edges.get(*i)).map(Edge::geom).collect::<Vec<_>>()));
+        }
+        prints = board_layers::decals(s, &board_loops, &holes.vias, board.layers, offset, board.thickness, board.finish, &mut warnings);
+    }
     (s.active_component, s.active_occurrence_path) = active;
     s.revision += 1;
     let (sketch, feature, bodies, warning) = built?;
@@ -227,6 +305,9 @@ pub(super) fn build_board(s: &mut Session, board: &Board, mut warnings: Vec<Stri
             c.properties.insert("pcb.drills".into(), board.drill_files.join(", "));
         }
         c.properties.insert("pcb.thickness".into(), mm(board.thickness));
+        for layer in board.layers {
+            c.properties.insert(format!("pcb.{}", layer.role.key), layer.file.clone());
+        }
         component_name = c.name.clone();
     }
     Ok(BoardImportResult {
@@ -237,10 +318,13 @@ pub(super) fn build_board(s: &mut Session, board: &Board, mut warnings: Vec<Stri
         body: bodies.first().cloned().unwrap_or_else(|| BODY_NAME.to_string()),
         bodies,
         holes: holes.hits,
+        vias: holes.vias.len(),
         slots: holes.slots,
         skipped: holes.skipped,
         thickness: board.thickness,
         offset: [offset.x, offset.y],
+        layer_sketches,
+        prints,
         warnings,
         param_warnings: Vec::new(),
     })
@@ -360,7 +444,7 @@ fn material_point(outline: &Outline, holes: &Holes) -> Option<Vec2> {
         .find(|p| clear(*p))
 }
 
-fn run(s: &mut Session, id: &str, p: &Value) -> Result<Value> {
+pub(super) fn run(s: &mut Session, id: &str, p: &Value) -> Result<Value> {
     let spec = super::find_command(id).ok_or_else(|| EngineError::Other(format!("`{id}` is missing")))?;
     (spec.run)(s, p)
 }
@@ -594,6 +678,121 @@ fn segment_distance(u: Vec2, v: Vec2, a: Vec2, b: Vec2) -> f64 {
     near(u, a, b).min(near(v, a, b)).min(near(a, u, v)).min(near(b, u, v))
 }
 
+/// The outline with each run of tiny lines read as the arcs and lines it traces (see [`STEP`]),
+/// each within [`TRACE`] of every point of the run. Each run keeps its own end points exactly, so
+/// it still joins its neighbours. A thousand steps make a slow board; a few arcs don't.
+fn trace_steps(geom: &[Geom2], warnings: &mut Vec<String>) -> Vec<Geom2> {
+    let mut out = Vec::with_capacity(geom.len());
+    let mut run: Vec<Vec2> = Vec::new();
+    let (mut steps, mut made) = (0usize, 0usize);
+    let mut flush = |run: &mut Vec<Vec2>, out: &mut Vec<Geom2>| {
+        if run.len() > 1 {
+            let before = out.len();
+            trace(run, out);
+            steps += run.len() - 1;
+            made += out.len() - before;
+        }
+        run.clear();
+    };
+    for g in geom {
+        match *g {
+            Geom2::Line(a, b) if a.dist(b) <= STEP => {
+                if a.dist(b) <= 1e-9 {
+                    continue;
+                }
+                if run.last().is_some_and(|&l| l.dist(a) <= 1e-9) {
+                    run.push(b);
+                } else {
+                    flush(&mut run, &mut out);
+                    run.extend([a, b]);
+                }
+            }
+            _ => {
+                flush(&mut run, &mut out);
+                out.push(g.clone());
+            }
+        }
+    }
+    flush(&mut run, &mut out);
+    if made + 100 <= steps {
+        warnings.push(format!(
+            "the board outline draws its curves in {steps} short lines; they were read as the {made} arcs and lines they trace, within {} mm",
+            mm(TRACE)
+        ));
+    }
+    out
+}
+
+/// Greedily, the longest arc (three steps or more) or line from each point of `pts` on.
+fn trace(pts: &[Vec2], out: &mut Vec<Geom2>) {
+    let mut i = 0;
+    while i + 1 < pts.len() {
+        let mut line = i + 1;
+        while line + 1 < pts.len() && on_line(&pts[i..=line + 1]) {
+            line += 1;
+        }
+        let mut arc = None;
+        let mut end = i + 3;
+        while end < pts.len() {
+            match on_arc(&pts[i..=end]) {
+                Some(g) => arc = Some((end, g)),
+                None => break,
+            }
+            end += 1;
+        }
+        match arc.filter(|(end, _)| *end > line) {
+            Some((end, g)) => {
+                out.push(g);
+                i = end;
+            }
+            None => {
+                out.push(Geom2::Line(pts[i], pts[line]));
+                i = line;
+            }
+        }
+    }
+}
+
+/// Every point of `pts` within [`TRACE`] of the line from its first to its last.
+fn on_line(pts: &[Vec2]) -> bool {
+    let (Some(&a), Some(&b)) = (pts.first(), pts.last()) else { return false };
+    pts.iter().all(|&p| p.dist(closest_on_segment(p, a, b)) <= TRACE)
+}
+
+/// The arc through the first, middle and last of `pts`, when every point and every step's middle
+/// is within [`TRACE`] of it and the steps turn one way, less than a whole turn.
+fn on_arc(pts: &[Vec2]) -> Option<Geom2> {
+    let (a, m, b) = (*pts.first()?, *pts.get(pts.len() / 2)?, *pts.last()?);
+    let d = 2.0 * (m - a).cross(b - a);
+    if d.abs() < 1e-12 {
+        return None;
+    }
+    // The circle through a, m and b, from a.
+    let (u, w) = (m - a, b - a);
+    let c = a + Vec2::new(w.y * u.len2() - u.y * w.len2(), u.x * w.len2() - w.x * u.len2()) * (1.0 / d);
+    let r = c.dist(a);
+    if !(r.is_finite() && r < 1e4) {
+        return None;
+    }
+    let near = |p: Vec2| (p.dist(c) - r).abs() <= TRACE;
+    let mut sweep = 0.0;
+    for s in pts.windows(2) {
+        let (p, q) = (s[0], s[1]);
+        if !near(q) || !near((p + q) * 0.5) {
+            return None;
+        }
+        let turn = (p - c).cross(q - c).atan2((p - c).dot(q - c));
+        if sweep != 0.0 && turn * sweep < 0.0 {
+            return None;
+        }
+        sweep += turn;
+    }
+    if sweep.abs() >= std::f64::consts::TAU - 1e-6 {
+        return None;
+    }
+    Some(if sweep > 0.0 { Geom2::Arc { c, a, b } } else { Geom2::Arc { c, a: b, b: a } })
+}
+
 /// End points, joined when closer than [`JOIN`].
 #[derive(Default)]
 struct Ends {
@@ -698,7 +897,41 @@ impl Outline {
                 }
             }
         }
-        let open: Vec<Vec2> = degree.iter().enumerate().filter(|(_, d)| *d % 2 == 1).filter_map(|(k, _)| points.at.get(k).copied()).collect();
+        let mut open: Vec<usize> = degree.iter().enumerate().filter(|(_, d)| *d % 2 == 1).map(|(k, _)| k).collect();
+        // Tiny gaps, as drafting slips and rounding leave, are closed with a short line, as a
+        // board maker would.
+        let mut bridged: Vec<f64> = Vec::new();
+        // Only a few open ends are slips; many are a drawing that isn't an outline.
+        while open.len() >= 2 && open.len() <= MAX_BRIDGED_ENDS {
+            let mut best: Option<(f64, usize, usize)> = None;
+            for (x, i) in open.iter().enumerate() {
+                for (y, j) in open.iter().enumerate().skip(x + 1) {
+                    let (Some(a), Some(b)) = (points.at.get(*i), points.at.get(*j)) else { continue };
+                    let d = a.dist(*b);
+                    if d <= BRIDGE && best.is_none_or(|(e, ..)| d < e) {
+                        best = Some((d, x, y));
+                    }
+                }
+            }
+            let Some((d, x, y)) = best else { break };
+            let (Some(&i), Some(&j)) = (open.get(x), open.get(y)) else { break };
+            if let (Some(&a), Some(&b)) = (points.at.get(i), points.at.get(j)) {
+                edges.push(Edge::Line(a, b));
+                ends.push(Some((i, j)));
+                bridged.push(d);
+            }
+            open.remove(y);
+            open.remove(x);
+        }
+        match bridged[..] {
+            [] => {}
+            [one] => warnings.push(format!("closed a gap of {} mm in the board outline", mm(one))),
+            _ => {
+                let widest = bridged.iter().copied().fold(0.0, f64::max);
+                warnings.push(format!("closed {} gaps in the board outline, the widest {} mm", bridged.len(), mm(widest)));
+            }
+        }
+        let open: Vec<Vec2> = open.iter().filter_map(|k| points.at.get(*k).copied()).collect();
         if let Some(first) = open.first() {
             let others = || open.iter().skip(1);
             let nearest = others().min_by(|a, b| a.dist(*first).total_cmp(&b.dist(*first)));
@@ -833,6 +1066,9 @@ impl Outline {
 struct Holes {
     geom: Vec<Geom2>,
     hits: usize,
+    /// Vias: holes the drill file marks as vias, or small plated ones (see [`VIA_MAX`]), drawn on
+    /// the board's look rather than cut.
+    vias: Vec<Geom2>,
     slots: usize,
     skipped: usize,
     /// A point on the wall of each plated hole and straight slot, for its copper colour.
@@ -841,7 +1077,7 @@ struct Holes {
 
 impl Holes {
     fn pick(outline: &Outline, drills: &Drills, warnings: &mut Vec<String>) -> Holes {
-        let mut out = Holes { geom: Vec::new(), hits: 0, slots: 0, skipped: 0, plated: Vec::new() };
+        let mut out = Holes { geom: Vec::new(), hits: 0, vias: Vec::new(), slots: 0, skipped: 0, plated: Vec::new() };
         let mut seen = HashSet::new();
         let mut repeated = 0;
         let usable = |d: f64, ps: &[Vec2]| d.is_finite() && d > JOIN && ps.iter().all(|p| p.x.is_finite() && p.y.is_finite());
@@ -858,6 +1094,8 @@ impl Holes {
             } else if !outline.fits_hole(h.at, r) {
                 warnings.push(format!("skipped the {} mm hole at {}: it is not wholly inside the board", mm(h.diameter), at(h.at)));
                 out.skipped += 1;
+            } else if h.plated != Some(false) && h.via.unwrap_or(h.diameter <= VIA_MAX) {
+                out.vias.push(Geom2::Circle(h.at, r));
             } else {
                 out.geom.push(Geom2::Circle(h.at, r));
                 out.hits += 1;
