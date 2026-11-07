@@ -905,6 +905,7 @@ pub fn gn_enclose_over(
 ) -> Result<Option<Enclosure>> {
     crate::profile::profile_scope!(k, "blend::certificate::gn_enclose_over");
     let s = at.s;
+    crate::profile::profile_note!(k, "enclose s=[{},{}] order={} n={}", s.lo, s.hi, order_s, n);
     let tr = Trunc::new(order_s, n)?;
     // a ball whose radius varies: its law over the span (0d43b4c)
     let law_r = match law {
@@ -1018,6 +1019,7 @@ pub fn gn_enclose_over(
         } else {
             let contracts = q < 1.0;
             if !contracts {
+                crate::profile::profile_note!(k, "enclose reject contraction q={q} limit=1");
                 return Ok(None); // the span is too long for its Jacobian to be one preconditioner's
             }
             // the next box from the contraction: K's radii are at most d + |C| w for a box
@@ -1053,8 +1055,10 @@ pub fn gn_enclose_over(
         }
     }
     if !proved {
+        crate::profile::profile_note!(k, "enclose reject inclusion iterations={it} q={q}");
         return Ok(None);
     }
+    crate::profile::profile_note!(k, "enclose root q={q} iterations={it}");
 
     // the feet's Taylor coefficients over the span, order by order: x = -Y R + C x,
     // |x| <= rho
@@ -1674,6 +1678,7 @@ pub fn arc_rows<S: TayScalar + GnScalar>(
 #[must_use]
 #[allow(clippy::too_many_arguments)]
 pub fn arc_row_terms_over(
+    k: &Kernel,
     f: &[VSer<Ivl>; 2],
     centre: &VSer<Ivl>,
     fm: &[VSer<Ivl>; 2],
@@ -1683,6 +1688,8 @@ pub fn arc_row_terms_over(
     rt: &mut GnRowTerms,
     touch: bool,
 ) -> bool {
+    #[cfg(not(feature = "profile"))]
+    let _ = k;
     const K: usize = 4 + TAYLOR;
     let mut rho = [[Tay::<Ivl>::zero(); 3]; 2];
     let mut mc = [Tay::<Ivl>::zero(); 3];
@@ -1725,6 +1732,7 @@ pub fn arc_row_terms_over(
             bd = bd + (r0q - mq) * dq;
         }
         if !dd.at(0).is_positive() {
+            crate::profile::profile_note!(k, "arc reject speed2={:?} required_lo>0", dd.at(0));
             return false;
         }
         let kk = bd / dd;
@@ -1734,6 +1742,7 @@ pub fn arc_row_terms_over(
     }
     let [rho0, rho1] = &rho;
     let Some((h, w)) = arc_rows(rho0, rho1, &mc, o) else {
+        crate::profile::profile_note!(k, "arc reject circle rho={rho:?} centre={mc:?}");
         return false;
     };
     // |S - O| <= |m - O| + the ball's radius over the piece
@@ -1754,6 +1763,7 @@ pub fn arc_row_terms_over(
         let dx = 24.0 * crate::geom::vector3d::sqrt(sq);
         let dy = 24.0 * wj.at(TAY).mag();
         let dwlo = wj.at(0).lo;
+        crate::profile::profile_note!(k, "arc row={j} x4={dx} w4={dy} w_lo={dwlo} radius={d_r}");
         if !(dx.is_finite() && dy.is_finite() && dwlo > 0.0) {
             return false;
         }
@@ -1814,6 +1824,7 @@ pub fn gn_certify_span(
     mut defs: Option<&mut GnDefs<'_>>,
 ) -> Result<f64> {
     crate::profile::profile_scope!(k, "blend::certificate::gn_certify_span");
+    crate::profile::profile_note!(k, "span begin s=[{},{}] target={} n={} law={}", a.s, b.s, target, n, law.is_some());
     // the series' orders are checked once (the fork leaves them to its callers)
     Trunc::new(4 + TAYLOR, n)?;
     let mut bound_out = f64::INFINITY;
@@ -1848,6 +1859,7 @@ pub fn gn_certify_span(
     for level in 0..=6_u32 {
         k.check_cancelled(OP_CERTIFY_SPAN)?;
         let pieces = 1_usize << level;
+        crate::profile::profile_note!(k, "level begin level={level} pieces={pieces}");
         // the pieces' end stations
         let mut ends = Vec::new();
         ends.push(*a);
@@ -1889,6 +1901,7 @@ pub fn gn_certify_span(
             i += 1;
         }
         if !solved {
+            crate::profile::profile_note!(k, "level reject station");
             continue;
         }
         ends.push(*b);
@@ -1981,6 +1994,7 @@ pub fn gn_certify_span(
                     Some(ps) => {
                         let d = Ivl::new(ea.s, eb.s) - Ivl::from(ps.mid);
                         arc_row_terms_over(
+                            k,
                             &ps.f,
                             &ps.v,
                             &ps.fm,
@@ -1996,6 +2010,7 @@ pub fn gn_certify_span(
             }
         }
         if !proved {
+            crate::profile::profile_note!(k, "level reject enclosure_or_rows m4={m4:?} uv4={uv4:?}");
             continue;
         }
         // the level's bound with the uv curves' term `uv` (#2690: taken with each
@@ -2034,6 +2049,7 @@ pub fn gn_certify_span(
                     };
                     let den = lj - kh * yj;
                     let num = wj.hi * da + kh * xj + kh * yj * rows.r;
+                    crate::profile::profile_note!(k, "row bound row={j} den={den} w_lo={lj} kh_w4={} num={num}", kh * yj);
                     let positive = den > 0.0;
                     bound = if positive {
                         cmax(bound, num / den)
@@ -2049,6 +2065,7 @@ pub fn gn_certify_span(
         };
         let bound = level_bound(&uv4_fork);
         if !bound.is_finite() {
+            crate::profile::profile_note!(k, "level reject nonfinite_bound");
             continue;
         }
         // certified by each parameter's own term, never larger than the fork's
@@ -2060,6 +2077,7 @@ pub fn gn_certify_span(
                 v.w = [cmin(lo, rlo), cmax(hi, rhi)];
             }
         }
+        crate::profile::profile_note!(k, "level bound={bound} target={target} uv4={uv4:?} m4={m4:?}");
         bound_out = cmin(bound_out, bound);
         if bound_out <= target {
             break;
@@ -2076,6 +2094,7 @@ pub fn gn_certify_span(
             }
             lower = cmax(lower, cmax(if rows_vary { 0.0 } else { sum }, k4 * uvl));
         }
+        crate::profile::profile_note!(k, "level lower={lower} target={target} last={last}");
         if round_down(lower * (1.0 - 1.0e-12)) > target {
             break;
         }
@@ -2085,6 +2104,7 @@ pub fn gn_certify_span(
         }
         last = bound;
     }
+    crate::profile::profile_note!(k, "span end bound={bound_out} target={target}");
     Ok(bound_out)
 }
 

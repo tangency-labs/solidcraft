@@ -519,10 +519,22 @@ impl LawRound {
         knots: &[f64],
         radii: &[f64],
     ) -> Self {
+        Self::build_on(&mut law_kernel(), size, from, to, degree, knots, radii)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn build_on(
+        k: &mut Kernel,
+        size: [f64; 3],
+        from: Point3,
+        to: Point3,
+        degree: usize,
+        knots: &[f64],
+        radii: &[f64],
+    ) -> Self {
         use solidcore::blend::fillet_geom::p1::FilletSolverId;
-        let mut k = law_kernel();
-        let mut b = create_box(&mut k, Vec3::ZERO, size[0], size[1], size[2]).unwrap();
-        let (e, reversed) = edge_between(&k, &b, from, to);
+        let mut b = create_box(k, Vec3::ZERO, size[0], size[1], size[2]).unwrap();
+        let (e, reversed) = edge_between(k, &b, from, to);
         let law = spline_law(degree, knots, radii, reversed);
         let base = radii[0].max(radii[radii.len() - 1]);
         let mut tols = SolverTols {
@@ -531,11 +543,11 @@ impl LawRound {
         };
         let mut pieces = Vec::new();
         {
-            let mut session = FilletSession::new(&mut k, &mut b).unwrap();
+            let mut session = FilletSession::new(k, &mut b).unwrap();
             session
-                .prepare_variable_radius_edges(&mut k, &[e], base, law, 1, 1)
+                .prepare_variable_radius_edges(k, &[e], base, law, 1, 1)
                 .unwrap();
-            session.do_fillet(&mut k).unwrap();
+            session.do_fillet(k).unwrap();
             for id in 0.. {
                 let Ok(s) = session.solver(FilletSolverId(id)) else {
                     break;
@@ -1203,4 +1215,36 @@ fn law_peak() {
         assert!((removed - want).abs() <= 1e-4 * want, "{removed}");
         assert_eq!(faces, 8);
     }
+}
+
+/// Count the unmodified certificate on the ops law-corner test's four inputs, plus
+/// the existing two-piece (2, 4, 2) helper. No wall-clock value is an oracle.
+#[cfg(feature = "profile")]
+#[test]
+#[ignore = "opt-in per-span certificate diagnostic (#3078)"]
+fn variable_round_certificate_work() {
+    let cases = [
+        ("ops peak", [10.0, 20.0, 30.0], Point3::new(10.0, 0.0, 30.0), Point3::new(10.0, 20.0, 30.0), LINEAR, &[2.0, 4.0, 2.0][..]),
+        ("ops dip", [20.0; 3], CUBE_FROM, CUBE_TO, LINEAR, &[4.0, 2.0, 4.0][..]),
+        ("ops dip peak", [20.0; 3], CUBE_FROM, CUBE_TO, &[0.0, 0.0, 0.25, 0.75, 1.0, 1.0][..], &[4.0, 2.0, 4.0, 2.0][..]),
+        ("ops dip peak reversed", [20.0; 3], CUBE_TO, CUBE_FROM, &[0.0, 0.0, 0.25, 0.75, 1.0, 1.0][..], &[4.0, 2.0, 4.0, 2.0][..]),
+    ];
+    for (name, size, from, to, knots, radii) in cases {
+        let mut k = law_kernel();
+        k.profiler.capture_notes();
+        let round = LawRound::build_on(&mut k, size, from, to, 1, knots, radii);
+        assert!(!round.pieces.is_empty());
+        eprintln!("CASE {name}");
+        let notes = k.profiler.take_notes();
+        assert!(notes.iter().any(|s| s.starts_with("span begin")));
+        for note in notes { eprintln!("{note}"); }
+        k.take_profile().write_jsonl(&mut std::io::stderr()).unwrap();
+    }
+    let k = gn_kernel();
+    k.profiler.capture_notes();
+    let (pieces, _) = law_corner_pieces(&k, [2.0, 4.0, 2.0]);
+    assert_eq!(pieces.pieces.len(), 2);
+    eprintln!("CASE helper peak");
+    for note in k.profiler.take_notes() { eprintln!("{note}"); }
+    k.take_profile().write_jsonl(&mut std::io::stderr()).unwrap();
 }

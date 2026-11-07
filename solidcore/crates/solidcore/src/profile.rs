@@ -74,6 +74,20 @@ macro_rules! profile_count {
     ($k:expr, $counter:ident, $n:expr) => {};
 }
 
+/// Records a diagnostic note only when explicitly captured by the profiler.
+#[cfg(feature = "profile")]
+macro_rules! profile_note {
+    ($k:expr, $($arg:tt)*) => {
+        $k.profiler.note(|| format!($($arg)*));
+    };
+}
+
+#[cfg(not(feature = "profile"))]
+macro_rules! profile_note {
+    ($k:expr, $($arg:tt)*) => {};
+}
+
+pub(crate) use profile_note;
 pub(crate) use profile_count;
 pub(crate) use profile_scope;
 
@@ -176,6 +190,7 @@ mod enabled {
         nodes: Vec<Node>,
         roots: Vec<u32>,
         stack: Vec<Frame>,
+        notes: Option<Vec<String>>,
     }
 
     impl State {
@@ -321,6 +336,27 @@ mod enabled {
     }
 
     impl Profiler {
+        /// Starts a fresh diagnostic capture. Normal profiles keep no per-call notes.
+        /// At most 100,000 notes are retained, independently of the call-path profile.
+        pub fn capture_notes(&self) {
+            self.shared.lock().notes = Some(Vec::new());
+        }
+
+        /// Ends diagnostic capture and returns its notes in execution order.
+        #[must_use]
+        pub fn take_notes(&self) -> Vec<String> {
+            self.shared.lock().notes.take().unwrap_or_default()
+        }
+
+        /// Adds a note, formatting it only during an explicit diagnostic capture.
+        pub(crate) fn note(&self, make: impl FnOnce() -> String) {
+            if let Some(notes) = self.shared.lock().notes.as_mut() {
+                if notes.len() < 100_000 {
+                    notes.push(make());
+                }
+            }
+        }
+
         /// Opens a scope named `name` under the innermost open one; it closes when the
         /// returned guard drops. Prefer [`profile_scope!`](crate::profile), which keeps the
         /// guard to the end of the block.
