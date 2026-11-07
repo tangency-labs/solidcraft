@@ -1835,6 +1835,31 @@ fn a_mirrored_occurrence_is_not_aligned_reached_or_joined() {
     }
 }
 
+/// A mirrored occurrence moved into a parent placed twice, through the parent's second
+/// placement: the mirror places it again by the parent's first placement as the design
+/// refreshes. The command reports that final placement, not the one worked out from the second,
+/// and the occurrence is still the mirror image of its source.
+#[test]
+fn a_mirrored_occurrence_moved_into_a_second_placement_reports_where_its_mirror_puts_it() {
+    let (mut s, _, _) = mirror_parts();
+    let r = run(&mut s, "component.mirror", json!({"components": ["Plate"], "plane": "YZ"}));
+    let mirror = r["mirrored"][0]["occurrence"].as_u64().unwrap();
+    let c = run(&mut s, "component.create", json!({"name": "Holder", "activate": false}));
+    let (holder, first) = (c["component"].as_u64().unwrap(), c["occurrence"].as_u64().unwrap());
+    let second = run(&mut s, "occurrence.copy", json!({"component": holder, "translate": [0, 100, 0]}))["occurrence"].as_u64().unwrap();
+    let out = run(&mut s, "occurrence.reparent", json!({"occurrence": mirror, "parent": holder, "parent_path": [second]}));
+    let o = s.doc.occurrences.iter().find(|o| o.id == mirror).unwrap();
+    assert_eq!(o.parent, holder);
+    assert_eq!(out["transform"], json!(o.transform), "the reported placement is the final one");
+    // The plate spans x 30…70, y 10…30: through the first placement its image spans x −70…−30.
+    let r = run(&mut s, "occurrence.properties", json!({"occurrence": mirror, "path": [first, mirror]}));
+    let bbox = &r["total"]["bbox"];
+    near(&bbox["min"][0], -70.0);
+    near(&bbox["max"][0], -30.0);
+    near(&bbox["min"][1], 10.0);
+    near(&bbox["max"][1], 30.0);
+}
+
 /// A pattern of bodies made in a component copies them about its own component's axis, so
 /// moving that component's occurrence moves the copies of a body that lives elsewhere. The model
 /// kept between edits must show them where a fresh evaluation does: a root block patterned four
