@@ -1474,6 +1474,10 @@ preference_settings! {
     /// With `extrude_view_isometric`: when Extrude closes (OK or Cancel) the view goes back to
     /// where it was before it turned (#9176). Off (the default): it stays isometric.
     extrude_view_return: bool = false, PAGE_TOOLS => check_id("prefs.extrude_view_return");
+    /// Extrude Two Sides: Distance 2 goes the other way from wherever the first side went, so a
+    /// negative Distance sends it back across the sketch plane, as before. Off (the default):
+    /// Direction fixes both sides and a sign only turns its own side over.
+    extrude_second_follows_first: bool = false, PAGE_TOOLS => check_id_help("prefs.extrude_second_follows_first", "prefs.extrude_second_follows_first.help");
     /// Feature windows choose Join, New Body or Cut from what their material touches (`op_auto`,
     /// #6901). Off: they keep the operation they open with (Extrude its own Join or Cut), as before.
     auto_operation: bool = true, PAGE_TOOLS => check_id("prefs.auto_operation");

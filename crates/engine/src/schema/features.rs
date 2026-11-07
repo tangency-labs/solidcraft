@@ -115,9 +115,15 @@ pub struct ExtrudeParams {
     pub direction: Option<DirectionParam>,
     /// Two Sides: a second distance on the side `direction` leaves free; the first side may be
     /// `through_all` or `to`. With `direction: negative` the first side goes against the normal
-    /// and `distance2` along it. A negative distance only turns its own side over.
+    /// and `distance2` along it. A negative distance only turns its own side over. A first side
+    /// that reaches to an object or through all goes where that object is, whatever `direction`
+    /// says, and `distance2` the other way.
     #[serde(default)]
     pub distance2: Option<LengthExpr>,
+    /// Two Sides as older builds read it: `distance2` goes the other way from wherever the first
+    /// side went, so a negative distance sends it back along the normal. Default: false.
+    #[serde(default)]
+    pub second_follows_first: Option<bool>,
     /// Start this far from the sketch plane, along its normal.
     #[serde(default)]
     pub start_offset: Option<LengthExpr>,

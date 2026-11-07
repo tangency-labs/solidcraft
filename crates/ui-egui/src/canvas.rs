@@ -607,11 +607,18 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         return;
     }
     // Two sides: the second distance gets its own arrow, the other way from the first side.
-    if let (Kind::Extrude { direction: crate::dialogs::TWO_SIDES | crate::dialogs::TWO_SIDES_REVERSED, distance2, .. }, Some(n)) = (&mut d.kind, dir)
+    let follows_first = d.extra.get("second_follows_first").and_then(serde_json::Value::as_bool).unwrap_or(false);
+    if let (Kind::Extrude { direction: crate::dialogs::TWO_SIDES | crate::dialogs::TWO_SIDES_REVERSED, distance, distance2, .. }, Some(n)) =
+        (&mut d.kind, dir)
     {
         // Distance 2 stays on the side Direction gives it, whatever the sign of Distance 1. Only
-        // a reach computed from the model (To Object, Through All) sends it the other way.
-        let n2 = if sign < 0.0 { n } else { -n };
+        // a reach computed from the model (To Object, Through All), or an extrude that reads Two
+        // Sides the older way, sends it the other way.
+        let turned = follows_first
+            && to_span.is_none()
+            && all_span.is_none()
+            && crate::length_input::eval(&app.session.doc, distance, ValueKind::Length).is_ok_and(|v| v < 0.0);
+        let n2 = if (sign < 0.0) != turned { n } else { -n };
         let before = distance2.clone();
         // While its text does not evaluate (cleared, or a `-` typed first) there is no arrow,
         // but the box stays below the base so the typing can be finished there.

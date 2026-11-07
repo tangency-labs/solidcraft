@@ -892,26 +892,33 @@ impl Dialog {
                     vec![SelInput::new("ui.sketch_project_geometry", if bodies { BODIES } else { PROJECT_GEOMETRY }, true)],
                 )
             }
-            "solid.extrude" => Dialog::new(
-                Kind::Extrude {
-                    distance: length_default(s, "10"),
-                    direction: 0,
-                    operation: usize::from(has_bodies),
-                    auto_op: true,
-                    smart: crate::smart_extrude::Smart { auto_to_object: app.preferences.extrude_auto_to_object, ..Default::default() },
-                    distance2: length_default(s, "10"),
-                    taper: "0 deg".into(),
-                    taper_present: false,
-                    to_offset: String::new(),
-                    start: String::new(),
-                    all: false,
-                    thin: false,
-                    wall: length_default(s, "2"),
-                    wall_side: 0,
-                    wall2: length_default(s, "1"),
-                },
-                vec![SelInput::new("Profiles", EXTRUDE_ACCEPT, true)],
-            ),
+            "solid.extrude" => {
+                let mut d = Dialog::new(
+                    Kind::Extrude {
+                        distance: length_default(s, "10"),
+                        direction: 0,
+                        operation: usize::from(has_bodies),
+                        auto_op: true,
+                        smart: crate::smart_extrude::Smart { auto_to_object: app.preferences.extrude_auto_to_object, ..Default::default() },
+                        distance2: length_default(s, "10"),
+                        taper: "0 deg".into(),
+                        taper_present: false,
+                        to_offset: String::new(),
+                        start: String::new(),
+                        all: false,
+                        thin: false,
+                        wall: length_default(s, "2"),
+                        wall_side: 0,
+                        wall2: length_default(s, "1"),
+                    },
+                    vec![SelInput::new("Profiles", EXTRUDE_ACCEPT, true)],
+                );
+                // Two Sides as older builds read it, when Preferences ask for that.
+                if app.preferences.extrude_second_follows_first {
+                    d.extra.insert("second_follows_first".into(), json!(true));
+                }
+                d
+            }
             "solid.revolve" => Dialog::new(
                 Kind::Revolve { angle: "360 deg".into(), operation: 0, axis: None },
                 vec![SelInput::new("Profile", PROFILES | PLANAR_FACES, true), SelInput::new("Axis", AXIS_PICKS, false)],
@@ -6685,6 +6692,9 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 wall2: thin.as_ref().and_then(|t| t.thickness2.as_deref().map(str::to_string)).unwrap_or_else(|| length_default(s, "1")),
             };
             d.extra.insert("convention".into(), json!(extent.convention));
+            // A saved extrude keeps how it reads Two Sides through the editor, whichever way the
+            // preference for new extrudes points.
+            d.extra.insert("second_follows_first".into(), json!(extent.second_follows_first));
             // Extent references belong to the extrude's authoring frame, including free
             // points. They are not body-local picks (a reference may be on another body).
             let frame = feature_frame(s, f.component);
