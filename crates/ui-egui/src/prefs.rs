@@ -9758,7 +9758,7 @@ mod tests {
         save_graphics(&mut app, true);
         assert_eq!(read(), json!({"backend": "dx12", "msaa": 4, "other": 1, "trial": {"backend": "vulkan", "msaa": 8}}));
         assert_eq!(app.graphics.saved, dx12, "only tried");
-        snapshot.restore(&mut app);
+        snapshot.restore_other_preferences(&mut app);
         assert_eq!(read(), json!({"backend": "dx12", "msaa": 4, "other": 1}), "Cancel takes the trial back");
 
         // The control channel: only an API this system offers; saved at once, any trial dropped.
