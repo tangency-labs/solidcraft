@@ -109,11 +109,10 @@ fn fillet_as_wide_as_a_face_rounds_it_off() {
 
 /// The owner's ruling of 2026-10-30: two edges of a 20 mm box rounded r2 in one fillet (they
 /// meet in a mitre at the corner (20, 0, 20), the upright edge there sharp), then the upright edge
-/// r3 in a second fillet, whose tangent chain takes the mitre's seam with it. The corner is the
-/// one solidcore 8ddce9016 builds for three rounds of different radii there: one patch, 10
-/// faces, 7928.743041456134 mm³ (the fork's setback corner, 15 faces and 7928.142563938, waits
-/// for solidcore#2310). The r2 rounds keep their names, and the r3 round and the corner's patch
-/// are the second fillet's.
+/// r3 in a second fillet, whose tangent chain takes the mitre's seam with it. The corner is
+/// solidcore's setback corner for three rounds of different radii there (solidcore#2382): 15
+/// faces, 7927.724282512234 mm³. The r2 rounds keep their names, and the r3 round and the
+/// corner's six patches are the second fillet's.
 #[test]
 fn a_later_round_at_a_mitred_corner_is_blended_with_the_rounds_there() {
     let mut s = Session::default();
@@ -135,17 +134,17 @@ fn a_later_round_at_a_mitred_corner_is_blended_with_the_rounds_there() {
     let second = run(&mut s, "solid.fillet", json!({"edges": [[20, 0, 10]], "radius": 3}))["feature"].as_u64().unwrap();
     assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
     let v = volume(&mut s);
-    assert!((v - 7928.743041456134).abs() < 1e-6, "{v}");
+    assert!((v - 7927.724282512234).abs() < 1e-6, "{v}");
     let faces = run(&mut s, "model.faces", json!({"body": "Box"}))["faces"].as_array().cloned().unwrap_or_default();
-    assert_eq!(faces.len(), 10);
+    assert_eq!(faces.len(), 15);
     let after: Vec<String> = rounds.iter().map(|p| named(&mut s, *p)).collect();
     assert_eq!(after, before);
     // The r3 round (halfway up, at 45°) and the corner's patches: the faces the second fillet made.
     let k3 = 3.0 - 4.5_f64.sqrt();
     assert!(named(&mut s, solidcore_record::Vec3::new(20.0 - k3, k3, 10.0)).starts_with(&format!("F{second}:blend:")));
     let made = faces.iter().filter(|f| f["name"].as_str().is_some_and(|n| n.starts_with(&format!("F{second}:")))).count();
-    // the r3 round and the corner's patch
-    assert_eq!(made, 2, "{faces:?}");
+    // the r3 round and the corner's six patches
+    assert_eq!(made, 7, "{faces:?}");
 }
 
 #[test]
@@ -1919,9 +1918,17 @@ fn measure_items() {
     let r = run(&mut s, "inspect.measure", json!({"items": [face(ft, [20.0, 15.0, 20.0]), face(fb, [20.0, 15.0, 0.0])]}));
     assert!((r["distance_mm"].as_f64().unwrap() - 20.0).abs() < 1e-9, "{r}");
     assert!((r["angle_deg"].as_f64().unwrap() - 180.0).abs() < 1e-6, "{r}");
+    // The ends of a distance are real points (#11833: NaN ends hid the Distance row): one on
+    // each face, straight across.
+    let end = |k: &str| -> Vec3 { serde_json::from_value(r[k].clone()).unwrap_or_else(|e| panic!("{k}: {e} in {r}")) };
+    let (from, to) = (end("from"), end("to"));
+    assert!((from.z - 20.0).abs() < 1e-9 && to.z.abs() < 1e-9 && (to - from).cross(Vec3::Z).len() < 1e-9, "{r}");
     let r = run(&mut s, "inspect.measure", json!({"items": [face(ft, [20.0, 15.0, 20.0]), face(ff, [20.0, 0.0, 10.0])]}));
     assert!(r["distance_mm"].as_f64().unwrap() < 1e-9);
     assert!((r["angle_deg"].as_f64().unwrap() - 90.0).abs() < 1e-6);
+    for k in ["from", "to"] {
+        assert!(serde_json::from_value::<Vec3>(r[k].clone()).is_ok_and(|p| p.is_finite()), "{k} in {r}");
+    }
     let r = run(&mut s, "inspect.measure", json!({"items": [face(ft, [20.0, 15.0, 20.0])]}));
     assert!((r["items"][0]["area_mm2"].as_f64().unwrap() - 1200.0).abs() < 1e-6, "{r}");
     let v = json!({"type": "vertex", "body": "Body1", "point": [0, 0, 0]});
@@ -2715,6 +2722,34 @@ fn split_body_by_a_sketch_line() {
     let saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
     let split = saved["features"].as_array().and_then(|f| f.iter().find(|f| f["type"] == "split")).cloned().unwrap();
     assert_eq!((split["sketch"].as_u64(), split["line"].as_str()), (Some(sk), Some("cut")), "{split}");
+}
+
+/// Split Body of a body of two separate pieces joined into one (#6738): a plane through both
+/// pieces splits it, and each half keeps the half of both pieces. The reporter's flow: one
+/// sketch with two squares 20 mm across and 30 mm apart, both extruded 10 mm as New Body, then
+/// Combine (join). The split used to stop with "the tool does not split the body".
+#[test]
+fn split_body_of_a_body_of_two_pieces_splits_both() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Sketch1"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 20]}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [50, 0], "p1": [70, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Sketch1", "distance": 10, "operation": "new"}));
+    run(&mut s, "solid.combine", json!({"target": "Body1", "tools": ["Body2"], "operation": "join"}));
+    // One body of two pieces before the split.
+    let st = s.world_state().unwrap();
+    assert_eq!(st.bodies.len(), 1, "{:?}", st.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    assert_eq!(st.bodies[0].body.lumps().unwrap().len(), 2);
+    // A plane through the middle of both squares (the extrusion is 10 mm tall).
+    run(&mut s, "solid.split_body", json!({"body": "Body1", "plane": {"origin": [0, 0, 5], "normal": [0, 0, 1]}}));
+    let st = s.world_state().unwrap();
+    assert_eq!(st.bodies.len(), 2, "{:?}", st.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    for b in &st.bodies {
+        // Each half holds the half of both squares: two pieces, half the body each.
+        assert!(rel(solidcraft_kernel::measure(&b.body).unwrap().volume, 4000.0) < 1e-6, "{}", b.name);
+        assert_eq!(b.body.lumps().unwrap().len(), 2, "{}", b.name);
+    }
 }
 
 /// Fillet types: chord length (radius from the face angle) and a radius varying along the

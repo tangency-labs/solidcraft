@@ -9,6 +9,7 @@ use solidcraft_doc::render_settings::{RenderSettings, RenderSetup};
 use super::CommandSpec;
 use crate::params::bad;
 use crate::schema::render_camera::{CameraApplied, CameraFitted, CameraInfo, CameraSet, RenderCamera};
+use crate::schema::render_settings::{RenderSettingsGot, RenderSettingsInfo, RenderSettingsSaved, SETUP_FIELDS, SetupFields, set_message};
 use crate::{Result, Session};
 
 mod clear_coat;
@@ -140,7 +141,9 @@ CommandSpec::new("render.library.preview", "Inspect Original Surface Map", crate
     .contract(&library::PREVIEW_CONTRACT)
     .output(crate::schema::output_schema_for::<crate::schema::render_library::LibraryPreview>)
     .params("id: SURF-*. Returns bounded hash-verified original base-color PNG bytes and source-map fidelity label, not a rendered material thumbnail. No external paths, rendering or document edits."),
-CommandSpec::new("render.library.physical.prepare", "Prepare Physical Reference", physical_library::prepare).icon("inspect").noundo().doc_only()
+CommandSpec::new("render.library.physical.prepare", "Prepare Physical Reference", crate::checked!("render.library.physical.prepare", physical_library::prepare)).icon("inspect").noundo().doc_only()
+    .contract(&physical_library::PREPARE_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_library::PhysicalPlan>)
     .params("id: named built-in physical profile, name: proposed new material label, acknowledge_reference:true. Read-only loss-aware creation plan using native ValidatedCard admission and one point density; returns source receipts, extended fields and omissions. Does not execute material.create, assign bodies or infer effective-part physics."),
 CommandSpec::new("render.stage.ground", "Save Render Ground", crate::checked!("render.stage.ground", staging::ground)).icon("render_scene")
     .contract(&staging::GROUND_CONTRACT)
@@ -176,15 +179,25 @@ CommandSpec::new("render.library.describe", "Inspect Render Library Resource", c
     .contract(&library::DESCRIBE_CONTRACT)
     .output(crate::schema::output_schema_for::<crate::schema::render_library::LibraryDescription>)
     .params("kind, id: exact authored resource. Returns original specification, runtime projection variants and explicit omissions. A concept is not an executable preset."),
-CommandSpec::new("render.library.appearance.apply", "Apply Library Opaque Appearance", library::apply_appearance).icon("appearance")
+CommandSpec::new("render.library.appearance.apply", "Apply Library Opaque Appearance", crate::checked!("render.library.appearance.apply", library::apply_appearance)).icon("appearance")
+    .contract(&library::APPEARANCE_APPLY_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_library::AppearanceApplied>)
     .params("id: SURF-* or SELENE-AP-*; variant: uniform_opaque (required); bodies: 1..256 exact body names. Applies the original scalar baseline through ordinary appearance assignment in one undo, preserving physical properties. Spatial maps and advanced target effects are explicitly excluded."),
-CommandSpec::new("render.library.environment.apply", "Apply Built-in HDR Environment", library::apply_environment).icon("settings").doc_only()
+CommandSpec::new("render.library.environment.apply", "Apply Built-in HDR Environment", crate::checked!("render.library.environment.apply", library::apply_environment)).icon("settings").doc_only()
+    .contract(&library::ENVIRONMENT_APPLY_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_library::EnvironmentApplied>)
     .params("id: HDR-*; name: saved setup; set?: typed CPU/GPU setup patch; rotation_rad?: authored rotation (native origin offset is explicit in the reply); intensity?:1; samples?:16 for CPU; replace_environment?:false. Hash-verifies and embeds original bytes, saves one atomic undo without external files or a render device. An HDR-owned sun cannot duplicate an analytic sun."),
-CommandSpec::new("render.library.surface.prepare", "Prepare Authored Surface Maps", library::prepare_surface).icon("appearance").noundo()
+CommandSpec::new("render.library.surface.prepare", "Prepare Authored Surface Maps", crate::checked!("render.library.surface.prepare", library::prepare_surface)).icon("appearance").noundo()
+    .contract(&library::SURFACE_PREPARE_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_library::SurfacePrepared>)
     .params("id: SURF-*; body_index and body_name from render.scene; origin?:[0,0,0]; plane?:xy/yz/zx; scale?:1; rotation_rad?:0 (positive around the plane normal). Returns an explicit GPU temporary planar binding and a source usable by saved CPU/GPU surface.bind, with source hashes, original millimetre scale, image-up normal orientation and absolute base-color semantics. No document change; height/displacement and true anisotropy are not included."),
-CommandSpec::new("render.library.studio.prepare", "Prepare Authored Studio Lights", library::prepare_studio).icon("inspect").noundo().doc_only()
+CommandSpec::new("render.library.studio.prepare", "Prepare Authored Studio Lights", crate::checked!("render.library.studio.prepare", library::prepare_studio)).icon("inspect").noundo().doc_only()
+    .contract(&library::STUDIO_PREPARE_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_library::StudioPrepared>)
     .params("id: RIG-*; variant: complete for emitter-only rigs, emitters_only for rigs with passive cards; center_mm and subject_extent_mm required. Converts exact rectangular half-edges and solar direction/radius. Optional name and typed CPU set return the complete CPU projection and explicit indirect-lighting adoption plan; authored radiance beyond CPU intensity64 refuses without scaling. Blocked calibration and external-sun rigs refuse. Returns a geometry-clearance review requirement; does not create cards or modify the scene."),
-CommandSpec::new("render.library.studio.apply", "Apply Authored Studio Lights", library::apply_studio).icon("settings")
+CommandSpec::new("render.library.studio.apply", "Apply Authored Studio Lights", crate::checked!("render.library.studio.apply", library::apply_studio)).icon("settings")
+    .contract(&library::STUDIO_APPLY_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_library::StudioApplied>)
     .params("rig: id, variant, center_mm and subject_extent_mm; name; set?: typed CPU/GPU setup patch; expected_revision?:u64; enable_indirect?:false (explicit CPU Sun adoption after review); replace_lighting_and_environment:true required. Saves the explicit rig projection in one undo, removing prior lighting/environment only with that confirmation. Subject clearance still needs review; passive cards are never silently omitted."),
 CommandSpec::new("render.hdr.inspect", "Inspect HDR Source", crate::checked!("render.hdr.inspect", resources::inspect)).icon("inspect").noundo().doc_only()
     .contract(&resources::INSPECT_CONTRACT)
@@ -210,9 +223,13 @@ CommandSpec::new("render.backends", "Render Backends", backends).icon("list")
     .noundo()
     .doc_only()
     .params("No parameters. Returns {schema_version: 1, default_backend: builtin, backends: [{id, label, availability, executors: [{id, availability, profiles, limits, scratch}]}]}. Metadata only; does not start rendering or probe a GPU. See docs/render-backends.md"),
-CommandSpec::new("render.settings.get", "Render Settings", get_settings).icon("settings").noundo().doc_only()
+CommandSpec::new("render.settings.get", "Render Settings", crate::checked!("render.settings.get", get_settings)).icon("settings").noundo().doc_only()
+    .contract(&crate::schema::TypedContract::<crate::schema::render_settings::GetParams>::new())
+    .output(crate::schema::output_schema_for::<RenderSettingsGot>)
     .params("name?: saved setup. Without name returns {setups, defaults}; with name returns {name, setup}. Does not evaluate the model or apply a camera. See docs/render-settings.md"),
-CommandSpec::new("render.settings.set", "Save Render Settings", set_settings).icon("settings").doc_only()
+CommandSpec::new("render.settings.set", "Save Render Settings", crate::checked!("render.settings.set", set_settings)).icon("settings").doc_only()
+    .contract(&crate::schema::TypedContract::<crate::schema::render_settings::SetParams>::new())
+    .output(crate::schema::output_schema_for::<RenderSettingsSaved>)
     .params("name: setup name, set: object of fields to replace (backend, mode, camera, width, height, format, exposure_ev, environment_rotation, environment_intensity, background, job, surfaces, optics, coats, stage). job?: typed active raster/cpu_raytrace/gpu_path configuration with optional validated embedded HDR reference; omitted preserves, null clears, object replaces the complete job. Creates from defaults and saves without a host, validates atomically, one undo step; identical edits are no-ops. See docs/render-settings.md"),
 CommandSpec::new("render.scene", "Inspect Render Scene", scene).noundo().at("RENDER", "SCENE").icon("render_scene")
     .params("No parameters. Authoritative product-scene metadata, without modelling overlays or mesh payloads. Explicitly settles stale geometry; does not render an image. See docs/render-workspace.md"),
@@ -317,13 +334,25 @@ struct GetSettings {
 fn get_settings(s: &mut Session, params: &Value) -> Result<Value> {
     let cmd = "render.settings.get";
     let request: GetSettings = serde_json::from_value(params.clone()).map_err(|e| bad(cmd, e.to_string()))?;
-    match request.name {
-        None => Ok(json!({"setups": s.doc.render.setups, "defaults": RenderSetup::default()})),
+    let info = match request.name {
+        None => {
+            let setups = s.doc.render.setups.iter().map(|(name, setup)| Ok((name.clone(), setup_fields(cmd, setup)?))).collect::<Result<_>>()?;
+            RenderSettingsInfo::All { setups, defaults: setup_fields(cmd, &RenderSetup::default())? }
+        }
         Some(name) => {
             RenderSettings::validate_name(&name).map_err(|e| bad(cmd, e.to_string()))?;
             let setup = s.doc.render.setups.get(&name).ok_or_else(|| bad(cmd, "no saved render setup with that name"))?;
-            Ok(json!({"name": name, "setup": setup}))
+            RenderSettingsInfo::One { setup: setup_fields(cmd, setup)?, name }
         }
+    };
+    typed_reply(cmd, RenderSettingsGot { info, param_warnings: Vec::new() })
+}
+
+/// A render setup's fields, as it saves them, for a reply.
+fn setup_fields(cmd: &str, setup: &RenderSetup) -> Result<SetupFields> {
+    match serde_json::to_value(setup).map_err(|e| bad(cmd, e.to_string()))? {
+        Value::Object(fields) => Ok(fields),
+        _ => Err(bad(cmd, "invalid render setup")),
     }
 }
 
@@ -338,23 +367,23 @@ fn set_settings(s: &mut Session, params: &Value) -> Result<Value> {
     let cmd = "render.settings.set";
     let request: SetSettings = serde_json::from_value(params.clone()).map_err(|e| bad(cmd, e.to_string()))?;
     let setup = patched_settings(s, &request.name, &request.set, cmd)?;
-    let reply = json!({"name": request.name, "setup": setup});
+    let reply = RenderSettingsSaved { name: request.name.clone(), setup: setup_fields(cmd, &setup)?, param_warnings: Vec::new() };
     if s.doc.render.setups.get(&request.name) == Some(&setup) {
-        return Ok(reply);
+        return typed_reply(cmd, reply);
     }
     let mut settings = (*s.doc.render).clone();
     settings.setups.insert(request.name, setup);
     settings.validate().map_err(|e| bad(cmd, e.to_string()))?;
     s.doc_mut().render = Arc::new(settings);
-    Ok(reply)
+    typed_reply(cmd, reply)
 }
 
 fn patched_settings(s: &Session, name: &str, set: &Value, cmd: &str) -> Result<RenderSetup> {
     RenderSettings::validate_name(name).map_err(|e| bad(cmd, e.to_string()))?;
-    // A full RenderSetup has 15 known fields, including maps, optics, coats and
-    // stage. Bound the patch by that schema; decoding below still rejects any
+    // A RenderSetup has `SETUP_FIELDS`, including surfaces, optics, coats and stage; the published
+    // schemas list the same fields. Bound the patch by them; decoding below still rejects any
     // unknown field instead of silently dropping saved intent.
-    let patch = set.as_object().filter(|p| p.len() <= 15).ok_or_else(|| bad(cmd, "`set` must be an object with at most 15 fields"))?;
+    let patch = set.as_object().filter(|p| p.len() <= SETUP_FIELDS.len()).ok_or_else(|| bad(cmd, set_message()))?;
     let current = s.doc.render.setups.get(name).cloned().unwrap_or_default();
     let mut value = serde_json::to_value(&current).map_err(|e| bad(cmd, e.to_string()))?;
     let object = value.as_object_mut().ok_or_else(|| bad(cmd, "invalid render setup"))?;

@@ -143,7 +143,7 @@ impl ModelBody {
 
     /// Face measurements for joint origins, at their original chord tolerance. Pose changes
     /// and scratch copies share them; a geometry edit makes a new body and cache.
-    pub(crate) fn joint_faces(&self) -> Result<Arc<[kernel::FaceInfo]>> {
+    pub fn joint_faces(&self) -> Result<Arc<[kernel::FaceInfo]>> {
         let measure = || {
             #[cfg(test)]
             cost_tests::count(|c| c.joint_faces += 1);
@@ -1161,6 +1161,18 @@ pub struct Model {
     placement_inputs: Option<placement_reuse::Inputs>,
     /// All evaluated features use supported local inputs; computed with the existing owner index.
     placement_local: bool,
+    /// A failed sketch shown while it is edited ([`Model::hold_failed_sketch`]).
+    held: Option<HeldSketch>,
+}
+
+/// A failed sketch built for its editor (#12085): `shown` is the final state `base` with that
+/// sketch in it. [`Model::state`] gives it only while the results still end in `base`, so the
+/// next evaluation, or anything else that changes the results, lets it go.
+#[derive(Clone, Debug)]
+struct HeldSketch {
+    feature: u64,
+    base: Arc<ModelState>,
+    shown: Arc<ModelState>,
 }
 
 /// Parameters a feature uses directly (inputs, sketch dimensions and the expressions of a
@@ -1647,6 +1659,21 @@ impl PlacementReads {
         }
     }
 
+    /// The bodies To / From Object's stored face names find, each where it is placed: evaluation
+    /// finds a named face by its name ([`with_named_face_points`] fails a feature whose name finds
+    /// none). Everything when a name is missing or empty, finds no one body, or `st` is `None`:
+    /// the face is then found by its point, on whatever body lies there.
+    fn object_faces(&mut self, st: Option<&ModelState>, names: Option<&[String]>) {
+        let bodies: Option<Vec<&str>> = st.zip(names).and_then(|(st, names)| {
+            let first_of_its_name = |b: &&ModelBody| st.body(&b.name).is_some_and(|first| std::ptr::eq(first, *b));
+            names.iter().map(|n| crate::name_lookup::face_body(st, n).filter(first_of_its_name).map(|b| b.name.as_str())).collect()
+        });
+        match bodies {
+            Some(bodies) => bodies.into_iter().for_each(|b| self.placed_body(st, b)),
+            None => self.all = true,
+        }
+    }
+
     /// The same target selection as `apply_traced`, expanded only over the timeline input.
     fn drawn_targets(&mut self, st: Option<&ModelState>, f: &Feature) {
         let Some(st) = st else {
@@ -1826,11 +1853,22 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
             }
         }
     }
+    // The faces To / From Object names, in `face_points` order.
+    let object_names = match &f.kind {
+        FeatureKind::Extrude { extent, .. } => usize::from(extent.to.is_some()) + usize::from(extent.from.is_some()),
+        FeatureKind::Revolve { to, .. } => usize::from(to.is_some()),
+        _ => 0,
+    };
     match &f.kind {
-        // To / From Object finds its target where that target's component is placed (#928),
-        // over every body.
-        FeatureKind::Extrude { extent, .. } if extent.to.is_some() || extent.from.is_some() => reads.all = true,
-        FeatureKind::Revolve { to: Some(_), .. } => reads.all = true,
+        // To / From Object finds its target where the target's body is placed (#928): only that
+        // body's placement, not every part's (#6325). Its tools meet their targets as other
+        // joins and cuts do.
+        kind if object_names > 0 => {
+            reads.object_faces(st, f.face_names.get(..object_names));
+            if drawn_tools_change_bodies(kind) {
+                reads.drawn_targets(st, f);
+            }
+        }
         // A mirror of placed bodies follows the placements it was picked at and its own component's
         // frame, not every occurrence: moving an unrelated one leaves it (and its cache) alone.
         FeatureKind::Mirror { placements, bodies, .. } if !placements.is_empty() => return mirror_placements_digest(doc, f, placements, bodies),
@@ -1978,7 +2016,54 @@ impl Model {
 
     /// The final model state.
     pub fn state(&self) -> Arc<ModelState> {
+        let last = self.evaluated_state();
+        match &self.held {
+            Some(held) if Arc::ptr_eq(&held.base, &last) => held.shown.clone(),
+            _ => last,
+        }
+    }
+
+    /// The state after the last feature evaluated, without a failed sketch held for its editor.
+    fn evaluated_state(&self) -> Arc<ModelState> {
         self.results.iter().rev().find(|r| !r.skipped).map(|r| r.state.clone()).unwrap_or_else(|| self.empty.clone())
+    }
+
+    /// Show the sketch `feature` while it is edited although it failed (#12085): a link whose
+    /// named face or edge is gone fails the sketch, so the evaluation keeps no sketch for it, and
+    /// its editor had nothing to show or repair. Here the sketch is built as it is evaluated, but
+    /// with such a link marked lost and kept where it was (no other face or edge is taken for
+    /// it), and added to the final state only: the sketch's result keeps its error and the
+    /// features after it still fail. `None`, a sketch that did not fail, or one that fails for
+    /// another reason too, shows nothing more. Returns whether a held sketch is shown.
+    pub fn hold_failed_sketch(&mut self, doc: &Document, feature: Option<u64>) -> bool {
+        let Some(id) = feature else {
+            self.held = None;
+            return false;
+        };
+        let base = self.evaluated_state();
+        if self.held.as_ref().is_some_and(|held| held.feature == id && Arc::ptr_eq(&held.base, &base)) {
+            return true;
+        }
+        self.held = None;
+        if base.sketch(id).is_some() || !self.result(id).is_some_and(|r| r.error.is_some() && !r.skipped && !r.stale) {
+            return false;
+        }
+        let Some(f) = doc.feature(id) else { return false };
+        let FeatureKind::Sketch { plane, sketch } = &f.kind else { return false };
+        let mut next = (*self.state_before(id)).clone();
+        let vals = evaluation_values(doc).0;
+        let mut warning = None;
+        let built = kernel::guard(&f.name, || {
+            let _frames = ToolFrames::install(doc, f, &next);
+            eval_sketch(doc, &vals, f, plane, sketch, &mut next, &mut warning, crate::project::LostNames::Mark)
+                .map_err(|e| kernel::KernelError::Failed(e.to_string()))
+        });
+        let Some(solved) = built.ok().and_then(|()| next.sketches.iter().find(|s| s.feature == id).cloned()) else { return false };
+        let mut shown = (*base).clone();
+        shown.sketches.retain(|s| s.feature != id);
+        shown.sketches.push(solved);
+        self.held = Some(HeldSketch { feature: id, base, shown: Arc::new(shown) });
+        true
     }
 
     /// State just before the feature with this id (for editing a sketch in context).
@@ -2144,6 +2229,10 @@ impl Model {
 
     /// Re-evaluate the document, reusing results up to the first changed feature.
     pub fn evaluate(&mut self, doc: &Document) {
+        // A failed sketch held for its editor is built again from the evaluated design: when the
+        // sketch and every feature after it fail, the results end in the state they ended in
+        // before, which would keep showing the sketch as it was before the edit.
+        self.held = None;
         let _span = solidcraft_profile::span("doc", "evaluate");
         self.placement_inputs = None;
         self.fingerprinted = None;
@@ -7386,72 +7475,7 @@ fn eval_feature(
         | FeatureKind::ReplaceFace { .. }
         | FeatureKind::Align { .. }
         | FeatureKind::Remove { .. } => more::eval(doc, vals, f, st, warning),
-        FeatureKind::Sketch { plane, sketch } => {
-            let anchor = crate::face_anchor::plane_face_anchor(plane);
-            let fst = match anchor {
-                Some(anchor) => crate::state_in_face_anchor_frame(doc, st, anchor, f.component)?,
-                // A sketch that reads no geometry (a fixed plane, no projections) needs no other
-                // component's bodies moved into its frame: placing every body of a large
-                // assembly again is what made each sketch edit as slow as the design is big.
-                None if !plane_reads_geometry(plane) && sketch.links.is_empty() => std::borrow::Cow::Borrowed(st),
-                None => state_in_frame(doc, st, f.component)?,
-            };
-            // A further placement a link reads is placed in its frame too (#9957).
-            let named: Vec<&str> = sketch.links.iter().flat_map(|l| l.source.bodies()).collect();
-            let fst = match anchor.map(|anchor| anchor.author_frame(doc, f.component)) {
-                _ if named.is_empty() => fst,
-                Some(Ok(frame)) => with_placed_copies(doc, st, fst, &frame, &named),
-                Some(Err(_)) => fst,
-                None => with_placed_copies(doc, st, fst, &doc.component_transform(f.component), &named),
-            };
-            let (plane, face_warning) = match (anchor, plane) {
-                (Some(_), plane) => doc.resolve_attached_plane_noted(vals, plane, f.component, st, &fst)?,
-                // A flat face of a sheet: the panel's exact plane, from its flat region and fold.
-                (None, plane) if crate::sheet::plane_sheet_face(plane).is_some() => {
-                    (doc.resolve_plane_in(vals, &sheet_face_plane_in_frame(doc, st, f.component, plane)?, 0, Some(&fst))?, None)
-                }
-                (None, PlaneRef::Face { plane: picked, at, name, anchor: None }) => face_plane(&fst, picked, *at, name.as_deref())?,
-                (None, other) => (doc.resolve_plane_in(vals, other, 0, Some(&fst))?, None),
-            };
-            let mut sk = sketch.clone();
-            // A text's outlines are rebuilt from its numbers when the links are refreshed: the
-            // ones its expressions give come first.
-            doc.apply_text_values(vals, &mut sk)?;
-            let mut warns = match anchor {
-                Some(anchor) => crate::project::refresh_face_anchor_links(doc, vals, &fst, &plane, &mut sk, anchor)?,
-                None => crate::project::refresh_links(doc, vals, &fst, &plane, &mut sk)?,
-            };
-            drop(fst);
-            sk.refresh_offsets()?;
-            if let Some(w) = face_warning {
-                warns.insert(0, w);
-            }
-            // The stored sketch is solved for its stored values, with its links where they
-            // were stored: a link that moved must not change the side a dimension from it is on.
-            let stored = sk.driving_values();
-            let report = doc.solve_sketch(vals, &mut sk, &stored, Some(sketch))?;
-            if !report.keeps_orientation() {
-                warns.insert(0, report.failure(|f| format!("the sketch constraints conflict ({f})")));
-            } else {
-                // The solve may have moved the curve a text runs along.
-                warns.extend(crate::project::relay_path_texts(&mut sk));
-            }
-            if !warns.is_empty() {
-                *warning = Some(warns.join("; "));
-            }
-            sk.validate_periodic_splines()?;
-            // A group of touching curves too large to search whole says so, rather than
-            // leaving profiles out silently (#6896).
-            let search = solidcraft_sketch::find_profiles_checked(&sk);
-            if search.incomplete {
-                append_warning(warning, profiles_cut_short_note());
-            }
-            let profiles = search.profiles;
-            let ends = solidcraft_sketch::loose_ends(&sk);
-            st.sketches.retain(|s| s.feature != f.id);
-            st.sketches.push(Arc::new(SolvedSketch { feature: f.id, name: f.name.clone(), plane, sketch: sk, report, profiles, ends }));
-            Ok(())
-        }
+        FeatureKind::Sketch { plane, sketch } => eval_sketch(doc, vals, f, plane, sketch, st, warning, crate::project::LostNames::Fail),
         FeatureKind::Extrude { operation, targets, .. }
         | FeatureKind::Pipe { operation, targets, .. }
         | FeatureKind::Revolve { operation, targets, .. }
@@ -8270,6 +8294,88 @@ fn eval_feature(
     }
 }
 
+/// A sketch feature: its links refreshed against the model before it, solved, its profiles
+/// found. `lost_names` says what a link whose named face or edge is gone does: the evaluation
+/// fails the sketch ([`crate::project::LostNames::Fail`]); a failed sketch shown for editing
+/// marks the link lost instead ([`Model::hold_failed_sketch`]).
+#[allow(clippy::too_many_arguments)]
+fn eval_sketch(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    plane: &PlaneRef,
+    sketch: &solidcraft_sketch::Sketch,
+    st: &mut ModelState,
+    warning: &mut Option<String>,
+    lost_names: crate::project::LostNames,
+) -> Result<()> {
+    let anchor = crate::face_anchor::plane_face_anchor(plane);
+    let fst = match anchor {
+        Some(anchor) => crate::state_in_face_anchor_frame(doc, st, anchor, f.component)?,
+        // A sketch that reads no geometry (a fixed plane, no projections) needs no other
+        // component's bodies moved into its frame: placing every body of a large
+        // assembly again is what made each sketch edit as slow as the design is big.
+        None if !plane_reads_geometry(plane) && sketch.links.is_empty() => std::borrow::Cow::Borrowed(st),
+        None => state_in_frame(doc, st, f.component)?,
+    };
+    // A further placement a link reads is placed in its frame too (#9957).
+    let named: Vec<&str> = sketch.links.iter().flat_map(|l| l.source.bodies()).collect();
+    let fst = match anchor.map(|anchor| anchor.author_frame(doc, f.component)) {
+        _ if named.is_empty() => fst,
+        Some(Ok(frame)) => with_placed_copies(doc, st, fst, &frame, &named),
+        Some(Err(_)) => fst,
+        None => with_placed_copies(doc, st, fst, &doc.component_transform(f.component), &named),
+    };
+    let (plane, face_warning) = match (anchor, plane) {
+        (Some(_), plane) => doc.resolve_attached_plane_noted(vals, plane, f.component, st, &fst)?,
+        // A flat face of a sheet: the panel's exact plane, from its flat region and fold.
+        (None, plane) if crate::sheet::plane_sheet_face(plane).is_some() => {
+            (doc.resolve_plane_in(vals, &sheet_face_plane_in_frame(doc, st, f.component, plane)?, 0, Some(&fst))?, None)
+        }
+        (None, PlaneRef::Face { plane: picked, at, name, anchor: None }) => face_plane(&fst, picked, *at, name.as_deref())?,
+        (None, other) => (doc.resolve_plane_in(vals, other, 0, Some(&fst))?, None),
+    };
+    let mut sk = sketch.clone();
+    // A text's outlines are rebuilt from its numbers when the links are refreshed: the
+    // ones its expressions give come first.
+    doc.apply_text_values(vals, &mut sk)?;
+    let mut warns = match (anchor, lost_names) {
+        (Some(anchor), crate::project::LostNames::Fail) => crate::project::refresh_face_anchor_links(doc, vals, &fst, &plane, &mut sk, anchor)?,
+        (None, crate::project::LostNames::Fail) => crate::project::refresh_links(doc, vals, &fst, &plane, &mut sk)?,
+        (anchor, crate::project::LostNames::Mark) => crate::project::refresh_links_marking_lost(doc, vals, &fst, &plane, &mut sk, anchor)?,
+    };
+    drop(fst);
+    sk.refresh_offsets()?;
+    if let Some(w) = face_warning {
+        warns.insert(0, w);
+    }
+    // The stored sketch is solved for its stored values, with its links where they
+    // were stored: a link that moved must not change the side a dimension from it is on.
+    let stored = sk.driving_values();
+    let report = doc.solve_sketch(vals, &mut sk, &stored, Some(sketch))?;
+    if !report.keeps_orientation() {
+        warns.insert(0, report.failure(|f| format!("the sketch constraints conflict ({f})")));
+    } else {
+        // The solve may have moved the curve a text runs along.
+        warns.extend(crate::project::relay_path_texts(&mut sk));
+    }
+    if !warns.is_empty() {
+        *warning = Some(warns.join("; "));
+    }
+    sk.validate_periodic_splines()?;
+    // A group of touching curves too large to search whole says so, rather than
+    // leaving profiles out silently (#6896).
+    let search = solidcraft_sketch::find_profiles_checked(&sk);
+    if search.incomplete {
+        append_warning(warning, profiles_cut_short_note());
+    }
+    let profiles = search.profiles;
+    let ends = solidcraft_sketch::loose_ends(&sk);
+    st.sketches.retain(|s| s.feature != f.id);
+    st.sketches.push(Arc::new(SolvedSketch { feature: f.id, name: f.name.clone(), plane, sketch: sk, report, profiles, ends }));
+    Ok(())
+}
+
 /// `copy`, a moved copy of `source` (instance `instance` of a pattern or mirror): its faces are
 /// named after the source's.
 fn moved_copy(source: &ModelBody, copy: Body, instance: usize) -> Traced {
@@ -8745,6 +8851,7 @@ impl PlacedBodies {
             let mut fresh = ModelBody::new(name.to_string(), placed.body.clone(), b.feature);
             fresh.mesh = placed.mesh.clone();
             fresh.measured = placed.measured.clone();
+            fresh.joint_faces = placed.joint_faces.clone();
             fresh.mesh_placement = placed.mesh_placement.clone();
             fresh.plan = placed.plan.clone();
             fresh.plan_mesh = placed.plan_mesh.clone();

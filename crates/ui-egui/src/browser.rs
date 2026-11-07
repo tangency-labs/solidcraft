@@ -2380,7 +2380,7 @@ pub const CANVASES: &str = "c0/canvases";
 
 /// The Canvases folder (reference images) with an eye per canvas.
 fn canvas_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut Actions) {
-    let canvases: Vec<(u64, String, bool)> = app.session.doc.canvases.iter().map(|c| (c.id, c.name.clone(), c.visible)).collect();
+    let canvases: Vec<(u64, String, bool, bool)> = app.session.doc.canvases.iter().map(|c| (c.id, c.name.clone(), c.visible, c.locked)).collect();
     if canvases.is_empty() {
         return;
     }
@@ -2403,8 +2403,9 @@ fn canvas_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
     if !open {
         return;
     }
-    for (id, name, visible) in canvases {
+    for (id, name, visible, locked) in canvases {
         let selected = app.tree.picked_canvases.contains(&id);
+        let badges: &[&str] = if locked { &["lock"] } else { &[] };
         let r = draw_row(
             ui,
             ui.scope_id().with(("canvas", id)),
@@ -2416,6 +2417,7 @@ fn canvas_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
                 name: true,
                 selected,
                 dim: !visible || !shown,
+                badges,
                 ..Default::default()
             },
         );
@@ -2435,7 +2437,9 @@ fn canvas_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
                 app.tree.picked_canvases.push(id);
             }
         }
-        if r.double {
+        if r.double && locked {
+            app.set_status(crate::i18n::tr("browser.canvas_locked"), true);
+        } else if r.double {
             app.tree.canvas_panel = Some(CanvasPanel::new(app, id, false));
         }
         if let Some(p) = r.secondary {
@@ -2454,14 +2458,19 @@ pub fn point_cloud_items(app: &SolveApp, id: u64) -> Vec<Item> {
 
 /// The menu of a canvas.
 pub fn canvas_items(app: &SolveApp, id: u64) -> Vec<Item> {
-    let visible = app.session.doc.canvases.iter().find(|c| c.id == id).is_some_and(|c| c.visible);
+    let canvas = app.session.doc.canvases.iter().find(|c| c.id == id);
+    let visible = canvas.is_some_and(|c| c.visible);
+    // A locked canvas (#12310) is not moved, calibrated or deleted until it is unlocked.
+    let locked = canvas.is_some_and(|c| c.locked);
+    let why = locked.then(|| crate::i18n::tr("browser.canvas_locked").to_string());
     vec![
-        Item::action("ui.editCanvas", "Edit Canvas", "canvas").with(json!({ "canvas": id })),
-        Item::action("ui.calibrateCanvas", "Calibrate", "measure").with(json!({ "canvas": id })),
+        Item::action("ui.editCanvas", "Edit Canvas", "canvas").with(json!({ "canvas": id })).off_because(why.clone()),
+        Item::action("ui.calibrateCanvas", "Calibrate", "measure").with(json!({ "canvas": id })).off_because(why.clone()),
         Item::action("canvas.to_sketch", "Canvas to Sketch", "canvas").with(json!({ "canvas": id })),
         Item::sep(),
-        Item::action("ui.delete", "Delete", "delete").with(json!({ "canvases": [id] })),
+        Item::action("ui.delete", "Delete", "delete").with(json!({ "canvases": [id] })).off_because(why),
         Item::action("ui.rename", "Rename", "rename").key("F2").with(json!({ "canvas": id })),
+        Item::action("ui.canvasLocked", if locked { "Unlock" } else { "Lock" }, "ground").with(json!({ "canvas": id, "locked": !locked })),
         Item::sep(),
         Item::action("ui.canvasVisible", "Show/Hide", "eye").key("V").with(json!({ "canvas": id, "visible": !visible })),
     ]
@@ -3141,10 +3150,25 @@ fn entry_row(
     let patterns_open = pattern_key.is_some_and(|key| is_open(app, key, start_open));
     let rect = row_rect(ui);
     let revealed = folder == "bodies" && body_reveal(app).is_some_and(|b| e.row_key.strip_prefix("b:") == Some(b));
-    if !ui.is_rect_visible(rect) && !patterns_open && !revealed {
+    // Features under bodies (#11945): the body row folds open on the features that built it.
+    let built_key = (folder == "bodies"
+        && app.preferences.browser_body_features
+        && !crate::render_workspace::active(app)
+        && matches!(e.sel, Some(Sel::Body { .. })))
+    .then(|| format!("{}/features", e.row_key));
+    let built_open = built_key.as_deref().is_some_and(|key| is_open(app, key, false));
+    if !ui.is_rect_visible(rect) && !patterns_open && !revealed && !built_open {
         ui.allocate_space(rect.size());
         return;
     }
+    let built: Vec<u64> = match &built_key {
+        Some(_) => {
+            prepare_model(app);
+            app.tree.model.as_mut().map(|model| model.body_features(&app.session, &e.key)).unwrap_or_default()
+        }
+        None => Vec::new(),
+    };
+    let built_key = built_key.filter(|_| !built.is_empty());
     let (selected, mark) = lit_row(acts.lit.entry(app, e));
     let visible = e.is_visible(app);
     let locked = match &e.sel {
@@ -3164,7 +3188,7 @@ fn entry_row(
         ui.scope_id().with(("item", &e.row_key)),
         &Row {
             depth,
-            fold: pattern_key.map(|_| patterns_open),
+            fold: pattern_key.map(|_| patterns_open).or(built_key.as_ref().map(|_| built_open)),
             eye: Some(visible),
             icon: e.icon,
             kind_tip: e.tip,
@@ -3196,6 +3220,10 @@ fn entry_row(
         && let Some(key) = pattern_key
     {
         toggle(app, key, start_open);
+    } else if r.fold
+        && let Some(key) = &built_key
+    {
+        toggle(app, key, false);
     }
     if folder == "bodies"
         && body_reveal(app).is_some_and(|b| e.row_key.strip_prefix("b:") == Some(b))
@@ -3266,6 +3294,9 @@ fn entry_row(
     }
     if patterns_open && let Some(Sel::Feature { id }) = &e.sel {
         crate::sketch_pattern_tree::rows(app, ui, *id, depth + 1, "browser", path.map(|path| (comp, path)), !visible || parent_hidden);
+    }
+    if built_open && built_key.is_some() {
+        features::body_rows(app, ui, acts, comp, path.unwrap_or_default(), &e.row_key, &built, depth + 1);
     }
     let Some(resp) = &r.resp else { return };
     // Drag: the selected items of this folder when this one is selected, else just this one.

@@ -38,7 +38,7 @@ fn pendulum(len: f64, theta: f64, omega: f64, inertia: f64) -> Model {
         a: Marker::ground(Vec3::ZERO, Vec3::Y, Vec3::X),
         b: Marker::new(Some(0), Vec3::new(0.0, 0.0, len), Vec3::Y, Vec3::X),
     };
-    Model { bodies: vec![body], joints: vec![joint], forces: vec![], gravity: down() }
+    Model { bodies: vec![body], joints: vec![joint], forces: vec![], drives: vec![], links: vec![], gravity: down() }
 }
 
 /// Times where `f` crosses zero upwards, linearly interpolated between samples.
@@ -68,7 +68,7 @@ fn free_fall_follows_the_parabola() {
     let mut body = Body::at_rest(2.5, Vec3::new(10.0, 20.0, 30.0), Vec3::new(1.0, 2.0, 3.0));
     body.velocity = Vec3::new(10.0, -5.0, 50.0);
     body.angular_velocity = Vec3::new(0.0, 0.0, 1.0);
-    let model = Model { bodies: vec![body.clone()], joints: vec![], forces: vec![], gravity: down() };
+    let model = Model { bodies: vec![body.clone()], joints: vec![], forces: vec![], drives: vec![], links: vec![], gravity: down() };
     let traj = ok(simulate(&model, &Settings::rk4(1.0, 0.01, 0.1)));
     assert_eq!(traj.samples.len(), 11);
     for s in &traj.samples {
@@ -158,6 +158,7 @@ fn double_pendulum() -> Model {
         ],
         forces: vec![],
         gravity: down(),
+        ..Model::default()
     }
 }
 
@@ -215,6 +216,7 @@ fn slider_crank_follows_its_closed_form() {
         ],
         forces: vec![],
         gravity: Vec3::ZERO,
+        ..Model::default()
     };
     let traj = ok(simulate(&model, &Settings::rk4(2.0, 1e-3, 1e-2)));
     // A planar linkage built from 3D joints repeats three equations; they are solved, not refused.
@@ -256,6 +258,7 @@ fn spring_mass(damping: f64) -> Model {
             preload: 0.0,
         }],
         gravity: down(),
+        ..Model::default()
     }
 }
 
@@ -294,7 +297,7 @@ fn torque_free_body_keeps_energy_and_momentum() {
     let mut body = Body::at_rest(1.0, Vec3::new(1000.0, 2000.0, 3000.0), Vec3::ZERO);
     body.orientation = Quat::from_axis_angle(Vec3::new(1.0, 2.0, 3.0), 0.7);
     body.angular_velocity = Vec3::new(1.0, 0.3, 5.0);
-    let model = Model { bodies: vec![body], joints: vec![], forces: vec![], gravity: Vec3::ZERO };
+    let model = Model { bodies: vec![body], joints: vec![], forces: vec![], drives: vec![], links: vec![], gravity: Vec3::ZERO };
     let traj = ok(simulate(&model, &Settings::rk4(2.0, 1e-4, 1e-2)));
     let momentum = |s: &Sample| {
         let b = s.bodies.first().copied();
@@ -329,6 +332,7 @@ fn spherical_pendulum_keeps_energy_and_vertical_momentum() {
         }],
         forces: vec![],
         gravity: down(),
+        ..Model::default()
     };
     let traj = ok(simulate(&model, &Settings::rk4(3.0, 5e-4, 1e-2)));
     let lz = |s: &Sample| {
@@ -369,9 +373,10 @@ fn jacobians_match_finite_differences() {
                 a: Marker::new(a_body, Vec3::new(4.0, -3.0, 7.0), Vec3::new(0.2, 0.5, 1.0), Vec3::new(1.0, 0.0, 0.3)),
                 b: Marker::new(Some(1), Vec3::new(-6.0, 2.0, 1.0), Vec3::new(-0.4, 1.0, 0.1), Vec3::new(0.0, 0.3, 1.0)),
             };
-            let model = Model { bodies: vec![a.clone(), b.clone()], joints: vec![joint], forces: vec![], gravity: Vec3::ZERO };
+            let model =
+                Model { bodies: vec![a.clone(), b.clone()], joints: vec![joint], forces: vec![], drives: vec![], links: vec![], gravity: Vec3::ZERO };
             let sys = ok(System::new(&model, None));
-            let y = ok(System::initial_state(&model));
+            let y = ok(sys.initial_state(&model));
             let h = 1e-4;
             let (now, plus, minus) = (
                 testing::rows_at(&sys, &y),
@@ -400,6 +405,7 @@ fn joint_values_read_the_relative_motion() {
             joints: vec![Joint { kind, a: Marker::ground(Vec3::ZERO, Vec3::Z, Vec3::X), b: Marker::new(Some(0), Vec3::ZERO, Vec3::Z, Vec3::X) }],
             forces: vec![],
             gravity: Vec3::ZERO,
+            ..Model::default()
         };
         let traj = ok(simulate(&model, &Settings::rk4(0.01, 0.01, 0.01)));
         traj.samples.first().and_then(|s| s.joints.first()).map(|j| j.values.clone()).unwrap_or_default()
@@ -523,6 +529,10 @@ fn hostile_input_is_an_error_not_a_panic() {
 fn models_round_trip_through_json() {
     let mut model = spring_mass(1.5);
     model.forces.push(Force::Load { body: 0, point: Vec3::new(1.0, 0.0, 0.0), force: Vec3::new(0.0, 5.0, 0.0), torque: Vec3::ZERO });
+    model.forces.push(Force::JointSpring { at: Coord::new(0, 0), stiffness: 3.0, damping: 0.5, rest: 1.0 });
+    model.forces.push(Force::Motor { at: Coord::new(0, 0), effort: Profile::Table { points: vec![(0.0, 1.0), (2.0, 3.0)] } });
+    model.drives.push(Drive { at: Coord::new(0, 0), motion: Profile::Ramp { from: 0.0, to: 1.0, start: 0.5, duration: 2.0 } });
+    model.links.push(Link { driver: Coord::new(0, 0), follower: Coord::new(1, 0), ratio: 2.0, offset: Some(0.5) });
     let text = match serde_json::to_string(&model) {
         Ok(t) => t,
         Err(e) => panic!("{e}"),
@@ -537,4 +547,254 @@ fn models_round_trip_through_json() {
         Err(e) => panic!("{e}"),
     };
     assert!(settings.projection && settings.validate().is_ok());
+}
+
+// Joint springs, motors, drives and motion links.
+
+/// `a − b` turned into (−π, π].
+fn wrap(x: f64) -> f64 {
+    (x + PI).rem_euclid(TAU) - PI
+}
+
+/// A wheel turning about Z on a revolute to the ground at `at`, its centre of mass on the axis.
+/// Wheels turning about Z on revolutes to the ground, centres of mass on their axes (inertia,
+/// centre); joint `i` holds body `i`.
+fn rotors(parts: &[(f64, Vec3)]) -> Model {
+    let mut model = Model::default();
+    for (i, (inertia, at)) in parts.iter().enumerate() {
+        model.bodies.push(Body::at_rest(1.0, Vec3::new(*inertia, *inertia, *inertia), *at));
+        model.joints.push(Joint {
+            kind: JointKind::Revolute,
+            a: Marker::ground(*at, Vec3::Z, Vec3::X),
+            b: Marker::new(Some(i), Vec3::ZERO, Vec3::Z, Vec3::X),
+        });
+    }
+    model
+}
+
+fn value(s: &Sample, joint: usize, dof: usize) -> f64 {
+    s.joints.get(joint).and_then(|j| j.values.get(dof)).copied().unwrap_or(f64::NAN)
+}
+
+#[test]
+fn profiles_give_consistent_derivatives() {
+    let profiles = [
+        Profile::Constant { value: 2.0 },
+        Profile::Linear { value: 1.0, rate: -3.0 },
+        Profile::Ramp { from: 0.5, to: 2.0, start: 0.2, duration: 0.6 },
+        Profile::Harmonic { offset: 1.0, amplitude: 0.3, frequency: 2.0, phase: 0.4 },
+    ];
+    let h = 1e-5;
+    for p in &profiles {
+        for k in 0..100 {
+            let t = k as f64 * 0.0123;
+            let (f, fd, fdd) = p.eval(t);
+            let (fp, fdp, _) = p.eval(t + h);
+            let (fm, fdm, _) = p.eval(t - h);
+            assert!((fd - (fp - fm) / (2.0 * h)).abs() < 1e-5 * (1.0 + fd.abs()), "{p:?} at {t}: ḟ");
+            assert!((fdd - (fdp - fdm) / (2.0 * h)).abs() < 1e-3 * (1.0 + fdd.abs()), "{p:?} at {t}: f̈");
+            assert!(f.is_finite());
+        }
+    }
+    let ramp = Profile::Ramp { from: 0.5, to: 2.0, start: 0.2, duration: 0.6 };
+    assert_eq!(ramp.eval(0.0).0, 0.5);
+    assert_eq!(ramp.eval(0.8).0, 2.0);
+    assert!((ramp.eval(0.5).0 - 1.25).abs() < 1e-12);
+    let table = Profile::Table { points: vec![(0.0, 1.0), (1.0, 3.0), (2.0, 0.0)] };
+    assert_eq!(table.eval(-1.0), (1.0, 0.0, 0.0));
+    assert_eq!(table.eval(0.5), (2.0, 2.0, 0.0));
+    assert_eq!(table.eval(1.5), (1.5, -3.0, 0.0));
+    assert_eq!(table.eval(9.0), (0.0, 0.0, 0.0));
+}
+
+#[test]
+fn driven_pendulum_reaches_its_commanded_angle_and_holds_it() {
+    // A drive lifts the pendulum from hanging to horizontal along a cycloidal ramp in 1 s,
+    // then holds it: the angle follows the ramp, and the holding torque is m·g·L.
+    let (len, mass) = (100.0, 1.0);
+    let mut model = pendulum(len, 0.0, 0.0, 40.0);
+    let ramp = Profile::Ramp { from: 0.0, to: PI / 2.0, start: 0.0, duration: 1.0 };
+    model.drives.push(Drive { at: Coord::new(0, 0), motion: ramp.clone() });
+    let traj = ok(simulate(&model, &Settings::rk4(1.5, 1e-3, 1e-2)));
+    let b0 = traj.samples.first().map(|s| s.energy.balance()).unwrap_or(f64::NAN);
+    for s in &traj.samples {
+        let angle = value(s, 0, 0);
+        assert!((angle - ramp.eval(s.time).0).abs() < 1e-9, "t={}: angle {angle} vs {}", s.time, ramp.eval(s.time).0);
+        // Work put in = kinetic + gravity energy gained.
+        assert!((s.energy.balance() - b0).abs() < 1e-6 * G * len, "t={}: balance {}", s.time, s.energy.balance() - b0);
+    }
+    let held: Vec<&Sample> = traj.samples.iter().filter(|s| s.time >= 1.0).collect();
+    assert!(held.len() > 40);
+    for s in held {
+        let effort = s.drives.first().copied().unwrap_or(f64::NAN);
+        assert!((effort.abs() - mass * G * len).abs() < 1e-6 * G * len, "t={}: holding torque {effort}", s.time);
+        assert!((s.energy.input - mass * G * len).abs() < 1e-6 * G * len, "work put in {}", s.energy.input);
+        assert!(s.energy.kinetic < 1e-9 * G * len);
+    }
+}
+
+#[test]
+fn driven_speed_counts_whole_turns() {
+    // 10 rad/s for 2 s: more than three turns; the driven angle never jumps a turn.
+    let mut model = rotors(&[(500.0, Vec3::ZERO)]);
+    model.drives.push(Drive { at: Coord::new(0, 0), motion: Profile::Linear { value: 0.0, rate: 10.0 } });
+    let traj = ok(simulate(&model, &Settings::rk4(2.0, 1e-3, 1e-2)));
+    for s in &traj.samples {
+        assert!(wrap(value(s, 0, 0) - 10.0 * s.time).abs() < 1e-9, "t={}", s.time);
+        let w = s.bodies.first().map(|b| b.angular_velocity.z).unwrap_or(f64::NAN);
+        assert!((w - 10.0).abs() < 1e-9);
+        assert!(s.drives.first().is_some_and(|e| e.abs() < 1e-6), "{:?}", s.drives);
+    }
+    assert!(traj.stats.max_constraint_error < 1e-9);
+}
+
+#[test]
+fn torsion_spring_period() {
+    // ω = √(k/I) = √(5e5 / 500) rad/s; released from 0.3 rad.
+    let (inertia, k) = (500.0_f64, 5e5_f64);
+    let w = (k / inertia).sqrt();
+    let mut model = rotors(&[(inertia, Vec3::ZERO)]);
+    if let Some(b) = model.bodies.first_mut() {
+        b.orientation = Quat::from_axis_angle(Vec3::Z, 0.3);
+    }
+    model.forces.push(Force::JointSpring { at: Coord::new(0, 0), stiffness: k, damping: 0.0, rest: 0.0 });
+    let traj = ok(simulate(&model, &Settings::rk4(1.0, 1e-4, 1e-3)));
+    for s in &traj.samples {
+        let expect = 0.3 * (w * s.time).cos();
+        assert!((value(s, 0, 0) - expect).abs() < 1e-7, "t={}: {} vs {expect}", s.time, value(s, 0, 0));
+    }
+    let measured = mean_period(&upward_crossings(&traj, |s| value(s, 0, 0)));
+    assert!((measured - TAU / w).abs() < 1e-5 * TAU / w);
+    let e0 = traj.samples.first().map(|s| s.energy.total()).unwrap_or(0.0);
+    assert!((e0 - 0.5 * k * 0.09).abs() < 1e-9 * e0);
+    // With damping the energy left plus the energy dissipated stays what it was.
+    if let Some(Force::JointSpring { damping, .. }) = model.forces.first_mut() {
+        *damping = 2.0 * 0.05 * (k * inertia).sqrt();
+    }
+    let traj = ok(simulate(&model, &Settings::rk4(1.0, 1e-4, 1e-2)));
+    let last = traj.samples.last().map(|s| s.energy).unwrap_or_default();
+    assert!(last.total() < 0.2 * e0 && last.dissipated > 0.8 * e0);
+    assert!(traj.samples.iter().all(|s| (s.energy.balance() - e0).abs() < 1e-7 * e0));
+}
+
+#[test]
+fn gear_pair_keeps_its_ratio_and_motor_work_is_kinetic_energy() {
+    // A motor's constant torque τ on gear 1; gear 2 turns at −r₁/r₂ = −0.5 of it. The pair
+    // accelerates as one inertia I₁ + 0.25·I₂: θ₁ = ½(τ/I_eff)t², and the motor's work τ·θ₁ is
+    // all kinetic energy. Over 3 s gear 1 makes more than half a turn past ±π.
+    let (i1, i2, ratio, tau) = (1000.0, 2000.0, -0.5, 1500.0);
+    let alpha = tau / (i1 + ratio * ratio * i2);
+    let mut model = rotors(&[(i1, Vec3::ZERO), (i2, Vec3::new(30.0, 0.0, 0.0))]);
+    model.forces.push(Force::Motor { at: Coord::new(0, 0), effort: Profile::Constant { value: tau } });
+    model.links.push(Link { driver: Coord::new(0, 0), follower: Coord::new(1, 0), ratio, offset: None });
+    let traj = ok(simulate(&model, &Settings::rk4(3.0, 1e-3, 1e-2)));
+    for s in &traj.samples {
+        let theta = 0.5 * alpha * s.time * s.time;
+        assert!(wrap(value(s, 0, 0) - theta).abs() < 1e-8, "t={}: gear 1 {} vs {theta}", s.time, value(s, 0, 0));
+        assert!(wrap(value(s, 1, 0) - ratio * theta).abs() < 1e-8, "t={}: gear 2", s.time);
+        assert!((s.energy.input - tau * theta).abs() < 1e-6 * tau * 4.5, "t={}: work {}", s.time, s.energy.input);
+        assert!((s.energy.kinetic - s.energy.input).abs() < 1e-6 * tau * 4.5, "t={}: kinetic {}", s.time, s.energy.kinetic);
+    }
+    assert!(0.5 * alpha * 9.0 > PI);
+}
+
+#[test]
+fn rack_and_pinion_follow_the_pinion_radius() {
+    // A pinion of radius 20 mm drives a rack on a slider along X; a harmonic motor torque. The
+    // rack's travel is 20·θ, and the motor's work is the kinetic energy of both.
+    let mut model = rotors(&[(800.0, Vec3::ZERO)]);
+    model.bodies.push(Body::at_rest(0.5, Vec3::new(100.0, 100.0, 100.0), Vec3::new(0.0, 20.0, 0.0)));
+    model.joints.push(Joint {
+        kind: JointKind::Slider,
+        a: Marker::ground(Vec3::new(0.0, 20.0, 0.0), Vec3::X, Vec3::Y),
+        b: Marker::new(Some(1), Vec3::ZERO, Vec3::X, Vec3::Y),
+    });
+    model
+        .forces
+        .push(Force::Motor { at: Coord::new(0, 0), effort: Profile::Harmonic { offset: 0.0, amplitude: 2000.0, frequency: 1.0, phase: 0.0 } });
+    model.links.push(Link { driver: Coord::new(0, 0), follower: Coord::new(1, 0), ratio: 20.0, offset: None });
+    let traj = ok(simulate(&model, &Settings::rk4(2.0, 1e-3, 1e-2)));
+    // I_eff = 800 + 0.5·20²; θ̈ = τ(t)/I_eff with τ = A sin(2πt): θ = A/I_eff·(t/2π − sin(2πt)/4π²).
+    let i_eff = 800.0 + 0.5 * 400.0;
+    for s in &traj.samples {
+        let t = s.time;
+        let theta = 2000.0 / i_eff * (t / TAU - (TAU * t).sin() / (TAU * TAU));
+        assert!((value(s, 0, 0) - theta).abs() < 1e-8, "t={t}: pinion {} vs {theta}", value(s, 0, 0));
+        assert!((value(s, 1, 0) - 20.0 * theta).abs() < 1e-7, "t={t}: rack {}", value(s, 1, 0));
+        assert!((s.energy.kinetic - s.energy.input).abs() < 1e-8 * 2000.0, "t={t}: {:?}", s.energy);
+    }
+}
+
+#[test]
+fn screw_turns_as_it_falls() {
+    // A nut on a vertical cylindrical joint, its travel tied to its turn by a 5 mm pitch, falls
+    // under gravity: z̈ = −m·g·k² / (I + m·k²) with k = pitch / 2π.
+    let (mass, inertia, k) = (0.2, 50.0, 5.0 / TAU);
+    let model = Model {
+        bodies: vec![Body::at_rest(mass, Vec3::new(inertia, inertia, inertia), Vec3::ZERO)],
+        joints: vec![Joint {
+            kind: JointKind::Cylindrical,
+            a: Marker::ground(Vec3::ZERO, Vec3::Z, Vec3::X),
+            b: Marker::new(Some(0), Vec3::ZERO, Vec3::Z, Vec3::X),
+        }],
+        links: vec![Link { driver: Coord::new(0, 0), follower: Coord::new(0, 1), ratio: k, offset: None }],
+        gravity: down(),
+        ..Model::default()
+    };
+    let traj = ok(simulate(&model, &Settings::rk4(1.0, 1e-3, 1e-2)));
+    let a = -mass * G * k * k / (inertia + mass * k * k);
+    for s in &traj.samples {
+        let z = s.bodies.first().map(|b| b.position.z).unwrap_or(f64::NAN);
+        assert!((z - 0.5 * a * s.time * s.time).abs() < 1e-7, "t={}: z {z}", s.time);
+        assert!(wrap(value(s, 0, 0) - z / k).abs() < 1e-8, "t={}: turn", s.time);
+        assert!(s.energy.balance().abs() < 1e-6 * mass * G, "t={}: {:?}", s.time, s.energy);
+    }
+    // It went down more than one turn.
+    assert!(0.5 * a < -5.0);
+}
+
+#[test]
+fn hostile_springs_motors_drives_and_links_are_errors() {
+    let good = rotors(&[(500.0, Vec3::ZERO), (500.0, Vec3::new(30.0, 0.0, 0.0))]);
+    let mut bad: Vec<Model> = Vec::new();
+    let mut with = |f: &dyn Fn(&mut Model)| {
+        let mut m = good.clone();
+        f(&mut m);
+        bad.push(m);
+    };
+    with(&|m| m.drives.push(Drive { at: Coord::new(5, 0), motion: Profile::Constant { value: 0.0 } }));
+    with(&|m| m.drives.push(Drive { at: Coord::new(0, 1), motion: Profile::Constant { value: 0.0 } }));
+    with(&|m| m.drives.push(Drive { at: Coord::new(0, 0), motion: Profile::Constant { value: f64::NAN } }));
+    with(&|m| m.drives.push(Drive { at: Coord::new(0, 0), motion: Profile::Ramp { from: 0.0, to: 1.0, start: 0.0, duration: 0.0 } }));
+    with(&|m| m.drives.push(Drive { at: Coord::new(0, 0), motion: Profile::Table { points: vec![] } }));
+    with(&|m| m.drives.push(Drive { at: Coord::new(0, 0), motion: Profile::Table { points: vec![(1.0, 0.0), (0.5, 1.0)] } }));
+    with(&|m| m.drives.push(Drive { at: Coord::new(0, 0), motion: Profile::Table { points: vec![(0.0, 0.0); MAX_PROFILE_POINTS + 1] } }));
+    with(&|m| m.forces.push(Force::JointSpring { at: Coord::new(0, 0), stiffness: -1.0, damping: 0.0, rest: 0.0 }));
+    with(&|m| m.forces.push(Force::JointSpring { at: Coord::new(0, 0), stiffness: 1.0, damping: f64::INFINITY, rest: 0.0 }));
+    with(&|m| m.forces.push(Force::Motor { at: Coord::new(9, 0), effort: Profile::Constant { value: 1.0 } }));
+    with(&|m| {
+        m.forces
+            .push(Force::Motor { at: Coord::new(0, 0), effort: Profile::Harmonic { offset: 0.0, amplitude: 1.0, frequency: f64::NAN, phase: 0.0 } })
+    });
+    with(&|m| m.links.push(Link { driver: Coord::new(0, 0), follower: Coord::new(0, 0), ratio: 1.0, offset: None }));
+    with(&|m| m.links.push(Link { driver: Coord::new(0, 0), follower: Coord::new(1, 0), ratio: f64::NAN, offset: None }));
+    with(&|m| m.links.push(Link { driver: Coord::new(0, 0), follower: Coord::new(1, 0), ratio: 1.0, offset: Some(f64::INFINITY) }));
+    with(&|m| m.links = vec![Link { driver: Coord::new(0, 0), follower: Coord::new(1, 0), ratio: 1.0, offset: None }; MAX_JOINTS + 1]);
+    with(&|m| {
+        // Ball and rigid joints have no value to act on yet.
+        if let Some(j) = m.joints.get_mut(0) {
+            j.kind = JointKind::Ball;
+        }
+        m.drives.push(Drive { at: Coord::new(0, 0), motion: Profile::Constant { value: 0.0 } });
+    });
+    for (i, m) in bad.iter().enumerate() {
+        assert!(simulate(m, &Settings::rk4(0.1, 1e-3, 1e-2)).is_err(), "case {i} should be refused");
+    }
+    // Links that fight each other, and drives that can't be met, stop or finish but never panic.
+    let mut locked = good.clone();
+    locked.links.push(Link { driver: Coord::new(0, 0), follower: Coord::new(1, 0), ratio: 1.0, offset: None });
+    locked.links.push(Link { driver: Coord::new(1, 0), follower: Coord::new(0, 0), ratio: 2.0, offset: None });
+    locked.drives.push(Drive { at: Coord::new(0, 0), motion: Profile::Harmonic { offset: 0.0, amplitude: 1e6, frequency: 1e3, phase: 0.0 } });
+    let _ = simulate(&locked, &Settings::rk4(0.1, 1e-3, 1e-2));
+    let _ = simulate(&locked, &Settings::adaptive(0.1, 1e-2, 1e-9, 1e-9));
 }

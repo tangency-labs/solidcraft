@@ -1534,7 +1534,7 @@ mod blend_tests {
         assert_eq!(ids(&r["created"]["curves"]), vec![sp.clone()], "{r}");
         assert_eq!(ids(&r["created"]["points"]).len(), 8, "{r}");
         assert!(ids(&r["created"]["constraints"]).is_empty() && ids(&r["created"]["dimensions"]).is_empty(), "{r}");
-        run(&mut s, "sketch.line", json!({"points": [[20, 10], [2, 0]], "id": "chord"}));
+        run(&mut s, "sketch.line", json!({"points": [[20, 10], [2, 0]], "ids": "chord"}));
         // Drop the two references: what is left is the blend and its chord, one closed region.
         run(&mut s, "sketch.delete", json!({"entities": [a, b]}));
         let id = s.active_sketch.unwrap();
