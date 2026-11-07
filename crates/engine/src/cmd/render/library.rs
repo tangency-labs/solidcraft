@@ -18,8 +18,10 @@ use solidcraft_render::{
 
 use crate::schema::TypedContract;
 use crate::schema::render_library::{
-    LibraryDescribeParams, LibraryListParams, LibraryPage, LibraryPreview, LibraryPreviewParams, LibraryResource, LibraryTargets,
-    LibraryTargetsParams, Pbr, RenderTarget, ResourceSummary, SceneBounds, StableRenderTarget,
+    AppearanceApplied, AppearanceApplyParams, CpuProjection, EnvironmentApplied, EnvironmentApplyParams, IndirectAdoption, LibraryDescribeParams,
+    LibraryListParams, LibraryLook, LibraryPage, LibraryPreview, LibraryPreviewParams, LibraryResource, LibraryTargets, LibraryTargetsParams, Pbr,
+    PreparedTexture, ProgressiveDefaults, RenderTarget, ResourceSummary, RigProjection, SceneBounds, StableRenderTarget, StudioApplied,
+    StudioApplyParams, StudioPrepareParams, StudioPrepared, SurfacePrepareParams, SurfacePrepared,
 };
 use crate::{Result, Session, params::bad};
 
@@ -27,6 +29,11 @@ pub(super) const LIST_CONTRACT: TypedContract<LibraryListParams> = TypedContract
 pub(super) const DESCRIBE_CONTRACT: TypedContract<LibraryDescribeParams> = TypedContract::new();
 pub(super) const TARGETS_CONTRACT: TypedContract<LibraryTargetsParams> = TypedContract::new();
 pub(super) const PREVIEW_CONTRACT: TypedContract<LibraryPreviewParams> = TypedContract::new();
+pub(super) const APPEARANCE_APPLY_CONTRACT: TypedContract<AppearanceApplyParams> = TypedContract::new();
+pub(super) const ENVIRONMENT_APPLY_CONTRACT: TypedContract<EnvironmentApplyParams> = TypedContract::new();
+pub(super) const SURFACE_PREPARE_CONTRACT: TypedContract<SurfacePrepareParams> = TypedContract::new();
+pub(super) const STUDIO_PREPARE_CONTRACT: TypedContract<StudioPrepareParams> = TypedContract::new();
+pub(super) const STUDIO_APPLY_CONTRACT: TypedContract<StudioApplyParams> = TypedContract::new();
 
 fn reply(command: &str, reply: impl serde::Serialize) -> Result<Value> {
     serde_json::to_value(reply).map_err(|e| bad(command, e.to_string()))
@@ -397,20 +404,39 @@ pub(super) fn apply_appearance(s: &mut Session, params: &Value) -> Result<Value>
         let color = std::array::from_fn::<_, 3, _>(|i| crate::geom::srgb::encode8((lo[i] + hi[i]) * 0.5));
         (
             value,
-            json!({"color":color,"opacity":1.0,"pbr":{"metallic":value["metallic"],"roughness":value["roughness"],"dielectric_ior":1.5}}),
+            LibraryLook {
+                name: String::new(),
+                color: json!(color),
+                opacity: json!(1.0),
+                pbr: json!({"metallic":value["metallic"],"roughness":value["roughness"],"dielectric_ior":1.5}),
+                bodies: Vec::new(),
+            },
             json!(["spatial_maps", "height_displacement", "true_anisotropic_brdf"]),
         )
     } else {
         let value = item("selene_appearances", &input.id, command)?;
         let p = &value["baseline_projection"]["runtime_parameters"];
-        (value, json!({"color":p["color"],"opacity":p["opacity"],"pbr":p["pbr"]}), value["baseline_projection"]["omitted_target_features"].clone())
+        (
+            value,
+            LibraryLook { name: String::new(), color: p["color"].clone(), opacity: p["opacity"].clone(), pbr: p["pbr"].clone(), bodies: Vec::new() },
+            value["baseline_projection"]["omitted_target_features"].clone(),
+        )
     };
     let name = value["name"].as_str().ok_or_else(|| bad(command, "authored appearance has no name"))?;
-    look["name"] = json!(format!("{} {}", input.id, name).chars().take(128).collect::<String>());
-    look["bodies"] = json!(input.bodies);
-    let assigned = crate::cmd::inspect::appearance(s, &look)?;
-    Ok(
-        json!({"id":input.id,"variant":input.variant,"omitted":omitted,"appearance":look,"assignment":assigned,"engineering_properties_unchanged":true}),
+    look.name = format!("{} {}", input.id, name).chars().take(128).collect::<String>();
+    look.bodies = input.bodies;
+    let assigned = crate::cmd::inspect::appearance(s, &reply(command, &look)?)?;
+    reply(
+        command,
+        AppearanceApplied {
+            id: input.id,
+            variant: input.variant,
+            omitted,
+            appearance: look,
+            assignment: assigned,
+            engineering_properties_unchanged: true,
+            param_warnings: Vec::new(),
+        },
     )
 }
 
@@ -500,8 +526,21 @@ pub(super) fn apply_environment(s: &mut Session, params: &Value) -> Result<Value
     if settings != *s.doc.render {
         s.doc_mut().render = Arc::new(settings);
     }
-    Ok(json!({"id":input.id,"name":input.name,"setup":setup,"resource":digest,"author_rotation_rad":input.rotation_rad,
-        "native_rotation_rad":rotation,"orientation_offset_rad":std::f64::consts::PI,"self_contained":true,"source_sha256":metadata["sha256"]}))
+    reply(
+        command,
+        EnvironmentApplied {
+            id: input.id,
+            name: input.name,
+            setup,
+            resource: digest,
+            author_rotation_rad: input.rotation_rad,
+            native_rotation_rad: rotation,
+            orientation_offset_rad: std::f64::consts::PI,
+            self_contained: true,
+            source_sha256: metadata["sha256"].clone(),
+            param_warnings: Vec::new(),
+        },
+    )
 }
 
 #[derive(Deserialize)]
@@ -562,14 +601,39 @@ pub(super) fn prepare_surface(s: &mut Session, params: &Value) -> Result<Value> 
     let frame = solidcraft_render::job::textures::PlanarFrame { origin, u, v };
     frame.validate().map_err(|e| bad(command, e.to_string()))?;
     let manifest = item("surface_manifest", &input.id, command)?;
-    Ok(json!({"id":input.id,"revision":s.revision,"executor":"gpu-path","variant":"gpu_planar_maps",
-        "texture":{"body_index":input.body_index,"body_name":input.body_name,"frame":frame,"normal_strength":1.0,"flip_v":true,"base_color_mode":"replace",
-            "base_color_srgb":format!("builtin://{}/base_color",input.id),"normal_opengl":format!("builtin://{}/normal_open_gl",input.id),
-            "roughness_linear":format!("builtin://{}/roughness",input.id),"metallic_linear":format!("builtin://{}/metallic",input.id)},
-        "source_maps":manifest["maps"],"omitted":["height_displacement","true_anisotropic_brdf","manufacturing_geometry"],
-        "dielectric_ior":"captured_body_value","persistence":"transient_request_binding; authored source bytes are built in",
-        "compatible_saved_methods":if cfg!(feature="bundled-render-library") {vec!["cpu_raytrace","gpu_path"]} else {Vec::<&str>::new()},
-        "cpu_maps":"saved_builtin_opaque_only; direct_or_indirect_lighting; level_zero_bilinear; incompatible_optics_refuse"}))
+    let map = |role: &str| format!("builtin://{}/{role}", input.id);
+    reply(
+        command,
+        SurfacePrepared {
+            revision: s.revision,
+            executor: "gpu-path".into(),
+            variant: "gpu_planar_maps".into(),
+            texture: PreparedTexture {
+                body_index: input.body_index,
+                body_name: input.body_name,
+                frame,
+                normal_strength: 1.0,
+                flip_v: true,
+                base_color_mode: "replace".into(),
+                base_color_srgb: map("base_color"),
+                normal_opengl: map("normal_open_gl"),
+                roughness_linear: map("roughness"),
+                metallic_linear: map("metallic"),
+            },
+            source_maps: manifest["maps"].clone(),
+            omitted: ["height_displacement", "true_anisotropic_brdf", "manufacturing_geometry"].map(String::from).into(),
+            dielectric_ior: "captured_body_value".into(),
+            persistence: "transient_request_binding; authored source bytes are built in".into(),
+            compatible_saved_methods: if cfg!(feature = "bundled-render-library") {
+                vec!["cpu_raytrace".into(), "gpu_path".into()]
+            } else {
+                Vec::new()
+            },
+            cpu_maps: "saved_builtin_opaque_only; direct_or_indirect_lighting; level_zero_bilinear; incompatible_optics_refuse".into(),
+            id: input.id.clone(),
+            param_warnings: Vec::new(),
+        },
+    )
 }
 
 #[derive(Deserialize)]
@@ -581,7 +645,9 @@ pub(super) struct RigInput {
     pub(super) subject_extent_mm: f64,
 }
 
-pub(super) fn rig_lighting(input: &RigInput, command: &str) -> Result<(StudioLighting, Value)> {
+/// The rig's lights and what it was scaled to, as `render.library.studio.prepare` and `.apply`
+/// report them; `rig_lighting` gives the same projection as JSON.
+fn rig_projection(input: &RigInput, command: &str) -> Result<(StudioLighting, RigProjection)> {
     let value = item("rigs", &input.id, command)?;
     if value["state"] != "authored_numeric_unbound" {
         return Err(bad(command, "rig requires unresolved calibration or an existing external sun"));
@@ -643,9 +709,21 @@ pub(super) fn rig_lighting(input: &RigInput, command: &str) -> Result<(StudioLig
     lighting.validate().map_err(|e| bad(command, e.to_string()))?;
     Ok((
         lighting,
-        json!({"id":input.id,"variant":input.variant,"passive_cards_omitted":if input.variant=="emitters_only" {cards}else{0},"passive_cards_included":if input.variant=="complete" {cards}else{0},"scale":scale,
-        "physical_units":"world millimetres; authored relative linear-sRGB radiance","reference_calibration_not_remeasured":true}),
+        RigProjection {
+            id: input.id.clone(),
+            variant: input.variant.clone(),
+            passive_cards_omitted: if input.variant == "emitters_only" { cards } else { 0 },
+            passive_cards_included: if input.variant == "complete" { cards } else { 0 },
+            scale,
+            physical_units: "world millimetres; authored relative linear-sRGB radiance".into(),
+            reference_calibration_not_remeasured: true,
+        },
     ))
+}
+
+pub(super) fn rig_lighting(input: &RigInput, command: &str) -> Result<(StudioLighting, Value)> {
+    let (lighting, projection) = rig_projection(input, command)?;
+    Ok((lighting, reply(command, projection)?))
 }
 
 pub(super) fn rig_stage(input: &RigInput, command: &str) -> Result<solidcraft_render::stage::Stage> {
@@ -774,10 +852,17 @@ pub(super) fn prepare_studio(s: &mut Session, params: &Value) -> Result<Value> {
     let command = "render.library.studio.prepare";
     let input: StudioPrepare = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
     let rig = RigInput { id: input.id, variant: input.variant, center_mm: input.center_mm, subject_extent_mm: input.subject_extent_mm };
-    let (lighting, projection) = rig_lighting(&rig, command)?;
+    let (lighting, projection) = rig_projection(&rig, command)?;
     let stage = rig_stage(&rig, command)?;
-    let mut report =
-        json!({"lighting":lighting,"stage":stage,"projection":projection,"requires_geometry_clearance_review":true,"document_changed":false});
+    let mut report = StudioPrepared {
+        lighting,
+        stage: stage.clone(),
+        projection,
+        requires_geometry_clearance_review: true,
+        document_changed: false,
+        cpu: None,
+        param_warnings: Vec::new(),
+    };
     if let Some(name) = input.name {
         let mut setup = super::patched_settings(s, &name, &input.set, command)?;
         let Some(RenderJob::CpuRaytrace { options, .. }) = &mut setup.job else {
@@ -791,18 +876,22 @@ pub(super) fn prepare_studio(s: &mut Session, params: &Value) -> Result<Value> {
         }
         setup.stage = stage;
         setup.validate().map_err(|e| bad(command, e.to_string()))?;
-        report["setup"] = json!(setup);
-        report["executor"] = json!("cpu-raytrace");
-        report["revision"] = json!(s.revision);
-        report["requires_indirect"] = json!(needs_indirect);
-        report["indirect_adoption"] = json!(
-            needs_indirect
-                .then_some(json!({"path_depth":8,"progressive_if_absent":{"samples_per_pixel":16,"seed":0},"primary_samples":1,"shadows":true}))
-        );
+        report.cpu = Some(CpuProjection {
+            setup,
+            executor: "cpu-raytrace".into(),
+            revision: s.revision,
+            requires_indirect: needs_indirect,
+            indirect_adoption: needs_indirect.then_some(IndirectAdoption {
+                path_depth: 8,
+                progressive_if_absent: ProgressiveDefaults { samples_per_pixel: 16, seed: 0 },
+                primary_samples: 1,
+                shadows: true,
+            }),
+        });
     } else if input.enable_indirect || input.set != json!({}) {
         return Err(bad(command, "CPU rig context needs name and typed set"));
     }
-    Ok(report)
+    reply(command, report)
 }
 
 #[derive(Deserialize)]
@@ -832,7 +921,7 @@ pub(super) fn apply_studio(s: &mut Session, params: &Value) -> Result<Value> {
     if !input.replace_stage && s.doc.render.setups.get(&input.name).is_some_and(|setup| !setup.stage.is_empty()) {
         return Err(bad(command, "existing stage requires replace_stage: true"));
     }
-    let (lighting, projection) = rig_lighting(&input.rig, command)?;
+    let (lighting, projection) = rig_projection(&input.rig, command)?;
     let mut setup = super::patched_settings(s, &input.name, &input.set, command)?;
     let stage = rig_stage(&input.rig, command)?;
     if !setup.stage.is_empty() && !input.replace_stage {
@@ -865,8 +954,15 @@ pub(super) fn apply_studio(s: &mut Session, params: &Value) -> Result<Value> {
     if settings != *s.doc.render {
         s.doc_mut().render = Arc::new(settings);
     }
-    Ok(
-        json!({"name":input.name,"setup":setup,"projection":projection,"clearance":"conservative product/stage AABB separation passed; not exact B-rep collision"}),
+    reply(
+        command,
+        StudioApplied {
+            name: input.name,
+            setup,
+            projection,
+            clearance: "conservative product/stage AABB separation passed; not exact B-rep collision".into(),
+            param_warnings: Vec::new(),
+        },
     )
 }
 

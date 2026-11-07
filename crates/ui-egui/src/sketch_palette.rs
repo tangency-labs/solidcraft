@@ -1218,6 +1218,55 @@ mod tests {
         assert!(h.app.session.active_sketch.is_none());
     }
 
+    /// With "Double Esc finishes the sketch" off (#12069), any number of quick presses only cancel
+    /// the tool and the selection, and the sketch stays open, blank or not; Finish Sketch still
+    /// ends it. On (the default) keeps the double press finishing it.
+    #[test]
+    fn escape_never_leaves_the_sketch_when_the_double_press_preference_is_off() {
+        assert!(crate::prefs::Prefs::default().escape_twice_finishes_sketch, "the default keeps today's double Esc");
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"escape_twice_finishes_sketch": false}));
+        assert!(!h.app.preferences.escape_twice_finishes_sketch, "set through the control channel");
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.settle();
+        let sketch = h.app.session.active_sketch;
+        assert!(sketch.is_some());
+        // Blank: a double Esc would take it away when the preference is on.
+        for _ in 0..10 {
+            h.step(&json!({"key":"Escape"})).unwrap();
+        }
+        h.settle();
+        assert_eq!(h.app.session.active_sketch, sketch, "ten quick presses keep the blank sketch open");
+
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
+        h.settle();
+        h.step(&json!({"start":"sketch.line"})).unwrap();
+        assert!(h.app.tool.is_some());
+        for _ in 0..4 {
+            h.step(&json!({"key":"Escape"})).unwrap();
+        }
+        h.settle();
+        assert!(h.app.tool.is_none(), "Esc still puts the tool down");
+        assert!(h.app.session.selection.is_empty(), "and clears the selection");
+        assert_eq!(h.app.session.active_sketch, sketch, "the sketch stays open");
+
+        h.app.finish_sketch();
+        h.settle();
+        assert!(h.app.session.active_sketch.is_none(), "Finish Sketch still ends it");
+        assert!(crate::scenario::handle_at("timeline:Sketch1").is_some(), "the sketch is kept");
+
+        // Back on, a quick double press finishes again.
+        h.call("ui.prefs", json!({"escape_twice_finishes_sketch": true}));
+        h.step(&json!({"click": {"handle": "timeline:Sketch1"}, "double": true})).unwrap();
+        h.settle();
+        assert!(h.app.session.active_sketch.is_some());
+        h.frames(60);
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.settle();
+        assert!(h.app.session.active_sketch.is_none(), "on: a double Esc finishes the sketch");
+    }
+
     /// A double Esc on a sketch left blank takes it away (no empty sketch in the browser or the
     /// timeline, one undo step) and leaves the view alone; one line is enough to keep it.
     #[test]

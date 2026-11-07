@@ -322,13 +322,13 @@ fn nullable<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Option<String>>, D
 
 /// A key's value as its handler reads it: `read` takes the raw JSON value, and anything it
 /// refuses gets the handler's own message, whole (no key put in front).
-fn read_with<'de, D: Deserializer<'de>, T>(d: D, message: &str, read: impl FnOnce(&Value) -> Option<T>) -> Result<Option<T>, D::Error> {
+pub(super) fn read_with<'de, D: Deserializer<'de>, T>(d: D, message: &str, read: impl FnOnce(&Value) -> Option<T>) -> Result<Option<T>, D::Error> {
     let value = Value::deserialize(d)?;
     read(&value).map(Some).ok_or_else(|| serde::de::Error::custom(whole(message)))
 }
 
 /// A value `T` deserializes from, or the handler's message.
-fn read_as<'de, D: Deserializer<'de>, T: serde::de::DeserializeOwned>(d: D, message: &str) -> Result<Option<T>, D::Error> {
+pub(super) fn read_as<'de, D: Deserializer<'de>, T: serde::de::DeserializeOwned>(d: D, message: &str) -> Result<Option<T>, D::Error> {
     read_with(d, message, |v| serde_json::from_value(v.clone()).ok())
 }
 

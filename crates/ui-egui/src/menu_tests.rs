@@ -840,6 +840,20 @@ fn canvas_menu_hides_renames_calibrates_and_deletes() {
     assert!(app.session.doc.canvases.is_empty());
     app.run("edit.undo", json!({})).unwrap();
     assert_eq!(app.session.doc.canvases.len(), 1);
+    // A locked canvas (#12310) can't be edited, calibrated or deleted, from its menu or the Delete key.
+    act(&mut app, &t, "Lock");
+    assert!(app.session.doc.canvases[0].locked);
+    let items = context_menu::items(&app, &t);
+    for label in ["Edit Canvas", "Calibrate", "Delete"] {
+        let item = find(&items, label);
+        assert!(!item.enabled && item.tip.as_deref() == Some(crate::i18n::tr("browser.canvas_locked")), "{label}: {item:?}");
+    }
+    assert!(find(&items, "Show/Hide").enabled && find(&items, "Rename").enabled);
+    app.tree.picked_canvases = vec![id];
+    crate::delete::delete_selection(&mut app);
+    assert_eq!(app.session.doc.canvases.len(), 1, "the locked canvas stays");
+    act(&mut app, &t, "Unlock");
+    assert!(!app.session.doc.canvases[0].locked);
     // A canvas picked in the browser goes with the Delete key.
     app.tree.picked_canvases = vec![id];
     crate::delete::delete_selection(&mut app);
