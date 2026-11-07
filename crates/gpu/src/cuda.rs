@@ -419,6 +419,12 @@ impl CudaBackend {
         GLOBAL_CUDA.get_or_init(Self::init).as_ref()
     }
 
+    /// Selects the highest-throughput CUDA device supporting at least `sm_70` (`compute_70` PTX),
+    /// ranked by `(sm_count, compute_capability, total_vram_bytes)`.
+    pub(crate) fn select_best_device(devices: &[CudaDeviceInfo]) -> Option<CudaDeviceInfo> {
+        devices.iter().filter(|d| d.compute_capability >= (7, 0)).max_by_key(|d| (d.sm_count, d.compute_capability, d.total_vram_bytes)).cloned()
+    }
+
     /// Probes all CUDA devices via the Driver API, selects the highest-throughput GPU, and loads PTX modules.
     fn init() -> Option<Self> {
         let api = CudaDriverApi::load()?;
@@ -479,8 +485,8 @@ impl CudaBackend {
             });
         }
 
-        // Select the highest-throughput GPU (by SM count, then compute capability, then VRAM).
-        let best = all_devices.iter().max_by_key(|d| (d.sm_count, d.compute_capability, d.total_vram_bytes))?.clone();
+        // Select the highest-throughput GPU supporting at least sm_70 (by SM count, then compute capability, then VRAM).
+        let best = Self::select_best_device(&all_devices)?;
 
         let mut dev: CUdevice = 0;
         // SAFETY: `best.ordinal` was validated above.

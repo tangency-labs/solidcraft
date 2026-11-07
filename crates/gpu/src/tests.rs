@@ -524,7 +524,7 @@ fn multi_backend_bicubic_patch_f32_and_f64_dmma_parity() {
 /// and does not misidentify consumer Ampere/Ada (sm_86, sm_87, sm_89) GPUs as having hardware FP64 tensor cores.
 #[test]
 fn cuda_fp64_tensor_core_detection_rules() {
-    use crate::cuda::CudaBackend;
+    use crate::cuda::{CudaBackend, CudaDeviceInfo};
     if let Some(cuda) = CudaBackend::global() {
         let dev = cuda.device_info();
         let (major, minor) = dev.compute_capability;
@@ -536,6 +536,27 @@ fn cuda_fp64_tensor_core_detection_rules() {
         );
         assert_eq!(cuda.has_fp64_tensor_core(), expected_hw_fp64 && cuda.has_ampere_ptx());
     }
+
+    // Verify `select_best_device` filters out pre-sm_70 devices even when they have more SMs,
+    // and breaks ties among eligible sm_70+ devices by `(sm_count, compute_capability, total_vram_bytes)`.
+    let mk_dev = |ordinal: i32, cc: (i32, i32), sm_count: i32, vram: usize| CudaDeviceInfo {
+        ordinal,
+        name: format!("GPU-{ordinal}"),
+        compute_capability: cc,
+        sm_count,
+        clock_khz: 1_500_000,
+        memory_bus_bits: 256,
+        l2_cache_bytes: 4 * 1024 * 1024,
+        total_vram_bytes: vram,
+        supports_ampere_ptx: cc.0 >= 8,
+        supports_fp64_tensor_core: false,
+        supports_rt_core: cc >= (7, 5),
+    };
+    let pascal_only = [mk_dev(0, (6, 1), 28, 11 << 30), mk_dev(1, (0, 0), 64, 16 << 30)];
+    assert!(CudaBackend::select_best_device(&pascal_only).is_none());
+
+    let mixed = [mk_dev(0, (6, 1), 28, 11 << 30), mk_dev(1, (8, 6), 20, 8 << 30), mk_dev(2, (7, 5), 20, 16 << 30)];
+    assert_eq!(CudaBackend::select_best_device(&mixed).expect("eligible gpu").ordinal, 1);
 }
 
 /// Verifies 3-ray watertight point-in-solid classification parity across CPU, Vulkan, CUDA PTX, and RT/BVH backends, including empty-BVH fallback.
