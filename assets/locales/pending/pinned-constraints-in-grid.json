@@ -1,0 +1,26 @@
+{
+  "en": {
+    "prefs.pinned_constraints_in_grid": "Show pinned constraints in the constraint grid",
+    "prefs.pinned_constraints_in_grid_note": "Constraints you pin to the sketch ribbon's Constrain panel are drawn as small icons in its grid, next to the default ones. Off: each is a full-size button with its name."
+  },
+  "ar": {
+    "prefs.pinned_constraints_in_grid": "إظهار القيود المثبتة في شبكة القيود",
+    "prefs.pinned_constraints_in_grid_note": "تُرسم القيود التي تثبّتها في لوحة «تقييد» بشريط الرسم كأيقونات صغيرة في شبكتها بجانب القيود الافتراضية. عند الإيقاف: يظهر كل منها زرًا كامل الحجم مع اسمه."
+  },
+  "he": {
+    "prefs.pinned_constraints_in_grid": "הצג אילוצים מוצמדים ברשת האילוצים",
+    "prefs.pinned_constraints_in_grid_note": "אילוצים שתצמיד ללוח האילוצים בסרגל השרטוט מוצגים כסמלים קטנים ברשת שלו, לצד אילוצי ברירת המחדל. כבוי: כל אחד מהם הוא כפתור בגודל מלא עם שמו."
+  },
+  "ja": {
+    "prefs.pinned_constraints_in_grid": "ピン留めした拘束を拘束グリッドに表示",
+    "prefs.pinned_constraints_in_grid_note": "スケッチリボンの拘束パネルにピン留めした拘束は、既定の拘束と並んでグリッド内の小さなアイコンとして表示されます。オフ: それぞれ名前付きの通常サイズのボタンになります。"
+  },
+  "vi": {
+    "prefs.pinned_constraints_in_grid": "Hiện ràng buộc đã ghim trong lưới ràng buộc",
+    "prefs.pinned_constraints_in_grid_note": "Các ràng buộc bạn ghim vào bảng Ràng buộc của thanh công cụ phác thảo được vẽ thành biểu tượng nhỏ trong lưới, cạnh các ràng buộc mặc định. Tắt: mỗi ràng buộc là một nút cỡ đầy đủ kèm tên."
+  },
+  "zh": {
+    "prefs.pinned_constraints_in_grid": "在约束网格中显示已固定的约束",
+    "prefs.pinned_constraints_in_grid_note": "固定到草图功能区“约束”面板的约束会以小图标显示在网格中，与默认约束并列。关闭时：每个约束都是带名称的全尺寸按钮。"
+  }
+}
