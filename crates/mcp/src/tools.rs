@@ -1013,7 +1013,7 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
         "export" => exec(
             b,
             "file.export",
-            pick(a, &["path", "format", "bodies", "mesh_prefix", "effort", "velocity", "mimic", "collision", "images", "name", "static", "model_uris"]),
+            pick(a, &["path", "format", "bodies", "mesh_prefix", "place_meshes", "effort", "velocity", "mimic", "collision", "images", "name", "static", "model_uris"]),
         ),
         "crash_reports" => match a.get("id") {
             Some(_) => exec(b, "diagnostics.crash_report", pick(a, &["id"])),
@@ -1224,7 +1224,7 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
         "redo" => mapped("edit.redo", json!({})),
         "export" => mapped(
             "file.export",
-            pick(a, &["path", "format", "bodies", "mesh_prefix", "effort", "velocity", "mimic", "collision", "images", "name", "static", "model_uris"]),
+            pick(a, &["path", "format", "bodies", "mesh_prefix", "place_meshes", "effort", "velocity", "mimic", "collision", "images", "name", "static", "model_uris"]),
         ),
         "save" => mapped("file.save", pick(a, &["path", "format"])),
         "open" => mapped("doc.open", pick(a, &["path", "up", "names", "geometry"])),
