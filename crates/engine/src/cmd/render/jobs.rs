@@ -991,6 +991,10 @@ pub(super) fn export(s: &mut Session, params: &Value) -> Result<Value> {
             .linear_exr()
             .ok_or_else(|| bad("render.export", "this completed job has no raw linear master; enable retention before rendering"))?,
     };
+    // Typed before the write: a conversion that fails then leaves no file behind.
+    let frame_info = retyped("render.export", &frame.info)?;
+    let linear_master = frame.linear_master_info().map(|info| retyped("render.export", info)).transpose()?;
+    let presentation = frame.presentation().map(|info| retyped("render.export", info)).transpose()?;
     // Replace atomically without reading an arbitrarily large previous target into memory.
     // Design saves retain their independent backup policy.
     let result =
@@ -1004,9 +1008,9 @@ pub(super) fn export(s: &mut Session, params: &Value) -> Result<Value> {
         format: input.format,
         encoding: if exr { "scene_linear_srgb_d65" } else { "srgb" },
         alpha: if exr { "coverage_premultiplied" } else { "straight" },
-        frame: retyped("render.export", &frame.info)?,
-        linear_master: frame.linear_master_info().map(|info| retyped("render.export", info)).transpose()?,
-        presentation: frame.presentation().map(|info| retyped("render.export", info)).transpose()?,
+        frame: frame_info,
+        linear_master,
+        presentation,
         param_warnings: Vec::new(),
     };
     super::typed_reply("render.export", reply)
