@@ -1616,6 +1616,12 @@ preference_settings! {
     save_mesh_format: String = "stl".into();
     /// URDF export writes motion links as `<mimic>` (false: each joint is free, as before).
     urdf_mimic: bool = true;
+    /// URDF export writes the meshes where the mesh prefix points, making its folder (false:
+    /// next to the URDF whatever the prefix says, as before).
+    urdf_place_meshes: bool = true, PAGE_GENERAL => check_tr("prefs.urdf_place_meshes");
+    /// File › Export URDF… asks for its options first (false: straight to the save picker, as
+    /// before, exporting with the options last chosen).
+    urdf_export_dialog: bool = true, PAGE_GENERAL => check_tr("prefs.urdf_export_dialog");
     /// Hidden edges in the current-view DXF export (false: omit, true: dashed).
     view_dxf_dashed: bool = false;
     /// Model-space chord tolerance for current-view DXF curves, in millimetres.
