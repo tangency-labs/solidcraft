@@ -41,12 +41,12 @@
   },
   {
     "case": "fillets/cov-fillet-g2-five-edge-apex-corner",
-    "issue": "tangency-labs/solidcore#2951",
+    "issue": "tangency-labs/solidcore#2697",
     "reason": "step 12 (solid.fillet): invalid input: the setback must be more than 3.5056 mm at the corner (-0.000, 0.000, 30.000): the rounds' contact lines meet 3"
   },
   {
     "case": "fillets/cov-fillet-g2-four-edge-apex-corner",
-    "issue": "tangency-labs/solidcore#2951",
+    "issue": "tangency-labs/solidcore#2697",
     "reason": "step 11 (solid.fillet): invalid input: the setback must be more than 3.9027 mm at the corner (0.000, 0.000, 30.000): the rounds' contact lines meet 3."
   },
   {
@@ -56,8 +56,8 @@
   },
   {
     "case": "fillets/cov-fillet-g2-oblique-three-edge-corner",
-    "issue": "solidcore#2250",
-    "reason": "refused on solidcore: its three edges meet at different wedge angles, and one curvature fillet takes the first edge's equal-area thumbweight for every edge (solidcore#2250, issuecomment-6563419897); SMLib d01d7b0 fails it too"
+    "issue": "tangency-labs/solidcore#2697",
+    "reason": "not run here: the corner is a blend_setback_open call, which the rig has not ported yet; it waits on that port and on the certified G2 corner fill"
   },
   {
     "case": "fillets/cov-fillet-g2-pocket-corner",
