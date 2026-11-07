@@ -480,8 +480,11 @@ fn an_adopted_model_mirrors_at_the_designs_own_pose() {
     run(&mut s, "solid.box", json!({"corner": [0, -100, 0], "length": 10, "width": 10, "height": 10, "body_name": "Later"}));
     let saved = s.model.saved(&s.doc).unwrap();
     run(&mut s, "joint.drive", json!({"joint": "Pan", "value": 40, "quiet": true}));
-    let mut adopted = solidcraft_doc::Model::adopt(&s.doc, &saved).unwrap();
-    adopted.evaluate(&s.doc);
-    s.model = adopted;
+    // As opening installs it, before any evaluation; and once evaluated.
+    s.model = solidcraft_doc::Model::adopt(&s.doc, &saved).unwrap();
+    assert_model_as_evaluated_afresh(&s);
+    let before = s.model.recomputed;
+    s.model.evaluate(&s.doc);
+    assert_eq!(s.model.recomputed, before, "the adopted model is current");
     assert_model_as_evaluated_afresh(&s);
 }
