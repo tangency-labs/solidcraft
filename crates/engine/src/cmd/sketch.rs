@@ -1956,6 +1956,12 @@ fn polygon_edge(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 pub(super) fn slot(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w: f64) -> Result<Value> {
+    let (out, info) = slot_parts(s, p, cmd, c0, c1, w)?;
+    Ok(result(out, info))
+}
+
+/// What [`slot`] adds: the curve and constraint ids, and the sketch's solve.
+pub(super) fn slot_parts(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w: f64) -> Result<((Vec<String>, Vec<String>), Value)> {
     let h = w / 2.0;
     let d = (c1 - c0).normalized().ok_or_else(|| bad(cmd, "the slot ends must differ"))?;
     let n = d.perp();
@@ -1974,7 +1980,7 @@ pub(super) fn slot(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w:
         cons.push(add_c(sk, ConstraintKind::Equal { a: a0, b: a1 })?);
         Ok((ids_of(sk, &[l1, a1, l2, a0]), cons))
     })?;
-    Ok(result(out, info))
+    Ok((out, info))
 }
 
 fn slot_c2c(s: &mut Session, p: &Value) -> Result<Value> {
