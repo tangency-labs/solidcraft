@@ -8,6 +8,9 @@ use super::*;
 /// only an immutable Session during refresh; a layout tick cannot run a document
 /// command. Explicit content commands stay on the separate supplied sink.
 pub trait AppPanelServices {
+    fn refresh_workspace(&mut self, _workspace: &WorkspaceId) -> PanelResult<()> {
+        Ok(())
+    }
     fn refresh_read_only(&mut self, session: &Session) -> PanelResult<()>;
     fn services(&mut self) -> ContentServices<'_>;
 }
@@ -21,6 +24,7 @@ pub struct AppPanelRuntime {
     last_error: Option<PanelError>,
     catalogue: Box<dyn commands::LayoutCatalogue>,
     adapters_set: bool,
+    pub(super) preferences: Option<super::preferences::PreferenceSession>,
 }
 impl AppPanelRuntime {
     pub fn new(runtime: PanelRuntime, services: Box<dyn AppPanelServices>) -> PanelResult<Self> {
@@ -37,6 +41,7 @@ impl AppPanelRuntime {
             last_error: None,
             catalogue: Box::<commands::InMemoryCatalogue>::default(),
             adapters_set: false,
+            preferences: None,
         })
     }
     pub fn last_error(&self) -> Option<&PanelError> {
@@ -45,9 +50,210 @@ impl AppPanelRuntime {
     pub fn runtime(&self) -> &PanelRuntime {
         &self.runtime
     }
+    pub(super) fn install_preference_catalogue(
+        &mut self,
+        catalogue: super::preferences::PreferenceCatalogue,
+        state: super::preferences::PreferenceSession,
+    ) -> PanelResult<()> {
+        self.runtime.require_live()?;
+        if self.preferences.is_some() || self.adapters_set {
+            return Err(error(Rule::Lifecycle, "application panel catalogue is already installed"));
+        }
+        self.catalogue = Box::new(catalogue);
+        self.preferences = Some(state);
+        Ok(())
+    }
+    pub(super) fn preference_record(&self) -> PanelResult<super::preferences::PreferenceRecord> {
+        let state = self.preferences.as_ref().ok_or_else(|| error(Rule::Lifecycle, "panel preferences are not enabled"))?;
+        if let Some(record) = &state.pending {
+            return Ok(record.clone());
+        }
+        Ok(super::preferences::PreferenceRecord {
+            version: 1,
+            selected: self.runtime.layout().layout().workspace.clone(),
+            catalogue: self.catalogue.state().export()?,
+            rejected: state.rejected.clone(),
+            legacy: state.legacy.clone(),
+        })
+    }
+    pub(super) fn preference_preset_names(&self) -> Vec<String> {
+        self.catalogue.state().builtin_presets().chain(self.catalogue.state().user_presets()).map(|(name, _)| name.to_string()).collect()
+    }
+    pub(super) fn preference_catalogue_state(&self) -> &commands::CatalogueState {
+        self.catalogue.state()
+    }
+    pub(super) fn current_preference_envelope(&self) -> PanelResult<LayoutEnvelope> {
+        commands::current_envelope_snapshot(self.catalogue.as_ref(), &self.runtime.layout().inspect(), self.runtime.layout().registry())
+    }
+    pub(super) fn preference_user_preset_names(&self) -> Vec<String> {
+        self.catalogue.state().user_presets().map(|(name, _)| name.to_string()).collect()
+    }
+    pub(super) fn restore_preference_record(&mut self, session: &Session, record: super::preferences::PreferenceRecord) -> PanelResult<()> {
+        let next = record.catalogue(self.runtime.layout().registry())?;
+        let stored = next.remembered(&record.selected).ok_or_else(|| error(Rule::MissingTarget, "saved selected workspace has no layout"))?;
+        let mut envelope = stored.project_envelope(self.runtime.layout().registry(), &record.selected)?;
+        restore_quarantine(&mut envelope, self.runtime.layout().registry())?;
+        self.restore_preference_catalogue(session, next, envelope)?;
+        if let Some(state) = &mut self.preferences {
+            state.pending = None;
+            state.failed = false;
+            state.failed_environment = None;
+            state.rejected = record.rejected;
+            state.legacy = record.legacy;
+        }
+        Ok(())
+    }
+    pub(super) fn restore_profile_layouts(&mut self, session: &Session, profile: super::preferences::ProfileLayouts) -> PanelResult<()> {
+        if self.preferences.as_ref().is_some_and(|state| state.pending.is_some()) {
+            return Err(error(Rule::Availability, "restore the saved panel layout before applying a profile"));
+        }
+        let registry = self.runtime.layout().registry();
+        let mut next = commands::InMemoryCatalogue::from_snapshot(&self.catalogue.state().export()?, registry)?;
+        use commands::LayoutCatalogue as _;
+        let current_workspace = self.runtime.layout().layout().workspace.clone();
+        let selected = profile.selected.clone().unwrap_or_else(|| current_workspace.clone());
+        let descriptors = next.state().summaries();
+        let mut incoming = None;
+        for (workspace, record) in profile.workspaces {
+            if record.layout.instances.iter().any(|instance| registry.get(&instance.kind).is_err()) {
+                return Err(error(Rule::Availability, "profile panel kind is not registered; keep the saved profile for retry"));
+            }
+            let target = if profile.selected.is_none() { current_workspace.clone() } else { workspace };
+            let descriptor = descriptors
+                .iter()
+                .find(|descriptor| descriptor.id == target)
+                .ok_or_else(|| error(Rule::MissingTarget, "profile layout workspace is not registered"))?;
+            let current = if target == current_workspace {
+                commands::current_envelope_snapshot(self.catalogue.as_ref(), &self.runtime.layout().inspect(), registry)?
+            } else {
+                let stored = next.state().remembered(&target).map(Ok).unwrap_or_else(|| next.state().preset(&descriptor.default_preset))?;
+                let raw = decode_retained_record(stored.bytes(), registry)?;
+                let mut envelope = stored.project_envelope(registry, &raw.layout.workspace)?;
+                envelope.layout.workspace = target.clone();
+                envelope
+            };
+            let mut projected = record.layout;
+            projected.workspace = target.clone();
+            let envelope = with_live_layout(&current, projected, registry)?;
+            let rejected = self.catalogue.state().remembered(&target).and_then(|stored| stored.rejected());
+            next.remember(&envelope, rejected, registry)?;
+            if target == selected {
+                incoming = Some(envelope);
+            }
+        }
+        self.restore_preference_catalogue(
+            session,
+            next.state().clone(),
+            incoming.ok_or_else(|| error(Rule::MissingTarget, "selected profile workspace has no arrangement"))?,
+        )
+    }
+    fn reset_pending_preferences(&mut self, session: &Session, record: super::preferences::PreferenceRecord) -> PanelResult<serde_json::Value> {
+        let registry = self.runtime.layout().registry();
+        let mut catalogue = commands::InMemoryCatalogue::from_snapshot(&record.catalogue, registry)?;
+        use commands::LayoutCatalogue as _;
+        let descriptor = catalogue
+            .state()
+            .summaries()
+            .into_iter()
+            .find(|item| item.id == record.selected)
+            .ok_or_else(|| error(Rule::MissingTarget, "saved workspace has no default"))?;
+        let stored = catalogue.state().preset(&descriptor.default_preset)?;
+        let raw = decode_retained_record(stored.bytes(), registry)?;
+        let mut envelope = stored.project_envelope(registry, &raw.layout.workspace)?;
+        envelope.layout.workspace = record.selected.clone();
+        catalogue.remember(&envelope, None, registry)?;
+        self.restore_preference_catalogue(session, catalogue.state().clone(), envelope)?;
+        if let Some(state) = &mut self.preferences {
+            let original = record.value();
+            state.rejected = record.rejected.or(Some(original));
+            state.legacy = record.legacy;
+            state.pending = None;
+            state.failed = false;
+            state.failed_environment = None;
+        }
+        serde_json::to_value(self.runtime.layout().inspect()).map_err(|_| error(Rule::Schema, "cannot encode layout reset reply"))
+    }
+    pub(super) fn preference_identity_reservations(&self) -> PanelResult<std::collections::BTreeSet<SectionId>> {
+        let envelope =
+            commands::current_envelope_snapshot(self.catalogue.as_ref(), &self.runtime.layout().inspect(), self.runtime.layout().registry())?;
+        Ok(preparation_context(&envelope)?.sections)
+    }
+    pub(super) fn apply_legacy_preferences(
+        &mut self,
+        session: &Session,
+        mutations: Vec<Mutation>,
+        weights: Vec<(InstanceId, f32)>,
+        legacy: super::preferences::LegacyPanelPlacements,
+    ) -> PanelResult<()> {
+        self.reconcile(session)?;
+        self.refresh_metrics()?;
+        self.refresh_reservations()?;
+        self.with_command_context(|context| {
+            let current = context.sink.inspect();
+            let source_catalogue = context.catalogue.state().clone();
+            let source = commands::current_envelope_snapshot(context.catalogue, &current, context.registry)?;
+            let preparation = preparation_context(&source)?;
+            let action = LayoutAction::Apply { expected_revision: Some(current.revision), mutations };
+            let mut projected = context.sink.project_in_context(action, &preparation)?;
+            for (instance, weight) in weights {
+                let id = projected.containing(&instance)?.id.clone();
+                let section = projected
+                    .sections
+                    .iter_mut()
+                    .find(|section| section.id == id)
+                    .ok_or_else(|| error(Rule::MissingTarget, "legacy section disappeared"))?;
+                section.weight = weight;
+            }
+            let envelope = with_live_layout(&source, projected, context.registry)?;
+            let incoming = preparation_context(&envelope)?;
+            let action = LayoutAction::Replace { expected_revision: Some(current.revision), layout: envelope.layout.clone() };
+            let mut catalogue = commands::InMemoryCatalogue::from_snapshot(&context.catalogue.state().export()?, context.registry)?;
+            let rejected = context.catalogue.state().remembered(&envelope.layout.workspace).and_then(|record| record.rejected());
+            catalogue.remember(&envelope, rejected, context.registry)?;
+            use commands::LayoutCatalogue as _;
+            let prepared = context.catalogue.prepare(catalogue.state().clone())?;
+            check_preference_source(context, &source_catalogue, current.revision, &preparation)?;
+            context.sink.project_in_context(action.clone(), &incoming)?;
+            context.sink.dispatch_in_context(action, &incoming)?;
+            context.catalogue.publish(prepared);
+            Ok(())
+        })?;
+        if let Some(state) = &mut self.preferences {
+            state.legacy = Some(legacy);
+        }
+        Ok(())
+    }
+    fn restore_preference_catalogue(&mut self, session: &Session, next: commands::CatalogueState, envelope: LayoutEnvelope) -> PanelResult<()> {
+        if let Some(host) = &mut self.host {
+            host.cancel_gesture();
+        }
+        self.reconcile(session)?;
+        self.refresh_metrics()?;
+        self.refresh_reservations()?;
+        let preparation = preparation_context(&envelope)?;
+        self.with_command_context(|context| {
+            let current = context.sink.inspect();
+            let revision = current.revision;
+            let source_catalogue = context.catalogue.state().clone();
+            let source = commands::current_envelope_snapshot(context.catalogue, &current, context.registry)?;
+            let source_context = preparation_context(&source)?;
+            let action = LayoutAction::Replace { expected_revision: Some(revision), layout: envelope.layout };
+            // Both catalogue staging and the exact incoming-context host proposal
+            // complete before either committed owner changes.
+            let prepared = context.catalogue.prepare(next)?;
+            check_preference_source(context, &source_catalogue, revision, &source_context)?;
+            context.sink.project_in_context(action.clone(), &preparation)?;
+            context.sink.dispatch_in_context(action, &preparation)?;
+            context.catalogue.publish(prepared);
+            Ok(())
+        })
+    }
     /// Internal capability injection. Production preferences/native realization
     /// remain peer work. Installation is once-only and precedes native hosts.
     pub fn set_command_adapters(&mut self, catalogue: Box<dyn commands::LayoutCatalogue>, native: Box<dyn NativeHostAdapter>) -> PanelResult<()> {
+        if self.preferences.is_some() {
+            return Err(error(Rule::Lifecycle, "application panel preferences already own the catalogue"));
+        }
         self.set_native_adapter(native)?;
         self.catalogue = catalogue;
         self.adapters_set = true;
@@ -60,14 +266,30 @@ impl AppPanelRuntime {
             host.cancel_gesture();
         }
         let command = commands::parse_command(id, params)?;
+        if !matches!(id, "panel.list" | "layout.get" | "layout.reset") && self.preferences.as_ref().is_some_and(|state| state.pending.is_some()) {
+            return Err(error(Rule::Availability, "saved panel layout restoration is pending; reset explicitly to recover"));
+        }
         self.reconcile(session)?;
         if !matches!(&command, commands::PanelCommand::HeaderAction(_)) {
             self.refresh_metrics()?;
             self.refresh_reservations()?;
         }
+        if id == "layout.reset"
+            && let Some(record) = self.preferences.as_ref().and_then(|state| state.pending.clone())
+        {
+            if let commands::PanelCommand::Reset(params) = &command
+                && params.expected_revision.is_some_and(|revision| revision != self.runtime.layout().inspect().revision)
+            {
+                return Err(error(Rule::Revision, "layout changed before reset"));
+            }
+            return self.reset_pending_preferences(session, record);
+        }
         self.with_command_context(|context| commands::execute_command(command, context))
     }
     pub fn command_batch(&mut self, session: &Session, steps: &[serde_json::Value]) -> PanelResult<serde_json::Value> {
+        if self.preferences.as_ref().is_some_and(|state| state.pending.is_some()) {
+            return Err(error(Rule::Availability, "saved panel layout restoration is pending"));
+        }
         if let Some(host) = &mut self.host {
             host.cancel_gesture();
         }
@@ -132,6 +354,9 @@ impl AppPanelRuntime {
         }
     }
     pub fn dispatch(&mut self, session: &Session, action: LayoutAction) -> PanelResult<LayoutReply> {
+        if action != LayoutAction::Inspect && self.preferences.as_ref().is_some_and(|state| state.pending.is_some()) {
+            return Err(error(Rule::Availability, "saved panel layout restoration is pending"));
+        }
         if let Some(host) = &mut self.host {
             host.cancel_gesture();
         }
@@ -220,6 +445,49 @@ impl AppPanelRuntime {
             capacity,
             chrome,
         );
+        let environment = if result.is_ok() && self.preferences.as_ref().is_some_and(|state| state.pending.is_some()) {
+            let reference =
+                self.host.as_ref().ok_or_else(|| error(Rule::Lifecycle, "universal panel host disabled"))?.command_reference(&self.runtime)?;
+            Some((
+                reference.render_domain,
+                reference.allocation_environment,
+                reference.geometry_policy.content_revision,
+                self.runtime.environment().clone(),
+                reference.chrome_obstacles,
+                self.native.capabilities(),
+            ))
+        } else {
+            None
+        };
+        if let Some(state) = &mut self.preferences
+            && state.failed
+            && state.failed_environment != environment
+        {
+            state.failed = false;
+        }
+        if result.is_ok()
+            && let Some(record) = self.preferences.as_ref().filter(|state| !state.failed).and_then(|state| state.pending.clone())
+        {
+            match self.restore_preference_record(session, record) {
+                Ok(()) => {
+                    self.refresh_metrics()?;
+                    self.refresh_reservations()?;
+                    self.host.as_mut().ok_or_else(|| error(Rule::Lifecycle, "universal panel host disabled"))?.prepare_in_domain(
+                        &self.runtime,
+                        render_domain,
+                        capacity,
+                        chrome,
+                    )?;
+                }
+                Err(reason) => {
+                    if let Some(state) = &mut self.preferences {
+                        state.failed = true;
+                        state.failed_environment = environment;
+                    }
+                    self.last_error = Some(reason);
+                }
+            }
+        }
         if result.is_err() {
             self.with_adapters(|runtime, _native, services| runtime.mount_in_app(&ResolvedLayout::default(), &mut EmptyPanelHost, services))?;
         }
@@ -244,6 +512,14 @@ impl AppPanelRuntime {
         }
         let mut services = self.services.services();
         let host = self.host.as_mut().ok_or_else(|| error(Rule::Lifecycle, "universal panel host disabled"))?;
+        if self.preferences.as_ref().is_some_and(|state| state.pending.is_some()) {
+            host.cancel_gesture();
+            // A fallback frame is observable while recovery is pending, but no
+            // body/header gesture may commit into an unpublished catalogue.
+            let result = ui.add_enabled_ui(false, |ui| host.show_deferred(ui, &mut self.runtime, self.native.as_mut(), &mut services)).inner;
+            host.cancel_gesture();
+            return result;
+        }
         if deferred {
             host.show_deferred(ui, &mut self.runtime, self.native.as_mut(), &mut services)
         } else {
@@ -253,6 +529,12 @@ impl AppPanelRuntime {
     /// Finish after every window/modal has registered its current layer. Refresh
     /// current Session again before dispatch, without a background update.
     pub fn finish_host(&mut self, session: &Session, ui: &mut egui::Ui) -> PanelResult<()> {
+        if self.preferences.as_ref().is_some_and(|state| state.pending.is_some()) {
+            if let Some(host) = &mut self.host {
+                host.cancel_gesture();
+            }
+            return Ok(());
+        }
         if !self.host.as_ref().is_some_and(WorkspacePanelHost::has_pending) {
             return Ok(());
         }
@@ -305,6 +587,7 @@ impl AppPanelRuntime {
         let before = self.runtime.environment().clone();
         let revision = self.runtime.layout().inspect().revision;
         let result = (|| {
+            self.services.refresh_workspace(&self.runtime.layout().layout().workspace)?;
             self.services.refresh_read_only(session)?;
             let mut environment = self.runtime.environment().clone();
             environment.document = Some(DocumentId::new(session.document_id.clone())?);
@@ -312,7 +595,7 @@ impl AppPanelRuntime {
         })();
         match &result {
             Ok(()) => {
-                if self.runtime.update_errors().is_empty() {
+                if self.runtime.update_errors().is_empty() && !self.preferences.as_ref().is_some_and(|state| state.failed) {
                     self.last_error = None;
                 }
                 if (self.runtime.environment() != &before || self.runtime.layout().inspect().revision != revision)
@@ -334,7 +617,9 @@ impl AppPanelRuntime {
         result
     }
     pub fn tick(&mut self, session: &Session) -> PanelResult<()> {
-        let result = match self.services.refresh_read_only(session) {
+        let refreshed =
+            self.services.refresh_workspace(&self.runtime.layout().layout().workspace).and_then(|()| self.services.refresh_read_only(session));
+        let result = match refreshed {
             Ok(()) => (|| {
                 let mut environment = self.runtime.environment().clone();
                 environment.document = Some(DocumentId::new(session.document_id.clone())?);
@@ -548,10 +833,12 @@ impl crate::SolveApp {
         self.panel_runtime.as_mut().ok_or_else(|| error(Rule::Lifecycle, "panel runtime disabled"))?.tick(&self.session)
     }
     pub fn disable_panel_runtime(&mut self) -> PanelResult<()> {
+        let saved = super::preferences::preferences_value(self);
         if let Some(integration) = &mut self.panel_runtime {
             integration.shutdown()?;
         }
         self.panel_runtime = None;
+        self.panel_layout_preferences.record = saved;
         Ok(())
     }
 }
@@ -564,8 +851,33 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
         }
         integration.last_tick_frame = Some(frame);
         // Errors remain inspectable without inventing untranslated production UI.
-        integration.last_error = integration.tick(&app.session).err();
+        let result = integration.tick(&app.session);
+        if result.is_err() || !integration.preferences.as_ref().is_some_and(|state| state.failed) {
+            integration.last_error = result.err();
+        }
     }
+    if app
+        .panel_runtime
+        .as_ref()
+        .and_then(|integration| integration.preferences.as_ref())
+        .is_some_and(|state| state.failed || state.rejected.is_some())
+    {
+        super::preferences::report_notice(app);
+    }
+}
+
+fn check_preference_source(
+    context: &commands::PanelCommandContext<'_>,
+    catalogue: &commands::CatalogueState,
+    revision: u64,
+    preparation: &LayoutPreparationContext,
+) -> PanelResult<()> {
+    let current = context.sink.inspect();
+    let envelope = commands::current_envelope_snapshot(context.catalogue, &current, context.registry)?;
+    if context.catalogue.state() != catalogue || current.revision != revision || preparation_context(&envelope)? != *preparation {
+        return Err(error(Rule::Revision, "panel preference source changed during storage staging"));
+    }
+    Ok(())
 }
 
 /// Called on the actual hidden transition, including a control-channel Home

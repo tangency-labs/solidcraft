@@ -529,6 +529,7 @@ pub(crate) enum EscapeOwner {
 pub struct SolveApp {
     /// Common panel foundation, internal opt-in; stays on the app across document tabs.
     pub(crate) panel_runtime: Option<panel_runtime::AppPanelRuntime>,
+    pub(crate) panel_layout_preferences: panel_runtime::PanelLayoutPreferences,
     pub blur: blur::State,
     pub(crate) blur_session: blur::Session,
     pub(crate) viewport_status: ui_kit::StatusPresentation,
@@ -835,6 +836,7 @@ impl SolveApp {
         let (shot_tx, shot_rx) = std::sync::mpsc::channel();
         let mut app = SolveApp {
             panel_runtime: None,
+            panel_layout_preferences: panel_runtime::PanelLayoutPreferences::default(),
             viewport_status: Default::default(),
             blur: Default::default(),
             blur_session: Default::default(),
@@ -1081,8 +1083,23 @@ impl SolveApp {
         self.viewport.adapter = format!("{:?} · {}", info.backend, info.name);
     }
 
-    /// Preferences kept between runs (JSON), for the host to store.
+    /// Preferences as JSON for inspection and compatibility. Storage hosts use
+    /// `try_prefs` so a refused portable layout leaves the previous file intact.
     pub fn prefs(&self) -> String {
+        self.try_prefs().unwrap_or_else(|reason| {
+            log::warn!("Preferences export retained recovery data: {reason}");
+            self.prefs_with_panel_layout(prefs::held_panel_layout(self).unwrap_or_else(|| panel_runtime::preferences_value(self)))
+        })
+    }
+
+    /// Portable preferences for storage. On refusal the host keeps its old file.
+    pub fn try_prefs(&self) -> Result<String, String> {
+        let layout = prefs::held_panel_layout(self).unwrap_or_else(|| panel_runtime::preferences_value(self));
+        let portable = panel_runtime::portable_preferences_value(self, layout).map_err(solidcraft_engine::panels::commands::error_text)?;
+        Ok(self.prefs_with_panel_layout(portable))
+    }
+
+    fn prefs_with_panel_layout(&self, panel_layout: Option<Value>) -> String {
         let mut v = json!({
             "dark": self.ui.dark,
             "grid": self.ui.show_grid,
@@ -1111,6 +1128,11 @@ impl SolveApp {
             "view_gizmo": self.view_gizmo.stored(),
             "gpu_path_setup_seconds": self.render_workspace.setup_seconds,
         });
+        if let Some(layout) = panel_layout
+            && let Some(obj) = v.as_object_mut()
+        {
+            obj.insert(panel_runtime::PREFERENCES_KEY.into(), layout);
+        }
         // While the Preferences dialog is open the file holds what Cancel would restore: a change
         // that was never applied must not reach disk through the periodic save, a quit or a
         // window close (#9730). One change covers every writer — desktop save and on_exit, the
@@ -1220,6 +1242,7 @@ impl SolveApp {
             .and_then(Value::as_array)
             .map(|a| a.iter().filter_map(|c| serde_json::from_value::<[u8; 3]>(c.clone()).ok()).take(recent_colors::MAX_RECENT_COLORS).collect())
             .unwrap_or_default();
+        panel_runtime::load_preferences(self, &v);
     }
 
     pub fn with_control(mut self, rx: Receiver<ControlRequest>) -> Self {

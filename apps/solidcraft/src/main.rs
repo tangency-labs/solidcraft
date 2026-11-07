@@ -282,13 +282,20 @@ impl eframe::App for App {
         let now = std::time::Instant::now();
         if self.prefs_writer.due(ui.input(|i| i.events.iter().any(changes_settings)), now)
             && let Some(storage) = frame.storage_mut()
-            && let Some(wait) = self.prefs_writer.store(storage, self.solve.prefs(), now)
+            && let Ok(prefs) = self.solve.try_prefs()
+            && let Some(wait) = self.prefs_writer.store(storage, prefs, now)
         {
             ui.ctx().request_repaint_after(wait);
         }
     }
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        let prefs = self.solve.prefs();
+        let prefs = match self.solve.try_prefs() {
+            Ok(prefs) => prefs,
+            Err(reason) => {
+                log::warn!("Settings were not written: {reason}");
+                return;
+            }
+        };
         storage.set_string(solidcraft_ui_egui::prefs::STORAGE_KEY, prefs.clone());
         self.prefs_writer.written = Some(prefs);
     }

@@ -386,10 +386,10 @@ mod web {
     impl Shell {
         /// The settings as they are kept between visits: with the user's own language, not a
         /// session-only English fallback.
-        fn persisted_prefs(&mut self) -> String {
+        fn persisted_prefs(&mut self) -> Option<String> {
             let saved = self.font.persisted_language(&self.app.preferences.language).to_owned();
             let live = std::mem::replace(&mut self.app.preferences.language, saved);
-            let prefs = self.app.prefs();
+            let prefs = self.app.try_prefs().map_err(|reason| log::warn!("Settings were not written: {reason}")).ok();
             self.app.preferences.language = live;
             prefs
         }
@@ -401,7 +401,7 @@ mod web {
             if !self.launch.persists() || ctx.input(|i| i.events.is_empty()) {
                 return;
             }
-            let prefs = self.persisted_prefs();
+            let Some(prefs) = self.persisted_prefs() else { return };
             let Some(prefs) = self.prefs_writer.take(prefs) else { return };
             let stored = web_sys::window().and_then(|w| w.local_storage().ok().flatten()).map(|s| s.set_item(&crate::prefs_key(), &prefs));
             if !matches!(stored, Some(Ok(()))) {
@@ -415,8 +415,9 @@ mod web {
         fn load_other_tabs_prefs(&mut self) {
             let Some(prefs) = self.other_tab_prefs.take() else { return };
             self.app.load_prefs(&prefs);
-            let held = self.persisted_prefs();
-            self.prefs_writer.loaded(held);
+            if let Some(held) = self.persisted_prefs() {
+                self.prefs_writer.loaded(held);
+            }
         }
 
         /// Files from the computer, writes to store, messages and the autosave.
@@ -1104,7 +1105,7 @@ mod web {
             if !self.launch.persists() {
                 return;
             }
-            let prefs = self.persisted_prefs();
+            let Some(prefs) = self.persisted_prefs() else { return };
             storage.set_string(&crate::prefs_key(), prefs);
         }
     }

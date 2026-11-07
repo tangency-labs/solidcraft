@@ -251,6 +251,9 @@ pub struct ResetPair {
 pub struct Save {
     pub name: String,
     #[serde(default)]
+    pub replace: bool,
+    /// Compatibility spelling accepted by earlier panel command clients.
+    #[serde(default)]
     pub overwrite: bool,
     pub expected_revision: Option<u64>,
 }
