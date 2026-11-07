@@ -12,7 +12,7 @@ use serde_json::Value;
 use solidcore_record::{Vec2, Vec3};
 use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::drawing::dimension::{
-    Candidate, Dimension, DimensionKind, ModelEdge, ModelFace, ModelPoint, Reference, Silhouette, Status, TextPlace, check_chain_length,
+    Candidate, Dimension, DimensionKind, ModelEdge, ModelFace, ModelPoint, Reference, Resolved, Silhouette, Status, TextPlace, check_chain_length,
 };
 use solidcraft_doc::ids;
 use solidcraft_geom::drawing_measure::{LinearDirection, Reading};
@@ -128,7 +128,6 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     let corner = |c: &CornerParam| doc.corner_reference(model, &c.pick, &c.path).map_err(|why| bad(ADD, why.to_string()));
     let face = |f: &FaceParam| doc.face_reference(model, &f.pick, &f.path).map_err(|why| bad(ADD, why.to_string()));
     let choose_diameter = matches!(request.kind, KindParam::Radial { diameter: None, .. });
-    let choose_side = request.offset_mm.is_none();
     let kind = match request.kind {
         KindParam::Linear { a, b, direction, reading } => DimensionKind::Linear {
             a: corner(&a)?,
@@ -162,40 +161,75 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
             DimensionKind::Chain { points, direction: direction.unwrap_or(LinearDirection::Aligned) }
         }
     };
-    check_drawn(&record, view, kind.paths(), ADD)?;
-    let id = record.allocate_id(&mut s.ids).map_err(|e| bad(ADD, e.to_string()))?;
-    let mut dimension = Dimension {
-        id,
+    let new = NewDimension {
         view,
         kind,
-        offset_mm: request.offset_mm.unwrap_or(DEFAULT_OFFSET_MM),
-        text: request.text.unwrap_or(TextPlace::Centred),
-        decimals: request.decimals.unwrap_or(DEFAULT_DECIMALS),
+        offset_mm: request.offset_mm,
+        text: request.text,
+        decimals: request.decimals,
         override_text: request.override_text,
-        last_good: None,
+        choose_diameter,
     };
-    // Read before it is added: a dimension its view can't measure would show nothing.
-    let mut staged = Drawing::clone(&record);
-    staged.add_dimensions([Arc::new(dimension.clone())]);
-    let read = s.doc.resolve_dimensions(&s.model, &staged, &[id]).map_err(|e| bad(ADD, e.to_string()))?;
-    if let Some(Status::Unmeasurable(why)) = read.first().map(|r| &r.status) {
-        return Err(bad(ADD, why.clone()));
-    }
-    if choose_diameter && let DimensionKind::Radial { diameter, .. } = &mut dimension.kind {
-        *diameter = read.first().is_some_and(|r| diameter_by_default(&r.points));
-    }
-    if choose_side
-        && let DimensionKind::Linear { direction, .. } | DimensionKind::Length { direction, .. } | DimensionKind::Chain { direction, .. } =
-            &dimension.kind
-        && let Some(r) = read.first()
-    {
-        dimension.offset_mm = DEFAULT_OFFSET_MM * side_by_default(s, &record, view, *direction, &r.points);
-    }
+    let (dimension, _) = placed(s, &record, ADD, new)?;
+    let id = dimension.id;
     s.edit_drawing(ADD, |d| {
         d.add_dimensions([Arc::new(dimension)]);
         Ok(())
     })?;
     answer(s, ADD, id)
+}
+
+/// A new dimension before it is placed: its view, what it measures, and what the request gave of
+/// the rest.
+pub(crate) struct NewDimension {
+    pub view: u64,
+    pub kind: DimensionKind,
+    pub offset_mm: Option<f64>,
+    pub text: Option<TextPlace>,
+    pub decimals: Option<u8>,
+    pub override_text: Option<String>,
+    /// A radial dimension whose diameter is left to the default.
+    pub choose_diameter: bool,
+}
+
+/// `new` as `drawing.dimension.add` places it on `record`, with how it reads, and nothing added:
+/// refused when its view doesn't draw what it measures or can't measure it; a new id; a radial one
+/// a diameter when it is a whole circle, if left to the default; a linear, length or chain one,
+/// with no offset given, on the side away from what it measures. One rule for every command that
+/// adds a dimension.
+pub(crate) fn placed(s: &mut Session, record: &Drawing, cmd: &str, new: NewDimension) -> Result<(Dimension, Option<Resolved>)> {
+    check_drawn(record, new.view, new.kind.paths(), cmd)?;
+    let id = record.allocate_id(&mut s.ids).map_err(|e| bad(cmd, e.to_string()))?;
+    let mut dimension = Dimension {
+        id,
+        view: new.view,
+        kind: new.kind,
+        offset_mm: new.offset_mm.unwrap_or(DEFAULT_OFFSET_MM),
+        text: new.text.unwrap_or(TextPlace::Centred),
+        decimals: new.decimals.unwrap_or(DEFAULT_DECIMALS),
+        override_text: new.override_text,
+        last_good: None,
+    };
+    // Read before it is added: a dimension its view can't measure would show nothing.
+    let mut staged = Drawing::clone(record);
+    staged.add_dimensions([Arc::new(dimension.clone())]);
+    let read = s.doc.resolve_dimensions(&s.model, &staged, &[id]).map_err(|e| bad(cmd, e.to_string()))?;
+    if let Some(Status::Unmeasurable(why)) = read.first().map(|r| &r.status) {
+        return Err(bad(cmd, why.clone()));
+    }
+    if new.choose_diameter
+        && let DimensionKind::Radial { diameter, .. } = &mut dimension.kind
+    {
+        *diameter = read.first().is_some_and(|r| diameter_by_default(&r.points));
+    }
+    if new.offset_mm.is_none()
+        && let DimensionKind::Linear { direction, .. } | DimensionKind::Length { direction, .. } | DimensionKind::Chain { direction, .. } =
+            &dimension.kind
+        && let Some(r) = read.first()
+    {
+        dimension.offset_mm = DEFAULT_OFFSET_MM * side_by_default(s, record, new.view, *direction, &r.points);
+    }
+    Ok((dimension, read.into_iter().next()))
 }
 
 fn repair(s: &mut Session, p: &Value) -> Result<Value> {
