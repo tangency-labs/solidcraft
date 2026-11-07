@@ -346,6 +346,10 @@ fn replies_match_the_output_schema() {
     }
     let r = run(&mut s, "sketch.snap", json!({"at": [5.1, 0.3]}));
     assert!(r["snaps"][0]["curve"].is_string() && r["snaps"][0]["at"].is_array(), "{r}");
+    // The end of `a` (made horizontal above) alone: the coincident snap names that point.
+    let r = run(&mut s, "sketch.snap", json!({"at": [10.2, 0.1], "radius": 0.5}));
+    let first = &r["snaps"][0];
+    assert_eq!((first["type"].as_str(), first["point"].as_str()), (Some("coincident"), Some(format!("{a}.end").as_str())), "{r}");
 
     // A dimension, driven and driving again.
     let c = ids(&run(&mut s, "sketch.circle.center", json!({"center": [50, 0], "radius": 5}))["curves"])[0].clone();
