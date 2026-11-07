@@ -652,6 +652,13 @@ fn holes_made_together_share_a_closed_folder_when_preferences_say_so() {
     let [folder] = h.app.session.doc.timeline_groups.as_slice() else { panic!("one folder: {:?}", h.app.session.doc.timeline_groups) };
     assert_eq!((folder.name.as_str(), &folder.features, folder.parent), ("Holes", &made, None));
     assert!(!crate::timeline_folders::is_open(&h.app, folder.id, true), "closed at first, in both Histories");
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert!(h.app.session.doc.timeline_groups.is_empty(), "first Undo removes the folder");
+    assert_eq!(h.app.session.doc.features.iter().filter(|f| made.contains(&f.id)).count(), 2, "holes remain");
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(h.app.session.doc.features.iter().filter(|f| made.contains(&f.id)).count(), 0, "second Undo removes both holes");
+    h.app.run("edit.redo", json!({})).unwrap();
+    h.app.run("edit.redo", json!({})).unwrap();
     // One hole alone, or a hole edited, stays out of any new folder.
     h.step(&json!({"start": "solid.hole"})).unwrap();
     let at = screen(&mut h, Vec3::new(5.0, 25.0, 20.0));

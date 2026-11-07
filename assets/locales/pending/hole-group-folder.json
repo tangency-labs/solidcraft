@@ -19,6 +19,10 @@
     "prefs.design_tools.hole_group": "一緒に作成した穴をまとめる",
     "prefs.design_tools.hole_group_help": "一度に作成した穴は履歴で1つのフォルダーにまとめられ、最初は閉じています。開くと穴を個別に編集できます。"
   },
+  "ko": {
+    "prefs.design_tools.hole_group": "함께 만든 구멍 그룹화",
+    "prefs.design_tools.hole_group_help": "한 번에 만든 구멍은 기록에서 하나의 폴더를 공유하며, 처음에는 닫혀 있습니다. 폴더를 열어 각 구멍을 개별적으로 편집하세요."
+  },
   "vi": {
     "prefs.design_tools.hole_group": "Nhóm các lỗ được tạo cùng lúc",
     "prefs.design_tools.hole_group_help": "Các lỗ được tạo trong một lần dùng chung một thư mục trong Lịch sử, ban đầu được đóng; mở thư mục để sửa từng lỗ."

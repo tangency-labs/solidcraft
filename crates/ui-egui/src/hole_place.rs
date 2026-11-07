@@ -364,10 +364,22 @@ pub(crate) fn group_made(app: &mut SolveApp, d: &Dialog, made: Vec<u64>) {
         return;
     }
     let parent = made.first().and_then(|first| app.session.doc.timeline_groups.iter().find(|g| g.features.contains(first))).map(|g| g.id);
+    let made_count = made.len();
     match app.run("timeline.group", serde_json::json!({"name": "Holes", "features": made, "parent": parent})) {
         Ok(reply) => {
             if let Some(id) = reply.get("group").and_then(serde_json::Value::as_u64) {
                 crate::timeline_folders::set_open(app, id, false);
+            }
+            // Keep one Undo step for all holes from this dialog, with folder creation after it.
+            let undo = &mut app.session.undo;
+            let first_hole =
+                undo.len().checked_sub(made_count + 1).filter(|&first| undo[first..undo.len() - 1].iter().all(|step| step.label == "Hole"));
+            if let Some(first_hole) = first_hole {
+                let folder_step = undo.pop();
+                if let Some(folder_step) = folder_step {
+                    drop(undo.drain(first_hole + 1..));
+                    undo.push(folder_step);
+                }
             }
         }
         // The holes stand; only the folder is missing.
