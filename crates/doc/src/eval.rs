@@ -7611,12 +7611,15 @@ fn eval_feature(
             let mut constructor = None;
             let mut to_body = None;
             let tools = feature_tools_with_constructor(doc, vals, f, st, &mut constructor, &mut to_body, warning)?;
-            // An extrude that cuts a sheet made from surfaces leaves pockets as deep as it was drawn.
+            // An extrude that cuts a sheet made from surfaces leaves pockets as deep as it was drawn,
+            // and none of a layer thinner than the extrusion resolution.
             if matches!(operation, Operation::Cut | Operation::Intersect)
                 && matches!(f.kind, FeatureKind::Extrude { .. })
                 && !st.surface_sheets.is_empty()
                 && let Some(c) = &constructor
             {
+                let reach: Vec<_> = tools.iter().map(|t| more::exact_box(&t.body)).collect();
+                more::surface_thin_layer_refused(st, &reach, &c.plane, c.interval, &crate::plain(targets))?;
                 st.cut_extents.insert(f.id, (c.plane, c.interval));
             }
             // Cuts through sheet metal become cut-outs of its flat pattern.
