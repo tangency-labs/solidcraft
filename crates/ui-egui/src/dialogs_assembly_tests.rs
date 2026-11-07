@@ -1556,6 +1556,7 @@ fn a_crossed_faces_centre_is_the_face() {
     app.viewport.woken = crate::snap_wake::Woken { item: Some(edge.clone()), face: Some(face.clone()), points, revision: app.session.revision };
     assert_eq!(woken_pick(&app, true, Sel::Vertex { body: "Body1".into(), point: Vec3::new(10.0, 10.0, 10.0) }), face);
     assert_eq!(woken_pick(&app, true, Sel::Vertex { body: "Body1".into(), point: Vec3::new(10.0, 0.0, 10.0) }), edge);
+}
 
 #[test]
 fn joint_dialog_applies_custom_name_or_falls_back_to_type_default() {
