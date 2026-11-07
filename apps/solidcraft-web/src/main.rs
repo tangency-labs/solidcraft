@@ -376,6 +376,7 @@ mod web {
         wheel_gestures: solidcraft_ui_egui::WebWheelGestures,
         /// The settings this tab wrote or loaded last, and those another tab wrote since (#8644).
         prefs_writer: crate::PrefsWriter,
+        prefs_warning: Option<String>,
         other_tab_prefs: PrefsInbox,
         /// The open designs followed for their kept copy, by `Session::uid` (#10220).
         keep_track: std::collections::HashMap<u64, Track>,
@@ -389,16 +390,19 @@ mod web {
         fn persisted_prefs(&mut self, previous: impl FnOnce() -> Result<Option<String>, String>) -> Option<String> {
             let saved = self.font.persisted_language(&self.app.preferences.language).to_owned();
             let live = std::mem::replace(&mut self.app.preferences.language, saved);
-            let prefs = self
-                .app
-                .try_prefs()
-                .or_else(|reason| {
-                    log::warn!("Panel layout changes were not saved: {reason}");
-                    let previous = previous()?;
-                    self.app.prefs_with_stored_panel_layout(previous.as_deref())
-                })
-                .map_err(|reason| log::warn!("Settings were not written: {reason}"))
-                .ok();
+            let (prefs, warning) = match self.app.try_prefs() {
+                Ok(prefs) => (Some(prefs), None),
+                Err(reason) => match previous().and_then(|previous| self.app.prefs_with_stored_panel_layout(previous.as_deref())) {
+                    Ok(prefs) => (Some(prefs), Some(format!("Panel layout changes were not saved: {reason}"))),
+                    Err(error) => (None, Some(format!("Settings were not written: {error}; panel layout: {reason}"))),
+                },
+            };
+            if self.prefs_warning != warning {
+                if let Some(warning) = &warning {
+                    log::warn!("{warning}");
+                }
+                self.prefs_warning = warning;
+            }
             self.app.preferences.language = live;
             prefs
         }
@@ -1298,6 +1302,7 @@ mod web {
                             space_mouse: SpaceMouse::default(),
                             wheel_gestures: solidcraft_ui_egui::WebWheelGestures::default(),
                             prefs_writer: crate::PrefsWriter::default(),
+                            prefs_warning: None,
                             other_tab_prefs,
                             keep_track: Default::default(),
                             all_kept: false,
