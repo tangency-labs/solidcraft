@@ -74,7 +74,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         r.result = read(app, r.sketch);
     }
     let title = crate::i18n::tr_label("Sketch Report");
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_sketch_report"), "inspect", title)
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_sketch_report"), "inspect", title)
         .fields()
         .actions("", crate::i18n::tr("ui.close"), None)
         .show(ctx, true, |ui| match &r.result {

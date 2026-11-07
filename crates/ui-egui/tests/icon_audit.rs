@@ -49,6 +49,145 @@ fn collect(h: &mut Harness, surface: &str, requested: &mut BTreeMap<String, bool
     }
 }
 
+/// Traverse the real opt-in workspace host, including a deliberately crowded
+/// tab group's overflow menu. This deliberately uses no lookalike gallery.
+fn universal_panel_host_menus(requested: &mut BTreeMap<String, bool>) {
+    use solidcraft_engine::panels::{Destination, LayoutAction, Mutation, Point, SectionId, Size};
+    use solidcraft_ui_egui::panel_runtime::{HostControlTarget, HostPointerTarget, enable_host_specimen};
+    fn click_control(h: &mut Harness, target: &HostControlTarget) {
+        let control = h
+            .app
+            .universal_panel_frame()
+            .unwrap()
+            .controls
+            .iter()
+            .find(|control| control.target == *target)
+            .unwrap_or_else(|| panic!("missing actual host control: {target:?}"));
+        let bounds = control.bounds;
+        assert!(control.enabled, "the audit must use an available real chrome control: {target:?}");
+        let x = bounds.origin.x + bounds.size.width / 2.0;
+        let y = bounds.origin.y + bounds.size.height / 2.0;
+        if let HostControlTarget::Pointer(HostPointerTarget::Menu { instance }) = target {
+            assert!(
+                h.app
+                    .universal_panel_frame()
+                    .unwrap()
+                    .layout
+                    .sections
+                    .iter()
+                    .filter(|section| section.instance != *instance)
+                    .all(|section| !section.outer.contains(Point { x, y })),
+                "the real menu source must not be covered by another specimen card"
+            );
+        }
+        assert_eq!(h.call("ui.move", json!({"x":x,"y":y}))["ok"], true);
+        assert_eq!(h.call("ui.click", json!({"x":x,"y":y}))["ok"], true);
+        h.frames(3);
+    }
+    let mut opened_menus = 0;
+    let mut opened_overflow = 0;
+    for preset in ["docks", "tabs", "collapsed", "floating", "overflow", "pinned", "columns", "stack_tabs", "content_fill", "inline"] {
+        let mut h = harness();
+        h.app.home.open = false;
+        let (width, height) = if preset == "floating" { (1400, 1000) } else { (800, 600) };
+        h.call("ui.resize", json!({"width":width,"height":height}));
+        enable_host_specimen(&mut h.app, preset).unwrap();
+        h.frames(3);
+        if preset == "overflow" {
+            let section = SectionId::new("specimen-section-0").unwrap();
+            let members =
+                h.app.panel_runtime().unwrap().layout().layout().instances.iter().skip(1).map(|instance| instance.id.clone()).collect::<Vec<_>>();
+            h.app
+                .dispatch_panel_layout(LayoutAction::Apply {
+                    expected_revision: None,
+                    mutations: members
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, instance)| Mutation::Move {
+                            instance,
+                            destination: Destination::JoinTab { section: section.clone(), index: index + 1 },
+                        })
+                        .collect(),
+                })
+                .unwrap();
+            h.frames(3);
+            assert!(
+                h.app.universal_panel_frame().unwrap().controls.iter().any(|control| {
+                    control.enabled && control.target == HostControlTarget::Pointer(HostPointerTarget::TabOverflow { section: section.clone() })
+                }),
+                "the typed fixture must force a real tab overflow launcher"
+            );
+        }
+        if preset == "floating" {
+            // Audit visible menu widgets, rather than clicking a lower card
+            // whose default clamped header is covered by its floating peers.
+            let sections = h.app.panel_runtime().unwrap().layout().layout().sections.iter().map(|section| section.id.clone()).collect::<Vec<_>>();
+            let origins = [Point { x: 40.0, y: 200.0 }, Point { x: 400.0, y: 200.0 }, Point { x: 40.0, y: 500.0 }, Point { x: 400.0, y: 500.0 }];
+            h.app
+                .dispatch_panel_layout(LayoutAction::Apply {
+                    expected_revision: None,
+                    mutations: sections
+                        .into_iter()
+                        .zip(origins)
+                        .map(|(section, origin)| Mutation::SetFloatingRect { section, origin, size: Size { width: 280.0, height: 240.0 } })
+                        .collect(),
+                })
+                .unwrap();
+        }
+        h.frames(3);
+        collect(&mut h, &format!("universal host {preset}"), requested);
+        let targets = h
+            .app
+            .universal_panel_frame()
+            .unwrap()
+            .controls
+            .iter()
+            .filter_map(|control| match &control.target {
+                HostControlTarget::Pointer(
+                    HostPointerTarget::Menu { .. }
+                    | HostPointerTarget::TabOverflow { .. }
+                    | HostPointerTarget::Overflow { .. }
+                    | HostPointerTarget::OverflowAll,
+                ) => Some(control.target.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(!targets.is_empty(), "specimen must expose actual shared chrome: {preset}");
+        for target in targets {
+            click_control(&mut h, &target);
+            assert!(h.app.universal_panel_frame().unwrap().menu_bounds.is_some(), "actual host menu must open for {preset}: {target:?}");
+            opened_menus += 1;
+            collect(&mut h, &format!("universal host {preset} {target:?}"), requested);
+            if matches!(
+                target,
+                HostControlTarget::Pointer(
+                    HostPointerTarget::Overflow { .. } | HostPointerTarget::OverflowAll | HostPointerTarget::TabOverflow { .. }
+                )
+            ) {
+                opened_overflow += 1;
+                let nested = h
+                    .app
+                    .universal_panel_frame()
+                    .unwrap()
+                    .controls
+                    .iter()
+                    .find_map(|control| match &control.target {
+                        HostControlTarget::PanelMenu { .. } => Some(control.target.clone()),
+                        _ => None,
+                    })
+                    .expect("overflow must expose the same per-instance action menu");
+                click_control(&mut h, &nested);
+                assert!(h.app.universal_panel_frame().unwrap().menu_bounds.is_some());
+                collect(&mut h, &format!("universal host {preset} overflow actions"), requested);
+            }
+            h.step(&json!({"key":"Escape"})).unwrap();
+            h.frames(2);
+        }
+    }
+    assert!(opened_menus >= 6, "must traverse actual menus in every bounded preset");
+    assert!(opened_overflow > 0, "must traverse an actual overflow menu");
+}
+
 fn menu(h: &mut Harness, target: Value, surface: &str, requested: &mut BTreeMap<String, bool>) {
     // Open on empty canvas so the picker cannot replace the prepared face/edge/sketch
     // selection with whatever happens to lie under the menu's anchor.
@@ -271,11 +410,21 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
         json!({"type":"folder","component":0,"scope":"c0","folder":"bodies"}),
         json!({"type":"folder","component":0,"scope":"c0","folder":"sketches"}),
         json!({"type":"folder","component":0,"scope":"c0","folder":"construction"}),
-        json!({"type":"section"}),
-        json!({"type":"canvas","id":1}),
     ] {
         menu(&mut h, target.clone(), &target.to_string(), &mut requested);
     }
+    // The Section Analysis and a canvas have a menu only while they are there (#10745).
+    h.app.run("inspect.section", json!({"plane": "YZ"})).unwrap();
+    menu(&mut h, json!({"type":"section"}), "section", &mut requested);
+    h.app.run("inspect.section", json!({"clear": true})).unwrap();
+    let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+    png.extend(400u32.to_be_bytes());
+    png.extend(200u32.to_be_bytes());
+    png.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
+    let data = solidcraft_engine::doc::canvas::base64_encode(&png);
+    let canvas = h.app.run("canvas.insert", json!({"data": data, "plane": "XY", "width": 80})).unwrap()["canvas"].clone();
+    menu(&mut h, json!({"type":"canvas","id":canvas}), "canvas", &mut requested);
+    h.app.run("selection.delete", json!({"canvases": [canvas]})).unwrap();
     for selection in [
         json!({"type":"face","body":body,"index":0,"point":[0,0,0]}),
         json!({"type":"edge","body":body,"index":0,"point":[0,0,0]}),
@@ -473,7 +622,7 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     documents.call("ui.resize", json!({"width":640,"height":1000}));
     click(&mut documents, "tab:overflow");
     documents.frames(3);
-    assert!(documents.ctx.data(|d| d.get_temp::<bool>(egui::Id::new("sc_doc_more"))).unwrap_or(false), "the document list must actually be open");
+    assert!(documents.ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("sc_doc_more"))).unwrap_or(false), "the document list must actually be open");
     collect(&mut documents, "document overflow list (active icon is a selection marker)", &mut requested);
     // Diagnostic badges and Copy Error/Warning Message only appear on troubled features.
     for failing in [false, true] {
@@ -506,6 +655,7 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
         scenario.run(&serde_json::from_str(source).unwrap()).unwrap_or_else(|e| panic!("{name}: {e}"));
         collect(&mut scenario, name, &mut requested);
     }
+    universal_panel_host_menus(&mut requested);
     icon_svg::audit::stop();
     let manifest = requested.iter().map(|(name, placeholder)| format!("{name}\t{placeholder}\n")).collect::<String>();
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/icons/ui/design/requested_icons.txt");

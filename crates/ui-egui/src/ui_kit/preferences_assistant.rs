@@ -134,7 +134,7 @@ fn choice_card(ui: &mut Ui, width: f32, choice: &SettingsChoice<'_>, selected: b
         crate::prefs_search::follow(ui, text, rect);
     }
     response.widget_info(|| {
-        egui::WidgetInfo::selected(egui::WidgetType::RadioButton, ui.is_enabled(), selected, format!("{}: {}", choice.title, choice.detail))
+        egui::WidgetInfo::selected(egui::Role::RadioButton, ui.is_enabled(), selected, format!("{}: {}", choice.title, choice.detail))
     });
     scenario::publish_target(choice.key, rect);
     response.backing_on_hover_text(choice.detail).on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -161,7 +161,7 @@ pub(crate) fn settings_pointer_preview(ui: &mut Ui, visible: bool, speed: &str, 
     };
     let caption_rect = Rect::from_min_max(rect.min + vec2(t.space_8, t.space_4), pos2(rect.right() - t.space_8, rect.top() + t.space_24));
     paint_text(ui, caption_rect, &caption, FontId::proportional(t.font_small), t.form_dim, false);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &caption));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), &caption));
     response.backing_on_hover_text(crate::i18n::tr(if follows_camera { "ai.prefs.follow_camera_on" } else { "ai.prefs.follow_camera_off" }));
 }
 
@@ -170,6 +170,6 @@ pub(crate) fn settings_short_note(ui: &mut Ui, text: &str) -> Response {
     let t = Tokens::get();
     let (rect, response) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.space_16), Sense::hover());
     paint_text(ui, rect, text, FontId::proportional(t.font_small), t.form_dim, false);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), text));
     response.backing_on_hover_text(text)
 }

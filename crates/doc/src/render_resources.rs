@@ -280,7 +280,7 @@ pub fn encode_hdr_base64(bytes: &[u8]) -> Result<String> {
     Ok(encoded)
 }
 
-fn decode_base64(value: &str, maximum: usize) -> Result<Vec<u8>> {
+pub(crate) fn decode_base64(value: &str, maximum: usize) -> Result<Vec<u8>> {
     let length = base64_length(value, maximum)?;
     let padding = if value.ends_with("==") { 2 } else { usize::from(value.ends_with('=')) };
     let mut bytes = Vec::new();
@@ -420,7 +420,7 @@ impl<'de> DeserializeSeed<'de> for EncodedBudget {
 // RawValue borrows the JSON source without building serde_json's unescaped String scratch.
 // Count base64 characters (including legal JSON slash/Unicode escapes) before any payload
 // allocation. Full canonical padding, stream, radiance and digest checks still follow.
-fn json_base64_length(raw: &str, maximum: usize) -> Result<usize> {
+pub(crate) fn json_base64_length(raw: &str, maximum: usize) -> Result<usize> {
     let text = raw.strip_prefix('"').and_then(|s| s.strip_suffix('"')).ok_or_else(|| invalid("HDR data must be a base64 string"))?;
     let mut bytes = text.as_bytes().iter().copied();
     let mut count = 0usize;

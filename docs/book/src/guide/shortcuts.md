@@ -95,6 +95,11 @@ Mouse and touch:
 | Double-click a sketch curve or edge | select its chain or tangent loop |
 | Double-click the middle button | go Home: the home view, framing everything shown (Preferences › Navigation › Middle double-click: Home, Fit or Off) |
 
+To zoom by dragging, assign a key to **Drag to Zoom** in File › Keyboard Shortcuts.
+Hold the shortcut, then drag up or down with the left mouse button in the viewport.
+Releasing the shortcut stops the zoom. The Zoom button in the navigation bar also
+shows the assigned shortcut.
+
 Help › Keyboard Shortcuts in the app lists the current bindings, including any you changed.
 
 With the **Touchpad** navigation preset, hold **Shift** while moving the pointer to pan, or

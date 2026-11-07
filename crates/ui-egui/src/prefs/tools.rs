@@ -35,6 +35,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                             "extrude_auto_to_object",
                         ),
                         (setting::auto_operation, "prefs.auto_operation_note", "auto_operation"),
+                        (setting::extrude_arrow_face_stops, "prefs.extrude_arrow_face_stops_note", "extrude_arrow_face_stops"),
                     ] {
                         ui.horizontal_wrapped(|ui| {
                             let response = setting(app, ui).backing_on_hover_text(app.tr(help));
@@ -68,6 +69,9 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
             });
         });
+        ui_kit::settings_section(ui, "command_dialog_values", app.tr("prefs.command_dialog_values"), |ui| {
+            setting::remember_dialog_values(app, ui);
+        });
         ui_kit::settings_section(ui, "joint_move", app.tr("joint_move.settings"), |ui| {
             tool_group(ui, "", ui_kit::paint_assembly_move, |ui| {
                 ui.horizontal_wrapped(|ui| {
@@ -80,6 +84,14 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
                 let response = setting::drive_joints_ghost(app, ui);
                 crate::scenario::publish_target("prefs:drive_joints_ghost", response.rect);
+                ui.horizontal_wrapped(|ui| {
+                    let tip = app.tr("prefs.move_drag_highlights_tip");
+                    let response = setting::move_drag_highlights(app, ui).backing_on_hover_text(tip);
+                    crate::scenario::publish_target("prefs:move_drag_highlights", response.rect);
+                    if !crate::prefs_search::suppress_chrome(ui) {
+                        ui_kit::help_icon(ui, tip);
+                    }
+                });
                 let label_width =
                     ["joint_move.coarse", "joint_move.fine"].into_iter().map(|id| ui_kit::ContentWidth::label(ui, app.tr(id))).fold(0.0, f32::max)
                         + t.space_16
