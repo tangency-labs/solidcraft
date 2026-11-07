@@ -561,6 +561,146 @@ fn rectangular_pattern_takes_features_from_every_history_layout() {
     }
 }
 
+#[test]
+fn linear_solid_pattern_ignores_invalid_second_direction_values() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+    let mut d = Dialog::for_command(&h.app, "solid.pattern.rectangular").unwrap();
+    d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    d.inputs[1].items = vec![Sel::Axis { name: "X".into() }];
+    d.extra.insert("linear".into(), json!(true));
+    if let Kind::PatternRect { count, spacing, count2, spacing2 } = &mut d.kind {
+        *count = "4".into();
+        *spacing = "12 mm".into();
+        *count2 = "this is ignored".into();
+        *spacing2 = "also ignored".into();
+    }
+    let commands = apply_commands(&h.app, &d).unwrap();
+    assert_eq!(commands[0].1["count1"], "4");
+    assert_eq!(commands[0].1["count2"], "1");
+    assert!(commands[0].1["dir2"].is_null());
+    assert_ne!(commands[0].1["spacing2"], "also ignored");
+    assert!(commands[0].1.get("linear").is_none(), "mode is UI state, not a new command parameter");
+    h.app.run(&commands[0].0, commands[0].1.clone()).unwrap();
+    assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 4);
+}
+
+#[test]
+fn old_single_row_solid_pattern_keeps_its_second_direction_settings() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+    h.app.run("solid.pattern.rectangular", json!({"name":"Row","bodies":["Body1"],"dir1":[1,0,0],"count1":"3","spacing1":"20 mm","dir2":[0,1,0],"count2":"1","spacing2":"37 mm","alignment2":"center","reversed2":true})).unwrap();
+    let id = h.app.session.doc.find_feature("Row").unwrap().id;
+    let d = for_feature(&h.app, id, None).unwrap();
+    assert_eq!(d.extra["linear"], false);
+    assert!(matches!(&d.kind, Kind::PatternRect { spacing2, .. } if spacing2 == "37 mm"));
+    assert_eq!(d.extra["alignment2"], "center");
+    assert_eq!(d.extra["reversed2"], true);
+    assert!(!d.inputs[2].items.is_empty());
+}
+
+#[test]
+fn rectangular_edit_preserves_dormant_count_and_spacing_without_a_second_direction() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+    h.app.run("parameters.add", json!({"name":"secondPitch","expression":"37","unit":"mm"})).unwrap();
+    h.app
+        .run(
+            "solid.pattern.rectangular",
+            json!({"name":"Row","bodies":["Body1"],"dir1":[1,0,0],"count1":"3","spacing1":"20 mm","count2":"3","spacing2":"secondPitch"}),
+        )
+        .unwrap();
+    assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 3, "without dir2, count2 is dormant and count1 controls the copies");
+    let id = h.app.session.doc.find_feature("Row").unwrap().id;
+    let d = for_feature(&h.app, id, None).unwrap();
+    assert_eq!(d.extra["linear"], false, "count2 greater than one keeps the Rectangular editor");
+    assert!(d.inputs[2].items.is_empty(), "the saved pattern has no second axis");
+    assert!(matches!(&d.kind, Kind::PatternRect { count, count2, spacing2, .. } if count == "3" && count2 == "3" && spacing2 == "secondPitch"));
+
+    for (command, params) in apply_commands(&h.app, &d).unwrap() {
+        assert_eq!(command, "timeline.redefine");
+        assert_eq!(params["command"], "solid.pattern.rectangular");
+        let pattern = &params["params"];
+        assert!(pattern.get("dir2").is_none(), "editing does not invent a second direction");
+        assert_eq!(pattern["count2"], "3");
+        assert_eq!(pattern["spacing2"], "secondPitch");
+        h.app.run(&command, params).unwrap();
+    }
+    let reopened = for_feature(&h.app, id, None).unwrap();
+    assert!(
+        matches!(&reopened.kind, Kind::PatternRect { count, count2, spacing2, .. } if count == "3" && count2 == "3" && spacing2 == "secondPitch")
+    );
+    assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 3, "the dormant count2 does not change the primary row's body count");
+}
+
+#[test]
+fn linear_solid_pattern_edit_roundtrip_uses_the_saved_shape_and_legacy_preference() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+    let fresh = Dialog::for_command(&h.app, "solid.pattern.rectangular").unwrap();
+    assert_eq!(fresh.extra["linear"], false, "new dialogs retain their Rectangular default");
+    h.app
+        .run(
+            "solid.pattern.rectangular",
+            json!({"name":"Row","bodies":["Body1"],"dir1":[1,0,0],"count1":"3","spacing1":"20 mm","count2":"1","spacing2":"37 mm"}),
+        )
+        .unwrap();
+    let id = h.app.session.doc.find_feature("Row").unwrap().id;
+    let mut d = for_feature(&h.app, id, None).unwrap();
+    assert_eq!(d.extra["linear"], true);
+    d.extra.insert("linear".into(), json!(false));
+    for (command, params) in apply_commands(&h.app, &d).unwrap() {
+        h.app.run(&command, params).unwrap();
+    }
+    let d = for_feature(&h.app, id, None).unwrap();
+    assert_eq!(d.extra["linear"], true, "an indistinguishable saved one-direction pattern is canonicalized as Linear");
+    assert!(matches!(&d.kind, Kind::PatternRect { spacing2, .. } if spacing2 == "37 mm"));
+    assert_eq!(h.call("ui.prefs", json!({"linear_pattern_editor":false}))["ok"], true);
+    let legacy = for_feature(&h.app, id, None).unwrap();
+    assert_eq!(legacy.extra["linear"], false, "the preference restores the old editor presentation");
+    assert!(matches!(&legacy.kind, Kind::PatternRect { spacing2, .. } if spacing2 == "37 mm"));
+    let mut restored = Harness::new();
+    restored.app.load_prefs(&h.app.prefs());
+    assert!(!restored.app.preferences.linear_pattern_editor, "the opt-out persists");
+    h.call("ui.prefs", json!({"open":"Tools"}));
+    h.call("ui.prefs", json!({"button":"defaults"}));
+    assert!(h.app.preferences.linear_pattern_editor, "Tools defaults restore the documented default");
+    h.call("ui.prefs", json!({"button":"cancel"}));
+    assert!(!h.app.preferences.linear_pattern_editor, "Cancel restores the prior preference");
+}
+
+#[test]
+fn linear_solid_pattern_type_menu_preserves_rectangular_inputs() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+    h.app.start("solid.pattern.rectangular");
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    d.inputs[1].items = vec![Sel::Axis { name: "X".into() }];
+    d.inputs[2].items = vec![Sel::Axis { name: "Y".into() }];
+    if let Kind::PatternRect { count2, spacing2, .. } = &mut d.kind {
+        *count2 = "2".into();
+        *spacing2 = "37 mm".into();
+    }
+    h.settle();
+    h.step(&json!({"click":{"handle":"dialog:Type"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Type:Linear"}})).unwrap();
+    h.frames(3);
+    let d = h.app.dialog.as_mut().unwrap();
+    assert_eq!(d.input_count(), 2);
+    d.advance();
+    assert!(d.active < 2);
+    assert!(scenario::handle_at("dialog:Spacing 2").is_none());
+    assert!(scenario::handle_at("arrow2").is_none());
+    h.step(&json!({"click":{"handle":"dialog:Type"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Type:Rectangular"}})).unwrap();
+    h.frames(3);
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands[0].1["count2"], "2");
+    assert_eq!(commands[0].1["spacing2"], "37 mm");
+    assert_eq!(commands[0].1["dir2"], json!([0.0, 1.0, 0.0]));
+}
+
 form_case!(loft, "solid.loft", ["Operation"]);
 form_case!(sweep, "solid.sweep", ["Orientation"]);
 form_case!(offset_plane, "construct.plane.offset", ["Distance"]);

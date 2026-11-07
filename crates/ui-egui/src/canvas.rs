@@ -158,6 +158,11 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
 /// (or kept) second direction, none until it has one; a sketch pattern's second direction, which
 /// is square to the first unless one is picked.
 fn pattern_dir2(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
+    if matches!(&d.kind, Kind::PatternRect { .. }) && d.extra.get("linear").and_then(serde_json::Value::as_bool) == Some(true)
+        || matches!(&d.kind, Kind::SketchModify(crate::sketch_modify_ui::Mod::PatternRect { linear: true, .. }))
+    {
+        return None;
+    }
     match &d.kind {
         Kind::PatternRect { .. } => match d.inputs.get(2).and_then(|i| i.items.first()) {
             Some(x) => crate::dialogs::axis_of(app, x).map(|a| a.1),

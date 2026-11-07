@@ -1010,14 +1010,18 @@ impl Dialog {
                     true,
                 )],
             ),
-            "solid.pattern.rectangular" => Dialog::new(
-                Kind::PatternRect { count: "3".into(), spacing: length_default(s, "20"), count2: "1".into(), spacing2: length_default(s, "20") },
-                vec![
-                    SelInput::new("Objects", BODIES, true),
-                    SelInput::new("Direction", AXES | EDGES, false),
-                    SelInput::new("Direction 2", AXES | EDGES, false),
-                ],
-            ),
+            "solid.pattern.rectangular" => {
+                let mut d = Dialog::new(
+                    Kind::PatternRect { count: "3".into(), spacing: length_default(s, "20"), count2: "1".into(), spacing2: length_default(s, "20") },
+                    vec![
+                        SelInput::new("Objects", BODIES, true),
+                        SelInput::new("Direction", AXES | EDGES, false),
+                        SelInput::new("Direction 2", AXES | EDGES, false),
+                    ],
+                );
+                d.extra.insert("linear".into(), json!(false));
+                d
+            }
             "solid.pattern.circular" => Dialog::new(
                 Kind::PatternCirc { count: "6".into(), angle: "360 deg".into() },
                 vec![SelInput::new("Objects", BODIES, true), SelInput::new("Axis", AXIS_PICKS, false)],
@@ -1353,11 +1357,21 @@ impl Dialog {
 
     /// Make the first single input still empty (after the filled ones) active.
     fn advance(&mut self) {
-        if let Some(i) = self.inputs.iter().position(|i| i.items.is_empty()) {
+        let count = self.input_count();
+        if let Some(i) = self.inputs.iter().take(count).position(|i| i.items.is_empty()) {
             self.active = i;
         } else {
-            self.active = self.active.min(self.inputs.len().saturating_sub(1));
+            self.active = self.active.min(count.saturating_sub(1));
         }
+    }
+
+    fn input_count(&self) -> usize {
+        let linear = match &self.kind {
+            Kind::PatternRect { .. } => self.extra.get("linear").and_then(Value::as_bool).unwrap_or(false),
+            Kind::SketchModify(crate::sketch_modify_ui::Mod::PatternRect { linear, .. }) => *linear,
+            _ => false,
+        };
+        if linear { self.inputs.len().min(2) } else { self.inputs.len() }
     }
 
     /// Does this dialog make a feature that can be previewed live?
@@ -2786,19 +2800,22 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
         return;
     }
     let current = match d.kind {
-        Kind::PatternRect { .. } => Some(0),
+        Kind::PatternRect { .. } => Some(if d.extra.get("linear").and_then(Value::as_bool).unwrap_or(false) { 3 } else { 0 }),
         Kind::PatternCirc { .. } => Some(1),
         Kind::PathPattern { .. } => Some(2),
         _ => None,
     };
     if let Some(cur) = current {
         let mut ty = cur;
-        choice_row(ui, "Type", "pat_type", &mut ty, &["Rectangular", "Circular", "Path"]);
-        if ty != cur {
+        choice_row(ui, "Type", "pat_type", &mut ty, &["Rectangular", "Circular", "Path", crate::i18n::tr("ui.pattern_linear")]);
+        if ty != cur && matches!(cur, 0 | 3) && matches!(ty, 0 | 3) {
+            d.extra.insert("linear".into(), json!(ty == 3));
+            d.active = d.active.min(d.input_count().saturating_sub(1));
+        } else if ty != cur {
             // Same objects, the new pattern's other inputs.
             let objects = d.inputs.first().map(|i| i.items.clone()).unwrap_or_default();
             let (kind, mut inputs) = match ty {
-                0 => (
+                0 | 3 => (
                     Kind::PatternRect {
                         count: "3".into(),
                         spacing: length_default(session, "20"),
@@ -2829,6 +2846,9 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
             d.kind = kind;
             d.inputs = inputs;
             d.extra.clear();
+            if ty == 3 {
+                d.extra.insert("linear".into(), json!(true));
+            }
             d.advance();
         }
         object_type_row(d, ui);
@@ -2949,12 +2969,6 @@ pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames
         }
         Sel::Vertex { body, .. } => format!("{body} · vertex"),
     }
-}
-
-/// Selection input rows: label, "N selected" (or a hint) and a clear button; clicking a row
-/// makes it the active input.
-fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::prefs::OriginPlaneNames) {
-    input_rows_range(d, ui, s, names, 0..d.inputs.len());
 }
 
 /// Saved vectors/axes are real inputs even when they have no origin-axis selection chip.
@@ -5413,15 +5427,31 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 (None, Some(k)) => k,
                 (None, None) => return Err("select a direction (an axis, a sketch line or a straight edge) first".into()),
             };
+            let linear = d.extra.get("linear").and_then(Value::as_bool).unwrap_or(false);
             let mut p = json!({"dir1": pt(d1), "count1": count, "spacing1": spacing});
+            if linear {
+                p["dir2"] = Value::Null;
+                p["count2"] = json!("1");
+                let kept_spacing = crate::length_input::eval(&app.session.doc, spacing2, ValueKind::Length).is_ok_and(f64::is_finite);
+                p["spacing2"] = json!(if kept_spacing { spacing2.clone() } else { length_default(&app.session, "20") });
+            }
             pattern_objects(s, sels(d, 0), &mut p);
             let kept2 = d.extra.get("dir2").and_then(|v| serde_json::from_value::<[f64; 3]>(v.clone()).ok()).map(|a| Vec3::new(a[0], a[1], a[2]));
-            let d2 = match sels(d, 2).first() {
-                Some(x) => Some(axis_of(app, x).ok_or("the second direction must be an axis, a sketch line or a straight edge")?.1),
-                None => kept2,
+            let d2 = if linear {
+                None
+            } else {
+                match sels(d, 2).first() {
+                    Some(x) => Some(axis_of(app, x).ok_or("the second direction must be an axis, a sketch line or a straight edge")?.1),
+                    None => kept2,
+                }
             };
             if let Some(d2) = d2 {
                 p["dir2"] = pt(d2);
+                p["count2"] = json!(count2);
+                p["spacing2"] = json!(spacing2);
+            } else if !linear {
+                // Keep the dormant second-direction values when the one-direction feature is
+                // presented with the Rectangular editor, even though no second axis is selected.
                 p["count2"] = json!(count2);
                 p["spacing2"] = json!(spacing2);
             }
@@ -5996,6 +6026,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         let fillet = matches!(d.kind, Kind::Fillet { chamfer: false, .. });
         for (k, v) in &d.extra {
             if fillet && !dense::fillet_option_applies(&d.extra, k) {
+                continue;
+            }
+            if k == "linear" && matches!(d.kind, Kind::PatternRect { .. }) {
                 continue;
             }
             m.entry(k.clone()).or_insert_with(|| v.clone());
@@ -7248,6 +7281,10 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             let mut d = match pattern {
                 PatternKind::Rectangular { dir1, count1, spacing1, dir2, count2, spacing2, alignment, alignment2, reversed, reversed2 } => {
                     let mut d = start("solid.pattern.rectangular")?;
+                    d.extra.insert(
+                        "linear".into(),
+                        json!(app.preferences.linear_pattern_editor && dir2.is_none() && count2.as_deref().is_none_or(|count| count.trim() == "1")),
+                    );
                     d.extra.insert("alignment".into(), json!(alignment));
                     d.extra.insert("alignment2".into(), json!(alignment2));
                     d.extra.insert("reversed".into(), json!(reversed));
