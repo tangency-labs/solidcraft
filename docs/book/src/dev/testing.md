@@ -67,14 +67,29 @@ them while building faster than `--release`. If a test fails only in a plain deb
 so in the PR.
 
 Run `cargo xtask test` to build with this profile and run the test binaries concurrently,
-with doc tests alongside. Arguments after `--` go to each test binary, for example
+with doc tests alongside. GPU-capable binaries (packages that can reach wgpu through Cargo
+dependencies, including optional and dev dependencies) share one serial lane by default and
+run with one libtest thread each; CPU-only binaries keep their parallel lanes. Arguments after
+`--` go to each test binary, for example
 `cargo xtask test -- shell`. To run the test binaries sequentially instead, use
 `cargo test --workspace --profile ci`. On a loaded machine set `SOLIDCRAFT_TEST_JOBS=N` to
-bound how many test binaries and side commands run at once; each binary then gets
-`RUST_TEST_THREADS` and `ACTION_MATRIX_JOBS` of `max(1, cpus / N)` so the binaries in flight
+bound how many test binaries and side commands run at once; CPU-only binaries then get
+`RUST_TEST_THREADS` and all binaries get `ACTION_MATRIX_JOBS` of `max(1, cpus / N)` so the
+binaries in flight
 share the machine instead of each defaulting to one worker per CPU. Setting
 `RUST_TEST_THREADS` or `ACTION_MATRIX_JOBS` yourself overrides that split, and leaving
-`SOLIDCRAFT_TEST_JOBS` unset keeps the original all-at-once behaviour.
+`SOLIDCRAFT_TEST_JOBS` unset keeps the original CPU-only parallelism, not unbounded GPU
+parallelism. GPU binaries default to one libtest thread even when the shared CPU split is
+larger. `SOLIDCRAFT_GPU_TEST_JOBS=N` explicitly allows N GPU binaries at once; it is still
+subject to the global command bound. To restore the old GPU concurrency, explicitly set both
+this lane count and `RUST_TEST_THREADS` (or pass `--test-threads` after `--`). Every binary and
+side gate still runs after failures, and filters, timeouts and baselines are unchanged.
+
+For a desktop sharing the test GPU, see the laptop guidance in
+[Contributing](contributing.md#tests). Serial scheduling is not adapter selection or a driver
+crash guarantee: to validate on software Vulkan, use an installed lavapipe ICD with
+`VK_DRIVER_FILES` and `WGPU_BACKEND=vulkan` as well as `SOLIDCRAFT_GPU=software`. The ui-egui
+offscreen policy fix is separate (#9052). These libtest settings do not alter nextest's policy.
 
 ## Test-level scheduling for full local CI
 
