@@ -18,6 +18,47 @@ fn press(h: &mut Harness, key: &str) {
     h.settle();
 }
 
+/// #12902: Ctrl+Shift+Z redoes, like Ctrl+Y; it used to undo a second time, Shift ignored. With a
+/// spline being drawn, Ctrl+Z takes its last point back and Ctrl+Shift+Z still redoes the history.
+#[test]
+fn ctrl_shift_z_redoes_like_ctrl_y() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[30,20]})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center":[50,10],"radius":5})).unwrap();
+    h.settle();
+    let sketch = h.app.session.active_sketch.unwrap();
+    let curves = |h: &Harness| h.app.session.model.state().sketch(sketch).unwrap().sketch.curves.len();
+    let drawn = curves(&h);
+    let undo = h.app.session.undo.len();
+    let press = |h: &mut Harness, key: &str, shift: bool| {
+        h.step(&json!({"key": key, "cmd": true, "shift": shift})).unwrap();
+        h.settle();
+        // Well apart, so two presses are never a quick double press.
+        h.frames(60);
+    };
+    press(&mut h, "Z", false);
+    assert_eq!((curves(&h), h.app.session.undo.len()), (drawn - 1, undo - 1), "Ctrl+Z undoes the circle");
+    press(&mut h, "Z", true);
+    assert_eq!((curves(&h), h.app.session.undo.len()), (drawn, undo), "Ctrl+Shift+Z redoes it");
+    press(&mut h, "Z", false);
+    press(&mut h, "Y", false);
+    assert_eq!((curves(&h), h.app.session.undo.len()), (drawn, undo), "Ctrl+Y still redoes");
+    // A spline with pending points: Ctrl+Z takes a point back, Ctrl+Shift+Z leaves the points
+    // alone and redoes the history.
+    press(&mut h, "Z", false);
+    h.step(&json!({"start":"sketch.spline.fit_point"})).unwrap();
+    for point in [[2, 2, 0], [8, 2, 0]] {
+        h.step(&json!({"click":{"world":point}})).unwrap();
+    }
+    assert_eq!(h.app.tool.as_ref().unwrap().pts.len(), 2);
+    press(&mut h, "Z", true);
+    assert_eq!(h.app.tool.as_ref().unwrap().pts.len(), 2, "Ctrl+Shift+Z is not a spline-point undo");
+    assert_eq!(curves(&h), drawn, "the circle is back");
+    press(&mut h, "Z", false);
+    assert_eq!((h.app.tool.as_ref().unwrap().pts.len(), curves(&h)), (1, drawn), "Ctrl+Z takes the spline point back first");
+}
+
 #[test]
 fn spline_undo_removes_pending_points_before_sketch_history() {
     for cmd in ["sketch.spline.fit_point", "sketch.spline.control_point", "sketch.spline.control_point_5"] {
