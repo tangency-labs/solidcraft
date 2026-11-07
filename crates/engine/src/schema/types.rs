@@ -492,6 +492,14 @@ macro_rules! keyword_param {
 }
 
 keyword_param!(
+    /// `solid.rib`'s and `solid.web`'s `direction`.
+    RibDirectionParam,
+    "direction",
+    &["in_plane", "plane", "normal"],
+    "in_plane or normal",
+    "Which way the wall grows from the curves: in_plane (the default; plane is an alias), across the sketch plane, or normal, along the sketch plane's normal. Matching ignores case."
+);
+keyword_param!(
     /// `solid.fillet`'s `type`.
     FilletTypeParam,
     "fillet type",
