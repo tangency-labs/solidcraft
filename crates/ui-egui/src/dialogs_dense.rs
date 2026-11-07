@@ -340,6 +340,7 @@ fn choose_fillet_type(extra: &mut serde_json::Map<String, Value>, index: usize, 
 pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     let t = Tokens::get();
     let mut enter = false;
+    d.active = d.active.min(d.input_count().saturating_sub(1));
     if matches!(d.kind, Kind::Appearance(_)) {
         ui.spacing_mut().item_spacing.y = t.space_10;
     }
@@ -360,7 +361,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             let label = d.active_input().map(|input| tr(input.label)).unwrap_or_else(|| tr("Objects"));
             let step = crate::i18n::format(
                 "dialog.selection_step",
-                &[("step", &(d.active + 1).to_string()), ("total", &d.inputs.len().to_string()), ("input", label)],
+                &[("step", &(d.active + 1).to_string()), ("total", &d.input_count().to_string()), ("input", label)],
             );
             ui_kit::text(ui, &step, ui_kit::Text::Hint("step")).backing_on_hover_text(tr("dialog.selection_guidance"));
         }
@@ -381,7 +382,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         // Each reference edge with its distance (#37, #6380).
         enter |= crate::hole_refs::input_rows(d, ui, &app.session, app.preferences.origin_plane_names, app.preferences.length_decimals);
     } else {
-        input_rows(d, ui, &app.session, app.preferences.origin_plane_names);
+        crate::dialogs::input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 0..d.input_count());
     }
     d.sync_material(&app.session);
     // The Hole dialog's dropdowns preview each choice on a copy of the form as it stands.
@@ -432,7 +433,12 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             }
             ui_kit::row(ui, tr("ui.sketch_intersect_projection_link"), |ui| ui_kit::checkbox(ui, "", projection_link));
         }
-        Kind::SketchModify(k) => enter |= crate::sketch_modify_ui::rows(ui, k, &app.session.doc),
+        Kind::SketchModify(k) => {
+            enter |= crate::sketch_modify_ui::rows(ui, k, &app.session.doc);
+            if matches!(k, crate::sketch_modify_ui::Mod::PatternRect { linear: true, .. }) && d.active > 1 {
+                d.active = 1;
+            }
+        }
         Kind::Text(k) => enter |= crate::sketch_text::rows(ui, k, &mut d.inputs, &mut d.active),
         Kind::TextMove(k) => enter |= crate::sketch_text_move::rows(ui, k),
         Kind::EditParam { name, expr } => {
@@ -660,13 +666,21 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             }
         }
         Kind::PatternRect { count, spacing, count2, spacing2 } => {
+            let linear = d.extra.get("linear").and_then(Value::as_bool).unwrap_or(false);
+            if linear && d.active > 1 {
+                d.active = 1;
+            }
             enter |= quantity_row(ui, &app.session.doc, "Quantity", count);
             enter |= expr_row(ui, "Spacing", spacing);
-            enter |= quantity_row(ui, &app.session.doc, "Quantity 2", count2);
-            enter |= expr_row(ui, "Spacing 2", spacing2);
+            if !linear {
+                enter |= quantity_row(ui, &app.session.doc, "Quantity 2", count2);
+                enter |= expr_row(ui, "Spacing 2", spacing2);
+            }
             if d.inputs.first().is_some_and(|i| i.accept == selection::FEATURES) {
                 feature_pattern_alignment_row(ui, &mut d.extra, 0);
-                feature_pattern_alignment_row(ui, &mut d.extra, 1);
+                if !linear {
+                    feature_pattern_alignment_row(ui, &mut d.extra, 1);
+                }
             }
         }
         Kind::PatternCirc { count, angle } => {
