@@ -206,10 +206,11 @@ fn child() {
         }
         // A clean exit whose journal cannot be removed: the directory is read-only.
         "clean_read_only" => {
-            let sessions = dir.join("sessions");
+            // Only Unix makes the folder read-only here; elsewhere the session just ends.
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
+                let sessions = dir.join("sessions");
                 fs::set_permissions(&sessions, fs::Permissions::from_mode(0o500)).unwrap();
                 end_session();
                 fs::set_permissions(&sessions, fs::Permissions::from_mode(0o700)).unwrap();
