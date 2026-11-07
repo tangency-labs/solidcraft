@@ -309,6 +309,42 @@ fn a_construction_point_projects_and_stays_linked() {
     assert!(error.contains("unknown point `Point9`"), "{error}");
 }
 
+/// A construction point of a component that is moved projects where the component puts it: into a
+/// sketch of the root, where it moves with the component, and into a sketch of the component
+/// itself, where it stays where the component's own coordinates put it (#12075).
+#[test]
+fn a_construction_point_of_a_moved_component_projects_where_it_is_placed() {
+    let mut s = Session::default();
+    let part = run(&mut s, "component.create", json!({"name": "Part"}))["component"].as_u64().unwrap();
+    run(&mut s, "construct.point.vertex", json!({"point": {"point": [10, 5, 20]}, "name": "Point1"}));
+    let own = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.project", json!({"refs": [{"point": "Point1"}]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let root = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.project", json!({"refs": [{"point": "Point1"}]}));
+    run(&mut s, "sketch.finish", json!({}));
+    // The projected point of each sketch, in its sketch's coordinates.
+    let at = |s: &Session, id: u64| {
+        let state = s.model.state();
+        let sk = &state.sketch(id).unwrap().sketch;
+        assert!(sk.links.iter().all(|l| !l.lost), "{:?}", sk.links);
+        let link = sk.links.first().unwrap();
+        let p = sk.link_points(&link.id).first().and_then(|p| sk.points.get(*p)).unwrap().pos;
+        (p.x, p.y)
+    };
+    let near = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).abs() < 1e-9 && (a.1 - b.1).abs() < 1e-9;
+    assert!(near(at(&s, own), (10.0, 5.0)), "{:?}", at(&s, own));
+    assert!(near(at(&s, root), (10.0, 5.0)), "{:?}", at(&s, root));
+    let placement = s.doc.occurrences.iter().find(|o| o.component == part).map(|o| o.id).unwrap();
+    run(&mut s, "occurrence.move", json!({"occurrence": placement, "translate": [100, 0, 0], "capture": true}));
+    let opened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    for session in [&s, &opened] {
+        assert!(near(at(session, root), (110.0, 5.0)), "the root's projection moves with the part: {:?}", at(session, root));
+        assert!(near(at(session, own), (10.0, 5.0)), "the part's own projection stays: {:?}", at(session, own));
+    }
+}
+
 #[test]
 fn project_whole_body_can_create_unlinked_geometry() {
     let mut s = Session::default();
