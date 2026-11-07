@@ -86,7 +86,7 @@ fn every_axis_is_drawn_in_one_set_of_colours() {
 
         let mut out = ctx.run_ui(egui::RawInput { screen_rect: Some(rect), ..Default::default() }, |ui| {
             let painter = ui.painter().clone();
-            crate::gizmo::show(ui, &painter, &proj, egui::Id::new("one_set_gizmo"), &triad, 1.0);
+            crate::gizmo::show(ui, &painter, &proj, egui::Id::unique("one_set_gizmo"), &triad, 1.0);
         });
         out.textures_delta.clear();
         let mut gizmo = stroke_colours(&out.shapes);
@@ -217,6 +217,9 @@ fn colours_outside_the_theme_are_only_the_listed_neutral_ones() {
                 continue;
             }
             let src = std::fs::read_to_string(&path).unwrap();
+            if src.trim_start().starts_with("#![cfg(test)]") {
+                continue;
+            }
             let code = src.split("#[cfg(test)]").next().unwrap_or(&src);
             let n: usize = COLOUR_LITERALS.iter().map(|p| code.matches(p).count()).sum();
             let allowed = ALLOWED_LITERALS.iter().find(|(f, _, _)| *f == relative).map_or(0, |(_, n, _)| *n);

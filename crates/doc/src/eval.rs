@@ -143,7 +143,7 @@ impl ModelBody {
 
     /// Face measurements for joint origins, at their original chord tolerance. Pose changes
     /// and scratch copies share them; a geometry edit makes a new body and cache.
-    pub(crate) fn joint_faces(&self) -> Result<Arc<[kernel::FaceInfo]>> {
+    pub fn joint_faces(&self) -> Result<Arc<[kernel::FaceInfo]>> {
         let measure = || {
             #[cfg(test)]
             cost_tests::count(|c| c.joint_faces += 1);
@@ -252,6 +252,35 @@ impl ModelBody {
     /// unchanged) and, while it is held, by no other body.
     pub fn display_identity(&self) -> Arc<dyn std::any::Any + Send + Sync> {
         self.mesh.clone()
+    }
+
+    /// Identity of the display cells of the solid this body shows: its own, or for a rigidly
+    /// placed copy its definition's (shared by every placement of it).
+    fn solid_id(&self) -> usize {
+        self.mesh_placement.as_deref().map_or(Arc::as_ptr(&self.mesh) as usize, placed_mesh::PlacedMesh::definition_id)
+    }
+
+    /// How this body is drawn moved from `before`: [`crate::IDENTITY`] when it is `before` where
+    /// it stood (its meshes and plans the same), the rigid motion between them when it is the same
+    /// solid placed elsewhere (a dragged component's body: `before`'s meshes and plans drawn moved
+    /// show it; a definition shown where it is defined is its own placement), `None` when it is
+    /// another body or its geometry differs.
+    pub fn display_moved_from(&self, before: &ModelBody) -> Option<crate::Mat> {
+        if self.name != before.name || self.solid_id() != before.solid_id() {
+            return None;
+        }
+        let (now, was) = (self.mesh_placement.as_deref(), before.mesh_placement.as_deref());
+        if let (Some(now), Some(was)) = (now, was)
+            && now.tolerance.to_bits() != was.tolerance.to_bits()
+        {
+            return None;
+        }
+        let at = |p: Option<&placed_mesh::PlacedMesh>| p.map_or(crate::IDENTITY, |p| *p.transform());
+        let (now, was) = (at(now), at(was));
+        if now == was {
+            return Some(crate::IDENTITY);
+        }
+        Some(crate::mat_mul(&now, &crate::mat_inverse(&was)?))
     }
 
     /// [`ModelBody::mesh`] as a shared mesh and the move that places it: for a rigid placement
@@ -438,6 +467,21 @@ fn removed_note(gone: &[Vec3]) -> String {
     }
 }
 
+thread_local! {
+    /// Current feature evaluation validation mode (`EachStep`, `EachFeature`, or `Off`).
+    static EVAL_VALIDATION: std::cell::Cell<kernel::Validation> = const { std::cell::Cell::new(kernel::Validation::EachFeature) };
+}
+
+/// Restores `EVAL_VALIDATION` to its previous value when dropped.
+struct EvalValidationGuard(kernel::Validation);
+
+impl Drop for EvalValidationGuard {
+    /// Restores the saved validation mode on scope exit.
+    fn drop(&mut self) {
+        EVAL_VALIDATION.set(self.0);
+    }
+}
+
 /// A blend's refusal as too large (`why`) with the largest `size` (radius, distance) that fits,
 /// as `search` finds it by building candidates ([`kernel::fillet_max`]): the refusal as it is
 /// when none fits or the search itself fails (a candidate failing for another reason says
@@ -447,6 +491,9 @@ fn with_largest_fit(
     size: &str,
     search: impl FnOnce() -> std::result::Result<Option<(f64, kernel::Body)>, kernel::KernelError>,
 ) -> kernel::KernelError {
+    if EVAL_VALIDATION.get() == kernel::Validation::Off {
+        return kernel::KernelError::TooLarge(why);
+    }
     // On solidcore the refusal names a size already, less a margin (34.99 where 35 builds), and
     // its edge: the edge stays, the size is the largest the search builds, solidcore's where the
     // search finds none.
@@ -788,7 +835,7 @@ impl ModelState {
             let mut h = std::collections::hash_map::DefaultHasher::new();
             serde_json::to_string(&s.plane).unwrap_or_default().hash(&mut h);
             let mut sketch = s.sketch.clone();
-            quantize(&mut sketch);
+            fingerprint_sketch(&mut sketch);
             serde_json::to_string(&sketch).unwrap_or_default().hash(&mut h);
             s.report.ok().hash(&mut h);
             self.sketch_keys.insert(feature, h.finish());
@@ -1257,6 +1304,13 @@ fn quantize(sk: &mut solidcraft_sketch::Sketch) {
     }
 }
 
+/// The stored solve as a cache key: on the [`QUANTUM`] grid, without the editor state
+/// (see [`solidcraft_sketch::Sketch::clear_id_counters`]).
+fn fingerprint_sketch(sk: &mut solidcraft_sketch::Sketch) {
+    quantize(sk);
+    sk.clear_id_counters();
+}
+
 /// A feature as fingerprinted: its definition, a sketch's stored solve quantized, an imported
 /// file's text or mesh payload by its content digest.
 /// Hash [`feature_json`] of `f` into `h`. Every evaluation fingerprints every feature, and in a
@@ -1323,7 +1377,7 @@ fn feature_json(f: &Feature, steps: &ImportDigests) -> String {
     if let FeatureKind::Sketch { .. } = &f.kind {
         let mut g = f.clone();
         if let FeatureKind::Sketch { sketch, .. } = &mut g.kind {
-            quantize(sketch);
+            fingerprint_sketch(sketch);
         }
         return serde_json::to_string(&g).unwrap_or_default();
     }
@@ -1597,6 +1651,21 @@ impl PlacementReads {
         }
     }
 
+    /// The bodies To / From Object's stored face names find, each where it is placed: evaluation
+    /// finds a named face by its name ([`with_named_face_points`] fails a feature whose name finds
+    /// none). Everything when a name is missing or empty, finds no one body, or `st` is `None`:
+    /// the face is then found by its point, on whatever body lies there.
+    fn object_faces(&mut self, st: Option<&ModelState>, names: Option<&[String]>) {
+        let bodies: Option<Vec<&str>> = st.zip(names).and_then(|(st, names)| {
+            let first_of_its_name = |b: &&ModelBody| st.body(&b.name).is_some_and(|first| std::ptr::eq(first, *b));
+            names.iter().map(|n| crate::name_lookup::face_body(st, n).filter(first_of_its_name).map(|b| b.name.as_str())).collect()
+        });
+        match bodies {
+            Some(bodies) => bodies.into_iter().for_each(|b| self.placed_body(st, b)),
+            None => self.all = true,
+        }
+    }
+
     /// The same target selection as `apply_traced`, expanded only over the timeline input.
     fn drawn_targets(&mut self, st: Option<&ModelState>, f: &Feature) {
         let Some(st) = st else {
@@ -1776,11 +1845,22 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
             }
         }
     }
+    // The faces To / From Object names, in `face_points` order.
+    let object_names = match &f.kind {
+        FeatureKind::Extrude { extent, .. } => usize::from(extent.to.is_some()) + usize::from(extent.from.is_some()),
+        FeatureKind::Revolve { to, .. } => usize::from(to.is_some()),
+        _ => 0,
+    };
     match &f.kind {
-        // To / From Object finds its target where that target's component is placed (#928),
-        // over every body.
-        FeatureKind::Extrude { extent, .. } if extent.to.is_some() || extent.from.is_some() => reads.all = true,
-        FeatureKind::Revolve { to: Some(_), .. } => reads.all = true,
+        // To / From Object finds its target where the target's body is placed (#928): only that
+        // body's placement, not every part's (#6325). Its tools meet their targets as other
+        // joins and cuts do.
+        kind if object_names > 0 => {
+            reads.object_faces(st, f.face_names.get(..object_names));
+            if drawn_tools_change_bodies(kind) {
+                reads.drawn_targets(st, f);
+            }
+        }
         // A mirror of placed bodies follows the placements it was picked at and its own component's
         // frame, not every occurrence: moving an unrelated one leaves it (and its cache) alone.
         FeatureKind::Mirror { placements, bodies, .. } if !placements.is_empty() => return mirror_placements_digest(doc, f, placements, bodies),
@@ -2318,6 +2398,7 @@ impl Model {
             let r = match frame_error.or(bad_param) {
                 Some(e) => Err(kernel::KernelError::Failed(e)),
                 None => kernel::guard(&f.name, || {
+                    let _val_guard = EvalValidationGuard(EVAL_VALIDATION.replace(validation));
                     let (r, deferred) =
                         kernel::validating(validation, || eval_feature(doc, &vals, f, &mut next, &mut warning, &mut import_report, &mut repair));
                     r.map_err(|e| match e {
@@ -3741,6 +3822,27 @@ fn body_at(st: &ModelState, body: &Option<crate::BodyName>, points: &[Vec3]) -> 
         .ok_or_else(|| DocError::Invalid("there is no body".into()))
 }
 
+/// Whether the whole line through `p` along `dir` (both ways) meets the box (slab test). A zero
+/// component of `dir` keeps the line in its slab only when `p` is already within it.
+fn line_meets_box(p: Vec3, dir: Vec3, b: &solidcraft_geom::Aabb3) -> bool {
+    if b.is_empty() {
+        return false;
+    }
+    let (mut lo, mut hi) = (f64::NEG_INFINITY, f64::INFINITY);
+    for (o, d, min, max) in [(p.x, dir.x, b.min.x, b.max.x), (p.y, dir.y, b.min.y, b.max.y), (p.z, dir.z, b.min.z, b.max.z)] {
+        if d == 0.0 || !d.is_finite() {
+            if !(min..=max).contains(&o) {
+                return false;
+            }
+            continue;
+        }
+        let (t0, t1) = ((min - o) / d, (max - o) / d);
+        lo = lo.max(t0.min(t1));
+        hi = hi.min(t0.max(t1));
+    }
+    lo <= hi
+}
+
 /// A hole stays on its face when the model changes: a position now inside a body moves back
 /// against the drilling direction to the surface, one now above it moves down onto it. Only the
 /// bodies in `scope` count (every body when it is empty, see [`hole_scope`]). Edit Hole seeds from
@@ -3751,6 +3853,12 @@ pub fn hole_on_surface(st: &ModelState, p: Vec3, dir: Vec3, scope: &[String]) ->
     let mut best: Option<Vec3> = None;
     for b in st.bodies.iter().filter(|b| in_hole_scope(scope, b)) {
         let m = b.mesh();
+        // Every test below casts along the line through `p`: a mesh whose box that line misses
+        // has no triangle to hit, so skip it before scanning its triangles (in an assembly of
+        // hundreds of parts, these scans were most of a hole's time).
+        if !line_meets_box(p, dir, &m.bounds().inflated(eps * 8.0)) {
+            continue;
+        }
         // Already on the surface: the drill enters right here.
         if let Some((t, _)) = m.raycast(p - dir * eps, dir)
             && t < eps * 4.0
@@ -3767,15 +3875,18 @@ pub fn hole_on_surface(st: &ModelState, p: Vec3, dir: Vec3, scope: &[String]) ->
     best.unwrap_or(p)
 }
 
-/// The faces of the model near `p`: for each, how far `p` is from it, the outward normal there
-/// (the surface's own normal for planes, cylinders and spheres, turned the way the face looks out
-/// of its body; the nearest mesh facet's otherwise) and, for a plane, how far `p` is from the
-/// plane itself. Only faces within `reach` of `p`, nearest first, of the bodies in `scope`
-/// (every body when it is empty).
-fn faces_through(st: &ModelState, p: Vec3, reach: f64, scope: &[String]) -> Vec<(f64, Vec3, Option<f64>)> {
-    let mut out: Vec<(f64, Vec3, Option<f64>)> = Vec::new();
-    for b in st.bodies.iter().filter(|b| !b.body.is_mesh() && in_hole_scope(scope, b)) {
+/// The faces of the model near `p`, nearest first, before their surfaces are looked at: for
+/// each, how far `p` is from it, its body, its index and the outward normal of its nearest mesh
+/// facet. Only faces within `reach` of `p`, of the bodies in `scope` (every body when it is
+/// empty). Ties keep body order, then face order.
+fn faces_near(st: &ModelState, p: Vec3, reach: f64, scope: &[String]) -> Vec<NearFace> {
+    let mut out: Vec<NearFace> = Vec::new();
+    for (i, b) in st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh() && in_hole_scope(scope, b)) {
         let m = b.mesh();
+        // No facet is nearer `p` than the mesh's box: one beyond `reach` has none to give.
+        if !m.bounds().inflated(reach).contains(p) {
+            continue;
+        }
         // The nearest facet of each face of this body.
         let mut near: BTreeMap<u32, (f64, Vec3)> = BTreeMap::new();
         for (t, f) in m.triangles.iter().zip(&m.tri_face) {
@@ -3786,53 +3897,67 @@ fn faces_through(st: &ModelState, p: Vec3, reach: f64, scope: &[String]) -> Vec<
                 near.insert(*f, (d, n));
             }
         }
-        for (f, (d, facet)) in near {
-            let (exact, off) = match kernel::face_surface(&b.body, f as usize) {
-                Some(kernel::FaceSurface::Plane { normal, point }) => (Some(*normal), Some((p - point).dot(normal).abs())),
-                Some(kernel::FaceSurface::Cylinder { origin, axis, .. }) => {
-                    let v = p - origin;
-                    ((v - axis * v.dot(axis)).normalized(), None)
-                }
-                Some(kernel::FaceSurface::Sphere { center, .. }) => ((p - center).normalized(), None),
-                // Square to the line through the apex, not the nearest facet's normal (#10698).
-                Some(kernel::FaceSurface::Cone { apex, axis, half_angle }) => {
-                    let v = p - apex;
-                    let out = (v - axis * v.dot(axis)).normalized();
-                    (out.and_then(|u| (u * half_angle.cos() - axis * half_angle.sin()).normalized()), None)
-                }
-                // Away from the nearest point of the ring the tube goes round.
-                Some(kernel::FaceSurface::Torus { center, axis, major, .. }) => {
-                    let v = p - center;
-                    let ring = (v - axis * v.dot(axis)).normalized().map(|u| center + u * major);
-                    (ring.and_then(|q| (p - q).normalized()), None)
-                }
-                _ => (None, None),
-            };
-            let n = match exact {
-                Some(n) if n.dot(facet) < 0.0 => -n,
-                Some(n) => n,
-                None => facet,
-            };
-            out.push((d, n, off));
-        }
+        out.extend(near.into_iter().map(|(f, (d, n))| (d, i, f, n)));
     }
     out.sort_by(|a, b| a.0.total_cmp(&b.0));
     out
 }
 
-/// The faces near `p` a hole placed there goes by (as [`faces_through`]): those of the bodies in
+/// A face of [`faces_near`]: its distance from the point, its body, its index and the outward
+/// normal of its nearest mesh facet.
+type NearFace = (f64, usize, u32, Vec3);
+
+/// One face of [`faces_near`] as [`faces_through`] gives it: the distance, the outward normal
+/// (the surface's own normal for planes, cylinders, spheres, cones and tori, turned the way the
+/// face looks out of its body; the nearest mesh facet's otherwise) and, for a plane, how far `p`
+/// is from the plane itself. Classifying the surface is the costly part, so callers that stop at
+/// the first face that answers them ask for no more than that.
+fn face_through(st: &ModelState, p: Vec3, (d, body, f, facet): NearFace) -> (f64, Vec3, Option<f64>) {
+    #[cfg(test)]
+    cost_tests::count(|c| c.surfaces += 1);
+    let exact = st.bodies.get(body).and_then(|b| kernel::face_surface(&b.body, f as usize));
+    let (exact, off) = match exact {
+        Some(kernel::FaceSurface::Plane { normal, point }) => (Some(*normal), Some((p - point).dot(normal).abs())),
+        Some(kernel::FaceSurface::Cylinder { origin, axis, .. }) => {
+            let v = p - origin;
+            ((v - axis * v.dot(axis)).normalized(), None)
+        }
+        Some(kernel::FaceSurface::Sphere { center, .. }) => ((p - center).normalized(), None),
+        // Square to the line through the apex, not the nearest facet's normal (#10698).
+        Some(kernel::FaceSurface::Cone { apex, axis, half_angle }) => {
+            let v = p - apex;
+            let out = (v - axis * v.dot(axis)).normalized();
+            (out.and_then(|u| (u * half_angle.cos() - axis * half_angle.sin()).normalized()), None)
+        }
+        // Away from the nearest point of the ring the tube goes round.
+        Some(kernel::FaceSurface::Torus { center, axis, major, .. }) => {
+            let v = p - center;
+            let ring = (v - axis * v.dot(axis)).normalized().map(|u| center + u * major);
+            (ring.and_then(|q| (p - q).normalized()), None)
+        }
+        _ => (None, None),
+    };
+    let n = match exact {
+        Some(n) if n.dot(facet) < 0.0 => -n,
+        Some(n) => n,
+        None => facet,
+    };
+    (d, n, off)
+}
+
+/// The faces near `p` a hole placed there goes by (as [`faces_near`]): those of the bodies in
 /// `scope`, the hole's own, when one of them passes within `on` of `p`, else those of every body.
 /// Where a plate's face touches another body both faces pass through `p`, and a hole that drills
 /// the plate goes by the plate's face, never the other body's (#12066). A hole placed on another
 /// body's face, to drill through it into its own body behind, still goes by that face.
-fn hole_faces_through(st: &ModelState, p: Vec3, reach: f64, on: f64, scope: &[String]) -> Vec<(f64, Vec3, Option<f64>)> {
+fn hole_faces_near(st: &ModelState, p: Vec3, reach: f64, on: f64, scope: &[String]) -> Vec<NearFace> {
     if !scope.is_empty() {
-        let own = faces_through(st, p, reach, scope);
-        if own.first().is_some_and(|(d, _, _)| *d <= on) {
+        let own = faces_near(st, p, reach, scope);
+        if own.first().is_some_and(|c| c.0 <= on) {
             return own;
         }
     }
-    faces_through(st, p, reach, &[])
+    faces_near(st, p, reach, &[])
 }
 
 /// The way a hole placed at `p` drills: into the material, against the outward normal of the
@@ -3842,17 +3967,22 @@ fn hole_faces_through(st: &ModelState, p: Vec3, reach: f64, on: f64, scope: &[St
 /// of the bodies in `scope` (the bodies the hole drills; empty for every body) decide.
 pub fn hole_direction_at(st: &ModelState, p: Vec3, scope: &[String]) -> Option<Vec3> {
     let size = st.bodies.iter().map(|b| b.body.size()).fold(1.0, f64::max);
-    let faces = hole_faces_through(st, p, f64::INFINITY, size * 1e-4, scope);
-    if let Some((d, n, _)) = faces.first()
-        && *d <= size * 1e-4
+    // Every face of the model, nearest first; each surface is classified only when the rules
+    // below reach it. Classifying all of them first took most of a hole's time in an assembly
+    // of hundreds of parts, where the nearest face nearly always answers.
+    let near = hole_faces_near(st, p, f64::INFINITY, size * 1e-4, scope);
+    let mut faces = near.iter().map(|c| face_through(st, p, *c));
+    let first = faces.next();
+    if let Some((d, n, _)) = first
+        && d <= size * 1e-4
     {
-        return Some(-*n);
+        return Some(-n);
     }
-    if let Some((_, n, _)) = faces.iter().find(|(_, _, off)| off.is_some_and(|o| o <= size * 1e-4)) {
-        return Some(-*n);
+    if let Some((_, n, _)) = first.into_iter().chain(faces).find(|(_, _, off)| off.is_some_and(|o| o <= size * 1e-4)) {
+        return Some(-n);
     }
     let reach = st.bodies.iter().map(crate::appearance::pick_tolerance).fold(0.0, f64::max);
-    faces.first().filter(|(d, _, _)| *d <= reach).map(|(_, n, _)| -*n)
+    first.filter(|(d, _, _)| *d <= reach).map(|(_, n, _)| -n)
 }
 
 /// A hole placed on a face drills into the material: when its direction leaves every face it
@@ -3865,7 +3995,7 @@ pub fn hole_direction_at(st: &ModelState, p: Vec3, scope: &[String]) -> Option<V
 /// the plate there, drills the plate (#12066).
 fn hole_dir_into_face(st: &ModelState, p: Vec3, dir: Vec3, scope: &[String]) -> Vec3 {
     let size = st.bodies.iter().map(|b| b.body.size()).fold(1.0, f64::max);
-    let faces = hole_faces_through(st, p, size * 1e-5, size * 1e-5, scope);
+    let faces: Vec<_> = hole_faces_near(st, p, size * 1e-5, size * 1e-5, scope).into_iter().map(|c| face_through(st, p, c)).collect();
     if faces.is_empty() || faces.iter().any(|(_, n, _)| n.dot(dir) < -1e-9) {
         return dir;
     }
@@ -5802,13 +5932,13 @@ fn feature_tools_with_constructor(
         FeatureKind::Torus { center, major, minor, .. } => {
             Ok(unnamed(vec![kernel::torus(point(vals, center)?, val(vals, major, Kind::Length)?, val(vals, minor, Kind::Length)?)?]))
         }
-        FeatureKind::Cone { base, axis, radius, top_radius, height, .. } => Ok(unnamed(vec![more::cone(
+        FeatureKind::Cone { base, axis, radius, top_radius, height, .. } => Ok(vec![more::cone(
             point(vals, base)?,
             axis.0,
             val(vals, radius, Kind::Length)?,
             val(vals, top_radius, Kind::Length)?,
             val(vals, height, Kind::Length)?,
-        )?])),
+        )?]),
         FeatureKind::Hole { .. } => Ok(hole_feature_tools(vals, st, f)?.into_iter().map(|(tool, _)| tool).collect()),
         _ => Err(DocError::Invalid(format!("{} cannot be patterned or mirrored yet", f.name))),
     }
@@ -6140,15 +6270,28 @@ fn from_profile_on_closed_path(segs: Vec<solidcore_record::Seg2>, path: &Plane, 
 /// Where an extrude of distance `d` starts and ends along the sketch normal, before any start
 /// offset: one side, the other, both (symmetric), or a second distance on the other side.
 ///
-/// A second distance (`distance2`) goes the other way from the first side, wherever that went:
-/// against the normal for `direction: negative` (#2700), and back along it when a negative
-/// distance or a To Object below the sketch sends the first side down.
+/// A second distance (`distance2`) goes the other way from the first side: against the normal,
+/// or along it for `direction: negative` (#2700). Entered distances keep those sides whatever
+/// their signs; a To Object below the sketch or a Through All that reaches down sends the first
+/// side down and the second back along the normal.
 pub(crate) fn extent_sides(vals: &BTreeMap<String, Value>, extent: &crate::Extent, d: f64, direction: crate::Direction) -> Result<(f64, f64)> {
     Ok(match (&extent.distance2, direction) {
         (Some(d2), _) => {
-            let first = if direction == crate::Direction::Negative { -d } else { d };
+            let negative = direction == crate::Direction::Negative;
+            let first = if negative { -d } else { d };
             let d2 = val(vals, d2, Kind::Length)?;
-            (if first < 0.0 { d2 } else { -d2 }, first)
+            // An entered distance keeps its side whatever its sign: Direction fixes the sides,
+            // and a sign only turns its own side over. A reach computed from the model (To
+            // Object, Through All) has the sign of where the object is, so the other side
+            // follows it.
+            let second = if extent.second_follows_first || extent.to.is_some() || extent.through_all {
+                if first < 0.0 { d2 } else { -d2 }
+            } else if negative {
+                d2
+            } else {
+                -d2
+            };
+            (second, first)
         }
         (None, crate::Direction::Positive) => (0.0, d),
         (None, crate::Direction::Negative) => (-d, 0.0),
@@ -7213,12 +7356,14 @@ pub(crate) fn sheet_face_plane_in_frame(doc: &Document, st: &ModelState, comp: u
         PlaneRef::Offset { base, distance } => {
             PlaneRef::Offset { base: Box::new(sheet_face_plane_in_frame(doc, st, comp, base)?), distance: distance.clone() }
         }
-        PlaneRef::AtAngle { base, axis_origin, axis_dir, angle, line } => PlaneRef::AtAngle {
+        PlaneRef::AtAngle { base, axis_origin, axis_dir, angle, line, direction_only, pivot } => PlaneRef::AtAngle {
             base: Box::new(sheet_face_plane_in_frame(doc, st, comp, base)?),
             axis_origin: *axis_origin,
             axis_dir: *axis_dir,
             angle: angle.clone(),
             line: line.clone(),
+            direction_only: *direction_only,
+            pivot: pivot.clone(),
         },
         PlaneRef::Flipped { base, about_y } => {
             PlaneRef::Flipped { base: Box::new(sheet_face_plane_in_frame(doc, st, comp, base)?), about_y: *about_y }
@@ -7319,6 +7464,7 @@ fn eval_feature(
     // Its tools meet bodies in other placements where those are shown (#3383).
     let _frames = ToolFrames::install(doc, f, st);
     match &f.kind {
+        FeatureKind::NewerFileFeature { raw } => Err(DocError::Invalid(raw.why())),
         FeatureKind::BodyTransfer { bodies, from, to, transform } => {
             crate::body_transfer::evaluate(doc, st, &crate::plain(bodies), *from, *to, *transform)
         }
@@ -7358,7 +7504,7 @@ fn eval_feature(
         | FeatureKind::Rib { .. }
         | FeatureKind::ReplaceFace { .. }
         | FeatureKind::Align { .. }
-        | FeatureKind::Remove { .. } => more::eval(doc, vals, f, st),
+        | FeatureKind::Remove { .. } => more::eval(doc, vals, f, st, warning),
         FeatureKind::Sketch { plane, sketch } => {
             let anchor = crate::face_anchor::plane_face_anchor(plane);
             let fst = match anchor {
@@ -8036,8 +8182,8 @@ fn eval_feature(
         FeatureKind::Cone { base, axis, radius, top_radius, height, operation } => {
             let (radius, top_radius, height) =
                 (val(vals, radius, Kind::Length)?, val(vals, top_radius, Kind::Length)?, val(vals, height, Kind::Length)?);
-            let b = more::cone(point(vals, base)?, axis.0, radius, top_radius, height)?;
-            apply_op(doc, st, f, vec![b], *operation, &[])
+            let tool = more::cone(point(vals, base)?, axis.0, radius, top_radius, height)?;
+            apply_traced(doc, st, f, vec![tool], *operation, &[])
         }
         FeatureKind::Combine { target, tools, operation, keep_tools } => {
             if tools.iter().any(|t| t == target) {
@@ -8386,7 +8532,7 @@ fn move_constructions_with(doc: &Document, st: &mut ModelState, moved: &[crate::
 fn plane_is_fixed(plane: &PlaneRef) -> bool {
     match plane {
         PlaneRef::Origin { .. } | PlaneRef::Custom { .. } | PlaneRef::Placed { .. } => true,
-        PlaneRef::AtAngle { line: Some(_), .. } => false,
+        PlaneRef::AtAngle { line: Some(_), .. } | PlaneRef::AtAngle { pivot: Some(_), .. } => false,
         PlaneRef::Offset { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::Flipped { base, .. } => plane_is_fixed(base),
         _ => false,
     }
@@ -8397,7 +8543,7 @@ fn plane_is_fixed(plane: &PlaneRef) -> bool {
 fn plane_reads_geometry(plane: &PlaneRef) -> bool {
     match plane {
         PlaneRef::Origin { .. } | PlaneRef::Custom { .. } | PlaneRef::Placed { .. } | PlaneRef::Construction { .. } => false,
-        PlaneRef::AtAngle { line: Some(_), .. } => true,
+        PlaneRef::AtAngle { line: Some(_), .. } | PlaneRef::AtAngle { pivot: Some(_), .. } => true,
         PlaneRef::Offset { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::Flipped { base, .. } => plane_reads_geometry(base),
         PlaneRef::ThroughPoint { .. }
         | PlaneRef::Midplane { .. }
@@ -8736,6 +8882,7 @@ impl PlacedBodies {
             let mut fresh = ModelBody::new(name.to_string(), placed.body.clone(), b.feature);
             fresh.mesh = placed.mesh.clone();
             fresh.measured = placed.measured.clone();
+            fresh.joint_faces = placed.joint_faces.clone();
             fresh.mesh_placement = placed.mesh_placement.clone();
             fresh.plan = placed.plan.clone();
             fresh.plan_mesh = placed.plan_mesh.clone();
@@ -9103,6 +9250,49 @@ mod world_placement_cache_tests {
         let again = world_state(&doc, &state).unwrap();
         assert!(Arc::ptr_eq(&original_mesh, &again.body("Block").unwrap().mesh()));
         assert!(Arc::ptr_eq(&names, &crate::naming::face_names(again.body(&second_name).unwrap())));
+    }
+
+    /// A dragged component's bodies are drawn from the meshes and plans made where the drag found
+    /// them, moved: each is the same solid moved rigidly, the others stand where they were, and a
+    /// body whose geometry changed is no such move.
+    #[test]
+    fn a_moved_placement_is_drawn_moved_from_where_it_stood() {
+        // A placement moved, and the part moved off where it is defined.
+        for from_definition in [false, true] {
+            let mut doc = Document::new("placements");
+            let component = doc.add_component(Some("Part"), 0).unwrap();
+            doc.body_components.insert("Block".into(), component);
+            let start = if from_definition { crate::IDENTITY } else { crate::rigid(Vec3::new(10., 20., 0.), Vec3::ZERO, Vec3::Z, 0.4) };
+            let second = doc.add_occurrence(component, 0, start).unwrap();
+            let mut state = ModelState::default();
+            state.bodies.push(ModelBody::new("Block".into(), kernel::box_solid(Vec3::ZERO, Vec3::new(2., 3., 4.)).unwrap(), 1));
+            let before = world_state(&doc, &state).unwrap();
+            let delta = crate::rigid(Vec3::new(4., -7., 1.5), Vec3::new(1., 1., 0.), Vec3::new(0., 1., 1.), 0.6);
+            let moved = doc.occurrences.iter_mut().find(|o| o.id == second).unwrap();
+            moved.transform = crate::mat_mul(&delta, &moved.transform);
+            let after = world_state(&doc, &state).unwrap();
+            assert_eq!(after.bodies.len(), 2);
+            let mut moves = 0;
+            for now in &after.bodies {
+                let was = before.body(&now.name).unwrap();
+                let d = now.display_moved_from(was).unwrap();
+                if d == crate::IDENTITY {
+                    assert!(Arc::ptr_eq(&now.mesh(), &was.mesh()), "{}: unchanged, the same mesh", now.name);
+                    continue;
+                }
+                moves += 1;
+                assert!(d.iter().flatten().zip(delta.iter().flatten()).all(|(a, b)| (a - b).abs() < 1e-9), "{}: {d:?}", now.name);
+                // `was`'s mesh drawn moved is `now`'s.
+                for (p, q) in was.mesh().positions.iter().zip(&now.mesh().positions) {
+                    assert!(crate::apply_point(&d, *p).dist(*q) < 1e-9);
+                }
+            }
+            assert_eq!(moves, 1, "from its definition: {from_definition}");
+            // Another body, or other geometry: no move draws it.
+            assert!(after.bodies[0].display_moved_from(&before.bodies[1]).is_none());
+            let other = ModelBody::new(before.bodies[0].name.clone(), kernel::box_solid(Vec3::ZERO, Vec3::new(1., 1., 1.)).unwrap(), 1);
+            assert!(other.display_moved_from(&before.bodies[0]).is_none());
+        }
     }
 }
 

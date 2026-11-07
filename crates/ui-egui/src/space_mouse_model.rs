@@ -173,7 +173,7 @@ fn rolled(ui: &egui::Ui, site: &str, travel: [f32; 6], repaint: bool) -> ball::B
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
     }
     ui.data_mut(|data| {
-        let ball = data.get_temp_mut_or_insert_with(ui.id().with(("sc_space_mouse_ball", site)), ball::Ball::new);
+        let ball = data.get_temp_mut_or_insert_with(ui.scope_id().with(("sc_space_mouse_ball", site)), ball::Ball::new);
         ball.roll(rate, seconds);
         *ball
     })
@@ -291,7 +291,7 @@ pub(crate) fn demo_swing(seconds: f32) -> f32 {
 /// rest again whenever the step changes.
 pub(crate) fn demo(ui: &mut egui::Ui, step: Step, kind: Kind) {
     let now = ui.input(|i| i.time);
-    let id = egui::Id::new("sc_space_mouse_demo");
+    let id = egui::Id::unique("sc_space_mouse_demo");
     let key = (step.axis, step.positive);
     let started = ui.data_mut(|data| {
         let (shown, started) = data.get_temp_mut_or_insert_with(id, || (key, now));

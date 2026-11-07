@@ -151,6 +151,7 @@ fn play(h: &mut Harness) {
     h.frames(2);
 }
 
+/// Clicks and a drag that start on an offset trim independent ends and preserve the expected undo history.
 #[test]
 fn trimming_construction_source_and_offsets_by_click_or_drag_is_independent() {
     for drag in [false, true] {

@@ -66,3 +66,7 @@ solidcraft-develop = { workspace = true }
 [[example]]
 name = "render_resource_workflow"
 required-features = ["raytrace-cpu"]
+
+[[example]]
+name = "wood_texture_workflow"
+required-features = ["raytrace-cpu"]

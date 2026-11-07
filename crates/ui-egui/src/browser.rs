@@ -205,15 +205,22 @@ pub struct TreeState {
     pub picked_timeline_groups: Vec<u64>,
     /// Last feature-history item clicked, for Shift ranges (`f:<id>` or `g:<id>`).
     pub timeline_anchor: Option<String>,
-    /// Find in Timeline: the feature the history scrolls to the next time it draws its items, in
-    /// the bottom strip or in the history on the left (#5850).
+    /// Which part of the design the History bar shows (`timeline_scope`).
+    pub(crate) timeline_scope: crate::timeline_scope::Scope,
+    /// The component edited or picked when the History bar last followed it, once it has
+    /// (`timeline_scope`).
+    pub(crate) timeline_followed: Option<Option<u64>>,
+    /// A feature the History bar scrolls into view the next time it draws its items, in the
+    /// bottom strip or in the history on the left: the edited component's last, or the one Find
+    /// in Timeline found (#5850).
     pub timeline_reveal: Option<u64>,
-    /// Show components marked out of the History bar anyway (#10393). Held by the session, like
-    /// the bar's Show All toggle; the History controls' menu carries the switch.
+    /// Show components marked out of the History bar anyway (#10393). Held by the session; the
+    /// History controls' menu carries the switch.
     pub history_show_hidden: bool,
-    /// The History bar's Show All toggle: every component's features, not only the active or
-    /// picked one's (#2880).
-    pub history_show_all: bool,
+    /// The runs and folders opened and folded in the active design's History (`history_folds`).
+    pub(crate) history_folds: crate::history_folds::Folds,
+    /// Those of designs with a file, by file, kept between runs (`history_folds`).
+    pub(crate) history_remembered: crate::history_folds::Remembered,
     /// The feature of the face or edge last picked in the view, so a new pick scrolls the
     /// history to it once.
     pub view_pick: Option<u64>,
@@ -758,16 +765,16 @@ fn row_rect(ui: &egui::Ui) -> Rect {
 pub(crate) use crate::ui_kit::{Mark, Row};
 
 fn compact_tree(ui: &egui::Ui) -> bool {
-    ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new("sc_compact_tree"))).unwrap_or(false)
+    ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_compact_tree"))).unwrap_or(false)
 }
 
 /// Where tree rows put their eye this frame (Preferences › Interface, #8718).
 pub(crate) fn publish_row_prefs(app: &SolveApp, ctx: &egui::Context) {
-    ctx.data_mut(|d| d.insert_temp(egui::Id::new("sc_tree_eye_left"), app.preferences.browser_eye_left));
+    ctx.data_mut(|d| d.insert_temp(egui::Id::unique("sc_tree_eye_left"), app.preferences.browser_eye_left));
 }
 
 fn eye_left(ui: &egui::Ui) -> bool {
-    ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::new("sc_tree_eye_left"))).unwrap_or(false)
+    ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_tree_eye_left"))).unwrap_or(false)
 }
 
 pub(crate) fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row<'_>) -> RowResp {
@@ -1134,7 +1141,7 @@ pub(crate) fn browser_width(remembered: f32) -> f32 {
 pub(crate) fn resize_column(app: &mut SolveApp, ui: &egui::Ui, rect: Rect, width: f32, handle: &'static str) {
     let rail = Rect::from_x_y_ranges(rect.right() - BROWSER_RAIL..=rect.right(), rect.y_range());
     let response =
-        ui.interact(rail, egui::Id::new(("sc_shared_column_rail", handle)), Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+        ui.interact(rail, egui::Id::unique(("sc_shared_column_rail", handle)), Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
     if response.dragged() {
         let delta = ui.input(|input| input.pointer.delta().x);
         if delta.is_finite() {
@@ -1173,7 +1180,7 @@ pub(crate) fn reveals(app: &SolveApp) -> bool {
 /// text edit started while it showed keeps it shown. A drag started elsewhere (orbiting the view)
 /// passes over it without showing it.
 fn reveal_opacity(app: &SolveApp, ctx: &egui::Context, previous: Option<Rect>, edge: Rect) -> f32 {
-    let card = egui::Id::new("sc_browser_card");
+    let card = egui::Id::unique("sc_browser_card");
     let memory = card.with("reveal");
     let was = ctx.data(|d| d.get_temp::<bool>(memory)).unwrap_or(false);
     let over = ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| {
@@ -1245,7 +1252,7 @@ pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
         let frame = container.frame(ui.ctx(), fill, crate::frame::Side::Left).inner_margin(CARD_INSET as i8);
         let inner_width = (bounds.width() - frame.total_margin().sum().x).max(0.0);
         let inner_height = (bounds.height() - frame.total_margin().sum().y).max(0.0);
-        let card = Container::new(ui.ctx(), Surface::Panel).area(egui::Id::new("sc_browser_card")).fixed_pos(bounds.min).show(ui.ctx(), |ui| {
+        let card = Container::new(ui.ctx(), Surface::Panel).area(egui::Id::unique("sc_browser_card")).fixed_pos(bounds.min).show(ui.ctx(), |ui| {
             let limits = Rect::from_min_max(available.min, pos2(available.right(), bounds.bottom()));
             let response = ui
                 .scope(|ui| {
@@ -1328,9 +1335,9 @@ fn render_card(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let _ = app.run("view.render_browser", json!({"open":false}));
                 }
             }
-            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("sc_compact_tree"), true));
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_compact_tree"), true));
             browser_contents(app, ui, true);
-            ui.ctx().data_mut(|d| d.remove::<bool>(egui::Id::new("sc_compact_tree")));
+            ui.ctx().data_mut(|d| d.remove::<bool>(egui::Id::unique("sc_compact_tree")));
         },
     );
     if (lens == 1) != app.render_workspace.view.by_look {
@@ -1367,8 +1374,9 @@ fn browser_collapsed_rail(app: &mut SolveApp, ui: &mut egui::Ui) {
     let height = title_top + t.space_24 * 4.0 + t.space_8;
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
     // Include the card margin in the hit target; keep the tint inside that margin.
-    let response =
-        ui.interact(rect.expand(CARD_INSET + 1.0), ui.id().with("browser_header"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+    let response = ui
+        .interact(rect.expand(CARD_INSET + 1.0), ui.scope_id().with("browser_header"), Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
     if response.hovered() || response.has_focus() {
         crate::ui_kit::panel_header_hover(ui.painter(), rect);
     }
@@ -1376,7 +1384,7 @@ fn browser_collapsed_rail(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::ui_kit::disclosure(ui.painter(), disclosure.center(), false, t.text_dim);
     crate::scenario::publish_handle("left-browser-toggle", disclosure.center());
     crate::scenario::publish_target("browser:header", disclosure);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), crate::i18n::tr("ui.browser_title")));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), crate::i18n::tr("ui.browser_title")));
     if response.backing_on_hover_text(crate::i18n::tr("ui.browser_expand")).clicked() {
         app.preferences.timeline_left_browser_collapsed = false;
     }
@@ -1436,7 +1444,7 @@ fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
     let collapsible = collapsible && !reveals(app);
     let t = Tokens::get();
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), HEADER_H), Sense::hover());
-    let response = ui.interact(rect, ui.id().with("browser_header"), if collapsible { Sense::click() } else { Sense::hover() });
+    let response = ui.interact(rect, ui.scope_id().with("browser_header"), if collapsible { Sense::click() } else { Sense::hover() });
     crate::scenario::publish_target("browser:header", rect);
     let vertical = app.ui.show_timeline && app.preferences.timeline_left;
     let stacked = crate::timeline_left::stacked(app);
@@ -1449,7 +1457,7 @@ fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
         crate::ui_kit::panel_header_hover(ui.painter(), rect);
     }
     let title = crate::i18n::tr("ui.browser_title").to_string();
-    let kind = if collapsible { egui::WidgetType::Button } else { egui::WidgetType::Label };
+    let kind = if collapsible { egui::Role::Button } else { egui::Role::Label };
     response.widget_info(|| egui::WidgetInfo::labeled(kind, true, &title));
     let galley = ui.painter().layout_no_wrap(title, crate::fonts::semibold(t.font_heading), t.text);
     ui.painter().galley(pos2(rect.left() + t.space_6, rect.center().y - galley.size().y / 2.0), galley, t.text);
@@ -1750,7 +1758,7 @@ fn component_rows_inner(
         mark: if id == 0 && acts.lit.any() { Mark::Branch } else { Mark::None },
         ..Default::default()
     };
-    let r = draw_row(ui, ui.id().with(("comp", id)), &row);
+    let r = draw_row(ui, ui.scope_id().with(("comp", id)), &row);
     if r.fold {
         toggle(app, key, true);
     }
@@ -1897,7 +1905,7 @@ fn occurrence_rows_inner(
     };
     let r = draw_row(
         ui,
-        ui.id().with(key),
+        ui.scope_id().with(key),
         &Row {
             depth,
             fold: Some(open),
@@ -2044,7 +2052,8 @@ fn occurrence_rows_inner(
 fn doc_settings(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
     let key = "docsettings";
     let open = is_open(app, key, false);
-    let r = draw_row(ui, ui.id().with(key), &Row { depth, fold: Some(open), icon: "settings", label: "Document Settings", ..Default::default() });
+    let r =
+        draw_row(ui, ui.scope_id().with(key), &Row { depth, fold: Some(open), icon: "settings", label: "Document Settings", ..Default::default() });
     if r.fold || r.clicked {
         toggle(app, key, false);
     }
@@ -2052,7 +2061,7 @@ fn doc_settings(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
         return;
     }
     let units = format!("Units: {}", app.session.doc.units);
-    let r = draw_row(ui, ui.id().with("units"), &Row { depth: depth + 1, icon: "settings", label: &units, ..Default::default() });
+    let r = draw_row(ui, ui.scope_id().with("units"), &Row { depth: depth + 1, icon: "settings", label: &units, ..Default::default() });
     if let Some(p) = r.secondary {
         crate::context_menu::open_for(app, p, Target::Units);
     } else if r.clicked
@@ -2066,7 +2075,7 @@ fn doc_settings(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
         crate::prefs::unit_scale(&app.session.doc.units).1,
         format_args!("{:.*}", usize::from(app.preferences.angle_decimals), 0.0)
     );
-    if draw_row(ui, ui.id().with("precision"), &Row { depth: depth + 1, icon: "settings", label: &prec, ..Default::default() }).clicked {
+    if draw_row(ui, ui.scope_id().with("precision"), &Row { depth: depth + 1, icon: "settings", label: &prec, ..Default::default() }).clicked {
         if app.prefs_window.open {
             crate::prefs::close(app, true);
         } else {
@@ -2074,15 +2083,19 @@ fn doc_settings(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
         }
     }
     let params = format!("Parameters ({})", app.session.doc.params.len());
-    if draw_row(ui, ui.id().with("params"), &Row { depth: depth + 1, icon: "params", label: &params, ..Default::default() }).clicked {
+    if draw_row(ui, ui.scope_id().with("params"), &Row { depth: depth + 1, icon: "params", label: &params, ..Default::default() }).clicked {
         if app.params.is_some() {
             app.params = None;
         } else {
             app.start("parameters.change");
         }
     }
-    if draw_row(ui, ui.id().with("design_properties"), &Row { depth: depth + 1, icon: "settings", label: "Design Properties", ..Default::default() })
-        .clicked
+    if draw_row(
+        ui,
+        ui.scope_id().with("design_properties"),
+        &Row { depth: depth + 1, icon: "settings", label: "Design Properties", ..Default::default() },
+    )
+    .clicked
     {
         if app.design_properties.is_some() {
             app.design_properties = None;
@@ -2113,7 +2126,7 @@ fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
     let items = origin_things();
     let r = draw_row(
         ui,
-        ui.id().with(key),
+        ui.scope_id().with(key),
         &Row {
             depth,
             fold: Some(open),
@@ -2149,7 +2162,7 @@ fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
         let (selected, mark) = lit_row(lit(&thing));
         let r = draw_row(
             ui,
-            ui.id().with(("o", k)),
+            ui.scope_id().with(("o", k)),
             // Faded when hidden itself or with the whole Origin. A renamed plane's label is already
             // in the interface's language (`name`).
             &Row {
@@ -2197,7 +2210,7 @@ pub const STANDARD_VIEWS: [(&str, &str); 4] = [("Top", "top"), ("Front", "front"
 fn named_view_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut Actions) {
     let key = "namedviews";
     let open = is_open(app, key, false);
-    let r = draw_row(ui, ui.id().with(key), &Row { depth, fold: Some(open), icon: "folder", label: "Named Views", ..Default::default() });
+    let r = draw_row(ui, ui.scope_id().with(key), &Row { depth, fold: Some(open), icon: "folder", label: "Named Views", ..Default::default() });
     if r.fold || r.clicked {
         toggle(app, key, false);
     }
@@ -2208,7 +2221,7 @@ fn named_view_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &m
         return;
     }
     for (label, view) in STANDARD_VIEWS {
-        let r = draw_row(ui, ui.id().with(("stdview", view)), &Row { depth: depth + 1, icon: "home", label, ..Default::default() });
+        let r = draw_row(ui, ui.scope_id().with(("stdview", view)), &Row { depth: depth + 1, icon: "home", label, ..Default::default() });
         if r.double {
             app.animate_view(view);
         }
@@ -2220,7 +2233,7 @@ fn named_view_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &m
     for name in names {
         let r = draw_row(
             ui,
-            ui.id().with(("view", &name)),
+            ui.scope_id().with(("view", &name)),
             &Row { depth: depth + 1, icon: "perspective", label: &name, name: true, ..Default::default() },
         );
         if r.double {
@@ -2285,7 +2298,7 @@ fn analysis_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut
     let open = is_open(app, key, start_open);
     let r = draw_row(
         ui,
-        ui.id().with(key),
+        ui.scope_id().with(key),
         &Row { depth, fold: Some(open), eye: Some(folder_shown), icon: "folder", label: "Analysis", dim: !folder_shown, ..Default::default() },
     );
     if r.fold || r.clicked {
@@ -2300,7 +2313,7 @@ fn analysis_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut
     }
     let r = draw_row(
         ui,
-        ui.id().with("section_analysis"),
+        ui.scope_id().with("section_analysis"),
         &Row {
             depth: depth + 1,
             eye: Some(section_shown),
@@ -2367,7 +2380,7 @@ pub const CANVASES: &str = "c0/canvases";
 
 /// The Canvases folder (reference images) with an eye per canvas.
 fn canvas_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut Actions) {
-    let canvases: Vec<(u64, String, bool)> = app.session.doc.canvases.iter().map(|c| (c.id, c.name.clone(), c.visible)).collect();
+    let canvases: Vec<(u64, String, bool, bool)> = app.session.doc.canvases.iter().map(|c| (c.id, c.name.clone(), c.visible, c.locked)).collect();
     if canvases.is_empty() {
         return;
     }
@@ -2378,7 +2391,7 @@ fn canvas_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
     let shown = !app.session.folder_hidden(CANVASES);
     let r = draw_row(
         ui,
-        ui.id().with(key),
+        ui.scope_id().with(key),
         &Row { depth, fold: Some(open), eye: Some(shown), icon: "folder", label: "Canvases", dim: !shown, ..Default::default() },
     );
     if r.fold || r.clicked {
@@ -2390,11 +2403,12 @@ fn canvas_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
     if !open {
         return;
     }
-    for (id, name, visible) in canvases {
+    for (id, name, visible, locked) in canvases {
         let selected = app.tree.picked_canvases.contains(&id);
+        let badges: &[&str] = if locked { &["lock"] } else { &[] };
         let r = draw_row(
             ui,
-            ui.id().with(("canvas", id)),
+            ui.scope_id().with(("canvas", id)),
             &Row {
                 depth: depth + 1,
                 eye: Some(visible),
@@ -2403,6 +2417,7 @@ fn canvas_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
                 name: true,
                 selected,
                 dim: !visible || !shown,
+                badges,
                 ..Default::default()
             },
         );
@@ -2422,7 +2437,9 @@ fn canvas_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
                 app.tree.picked_canvases.push(id);
             }
         }
-        if r.double {
+        if r.double && locked {
+            app.set_status(crate::i18n::tr("browser.canvas_locked"), true);
+        } else if r.double {
             app.tree.canvas_panel = Some(CanvasPanel::new(app, id, false));
         }
         if let Some(p) = r.secondary {
@@ -2441,14 +2458,19 @@ pub fn point_cloud_items(app: &SolveApp, id: u64) -> Vec<Item> {
 
 /// The menu of a canvas.
 pub fn canvas_items(app: &SolveApp, id: u64) -> Vec<Item> {
-    let visible = app.session.doc.canvases.iter().find(|c| c.id == id).is_some_and(|c| c.visible);
+    let canvas = app.session.doc.canvases.iter().find(|c| c.id == id);
+    let visible = canvas.is_some_and(|c| c.visible);
+    // A locked canvas (#12310) is not moved, calibrated or deleted until it is unlocked.
+    let locked = canvas.is_some_and(|c| c.locked);
+    let why = locked.then(|| crate::i18n::tr("browser.canvas_locked").to_string());
     vec![
-        Item::action("ui.editCanvas", "Edit Canvas", "canvas").with(json!({ "canvas": id })),
-        Item::action("ui.calibrateCanvas", "Calibrate", "measure").with(json!({ "canvas": id })),
+        Item::action("ui.editCanvas", "Edit Canvas", "canvas").with(json!({ "canvas": id })).off_because(why.clone()),
+        Item::action("ui.calibrateCanvas", "Calibrate", "measure").with(json!({ "canvas": id })).off_because(why.clone()),
         Item::action("canvas.to_sketch", "Canvas to Sketch", "canvas").with(json!({ "canvas": id })),
         Item::sep(),
-        Item::action("ui.delete", "Delete", "delete").with(json!({ "canvases": [id] })),
+        Item::action("ui.delete", "Delete", "delete").with(json!({ "canvases": [id] })).off_because(why),
         Item::action("ui.rename", "Rename", "rename").key("F2").with(json!({ "canvas": id })),
+        Item::action("ui.canvasLocked", if locked { "Unlock" } else { "Lock" }, "ground").with(json!({ "canvas": id, "locked": !locked })),
         Item::sep(),
         Item::action("ui.canvasVisible", "Show/Hide", "eye").key("V").with(json!({ "canvas": id, "visible": !visible })),
     ]
@@ -2864,7 +2886,7 @@ fn folder_rows_at(
         } else {
             draw_row(
                 ui,
-                ui.id().with(key),
+                ui.scope_id().with(key),
                 &Row {
                     depth,
                     fold: Some(open),
@@ -2975,7 +2997,7 @@ fn folder_level(
         let count = if render && !gopen { crate::i18n::format("render.tree_more", &[("count", &group.count.to_string())]) } else { String::new() };
         let r = draw_row(
             ui,
-            ui.id().with(gkey),
+            ui.scope_id().with(gkey),
             &Row {
                 depth,
                 fold: Some(gopen),
@@ -3076,7 +3098,7 @@ fn inline_rename(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect, label_left: f
     let Some(mut rename) = app.menu.rename.take() else { return };
     let edit_rect = Rect::from_min_max(pos2(label_left, row.top() + 1.0), pos2(row.right() - 3.0, row.bottom() - 1.0));
     ui.painter().rect_filled(edit_rect, 3.0, Tokens::get().field);
-    let id = ui.id().with(("browser_rename", &e.row_key));
+    let id = ui.scope_id().with(("browser_rename", &e.row_key));
     let response = crate::ui_kit::inline_name(ui, edit_rect, id, &mut rename.text);
     crate::scenario::publish_handle(&format!("rename:{}", e.key), edit_rect.center());
     let was_focused = rename.focused;
@@ -3148,7 +3170,7 @@ fn entry_row(
     let state_tip = sketch_state.map(crate::sketch_state::SketchState::text);
     let r = draw_row(
         ui,
-        ui.id().with(("item", &e.row_key)),
+        ui.scope_id().with(("item", &e.row_key)),
         &Row {
             depth,
             fold: pattern_key.map(|_| patterns_open),
@@ -3543,7 +3565,7 @@ pub(crate) fn occurrence_triad(app: &mut SolveApp, ui: &mut egui::Ui, painter: &
     let before = (m.translate, m.angles);
     let Some(t) = occurrence_triad_model(app) else { return };
     let step = crate::canvas::snap_step(app.cam.half_height());
-    let Some(g) = gizmo::show(ui, painter, proj, egui::Id::new("sc_occ_triad"), &t, step) else { return };
+    let Some(g) = gizmo::show(ui, painter, proj, egui::Id::unique("sc_occ_triad"), &t, step) else { return };
     if g.started || m.drag0.is_none() {
         m.drag0 = Some((m.translate, m.angles));
     }

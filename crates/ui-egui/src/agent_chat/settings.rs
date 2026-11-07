@@ -34,6 +34,8 @@ pub struct AddState {
     /// Optional reasoning effort sent as `reasoning_effort`; empty sends nothing.
     pub reasoning_effort: String,
     pub error: Option<String>,
+    /// What the fields said when Add was refused: `error` stays only while they still say it.
+    refused: Option<AddInputs>,
     /// Editing this added agent (its id) instead of adding a new one.
     pub editing: Option<String>,
     /// Editing an endpoint whose key is in the keychain: an empty key field keeps it.
@@ -48,7 +50,32 @@ pub struct AddState {
     list_again: bool,
 }
 
+/// What the Add dialog's fields say, as far as a refusal can be about them: of the key only
+/// whether one is typed (`add_agent` reads nothing else of it, and no second copy is kept).
+type AddInputs = (AddKind, Protocol, usize, String, String, String, String, bool, u64, String);
+
 impl AddState {
+    fn inputs(&self) -> AddInputs {
+        (
+            self.kind,
+            self.protocol,
+            self.preset,
+            self.name.clone(),
+            self.command.clone(),
+            self.base_url.clone(),
+            self.model.clone(),
+            !self.key.trim().is_empty(),
+            self.request_timeout_s,
+            self.reasoning_effort.clone(),
+        )
+    }
+
+    /// Show why Add was refused, for as long as the fields stay as they are.
+    fn refuse(&mut self, error: String) {
+        self.refused = Some(self.inputs());
+        self.error = Some(error);
+    }
+
     fn insecure_http_endpoint(&self) -> Option<String> {
         let url = agents::normalize_url(&self.base_url).ok()?;
         (self.kind == AddKind::Api && self.protocol == Protocol::OpenAi && !agents::key_safe_for(&url)).then_some(url)
@@ -446,7 +473,7 @@ fn timeout_field(ui: &mut egui::Ui, secs: &mut u64, handle: &str) -> bool {
 
 /// The free-text reasoning effort field with its hover hint; true when the text changed.
 fn effort_field(ui: &mut egui::Ui, effort: &mut String, handle: &str) -> bool {
-    let response = ui_kit::cell_editor(ui, ui.id().with("ai_reasoning_effort"), effort, tr("ui.ai_reasoning_effort_field_hint"), false)
+    let response = ui_kit::cell_editor(ui, ui.scope_id().with("ai_reasoning_effort"), effort, tr("ui.ai_reasoning_effort_field_hint"), false)
         .backing_on_hover_text(tr("ui.ai_reasoning_effort_hint"));
     crate::scenario::publish_target(handle, response.rect);
     response.changed()
@@ -529,7 +556,7 @@ fn connecting_section(app: &mut SolveApp, ui: &mut egui::Ui) {
 /// Custom instructions (#8220): text every new chat's system note carries.
 fn instructions_section(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::settings_section(ui, "instructions", tr("ai.prefs.instructions"), |ui| {
-        let id = egui::Id::new("prefs_agent_instructions");
+        let id = egui::Id::unique("prefs_agent_instructions");
         let text = &mut app.preferences.agent_instructions;
         let response = ui_kit::text_area(ui, tr("ai.prefs.instructions"), id, text, 6, acp::INSTRUCTIONS_LIMIT);
         if response.has_focus() {
@@ -1037,8 +1064,15 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
     if app.agent_chat.settings.add.is_none() {
         return;
     }
+    // A refused Add's message is about the fields it ran with (#641): once they change, it goes.
+    if let Some(s) = app.agent_chat.settings.add.as_mut()
+        && s.refused.as_ref().is_some_and(|was| *was != s.inputs())
+    {
+        s.error = None;
+        s.refused = None;
+    }
     if let Some(url) = app.agent_chat.settings.add.as_ref().and_then(|s| s.confirm_insecure_http.clone()) {
-        let (closed, action) = ui_kit::Confirm::new(egui::Id::new("sc_ai_http_consent"), "status_warning", tr("ai.http.allow"))
+        let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_ai_http_consent"), "status_warning", tr("ai.http.allow"))
             .tone(ui_kit::Tone::Warning)
             .actions(tr("ai.http.confirm"), tr("ui.cancel"), None)
             .selected(ui_kit::Action::Cancel)
@@ -1074,7 +1108,7 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
     // Editing keeps the agent's kind: the kind switch is for adding only.
     let editing = app.agent_chat.settings.add.as_ref().is_some_and(|s| s.editing.is_some());
     let (title, ok) = if editing { ("ui.ai_edit_agent_title", "ui.ai_save") } else { ("ui.ai_add_agent_title", "ui.ai_add") };
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_ai_add"), "settings", tr(title))
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_ai_add"), "settings", tr(title))
         .cards(2.0)
         .fields()
         .actions(tr(ok), "Cancel", None)
@@ -1176,7 +1210,7 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                         ui_kit::text_field(ui, &mut s.name, "");
                     });
                     ui_kit::row(ui, tr("ui.ai_base_url"), |ui| {
-                        let r = ui_kit::cell_editor(ui, egui::Id::new("sc_ai_add_url"), &mut s.base_url, tr("ui.ai_url_hint"), false);
+                        let r = ui_kit::cell_editor(ui, egui::Id::unique("sc_ai_add_url"), &mut s.base_url, tr("ui.ai_url_hint"), false);
                         s.list_again |= r.lost_focus();
                         if r.changed() {
                             s.insecure_http_url = None;
@@ -1220,7 +1254,7 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                     ui_kit::row(ui, tr("ui.ai_key"), |ui| {
                         ui.add_enabled_ui(has_keychain, |ui| {
                             let hint = tr(if s.saved_key { "ui.ai_key_keep_hint" } else { "ui.ai_key_hint" });
-                            let r = ui_kit::password_field(ui, egui::Id::new("sc_ai_add_key"), &mut s.key, hint);
+                            let r = ui_kit::password_field(ui, egui::Id::unique("sc_ai_add_key"), &mut s.key, hint);
                             crate::scenario::publish_target("ai_add:key", r.rect);
                             s.list_again |= r.lost_focus();
                         });
@@ -1304,7 +1338,7 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
             Ok(()) => open = false,
             Err(e) => {
                 if let Some(s) = app.agent_chat.settings.add.as_mut() {
-                    s.error = Some(e);
+                    s.refuse(e);
                 }
             }
         }
@@ -1801,6 +1835,48 @@ mod card_tests {
         );
         assert_eq!(capability_warning("local:4b", Some(true)), None);
         assert_eq!(capability_warning("local:4b", None), None);
+    }
+
+    #[test]
+    fn a_refused_add_keeps_its_message_until_the_fields_change() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.ai_features = true;
+        h.app.agent_chat.detection = Some(Default::default());
+        open_add(&mut h.app);
+        h.frames(4);
+        h.step(&json!({"click":{"handle":"ai_add:ui.ai_add_custom"}})).unwrap();
+        h.step(&json!({"click":{"handle":"ai_add:add"}})).unwrap();
+        let refused = h.app.agent_chat.settings.add.as_ref().unwrap().error.clone();
+        assert!(refused.is_some(), "an empty command is refused");
+        h.frames(3);
+        assert_eq!(h.app.agent_chat.settings.add.as_ref().unwrap().error, refused, "the message stays while the fields do");
+        // Typing the command takes the refusal away before Add is clicked again.
+        h.app.agent_chat.settings.add.as_mut().unwrap().command = "solidcraft-fixture-agent --acp".into();
+        h.frames(3);
+        assert_eq!(h.app.agent_chat.settings.add.as_ref().unwrap().error, None, "the message was about the empty command, which is gone");
+        // The message is about the fields Add ran with (#641): the same fields again are refused again.
+        h.app.agent_chat.settings.add.as_mut().unwrap().command.clear();
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"ai_add:add"}})).unwrap();
+        assert_eq!(h.app.agent_chat.settings.add.as_ref().unwrap().error, refused, "the same reason again");
+        assert!(h.app.agent_chat.settings.add.is_some(), "nothing added");
+        // An endpoint without a model: the same for its fields.
+        h.step(&json!({"click":{"handle":"ai_add:ui.ai_add_endpoint"}})).unwrap();
+        h.step(&json!({"click":{"handle":"ai_add:protocol:anthropic"}})).unwrap();
+        h.step(&json!({"click":{"handle":"ai_add:add"}})).unwrap();
+        let refused = h.app.agent_chat.settings.add.as_ref().unwrap().error.clone();
+        assert!(refused.is_some(), "an endpoint without a model is refused");
+        h.frames(3);
+        assert_eq!(h.app.agent_chat.settings.add.as_ref().unwrap().error, refused);
+        h.app.agent_chat.settings.add.as_mut().unwrap().model = "claude-opus-5-5".into();
+        h.frames(3);
+        assert_eq!(h.app.agent_chat.settings.add.as_ref().unwrap().error, None, "the message was about the missing model, which is typed");
+        h.app.agent_chat.settings.add.as_mut().unwrap().model.clear();
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"ai_add:add"}})).unwrap();
+        assert_eq!(h.app.agent_chat.settings.add.as_ref().unwrap().error, refused, "the same reason again");
+        assert!(h.app.agent_chat.settings.add.is_some(), "nothing added");
     }
 
     #[test]
@@ -2431,7 +2507,7 @@ mod card_tests {
         h.frames(3);
         h.step(&json!({"text":"  vendor/own "})).unwrap();
         h.frames(3);
-        assert!(h.ctx.memory(|m| m.has_focus(egui::Id::new("sc_ai_model:api-1").with("search"))), "the box keeps the focus over Preferences");
+        assert!(h.ctx.memory(|m| m.has_focus(egui::Id::unique("sc_ai_model:api-1").with("search"))), "the box keeps the focus over Preferences");
         h.step(&json!({"click":{"handle":"prefs:ai_model:api-1:custom"}})).unwrap();
         h.frames(3);
         assert_eq!(model(&h).as_deref(), Some("vendor/own"));

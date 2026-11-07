@@ -18,7 +18,7 @@ fn independent_plane(plane: &PlaneRef, depth: usize) -> Result<()> {
     }
     match plane {
         PlaneRef::Origin { .. } | PlaneRef::Custom { .. } | PlaneRef::Placed { .. } => Ok(()),
-        PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } | PlaneRef::AtAngle { base, line: None, .. } => {
+        PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } | PlaneRef::AtAngle { base, line: None, pivot: None, .. } => {
             independent_plane(base, depth + 1)
         }
         _ => Err(bad(CMD, "the copied sketch's plane depends on model geometry; convert it to a fixed plane before pasting into another design")),
@@ -192,9 +192,10 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> Result<Value> {
             .and_then(|a| a.iter().map(Value::as_u64).collect::<Option<Vec<_>>>())
             .ok_or_else(|| bad(CMD, "`component_path` must list 0..64 occurrence ids"))?,
         None if component == s.active_component => s.active_occurrence_path.clone().unwrap_or_else(|| s.doc.first_path(component)),
-        None => super::component::placing::placement_of(s, &s.placed_document(), component, None, "component_path", CMD)?.0,
+        None => super::component::placing::placement_of(s, &s.design_document(), component, None, "component_path", CMD)?.0,
     };
-    let placed = s.placed_document();
+    // The target as the design places it, without an exploded view shown.
+    let placed = s.design_document();
     let frame = placed.path_transform(component, &path).ok_or_else(|| bad(CMD, "that path is not a placement of the target"))?;
     let into_target = solidcraft_doc::mat_inverse(&frame).ok_or_else(|| bad(CMD, "the target's frame is not invertible"))?;
     drop(placed);

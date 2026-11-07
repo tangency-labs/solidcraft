@@ -1621,7 +1621,7 @@
   "help.sketch.insert_svg": "Čita putanje SVG crteža u skicu, skalirane, zakrenute i postavljene kako zadate. Upotrijebite ga za pretvaranje logotipa ili vektorskog obrisa u krivulje koje možete ekstrudirati.",
   "help.sketch.inspect": "Otvara izvješće o otvorenoj skici: koliko je stupnjeva slobode preostalo i je li potpuno ograničena. Upotrijebite ga kako biste saznali što se još pomiče prije dovršetka skice.",
   "help.sketch.intersect": "Dodaje krivulje ili točke u kojima tijela, lica, bridovi ili druge skice presijecaju ravninu skice. Ostaju povezane i prate model kad se promijeni.",
-  "help.sketch.intersection_curve": "Izrađuje 3D krivulje na mjestu gdje se dva tijela ili lica susreću, povezane s njima. Upotrijebite ih kao putanje ili vodilice koje prate model.",
+  "help.sketch.intersection_curve": "Izrađuje 3D krivulje na mjestu gdje se dva tijela, lica ili krivulje drugih skica susreću, povezane s njima. Upotrijebite ih kao putanje ili vodilice koje prate model.",
   "help.sketch.isoparametric_curve": "Izrađuje 3D krivulju u smjeru U ili V lica kroz točku koju odaberete, povezanu s licem. Upotrijebite je kao putanju ili liniju razdvajanja koja prati plohu.",
   "help.sketch.line": "Crta povezane linije točku po točku, kao otvoreni lanac ili zatvoreni obris. To je osnovni alat za većinu profila.",
   "help.sketch.line.midpoint": "Crta liniju od njezine središnje točke do jednog kraja, a drugi kraj zrcali. Upotrijebite ga za linije centrirane na točku, primjerice simetričan brid.",
