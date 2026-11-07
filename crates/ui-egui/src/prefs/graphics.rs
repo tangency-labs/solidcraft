@@ -327,6 +327,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 .backing_on_hover_text(app.tr("ui.cosmetic_thread_markings_help"));
             crate::scenario::publish_target("prefs:cosmetic_threads", response.rect);
             setting::sketch_halo(app, ui);
+            let fade = setting::fade_other_component_sketches(app, ui).backing_on_hover_text(app.tr("prefs.fade_other_component_sketches_help"));
+            crate::scenario::publish_target("prefs:fade_other_component_sketches", fade.rect);
             ui_kit::row(ui, app.tr("prefs.section_hatch"), |ui| {
                 let styles = [crate::prefs::SectionHatch::One, crate::prefs::SectionHatch::ByPart];
                 let mut selected = styles.iter().position(|s| *s == app.preferences.section_hatch).unwrap_or(1);
