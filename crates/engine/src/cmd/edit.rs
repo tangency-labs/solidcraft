@@ -1781,6 +1781,20 @@ fn segment_span(key: &str) -> Option<([u64; 3], f64, f64)> {
     Some((point, from, to))
 }
 
+/// The edge a `sheet.flange` edge-level input belongs to: the pick point its key carries, for the
+/// edge's own `angle` and `height`. A segment input carries its stretch as well, so `segment_span`
+/// reads those; this reads only the keys that name the edge itself.
+fn edge_point(key: &str) -> Option<[u64; 3]> {
+    let rest = key.strip_prefix("sheet.flange.edge")?;
+    let mut parts = rest.split('.');
+    let point: Vec<u64> = parts.next()?.split(',').map(|bits| bits.parse().ok()).collect::<Option<_>>()?;
+    let point: [u64; 3] = point.try_into().ok()?;
+    if !matches!(parts.next()?, "angle" | "height") || parts.next().is_some() {
+        return None;
+    }
+    Some(point)
+}
+
 fn input_keys(kind: &FeatureKind) -> Vec<(String, solidcraft_doc::expr::Kind)> {
     let mut keys: Vec<_> = kind.inputs().into_iter().map(|(label, _, unit)| (label.to_string(), unit)).collect();
     if let FeatureKind::Fillet { style, .. } = kind {
@@ -2017,7 +2031,8 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     // the old input of the same label and kind that carries the same expression first: the survivor
     // still has the value it had. Only then does the greatest span overlap on the same edge carry a
     // name. A deleted stretch's name never lands on a stretch whose value came from elsewhere
-    // (#5927, #5928).
+    // (#5927, #5928). An edge's own angle or height is keyed by its pick point and matched by that
+    // point alone, so an edge deleted and another inserted in one redefine move no name across.
     for (i, (key, kind)) in keys.iter().enumerate() {
         if !param_names[i].is_empty() {
             continue;
@@ -2052,10 +2067,23 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
             // constructor's own name stays, rather than another stretch's.
             continue;
         }
-        if let Some(k) = old_inputs
-            .iter()
-            .position(|(old_key, old_label, old_kind, _, _)| *old_label == new_labels[i] && old_kind == kind && segment_span(old_key).is_none())
-        {
+        if let Some(point) = edge_point(key) {
+            // An edge's own angle or height is keyed by the edge's pick point, so the exact-key match
+            // above kept a surviving edge's name. A newly inserted edge has no old input at its
+            // point and keeps the constructor's name: a deleted edge's name never lands on it
+            // (#5927, #5928).
+            if let Some(k) = old_inputs.iter().position(|(old_key, old_label, old_kind, _, _)| {
+                *old_label == new_labels[i] && old_kind == kind && segment_span(old_key).is_none() && edge_point(old_key) == Some(point)
+            }) {
+                param_names[i] = old_inputs.remove(k).3.clone();
+            }
+            continue;
+        }
+        // Only inputs whose key names no point are left: a label and a kind are all they carry, so
+        // one of them is matched by those alone.
+        if let Some(k) = old_inputs.iter().position(|(old_key, old_label, old_kind, _, _)| {
+            *old_label == new_labels[i] && old_kind == kind && segment_span(old_key).is_none() && edge_point(old_key).is_none()
+        }) {
             param_names[i] = old_inputs.remove(k).3.clone();
         }
     }

@@ -1939,3 +1939,59 @@ fn swapping_two_edges_keeps_each_named_height_on_its_own_edge() {
     let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
     assert!(errors.is_empty(), "{errors:?}");
 }
+
+/// An edge-level height name follows the edge it was put on, by the pick point its key carries:
+/// deleting one edge and inserting another in the same redefine must not put the deleted edge's
+/// name on the new edge's height, which matched by label and kind alone (#5927, #5928).
+#[test]
+fn deleting_an_edge_does_not_move_its_named_height_to_another_edge() {
+    fn param(s: &mut Session, name: &str) -> Value {
+        let list = run(s, "parameters.list", json!({}));
+        list["parameters"].as_array().and_then(|a| a.iter().find(|p| p["name"] == name)).cloned().unwrap_or(Value::Null)
+    }
+    // The name on each "Edge height" input of `Bands`, in the walk's order.
+    fn edge_names(s: &mut Session) -> Vec<(String, String)> {
+        let f = s.doc.find_feature("Bands").unwrap();
+        f.kind
+            .inputs()
+            .iter()
+            .enumerate()
+            .filter(|(_, (label, _, _))| *label == "Edge height")
+            .map(|(i, (_, expression, _))| (f.param_names[i].clone(), expression.clone()))
+            .collect()
+    }
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name":"AL2","thickness":"2 mm","k_factor":0.5,"bend_radius":"1 mm","active":true}));
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[200,100]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch":"Base"}));
+    // Two edges with their own heights: 20 mm on the y = 0 edge, 15 mm on the y = 100 edge.
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[100,0,2],"height":"20 mm"},{"point":[100,100,2],"height":"15 mm"}],
+            "height":"20 mm","angle":"90 deg","name":"Bands"}),
+    );
+    let names = edge_names(&mut s);
+    assert_eq!(names.iter().map(|(_, expression)| expression.as_str()).collect::<Vec<_>>(), ["20 mm", "15 mm"], "{names:?}");
+    run(&mut s, "parameters.rename", json!({"name": names[0].0, "new_name": "Front20"}));
+    run(&mut s, "parameters.rename", json!({"name": names[1].0, "new_name": "Back15"}));
+    assert_eq!((param(&mut s, "Front20")["value"].as_f64(), param(&mut s, "Back15")["value"].as_f64()), (Some(20.0), Some(15.0)));
+    // The y = 0 edge is deleted and an edge on the x = 0 edge is inserted in the same redefine.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":"Bands","command":"sheet.flange","params":{
+            "type":"edge","edges":[{"point":[100,100,2],"height":"15 mm"},{"point":[0,50,2],"height":"25 mm"}],
+            "height":"20 mm","angle":"90 deg"}}),
+    );
+    assert_eq!(param(&mut s, "Back15")["value"].as_f64(), Some(15.0), "the surviving edge keeps its own name");
+    assert!(param(&mut s, "Front20")["value"].is_null(), "the deleted edge's name is gone: {:?}", run(&mut s, "parameters.list", json!({})));
+    let names = edge_names(&mut s);
+    assert_eq!(names.iter().map(|(_, expression)| expression.as_str()).collect::<Vec<_>>(), ["15 mm", "25 mm"], "{names:?}");
+    assert!(names.iter().any(|(name, expression)| name == "Back15" && expression == "15 mm"), "{names:?}");
+    assert!(names.iter().all(|(name, _)| name != "Front20"), "the new edge's height took the deleted edge's name: {names:?}");
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+}

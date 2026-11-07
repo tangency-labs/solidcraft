@@ -864,3 +864,59 @@ fn a_round_notch_over_a_junctions_far_edge_ends_the_cut_on_the_arc() {
     let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
     assert!(errors.is_empty(), "unfold: {errors:?}");
 }
+
+/// A re-entrant notch pattern leaves the junction line crossing material more than once: every
+/// surviving bridge is parted, in the flat loop and the DXF, not only the stretch nearest the bend
+/// line. With the two notches below, material is left at x = 50 from the bend line to y = -8 and
+/// again from y = -10 to y = -15; cutting only the first left the second bridge joined, so the
+/// folded part did not separate (FR-7 #5932).
+#[test]
+fn every_surviving_bridge_of_a_junction_is_cut() {
+    let mut s = plate_in(sheet_of_2mm(), &[]);
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[50,0,2],"segments":[
+            {"from":0,"to":0.5,"angle":"90 deg","height":"20 mm","flip":false},
+            {"from":0.5,"to":1,"angle":"90 deg","height":"20 mm","flip":true}]}],
+            "height":"20 mm","angle":"90 deg"}),
+    );
+    run(&mut s, "sheet.unfold", json!({}));
+    // Notch 1: x 49…101, y -10…-8: a slot from x = 49 out through the right edge, between the bend
+    // line and the far edge. Notch 2: x 49…51, y -18…-15, across the far edge at the junction. The
+    // material left at x = 50 is y 3…-8 and y -10…-15: two bridges, each one to part.
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Notch"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[49,-10],"p1":[101,-8]}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[49,-18],"p1":[51,-15]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch":"Notch","through_all":true,"operation":"cut","direction":"symmetric"}));
+    let bridges = [(Vec2::new(50.0, 3.0), Vec2::new(50.0, -8.0)), (Vec2::new(50.0, -10.0), Vec2::new(50.0, -15.0))];
+    let cut = |lp: &solidcore_record::Loop2, a: Vec2, b: Vec2| {
+        lp.segs.iter().any(|s| matches!(s, Seg2::Line { a: p, b: q } if p.dist(a) < 1e-6 && q.dist(b) < 1e-6))
+    };
+    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    for (a, b) in bridges {
+        assert!(
+            regions.iter().any(|r| cut(&r.outer, a, b) && cut(&r.outer, b, a)),
+            "the blank is not cut across the bridge {a:?}–{b:?}: {:?}",
+            regions.iter().map(|r| r.outer.segs.len()).collect::<Vec<_>>()
+        );
+    }
+    let outline: Vec<(Vec2, Vec2)> = entities(&export(&mut s, json!({})))
+        .iter()
+        .filter(|e| e.0 == "LINE" && layer_of(e) == "OUTLINE")
+        .map(|e| (point(e, 10), point(e, 11)))
+        .collect();
+    let near = |p: Vec2, q: Vec2| p.dist(q) < 1e-6;
+    let both_ways = |lines: &[(Vec2, Vec2)], a: Vec2, b: Vec2| {
+        lines.iter().any(|&(p, q)| near(p, a) && near(q, b)) && lines.iter().any(|&(p, q)| near(p, b) && near(q, a))
+    };
+    for (a, b) in bridges {
+        assert!(both_ways(&outline, a, b), "the DXF has no cut across the bridge {a:?}–{b:?}: {outline:?}");
+    }
+    // The cuts leave the part one piece, and refolding then unfolding builds it.
+    run(&mut s, "sheet.refold", json!({}));
+    run(&mut s, "sheet.unfold", json!({}));
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "unfold: {errors:?}");
+}

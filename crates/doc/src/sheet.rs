@@ -453,15 +453,18 @@ fn slit_loop(lp: &mut Loop2, at: Vec2, tip: Vec2) -> bool {
 }
 
 /// Clip a junction cut to the material that remains when the ends it was computed from were cut
-/// away: walk the junction line outward from the bend line and end the cut where that line meets the
-/// outer loop. Returns the two ends to slit between, boundary end first, or None when the line has no
-/// material outward of the bend line: that cut has nothing left to part, an empty stretch of the
-/// line rather than a failed lookup.
-fn clip_junction_slit(lp: &Loop2, at: Vec2, tip: Vec2) -> Option<(Vec2, Vec2)> {
+/// away: walk the junction line outward from the bend line and collect every stretch of it that
+/// still runs through material, each end on the outer loop, ordered outward from the bend line.
+/// Returns the pairs to slit between, boundary end first; empty when the line has no material
+/// outward of the bend line: that cut has nothing left to part, an empty stretch of the line rather
+/// than a failed lookup. A re-entrant notch pattern leaves the line crossing material several
+/// times, and each of those stretches is a bridge the folded part separates along, so each one is
+/// returned.
+fn clip_junction_slits(lp: &Loop2, at: Vec2, tip: Vec2) -> Vec<(Vec2, Vec2)> {
     let d = tip - at;
     let len = d.len();
     if len <= 1e-9 {
-        return None;
+        return Vec::new();
     }
     let u = d / len;
     // Where the junction line crosses the boundary, nearest the bend line first. A line and a
@@ -530,20 +533,30 @@ fn clip_junction_slit(lp: &Loop2, at: Vec2, tip: Vec2) -> Option<(Vec2, Vec2)> {
     }
     hits.sort_by(|a, b| a.0.total_cmp(&b.0));
     hits.dedup_by(|a, b| (a.0 - b.0).abs() <= 1e-7);
+    let mut out: Vec<(Vec2, Vec2)> = Vec::new();
     if lp.contains(at) {
-        // The bend line is in material: the cut runs from it out to the nearest boundary crossing.
-        return hits.first().map(|(_, p)| (*p, at));
-    }
-    // The bend line itself was cut away: the cut spans the stretch of material the line still
-    // crosses, both ends on the boundary.
-    let (pairs, _) = hits.as_chunks::<2>();
-    for [enter, leave] in pairs {
-        let mid = at + u * ((enter.0 + leave.0) / 2.0);
-        if lp.contains(mid) {
-            return Some((enter.1, leave.1));
+        // The bend line is in material: the first cut runs from it out to the nearest boundary
+        // crossing.
+        if let Some((t, p)) = hits.first()
+            && *t > 1e-9
+        {
+            out.push((*p, at));
         }
     }
-    None
+    // Beyond a crossing, the stretches between later crossings that lie in material are the bridges
+    // the notches left: each one is a cut. The bend line itself being cut away is the case where the
+    // first stretch is a gap and the pairs below are all that remain.
+    for pair in hits.windows(2) {
+        let ((t0, p0), (t1, p1)) = (pair[0], pair[1]);
+        if p0.dist(p1) <= 1e-6 {
+            continue;
+        }
+        let mid = at + u * ((t0 + t1) / 2.0);
+        if lp.contains(mid) {
+            out.push((p0, p1));
+        }
+    }
+    out
 }
 
 /// Split the loop's segment that runs through `p` into two there, so `p` is a vertex of the loop.
@@ -560,14 +573,19 @@ fn split_loop_at(lp: &mut Loop2, p: Vec2) -> Option<usize> {
                 }
                 let u = d / len;
                 let along = (p - a).dot(u);
-                if (p - (a + u * along)).len() > TOL || along < -TOL || along > len + TOL {
+                if (p - (a + u * along)).len() > TOL {
                     continue;
                 }
-                // A point already at a segment's end is a vertex of the loop as it stands: there is
-                // nothing to split, and saying so is what lets a cut end on a corner (a stepped far
-                // edge, for one) rather than being refused as "not on the loop".
-                if along <= TOL || along >= len - TOL {
+                // A point within the slit's own tolerance of either end is a vertex of the loop as
+                // it stands: there is nothing to split, and saying so is what lets a cut end on a
+                // corner (a stepped far edge, for one) rather than being refused as "not on the
+                // loop". The distance is the test `slit_loop` finds the anchor's segment end with,
+                // so the two always agree.
+                if p.dist(a) <= TOL || p.dist(b) <= TOL {
                     return Some(k);
+                }
+                if along < 0.0 || along > len {
+                    continue;
                 }
                 lp.segs[k] = Seg2::Line { a, b: p };
                 lp.segs.insert(k + 1, Seg2::Line { a: p, b });
@@ -577,14 +595,20 @@ fn split_loop_at(lp: &mut Loop2, p: Vec2) -> Option<usize> {
                 if ((p - center).len() - radius).abs() > TOL || sweep.abs() < 1e-12 {
                     continue;
                 }
+                // An arc's ends are judged by the same distance, not by a share of the sweep: a
+                // share is a different kind of number and disagrees with the 1e-6 mm the slit
+                // accepts on a large radius (5e-7 of a 1 rad sweep on R = 100 mm is 5e-5 mm out,
+                // so a cut there was read as "already a vertex" and then dropped as "not on the
+                // loop"). As for a line, an end point is a vertex of the loop already.
+                let start_point = center + Vec2::from_angle(start) * radius;
+                let end_point = center + Vec2::from_angle(start + sweep) * radius;
+                if p.dist(start_point) <= TOL || p.dist(end_point) <= TOL {
+                    return Some(k);
+                }
                 let turn = ((p - center).angle() - start) * sweep.signum();
                 let share = turn.rem_euclid(std::f64::consts::TAU) / sweep.abs();
-                if share > 1.0 + TOL {
+                if share > 1.0 {
                     continue;
-                }
-                // As for a line: an end point is a vertex of the loop already.
-                if share <= TOL || share >= 1.0 - TOL {
-                    return Some(k);
                 }
                 lp.segs[k] = Seg2::Arc { center, radius, start, sweep: sweep * share };
                 lp.segs.insert(k + 1, Seg2::Arc { center, radius, start: start + sweep * share, sweep: sweep * (1.0 - share) });
@@ -965,9 +989,9 @@ pub struct EdgeFlange {
     /// still has there: `(0, 1)` is the whole edge, as every edge flange was before segments
     /// (`sheet.flange`'s `segments`); anything else is one segment of a split edge.
     pub span: (f64, f64),
-    /// This segment's side, where it has one of its own: `Some(true)` bends it the other way and
-    /// `Some(false)` the same way as the feature's `flip`, replacing that setting for this
-    /// stretch rather than turning it relative to it.
+    /// This segment's side, where it has one of its own: it replaces the feature's `flip` outright
+    /// for this stretch rather than turning relative to it, so `Some(false)` is the default
+    /// direction and `Some(true)` the other one, whatever the feature's `flip` is.
     pub flip: Option<bool>,
 }
 
@@ -2750,18 +2774,18 @@ impl SheetBody {
             // Neither computed end is a vertex of the material that is left: clip the cut to what
             // remains, so a required junction cut is never dropped (a notch through the far edge,
             // for one). A cut with no material outward of the bend line parts nothing, which
-            // `clip_junction_slit` says by returning none: an empty stretch of the line, not a
-            // failed lookup.
+            // `clip_junction_slits` says by returning nothing: an empty stretch of the line, not a
+            // failed lookup. Every stretch of the line that still runs through material is a bridge
+            // the folded part separates along, so each one is slit.
             let holder = regions.iter().position(|r| r.outer.contains(at));
             let order: Vec<usize> = match holder {
                 Some(h) => std::iter::once(h).chain((0..regions.len()).filter(|&i| i != h)).collect(),
                 None => (0..regions.len()).collect(),
             };
             for i in order {
-                if let Some((anchor, inner)) = clip_junction_slit(&regions[i].outer, at, tip)
-                    && slit_loop(&mut regions[i].outer, anchor, inner)
-                {
-                    break;
+                let slits = clip_junction_slits(&regions[i].outer, at, tip);
+                for (anchor, inner) in slits {
+                    slit_loop(&mut regions[i].outer, anchor, inner);
                 }
             }
         }
@@ -10836,5 +10860,33 @@ mod tests {
         ]);
         assert!(!stepped.edge_is_line(None, Vec2::new(50.0, 0.0), Vec2::new(150.0, 0.0)));
         assert!(stepped.edge_is_line(None, Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0)));
+    }
+
+    /// A cut near an arc's end is split by the distance the slit's own anchor test uses, not by a
+    /// fraction of the sweep: on an R = 100 mm arc with a 1 rad sweep, `share = 5e-7` is 5e-5 mm
+    /// from the arc's start, so the point is on the arc's interior and must become a vertex of the
+    /// loop. Judged by share it read as "already a vertex", and the caller's 1e-6 mm distance test
+    /// then found no segment end there and dropped the cut (FR-7 #5932).
+    #[test]
+    fn a_cut_near_an_arcs_end_is_split_by_distance_not_by_its_angle_share() {
+        // A circular segment: an R = 100 mm arc from angle 0 through 1 rad, closed by its chord.
+        let (centre, radius, start, sweep) = (Vec2::new(0.0, 0.0), 100.0, 0.0, 1.0);
+        let arc_start = centre + Vec2::from_angle(start) * radius;
+        let arc_end = centre + Vec2::from_angle(start + sweep) * radius;
+        let mut lp = Loop2 { segs: vec![Seg2::Arc { center: centre, radius, start, sweep }, Seg2::Line { a: arc_end, b: arc_start }] };
+        // The anchor on the arc at share 5e-7, the tip inside the material the slit parts.
+        let anchor = centre + Vec2::from_angle(start + sweep * 5e-7) * radius;
+        let tip = centre + Vec2::from_angle(0.5) * 99.0;
+        assert!(lp.contains(tip), "the tip is inside the circular segment");
+        let off = anchor.dist(arc_start);
+        assert!(off > 1e-6 && off < 1e-4, "the anchor is {off} mm from the arc's start: on its interior, past the 1e-6 mm the slit accepts");
+        let before = lp.segs.len();
+        assert!(slit_loop(&mut lp, anchor, tip), "the slit is inserted at {anchor:?}");
+        assert_eq!(lp.segs.len(), before + 3, "the arc is split at the anchor and the slit's two lines added");
+        assert!(lp.segs.iter().any(|s| s.end().dist(anchor) <= 1e-6), "the anchor is a vertex of the loop");
+        assert!(
+            lp.segs.iter().any(|s| matches!(s, Seg2::Line { a, b } if a.dist(anchor) <= 1e-6 && b.dist(tip) <= 1e-6)),
+            "the slit runs from the anchor to the tip"
+        );
     }
 }

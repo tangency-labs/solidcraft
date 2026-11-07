@@ -281,8 +281,9 @@ which edge is "the long edge" on a near-square part) before building.
   never lands on a stretch whose value came from elsewhere. A segment input is keyed by its edge's
   pick point, the physical edge, not by the edge's place in the list: reordering the `edges` list
   keeps every name on its own edge's stretch.
-- **`flip` is per segment:** it sets that bend's side outright: `true` bends it the other way and
-  `false` the same way as the feature's `flip`, an override rather than a turn relative to it.
+- **`flip` is per segment:** it replaces the feature's `flip` outright for that stretch: `false` is
+  the default direction and `true` the other one, whatever the feature's `flip` is. It is not a turn
+  relative to the feature.
 - **`then` is refused with `segments`:** bend each segment's far edge in its own feature. The
   Flange dialog says the same, naming the edge: `edge N is split into segments: a split edge takes
   no `then`; bend each segment's far edge in its own feature`.

@@ -200,9 +200,10 @@ the outline enters the edge, so the first `from` is 0, the last `to` is 1 and ea
 next `from`: segments divide the edge, they never leave material out (a set-back is the other
 thing). Consecutive segments that match in angle, height and side make one bend; the others make
 a bend each, with its own setback, leg and side, so the base's outline steps where their angles
-differ and the flange's far edge steps where their heights differ. A segment's `flip` sets that
-stretch's side outright: `true` bends it the other way and `false` the same way as the feature's,
-an override rather than a turn relative to it. No bend relief is cut where two segments meet, and
+differ and the flange's far edge steps where their heights differ. A segment's `flip` replaces the
+feature's `flip` outright: `false` is the default direction and `true` the other one, whatever the
+feature's `flip` is, so it is not a turn relative to the feature. No bend relief is cut where two
+segments meet, and
 where the two stretches bend to opposite sides the blank is cut along their junction, from the bend
 line out to the shorter stretch's far edge, in the flat pattern and the DXF: a blank still joined
 there cannot fold one stretch up and the next down, while same-side stretches stay one piece. Where
