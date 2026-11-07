@@ -1,0 +1,254 @@
+{
+  "en": {
+    "prefs.base_colour": "Base colour",
+    "prefs.colour_intensity": "Colour intensity",
+    "prefs.time_of_day": "Colours follow the time of day",
+    "prefs.background_strength": "Background strength",
+    "prefs.background_even": "Even out strong colours",
+    "prefs.tab_tint": "Background follows the active tab",
+    "prefs.your_colours": "Your colours"
+  },
+  "ar": {
+    "prefs.base_colour": "اللون الأساسي",
+    "prefs.colour_intensity": "شدة اللون",
+    "prefs.time_of_day": "تتبع الألوان وقت اليوم",
+    "prefs.background_strength": "قوة الخلفية",
+    "prefs.background_even": "تخفيف الألوان القوية",
+    "prefs.tab_tint": "تتبع الخلفية علامة التبويب النشطة",
+    "prefs.your_colours": "ألوانك"
+  },
+  "cs": {
+    "prefs.base_colour": "Základní barva",
+    "prefs.colour_intensity": "Intenzita barvy",
+    "prefs.time_of_day": "Barvy se řídí denní dobou",
+    "prefs.background_strength": "Síla pozadí",
+    "prefs.background_even": "Vyrovnat výrazné barvy",
+    "prefs.tab_tint": "Pozadí podle aktivní karty",
+    "prefs.your_colours": "Vaše barvy"
+  },
+  "da": {
+    "prefs.base_colour": "Grundfarve",
+    "prefs.colour_intensity": "Farveintensitet",
+    "prefs.time_of_day": "Farverne følger tidspunktet på dagen",
+    "prefs.background_strength": "Baggrundens styrke",
+    "prefs.background_even": "Udjævn kraftige farver",
+    "prefs.tab_tint": "Baggrunden følger den aktive fane",
+    "prefs.your_colours": "Dine farver"
+  },
+  "de": {
+    "prefs.base_colour": "Grundfarbe",
+    "prefs.colour_intensity": "Farbintensität",
+    "prefs.time_of_day": "Farben folgen der Tageszeit",
+    "prefs.background_strength": "Hintergrundstärke",
+    "prefs.background_even": "Kräftige Farben angleichen",
+    "prefs.tab_tint": "Hintergrund folgt dem aktiven Tab",
+    "prefs.your_colours": "Eigene Farben"
+  },
+  "en-GB": {
+    "prefs.base_colour": "Base colour",
+    "prefs.colour_intensity": "Colour intensity",
+    "prefs.time_of_day": "Colours follow the time of day",
+    "prefs.background_strength": "Background strength",
+    "prefs.background_even": "Even out strong colours",
+    "prefs.tab_tint": "Background follows the active tab",
+    "prefs.your_colours": "Your colours"
+  },
+  "es": {
+    "prefs.base_colour": "Color base",
+    "prefs.colour_intensity": "Intensidad del color",
+    "prefs.time_of_day": "Los colores siguen la hora del día",
+    "prefs.background_strength": "Intensidad del fondo",
+    "prefs.background_even": "Igualar los colores intensos",
+    "prefs.tab_tint": "El fondo sigue la pestaña activa",
+    "prefs.your_colours": "Tus colores"
+  },
+  "fr": {
+    "prefs.base_colour": "Couleur de base",
+    "prefs.colour_intensity": "Intensité de la couleur",
+    "prefs.time_of_day": "Les couleurs suivent l'heure de la journée",
+    "prefs.background_strength": "Intensité de l’arrière-plan",
+    "prefs.background_even": "Adoucir les couleurs vives",
+    "prefs.tab_tint": "L’arrière-plan suit l’onglet actif",
+    "prefs.your_colours": "Vos couleurs"
+  },
+  "gl": {
+    "prefs.base_colour": "Cor base",
+    "prefs.colour_intensity": "Intensidade da cor",
+    "prefs.time_of_day": "As cores seguen a hora do día",
+    "prefs.background_strength": "Intensidade do fondo",
+    "prefs.background_even": "Igualar as cores intensas",
+    "prefs.tab_tint": "O fondo segue a lapela activa",
+    "prefs.your_colours": "As túas cores"
+  },
+  "he": {
+    "prefs.base_colour": "צבע בסיס",
+    "prefs.colour_intensity": "עוצמת הצבע",
+    "prefs.time_of_day": "הצבעים עוקבים אחר שעות היום",
+    "prefs.background_strength": "עוצמת הרקע",
+    "prefs.background_even": "איזון צבעים חזקים",
+    "prefs.tab_tint": "הרקע עוקב אחר הכרטיסייה הפעילה",
+    "prefs.your_colours": "הצבעים שלך"
+  },
+  "hu": {
+    "prefs.base_colour": "Alapszín",
+    "prefs.colour_intensity": "Színintenzitás",
+    "prefs.time_of_day": "A színek követik a napszakot",
+    "prefs.background_strength": "Háttér erőssége",
+    "prefs.background_even": "Erős színek kiegyenlítése",
+    "prefs.tab_tint": "A háttér az aktív lapot követi",
+    "prefs.your_colours": "Saját színek"
+  },
+  "id": {
+    "prefs.base_colour": "Warna dasar",
+    "prefs.colour_intensity": "Intensitas warna",
+    "prefs.time_of_day": "Warna mengikuti waktu dalam sehari",
+    "prefs.background_strength": "Kekuatan latar",
+    "prefs.background_even": "Ratakan warna yang kuat",
+    "prefs.tab_tint": "Latar mengikuti tab aktif",
+    "prefs.your_colours": "Warna Anda"
+  },
+  "it": {
+    "prefs.base_colour": "Colore di base",
+    "prefs.colour_intensity": "Intensità del colore",
+    "prefs.time_of_day": "I colori seguono l'ora del giorno",
+    "prefs.background_strength": "Intensità dello sfondo",
+    "prefs.background_even": "Uniforma i colori intensi",
+    "prefs.tab_tint": "Lo sfondo segue la scheda attiva",
+    "prefs.your_colours": "I tuoi colori"
+  },
+  "ja": {
+    "prefs.base_colour": "ベースカラー",
+    "prefs.colour_intensity": "色の強さ",
+    "prefs.time_of_day": "色が時間帯に合わせて変わる",
+    "prefs.background_strength": "背景の強さ",
+    "prefs.background_even": "強い色をなじませる",
+    "prefs.tab_tint": "背景をアクティブなタブに合わせる",
+    "prefs.your_colours": "自分の色"
+  },
+  "ko": {
+    "prefs.base_colour": "기본 색상",
+    "prefs.colour_intensity": "색상 강도",
+    "prefs.time_of_day": "색이 시간대를 따라감",
+    "prefs.background_strength": "배경 강도",
+    "prefs.background_even": "강한 색상 고르게 하기",
+    "prefs.tab_tint": "배경이 활성 탭을 따름",
+    "prefs.your_colours": "내 색상"
+  },
+  "ms": {
+    "prefs.base_colour": "Warna asas",
+    "prefs.colour_intensity": "Keamatan warna",
+    "prefs.time_of_day": "Warna mengikut waktu hari",
+    "prefs.background_strength": "Kekuatan latar",
+    "prefs.background_even": "Ratakan warna yang kuat",
+    "prefs.tab_tint": "Latar mengikut tab aktif",
+    "prefs.your_colours": "Warna anda"
+  },
+  "nb": {
+    "prefs.base_colour": "Grunnfarge",
+    "prefs.colour_intensity": "Fargeintensitet",
+    "prefs.time_of_day": "Fargene følger tiden på døgnet",
+    "prefs.background_strength": "Bakgrunnens styrke",
+    "prefs.background_even": "Jevn ut kraftige farger",
+    "prefs.tab_tint": "Bakgrunnen følger den aktive fanen",
+    "prefs.your_colours": "Dine farger"
+  },
+  "nl": {
+    "prefs.base_colour": "Basiskleur",
+    "prefs.colour_intensity": "Kleurintensiteit",
+    "prefs.time_of_day": "Kleuren volgen het tijdstip van de dag",
+    "prefs.background_strength": "Sterkte van de achtergrond",
+    "prefs.background_even": "Sterke kleuren gelijkmaken",
+    "prefs.tab_tint": "Achtergrond volgt het actieve tabblad",
+    "prefs.your_colours": "Eigen kleuren"
+  },
+  "pl": {
+    "prefs.base_colour": "Kolor bazowy",
+    "prefs.colour_intensity": "Intensywność koloru",
+    "prefs.time_of_day": "Kolory podążają za porą dnia",
+    "prefs.background_strength": "Siła tła",
+    "prefs.background_even": "Wyrównaj intensywne kolory",
+    "prefs.tab_tint": "Tło zgodne z aktywną kartą",
+    "prefs.your_colours": "Twoje kolory"
+  },
+  "pt-BR": {
+    "prefs.base_colour": "Cor base",
+    "prefs.colour_intensity": "Intensidade da cor",
+    "prefs.time_of_day": "As cores acompanham a hora do dia",
+    "prefs.background_strength": "Intensidade do fundo",
+    "prefs.background_even": "Equilibrar cores fortes",
+    "prefs.tab_tint": "O fundo segue a aba ativa",
+    "prefs.your_colours": "Suas cores"
+  },
+  "ro": {
+    "prefs.base_colour": "Culoare de bază",
+    "prefs.colour_intensity": "Intensitatea culorii",
+    "prefs.time_of_day": "Culorile urmează momentul zilei",
+    "prefs.background_strength": "Intensitatea fundalului",
+    "prefs.background_even": "Echilibrează culorile puternice",
+    "prefs.tab_tint": "Fundalul urmează fila activă",
+    "prefs.your_colours": "Culorile tale"
+  },
+  "ru": {
+    "prefs.base_colour": "Основной цвет",
+    "prefs.colour_intensity": "Насыщенность цвета",
+    "prefs.time_of_day": "Цвета меняются в течение дня",
+    "prefs.background_strength": "Насыщенность фона",
+    "prefs.background_even": "Сглаживать яркие цвета",
+    "prefs.tab_tint": "Фон следует активной вкладке",
+    "prefs.your_colours": "Свои цвета"
+  },
+  "sv": {
+    "prefs.base_colour": "Grundfärg",
+    "prefs.colour_intensity": "Färgintensitet",
+    "prefs.time_of_day": "Färgerna följer tiden på dygnet",
+    "prefs.background_strength": "Bakgrundens styrka",
+    "prefs.background_even": "Jämna ut starka färger",
+    "prefs.tab_tint": "Bakgrunden följer den aktiva fliken",
+    "prefs.your_colours": "Egna färger"
+  },
+  "tr": {
+    "prefs.base_colour": "Temel renk",
+    "prefs.colour_intensity": "Renk yoğunluğu",
+    "prefs.time_of_day": "Renkler günün saatini izler",
+    "prefs.background_strength": "Arka plan gücü",
+    "prefs.background_even": "Güçlü renkleri dengele",
+    "prefs.tab_tint": "Arka plan etkin sekmeyi izler",
+    "prefs.your_colours": "Renkleriniz"
+  },
+  "uk": {
+    "prefs.base_colour": "Основний колір",
+    "prefs.colour_intensity": "Насиченість кольору",
+    "prefs.time_of_day": "Кольори змінюються протягом дня",
+    "prefs.background_strength": "Насиченість тла",
+    "prefs.background_even": "Згладжувати яскраві кольори",
+    "prefs.tab_tint": "Тло відповідає активній вкладці",
+    "prefs.your_colours": "Власні кольори"
+  },
+  "vi": {
+    "prefs.base_colour": "Màu nền",
+    "prefs.colour_intensity": "Cường độ màu",
+    "prefs.time_of_day": "Màu sắc theo thời điểm trong ngày",
+    "prefs.background_strength": "Độ đậm của nền",
+    "prefs.background_even": "Cân bằng màu đậm",
+    "prefs.tab_tint": "Nền theo thẻ đang mở",
+    "prefs.your_colours": "Màu của bạn"
+  },
+  "zh": {
+    "prefs.base_colour": "基础颜色",
+    "prefs.colour_intensity": "颜色强度",
+    "prefs.time_of_day": "颜色随一天中的时间变化",
+    "prefs.background_strength": "背景强度",
+    "prefs.background_even": "平衡浓烈的颜色",
+    "prefs.tab_tint": "背景跟随当前选项卡",
+    "prefs.your_colours": "自定义颜色"
+  },
+  "zh-TW": {
+    "prefs.base_colour": "基礎顏色",
+    "prefs.colour_intensity": "顏色強度",
+    "prefs.time_of_day": "顏色隨一天中的時間變化",
+    "prefs.background_strength": "背景強度",
+    "prefs.background_even": "平衡濃烈的顏色",
+    "prefs.tab_tint": "背景跟隨目前分頁",
+    "prefs.your_colours": "自訂顏色"
+  }
+}

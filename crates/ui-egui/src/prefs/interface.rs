@@ -115,6 +115,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 follow_row(app, ui);
             });
         });
+        ui_kit::settings_section(ui, "your_colours", app.tr("prefs.your_colours"), |ui| your_colours(app, ui, t));
         ui_kit::settings_section(ui, "scale", app.tr("prefs.scale_text"), |ui| {
             ui_kit::settings_pair(
                 ui,
@@ -656,6 +657,73 @@ fn browser_visibility(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
                 ui_kit::help_icon(ui, app.tr("prefs.browser_show_note"));
             });
+        });
+    });
+}
+
+/// The user's own colours over the theme (`crate::personal`): a base colour and how strongly it
+/// tints, colours that follow the time of day, a background that follows the active ribbon tab,
+/// and how strong that background is.
+fn your_colours(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
+    ui_kit::settings_form(ui, t.space_24 * 6.0 + t.space_6, |ui| {
+        let day = app.preferences.time_of_day;
+        colour_pref(app, ui, "prefs.base_colour", "ui_color", !day, |p| &mut p.ui_color);
+        let tinted = day || !app.preferences.ui_color.is_empty();
+        let label = app.tr("prefs.colour_intensity");
+        ui_kit::row(ui, label, |ui| {
+            ui.add_enabled_ui(tinted, |ui| {
+                let response = ui_kit::named_control(ui, label, |ui| {
+                    ui_kit::slider(
+                        ui,
+                        &mut app.preferences.ui_color_intensity,
+                        0.0..=1.0,
+                        ui_kit::Slider { step: Some(0.05), format: |v| format!("{:.0} %", v * 100.0), ..Default::default() },
+                    )
+                });
+                crate::scenario::publish_target("prefs:ui_color_intensity", response.rect);
+            });
+        });
+        let response = ui_kit::checkbox(ui, app.tr("prefs.time_of_day"), &mut app.preferences.time_of_day);
+        crate::scenario::publish_target("prefs:time_of_day", response.rect);
+        let response = ui_kit::checkbox(ui, app.tr("prefs.tab_tint"), &mut app.preferences.tab_tint);
+        crate::scenario::publish_target("prefs:tab_tint", response.rect);
+        let sky = day || app.preferences.tab_tint;
+        let label = app.tr("prefs.background_strength");
+        ui_kit::row(ui, label, |ui| {
+            ui.add_enabled_ui(sky, |ui| {
+                let response = ui_kit::named_control(ui, label, |ui| {
+                    ui_kit::slider(
+                        ui,
+                        &mut app.preferences.background_strength,
+                        0.0..=1.0,
+                        ui_kit::Slider { step: Some(0.05), format: |v| format!("{:.0} %", v * 100.0), ..Default::default() },
+                    )
+                });
+                crate::scenario::publish_target("prefs:background_strength", response.rect);
+            });
+        });
+        ui.add_enabled_ui(sky, |ui| {
+            let response = ui_kit::checkbox(ui, app.tr("prefs.background_even"), &mut app.preferences.background_even);
+            crate::scenario::publish_target("prefs:background_even", response.rect);
+        });
+    });
+}
+
+/// A `#rrggbb` colour preference's row: a colour field, and Theme's own to clear it.
+fn colour_pref(app: &mut SolveApp, ui: &mut egui::Ui, label_id: &'static str, key: &str, enabled: bool, field: fn(&mut Prefs) -> &mut String) {
+    let label = app.tr(label_id);
+    ui_kit::row(ui, label, |ui| {
+        ui.add_enabled_ui(enabled, |ui| {
+            let saved = field(&mut app.preferences).clone();
+            let mut rgb = crate::dialogs_appearance::parse_color(&json!(saved)).unwrap_or([128, 128, 128]);
+            let response = ui_kit::color_field(ui, &mut rgb);
+            crate::scenario::publish_target(&format!("prefs:{key}"), response.rect);
+            if response.changed() {
+                *field(&mut app.preferences) = crate::dialogs_appearance::hex(rgb);
+            }
+            if !saved.is_empty() && ui_kit::button(ui, app.tr("prefs.appearance.theme_own"), ui_kit::Button::Ghost).clicked() {
+                field(&mut app.preferences).clear();
+            }
         });
     });
 }
