@@ -531,6 +531,22 @@ keyword_param!(
     "mitre or swept",
     "How two rounds turn round a sharp, straight, convex side edge square to both on a plane (the rounds along a boss's base, at its upright edges): mitre (the default) runs them on to meet in a mitre; swept ends them at the side edge and fills the corner with their section revolved about it, a torus. swept takes type: constant, corner: rolling, no setbacks and fit: exact or reduce, and is refused with the reason where the rounds are unequal or the side edge is concave, curved or tangent. Matching ignores case."
 );
+keyword_param!(
+    /// `plastic.lip`'s `type`.
+    LipTypeParam,
+    "type",
+    &["lip", "groove"],
+    "lip or groove",
+    "What the feature makes along the rim: lip (the default), a raised band, or groove, a band cut into the rim for another part's lip. Matching ignores case."
+);
+keyword_param!(
+    /// `plastic.lip`'s `side`.
+    LipSideParam,
+    "side",
+    &["inside", "outside"],
+    "inside or outside",
+    "Which edge of the rim face the band runs along: inside (the default) or outside. Matching ignores case."
+);
 
 /// How a feature combines with existing bodies, as `features::operation` reads it.
 #[derive(Clone, Debug, PartialEq)]
