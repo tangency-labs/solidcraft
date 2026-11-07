@@ -509,6 +509,19 @@ pub(super) fn build(
             }
             anchor.author_path = cloned_path(source, &original.author_path, component, &clone_path, &occurrences)?;
         }
+        if let (FeatureKind::FrameGusset { supports, .. }, FeatureKind::FrameGusset { supports: originals, .. }) = (&mut f.kind, &old.kind) {
+            for (support, original) in supports.iter_mut().zip(originals) {
+                if let (Some(anchor), Some(original)) =
+                    (super::sketch::face::anchor_mut(&mut support.plane), super::sketch::face::anchor(&original.plane))
+                {
+                    if bodies.contains_key(&original.target.body) {
+                        anchor.component = *components.get(&original.component).ok_or_else(|| bad(CMD, "gusset source outside copied graph"))?;
+                        anchor.path = cloned_path(source, &original.path, component, &clone_path, &occurrences)?;
+                    }
+                    anchor.author_path = cloned_path(source, &original.author_path, component, &clone_path, &occurrences)?;
+                }
+            }
+        }
         if let Some(slot) = scratch.doc_mut().feature_mut(f.id) {
             *slot = f;
         }
@@ -641,14 +654,20 @@ pub(super) fn build(
                 }
             }
         }
-        if let FeatureKind::Sketch { plane, .. } = &feature.kind
-            && let Some(anchor) = super::sketch::face::anchor(plane)
-            && !bodies.contains_key(&anchor.target.body)
-        {
-            notices.push(format!(
-                "{} retains external exact face attachment to {} (producer {})",
-                feature.name, anchor.target.body, anchor.target.origin_feature
-            ));
+        let (sketch_plane, gusset_supports) = match &feature.kind {
+            FeatureKind::Sketch { plane, .. } => (Some(plane), &[][..]),
+            FeatureKind::FrameGusset { supports, .. } => (None, supports.as_slice()),
+            _ => (None, &[][..]),
+        };
+        for plane in sketch_plane.into_iter().chain(gusset_supports.iter().map(|support| &support.plane)) {
+            if let Some(anchor) = super::sketch::face::anchor(plane)
+                && !bodies.contains_key(&anchor.target.body)
+            {
+                notices.push(format!(
+                    "{} retains external exact face attachment to {} (producer {})",
+                    feature.name, anchor.target.body, anchor.target.origin_feature
+                ));
+            }
         }
         for id in feature.kind.input_sketches() {
             if !features.contains_key(&id) {

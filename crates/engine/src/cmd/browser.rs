@@ -1256,6 +1256,7 @@ fn repair_body(s: &mut Session, p: &Value) -> Result<Value> {
     serde_json::to_value(reply).map_err(|e| crate::EngineError::Other(e.to_string()))
 }
 
+/// Rename a body and update the later references that identify it, including exact gusset faces.
 fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "body.rename";
     let given = str_(p, "body").ok_or_else(|| bad(cmd, "`body` must be a body name"))?;
@@ -1373,6 +1374,16 @@ fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
             for link in &mut sketch.links {
                 if link.auto_face && matches!(&link.source,solidcraft_sketch::LinkSource::Face {body,..} if *body==old) {
                     link.face_name = Some(anchor.target.name.clone());
+                }
+            }
+        }
+        if let FeatureKind::FrameGusset { supports, .. } = &mut f.kind {
+            for support in supports {
+                if let Some(anchor) = super::sketch::face::anchor_mut(&mut support.plane)
+                    && anchor.target.body == old
+                {
+                    let ids = std::collections::BTreeMap::from([(anchor.target.origin_feature, anchor.target.origin_feature)]);
+                    anchor.remap_target(&ids, &std::collections::BTreeMap::from([(old.clone(), name.to_string())]))?;
                 }
             }
         }

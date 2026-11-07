@@ -411,3 +411,51 @@ fn a_line_a_hair_off_vertical_is_vertical() {
     let (_, y) = member_axes(Vec3::new(1e-3, 0.0, 1.0), 0.0).unwrap();
     assert!(y.z > 0.0 && y.x < 0.0, "{y:?}");
 }
+
+#[test]
+/// Curved face boundaries contribute their actual area and projected extent to contact checks.
+fn gusset_face_boundaries_are_measured_on_their_exact_curves() {
+    use crate::gusset::{conic_share, counter_clockwise, loop_signed_area, scalar_extent, seg_extent};
+    use solidcore_record::{Loop2, Seg2, Vec2 as V};
+    use std::f64::consts::{FRAC_1_SQRT_2, PI, TAU};
+    // A clockwise circle is turned counter-clockwise and encloses exactly pi.
+    let circle = Loop2 { segs: vec![Seg2::Arc { center: V::new(2., 0.), radius: 1., start: 0., sweep: -TAU }] };
+    assert!((loop_signed_area(&circle).unwrap() + PI).abs() < 1e-12);
+    assert!((loop_signed_area(&counter_clockwise(circle).unwrap()).unwrap() - PI).abs() < 1e-12);
+    // A quarter arc reaches its extreme between its ends, not at them.
+    let quarter = Seg2::Arc { center: V::new(0., 0.), radius: 1., start: -0.25 * PI, sweep: 0.5 * PI };
+    let (lo, hi) = seg_extent(&quarter, V::new(1., 0.)).unwrap();
+    assert!((hi - 1.).abs() < 1e-12 && (lo - FRAC_1_SQRT_2).abs() < 1e-12, "{lo} {hi}");
+    // A cubic's bulge counts: (0,0)-(0,1)-(1,1)-(1,0) peaks at y = 3/4 and encloses 3/5 with its chord.
+    let cubic = Seg2::Cubic { p0: V::new(0., 0.), p1: V::new(0., 1.), p2: V::new(1., 1.), p3: V::new(1., 0.) };
+    let (_, top) = seg_extent(&cubic, V::new(0., 1.)).unwrap();
+    assert!((top - 0.75).abs() < 1e-9, "{top}");
+    let closed = Loop2 { segs: vec![cubic, Seg2::Line { a: V::new(1., 0.), b: V::new(0., 0.) }] };
+    assert!((loop_signed_area(&closed).unwrap().abs() - 0.6).abs() < 1e-12);
+    // An extent that can't be resolved in the halvings allowed is an error, never the hull.
+    assert!(scalar_extent(vec![(0., 1.), (1., 1.), (1., 1.), (0., 1.)], 0).is_err());
+
+    // Conics: a quarter circle as a rational quadratic (w = cos 45°) closed through the centre
+    // encloses pi/4 exactly, and reaches 1 along the diagonal.
+    let arc = Seg2::Conic { a: V::new(1., 0.), apex: V::new(1., 1.), b: V::new(0., 1.), w: FRAC_1_SQRT_2 };
+    let sector = Loop2 { segs: vec![arc, Seg2::Line { a: V::new(0., 1.), b: V::new(0., 0.) }, Seg2::Line { a: V::new(0., 0.), b: V::new(1., 0.) }] };
+    assert!((loop_signed_area(&sector).unwrap() - PI / 4.).abs() < 1e-12);
+    let (_, far) = seg_extent(&arc, V::new(FRAC_1_SQRT_2, FRAC_1_SQRT_2)).unwrap();
+    assert!((far - 1.).abs() < 1e-9, "{far}");
+    // A parabola (w = 1) takes 2/3 of its control triangle; a hyperbola (w = cosh 1) takes
+    // cosh 1 (sinh 1 cosh 1 - 1) / sinh³ 1; across w = 1 the share is continuous.
+    assert!((conic_share(1.).unwrap() - 2. / 3.).abs() < 1e-15);
+    let (c, sh) = (1f64.cosh(), 1f64.sinh());
+    assert!((conic_share(c).unwrap() - c * (sh * c - 1.) / (sh * sh * sh)).abs() < 1e-12);
+    for w in [1. - 1.1e-4, 1. - 0.9e-4, 1. + 0.9e-4, 1. + 1.1e-4] {
+        assert!((conic_share(w).unwrap() - (2. / 3. - 4. / 15. * (1. - w))).abs() < 1e-8, "{w}");
+    }
+    let parabola = Seg2::Conic { a: V::new(-1., 0.), apex: V::new(0., 2.), b: V::new(1., 0.), w: 1. };
+    let cap = Loop2 { segs: vec![parabola, Seg2::Line { a: V::new(1., 0.), b: V::new(-1., 0.) }] };
+    assert!((loop_signed_area(&cap).unwrap().abs() - 4. / 3.).abs() < 1e-12);
+    // A weight that isn't positive is refused, not measured.
+    for w in [0., -0.5, f64::NAN] {
+        let bad = Seg2::Conic { a: V::new(1., 0.), apex: V::new(1., 1.), b: V::new(0., 1.), w };
+        assert!(seg_extent(&bad, V::new(1., 0.)).is_err() && conic_share(w).is_err(), "{w}");
+    }
+}

@@ -56,16 +56,20 @@ pub(super) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Featu
     if !f.body_names.is_empty() {
         // A copy (pasted, or in a copied component) names its members by position, as any
         // feature's bodies.
-        for (k, t) in made.into_iter().enumerate() {
+        for (k, ((line, _, _), t)) in segments.into_iter().zip(made).enumerate() {
             let name = new_name(st, f, k);
-            st.bodies.push(ModelBody::traced_new(name, t, f.id));
+            let mut body = ModelBody::traced_new(name, t, f.id);
+            body.frame_member_line = Some(line.into());
+            st.bodies.push(body);
         }
         return Ok(());
     }
     let base = body_name.as_deref().map(str::trim).filter(|n| !n.is_empty()).map_or(description, str::to_string);
     let ids: Vec<String> = segments.into_iter().map(|(id, _, _)| id).collect();
-    for (name, t) in member_names(st, &ids, names, &base).into_iter().zip(made) {
-        st.bodies.push(ModelBody::traced_new(name, t, f.id));
+    for ((name, line), t) in member_names(st, &ids, names, &base).into_iter().zip(ids).zip(made) {
+        let mut body = ModelBody::traced_new(name, t, f.id);
+        body.frame_member_line = Some(line.into());
+        st.bodies.push(body);
     }
     Ok(())
 }
