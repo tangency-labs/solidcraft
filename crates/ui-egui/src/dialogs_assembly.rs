@@ -2278,7 +2278,8 @@ fn grouped(app: &SolveApp, count: usize) -> bool {
 fn joints_open(app: &SolveApp, count: usize, run: JointRun) -> bool {
     !grouped(app, count)
         || match run {
-            JointRun::Loose => crate::browser::is_open(app, &run.key(), false),
+            // The History's own fold: a Browser search filters the Browser's rows, not these.
+            JointRun::Loose => crate::browser::fold_open(app, &run.key(), false),
             // Folder ids are numbered in each design: its choice stays with the design, as the
             // folder's own fold does.
             JointRun::Folder { .. } => crate::history_folds::is_open(app, &run.key(), false),
@@ -2287,7 +2288,7 @@ fn joints_open(app: &SolveApp, count: usize, run: JointRun) -> bool {
 
 fn toggle_joints(app: &mut SolveApp, run: JointRun) {
     match run {
-        JointRun::Loose => crate::browser::toggle(app, &run.key(), false),
+        JointRun::Loose => crate::browser::toggle_fold(app, &run.key(), false),
         JointRun::Folder { .. } => {
             let open = crate::history_folds::is_open(app, &run.key(), false);
             crate::history_folds::set_open(app, &run.key(), !open);
