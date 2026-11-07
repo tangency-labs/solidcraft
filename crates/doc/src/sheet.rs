@@ -949,6 +949,12 @@ pub struct SheetPerforation {
     pub outline: Option<Vec<Region2>>,
 }
 
+/// A pocket in the flat: `region` recessed from `z0` to `z1` through the thickness, z 0 the
+/// bottom and z t the top. A sheet made from surfaces is an oriented surface: the input surfaces
+/// with their outward normals, continuous across every bend. Its top is the normal side,
+/// everywhere, folded or flat; its bottom is the face one thickness into the material. A Convert
+/// pick names which face is the surface, `flip` reverses it, and a sketch sheet's surface faces
+/// along its sketch's normal. Nothing about a sheet's faces is a spatial z.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SheetPocket {
     pub region: Region2,

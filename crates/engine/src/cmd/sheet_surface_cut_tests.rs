@@ -71,9 +71,9 @@ fn a_hole_drilled_through_a_folded_sheet_is_a_cut_out_of_its_flat() {
     assert!((exact_volume(&s) - want).abs() < 1e-6 * want, "{} vs {want}", exact_volume(&s));
 }
 
-/// An engraving cut 0.5 into the sheet's surface is a pocket from the flat's face on the
-/// surface (z 0…0.5), on its DXF layer; a hole drilled through it is a cut-out of the flat and a
-/// hole in the pocket. Cut into the other face, an engraving is a pocket from z 1.5 to 2.
+/// An engraving cut 0.5 into the sheet's surface is a pocket down from the flat's face on the
+/// surface, its top (z 1.5…2), on its DXF layer; a hole drilled through it is a cut-out of the
+/// flat and a hole in the pocket. Cut into the other face, an engraving is a pocket from z 0 to 0.5.
 #[test]
 fn an_engraving_is_a_pocket_and_a_hole_through_it_takes_it_with_the_material() {
     let mut s = plate();
@@ -81,9 +81,9 @@ fn an_engraving_is_a_pocket_and_a_hole_through_it_takes_it_with_the_material() {
     let v1 = 100.0 * 60.0 * T - 200.0 * 0.5;
     assert!((exact_volume(&s) - v1).abs() < 1e-6 * v1, "{}", exact_volume(&s));
     let p = pockets(&mut s);
-    assert!(p.len() == 1 && (p[0]["depth_mm"].as_f64().unwrap_or(0.0) - 0.5).abs() < 1e-9 && p[0]["z0_mm"].as_f64() == Some(0.0), "{p:?}");
+    assert!(p.len() == 1 && (p[0]["depth_mm"].as_f64().unwrap_or(0.0) - 0.5).abs() < 1e-9 && p[0]["z1_mm"].as_f64() == Some(T), "{p:?}");
     let dxf = run(&mut s, "sheet.export_dxf", json!({}))["dxf"].as_str().unwrap_or("").to_string();
-    assert_eq!((lines_on(&dxf, "OUTLINE"), lines_on(&dxf, "POCKET_BOTTOM_Z0.000000_TO_0.500000_MM")), (4, 4), "{dxf}");
+    assert_eq!((lines_on(&dxf, "OUTLINE"), lines_on(&dxf, "POCKET_TOP_Z1.500000_TO_2.000000_MM")), (4, 4), "{dxf}");
     // Through the middle of it.
     run(&mut s, "solid.hole", json!({"position": [20, 15, T - 0.5], "diameter": 4}));
     let v2 = v1 - PI * 4.0 * (T - 0.5);
@@ -94,7 +94,7 @@ fn an_engraving_is_a_pocket_and_a_hole_through_it_takes_it_with_the_material() {
     // The other face.
     engrave(&mut s, "Under", 0.0, [60.0, 10.0], [80.0, 20.0], 0.5, false);
     let p = pockets(&mut s);
-    assert!(p.iter().any(|x| x["z0_mm"].as_f64().is_some_and(|z| (z - 1.5).abs() < 1e-9) && x["side"] == "top"), "{p:?}");
+    assert!(p.iter().any(|x| x["z0_mm"].as_f64() == Some(0.0) && x["side"] == "bottom"), "{p:?}");
 }
 
 /// Engravings from both faces that meet in the thickness cut through where they overlap: the
