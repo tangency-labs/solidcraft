@@ -562,6 +562,11 @@ fn redefine_panel_takes_a_plane_or_face_picked_in_the_view() {
     assert!(matches!(h.app.session.selection.first(), Some(solidcraft_engine::Sel::Face { body, .. }) if body == "Block"));
     let commands = crate::sketch_attachment_ui::commands(&h.app).expect("the picked face fills the Plane field");
     assert_eq!(commands[0].1["plane"]["body"], "Block", "{commands:?}");
+    // A plane selected ahead of the face does not take the field from the face.
+    let face = h.app.session.selection.first().cloned().unwrap();
+    h.app.session.selection = vec![solidcraft_engine::Sel::Plane { name: "Front30".into() }, face];
+    h.frames(2);
+    assert_eq!(crate::sketch_attachment_ui::commands(&h.app).unwrap()[0].1["plane"]["body"], "Block");
     h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
     assert!(h.app.tree.redefine.is_none());
     assert!(h.app.session.model.result(sketch).unwrap().error.is_none());

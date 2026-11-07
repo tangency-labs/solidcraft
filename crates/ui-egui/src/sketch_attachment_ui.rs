@@ -94,10 +94,15 @@ fn fixed_plane(plane: Plane) -> Value {
     json!({"origin":plane.origin,"x_dir":plane.x,"y_dir":plane.y})
 }
 
-/// The first selected item the Plane field can take: a planar face, an origin plane or a
-/// construction plane.
+/// The selected item the Plane field can take: the first selected face, as the field always
+/// took, else the first origin or construction plane.
 fn picked_plane(app: &SolveApp) -> Option<Sel> {
-    app.session.selection.iter().find(|selection| matches!(selection, Sel::Face { .. } | Sel::Plane { .. })).cloned()
+    let selection = &app.session.selection;
+    selection
+        .iter()
+        .find(|item| matches!(item, Sel::Face { .. }))
+        .or_else(|| selection.iter().find(|item| matches!(item, Sel::Plane { .. })))
+        .cloned()
 }
 
 /// What `sketch.redefine` gets for a picked face or plane, with the field's label.

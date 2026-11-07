@@ -1419,6 +1419,7 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     baseline.doc_mut().marker = Some(index + 1);
     baseline.refresh();
     let visible_geometry = baseline.model.state().sketch(id).map(|resolved| resolved.sketch.clone());
+    let evaluated_plane = baseline.model.state().sketch(id).map(|resolved| resolved.plane);
     let mut trial = s.scratch();
     trial.active_component = component;
     trial.active_occurrence_path = (!author_path.is_empty()).then_some(author_path);
@@ -1438,7 +1439,7 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
         super::sketch::face::capture_positions(&mut trial, &plane)?;
     }
     let flipped = match p.get("flip") {
-        None | Some(Value::Null) if !super::sketch::face::is_face(p) => keep_facing(&trial, id, &plane),
+        None | Some(Value::Null) if !super::sketch::face::is_face(p) => keep_facing(&trial, id, evaluated_plane, &plane),
         _ => super::sketch::flip_param(&trial, p, &plane, cmd)?,
     };
     if let Some(about_y) = flipped {
@@ -1520,12 +1521,20 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
 /// (as `sketch.create`'s `flip`) that keeps it facing the same way, about whichever in-plane axis
 /// keeps the sketch's x and y closest to where they were. `None` when it already faces that
 /// way, or when either plane cannot be placed (a lost face: nothing to keep).
-fn keep_facing(s: &Session, sketch: u64, next: &PlaneRef) -> Option<bool> {
+///
+/// `evaluated`: where the sketch is now as the model placed it (a face attachment follows its
+/// face, which may have turned since it was picked); without it, its stored plane.
+fn keep_facing(s: &Session, sketch: u64, evaluated: Option<solidcore_record::Plane>, next: &PlaneRef) -> Option<bool> {
     use solidcraft_geom::{PlaneGeom, Vec3Geom};
-    let FeatureKind::Sketch { plane: now, .. } = &s.doc.feature(sketch)?.kind else { return None };
     let (vals, _) = s.doc.param_values();
     let state = s.model.state();
-    let now = s.doc.resolve_plane_in(&vals, now, 0, Some(&state)).ok()?;
+    let now = match evaluated {
+        Some(plane) => plane,
+        None => {
+            let FeatureKind::Sketch { plane: now, .. } = &s.doc.feature(sketch)?.kind else { return None };
+            s.doc.resolve_plane_in(&vals, now, 0, Some(&state)).ok()?
+        }
+    };
     let next = s.doc.resolve_plane_in(&vals, next, 0, Some(&state)).ok()?;
     if now.normal().dot(next.normal()) >= -1e-9 {
         return None;
