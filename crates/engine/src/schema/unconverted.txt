@@ -122,7 +122,6 @@ sketch.rectangle.center
 sketch.rectangle.rounded
 sketch.rectangle.three_point
 sketch.rectangle.two_point
-sketch.redefine
 sketch.slot.arc_center
 sketch.slot.arc_three_point
 sketch.slot.center_point
@@ -182,8 +181,3 @@ timeline.rename_group
 timeline.reorder
 timeline.reorder_many
 timeline.ungroup
-view.apply
-view.delete
-view.list
-view.rename
-view.save
