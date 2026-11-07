@@ -370,9 +370,9 @@ fn written_flags(c: &solidcore_record::brep::Curve) -> String {
     let curve = crate::write::topology::curve(c).unwrap_or_else(|e| panic!("{e}"));
     GeomWriter::new(&mut w).curve(&curve);
     let text = w.data();
-    let line = text.lines().find(|l| l.contains("B_SPLINE_CURVE")).unwrap_or_else(|| panic!("{text}"));
-    let logicals: Vec<&str> = line.split(',').filter(|t| matches!(t.trim_matches(|c| c == ')' || c == ';'), ".T." | ".F." | ".U.")).collect();
-    logicals.join(",")
+    // The two logicals after the form (`.UNSPECIFIED.` for every curve written here).
+    let after = text.split(".UNSPECIFIED.,").nth(1).unwrap_or_else(|| panic!("{text}"));
+    after.get(..7).unwrap_or_else(|| panic!("{text}")).to_string()
 }
 
 #[test]
