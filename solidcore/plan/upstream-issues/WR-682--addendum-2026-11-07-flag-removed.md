@@ -19,6 +19,26 @@ found no curve (`fillet_geom::p2`).
   - a flat surface meets the plane in its exact line;
   - a surface that touches the plane, or an end off the surface, is not traced;
   - the cylinder as itself keeps its intersector's 1001 between points past the patch.
+- **Fixes to the trace itself (not the fork's).** The goldens' generated
+  `blend.fillet_geom_p2` cases showed three defects it carried from the fork:
+  - **It left the surface.** The march went on along the B-spline's extrapolation (`gen0014`:
+    u = -6e5 on a domain of [0, 1]), and each refining pass split every span that missed,
+    doubling the stations until the allocation aborted (4.9 GB). A station off the surface's
+    domain, in a direction the surface isn't closed in, is now the curve leaving the surface,
+    and the trace refuses it (1001, as main's result). The trace also holds at most
+    `MAX_STATIONS`, the march's own 100 000.
+  - **Its span check couldn't be met at an end.** The curve's ends are the given points,
+    within `tol` of the exact curve. A span at an end offset by more than a tenth of `tol`
+    never met the check however often it was split (`gen0015`, `gen0170`: the error at the
+    quarter points was the end offset times the Hermite end basis, 0.84, 0.5, 0.16). A span
+    is now judged on its own interpolation error: the exact curve carried by its ends'
+    offsets.
+  - **Coinciding ends** (`gen0123`) are no curve between two points. They're not the trace's
+    event, and the intersectors answer them as before (1007).
+- **Known failing:** upstream's `cyl_on_box1.smb` edge 12 r 2 (the goldens'
+  `private-upstream-rollover-404-cyl-on-box1-edge12-r2`) fails in the rollover (1001) once the
+  trace is taken. Main's default built it. The trace's curves agree with the two-points
+  intersector's to the tolerance, so the cause isn't found yet (tangency-labs/solidcore#3072).
 - **Tests:** `wr682_surface_plane_curve` keeps the trace's tests on the default kernel. Its
   flag-off case is removed, and the cases that compared the flag on and off assert those answers
   themselves. The tests that set the flag drop the setting.
