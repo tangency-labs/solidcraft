@@ -2,21 +2,22 @@ Put a hole in a solid body: a simple hole, a counterbore, a countersink or a tap
 
 #### Before you start
 
-- You need a solid body with a flat face to drill into. The hole goes straight into the face.
-- Locate the hole from edges of that face, the same way a print dimensions a hole from two edges. Pick an edge as Reference 1 and type its distance, then do the same for Reference 2.
-- To drill several holes at once, sketch a point for each one on the face first. Every point gets a hole.
+- You need a solid body with a face to drill into. The hole goes straight into the face. A single hole can go on a flat or curved face; locating it from edges needs a flat face.
+- Locate the hole from edges of that face, the same way a print dimensions a hole from two edges. Pick an edge as Reference 1 and type its distance, then do the same for Reference 2. Both edges must be straight and must not be parallel to each other: pick one side edge and one front or back edge, not two opposite sides.
+- To drill several holes at once, sketch a point for each hole on the face first. Then open Hole, set Placement to Multiple and select the points you want. Only the points you select get a hole.
 
 #### Options
 
 | Choice in the dialog | Meaning | Example or reason to choose it |
 | --- | --- | --- |
-| Placement | Single drills one hole on the face you pick. | Use Single for one hole located from edges. |
+| Personal Presets | Saves the dialog settings under a name you choose (Save new), so you can reuse them. Rename and Delete manage saved presets. | Save a "1/4-20 blind" preset once and pick it for every tapped hole of that size. |
+| Placement | Single drills one hole on the face you pick. Multiple drills a hole at each sketch point you select. | Single for one hole located from edges. Multiple for a bolt pattern laid out in a sketch. |
 | Face | The face the hole is drilled into. | Click the top face of the part. |
 | Reference 1 and Distance 1 | An edge of the face, and how far the hole center is from it. | The left edge, 0.75 in. |
 | Reference 2 and Distance 2 | A second edge, and how far the hole center is from it. | The front edge, 0.75 in. |
 | Extents | How the depth is set. Distance drills to the Depth you type. | Use Distance for a blind hole. |
 | Hole Type | Simple is a straight hole. Counterbore and Countersink add a bore or a cone at the top. | Counterbore for a socket head cap screw. Countersink for a flat head screw: 82° for inch screws, 90° for metric. |
-| Hole Tap Type | Simple is a plain drilled hole with a Diameter you type. Tapped makes a threaded hole and shows the thread settings. | Choose Tapped for any tapped hole. |
+| Hole Tap Type | Simple is a plain drilled hole with a Diameter you type. Tapped drills the tap drill size and carries the thread as a callout; the thread itself is not cut into the hole wall. | Choose Tapped for any tapped hole. To show real thread geometry, use {{#command solid.thread}} on the hole wall. |
 | Profile (Tapped) | The thread standard. | UNC for coarse inch threads, UNF for fine inch threads. |
 | Size (Tapped) | The thread size, from a list. The Designation box shows the callout, and Tap drill diameter shows the drill the app uses. | 1/4-20 UNC uses a 0.201 in (#7) tap drill. The app shows it as 5.1054 mm. |
 | Full thread depth (Tapped) | On: the thread runs the full depth of the hole. Off: a Thread depth box appears. | Turn it off for a blind tapped hole. |
