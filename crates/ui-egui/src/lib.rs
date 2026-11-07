@@ -1336,6 +1336,15 @@ impl SolveApp {
         if let Ok(v) = &r {
             match id {
                 "sketch.finish" | "sketch.cancel" => self.sketch_closed(v.get("sketch").and_then(Value::as_u64)),
+                // The sketch being edited has all new contents: a tool's picks named the old ones.
+                "sketch.replace" if v.get("sketch_id").and_then(Value::as_u64).is_some_and(|id| self.session.active_sketch == Some(id)) => {
+                    if let Some(tool) = self.tool.as_mut() {
+                        tool.pts.clear();
+                        tool.hover = None;
+                        tool.picks.clear();
+                        tool.point_picks.clear();
+                    }
+                }
                 "view.fit" | "view.home" => self.frame_view(id == "view.home"),
                 "view.tool" => {
                     self.viewport.nav = match v.get("tool").and_then(Value::as_str) {
