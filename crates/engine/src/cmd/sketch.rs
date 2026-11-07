@@ -243,7 +243,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("curves: [ids], value?: bool (default: construction unless all of them already are)"),
     CommandSpec::new("sketch.delete", "Delete Sketch Entities", sketch_delete).icon("delete")
         .enabled(in_sketch)
-        .params("entities: [curve, point or constraint ids]"),
+        .params("entities: [curve, point, constraint or sketch pattern ids]; a pattern goes with its copies, its sources stay"),
     CommandSpec::new("sketch.move_point", "Drag Sketch Point", move_point).icon("sketch_move").enabled(in_sketch).params("point: ref, to: [x,y]"),
     CommandSpec::new("sketch.move_points", "Move Sketch Points", move_points).icon("sketch_move").enabled(in_sketch).params(
         "moves: [{point: ref | near: [x,y], to: [x,y]}] (each point to its own target; `near`: the sketch point closest to it, \
@@ -3735,6 +3735,14 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
             } else if sk.link(id).is_some() {
                 curves.extend(sk.link_curves(id));
                 points.extend(sk.link_points(id));
+            } else if let Some(i) = sk.patterns.iter().position(|pattern| &pattern.id == id) {
+                // A pattern goes with its copies and their relations; its sources stay (#12081).
+                let pattern = sk.patterns.remove(i);
+                for instance in &pattern.instances {
+                    curves.extend(instance.curves.iter().filter_map(|c| sk.curve_index(c)));
+                    points.extend(instance.points.iter().filter_map(|(_, q)| sk.point_index(q)));
+                    cons.extend(instance.constraints.iter().cloned());
+                }
             } else {
                 return Err(bad(cmd, format!("unknown sketch entity `{id}`")));
             }

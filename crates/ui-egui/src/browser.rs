@@ -1009,12 +1009,14 @@ impl Lit {
                 Sel::Profile { sketch, .. } | Sel::ExternalSketchCurve { sketch, .. } | Sel::ExternalSketchPoint { sketch, .. } => {
                     Thing::Sketch(*sketch)
                 }
-                Sel::SketchCurve { .. } | Sel::SketchPoint { .. } | Sel::SketchMidpoint { .. } | Sel::SketchConstraint { .. } => {
-                    match app.session.active_sketch {
-                        Some(id) => Thing::Sketch(id),
-                        None => continue,
-                    }
-                }
+                Sel::SketchCurve { .. }
+                | Sel::SketchPoint { .. }
+                | Sel::SketchMidpoint { .. }
+                | Sel::SketchConstraint { .. }
+                | Sel::SketchPattern { .. } => match app.session.active_sketch {
+                    Some(id) => Thing::Sketch(id),
+                    None => continue,
+                },
                 Sel::Plane { name } => Thing::Plane(name.clone()),
                 Sel::Axis { name } => Thing::Axis(name.clone()),
                 Sel::ConstructionPoint { name } => Thing::Point(name.clone()),
