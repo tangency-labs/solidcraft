@@ -35,7 +35,9 @@ solidcraft-engine = { workspace = true }
 solidcraft-gpu = { workspace = true }
 solidcraft-ui-egui = { workspace = true }
 solidcraft-space-mouse = { workspace = true }
-eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11", "links"] }
+# `clipboard` writes Copy, Cut and Copy report to the operating system's clipboard.
+# Without it, eframe keeps that text inside this process only (#12433).
+eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "clipboard", "wayland", "x11", "links"] }
 egui = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

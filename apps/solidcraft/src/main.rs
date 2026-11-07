@@ -1594,6 +1594,18 @@ mod backend_tests {
 }
 
 #[cfg(test)]
+mod clipboard_feature {
+    /// Copy, Cut and Copy report reach other programs only when eframe's `clipboard` feature is on.
+    #[test]
+    fn the_desktop_window_enables_the_system_clipboard() {
+        let manifest = include_str!("../Cargo.toml");
+        let dependencies = manifest.split("[dependencies]").nth(1).unwrap_or("");
+        let eframe = dependencies.lines().find(|line| line.trim_start().starts_with("eframe ")).unwrap_or("");
+        assert!(eframe.contains("\"clipboard\""), "eframe clipboard feature is missing (#12433): {eframe}");
+    }
+}
+
+#[cfg(test)]
 mod prefs_writer_tests {
     use super::PrefsWriter;
     use solidcraft_ui_egui::prefs::{NavigatorStyle, STORAGE_KEY};
