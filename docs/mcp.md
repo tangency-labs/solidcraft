@@ -11,7 +11,7 @@ ordinary `execute` tool: `render.preflight`, `render.start`, `render.status`,
 in the session until explicit PNG export. See [render jobs](render-jobs.md).
 
 For sandboxed plugins and parametric timeline
-features that also use `run(command, args)`, see [plugins.md](plugins.md). Desktop MCP in this
+features that also use `run(command, args)`, see [RFC 0002](rfcs/0002-plugins.md). Desktop MCP in this
 document remains the reference implementation today.
 
 ## Start it
