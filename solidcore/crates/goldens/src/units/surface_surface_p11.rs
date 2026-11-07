@@ -988,15 +988,13 @@ mod tests {
         assert!(dx_du > off_diagonal && dy_dv > off_diagonal);
         let d = input.a.domain;
         assert!(d.iter().all(|x| (0.0..=1.0).contains(x)));
-        let mut delta = [[0.0; 3]; 3];
-        for v in 0..3 {
+        let columns: [[f64; 3]; 3] = std::array::from_fn(|v| {
             let column =
                 std::array::from_fn(|u| input.b.net[3 * u + v][2] - input.a.net[3 * u + v][2]);
-            let restricted = review_restrict_quadratic(column, d[0], d[2]);
-            for u in 0..3 {
-                delta[u][v] = restricted[u];
-            }
-        }
+            review_restrict_quadratic(column, d[0], d[2])
+        });
+        let delta: [[f64; 3]; 3] =
+            std::array::from_fn(|u| std::array::from_fn(|v| columns[v][u]));
         let upper = delta
             .into_iter()
             .flat_map(|row| review_restrict_quadratic(row, d[1], d[3]))

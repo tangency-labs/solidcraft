@@ -1637,7 +1637,7 @@ mod tests {
             let count = values[2] as usize;
             assert_eq!(values.len(), 3 + 13 * count);
             let mut worst = 0.0_f64;
-            for record in values[3..].chunks_exact(13) {
+            for record in values[3..].chunks(13) {
                 assert_eq!(&record[..3], &[1.0, 2.0, 2.0]);
                 let (u, v) = (record[8], record[9]);
                 assert!(cci.ivl1[0] <= u && u <= cci.ivl1[1]);
