@@ -13,6 +13,7 @@ pub mod access;
 pub mod agent_chat;
 pub mod agent_cursor;
 pub mod ai_connect;
+mod arrange_sheet;
 pub mod bidi;
 pub mod blur;
 pub mod bom_panel;
@@ -1412,6 +1413,13 @@ impl SolveApp {
                     let on = v.get("on").and_then(Value::as_bool).unwrap_or(!self.preferences.ribbon_tabs_only);
                     self.preferences.ribbon_tabs_only = on;
                     self.ui.ribbon_open = false;
+                }
+                // What did not fit stays where it was: say so, or it looks as if it had been missed.
+                "solid.arrange" => {
+                    let notes = crate::dialogs::arrange_notes(v);
+                    if !notes.is_empty() {
+                        self.set_status(notes.join(" "), false);
+                    }
                 }
                 // An edit OK'd on a feature behind the history marker changes nothing in the view:
                 // say why, or the edit looks as if it had silently failed (#8100).

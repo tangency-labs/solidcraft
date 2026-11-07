@@ -250,6 +250,7 @@ pub const DOCUMENTED: &[&str] = &[
     "sketch.transform",
     "sketch.trim",
     "solid.align",
+    "solid.arrange",
     "solid.boundary_fill",
     "solid.bounding_solid",
     "solid.box",
