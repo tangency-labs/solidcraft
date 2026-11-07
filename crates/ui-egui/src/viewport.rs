@@ -2856,8 +2856,11 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     // Sketch points of the active sketch (of every shown sketch while a command takes points,
     // while idle or projecting, and while 3D drawing snaps to points on other visible sketches).
     let wants_points = app.dialog.as_ref().and_then(|d| d.active_input()).is_some_and(|i| i.accept & crate::selection::POINTS != 0);
-    let external_points =
-        wants_points || other_sketch_points || (app.dialog.is_none() && app.tool.as_ref().is_none_or(|tool| tool.cmd == "sketch.project"));
+    // A constraint pick tool takes another sketch's point too, and projects it.
+    let external_points = wants_points
+        || other_sketch_points
+        || (app.dialog.is_none()
+            && app.tool.as_ref().is_none_or(|tool| tool.cmd == "sketch.project" || crate::tools::picks_other_sketch_points(tool)));
     let point_sketches: Vec<u64> = if crate::render_workspace::active(app) {
         Vec::new()
     } else if external_points {
@@ -2869,6 +2872,10 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     // point that isn't shown (a letter's outline) neither takes the pick nor hides a shown one.
     let snapping = app.dialog.as_ref().and_then(|d| d.active_input()).is_some_and(|i| crate::dialogs::snaps_to_points(i.accept));
     let prefer_free = app.preferences.prefer_free_sketch_points && include_midpoints && app.tool.is_none() && app.dialog.is_none();
+    // A constraint pick tool takes the edited sketch's own point within reach before any other
+    // sketch's point, however near: another sketch's point is projected only when the sketch
+    // has none there, as when the tool took the sketch's points alone.
+    let own_points_first = app.dialog.is_none() && app.tool.as_ref().is_some_and(crate::tools::picks_other_sketch_points);
     let mut best = Near::new(all);
     // A woken centre's extra reach (past the usual 8) yields to a curve under the pointer, so a
     // click on a small circle's edge still takes the circle.
@@ -2884,7 +2891,7 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
             if let Some(sp) = proj.to_screen(ss.plane.to_world(p.pos)) {
                 let dd = sp.distance(pos) - if s.active_sketch == Some(sid) { 2.0 } else { 0.0 };
                 // On a distance tie, grab a movable point before the origin or a linked point.
-                let rank = (dd, prefer_free && locked);
+                let rank = (own_points_first && s.active_sketch != Some(sid), dd, prefer_free && locked);
                 let woken = app.viewport.woken_centre.as_ref().is_some_and(|(k, id)| *k == sid && *id == p.id);
                 if dd < 8.0 && best.wants(rank) {
                     best.offer(rank, Hit::SketchPoint { sketch: sid, id: p.id.clone(), at: p.pos });
@@ -2897,7 +2904,7 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     for (name, point) in construction_points(app) {
         if let Some(sp) = proj.to_screen(point) {
             let dd = sp.distance(pos);
-            let rank = (dd, prefer_free);
+            let rank = (false, dd, prefer_free);
             if dd < 8.0 && best.wants(rank) {
                 best.offer(rank, Hit::ConstructionPoint { name });
             }
