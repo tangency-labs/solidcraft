@@ -1285,6 +1285,43 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    /// #13171: slicers as their Windows installers lay them out. Lychee's program is
+    /// `LycheeSlicer.exe`; QIDI Studio and CHITUBOX are not in the table before; CHITUBOX Basic and
+    /// CreatWare sit one folder below a vendor's (`CBD\CHITUBOX_Basic`, `CreatBot\CreatWare`).
+    #[test]
+    fn finds_windows_slicers_by_their_installed_layouts() {
+        let root = scratch("win-slicers");
+        let prog = root.join("Program Files");
+        for (dir, exe) in [
+            ("LycheeSlicer", "LycheeSlicer.exe"),
+            ("QIDIStudio", "qidi-studio.exe"),
+            ("CHITUBOX Pro", "CHITUBOX Pro.exe"),
+            ("CBD/CHITUBOX_Basic", "CHITUBOX_Basic.exe"),
+            ("CreatBot/CreatWare", "CreatWare-slicer.exe"),
+        ] {
+            std::fs::create_dir_all(prog.join(dir)).unwrap();
+            std::fs::write(prog.join(dir).join(exe), b"x").unwrap();
+        }
+        // A vendor folder with nothing known in it, and a program with a name like a slicer's one
+        // level too deep, are not listed.
+        std::fs::create_dir_all(prog.join("Vendor/Tools/Cura")).unwrap();
+        std::fs::write(prog.join("Vendor/Tools/Cura/Cura.exe"), b"x").unwrap();
+        let found = detect_in(&Env { install_dirs: vec![prog.clone()], ..Env::default() });
+        let mut ids: Vec<&str> = found.iter().map(|f| f.base_id()).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, ["chitubox", "chitubox", "creatware", "lychee", "qidi"], "{found:?}");
+        let exe_of = |id: &str| found.iter().filter(|f| f.base_id() == id).map(|f| f.command[0].clone()).collect::<Vec<_>>();
+        assert_eq!(exe_of("lychee"), [prog.join("LycheeSlicer/LycheeSlicer.exe").to_string_lossy()]);
+        assert_eq!(exe_of("qidi"), [prog.join("QIDIStudio/qidi-studio.exe").to_string_lossy()]);
+        assert_eq!(exe_of("creatware"), [prog.join("CreatBot/CreatWare/CreatWare-slicer.exe").to_string_lossy()]);
+        assert_eq!(exe_of("chitubox").len(), 2);
+        // The resin slicers take STL.
+        let chitubox = found.iter().find(|f| f.base_id() == "chitubox").unwrap();
+        assert_eq!(chitubox.target().default_format, "stl");
+        assert!(!chitubox.target().accepts("3mf"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn finds_programs_on_the_path_and_appimages() {
