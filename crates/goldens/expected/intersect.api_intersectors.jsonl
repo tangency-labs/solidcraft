@@ -331,8 +331,8 @@
 {"case":"ssi-sphere-cylinder-coaxial-tangent-swapped","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14025.0,14033.0,28059.0]],"n":24},"status":[1000.0]}}
 {"case":"ssi-sphere-plane-bounded-plane-misses","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0],"status":[1001.0]}}
 {"case":"ssi-sphere-plane-bounded-plane-misses-swapped","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0],"status":[1001.0]}}
-{"case":"ssi-sphere-plane-near-tangent-in","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14044.999999499996,14044.999999499996,28230.999992]],"n":24},"status":[1000.0]}}
-{"case":"ssi-sphere-plane-near-tangent-in-swapped","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14044.999999499996,14044.999999499996,28230.999992]],"n":24},"status":[1000.0]}}
+{"case":"ssi-sphere-plane-near-tangent-in","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14033.00063195552,14033.003161777613,28207.003786733145]],"n":24},"status":[1000.0]}}
+{"case":"ssi-sphere-plane-near-tangent-in-swapped","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14033.00063195552,14033.003161777613,28207.003786733145]],"n":24},"status":[1000.0]}}
 {"case":"ssi-sphere-plane-near-tangent-out","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14045.000000500004,14045.000000500004,28231.000008]],"n":24},"status":[1000.0]}}
 {"case":"ssi-sphere-plane-near-tangent-out-swapped","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14045.000000500004,14045.000000500004,28231.000008]],"n":24},"status":[1000.0]}}
 {"case":"ssi-sphere-plane-partial-sphere","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[28080.841794588196,28086.75538594612,379141.63132555096]],"n":47},"status":[1000.0]}}
@@ -349,7 +349,7 @@
 {"case":"ssi-sphere-sphere-crossing-at-pole","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14031.822875655533,14037.114378277663,28197.42614007724]],"n":24},"status":[1000.0]}}
 {"case":"ssi-sphere-sphere-externally-tangent","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14045.0,14045.0,28211.0]],"n":24},"status":[1000.0]}}
 {"case":"ssi-sphere-sphere-internally-tangent","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14045.0,14045.0,28211.0]],"n":24},"status":[1000.0]}}
-{"case":"ssi-sphere-sphere-near-tangent","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14045.0,14045.0,28211.0]],"n":24},"status":[1000.0]}}
+{"case":"ssi-sphere-sphere-near-tangent","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14033.00044696359,14033.002235817956,28187.003126995143]],"n":24},"status":[1000.0]}}
 {"case":"ssi-sphere-sphere-partial","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[14038.45045568142,14038.45045568142,28275.232063061994]],"n":24},"status":[1000.0]}}
 {"case":"ssi-sphere-sphere-split-circle-both-partial-r0-d0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":{"blocks":[[28061.0,28077.333819839176,378892.77258164727]],"n":47},"status":[1000.0]}}
 {"case":"ssi-sphere-sphere-split-circle-both-partial-r0-d1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"record":[0.0],"status":[1001.0]}}

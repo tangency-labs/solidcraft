@@ -176,7 +176,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.fillet_trace_reaches_rails = true;
     k.fixes.fillet_rail_end_on_continued_surface = true;
     k.fixes.boolean_lists_virtual_surface_copies = true;
-    k.fixes.sphere_small_circle_not_touching = true;
     k.fixes.ssi_tangent_contact_points = true;
     k.fixes.ssi_trace_tangent_curves_once = true;
     k.fixes.ssi_singular_start_inside_direction = true;

@@ -252,7 +252,6 @@
   "fillet_rail_trim_at_near_knot",
   "boolean_lists_virtual_surface_copies",
   "close_loop_relates_only_coincident_edges",
-  "sphere_small_circle_not_touching",
   "ssi_tangent_contact_points",
   "ssi_low_angle_start_on_probation",
   "ssi_trace_tangent_curves_once",

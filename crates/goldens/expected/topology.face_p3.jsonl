@@ -2277,10 +2277,10 @@
 {"case":"touching_sphere_plane_outside_10_tol1e-6","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0,0.0]}}
 {"case":"touching_sphere_plane_outside_10_tol1e-6_nopts","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0,0.0]}}
 {"case":"touching_sphere_plane_overlap_1e-9_01_tol1e-4","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0,1.0,0.0,0.999999999,0.0]}}
-{"case":"touching_sphere_plane_overlap_1e-9_01_tol1e-6","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0,1.0,0.0,0.999999999,0.0]}}
+{"case":"touching_sphere_plane_overlap_1e-9_01_tol1e-6","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0,1.0,-2.541098841762901e-21,0.9999999989999999,-4.235164736271502e-21]}}
 {"case":"touching_sphere_plane_overlap_1e-9_01_tol1e-6_nopts","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0,0.0]}}
 {"case":"touching_sphere_plane_overlap_1e-9_10_tol1e-4","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0,1.0,0.0,0.999999999,0.0]}}
-{"case":"touching_sphere_plane_overlap_1e-9_10_tol1e-6","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0,1.0,0.0,0.999999999,0.0]}}
+{"case":"touching_sphere_plane_overlap_1e-9_10_tol1e-6","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0,1.0,-2.541098841762901e-21,0.9999999989999999,-4.235164736271502e-21]}}
 {"case":"touching_sphere_plane_overlap_1e-9_10_tol1e-6_nopts","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0,0.0]}}
 {"case":"touching_sphere_plane_tiny_01_tol1e-4","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0,1.0,0.0,0.001,0.0]}}
 {"case":"touching_sphere_plane_tiny_01_tol1e-6","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,0.0,0.0,1.0,0.0,0.001,0.0]}}

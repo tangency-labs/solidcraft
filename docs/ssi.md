@@ -472,6 +472,13 @@ coincidence check first and returns the faces' own edge curves trimmed to each o
 
 `face_intersect` (`topology/face/p3.rs`) calls `global_surface_intersect_with_context` over the two
 faces' UV domains with the curve angle tolerance, then for each curve:
+- a crossing curve that bounds a cap within the tolerance is a touch at the B-rep's tolerance: at each
+  of eight points the surfaces' crossing angle θ over twice the curve's curvature κ (the cap's height
+  to second order: r² / 2R for a sphere cut in a circle of radius r) is at most the tolerance, its
+  centre of curvature lies within the tolerance of both surfaces (which a tangent curve's does not),
+  and the curve becomes a touch point at that centre, once per cap (`cap_centre_within_tolerance`,
+  WR-79, #2412). An edge there would join faces within tolerance of each other across a band
+  tol / θ wide, wider than the cap, which the merge pairs as coincident;
 - a degenerate curve (a touch point) is classified at its point on both faces and kept as a point when
   it is on or inside both;
 - every other curve is classified on each face (`curve_on_classify_mut`), with its UV curve when SSI
@@ -607,7 +614,7 @@ and why the approximation tolerance is half of it.
 | touch point inside both faces (#17 gap 1) | no boundary start, normals within 5° at every seed | missed (#394); found with `ssi_tangent_contact_points` | a proved extremum of g at zero | flag on by default |
 | branch point (#17 gap 3) | the marcher steps straight through; one curve where two end | wrong topology (#393); split with `ssi_split_curves_at_singular_points` | a proved saddle; branches joined through it, vertex reported | #393 |
 | small loop, nearly tangent (#17 gap 2) | every seed below the 5°/2° thresholds | missed (#396); found with `ssi_low_angle_start_on_probation` | loop-free pairs cannot hide it; closed form for plane/sphere and degree-2 | flag on by default |
-| small circle taken as a point | gap to tangency within tolerance though the circle is not | sphere circles up to √(2R tol) collapsed; fixed with `sphere_small_circle_not_touching` (WR-79) | the radius from √((R − \|d\|)(R + \|d\|)) | #2412 (the boolean with it on) |
+| small circle taken as a point | gap to tangency within tolerance though the circle is not | fixed (WR-79): the sphere's closed forms collapse a circle only when its radius is within the tolerance; `FaceIntersect` takes a circle whose cap lies within the tolerance as a touch (§4.6) | the radius from √((R − \|d\|)(R + \|d\|)) | |
 | coincident faces | normals parallel everywhere | closed forms for planes, coaxial revolutions, parallel cylinders; else the boolean's coincidence check before SSI | region boundary from the field's zero coefficients | |
 | near-coincident strip | two planes within tolerance across a strip; the crossing is fixed only to tol / sin θ | `boolean_coincident_strip_drops_crossing` (WR-614) | patches 1e-8 apart, separating only at second order: refused (`y23_fig1d_two_quads`) | |
 | grazing | boxes just touch; a boundary meets the other surface tangentially | `grazing_box_process`, `do_boundary_plane_test` | the pair is apart or refused | |
@@ -698,7 +705,6 @@ boolean's side.
 | [#395](https://github.com/tangency-labs/solidcore/issues/395) | tangent and high-order contact curves missed or collapsed; fix behind a flag |
 | [#1552](https://github.com/tangency-labs/solidcore/issues/1552) | how `solidcore-ssi` is wired into the kernel |
 | [#2331](https://github.com/tangency-labs/solidcore/issues/2331) | exact UV trims of plane sections on a cylinder by default |
-| [#2412](https://github.com/tangency-labs/solidcore/issues/2412) | with WR-79 on, a sphere a hair through a box face gives volume 0 or an open body |
 | [#2479](https://github.com/tangency-labs/solidcore/issues/2479) | pcurves end one ulp past their face's domain |
 | [#2537](https://github.com/tangency-labs/solidcore/issues/2537) | a tilted cylinder whose cap is bisected by a box face is refused (#36) |
 | [#2538](https://github.com/tangency-labs/solidcore/issues/2538) | a notch cylinder along a slanted box edge fails (1001, #36) |

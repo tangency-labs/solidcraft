@@ -279,7 +279,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "simple_coincidence_crossing_is_point",
     "slice_coincident_faces_sheet_side",
     "sphere_from_arcs_common_centre",
-    "sphere_small_circle_not_touching",
     "ssi_alignment_statuses",
     "ssi_low_angle_start_on_probation",
     "ssi_pole_point_keeps_its_tangent",

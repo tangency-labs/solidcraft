@@ -99,11 +99,13 @@
 //! - **Cone intersection.** The cone's iso circle through a point
 //!   (`SmCone::CreateIsoCircleFromPoint`) is [`Cone::create_iso_circle_from_point`];
 //!   the cone is taken without owner (its zone tolerance finds no face).
-//! - **Opt-in fix** ([`UpstreamFixes::sphere_small_circle_not_touching`](crate::kernel::UpstreamFixes::sphere_small_circle_not_touching),
-//!   WR-79, #396): `IntersectWithPlane` and `IntersectWithSphere` return a touching
-//!   point only when the intersection circle's own radius is within the tolerance, not
-//!   when the gap to tangency is, which collapses circles of radius up to about
-//!   `sqrt(2 R tol)`. Off by default (upstream behaviour). No input-driven recursion.
+//! - **Small circles** (WR-79, #396, #2412): `IntersectWithPlane` and
+//!   `IntersectWithSphere` return a touching point only when the intersection circle's
+//!   own radius is within the tolerance. Upstream returns one whenever the gap to
+//!   tangency is, which collapses circles of radius up to about `sqrt(2 R tol)` to a
+//!   point a whole radius from them. A circle whose cap lies within the tolerance is
+//!   still a touch for a B-rep at that tolerance: `FaceIntersect` makes it one
+//!   (`topology::face::p3`). No input-driven recursion.
 //! - **Opt-in fix** ([`UpstreamFixes::found_torus_sphere_keep_tested_nurb`](crate::kernel::UpstreamFixes::found_torus_sphere_keep_tested_nurb),
 //!   WR-493, the SolidCraft fork's tangency-labs/smlib@7ea6a96): `IsNurbSurfaceSphere`
 //!   tests the half meridian within `180 + 360 * SM_EFF_ZERO` degrees and the sphere it
@@ -1170,15 +1172,12 @@ impl Sphere {
             }
         }
 
-        // See if we are intersecting at a singularity point
-        let touching = if k.fixes.sphere_small_circle_not_touching {
-            // the circle collapses to a point only when its radius sqrt(R^2 - d^2) is
-            // within the tolerance (the fork's tangency-labs/smlib@30d25bf)
-            let gap = self.radius - dist_to_plane;
-            gap <= 0.0 || gap * (self.radius + dist_to_plane) <= tol * tol
-        } else {
-            dist_to_plane > self.radius - tol
-        };
+        // See if we are intersecting at a singularity point: the circle collapses to a
+        // point only when its radius sqrt(R^2 - d^2) is within the tolerance (WR-79;
+        // upstream compares the gap R - d with the tolerance, which collapses circles
+        // of radius up to sqrt(2 R tol))
+        let gap = self.radius - dist_to_plane;
+        let touching = gap <= 0.0 || gap * (self.radius + dist_to_plane) <= tol * tol;
         if touching {
             // build degenerate curve
             let bsc = BSplineCurve::create_degenerate_curve(3, projected)?;
@@ -1313,27 +1312,18 @@ impl Sphere {
             return Ok(false);
         }
 
-        // Take care of touching situations
-        let (touching, touching_inside) = if k.fixes.sphere_small_circle_not_touching {
-            // the circle collapses to a point only when its radius h is within the
-            // tolerance: (2 d h)^2 = (d+r1+r2)(r1+r2-d)(d-r1+r2)(d+r1-r2), each factor
-            // formed directly (the fork's tangency-labs/smlib@30d25bf)
-            let out_gap = radius + other_radius - dist;
-            let in_gap = dist - (radius - other_radius).abs();
-            let height4 = (dist + radius + other_radius)
-                * out_gap
-                * (dist - radius + other_radius)
-                * (dist + radius - other_radius);
-            (
-                out_gap <= 0.0 || in_gap <= 0.0 || height4 <= 4.0 * tol * tol * dist * dist,
-                in_gap < out_gap,
-            )
-        } else {
-            (
-                dist + tol > radius + other_radius || dist - tol < (radius - other_radius).abs(),
-                dist - tol < (radius - other_radius).abs(),
-            )
-        };
+        // Take care of touching situations: the circle collapses to a point only when
+        // its radius h is within the tolerance (WR-79; upstream compares the gaps to
+        // tangency with the tolerance): (2 d h)^2 = (d+r1+r2)(r1+r2-d)(d-r1+r2)(d+r1-r2),
+        // each factor formed directly so it stays accurate near tangency
+        let out_gap = radius + other_radius - dist;
+        let in_gap = dist - (radius - other_radius).abs();
+        let height4 = (dist + radius + other_radius)
+            * out_gap
+            * (dist - radius + other_radius)
+            * (dist + radius - other_radius);
+        let touching = out_gap <= 0.0 || in_gap <= 0.0 || height4 <= 4.0 * tol * tol * dist * dist;
+        let touching_inside = in_gap < out_gap;
         if touching {
             let mut sign = 1.0;
             // when touching inside

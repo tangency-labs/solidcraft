@@ -75,6 +75,11 @@
 //!   `pOptThisCCUVCrvs` / `pOptOtherCCUVCrvs` are never reset (they append to the
 //!   caller's arrays) has no counterpart; in the coincident branch the failing-copy
 //!   path replaces all four vectors with the intersector's.
+//! - **Caps within the tolerance** (not upstream; WR-79, #2412). `FaceIntersect` takes a
+//!   crossing curve whose cap (the region it bounds) lies within `approx_tol_3d` of both
+//!   surfaces as a touching point at the cap's centre (`cap_centre_within_tolerance`):
+//!   upstream's sphere closed forms collapsed such circles in the intersector itself,
+//!   which loses them for every other caller.
 //! - **`Notify`** takes the face surface's trimmed surface cache (if any) for
 //!   `SM_NO_PRE_EDIT` (`SmCacheMgr::GetObjectCache(SM_OC_TRIMSRF, ..)` has no counterpart:
 //!   B-rep surfaces carry no object cache) and the notification state of
@@ -110,9 +115,11 @@ use crate::intersect::point_class::{
 };
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3, EFF_ZERO, PI};
+use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::nurbs::knots::Side;
 use crate::query::brep::{BrepFaceServices, FaceCaches, SideObject, SidedFaceServices};
 use crate::query::face::p2 as qf2;
 use crate::surface::surface::p1::map_to_2d;
@@ -2242,6 +2249,142 @@ impl qf2::CurveOnClassifyBrep<IntersectObject> for IntersectObjectsMut<'_> {
     }
 }
 
+/// Points at which [`cap_centre_within_tolerance`] measures a curve: the midpoints of
+/// equal parameter steps, so no sample sits on a closed curve's joint.
+const CAP_SAMPLES: u32 = 8;
+
+/// The centre of the cap a crossing curve bounds, when the two surfaces stay within
+/// `tol` of each other over the whole of it (not upstream; WR-79, #2412).
+///
+/// Near a contact the separation of the surfaces is to second order a quadratic `g`
+/// whose zero set is the crossing curve. At a point of the curve the surfaces cross at
+/// `theta` (`|grad g|`, the angle of their normals) and the curve bends with curvature
+/// `kappa`; a closed level set of a quadratic is an ellipse, and the separation at its
+/// centre is the geometric mean of `theta / (2 kappa)` at its two axis ends, so no larger
+/// than that quotient's largest value along the curve. For a sphere of radius `R` cut
+/// by a plane `gap` inside its tangent plane the quotient is `R sin(theta) / 2` over the
+/// circle of radius `r = R sin(theta)`, which is `r^2 / (2 R)`, the cap height `gap` to
+/// second order; for two spheres it is the sum of both caps.
+///
+/// When the quotient is within `tol` at every sample and the centre lies within `tol`
+/// of both surfaces, the curve bounds a region where
+/// the faces are coincident at that tolerance: at the B-rep's tolerance the contact is a
+/// touch at the cap's centre, not a crossing. An edge on such a curve would join faces
+/// that stay within tolerance of each other across a band `tol / theta` wide, far wider
+/// than the cap, and the boolean cannot tell which side of it is which (#2412). The
+/// centre is the curve's mean centre of curvature (the circle's own centre).
+///
+/// `None` as soon as one sample's quotient is above `tol`, or when the curve is straight,
+/// cannot be evaluated or a surface point cannot be found there: the curve is then kept
+/// as the intersector gave it. A surface's UV curve, when there is one, gives the guess
+/// for the point's drop onto that surface.
+///
+/// # Errors
+///
+/// [`SolidError::Unported`] and a cancellation; every other failure is `None`.
+fn cap_centre_within_tolerance(
+    k: &Kernel,
+    curve: &Curve,
+    surfaces: [(&Surface, &Extent2d, Option<&Curve>); 2],
+    tol: f64,
+) -> Result<Option<Point3>> {
+    match cap_centre_samples(k, curve, surfaces, tol) {
+        Ok(centre) => Ok(centre),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
+        Err(_) => Ok(None),
+    }
+}
+
+/// The samples of [`cap_centre_within_tolerance`], with every failure an error.
+fn cap_centre_samples(
+    k: &Kernel,
+    curve: &Curve,
+    surfaces: [(&Surface, &Extent2d, Option<&Curve>); 2],
+    tol: f64,
+) -> Result<Option<Point3>> {
+    let ivl = curve.natural_interval();
+    let mut centre = Vec3::new(0.0, 0.0, 0.0);
+    for i in 0..CAP_SAMPLES {
+        let s = (f64::from(i) + 0.5) / f64::from(CAP_SAMPLES);
+        let d = curve.evaluate(k, ivl.min() + (ivl.max() - ivl.min()) * s, 2, false, false)?;
+        let (Some(&point), Some(&d1), Some(&d2)) = (d.first(), d.get(1), d.get(2)) else {
+            return Ok(None);
+        };
+        let speed2 = d1.length_squared();
+        if speed2 <= EFF_ZERO {
+            return Ok(None);
+        }
+        // the curvature vector, d2's part across the tangent over the squared speed
+        let bend = (d2 - d1 * (d2.dot(d1) / speed2)) * (1.0 / speed2);
+        let kappa = bend.length();
+        if kappa <= EFF_ZERO {
+            return Ok(None);
+        }
+        let mut normals = [Vec3::new(0.0, 0.0, 0.0); 2];
+        for ((surface, domain, uv_curve), normal) in surfaces.iter().zip(normals.iter_mut()) {
+            let guess_uv = match uv_curve {
+                Some(uv) => {
+                    let uv_ivl = uv.natural_interval();
+                    let p =
+                        uv.evaluate_point(k, uv_ivl.min() + (uv_ivl.max() - uv_ivl.min()) * s)?;
+                    Some(Point2::new(p.x, p.y))
+                }
+                None => None,
+            };
+            let options = DropPointOptions {
+                guess_uv,
+                ..DropPointOptions::default()
+            };
+            let drop = surface.drop_point::<NoObject>(k, point, domain, &options)?;
+            if !drop.success {
+                return Ok(None);
+            }
+            *normal = surface.evaluate_normal(k, drop.result_uv, Side::Left, Side::Left)?;
+        }
+        let [n1, n2] = normals;
+        if n1.cross(n2).length() > 2.0 * kappa * tol {
+            return Ok(None);
+        }
+        centre = centre + point + bend * (1.0 / (kappa * kappa));
+    }
+    // the cap's centre is a point of contact: within the tolerance of both surfaces (a
+    // tangent curve, along which the surfaces do not cross, has its centre of curvature
+    // far from them)
+    let centre = centre * (1.0 / f64::from(CAP_SAMPLES));
+    for (surface, domain, _) in &surfaces {
+        let drop =
+            surface.drop_point::<NoObject>(k, centre, domain, &DropPointOptions::default())?;
+        if !drop.success || drop.gap > tol {
+            return Ok(None);
+        }
+    }
+    Ok(Some(centre))
+}
+
+/// Removes entry `ii` of each of the intersector's parallel lists that has one.
+fn remove_intersection_entry(
+    curves: &mut Vec<Curve>,
+    uv1: &mut Vec<Option<Curve>>,
+    uv2: &mut Vec<Option<Curve>>,
+    types: &mut Vec<TsectCurveType>,
+    ii: usize,
+) {
+    drop_entry(curves, ii);
+    drop_entry(uv1, ii);
+    drop_entry(uv2, ii);
+    drop_entry(types, ii);
+}
+
+/// Drops entry `ii` of `list`, if it has one, keeping the others in order.
+fn drop_entry<T>(list: &mut Vec<T>, ii: usize) {
+    let mut at = 0;
+    list.retain(|_| {
+        let keep = at != ii;
+        at += 1;
+        keep
+    });
+}
+
 /// `FaceIntersect`: the curves (and, when asked, points) where face `f` meets
 /// `other`. Coincident surfaces (by `options.coincidence`, else
 /// `SmSurface::CoincidenceCheck` within `approx_tol_3d`) give copies of both faces'
@@ -2457,6 +2600,64 @@ pub fn face_intersect_breps_cached(
         uv_curves1 = r.surface1_uv_curves;
         uv_curves2 = r.surface2_uv_curves;
         curve_types = r.curve_types;
+
+        // A crossing curve that bounds a cap within the tolerance is a touch at the
+        // B-rep's tolerance (not upstream; WR-79, #2412): it becomes the touching point at
+        // the cap's centre, once for all the pieces of one cap.
+        let mut caps: Vec<Point3> = Vec::new();
+        let mut ii = 0;
+        while ii < curves_3d.len() {
+            let touching = curve_types.get(ii) == Some(&TsectCurveType::Touching);
+            let cap = match curves_3d.get(ii) {
+                Some(curve) if !touching => cap_centre_within_tolerance(
+                    k,
+                    curve,
+                    [
+                        (
+                            &surface,
+                            &domain,
+                            uv_curves1.get(ii).and_then(Option::as_ref),
+                        ),
+                        (
+                            other_surface,
+                            &other_domain,
+                            uv_curves2.get(ii).and_then(Option::as_ref),
+                        ),
+                    ],
+                    approx_tol_3d,
+                )?,
+                _ => None,
+            };
+            let Some(centre) = cap else {
+                ii += 1;
+                continue;
+            };
+            if caps.iter().any(|c| c.distance(centre) <= approx_tol_3d) {
+                // another piece of a cap already made a point
+                remove_intersection_entry(
+                    &mut curves_3d,
+                    &mut uv_curves1,
+                    &mut uv_curves2,
+                    &mut curve_types,
+                    ii,
+                );
+                continue;
+            }
+            caps.push(centre);
+            let point = BSplineCurve::create_degenerate_curve(3, centre)?;
+            if let Some(slot) = curves_3d.get_mut(ii) {
+                *slot = Curve::from(point);
+            }
+            for uv in [&mut uv_curves1, &mut uv_curves2] {
+                if let Some(slot) = uv.get_mut(ii) {
+                    *slot = None;
+                }
+            }
+            if let Some(slot) = curve_types.get_mut(ii) {
+                *slot = TsectCurveType::Touching;
+            }
+            ii += 1;
+        }
     }
     for (ii, curve) in curves_3d.iter().enumerate() {
         let curve_type = curve_types
