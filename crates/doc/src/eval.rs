@@ -5431,7 +5431,11 @@ fn feature_tools_with_constructor(
                 None if extent.through_all => through_all_distance(st, &ss.plane, &crate::plain(targets))?,
                 None => val(vals, &extent.distance, Kind::Length)?,
             };
-            if let Some(tp) = &extent.taper {
+            // A taper of 0 is a straight extrusion (the dialog stores one, and designs carry it);
+            // the tapered path refuses a profile with holes without a draft (#13188).
+            if let Some(tp) = &extent.taper
+                && val(vals, tp, Kind::Angle)? != 0.0
+            {
                 let taper = val(vals, tp, Kind::Angle)?;
                 if extent.distance2.is_some() || extent.direction == crate::Direction::Symmetric {
                     return Err(DocError::Invalid("not supported yet: taper with two-sided or symmetric extents".into()));
