@@ -1920,6 +1920,8 @@
   "prefs.dark_parts_shading": "어두운 부품의 형태 유지",
   "prefs.dark_parts_shading_help": "선형 조명과 부드러운 하늘광으로 뷰를 음영 처리하여 어두운 면이 검게 뭉개지지 않고 그라데이션을 유지합니다",
   "prefs.dead_zone_note": "빗금 친 영역이 데드존입니다. 그 안의 움직임은 무시됩니다.",
+  "prefs.delete_empty_sketch": "끝내기에서 새로 만든 빈 스케치 제거",
+  "prefs.delete_empty_sketch_help": "스케치 끝내기는 이번 세션에서 만들었고 곡선, 점, 구속이 아직 없는 스케치를 제거합니다. 기존 스케치를 편집한 경우는 남깁니다. 끄면 빈 스케치가 타임라인에 남습니다.",
   "prefs.default": "기본값",
   "prefs.design": "디자인",
   "prefs.design_note": "새 디자인의 시작 설정입니다.",

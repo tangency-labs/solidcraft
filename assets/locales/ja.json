@@ -2547,6 +2547,8 @@
   "prefs.dark_parts_shading": "暗い部品の形状を保つ",
   "prefs.dark_parts_shading_help": "リニア光と柔らかいスカイライトでビューをシェーディングし、暗い面が黒くつぶれずにグラデーションを保つようにします",
   "prefs.dead_zone_note": "斜線の帯はデッドゾーンです。この範囲内の動きは無視されます。",
+  "prefs.delete_empty_sketch": "終了時に新しい空のスケッチを削除",
+  "prefs.delete_empty_sketch_help": "スケッチを終了すると、この操作で作成され、曲線・点・拘束がまだないスケッチは削除されます。既存のスケッチの編集はそのまま残ります。オフ: 空のスケッチは履歴に残ります。",
   "prefs.default": "既定",
   "prefs.design": "デザイン",
   "prefs.design_note": "新規デザインの初期設定。",
