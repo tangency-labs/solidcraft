@@ -549,8 +549,10 @@ fn trims(flat: View, n_edgeuses: usize) -> Res<Vec<Option<b::Curve2>>> {
 /// edgeuse runs against the edge (`same` false) reversed exactly (control points in reverse
 /// order, knots t ↦ a + b − t), then the knots mapped. SMLib keeps a trim on its edge's
 /// interval; where the two ends differ by the rounding of SMLib's own or this remap (within the
-/// schema's 10⁻⁹ of the interval's magnitude, at least 1), the knots at the trim's ends are the
-/// edge record's interval ends, so the pcurve is defined there; farther apart is an error.
+/// schema's 10⁻⁹ of the interval's magnitude, at least 1), the knots at the trim's ends, and any
+/// knot that rounding put past them, are the edge record's interval ends, and the end spans that
+/// leaves without length go with their control points, so the pcurve is a valid record defined
+/// on the edge; farther apart is an error.
 fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f64; 2]) -> Res<b::Curve2> {
     fn along<T: Clone>(knots: &[f64], points: &[T], same: bool) -> (Vec<f64>, Vec<T>) {
         if same {
@@ -559,26 +561,54 @@ fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f6
         let (a, b) = (knots.first().copied().unwrap_or(0.0), knots.last().copied().unwrap_or(0.0));
         (knots.iter().rev().map(|t| a + b - t).collect(), points.iter().rev().cloned().collect())
     }
-    let map = |k: Vec<f64>, n: usize| -> Res<Vec<f64>> {
+    // The knots mapped, and the points with them: a knot a rounding past an end of the trim's
+    // domain (within the slack) is that end, and the end spans that leaves without length are
+    // dropped with their control points. SMLib can hand over a trim whose domain runs a rounding
+    // past the edge's interval with a dead span there (knots `5 x4, 5.00000000003 x5` on an edge
+    // ending at 5: the slot of a sloped bar, solidcraft#12365), or whose last interior knots lie
+    // one ulp past its end knots. Moving the ends alone left a run of 9 knots at 5, or an
+    // unordered vector, which the record refuses, and the body was lost. A basis function whose
+    // support has no length is zero on the domain, so dropping its knot and point leaves the
+    // curve on the edge as it was (exact where the dead span starts at a knot of multiplicity
+    // degree + 1, within the slack otherwise).
+    fn map<T: Clone>(k: Vec<f64>, points: Vec<T>, [scale, offset]: [f64; 2], [t0, t1]: [f64; 2]) -> Res<(Vec<f64>, Vec<T>)> {
         let mut k: Vec<f64> = k.into_iter().map(|t| scale * t + offset).collect();
+        let n = points.len();
         let degree = k.len().checked_sub(n + 1).ok_or_else(|| invalid("UV trim knots"))?;
         let (a, z) = (at(&k, degree, "UV trim knots")?, at(&k, n, "UV trim knots")?);
         let slack = 1e-9 * t0.abs().max(t1.abs()).max(1.0);
         if (a - t0).abs() > slack || (z - t1).abs() > slack {
             return Err(invalid(format!("a UV trim on [{a}, {z}], its edge on [{t0}, {t1}]")));
         }
-        k.iter_mut().filter(|x| **x == a).for_each(|x| *x = t0);
-        k.iter_mut().filter(|x| **x == z).for_each(|x| *x = t1);
-        Ok(k)
-    };
+        for x in &mut k {
+            if (*x < a && *x >= a - slack) || *x == a {
+                *x = t0;
+            } else if (*x > z && *x <= z + slack) || *x == z {
+                *x = t1;
+            }
+        }
+        let mut points = points;
+        let run_at_start = k.iter().take_while(|x| **x == t0).count();
+        let surplus = run_at_start.saturating_sub(degree + 1).min(n.saturating_sub(degree + 1));
+        k.drain(..surplus);
+        points.drain(..surplus);
+        let run_at_end = k.iter().rev().take_while(|x| **x == t1).count();
+        let n = points.len();
+        let surplus = run_at_end.saturating_sub(degree + 1).min(n.saturating_sub(degree + 1));
+        k.truncate(k.len() - surplus);
+        points.truncate(n - surplus);
+        Ok((k, points))
+    }
     Ok(match trim {
         b::Curve2::Spline { knots, points } => {
             let (k, points) = along(knots, points, same);
-            b::Curve2::Spline { knots: map(k, points.len())?, points }
+            let (knots, points) = map(k, points, [scale, offset], [t0, t1])?;
+            b::Curve2::Spline { knots, points }
         }
         b::Curve2::RationalSpline { knots, homogeneous } => {
             let (k, homogeneous) = along(knots, homogeneous, same);
-            b::Curve2::RationalSpline { knots: map(k, homogeneous.len())?, homogeneous }
+            let (knots, homogeneous) = map(k, homogeneous, [scale, offset], [t0, t1])?;
+            b::Curve2::RationalSpline { knots, homogeneous }
         }
     })
 }

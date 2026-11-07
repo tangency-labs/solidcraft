@@ -457,7 +457,7 @@ mod native_tests {
 /// `mapped`: SMLib's UV trim moved onto the edge record's parameter (solidcraft#12365).
 mod mapped_tests {
     use super::*;
-    use solidcore_record::brep::{check_curve2, Budget};
+    use solidcore_record::brep::{Budget, check_curve2};
     use solidcraft_geom::brep::pcurve::eval;
 
     /// A cubic trim on [3, 5]: clamped, one interior knot.
