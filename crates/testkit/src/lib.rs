@@ -244,8 +244,9 @@ pub const BUDGET: Duration = Duration::from_secs(2);
 /// Run `read` over `inputs`: no panic, within [`BUDGET`], and `read`'s count (triangles,
 /// entities, …) at most `cap`. `read` returns `None` for an error. Panics (the test fails) naming
 /// the first case that breaks a rule.
-// Failing the calling test is this function's job; it only ever runs inside tests.
-#[allow(clippy::panic)]
+// Failing the calling test is this function's job, and its summary line is test output; it only
+// ever runs inside tests.
+#[allow(clippy::panic, clippy::print_stderr)]
 pub fn survives(what: &str, inputs: &[Vec<u8>], cap: usize, mut read: impl FnMut(&[u8]) -> Option<usize>) {
     count_panics();
     let mut slowest = (Duration::ZERO, 0);

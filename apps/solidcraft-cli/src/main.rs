@@ -149,7 +149,7 @@ fn main() -> ExitCode {
     let profiling = match profiling {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("error: {e}");
+            solidcraft_engine::note!("error: {e}");
             return ExitCode::FAILURE;
         }
     };
@@ -838,7 +838,7 @@ fn cmd_mcp(args: &[String]) -> Result<(), String> {
     install_renderer();
     let options = solidcraft_mcp::Options::from_args_and_env(args).map_err(|e| format!("mcp: {e}"))?;
     if options.compact {
-        eprintln!("solidcraft mcp: compact output (inspect_design summarises sketches; tool JSON is not pretty-printed)");
+        solidcraft_engine::note!("solidcraft mcp: compact output (inspect_design summarises sketches; tool JSON is not pretty-printed)");
     }
     let scope = (!args.iter().any(|a| a == "--allow-any-path"))
         .then(|| solidcraft_mcp::agent_scope(flags(args, "--allow-path").into_iter().map(std::path::PathBuf::from)));

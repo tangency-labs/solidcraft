@@ -1039,15 +1039,15 @@ impl SolveApp {
                     Ok(solidcraft_gpu::view::MsaaCheck::Fallback) => {
                         installed.samples = 1;
                         self.msaa_compatibility = true;
-                        eprintln!(
+                        solidcraft_engine::note!(
                             "SolidCraft graphics: anti-aliasing check failed at {}x and passed at 1x; using 1x for this session",
                             scene.samples
                         );
                     }
                     Ok(solidcraft_gpu::view::MsaaCheck::FailedAtOne) => {
-                        eprintln!("SolidCraft graphics: anti-aliasing check also failed at 1x; keeping {}x", scene.samples);
+                        solidcraft_engine::note!("SolidCraft graphics: anti-aliasing check also failed at 1x; keeping {}x", scene.samples);
                     }
-                    Err(error) => eprintln!("SolidCraft graphics: anti-aliasing check error; keeping {}x: {error}", scene.samples),
+                    Err(error) => solidcraft_engine::note!("SolidCraft graphics: anti-aliasing check error; keeping {}x: {error}", scene.samples),
                 }
             }
         }
