@@ -7,7 +7,10 @@
 //! tolerance, in its surfaces' degree and knots (degree 6 over 7 spans). The fork's case:
 //! SolidCraft's G2 corner on the 60 x 40 x 20 box, its three edges at (60, 40, 20) rounded
 //! r 5, set back and eased (`smlib_blend_setback_open_eased`; capi test
-//! `corner_setback_eased_face_curves_are_quintics`).
+//! `corner_setback_eased_face_curves_are_quintics`). Since solidcore#2933 this marked corner
+//! between planes is the blend corner's Setback, its G2 fill bounded by the same halves, and
+//! the checks hold for it; `fillet_corner_face_curve_halves`' N x N branch is reached only by
+//! an N x N corner (beside a curved face), which this test does not build.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

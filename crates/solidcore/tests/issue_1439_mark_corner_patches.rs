@@ -3,9 +3,13 @@
 //! x 20 box with r5 rounds on the three edges at (60, 40, 20), that corner set back 8.
 //! With the option the faces of the corner's patch carry a mark naming the corner; they
 //! make a disc whose rim runs through the six section ends, each rim edge between a
-//! patch face and one other face. As in the fork's own test (`ops_kernel.cpp`, the
-//! same box), removing the patch would leave 9 faces, 30 edges and 22 vertices and a
-//! hole of twelve edges. Off (the default), no face is marked and the body is the same.
+//! patch face and one other face. The corner is the blend corner's Setback (solidcore#2933),
+//! its fill's six patches the marked faces: its rim is the three rounds' end sections and
+//! the six halves of the spring curves on the box's faces, so removing the patch would leave
+//! 9 faces, 27 edges and 19 vertices and a hole of nine edges. (The fork's own test,
+//! `ops_kernel.cpp` on the same box, has the N x N patch, whose rim splits each section at
+//! its middle too: twelve edges, 30 edges and 22 vertices left.) Off (the default), no face
+//! is marked and the body is the same.
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)] // test helpers
 
 use std::collections::BTreeSet;
@@ -80,7 +84,7 @@ fn build(mark: Option<bool>) -> (Brep, Vec<(usize, FaceId)>, usize) {
 }
 
 #[test]
-fn the_set_back_patch_is_marked_and_rimmed_by_twelve_edges() {
+fn the_set_back_patch_is_marked_and_rimmed_by_nine_edges() {
     let (b, marked, index) = build(Some(true));
     assert!(!marked.is_empty());
     assert!(marked.iter().all(|&(i, _)| i == index), "{marked:?}");
@@ -100,7 +104,7 @@ fn the_set_back_patch_is_marked_and_rimmed_by_twelve_edges() {
         assert_eq!((faces.len(), inside), (2, 1), "rim edge {e:?}");
         rim += 1;
     }
-    assert_eq!(rim, 12);
+    assert_eq!(rim, 9);
     let faces = p1::faces(&b, None).unwrap().len();
     let edges = p1::edges(&b, None).unwrap().len();
     let vertices = p1::vertices(&b, None).unwrap();
@@ -114,8 +118,8 @@ fn the_set_back_patch_is_marked_and_rimmed_by_twelve_edges() {
         })
         .count();
     assert_eq!(faces - patch.len(), 9);
-    assert_eq!(edges - inner, 30);
-    assert_eq!(vertices.len() - only_patch, 22);
+    assert_eq!(edges - inner, 27);
+    assert_eq!(vertices.len() - only_patch, 19);
 }
 
 #[test]

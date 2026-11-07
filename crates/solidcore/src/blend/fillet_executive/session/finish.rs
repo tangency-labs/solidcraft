@@ -770,6 +770,9 @@ impl FilletSession<'_> {
             return Err(failure());
         }
         self.refuse_great_circles_over_a_law_corner(k)?;
+        // (not the fork, #2933) a corner at a vertex marked set back is classified now, where
+        // the setback set on it is first read: the Setback where it is one
+        self.set_back_marked_corners(k)?;
         // WR-459: the clean-up after filleting leaves the target's own edges and faces.
         self.objects.cleanup_kept = if k.fixes.fillet_cleanup_keeps_target_faces {
             Some((

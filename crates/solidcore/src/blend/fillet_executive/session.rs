@@ -2265,32 +2265,21 @@ impl<'target> FilletSession<'target> {
                         &lookup,
                         crate::math::rad_to_deg(corner.tangency_tol_radians),
                         set_back_fills,
+                        false,
                     );
                     match classified {
                         Err(_) => {
                             let location = crate::topology::vertex::point(target, vertex).ok();
                             return Ok(CornerCreation::Unsupported { location });
                         }
-                        Ok((crate::blend::blend_corner::BlendCornerEvent::Setback, order)) => {
-                            let mut setback = FilletCorner::new(
-                                FilletCornerKind::NByTwo,
-                                corner.vertex,
-                                corner.solver_eus.clone(),
-                                corner.all_eus.clone(),
-                                corner.approx_tol_3d,
-                                corner.tangency_tol_radians,
+                        Ok(class)
+                            if class.event
+                                == crate::blend::blend_corner::BlendCornerEvent::Setback =>
+                        {
+                            corner = crate::blend::blend_corner::setback::setback_corner_of(
+                                &corner,
+                                class.order,
                             );
-                            setback.blend = Some(crate::blend::blend_corner::BlendCorner {
-                                event: crate::blend::blend_corner::BlendCornerEvent::Setback,
-                                turn: crate::blend::blend_corner::BlendTurn::Mitre,
-                                end: crate::blend::blend_corner::BlendEnd::OnEndFace,
-                            });
-                            setback.setback = Some(
-                                crate::blend::blend_corner::setback::SetbackCorner::with_order(
-                                    order,
-                                ),
-                            );
-                            corner = setback;
                         }
                         Ok(_) => {}
                     }
@@ -2686,6 +2675,11 @@ impl<'target> FilletSession<'target> {
     /// The fork's `AddSetBackVertex` (smlib#79 step 4c; WR-697): the caller sets
     /// `vertex` back (its corner's setback distance, set after the corners are made), so
     /// no Ball is built there (`IsSetBackVertex`, read by `SmBlendCorner::ClassifyBall`).
+    /// Between planes, with a setback set on its corner ([`Self::set_corner_setback`], its
+    /// ease with [`Self::set_corner_ease`]), the corner is then the blend corner's Setback,
+    /// decided when the corners are filleted and filled as one asked with
+    /// [`Self::set_set_back_fill`]; without one it stays the N x N corner (not the fork,
+    /// solidcore#2933).
     /// Add it before [`Self::do_fillet`].
     pub fn add_set_back_vertex(&mut self, vertex: VertexId) {
         self.objects.set_back_vertices.push(vertex);
@@ -2711,6 +2705,85 @@ impl<'target> FilletSession<'target> {
                 ease,
                 open,
             });
+    }
+
+    /// Not the fork (solidcore#2933): each N x N corner at a vertex marked set back
+    /// ([`Self::add_set_back_vertex`]) with a setback set on it ([`Self::set_corner_setback`],
+    /// its ease with [`Self::set_corner_ease`]) is classified where its setback is first read,
+    /// before any corner's geometry is made: by `classify_setback` with that setback asked as
+    /// its vertex's fill. The setback is not known when [`Self::create_corners`] classifies the
+    /// corners: it is set on a made corner, by its identity (the fork's `SetSetBackDist`), and
+    /// every caller sets it after the corners are made: `solidcore-ops`' `blend::pass` makes
+    /// them and `blend::corners` sets it, SolidCraft's `smlib::core::blend` likewise
+    /// (`blend_edges_stopping`, then `corners`), and the goldens runner's
+    /// `setback_fillet_edges`. Where the corner is the Setback it takes the N x N
+    /// corner's place, with its fill asked as [`Self::set_set_back_fill`] asks one; elsewhere
+    /// (beside a curved face, no setback set) it stays the N x N corner.
+    ///
+    /// # Errors
+    /// Those of the classification.
+    pub(super) fn set_back_marked_corners(&mut self, k: &Kernel) -> Result<()> {
+        use crate::blend::blend_corner::setback::{
+            classify_setback, set_back_fill_of, setback_corner_of, SetBackFill,
+        };
+        let SessionObjects {
+            target,
+            solvers,
+            corners,
+            set_back_vertices,
+            set_back_fills,
+            ..
+        } = &mut self.objects;
+        let lookup = SweptSessionSolvers {
+            solvers: solvers.as_slice(),
+            executive: Some(&self.executive),
+        };
+        for corner in corners.iter_mut() {
+            let Some(vertex) = corner.vertex else {
+                continue;
+            };
+            let setback = corner.set_back_dist;
+            if !matches!(
+                corner.kind,
+                FilletCornerKind::ConvexNByN | FilletCornerKind::ConcaveNByN
+            ) || corner.blend.is_some()
+                || corner.chamfer
+                || !set_back_vertices.contains(&vertex)
+                || setback.is_nan()
+                || setback <= 0.0
+                || set_back_fill_of(set_back_fills, vertex).is_some()
+            {
+                continue;
+            }
+            let fill = SetBackFill {
+                vertex,
+                setback,
+                ease: if corner.ease_dist > 0.0 {
+                    corner.ease_dist
+                } else {
+                    0.0
+                },
+                open: false,
+            };
+            let mut asked = set_back_fills.clone();
+            asked.push(fill);
+            let class = classify_setback(
+                k,
+                target,
+                vertex,
+                corner.solver_eus.as_deref().unwrap_or_default(),
+                corner.all_eus.as_deref().unwrap_or_default(),
+                &lookup,
+                crate::math::rad_to_deg(corner.tangency_tol_radians),
+                &asked,
+                true,
+            )?;
+            if class.event == crate::blend::blend_corner::BlendCornerEvent::Setback {
+                *corner = setback_corner_of(corner, class.order);
+                set_back_fills.push(fill);
+            }
+        }
+        Ok(())
     }
 
     /// The fork's `GetFitSetBack` (smlib#104 f1d81f4): with a setback corner refused as too

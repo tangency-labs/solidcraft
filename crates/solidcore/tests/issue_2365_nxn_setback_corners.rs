@@ -5,19 +5,26 @@
 //! (`CornerUnsupported`) by the check that a setback asked is built; solidcore keeps the
 //! paths, and the check refuses only a corner that builds no setback.
 //!
+//! Since solidcore#2933 such a corner between planes is the blend corner's Setback
+//! ([`FilletCornerType::NByTwo`]), the setback set on it read as the fill asked: its patch
+//! meets the rounds tangentially (the N x N patch was up to 4.71 degrees off). Its six fill
+//! patches are marked as the N x N patch's six were. The G2 cases' volumes come within
+//! 0.007 % of the rig's (SolidCraft's G2 patch), where the N x N patch was up to 0.08 % off.
+//! A setback too short for the fill to stay convex is refused with the one that builds
+//! (`NoRoom`, 3.5 on r3 rounds: 3.5595), where the N x N corner built a patch.
+//!
 //! The seven cases are SolidCraft's kernel-rig cases that built before the port (their
-//! entries are in `tests/kernel_cases/`), driven as SolidCraft's `round_edges` drives the
+//! entries are in `tests/kernel_cases/`; six build here, the r3 one is refused), driven as SolidCraft's `round_edges` drives the
 //! session: circular rounds per edge, each set-back vertex marked (`add_set_back_vertex`)
 //! before the corners are made, then `set_corner_setback` on the vertex's corner, and with
 //! a G2 corner the corner's patch marked (`set_mark_corner_patches`) for SolidCraft to
 //! replace; then `StitchAndOrient`. The fixes are the corpus's `fixes.json`. The values are
-//! those the same calls give on main without the port (origin/main 48b1bd207), every one:
-//! counts, the patch's faces and the volume to 1e-9. Where the
-//! case's rig value is the kernel's own (013's filled corner, and the cut that takes the
-//! whole patch away in `...-outside-setback`) it is the rig's measured value too; the G2
-//! cases' rig volumes are SolidCraft's patch's, so here the corner's own N x N patch is
+//! those the same calls give on the Setback (solidcore#2933), every one: counts, the
+//! patch's faces and the volume to 1e-9. The rig's values are the N x N corner's (013's
+//! filled corner) or SolidCraft's G2 patch's, so here the corner's own Setback fill is
 //! checked: its six faces marked, and the body's faces the rig's less SolidCraft's one G2
-//! patch plus these six.
+//! patch plus these six. Where the cut takes the whole patch away (`...-outside-setback`)
+//! the volume is the rig's measured value.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -157,18 +164,20 @@ fn round_set_back(
     if s.create_corners(k, None).is_err() {
         return Err(refused(&s));
     }
-    let mut kind = None;
+    let mut found = None;
     for (i, c) in s.fillet_corners().unwrap().into_iter().enumerate() {
         if s.corner(c).unwrap().vertex == Some(v) {
-            kind = Some((i, s.corner(c).unwrap().corner_type()));
+            found = Some((i, c));
             s.set_corner_setback(c, setback).unwrap();
         }
     }
-    let (index, kind) = kind.expect("the set-back vertex's corner");
+    let (index, id) = found.expect("the set-back vertex's corner");
     s.set_mark_corner_patches(mark);
     if s.do_filleting(k, None).is_err() {
         return Err(refused(&s));
     }
+    // the corner filleted (the Setback is decided where its setback is read, in do_filleting)
+    let kind = s.corner(id).unwrap().corner_type();
     let patch = s
         .corner_patch_faces()
         .unwrap()
@@ -240,19 +249,23 @@ fn assert_made(
 const BOX_EDGES: [[f64; 3]; 3] = [[30.0, 40.0, 20.0], [60.0, 20.0, 20.0], [60.0, 40.0, 10.0]];
 
 /// ladder 07-fillets/013-corner-setback: three r5 rounds at the box corner (60, 40, 20),
-/// set back 8, filled (rig: V 47325.531677, 15 faces, 36 edges; the volume here at 1e-12
-/// is 9e-13 from the rig's).
+/// set back 8, filled (rig: V 47325.531677, 15 faces, 36 edges: the N x N patch's). The
+/// Setback's body, the same as the fill asked with `set_set_back_fill` builds, bit for bit,
+/// inside the closed-form bounds of 013 (47271.9757 to 47384.8935).
 #[test]
 fn ladder_013_corner_setback_builds_its_setback() {
     let m = box_corner(60.0, 40.0, 20.0, &BOX_EDGES, 5.0, 8.0, false);
     assert_made(
         "013",
         &m,
-        FilletCornerType::NByNConvex,
+        FilletCornerType::NByTwo,
         0,
         (15, 36, 23),
-        47325.53167668245,
+        47369.84438406032,
     );
+    let asked = fill_asked(false).1.unwrap();
+    assert_eq!(asked.counts, m.counts);
+    assert_eq!(asked.volume.to_bits(), m.volume.to_bits());
 }
 
 /// ladder 07-fillets/015-corner-g2-patch and fillets/9-fillet-corner-r5-curvature-default-
@@ -265,27 +278,29 @@ fn ladder_015_and_9_g2_corner_patch_is_marked() {
     assert_made(
         "015",
         &m,
-        FilletCornerType::NByNConvex,
+        FilletCornerType::NByTwo,
         6,
         (15, 36, 23),
-        47334.86499451741,
+        47373.20660833885,
     );
 }
 
 /// fillets/every-box-corner-three-edges-r3-curvature-setback-3-5: a 40 x 30 x 20 box's
-/// corner (40, 30, 20), three r3 rounds, the G2 corner set back 3.5, its patch marked (rig:
-/// V 23830.420377, 10 faces, 24 edges).
+/// corner (40, 30, 20), three r3 rounds, the G2 corner set back 3.5 (rig: V 23830.420377,
+/// 10 faces, 24 edges, SolidCraft's G2 patch). The Setback's G1 fill stays convex only from
+/// a setback of 3.5595: 3.5 is refused (`NoRoom`), naming it, where the N x N corner built
+/// a patch (V 23826.811198).
 #[test]
-fn every_box_corner_r3_setback_3_5_patch_is_marked() {
+fn every_box_corner_r3_setback_3_5_is_refused_naming_the_setback_that_builds() {
     let at = [[20.0, 30.0, 20.0], [40.0, 15.0, 20.0], [40.0, 30.0, 10.0]];
-    let m = box_corner(40.0, 30.0, 20.0, &at, 3.0, 3.5, true);
-    assert_made(
-        "every-box-corner",
-        &m,
-        FilletCornerType::NByNConvex,
-        6,
-        (15, 36, 23),
-        23826.81119824473,
+    let mut k = solidcraft_fixes();
+    let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
+    let (code, comment) =
+        round_set_back(&mut k, &mut b, &at, 3.0, [40.0, 30.0, 20.0], 3.5, true).unwrap_err();
+    assert_eq!(code, 8, "{comment}");
+    assert!(
+        comment.contains("a setback of 3.5595 builds it"),
+        "{comment}"
     );
 }
 
@@ -299,10 +314,10 @@ fn bar_into_post_g2_corner_patch_is_marked() {
     assert_made(
         "bar",
         &m,
-        FilletCornerType::NByNConvex,
+        FilletCornerType::NByTwo,
         6,
         (16, 39, 25),
-        9359.757405169972,
+        9362.392656764272,
     );
 }
 
@@ -320,7 +335,7 @@ fn bar_into_post_outside_the_setback_cube() {
     assert_made(
         "outside",
         &m,
-        FilletCornerType::NByNConvex,
+        FilletCornerType::NByTwo,
         6,
         (13, 33, 22),
         9342.029547320612,
@@ -344,10 +359,10 @@ fn ladder_019_concave_corner_g2_patch_is_marked() {
     assert_made(
         "019",
         &m,
-        FilletCornerType::NByNConvex,
+        FilletCornerType::NByTwo,
         6,
         (18, 45, 29),
-        44289.58139495591,
+        44251.24017760676,
     );
 }
 

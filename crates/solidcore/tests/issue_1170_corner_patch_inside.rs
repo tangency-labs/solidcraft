@@ -1,6 +1,9 @@
 //! #1170 (WR-461): the setback corner patch of three rounds stays inside the faces it
 //! meets. A box 60 x 40 x 20 with r5 rounds on the three edges at (60, 40, 20) and a
-//! setback on that corner.
+//! setback on that corner. Since solidcore#2933 the marked corner is the blend corner's
+//! Setback, whose certified fill stays inside the box with or without
+//! `corner_blend_stays_inside_neighbours` (the N x N patch's fix, which bulged 0.08 past the
+//! faces at a setback of 13 without it).
 
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::math::Point3;
@@ -46,7 +49,7 @@ fn build(setback: f64, stay_inside: bool) -> solidcore::Result<(Kernel, Brep)> {
     {
         let mut session = FilletSession::new(&mut k, &mut b)?;
         session.prepare_constant_radius_edges(&mut k, &edges, 5.0, 1, 1, 1.0)?;
-        // set back (`AddSetBackVertex`), so the corner is the N x N corner, not the Ball
+        // set back (`AddSetBackVertex`), so the corner is the Setback, not the Ball
         if let Some(v) = set_back {
             session.add_set_back_vertex(v);
         }
@@ -144,14 +147,14 @@ fn a_setback_patch_stays_inside_the_box_with_the_fix() {
 }
 
 #[test]
-fn upstream_bulges_past_the_faces_for_a_large_setback() {
-    // Up to 10 (twice the radius) the patch stays inside; at 13 it is 0.08 outside.
-    let (max, faces, _) = fillet_with_setback(10.0, false).unwrap();
-    assert!(max[0] <= CORNER[0] + 1e-6, "{max:?}");
-    assert_eq!(faces, 15);
-    let (max, faces, _) = fillet_with_setback(13.0, false).unwrap();
-    for (m, limit) in max.iter().zip(CORNER) {
-        assert!((m - limit - 0.0806).abs() < 1e-3, "{max:?}");
+fn the_setback_stays_inside_without_the_n_by_n_fix() {
+    // the N x N patch bulged 0.08 past the faces at 13 without the fix
+    for setback in [10.0, 13.0] {
+        let (max, faces, solid) = fillet_with_setback(setback, false).unwrap();
+        for (m, limit) in max.iter().zip(CORNER) {
+            assert!(*m <= limit + 1e-6, "setback {setback}: {max:?}");
+        }
+        assert_eq!(faces, 15, "setback {setback}");
+        assert!(solid, "setback {setback}");
     }
-    assert_eq!(faces, 15);
 }

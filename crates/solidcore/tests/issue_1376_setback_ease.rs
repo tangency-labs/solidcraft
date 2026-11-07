@@ -305,6 +305,35 @@ fn an_eased_curvature_continuous_blend_meets_the_contact_lines_flat() {
     assert!(worst <= 1e-6, "{worst}");
 }
 
+/// The box's volume with every corner set back and eased `ease`, and its worst edge tolerance.
+fn every_corner_eased(ease: f64) -> (f64, f64) {
+    let (k, mut b, _) = build(Spec {
+        ease: Some(ease),
+        all: true,
+        g2_blend: false,
+    });
+    assert!(is_manifold_solid(&b).unwrap(), "ease {ease}");
+    let tol = b
+        .edges()
+        .ids()
+        .map(|e| edge::tolerance(&b, e).unwrap())
+        .fold(0.0, f64::max);
+    (volume(&k, &mut b), tol)
+}
+
+/// solidcore#1386: every corner eased 4, which the N x N corners left open (the stitch glued
+/// a face curve's ends 5.66 apart, so the body was not a solid) and the fork's test avoids, is
+/// a closed solid, its edges within the kernel's 4e-5, its volume between the eases of 3 and 6
+/// (a longer ease takes less off).
+#[test]
+fn every_corner_eased_four_is_a_solid() {
+    let (v3, _) = every_corner_eased(3.0);
+    let (v4, tol) = every_corner_eased(4.0);
+    let (v6, _) = every_corner_eased(6.0);
+    assert!(tol <= 4.0e-5 * (1.0 + 1e-9), "edge tolerance {tol}");
+    assert!(v3 < v4 && v4 < v6, "{v3} {v4} {v6}");
+}
+
 #[test]
 fn every_corner_eased_eases_each_round_at_both_ends() {
     // 12 + 3 twice is 30, inside the 40 edge: the fork's test of this box (an ease of 4

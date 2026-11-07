@@ -150,6 +150,39 @@ impl Default for SetbackCorner {
     }
 }
 
+/// [`classify_setback`]'s answer: the corner's event and, for the Setback, its fill's order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SetbackClass {
+    /// [`BlendCornerEvent::Setback`], or [`BlendCornerEvent::None`] where the corner is not one.
+    pub event: BlendCornerEvent,
+    /// The fill's order (1: G1, 2: G2).
+    pub order: usize,
+}
+
+/// The blend corner's Setback of fill order `order` at `corner`'s vertex, on its edge uses
+/// (`SmFilletCorner::Create`'s N x N case taking the Setback, smlib#104 61547af), its setback
+/// and ease the ones set on `corner`.
+#[must_use]
+pub fn setback_corner_of(corner: &FilletCorner, order: usize) -> FilletCorner {
+    let mut setback = FilletCorner::new(
+        FilletCornerKind::NByTwo,
+        corner.vertex,
+        corner.solver_eus.clone(),
+        corner.all_eus.clone(),
+        corner.approx_tol_3d,
+        corner.tangency_tol_radians,
+    );
+    setback.blend = Some(BlendCorner {
+        event: BlendCornerEvent::Setback,
+        turn: crate::blend::blend_corner::BlendTurn::Mitre,
+        end: crate::blend::blend_corner::BlendEnd::OnEndFace,
+    });
+    setback.setback = Some(SetbackCorner::with_order(order));
+    setback.set_back_dist = corner.set_back_dist;
+    setback.ease_dist = corner.ease_dist;
+    setback
+}
+
 impl FilletCorner {
     /// `SmBlendCorner::IsSetBackOpen` (the fork's ef57570): an open G1 setback corner, its
     /// hole bounded by its sections and spring curves, no patches.
@@ -190,8 +223,12 @@ pub struct SetBackFill {
 /// that no blend corner took (`SmFilletConvexNxNCorner`'s setback corner, to which
 /// `SmFilletConcaveNxNCorner` hands its own). The fork's dc757a6 deletes the N x N setback
 /// paths; solidcore keeps them (WR-697 addendum `setback-asked-not-built-refused`), as the
-/// Setback does not build every corner they do (three equal rounds at a box corner, which a
-/// set-back vertex keeps from the Ball; a corner beside a curved face; a concave notch).
+/// Setback does not build every corner they do: a marked corner beside a curved face, and
+/// one [`classify_setback`] does not take (variable rounds, mixed convexity, edges tangent at
+/// the vertex). Three equal rounds of one convexity between planes, convex or concave, which
+/// a set-back vertex keeps from the Ball, are the Setback once a setback is set on their
+/// corner (solidcore#2933, classified when the corners are filleted: [`classify_setback`]'s
+/// `marked`).
 #[must_use]
 pub fn builds_setback(corner: &FilletCorner) -> bool {
     match corner.blend {
@@ -896,6 +933,13 @@ fn set_backs(
 /// ([`BlendCornerEvent::None`]). The fill's order with it: 2 for curvature-continuous
 /// sections or a setback with an ease, else 1.
 ///
+/// Not the fork (solidcore#2933): `marked` says the fill asked at the vertex is its mark's
+/// (`AddSetBackVertex`, the distance and ease set on the made corner with `SetSetBackDist`
+/// and `SetEaseDist`), which the session reads as one when the corners are filleted: three
+/// equal rounds there are then the Setback with its certified fill, not the N x N corner's
+/// `N_FillNSidedHole` patch. Beside a curved face such a corner stays the N x N corner, as
+/// before.
+///
 /// # Errors
 ///
 /// [`SolidError::null_pointer`] where a ring edge use has no solver or one no offset surface
@@ -910,9 +954,13 @@ pub fn classify_setback(
     solvers: &dyn BallSolvers,
     tangency_tol_deg: f64,
     fills: &[SetBackFill],
-) -> Result<(BlendCornerEvent, usize)> {
+    marked: bool,
+) -> Result<SetbackClass> {
     let nul = || SolidError::null_pointer(OP_CLASSIFY);
-    let none = Ok((BlendCornerEvent::None, 1));
+    let none = Ok(SetbackClass {
+        event: BlendCornerEvent::None,
+        order: 1,
+    });
     let n = all_eus.len();
     if n < 3 || solver_eus.len() != n {
         return none;
@@ -1000,6 +1048,10 @@ pub fn classify_setback(
     if curved && (kind != FilletSurfaceGeneratorType::Circular || !one_kind) {
         return none;
     }
+    // a mark's fill beside a curved face is not read (the N x N corner's, solidcore#2343)
+    if curved && marked {
+        return none;
+    }
 
     let asked = set_back_fill_of(fills, vtx);
     if asked.is_none() && !one_kind {
@@ -1027,9 +1079,15 @@ pub fn classify_setback(
         1
     };
     if curved && order != 1 {
-        return Ok((BlendCornerEvent::None, order));
+        return Ok(SetbackClass {
+            event: BlendCornerEvent::None,
+            order,
+        });
     }
-    Ok((BlendCornerEvent::Setback, order))
+    Ok(SetbackClass {
+        event: BlendCornerEvent::Setback,
+        order,
+    })
 }
 
 /// What the Setback's topology operates on besides the corner itself.

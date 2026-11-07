@@ -274,9 +274,9 @@ never returns "no kind": a configuration the table does not name is a Setback.
 | **End** | one blend ends at the vertex | the end rib on the end face, S ∩ E; a tangent side is the tangent end of §3.1 |
 | **Join** | two blends meeting G1 and continuing each other, every other edge at the vertex tangent | one shared section |
 | **Turn** | two blends sharing a face, turning at a sharp unrounded side edge (a boss base, a pocket's floor or rim; also blends meeting G1 where a side edge between their faces is sharp, such as a ruled loft's side edge at its rim) | **Mitre** (default) or **Swept** (option) |
-| **Ball** | three equal rounds of one convexity at a vertex of three faces | the corner ball's sphere |
+| **Ball** | three equal rounds of one convexity at a vertex of three faces, the vertex not set back | the corner ball's sphere |
 | **Chamfer** | every edge at the vertex chamfered, each chamfer a plane between two planes | **Mitre** (default): the chamfer planes run on to their common point; or **Facet** (option): one plane through the rails' crossings |
-| **Setback** | everything else: unequal radii, four or more blends, mixed convexity, and any corner where G2 is selected | the setback hole and its certified convex fill |
+| **Setback** | everything else: unequal radii, four or more blends, mixed convexity, any corner where G2 is selected, and three equal constant rounds of one convexity between planes at a vertex set back by a given distance (marked set back with no distance, such a vertex stays the N x N corner; a marked corner beside a curved face, or one of rounds the Setback does not take, such as variable rounds or edges of mixed convexity, keeps the N x N corner's uncertified patch) | the setback hole and its certified convex fill |
 
 ![Plan views of the four corner kinds: mitre crease, swept torus, ball sphere patch, setback hole.](generic-blend/corner-events.svg)
 

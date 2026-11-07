@@ -6,7 +6,10 @@
 //! patch's edge, the one nearer the other's faces: two near-equal distances, so a
 //! section half could come out as the approximation, 1.4e-5 off the round. With
 //! `fillet_patch_keeps_fillet_edges` every edge between the patch and a round is the
-//! round's own edge and lies on it.
+//! round's own edge and lies on it. Since solidcore#2933 this marked corner between planes
+//! is the blend corner's Setback, whose fill meets the rounds on their own sections, and the
+//! check holds for it; the flag's N x N branch is reached only by an N x N corner (beside a
+//! curved face), which this test does not build.
 
 #![allow(
     clippy::unwrap_used,

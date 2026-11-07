@@ -342,8 +342,11 @@ fn box_edge_equal_area_round_takes_off_the_circle_s_area() {
 /// box's corner (40, 40, 40), its three edges rounded r 8, set back 12 and eased 4 (as
 /// `issue_1376_setback_ease.rs`). Fork d01d7b0, built locally and driven through
 /// `SmFilletExecutive` the same way, gives 62375.682794873181 (62279.332678480074 without
-/// the ease), and fork 7102bc5 the same; with the equal area section as the ease's target
-/// the volume differs. The rounds take the default thumbweight (the equal area one).
+/// the ease), and fork 7102bc5 the same, both with the N x N corner's patch. Since
+/// solidcore#2933 the marked corner is the blend corner's Setback, its fill G2 for the ease
+/// (and the same ease of the rounds' sections): 62587.581095107686, 62421.539577350763
+/// without the ease; with the equal area section as the ease's target the volume differs.
+/// The rounds take the default thumbweight (the equal area one).
 #[test]
 fn eased_setback_takes_the_order_2_section_at_thumbweight_0() {
     use solidcore::blend::fillet_executive::session::FilletSession;
@@ -354,7 +357,7 @@ fn eased_setback_takes_the_order_2_section_at_thumbweight_0() {
         let q = vertex::point(b, v).unwrap();
         (q.x - 40.0).abs() + (q.y - 40.0).abs() + (q.z - 40.0).abs() < 1e-6
     };
-    for (ease, want) in [(0.0, 62279.332678480074), (4.0, 62375.682794873181)] {
+    for (ease, want) in [(0.0, 62421.539577350763), (4.0, 62587.581095107686)] {
         let mut k = kernel(true);
         let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 40.0, 40.0).unwrap();
         let edges: Vec<EdgeId> = b
