@@ -1130,6 +1130,833 @@ pub struct UnlockResult {
     pub param_warnings: Vec<String>,
 }
 
+// ---------------------------------------------------------------------------------------------
+// The occurrence commands, Capture and Revert Position, Move Bodies and Sketches to Component and
+// Paste New (#13186).
+//
+// As above, each key reads as its handler reads it and fails with the handler's message; a key
+// the handler refuses when it is left out is optional in the type and required in the schema.
+// Some handlers read a key only in some cases (`occurrence.copy` reads `component` only without
+// `occurrence`, `occurrence.move` reads `tolerance` only with `matrix`, and so on): those
+// parameters types are read stage by stage in the handler's order, from only the keys the handler
+// reads in that case, so a call that works today gets no warning and a call that fails gets the
+// handler's message.
+// ---------------------------------------------------------------------------------------------
+
+/// The message of a handler's refusal, to give whole.
+fn refusal(e: crate::EngineError) -> String {
+    match e {
+        crate::EngineError::BadParams { msg, .. } => msg,
+        e => e.to_string(),
+    }
+}
+
+/// The keys of `value` that are in `keys`, as an object.
+fn only(value: &Value, keys: &[&str]) -> Value {
+    Value::Object(value.as_object().into_iter().flatten().filter(|(k, _)| keys.contains(&k.as_str())).map(|(k, v)| (k.clone(), v.clone())).collect())
+}
+
+/// `K` read from `value`: first from just the keys of each of `stages` in turn (the order the
+/// handler reads them in, so the first refusal is the handler's), then from all of it.
+fn staged<K: serde::de::DeserializeOwned, E: serde::de::Error>(value: &Value, stages: &[&[&str]]) -> Result<K, E> {
+    read_stages::<K, E>(value, stages)?;
+    serde_path_to_error::deserialize(value).map_err(|e| E::custom(located(&e)))
+}
+
+/// What [`staged`] reads first: just the keys of each of `stages` in turn, for the first refusal.
+fn read_stages<K: serde::de::DeserializeOwned, E: serde::de::Error>(value: &Value, stages: &[&[&str]]) -> Result<(), E> {
+    for stage in stages {
+        serde_path_to_error::deserialize::<_, K>(&only(value, stage)).map_err(|e| E::custom(located(&e)))?;
+    }
+    Ok(())
+}
+
+/// The keys of `value` without `keys`.
+fn without(mut value: Value, keys: &[&str]) -> Value {
+    if let Some(object) = value.as_object_mut() {
+        for key in keys {
+            object.remove(*key);
+        }
+    }
+    value
+}
+
+/// `key`'s value as `cmd::move_vector` reads it: `[x, y, z]` or `{x, y, z}` of numbers below 1e9
+/// in size, with its message `key must contain three finite numbers` for anything else, `null`
+/// included.
+fn move_point_key<'de, D: Deserializer<'de>>(d: D, key: &str, coordinate: bool) -> Result<Option<Point3>, D::Error> {
+    let mut one = serde_json::Map::new();
+    one.insert(key.to_string(), Value::deserialize(d)?);
+    crate::cmd::move_vector(&Value::Object(one), key, Vec3::ZERO, coordinate, "")
+        .map(|v| Some(Point3(v)))
+        .map_err(|e| D::Error::custom(whole(refusal(e))))
+}
+
+macro_rules! move_point {
+    ($name:ident, $key:literal, $coordinate:literal) => {
+        fn $name<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Point3>, D::Error> {
+            move_point_key(d, $key, $coordinate)
+        }
+    };
+}
+
+move_point!(translate_key, "translate", true);
+move_point!(axis_key, "axis", false);
+move_point!(origin_key, "origin", true);
+move_point!(at_key, "at", true);
+move_point!(point_key, "point", true);
+
+/// A placement path as `placing::parent_path` and `component.move_bodies` read `parent_path`,
+/// `component_path` and `from_path`: up to 64 occurrence ids (none is the design itself).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlacementPath(pub Vec<u64>);
+
+impl<'de> Deserialize<'de> for PlacementPath {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Value::deserialize(d)?
+            .as_array()
+            .filter(|a| a.len() <= 64)
+            .and_then(|a| a.iter().map(Value::as_u64).collect::<Option<Vec<_>>>())
+            .map(PlacementPath)
+            .ok_or_else(|| D::Error::custom("must list 0..64 occurrence ids"))
+    }
+}
+
+impl JsonSchema for PlacementPath {
+    fn schema_name() -> Cow<'static, str> {
+        "PlacementPath".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "An exact placement path: up to 64 occurrence ids from the root down; empty for the design itself.",
+            "type": "array",
+            "items": {"type": "integer", "minimum": 0, "maximum": u64::MAX},
+            "maxItems": 64
+        })
+    }
+}
+
+/// `component.revert_position`'s `occurrences`: 1 to 10000 occurrence ids.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OccurrenceIds(pub Vec<u64>);
+
+impl<'de> Deserialize<'de> for OccurrenceIds {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Value::deserialize(d)?
+            .as_array()
+            .filter(|a| !a.is_empty() && a.len() <= 10_000)
+            .and_then(|a| a.iter().map(Value::as_u64).collect::<Option<Vec<_>>>())
+            .map(OccurrenceIds)
+            .ok_or_else(|| D::Error::custom(whole("occurrences must list 1..10000 ids")))
+    }
+}
+
+impl JsonSchema for OccurrenceIds {
+    fn schema_name() -> Cow<'static, str> {
+        "OccurrenceIds".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "1 to 10000 occurrence ids.",
+            "type": "array",
+            "items": {"type": "integer", "minimum": 0, "maximum": u64::MAX},
+            "minItems": 1,
+            "maxItems": 10000
+        })
+    }
+}
+
+/// `occurrence.move`'s `angle`: a number (radians) or an angle expression, which the handler
+/// evaluates against the design's parameters.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MoveAngle(pub Value);
+
+impl<'de> Deserialize<'de> for MoveAngle {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            v @ (Value::Number(_) | Value::String(_)) => Ok(MoveAngle(v)),
+            _ => Err(D::Error::custom(whole("angle must be a number or angle expression"))),
+        }
+    }
+}
+
+impl JsonSchema for MoveAngle {
+    fn schema_name() -> Cow<'static, str> {
+        "MoveAngle".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"description": "An angle in radians (a number) or an angle expression such as \"30 deg\".", "type": ["number", "string"]})
+    }
+}
+
+/// Which frame `occurrence.move` reads its move in: `local` or `world`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum MoveSpace {
+    Local,
+    World,
+}
+
+fn move_space<'de, D: Deserializer<'de>>(d: D) -> Result<Option<MoveSpace>, D::Error> {
+    super::view_navigation::read_as(d, "space must be local or world")
+}
+
+/// `occurrence.move`'s `matrix`: 12 numbers (a row-major 3×4) or 16 (a 4×4), flat or as rows. The
+/// parameters read it with `tolerance` (`matrix::rigid`), which refuses what isn't a rigid move.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MatrixParam(pub Value);
+
+impl<'de> Deserialize<'de> for MatrixParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Value::deserialize(d).map(MatrixParam)
+    }
+}
+
+impl JsonSchema for MatrixParam {
+    fn schema_name() -> Cow<'static, str> {
+        "MoveMatrix".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let row = json!({"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4});
+        json_schema!({
+            "description": "A rigid move as a row-major 3x4 (12 numbers) or 4x4 (16 numbers) matrix, flat or as 3 or 4 rows of 4.",
+            "anyOf": [
+                {"type": "array", "items": {"type": "number"}, "minItems": 12, "maxItems": 12},
+                {"type": "array", "items": {"type": "number"}, "minItems": 16, "maxItems": 16},
+                {"type": "array", "items": row, "minItems": 3, "maxItems": 4}
+            ]
+        })
+    }
+}
+
+/// `occurrence.move`'s `tolerance`, read only with `matrix`: a number above 0 and at most 1e-3.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MatrixTolerance(pub Value);
+
+impl<'de> Deserialize<'de> for MatrixTolerance {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Value::deserialize(d).map(MatrixTolerance)
+    }
+}
+
+impl JsonSchema for MatrixTolerance {
+    fn schema_name() -> Cow<'static, str> {
+        "MatrixTolerance".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"description": "A number above 0 and at most 0.001.", "type": "number", "exclusiveMinimum": 0, "maximum": 0.001})
+    }
+}
+
+/// `occurrence.move`'s `base_transform`: the 4×4 matrix a move starts from, as the Browser's
+/// drag passes it: finite, affine (a last row of 0, 0, 0, 1) and invertible.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BaseTransform(pub solidcraft_doc::Mat);
+
+impl<'de> Deserialize<'de> for BaseTransform {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        crate::cmd::base_transform(&Value::deserialize(d)?).map(BaseTransform).map_err(|message| D::Error::custom(whole(message)))
+    }
+}
+
+impl JsonSchema for BaseTransform {
+    fn schema_name() -> Cow<'static, str> {
+        "BaseTransform".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let row = json!({"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4});
+        json_schema!({
+            "description": "A 4x4 matrix as 4 rows of 4 numbers: finite, affine (a last row of 0, 0, 0, 1) and invertible.",
+            "type": "array",
+            "items": row,
+            "minItems": 4,
+            "maxItems": 4
+        })
+    }
+}
+
+macro_rules! wraps_keys {
+    ($params:ident, $keys:ident, $name:literal) => {
+        impl JsonSchema for $params {
+            fn schema_name() -> Cow<'static, str> {
+                $name.into()
+            }
+            fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+                $keys::json_schema(generator)
+            }
+        }
+    };
+}
+
+fn occurrence_required(schema: &mut Schema) {
+    require(schema, "occurrence");
+}
+
+fn component_and_bodies_required(schema: &mut Schema) {
+    require(schema, "component");
+    require(schema, "bodies");
+}
+
+fn component_and_sketches_required(schema: &mut Schema) {
+    require(schema, "component");
+    require(schema, "sketches");
+}
+
+fn occurrence_or_component_required(schema: &mut Schema) {
+    schema.insert("anyOf".into(), json!([{"required": ["occurrence"]}, {"required": ["component"]}]));
+}
+
+fn drag_schema(schema: &mut Schema) {
+    schema.insert("anyOf".into(), json!([{"required": ["occurrence"]}, {"required": ["path"]}]));
+    require(schema, "at");
+    require(schema, "point");
+}
+
+fn move_schema(schema: &mut Schema) {
+    require(schema, "occurrence");
+    schema.insert("allOf".into(), json!(["translate", "axis", "angle", "origin"].map(|key| json!({"not": {"required": ["matrix", key]}}))));
+}
+
+/// `sketches` as `string_list` reads it (one name or a list, with its messages), where `null`,
+/// `[]` and a missing key all get the handler's `` `sketches` must list sketches ``.
+fn sketch_names<'de, D: Deserializer<'de>>(d: D) -> Result<Option<super::config::NameList>, D::Error> {
+    let v = Value::deserialize(d)?;
+    let names = if v.is_null() { Default::default() } else { super::config::NameList::deserialize(v).map_err(D::Error::custom)? };
+    if names.0.is_empty() { Err(D::Error::custom(whole("`sketches` must list sketches"))) } else { Ok(Some(names)) }
+}
+
+fn sketch_names_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "The sketches, by id or name as text: one, or a list of 1 to 10000.",
+        "anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": params::MAX_STRING_LIST}]
+    })
+}
+
+/// Make every pending occurrence move the occurrence's placement. The exploded view is shown,
+/// never captured: it stays shown, and the design keeps its placements.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct CapturePositionParams {}
+
+/// What `component.capture_position` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct CapturePositionResult {
+    /// How many pending moves became the occurrences' placements.
+    pub captured: usize,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Drop pending occurrence moves, putting the occurrences back where they were captured. Not an
+/// undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct RevertPositionParams {
+    /// The occurrences to put back, by id. Default: every one with a pending move.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "OccurrenceIds")]
+    pub occurrences: Option<OccurrenceIds>,
+}
+
+/// What `component.revert_position` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct RevertPositionResult {
+    /// How many pending moves were dropped.
+    pub reverted: usize,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Ground a placement, or let it go (a grounded part stays where it is when joints move
+/// things). Without `grounded` it toggles.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = occurrence_required)]
+pub struct GroundParams {
+    // Optional in the type and required in the schema (`occurrence_required`).
+    /// The occurrence, by id or name.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "OccurrenceRef")]
+    pub occurrence: Option<OccurrenceRef>,
+    /// The occurrence's exact placement, as occurrence ids from the top of the design (1 to 64),
+    /// ending in `occurrence`. It is only checked.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "OccurrencePath")]
+    pub path: Option<OccurrencePath>,
+    /// `true` grounds it, `false` frees it. Default: toggle.
+    #[serde(default)]
+    pub grounded: Option<bool>,
+}
+
+/// What `occurrence.ground` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct GroundResult {
+    /// The occurrence, by id.
+    pub occurrence: u64,
+    /// Whether it is grounded now.
+    pub grounded: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Place a component again (Paste as an instance): a new occurrence of the same component, which
+/// shares its contents, at the selected placement's transform (pending moves included) moved by
+/// `translate`. Give the `occurrence` to copy, or the `component`.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = occurrence_or_component_required)]
+pub struct CopyKeys {
+    // `occurrence` or `component` is needed: optional in the type and required in the schema
+    // (`occurrence_or_component_required`), so that the handler's message is what a caller sees.
+    /// The placement to copy, by id or name. When given, `component` is not read.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "OccurrenceRef")]
+    pub occurrence: Option<OccurrenceRef>,
+    /// The component to place again, by id or name: its first placement is copied. Read only
+    /// without `occurrence`.
+    #[serde(default, deserialize_with = "component", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ComponentRef")]
+    pub component: Option<ComponentRef>,
+    /// The placement's exact path, as occurrence ids from the top of the design (1 to 64),
+    /// ending in the placement copied. Needed for a placement inside a component placed more
+    /// than once, with `in_place`.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "OccurrencePath")]
+    pub path: Option<OccurrencePath>,
+    /// The component the copy goes in, by id or name. Default: the copied placement's parent.
+    #[serde(default, deserialize_with = "parent", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ComponentRef")]
+    pub parent: Option<ComponentRef>,
+    /// Move the copy by this much, in mm (up to 1e9). Default: no move.
+    #[serde(default, deserialize_with = "translate_key", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Point3")]
+    pub translate: Option<Point3>,
+    /// `false`: the copy has the selected transform within its parent. `true`: it sits where the
+    /// selected placement is in the world, and `translate` is along the world axes. Default:
+    /// `false`.
+    #[serde(default)]
+    pub in_place: Option<bool>,
+    /// With `in_place: true`: the placement of `parent` to place the copy by, as occurrence ids
+    /// from the top (up to 64; none is the design). A parent placed more than once puts the copy
+    /// in every instance. Default: the parent's only placement, else the active one. Read only
+    /// with `in_place: true`.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PlacementPath")]
+    pub parent_path: Option<PlacementPath>,
+}
+
+/// `occurrence.copy`'s parameters: [`CopyKeys`], with `component` read only without `occurrence`
+/// and `parent_path` only with `in_place: true`, as the handler reads them.
+#[derive(Debug)]
+pub struct CopyParams(pub CopyKeys);
+
+impl<'de> Deserialize<'de> for CopyParams {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let mut value = Value::deserialize(d)?;
+        if value.get("occurrence").is_some() {
+            value = without(value, &["component"]);
+        }
+        if value.get("in_place").and_then(Value::as_bool) != Some(true) {
+            value = without(value, &["parent_path"]);
+        }
+        staged(&value, &[&["occurrence", "component"], &["path"], &["parent"], &["translate"]]).map(CopyParams)
+    }
+}
+
+wraps_keys!(CopyParams, CopyKeys, "CopyParams");
+
+/// What `occurrence.copy` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct CopyResult {
+    /// The new placement, by id.
+    pub occurrence: u64,
+    /// The component it places, by id.
+    pub component: u64,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Paste New: an independent copy of a component, with its nested components, features, bodies,
+/// materials, styles, joints and motion, placed at the source placement's transform (pending
+/// moves included) moved by `translate`. Unlike `occurrence.copy`, the copy shares nothing with
+/// the original. A body reassigned from outside becomes base geometry; links kept to outside
+/// things and joints omitted at the boundary are listed in `notices`.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = component_required)]
+pub struct PasteNewKeys {
+    // Optional in the type and required in the schema (`component_required`).
+    /// The component to copy, by id or name (not the design).
+    #[serde(default, deserialize_with = "component", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ComponentRef")]
+    pub component: Option<ComponentRef>,
+    /// The source placement, by id or name; it must place `component`. Default: the component's
+    /// first placement.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "OccurrenceRef")]
+    pub occurrence: Option<OccurrenceRef>,
+    /// The source placement's exact path, as occurrence ids from the top of the design (1 to 64),
+    /// ending in the placement copied.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "OccurrencePath")]
+    pub path: Option<OccurrencePath>,
+    /// The component the copy goes in, by id or name. Default: the source placement's parent. It
+    /// may not be the component or one inside it.
+    #[serde(default, deserialize_with = "parent", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ComponentRef")]
+    pub parent: Option<ComponentRef>,
+    /// Move the copy by this much, in mm (up to 1e9). Default: no move.
+    #[serde(default, deserialize_with = "translate_key", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Point3")]
+    pub translate: Option<Point3>,
+    /// `false`: the copy has the source transform within its parent. `true`: it sits where the
+    /// source placement is in the world, and `translate` is along the world axes. Default:
+    /// `false`.
+    #[serde(default)]
+    pub in_place: Option<bool>,
+    /// With `in_place: true`: the placement of `parent` to place the copy by, as occurrence ids
+    /// from the top (up to 64; none is the design). Read only with `in_place: true`.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PlacementPath")]
+    pub parent_path: Option<PlacementPath>,
+}
+
+/// `component.paste_new`'s parameters: [`PasteNewKeys`], with `parent_path` read only with
+/// `in_place: true`, as the handler reads it.
+#[derive(Debug)]
+pub struct PasteNewParams(pub PasteNewKeys);
+
+impl<'de> Deserialize<'de> for PasteNewParams {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let mut value = Value::deserialize(d)?;
+        if value.get("in_place").and_then(Value::as_bool) != Some(true) {
+            value = without(value, &["parent_path"]);
+        }
+        let first: &[&str] = if value.get("occurrence").is_some() { &["occurrence", "path"] } else { &["occurrence"] };
+        staged(&value, &[&["component"], first, &["translate"], &["parent"], &["path"]]).map(PasteNewParams)
+    }
+}
+
+wraps_keys!(PasteNewParams, PasteNewKeys, "PasteNewParams");
+
+/// What `component.paste_new` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PasteNewResult {
+    /// The copy of the component, by id.
+    pub component: u64,
+    /// Its placement, by id.
+    pub occurrence: u64,
+    /// The new features, by id.
+    pub features: Vec<u64>,
+    /// How many components were made: the copy and what is inside it.
+    pub components: usize,
+    /// How many bodies the copy has.
+    pub bodies: usize,
+    /// The bodies copied as frozen geometry (their features stay with the original).
+    pub frozen_bodies: Vec<String>,
+    /// What was left behind or kept pointing outside the copy: links to bodies, sketches, planes,
+    /// parameters and features outside it, and joints and motion across its boundary.
+    pub notices: Vec<String>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Move an occurrence: by `translate`, or turned by `angle` about `axis` through `origin`, or by
+/// a rigid `matrix` instead of those. Nested occurrences' definitions stay shared. A grounded
+/// occurrence refuses unless `move_grounded` is true. When joints hold it to something fixed and
+/// put it back, the reply says so (`reverted`).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = move_schema)]
+pub struct MoveKeys {
+    // Optional in the type and required in the schema (`move_schema`).
+    /// The occurrence, by id or name.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "OccurrenceRef")]
+    pub occurrence: Option<OccurrenceRef>,
+    /// The occurrence's exact placement, as occurrence ids from the top of the design (1 to 64),
+    /// ending in `occurrence`. Needed with `space: world` for a placement inside a component
+    /// placed more than once.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "OccurrencePath")]
+    pub path: Option<OccurrencePath>,
+    /// The frame of the move: `local` is the parent's (the placement's own), `world` is world
+    /// coordinates. Default: `local`.
+    #[serde(default, deserialize_with = "move_space", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "MoveSpace")]
+    pub space: Option<MoveSpace>,
+    /// Move by this much, in mm. Default: no move. Not with `matrix`.
+    #[serde(default, deserialize_with = "translate_key", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Point3")]
+    pub translate: Option<Point3>,
+    /// The axis to turn about, not zero when `angle` is. Default: Z. Not with `matrix`.
+    #[serde(default, deserialize_with = "axis_key", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Point3")]
+    pub axis: Option<Point3>,
+    /// The turn about `axis`: radians, or an angle expression. Default: 0. Not with `matrix`.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "MoveAngle")]
+    pub angle: Option<MoveAngle>,
+    /// The point the turn is about, in mm. Default: the origin. Not with `matrix`.
+    #[serde(default, deserialize_with = "origin_key", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Point3")]
+    pub origin: Option<Point3>,
+    /// A rigid move instead of `translate`, `axis`, `angle` and `origin`: a rotation and a
+    /// translation. One that is a rotation only up to `tolerance` is made exact; a scale, shear or
+    /// mirror is refused.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "MatrixParam")]
+    pub matrix: Option<MatrixParam>,
+    /// With `matrix`: the largest accepted |RᵀR − I| per entry. Default: 1e-9. Read only with
+    /// `matrix`.
+    #[serde(default)]
+    pub tolerance: Option<MatrixTolerance>,
+    /// `true` makes the move the occurrence's placement now; `false` keeps it pending until
+    /// `component.capture_position`. Default: `true`.
+    #[serde(default)]
+    pub capture: Option<bool>,
+    /// `true` moves a grounded occurrence, which stays grounded. Default: `false`, which refuses.
+    #[serde(default)]
+    pub move_grounded: Option<bool>,
+    /// The transform the move starts from, in place of the occurrence's current one (what a drag
+    /// in the Browser passes).
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "BaseTransform")]
+    pub base_transform: Option<BaseTransform>,
+}
+
+/// `occurrence.move`'s parameters: [`MoveKeys`], read as the handler reads them: with `matrix`,
+/// `translate`, `axis`, `angle` and `origin` are refused and `tolerance` is read; without it,
+/// `tolerance` is not.
+#[derive(Debug)]
+pub struct MoveParams(pub MoveKeys);
+
+impl<'de> Deserialize<'de> for MoveParams {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let mut value = Value::deserialize(d)?;
+        if value.get("matrix").is_some() {
+            read_stages::<MoveKeys, D::Error>(&value, &[&["occurrence"]])?;
+            if let Some(key) = ["translate", "axis", "angle", "origin"].into_iter().find(|k| value.get(*k).is_some()) {
+                return Err(D::Error::custom(whole(format!("give either matrix or {key}, not both"))));
+            }
+            let tolerance = crate::cmd::matrix_tolerance(&value, "").map_err(|e| D::Error::custom(whole(refusal(e))))?;
+            crate::cmd::rigid_matrix(value.get("matrix").unwrap_or(&Value::Null), tolerance, "").map_err(|e| D::Error::custom(whole(refusal(e))))?;
+            return staged(&value, &[&["space"], &["path"]]).map(MoveParams);
+        }
+        value = without(value, &["tolerance"]);
+        staged(&value, &[&["occurrence"], &["translate"], &["axis"], &["angle"], &["origin"], &["space"], &["path"]]).map(MoveParams)
+    }
+}
+
+wraps_keys!(MoveParams, MoveKeys, "MoveParams");
+
+/// What `occurrence.move` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MoveResult {
+    /// The occurrence, by id.
+    pub occurrence: u64,
+    /// Its placement in its parent now, as a 4×4 matrix (its pending one with `capture: false`).
+    pub transform: [[f64; 4]; 4],
+    /// Whether the move is pending, not captured.
+    pub pending: bool,
+    /// Present, and `true`, when joints hold the occurrence to something fixed and put it back:
+    /// `transform` is where it is.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reverted: bool,
+    /// With `reverted`: the joint that holds it and what to change instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Drag a placement by `point - at`, in world coordinates, and capture its position: the grabbed
+/// point `at` goes to `point`. Any chain of joints it is in that is joined to nothing grounded
+/// moves with it; other pending moves stay pending; shared definitions move in all their
+/// placements. Grounded parts and parts that joints hold to something fixed are refused
+/// (`joint.reach` moves those).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = drag_schema)]
+pub struct DragKeys {
+    // `occurrence` or `path` is needed, and `at` and `point` both: optional in the type and
+    // required in the schema (`drag_schema`), so that the handler's message is what a caller sees.
+    /// The placement, by id or name. Without it, `path` names the placement.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "OccurrenceRef")]
+    pub occurrence: Option<OccurrenceRef>,
+    /// The placement's exact path, as occurrence ids from the top of the design (1 to 64); with
+    /// `occurrence` it must end in it.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "OccurrencePath")]
+    pub path: Option<OccurrencePath>,
+    /// The grabbed point on the placement, in world coordinates (mm).
+    #[serde(default, deserialize_with = "at_key", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Point3")]
+    pub at: Option<Point3>,
+    /// Where that point goes, in world coordinates (mm).
+    #[serde(default, deserialize_with = "point_key", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Point3")]
+    pub point: Option<Point3>,
+    /// Reply `continuous`, for a drag that goes on over several calls (the viewport's). It
+    /// changes nothing else. Default: `false`.
+    #[serde(default)]
+    pub continuous: Option<bool>,
+}
+
+/// `occurrence.drag`'s parameters: [`DragKeys`], read as the handler reads them: `path` stands
+/// for `occurrence` when it is missing, and `at` and `point` are asked for together.
+#[derive(Debug)]
+pub struct DragParams(pub DragKeys);
+
+impl<'de> Deserialize<'de> for DragParams {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let value = Value::deserialize(d)?;
+        if value.is_object() {
+            if value.get("occurrence").is_none() && value.get("path").is_none_or(|path| OccurrencePath::deserialize(path).is_err()) {
+                return Err(D::Error::custom(whole("give `occurrence` or `path` (1..64 occurrence ids)")));
+            }
+            read_stages::<DragKeys, D::Error>(&value, &[&["occurrence", "path"]])?;
+            if value.get("at").is_none() || value.get("point").is_none() {
+                return Err(D::Error::custom(whole("`at` and `point` must both be given")));
+            }
+        }
+        staged(&value, &[&["at"], &["point"]]).map(DragParams)
+    }
+}
+
+wraps_keys!(DragParams, DragKeys, "DragParams");
+
+/// What `occurrence.drag` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DragResult {
+    /// The placement dragged, by id.
+    pub occurrence: u64,
+    /// Its exact path.
+    pub path: Vec<u64>,
+    /// The occurrences moved: it first, then those a chain of joints carries with it.
+    pub moved: Vec<u64>,
+    /// How far they moved, `point - at` (mm).
+    pub translate: [f64; 3],
+    /// What the call gave as `continuous`.
+    pub continuous: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Measure an occurrence where its placement puts it, in world coordinates, with what is inside
+/// it unless `descendants` is false: material-aware mass and centre of mass, and volume, density
+/// and inertia for closed, consistently oriented bodies, with totals and principal moments.
+/// Pending moves are included. The design is not changed.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = occurrence_required)]
+pub struct OccurrencePropertiesParams {
+    // Optional in the type and required in the schema (`occurrence_required`).
+    /// The occurrence, by id or name.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "OccurrenceRef")]
+    pub occurrence: Option<OccurrenceRef>,
+    /// The occurrence's exact placement, as occurrence ids from the top of the design (1 to 64),
+    /// ending in `occurrence`. Needed when it is nested under several instances.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "OccurrencePath")]
+    pub path: Option<OccurrencePath>,
+    /// Include the placements inside it. Default: `true`.
+    #[serde(default, deserialize_with = "descendants_flag", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub descendants: Option<bool>,
+    /// A point in mm, also given the total inertia about it (`total.inertia_about`).
+    #[serde(default, deserialize_with = "about", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<Point3>")]
+    pub about: Option<Point3>,
+}
+
+/// What `occurrence.properties` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct OccurrencePropertiesResult {
+    /// The occurrence, by id.
+    pub occurrence: u64,
+    /// Its name.
+    pub name: Option<String>,
+    #[serde(flatten)]
+    pub properties: PhysicalProperties,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Move bodies into another component, keeping them where they are in the world. All or
+/// nothing, one undo step; refused while the timeline is rolled back.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = component_and_bodies_required)]
+pub struct MoveBodiesParams {
+    // Optional in the type and required in the schema (`component_and_bodies_required`).
+    /// The bodies, by name.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "DefinitionBodies")]
+    pub bodies: Option<DefinitionBodies>,
+    /// The component they go to, by id or name.
+    #[serde(default, deserialize_with = "component", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ComponentRef")]
+    pub component: Option<ComponentRef>,
+    /// The placement of that component to place them by, as occurrence ids from the top (up to
+    /// 64). A component placed more than once gets them in every instance. Default: its only
+    /// placement, else the active one.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PlacementPath")]
+    pub component_path: Option<PlacementPath>,
+    /// The placement of their component they move from, as occurrence ids from the top (up to
+    /// 64). Default: its only placement, else its first, where its bodies have their own names.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PlacementPath")]
+    pub from_path: Option<PlacementPath>,
+}
+
+/// What `component.move_bodies` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MoveBodiesResult {
+    /// The bodies that moved.
+    pub bodies: Vec<String>,
+    /// The component they went to, by id.
+    pub component: u64,
+    /// The Body Transfer features that moved them, by id, in the order of `bodies`.
+    pub features: Vec<u64>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Move sketches into another component. They keep their own coordinates (`component.move_features`
+/// keeps them where they are in the world), except that a sketch on an exactly attached face
+/// stays where it is on the face.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = component_and_sketches_required)]
+pub struct MoveSketchesParams {
+    // Optional in the type and required in the schema (`component_and_sketches_required`): left
+    // out, `null` or empty, the handler refuses the call with its own message.
+    #[serde(default, deserialize_with = "sketch_names")]
+    #[schemars(schema_with = "sketch_names_schema")]
+    pub sketches: Option<super::config::NameList>,
+    /// The component they go to, by id or name.
+    #[serde(default, deserialize_with = "component", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ComponentRef")]
+    pub component: Option<ComponentRef>,
+}
+
+/// What `component.move_sketches` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MoveSketchesResult {
+    /// The sketches that moved, by feature id.
+    pub sketches: Vec<u64>,
+    /// The component they went to, by id.
+    pub component: u64,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 #[cfg(test)]
 #[path = "component_tests.rs"]
 mod tests;

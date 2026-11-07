@@ -2,11 +2,6 @@
 # (coverage_tests.rs). This list only shrinks: when you give a command its contract and output
 # type, remove its line. Never add one: a new command comes with both schemas. Sorted, one id
 # per line.
-component.capture_position
-component.move_bodies
-component.move_sketches
-component.paste_new
-component.revert_position
 doc.open
 doc.recover
 doc.recovery_discard
@@ -36,11 +31,6 @@ motion.plot
 motion.trace
 motion.trace.edit
 motion.trace.keep
-occurrence.copy
-occurrence.drag
-occurrence.ground
-occurrence.move
-occurrence.properties
 render.aging.describe
 render.backends
 render.cancel
