@@ -3973,8 +3973,9 @@ pub(crate) fn occurrence_triad(app: &mut SolveApp, ui: &mut egui::Ui, painter: &
             let (t0, _) = m.drag0.unwrap_or((m.translate, m.angles));
             m.translate = [t0[0] + v.x, t0[1] + v.y, t0[2] + v.z];
         }
-        // Not on the press: a click on a ring changes nothing.
-        Change::Rotate { axis, angle } if angle != 0.0 => {
+        // Not on the press: a click on a ring changes nothing. Once the ring has turned, a drag
+        // back to where it started is a real zero.
+        Change::Rotate { axis, angle } if angle != 0.0 || m.ring_set => {
             let i = axis.min(2);
             // The ring's first turn: let its angle add, or start over on the turns so far.
             if !m.ring_set {

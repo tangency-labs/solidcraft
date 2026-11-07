@@ -1514,3 +1514,36 @@ fn a_dragged_angle_stays_within_one_turn() {
         assert_eq!(rx, want, "{from} turned by {by}");
     }
 }
+
+/// A ring dragged out and back to where it started is back at its angle: the snapped angle
+/// reaches exactly zero on the way back. A click on a ring changes nothing.
+#[test]
+fn a_ring_dragged_back_to_its_start_is_back_at_its_angle() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length": 20, "width": 20, "height": 20})).unwrap();
+    let app = SolveApp::new(s, Services::default());
+    let rx_of = |d: &Dialog| match &d.kind {
+        Kind::Move { rx, .. } => rx.clone(),
+        _ => panic!("not a move"),
+    };
+    let ring = |d: &mut Dialog, by: f64, started: bool, done: bool| {
+        let change = Change::Rotate { axis: 0, angle: f64::to_radians(by) };
+        drag(&app, d, crate::gizmo::Drag { handle: crate::gizmo::Handle::Ring(0), change, started, done });
+    };
+    let mut d = move_dialog(FREE);
+    if let Kind::Move { rx, .. } = &mut d.kind {
+        *rx = "12 deg".into();
+    }
+    ring(&mut d, 10.0, true, false);
+    assert_eq!(rx_of(&d), "22 deg");
+    ring(&mut d, 5.0, false, false);
+    assert_eq!(rx_of(&d), "17 deg");
+    ring(&mut d, 0.0, false, true);
+    assert_eq!(rx_of(&d), "12 deg", "back where the drag began");
+
+    if let Kind::Move { rx, .. } = &mut d.kind {
+        *rx = "12.50 deg".into();
+    }
+    ring(&mut d, 0.0, true, true);
+    assert_eq!(rx_of(&d), "12.50 deg", "a click leaves the typed angle as it is");
+}

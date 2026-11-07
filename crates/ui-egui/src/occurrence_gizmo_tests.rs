@@ -107,3 +107,35 @@ fn occurrence_rings_turn_about_the_axes_they_show() {
         assert!((got - want).abs() < 1e-6, "{world:?}");
     }
 }
+
+/// A ring dragged out and back to where it started leaves the occurrence where it was.
+#[test]
+fn an_occurrence_ring_dragged_back_to_its_start_leaves_it_there() {
+    let mut h = Harness::new();
+    let part = h.app.run("component.create", json!({"name":"Block","grounded":false})).unwrap();
+    let first = part["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length":10,"width":20,"height":30})).unwrap();
+    h.app.run("component.activate", json!({"component":0})).unwrap();
+    h.app.cam = h.app.cam.looking_from(Vec3::new(1.0, 0.8, 0.6));
+    h.app.cam.target = Vec3::ZERO;
+    h.app.cam.distance = 200.;
+    h.frames(3);
+    let target = Target::Occurrence { path: vec![first] };
+    let item = context_menu::items(&h.app, &target).into_iter().find(|item| item.id == "ui.moveOccurrence").unwrap();
+    context_menu::run_item(&mut h.app, &item, egui::Pos2::ZERO);
+    h.frames(3);
+    let before = h.app.session.occurrence_placement(&[first]).unwrap().world;
+
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    let t = crate::browser::occurrence_triad_model(&h.app).unwrap();
+    let grip = crate::gizmo::ring_grip(&proj, &t, 0).unwrap();
+    let [start, out] = [grip, grip + 20.].map(|a| crate::gizmo::handle_point("rx", Vec3::ZERO, a).unwrap());
+    let drag = [start, out, start].map(|p| json!({"world": [p.x, p.y, p.z]}));
+    h.step(&json!({"drag": drag, "steps": 12})).unwrap();
+    h.frames(3);
+    assert_eq!(h.app.tree.occurrence_move.as_ref().unwrap().angles, [0., 0., 0.]);
+    let world = h.app.session.occurrence_placement(&[first]).unwrap().world;
+    for (got, want) in world.iter().flatten().zip(before.iter().flatten()) {
+        assert!((got - want).abs() < 1e-9, "{world:?} != {before:?}");
+    }
+}

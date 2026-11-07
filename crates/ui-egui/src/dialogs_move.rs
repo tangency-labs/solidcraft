@@ -644,6 +644,8 @@ pub fn drag(app: &SolveApp, d: &mut Dialog, g: Drag) {
         d.extra.insert("ring_set".into(), json!(true));
         snapshot(d);
     }
+    // Once the ring has turned, a drag back to where it started is a real zero.
+    let turning = d.extra.contains_key("ring_set");
     let v0: [f64; 6] = d.extra.get("drag0").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
     let Kind::Move { x, y, z, rx, ry, rz, .. } = &mut d.kind else { return };
     match g.change {
@@ -655,7 +657,7 @@ pub fn drag(app: &SolveApp, d: &mut Dialog, g: Drag) {
         Change::Rotate { axis, angle } => {
             let i = axis.min(2);
             if let Some(slot) = [rx, ry, rz].into_iter().nth(i)
-                && angle != 0.0
+                && turning
             {
                 *slot = deg(gizmo::within_turn(v0[3 + i] + angle));
             }
