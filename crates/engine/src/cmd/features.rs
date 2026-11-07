@@ -2364,8 +2364,18 @@ fn pattern_path(s: &mut Session, p: &Value) -> Result<Value> {
         }
         (None, None) => (None, None),
     };
-    let pattern =
-        solidcraft_doc::PatternKind::Path { path_sketch: SketchId(path_sketch), path, count, spacing, extent, flip, orient, start, start_fraction };
+    let pattern = solidcraft_doc::PatternKind::Path {
+        path_sketch: SketchId(path_sketch),
+        path,
+        count,
+        spacing,
+        extent,
+        flip,
+        orient,
+        start,
+        start_fraction,
+        follow_frame: true,
+    };
     finish_pattern(s, p, features, pattern, bodies)
 }
 

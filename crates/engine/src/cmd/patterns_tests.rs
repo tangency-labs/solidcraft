@@ -698,6 +698,24 @@ fn path_pattern_orientation_follows_a_3d_path() {
     assert!((gap(a).sqrt() - 5.0).abs() < 0.05, "the copy is {} mm from the path: {c:?}", gap(a).sqrt());
     let turned = dot(side).atan2(dot(outward));
     assert!((turned + a * h / n).abs() < 0.01, "the copy turned {turned} rad about the path at {a} rad, want {}: {c:?}", -a * h / n);
+
+    // A design saved before the frame keeps what it built: its copy is turned about the
+    // sketch's normal only, so the ball's 5 mm outward offset stays level. It sits 5 mm from the
+    // path's point at a quarter turn, (0, r, h·π/2), at that point's height, where the frame
+    // tilts it with the path.
+    let mut doc = (*s.doc).clone();
+    for f in &mut doc.features {
+        if let solidcraft_doc::FeatureKind::Pattern { pattern: solidcraft_doc::PatternKind::Path { follow_frame, .. }, .. } = &mut f.kind {
+            assert!(*follow_frame, "a pattern made now follows the frame");
+            *follow_frame = false;
+        }
+    }
+    s.doc = std::sync::Arc::new(doc);
+    s.refresh();
+    let old = copy_centres(&mut s, "Ball").first().copied().unwrap_or([f64::NAN; 3]);
+    let level = old[0].hypot(old[1] - r);
+    assert!((old[2] - h * 0.5 * PI).abs() < 0.05 && (level - 5.0).abs() < 0.05, "the older design's copy is at {old:?}");
+    assert!((c[2] - h * 0.5 * PI).abs() > 0.5, "the frame tilts the offset with the path: {c:?}");
 }
 
 /// Patterns of a blind hole drill every copy to the full depth from the face at the copy

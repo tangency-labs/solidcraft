@@ -2540,6 +2540,12 @@ pub enum PatternKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(unitless = "Start point (0 to 1)")]
         start_fraction: Option<Expr>,
+        /// With `orient`, carry the copies with a rotation-minimising frame along the path, so on
+        /// a 3D path they keep the original's relation to it. Every Pattern on Path made now sets
+        /// it; one saved before it existed turns its copies about the sketch's normal only, as it
+        /// did then (the same on a flat path).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        follow_frame: bool,
     },
 }
 

@@ -6309,7 +6309,7 @@ fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &Model
                 }
             }
         }
-        crate::PatternKind::Path { path_sketch, path, count: c, spacing, extent, flip, orient, start, start_fraction } => {
+        crate::PatternKind::Path { path_sketch, path, count: c, spacing, extent, flip, orient, start, start_fraction, follow_frame } => {
             let n = count(c)?;
             let d = val(vals, spacing, Kind::Length)?;
             let ps = st.sketch(path_sketch.0).ok_or_else(|| DocError::Unknown(format!("path sketch {path_sketch}")))?;
@@ -6357,8 +6357,23 @@ fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &Model
             let normal = ps.plane.normal();
             let (p0, r0) = path_station(&segs, from, normal);
             for i in 1..n {
-                let (pk, rk) = path_station(&segs, from + step * i as f64, normal);
-                out.push(if *orient { frame_to_frame(p0, &r0, pk, &rk) } else { translation(pk - p0) });
+                let at = from + step * i as f64;
+                let (pk, rk) = path_station(&segs, at, normal);
+                out.push(match (*orient, *follow_frame) {
+                    (false, _) => translation(pk - p0),
+                    (true, true) => frame_to_frame(p0, &r0, pk, &rk),
+                    // A pattern saved before the frame: the signed turn of the tangent about the
+                    // sketch's normal only.
+                    (true, false) => {
+                        let (t0, tk) = (path_tangent(&segs, from), path_tangent(&segs, at));
+                        let mut m = rotation(p0, normal, t0.cross(tk).dot(normal).atan2(t0.dot(tk)));
+                        let dv = pk - p0;
+                        m[3][0] += dv.x;
+                        m[3][1] += dv.y;
+                        m[3][2] += dv.z;
+                        m
+                    }
+                });
             }
         }
         crate::PatternKind::Circular { origin, axis, count: c, angle, alignment, reversed, axis_ref, axis_feature } => {
@@ -6467,6 +6482,19 @@ fn path_station(segs: &[kernel::PathSeg], d: f64, normal: Vec3) -> (Vec3, crate:
         left -= l;
     }
     (Vec3::ZERO, r)
+}
+
+/// The tangent `d` mm along a chain (clamped to its ends).
+fn path_tangent(segs: &[kernel::PathSeg], d: f64) -> Vec3 {
+    let mut left = d.max(0.0);
+    for (i, s) in segs.iter().enumerate() {
+        let l = seg_len(s);
+        if left <= l + 1e-9 || i + 1 == segs.len() {
+            return seg_at(s, left.min(l)).1;
+        }
+        left -= l;
+    }
+    Vec3::X
 }
 
 /// The least rotation that turns unit direction `a` onto `b`; a half turn about `normal` (or
