@@ -110,6 +110,7 @@ drawing.status                    a drawing: its tests in crates/engine/src/cmd/
 drawing.table.add                 a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.table.delete              a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.table.edit                a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.table.inspect             a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.template.apply            a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.template.list             a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.template.save             a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs

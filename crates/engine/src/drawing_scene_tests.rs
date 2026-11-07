@@ -1387,6 +1387,7 @@ fn a_replys_text_and_fonts_keep_to_its_schema() {
         objects: Vec::new(),
         dimensions: Vec::new(),
         notes: Vec::new(),
+        tables: Vec::new(),
         out_of_date: Vec::new(),
         param_warnings: Vec::new(),
     };

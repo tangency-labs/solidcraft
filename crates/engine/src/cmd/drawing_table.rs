@@ -1,6 +1,8 @@
 //! `drawing.table.add`, `.edit` and `.delete` (#3874): a parts list or a revision table saved on a
 //! sheet of the open drawing. Its definition is the record's ([`solidcraft_doc::drawing::table`]).
-//! Each is one undo step of the drawing, and none evaluates the model.
+//! Each is one undo step of the drawing, and none evaluates the model. `drawing.table.inspect` says
+//! where a table sits and what it shows, laid out as the sheet draws it
+//! ([`crate::drawing_table_paper`]), or why it can't be.
 //!
 //! Placing a parts list saves the item numbers its view shows, once for each view, so what is
 //! printed doesn't move. Numbers are the design's, not the drawing's: undoing the placing puts back
@@ -13,11 +15,18 @@ use serde_json::Value;
 use solidcraft_doc::drawing::table::{Kind, MassFormat, PartsList, SheetTable};
 use solidcraft_doc::drawing::{Drawing, OnSheet, SheetComponent};
 use solidcraft_doc::ids;
+use solidcraft_geom::Aabb2;
+use solidcraft_geom::cell::Warning;
+use solidcraft_sketch::PaperFonts;
 
 use super::CommandSpec;
 use crate::drawing_scene::sheet_id;
+use crate::drawing_table_paper::{Unplaced, drawing_space, place};
 use crate::params::bad;
-use crate::schema::drawing_table::{AddParams, DeleteParams, DeleteResult, EditParams, KindParam, ListSet, TableResult, TableSet};
+use crate::schema::drawing_table::{
+    AddParams, DeleteParams, DeleteResult, EditParams, InspectOverride, InspectParams, InspectResult, InspectRow, InspectWarning, KindParam, ListSet,
+    TableResult, TableSet,
+};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
@@ -27,6 +36,8 @@ const EDIT: &str = "drawing.table.edit";
 const EDIT_CONTRACT: TypedContract<EditParams> = TypedContract::new();
 const DELETE: &str = "drawing.table.delete";
 const DELETE_CONTRACT: TypedContract<DeleteParams> = TypedContract::new();
+const INSPECT: &str = "drawing.table.inspect";
+const INSPECT_CONTRACT: TypedContract<InspectParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new(ADD, "Add Table", crate::checked!("drawing.table.add", add))
@@ -61,6 +72,19 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&DELETE_CONTRACT)
         .output(output_schema_for::<DeleteResult>)
         .params("table: its id → {table, balloons?: those that named it, which name no list now}. A sheet's delete counts the tables on it and takes them with `contents: delete`. One undo step."),
+    CommandSpec::new(INSPECT, "Inspect Table", crate::checked!("drawing.table.inspect", inspect))
+        .icon("inspect")
+        .in_drawing()
+        .noundo()
+        .doc_only()
+        .contract(&INSPECT_CONTRACT)
+        .output(output_schema_for::<InspectResult>)
+        .params(
+            "table: its id → {table, sheet, status: ok|failed, why?, outline_mm?: [x0, y0, x1, y1] on the sheet, rows?: [{key, \
+             rect_mm}] those it shows, listed: how many before its filter, overrides?: [{row, column, text, replaced}], warnings?: \
+             [{row?, column, warning: width|height|chars}]}, laid out in the drawing's font as the sheet draws it. Read-only; a parts \
+             list showing a mass weighs the design.",
+        ),
 ];
 
 fn add(s: &mut Session, p: &Value) -> Result<Value> {
@@ -110,6 +134,64 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(named)
     })?;
     serde_json::to_value(DeleteResult { table: ids::encode(id), balloons }).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
+    let request: InspectParams = crate::schema::read(INSPECT, p)?;
+    let id = request.table.0;
+    let d = s.drawing(INSPECT)?.clone();
+    let table = d.tables.by_id(id).ok_or_else(|| bad(INSPECT, format!("the drawing has no table {}", ids::encode(id))))?;
+    let sheet = d.sheets.iter().find(|one| one.id == table.sheet).ok_or_else(|| bad(INSPECT, "its sheet is gone"))?;
+    let mut reply = InspectResult {
+        table: ids::encode(id),
+        sheet: ids::encode(table.sheet),
+        status: "ok",
+        why: None,
+        outline_mm: None,
+        rows: Vec::new(),
+        listed: 0,
+        overrides: Vec::new(),
+        warnings: Vec::new(),
+    };
+    // A command waits for a font search, as an export does, so the answer is final.
+    match place(s, &d, table, drawing_space(sheet), &PaperFonts::new(&d.font, &d.language, true)) {
+        Err(Unplaced::Failed(why)) => (reply.status, reply.why) = ("failed", Some(why)),
+        Err(Unplaced::Pending) => (reply.status, reply.why) = ("failed", Some("its font is still being looked for".into())),
+        Ok(placed) => {
+            // A row's cells are its printed columns', in order.
+            let printed: Vec<&str> = table.table.columns.iter().filter(|c| c.printed).map(|c| c.name.as_str()).collect();
+            let column = |at: usize| printed.get(at).map_or_else(String::new, |name| (*name).to_string());
+            reply.outline_mm = Some(corners(placed.layout.outline));
+            reply.listed = placed.rows.len();
+            for row in std::iter::once(&placed.layout.heading).chain(&placed.layout.rows) {
+                for (at, cell) in row.cells.iter().enumerate() {
+                    if let Some(warning) = cell.warning {
+                        reply.warnings.push(InspectWarning { row: row.key.clone(), column: column(at), warning: warning_word(warning) });
+                    }
+                    if let (Some(replaced), Some(key)) = (&cell.replaced, &row.key) {
+                        let text = cell.lines.iter().map(|line| line.text.as_str()).collect::<Vec<_>>().join("\n");
+                        reply.overrides.push(InspectOverride { row: key.clone(), column: column(at), text, replaced: replaced.clone() });
+                    }
+                }
+                if let Some(key) = &row.key {
+                    reply.rows.push(InspectRow { key: key.clone(), rect_mm: corners(row.rect) });
+                }
+            }
+        }
+    }
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+fn corners(rect: Aabb2) -> [f64; 4] {
+    [rect.min.x, rect.min.y, rect.max.x, rect.max.y]
+}
+
+fn warning_word(warning: Warning) -> &'static str {
+    match warning {
+        Warning::Chars { .. } => "chars",
+        Warning::Height => "height",
+        Warning::Width => "width",
+    }
 }
 
 /// The list a parts list on `sheet` starts with: what its sheet documents, else the design.

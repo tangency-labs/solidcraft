@@ -21,6 +21,7 @@ pub mod drawing_note_paper;
 pub mod drawing_picture;
 pub mod drawing_pictures;
 pub mod drawing_scene;
+mod drawing_table_paper;
 pub mod drawing_view;
 pub mod easyprint;
 pub mod frames;
