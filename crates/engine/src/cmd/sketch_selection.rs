@@ -143,7 +143,7 @@ fn kind(sketch: &Sketch, sel: &Sel) -> Option<Kind> {
 /// Collinear take two lines; Equal lines or circles and arcs; Tangent two curves that are not
 /// both lines; Concentric circles or arcs (or one and a point); Curvature a pair with a free-form
 /// curve; MidPoint and Polygon lines where they take curves; Coincident two points, lines or
-/// round curves, or a point with a line or round curve; Horizontal/Vertical a
+/// round curves, or a point with any curve; Horizontal/Vertical a
 /// single line. Entities of no sketch never fit.
 pub fn kinds_fit(command: &str, selection: &[Sel], sketch: &Sketch) -> bool {
     let Some(kinds) = selection.iter().map(|s| kind(sketch, s)).collect::<Option<Vec<Kind>>>() else { return false };
@@ -158,8 +158,8 @@ pub fn kinds_fit(command: &str, selection: &[Sel], sketch: &Sketch) -> bool {
         "horizontal_vertical" => n != 1 || l == 1,
         "midpoint" => p == n || l == n - p,
         // As the command takes them: two points, two lines, two circles or arcs, or a point with
-        // a line, circle or arc.
-        "coincident" => n == 2 && (p == 2 || l == 2 || r == 2 || (p == 1 && (l == 1 || r == 1))),
+        // any curve (a spline or ellipse too).
+        "coincident" => n == 2 && (p == 2 || l == 2 || r == 2 || (p == 1 && (l == 1 || r == 1 || c == 1))),
         "polygon" => l == n,
         _ => true,
     }
