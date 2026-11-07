@@ -384,6 +384,13 @@ impl<'w> GeomWriter<'w> {
                 });
                 self.w.add(name, &[s(), r(c3), list(items), m])
             }
+            Curve::Replica { parent, transform } => {
+                let c = self.curve_in(parent, 3);
+                let (x, y, z) = (self.direction(transform.x), self.direction(transform.y), self.direction(transform.z));
+                let o = self.point(transform.origin);
+                let t = self.w.add("CARTESIAN_TRANSFORMATION_OPERATOR_3D", &[s(), r(x), r(y), r(o), f(transform.scale), r(z)]);
+                self.w.add("CURVE_REPLICA", &[s(), r(c), r(t)])
+            }
             Curve::OffsetCurve3d { basis, distance, self_intersect, ref_direction } => {
                 let b = self.curve_in(basis, 3);
                 let d = self.direction(*ref_direction);

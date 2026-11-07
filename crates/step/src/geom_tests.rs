@@ -381,7 +381,11 @@ fn curve_replica_is_its_parent_moved_and_scaled() {
 #[test]
 fn curve_replica_scales_its_placement_with_the_file_units() {
     let inches = Units { len: 25.4, ang: 1.0 };
-    let c = curve("#20=CARTESIAN_POINT('',(1.,0.,0.));#21=CARTESIAN_TRANSFORMATION_OPERATOR_3D('',$,$,#20,$,$);#10=LINE('',#1,#12);#12=VECTOR('',#3,1.);#11=CURVE_REPLICA('',#10,#21);", 11, inches);
+    let c = curve(
+        "#20=CARTESIAN_POINT('',(1.,0.,0.));#21=CARTESIAN_TRANSFORMATION_OPERATOR_3D('',$,$,#20,$,$);#10=LINE('',#1,#12);#12=VECTOR('',#3,1.);#11=CURVE_REPLICA('',#10,#21);",
+        11,
+        inches,
+    );
     at_curve(&c, 1.0, [50.8, 0.0, 0.0]);
 }
 

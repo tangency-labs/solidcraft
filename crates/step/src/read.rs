@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use crate::geom::{
     Associated, Axis1, BSplineCurve, BSplineSurface, Curve, CurveForm, KnotSpec, Logical, P3, Pcurve, Placement, PreferredRep, Surface,
-    SurfaceCurveKind, SurfaceForm, Trim, TrimPreference, dot, norm, scale, sub,
+    SurfaceCurveKind, SurfaceForm, Transform, Trim, TrimPreference, cross, dot, norm, scale, sub,
 };
 use crate::p21::{Entity, Exchange, Param};
 
@@ -358,6 +358,40 @@ impl<'a> Reader<'a> {
         Ok(Axis1 { origin, direction })
     }
 
+    /// CARTESIAN_TRANSFORMATION_OPERATOR_3D, its axes made orthonormal as STEP derives them:
+    /// `Z` from `axis3` (default +Z), `X` from `axis1` made orthogonal to `Z`, `Y` = `Z` × `X`,
+    /// or its opposite (a mirror) when `axis2` points that way.
+    pub fn transform(&self, id: u64) -> R<Transform> {
+        let e = entity(self.ex, id)?;
+        if e.name() != "CARTESIAN_TRANSFORMATION_OPERATOR_3D" {
+            return Err(format!("not supported yet: transformation {}", e.name()));
+        }
+        let p = e.params();
+        let axis = |i: usize| p.get(i).and_then(Param::as_ref_id).map(|d| self.direction(d)).transpose();
+        let z = axis(5)?.unwrap_or([0.0, 0.0, 1.0]);
+        let x = match axis(1)? {
+            Some(a) => sub(a, scale(z, dot(a, z))),
+            None => {
+                let a = if z == [0.0, 0.0, 1.0] { [1.0, 0.0, 0.0] } else { [0.0, 0.0, 1.0] };
+                sub(a, scale(z, dot(a, z)))
+            }
+        };
+        let x = unit(x, &format!("#{id} axes"))?;
+        let mut y = cross(z, x);
+        if axis(2)?.is_some_and(|a| dot(a, y) < 0.0) {
+            y = scale(y, -1.0);
+        }
+        let origin = self.point(reference(p.get(3), "transformation origin")?)?;
+        let k = match p.get(4) {
+            Some(v) if v.as_f64().is_some() => num(Some(v), "transformation scale")?,
+            _ => 1.0,
+        };
+        if !(k > 0.0 && k.is_finite()) {
+            return Err(format!("#{id}: scale must be positive"));
+        }
+        Ok(Transform { origin, x, y, z, scale: k })
+    }
+
     /// A VECTOR: unit direction and magnitude (scaled as a length by `len`).
     fn vector_scaled(&self, id: u64, s: [f64; 3], dim: usize) -> R<(P3, f64)> {
         let e = entity(self.ex, id)?;
@@ -529,6 +563,11 @@ impl<'a> Reader<'a> {
                 let ref_direction = self.direction(reference(p.get(4), "offset curve direction")?)?;
                 Ok(Curve::OffsetCurve3d { basis, distance, self_intersect, ref_direction })
             }
+            "CURVE_REPLICA" if dim == 3 => {
+                let parent = self.curve_in(reference(p.get(1), "curve replica parent")?, depth + 1)?;
+                let transform = self.transform(reference(p.get(2), "curve replica transformation")?)?;
+                Ok(Curve::Replica { parent, transform })
+            }
             n => Err(format!("not supported yet: curve {n}{}", if dim == 2 { " in parameter space" } else { "" })),
         }
     }
@@ -585,6 +624,7 @@ impl<'a> Reader<'a> {
         match c {
             Curve::Circle { .. } | Curve::Ellipse { .. } => ParamKind::Angle,
             Curve::Trimmed { basis, .. } | Curve::OffsetCurve3d { basis, .. } => Self::curve_param_kind(basis),
+            Curve::Replica { parent, .. } => Self::curve_param_kind(parent),
             Curve::SurfaceCurve { curve_3d, .. } => Self::curve_param_kind(curve_3d),
             _ => ParamKind::Plain,
         }
