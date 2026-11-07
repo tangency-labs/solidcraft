@@ -290,7 +290,8 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
   `my-agent --acp`. SolidCraft starts it directly, not through a shell.
 - **OpenAI-compatible API:** a preset (Ollama `http://localhost:11434/v1`, LM Studio
   `http://localhost:1234/v1`, OpenClaw `http://localhost:18789/v1`, OpenAI, Mistral AI
-  `https://api.mistral.ai/v1`, Mammouth AI `https://api.mammouth.ai/v1`,
+  `https://api.mistral.ai/v1`, Google Gemini `https://generativelanguage.googleapis.com/v1beta/openai`,
+  Mammouth AI `https://api.mammouth.ai/v1`,
   OpenCode Go `https://opencode.ai/zen/go/v1`, DeepSeek `https://api.deepseek.com`,
   Qwen `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`, Cheaper Inference
   `https://api.cheaperinference.com/v1`, OpenRouter
