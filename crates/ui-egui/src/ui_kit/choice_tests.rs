@@ -423,8 +423,8 @@ fn a_checkbox_grid_gives_up_columns_for_labels_that_do_not_fit() {
     assert_eq!(fits(&[100.0, 240.0], 300.0, 2), 1, "a long German label");
     assert_eq!(fits(&[100.0, 400.0], 300.0, 2), 1, "one column is the least, even when nothing fits");
     // Three columns step down to two before one.
-    assert_eq!(fits(&[60.0, 80.0, 70.0], 300.0, 3), 3);
-    assert_eq!(fits(&[60.0, 130.0, 70.0], 300.0, 3), 2);
-    assert_eq!(fits(&[60.0, 130.0, 70.0], 300.0, 1), 1, "a single column stays one");
+    assert_eq!(fits(&[50.0, 70.0, 60.0], 300.0, 3), 3);
+    assert_eq!(fits(&[50.0, 120.0, 60.0], 300.0, 3), 2);
+    assert_eq!(fits(&[50.0, 120.0, 60.0], 300.0, 1), 1, "a single column stays one");
     assert_eq!(fits(&[], 300.0, 2), 2, "no labels, no change");
 }
