@@ -1361,13 +1361,18 @@ mod tests {
             assert_eq!(r["bytes"].as_u64(), Some(bytes.len() as u64), "{cmd}");
             assert!(bytes.starts_with(signature), "{cmd}");
         }
-        // The triangles `file.export` writes (the 80-byte header holds the file's name): a box is
-        // 12 triangles, 84 + 50 bytes each.
+        // The triangles `file.export` writes (the 80-byte header holds the file's name), 84 + 50
+        // bytes each. The mesher lays each planar face out as a regular grid whose sides are at
+        // most a fifth of the body's diagonal (kernel test `a_box_is_a_regular_grid_on_every_face`):
+        // 22.9 / 5 = 4.58 mm, so 5 × 3 × 2 cells along 20 × 10 × 5, two triangles each.
         s.execute("file.export", &json!({"path": at("box.stl")})).unwrap();
         assert_eq!(std::fs::read(at("StlBinary.txt")).unwrap()[80..], std::fs::read(at("box.stl")).unwrap()[80..]);
-        assert_eq!(std::fs::metadata(at("box.stl")).unwrap().len(), 84 + 50 * 12);
+        let triangles = 2 * 2 * (5 * 3 + 5 * 2 + 3 * 2);
+        let stl = std::fs::read(at("box.stl")).unwrap();
+        assert_eq!(u32::from_le_bytes([stl[80], stl[81], stl[82], stl[83]]), u32::try_from(triangles).unwrap());
+        assert_eq!(stl.len(), 84 + 50 * triangles);
         let obj = std::fs::read_to_string(at("Obj.txt")).unwrap();
-        assert_eq!(obj.lines().filter(|l| l.starts_with("f ")).count(), 12, "{obj}");
+        assert_eq!(obj.lines().filter(|l| l.starts_with("f ")).count(), triangles, "{obj}");
         let r = s.execute("file.export_urdf", &json!({"path": at("robot.urdf")})).unwrap();
         assert_eq!(r["format"], "Urdf");
         assert!(std::fs::read_to_string(at("robot.urdf")).unwrap().contains("<robot"));
