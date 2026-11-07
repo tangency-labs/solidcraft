@@ -54,7 +54,9 @@ use solidcraft_doc::drawing::dimension::{Dimension, LabelKind, MAX_DECIMALS, rea
 use solidcraft_doc::drawing::fold::{FoldFor, FoldRefusal, FoldSide, auxiliary_side};
 use solidcraft_doc::drawing::note::Note;
 use solidcraft_doc::drawing::thread_lines::{ThreadPiece, ThreadStroke};
-use solidcraft_doc::drawing::view::{Beside, ResolvedView, SetBy, Setting, View, ViewKind, ViewLabel, ViewPlace, check_occurrence_paths, check_pose};
+use solidcraft_doc::drawing::view::{
+    Beside, LeftOut, ResolvedView, SetBy, Setting, View, ViewKind, ViewLabel, ViewPlace, check_occurrence_paths, check_pose,
+};
 use solidcraft_doc::drawing_view::{
     Exploded, JointPose, Looking, MAX_POSE_JOINTS, OccurrencePaths, Pose, StudyStep, TangentEdges, ViewConfiguration, ViewDirection, ViewOverrides,
 };
@@ -73,7 +75,7 @@ use solidcraft_render::VisualStyle;
 
 use super::CommandSpec;
 use crate::drawing_view::{
-    CHORD_RANGE, Extents, LeftOut, LineRequest, Lines, NOTHING_CHOSEN, OnSheet, PreparedBodies, Room, ShownSet, Styles, Unmeasured, ViewSessions,
+    CHORD_RANGE, Extents, LineRequest, Lines, NOTHING_CHOSEN, OnSheet, PreparedBodies, Room, ShownSet, Styles, Unmeasured, ViewSessions,
 };
 use crate::params::bad;
 use crate::schema::drawing_view::{
@@ -426,12 +428,12 @@ pub(super) fn check_drawn<'a>(record: &Drawing, view: u64, paths: impl IntoItera
     }
 }
 
-/// Why view `view` of `record` doesn't draw the first of `paths` it leaves out, in words ([`left_out`]);
+/// Why view `view` of `record` doesn't draw the first of `paths` it leaves out, in words ([`ResolvedView::left_out`]);
 /// nothing when it draws them all, or for a view that can't be resolved, which its own reply reports.
 /// The view is resolved once, however many paths there are.
 fn not_drawn<'a>(record: &Drawing, view: u64, paths: impl IntoIterator<Item = &'a [u64]>) -> Option<String> {
     let resolved = record.resolve_view(view).ok()?;
-    let left = paths.into_iter().find_map(|path| crate::drawing_view::left_out(&resolved, path))?;
+    let left = paths.into_iter().find_map(|path| resolved.left_out(path))?;
     Some(match left {
         LeftOut::Hidden { by, set_by } => format!("its hide leaves out occurrence path {by:?}{}", set_on(set_by)),
         LeftOut::NotChosen { set_by } => format!("its source draws only the occurrences it chose{}", set_on(set_by)),

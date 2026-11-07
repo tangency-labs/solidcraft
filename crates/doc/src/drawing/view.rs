@@ -33,7 +33,7 @@
 //! ([`is_paper_coordinate`]); a view's occurrence paths keep [`check_occurrence_paths`]; at most
 //! [`MAX_VIEWS`] views, listed by id ([`Drawing::add_views`]).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -537,6 +537,41 @@ pub fn check_pose(pose: &Pose) -> Result<()> {
     })?;
     let listed: BTreeSet<u64> = joints.iter().map(|j| j.joint).collect();
     require(listed.len() == joints.len(), || "a position lists each joint once".into())
+}
+
+/// Whether a body placed by `path` is drawn: under a `source` path (`[]` only for the design's own
+/// bodies) and under no `hide` path. Each of the path's heads is one look-up, so a body costs at
+/// most 64 of them however many paths there are.
+pub fn chosen(path: &[u64], source: Option<&HashSet<&[u64]>>, hide: &HashSet<&[u64]>) -> bool {
+    let heads = || (1..=path.len()).filter_map(|n| path.get(..n));
+    let wanted = source.is_none_or(|set| if path.is_empty() { set.contains(path) } else { heads().any(|h| set.contains(h)) });
+    wanted && !heads().any(|h| hide.contains(h))
+}
+
+/// Why a saved view doesn't draw what an occurrence path places ([`ResolvedView::left_out`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LeftOut {
+    /// A `hide` path covers it: that path, and the view that set it.
+    Hidden { by: Vec<u64>, set_by: SetBy },
+    /// No `source` path takes it: the view that set the source.
+    NotChosen { set_by: SetBy },
+}
+
+impl ResolvedView {
+    /// Why this view doesn't draw the body that occurrence path `path` places, if it doesn't:
+    /// [`chosen`] asked about one path, with the `hide` path that covers it. No model is read.
+    pub fn left_out(&self, path: &[u64]) -> Option<LeftOut> {
+        let source: Option<HashSet<&[u64]>> = self.occurrences.value.as_deref().map(|paths| paths.iter().map(Vec::as_slice).collect());
+        let hide: HashSet<&[u64]> = self.hide.value.as_deref().unwrap_or_default().iter().map(Vec::as_slice).collect();
+        if chosen(path, source.as_ref(), &hide) {
+            return None;
+        }
+        let by = (1..=path.len()).filter_map(|n| path.get(..n)).find(|head| hide.contains(head));
+        Some(match by {
+            Some(by) => LeftOut::Hidden { by: by.to_vec(), set_by: self.hide.set_by },
+            None => LeftOut::NotChosen { set_by: self.occurrences.set_by },
+        })
+    }
 }
 
 /// The views from `id` up to its base view, nearest first, each found by `find`: refused when a
