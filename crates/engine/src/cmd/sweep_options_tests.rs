@@ -3,7 +3,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use std::f64::consts::PI;
+use std::f64::consts::{FRAC_1_SQRT_2, PI};
 
 use serde_json::{Value, json};
 
@@ -219,37 +219,36 @@ fn a_sweep_round_a_closed_body_edge_path_starts_where_the_profile_is() {
     run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [2, 1.5]}));
     run(&mut s, "sketch.finish", json!({}));
     // The path: the loop's eight edges, one point on each, in order round it.
-    let c = 8.0 * 0.70710678118654752;
-    run(&mut s, "solid.sweep", json!({
-        "sketch": "Prof",
-        "path_body": "Slab",
-        "path_edges": [
-            [-11.0, -20.0, 10.0],
-            [22.0 + c, -12.0 - c, 10.0],
-            [30.0, 0.0, 10.0],
-            [22.0 + c, 12.0 + c, 10.0],
-            [-11.0, 20.0, 10.0],
-            [-22.0 - c, 12.0 + c, 10.0],
-            [-30.0, 0.0, 10.0],
-            [-22.0 - c, -12.0 - c, 10.0]
-        ],
-        "operation": "new",
-        "body_name": "Tube"
-    }));
+    let c = 8.0 * FRAC_1_SQRT_2;
+    run(
+        &mut s,
+        "solid.sweep",
+        json!({
+            "sketch": "Prof",
+            "path_body": "Slab",
+            "path_edges": [
+                [-11.0, -20.0, 10.0],
+                [22.0 + c, -12.0 - c, 10.0],
+                [30.0, 0.0, 10.0],
+                [22.0 + c, 12.0 + c, 10.0],
+                [-11.0, 20.0, 10.0],
+                [-22.0 - c, 12.0 + c, 10.0],
+                [-30.0, 0.0, 10.0],
+                [-22.0 - c, -12.0 - c, 10.0]
+            ],
+            "operation": "new",
+            "body_name": "Tube"
+        }),
+    );
     let m = measure(&s, "Tube");
     // Pappus: the profile's area (4 x 3) times the loop's length.
     let want = 12.0 * (2.0 * 44.0 + 2.0 * 24.0 + 4.0 * (PI / 2.0) * 8.0);
     assert!((m.volume - want).abs() < want * 1e-3, "{} vs {want}", m.volume);
     // The tube stays on the loop: within the profile's half width (2) of it, the loop's own
     // bounds (-30..30 by -20..20) grown by it.
-    for (got, want) in [
-        (m.bbox.min.x, -32.0),
-        (m.bbox.max.x, 32.0),
-        (m.bbox.min.y, -22.0),
-        (m.bbox.max.y, 22.0),
-        (m.bbox.min.z, 8.5),
-        (m.bbox.max.z, 11.5),
-    ] {
+    for (got, want) in
+        [(m.bbox.min.x, -32.0), (m.bbox.max.x, 32.0), (m.bbox.min.y, -22.0), (m.bbox.max.y, 22.0), (m.bbox.min.z, 8.5), (m.bbox.max.z, 11.5)]
+    {
         assert!((got - want).abs() < 0.08, "{:?}", m.bbox);
     }
 }
