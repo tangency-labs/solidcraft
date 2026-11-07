@@ -576,3 +576,19 @@ fn a_hole_placed_on_another_parts_face_drills_its_own_part_behind_it() {
     assert!(hole_direction(&opened, "H").z > 0.999);
     drilled_base_only(&mut opened);
 }
+
+/// #11538: a sketch on an offset plane inside the part is where the hole starts, not the part's
+/// top face above it. A 5 mm blind hole from z 12 removes z 7..12.
+#[test]
+fn hole_from_a_sketch_on_an_offset_plane_inside_the_part_starts_at_the_plane() {
+    let mut s = Session::default();
+    box_part(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": "12 mm", "name": "Pts"}));
+    run(&mut s, "sketch.point", json!({"point": [20, 20], "id": "p1"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let base = volume(&mut s);
+    drill(&mut s, &["p1".to_string()], json!({"depth": 5}));
+    // The tool runs a hair past its start, so the walls are checked, not the volume.
+    assert!(solid_at(&s, 20.0, 20.0, 6.5) && !solid_at(&s, 20.0, 20.0, 7.5) && !solid_at(&s, 20.0, 20.0, 11.5));
+    assert!(solid_at(&s, 20.0, 20.0, 14.5) && solid_at(&s, 20.0, 20.0, 18.0) && base - volume(&mut s) < pi() * 25.0 * 6.0);
+}
