@@ -29,7 +29,6 @@ joint.reach
 joint.rigid_group
 joint.screw
 joint.sweep
-mesh.convert
 motion.export_animation
 motion.interference
 motion.plot
