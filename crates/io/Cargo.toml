@@ -32,6 +32,9 @@ encoding_rs = { workspace = true }
 cadmpeg-core = { workspace = true }
 cadmpeg-ir = { workspace = true }
 cadmpeg-registry = { workspace = true }
+# Gerber (RS-274X) parsing for PCB import (src/gerber.rs); pure Rust, MIT OR Apache-2.0, and
+# gives the full command set (apertures, regions, macros) later slices need for copper layers.
+gerber_parser = { version = "0.5.0", default-features = false }
 
 # The model cache's key (build.rs).
 [build-dependencies]

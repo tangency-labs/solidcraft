@@ -20,6 +20,7 @@ macro_rules! planned {
     };
 }
 
+mod board_import;
 mod bom;
 pub(crate) mod browser;
 pub(crate) mod clearance;
@@ -358,6 +359,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(parameters::COMMANDS.iter());
     v.extend(parameter_sweep::COMMANDS.iter());
     v.extend(file::COMMANDS.iter());
+    v.extend(board_import::COMMANDS.iter());
     v.extend(print_face::COMMANDS.iter());
     v.extend(metadata::COMMANDS.iter());
     v.extend(inspect::COMMANDS.iter());
