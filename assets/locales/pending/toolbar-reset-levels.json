@@ -1,0 +1,58 @@
+{
+  "en": {
+    "toolbar.reset": "Reset",
+    "toolbar.reset_all_tabs": "Reset All Tabs",
+    "toolbar.reset_all_tabs_confirm": "Put the buttons of every toolbar tab back to their defaults? Hidden tabs stay hidden.",
+    "toolbar.reset_tab": "Reset This Tab",
+    "toolbar.reset_tab_confirm": "Put the buttons of the {tab} tab back to their defaults?"
+  },
+  "ar": {
+    "toolbar.reset": "إعادة تعيين",
+    "toolbar.reset_all_tabs": "إعادة تعيين كل التبويبات",
+    "toolbar.reset_all_tabs_confirm": "هل تريد إعادة أزرار كل تبويبات شريط الأدوات إلى إعداداتها الافتراضية؟ تبقى التبويبات المخفية مخفية.",
+    "toolbar.reset_tab": "إعادة تعيين هذا التبويب",
+    "toolbar.reset_tab_confirm": "هل تريد إعادة أزرار تبويب {tab} إلى إعداداتها الافتراضية؟"
+  },
+  "de": {
+    "toolbar.reset": "Zurücksetzen",
+    "toolbar.reset_all_tabs": "Alle Registerkarten zurücksetzen",
+    "toolbar.reset_all_tabs_confirm": "Die Schaltflächen aller Registerkarten der Werkzeugleiste auf die Standardwerte zurücksetzen? Ausgeblendete Registerkarten bleiben ausgeblendet.",
+    "toolbar.reset_tab": "Diese Registerkarte zurücksetzen",
+    "toolbar.reset_tab_confirm": "Die Schaltflächen der Registerkarte {tab} auf die Standardwerte zurücksetzen?"
+  },
+  "he": {
+    "toolbar.reset": "איפוס",
+    "toolbar.reset_all_tabs": "איפוס כל הלשוניות",
+    "toolbar.reset_all_tabs_confirm": "להחזיר את הלחצנים של כל לשוניות סרגל הכלים לברירת המחדל? לשוניות מוסתרות יישארו מוסתרות.",
+    "toolbar.reset_tab": "איפוס הלשונית הזו",
+    "toolbar.reset_tab_confirm": "להחזיר את הלחצנים של לשונית {tab} לברירת המחדל?"
+  },
+  "ja": {
+    "toolbar.reset": "リセット",
+    "toolbar.reset_all_tabs": "すべてのタブをリセット",
+    "toolbar.reset_all_tabs_confirm": "ツールバーのすべてのタブのボタンを既定に戻しますか？非表示のタブは非表示のままです。",
+    "toolbar.reset_tab": "このタブをリセット",
+    "toolbar.reset_tab_confirm": "{tab} タブのボタンを既定に戻しますか？"
+  },
+  "ko": {
+    "toolbar.reset": "재설정",
+    "toolbar.reset_all_tabs": "모든 탭 재설정",
+    "toolbar.reset_all_tabs_confirm": "도구 모음의 모든 탭 버튼을 기본값으로 되돌릴까요? 숨긴 탭은 계속 숨겨집니다.",
+    "toolbar.reset_tab": "이 탭 재설정",
+    "toolbar.reset_tab_confirm": "{tab} 탭의 버튼을 기본값으로 되돌릴까요?"
+  },
+  "vi": {
+    "toolbar.reset": "Đặt lại",
+    "toolbar.reset_all_tabs": "Đặt lại tất cả các thẻ",
+    "toolbar.reset_all_tabs_confirm": "Đưa các nút của mọi thẻ trên thanh công cụ về mặc định? Các thẻ đang ẩn vẫn được ẩn.",
+    "toolbar.reset_tab": "Đặt lại thẻ này",
+    "toolbar.reset_tab_confirm": "Đưa các nút của thẻ {tab} về mặc định?"
+  },
+  "zh": {
+    "toolbar.reset": "重置",
+    "toolbar.reset_all_tabs": "重置所有选项卡",
+    "toolbar.reset_all_tabs_confirm": "将工具栏所有选项卡的按钮恢复为默认值？隐藏的选项卡仍保持隐藏。",
+    "toolbar.reset_tab": "重置此选项卡",
+    "toolbar.reset_tab_confirm": "将 {tab} 选项卡的按钮恢复为默认值？"
+  }
+}
