@@ -115,6 +115,9 @@ pub fn reading_label(kind: LabelKind, value: f64, units: &str, decimals: u8) -> 
 pub const MAX_DIMENSIONS: usize = 10_000;
 /// The most decimals a dimension shows.
 pub const MAX_DECIMALS: u8 = 6;
+/// How many decimals a new dimension or hole callout shows unless told: the length-decimals
+/// preference's default, one constant for both so a callout and a dimension on one sheet read alike.
+pub const DEFAULT_DECIMALS: u8 = 2;
 /// The most candidates an ambiguous dimension lists.
 pub const MAX_CANDIDATES: usize = 16;
 /// The longest text shown instead of a dimension's number, in bytes.
