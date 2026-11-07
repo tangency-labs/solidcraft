@@ -88,6 +88,19 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         }
                     }
                 });
+                // The glow behind text on see-through panels.
+                let label = app.tr("prefs.text_glow");
+                ui_kit::row(ui, label, |ui| {
+                    let response = ui_kit::named_control(ui, label, |ui| {
+                        ui_kit::slider(
+                            ui,
+                            &mut app.preferences.text_glow,
+                            0.0..=1.0,
+                            ui_kit::Slider { step: Some(0.05), format: |v| format!("{:.0} %", v * 100.0), ..Default::default() },
+                        )
+                    });
+                    crate::scenario::publish_target("prefs:text_glow", response.rect);
+                });
                 // A picture of the user's behind the model.
                 let label = app.tr("prefs.background_image");
                 ui_kit::row(ui, label, |ui| {
