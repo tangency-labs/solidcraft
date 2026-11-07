@@ -2013,6 +2013,250 @@ fn an_edge_flange_is_refused_on_the_bend_line_of_a_flange() {
     assert!(volume(&mut s) > before);
 }
 
+/// A 150 x 100 base (2 mm sheet, 2 mm bend radius) for the set-back tests, and the volume of
+/// one 90° bend with its straight leg per millimetre of flange: the quarter ring
+/// `pi/4 x ((2 + 2)^2 - 2^2)` and a leg of `height - 4` (the setback of an inside bend is the
+/// virtual sharp, `(r + t) x tan(45°)` = 4 mm).
+fn setback_sheet(s: &mut Session) {
+    run(
+        s,
+        "sheet.manage_rules",
+        json!({"name": "Demo", "thickness": "2 mm", "bend_radius": "2 mm", "gap": "0.5 mm", "k_factor": "0.4", "active": true}),
+    );
+    base(s, 150.0, 100.0);
+}
+
+fn bend_section(height: f64) -> f64 {
+    PI / 4.0 * 12.0 + (height - 4.0) * 2.0
+}
+
+/// One bend relief of the rule (a slot `relief_width` = 2 mm wide, from `relief_depth` = 1 mm
+/// before the bend line to the 4 mm strip beyond it that the flange leaves standing), 2 mm thick.
+const RELIEF_SLOT: f64 = 2.0 * (1.0 + 4.0) * 2.0;
+
+/// An edge flange stops short of the start and of the end of its edge by the set-backs, from
+/// either end: its bend is that much shorter, the strip it bends from is taken from the base
+/// only along it, and the bend ends beside more of the base get the rule's relief. One feature,
+/// one undo step.
+#[test]
+fn an_edge_flange_can_stop_short_of_the_ends_of_its_edge() {
+    let mut s = Session::default();
+    setback_sheet(&mut s);
+    let features = s.doc.features.len();
+    // The edge at x = 0 runs from (0, 100) to (0, 0): its start is the end at y = 100.
+    let edge = json!([[0, 50, 2]]);
+    run(&mut s, "sheet.flange", json!({"edges": edge, "height": 40}));
+    assert!(rel(volume(&mut s), 30000.0 - 4.0 * 100.0 * 2.0 + 100.0 * bend_section(40.0)) < 1e-6);
+    run(&mut s, "edit.undo", json!({}));
+
+    for (label, start, end, from_y, to_y, reliefs) in [
+        ("both", Some("10 mm"), Some("20 mm"), 90.0, 20.0, 2.0),
+        ("start only", Some("10 mm"), None, 90.0, 0.0, 1.0),
+        ("end only", None, Some("20 mm"), 100.0, 20.0, 1.0),
+    ] {
+        let mut params = json!({"edges": edge, "height": 40});
+        if let Some(v) = start {
+            params["start_setback"] = json!(v);
+        }
+        if let Some(v) = end {
+            params["end_setback"] = json!(v);
+        }
+        run(&mut s, "sheet.flange", params);
+        assert_eq!(s.doc.features.len(), features + 1, "{label}: one feature");
+        let flat = flat(&mut s);
+        let bends = flat["bends"].as_array().cloned().unwrap_or_default();
+        assert_eq!(bends.len(), 1, "{label}");
+        let (len, a, b) = (from_y - to_y, from_y, to_y);
+        assert!((bends[0]["length"].as_f64().unwrap_or(0.0) - len).abs() < 1e-6, "{label}: {}", bends[0]);
+        assert!((bends[0]["start"][1].as_f64().unwrap_or(0.0) - a).abs() < 1e-6, "{label}: {}", bends[0]);
+        assert!((bends[0]["end"][1].as_f64().unwrap_or(0.0) - b).abs() < 1e-6, "{label}: {}", bends[0]);
+        assert_eq!(flat["outline"].as_array().map(Vec::len), Some(1), "{label}: the flat pattern is one piece");
+        let want = 30000.0 - 4.0 * len * 2.0 + len * bend_section(40.0) - reliefs * RELIEF_SLOT;
+        assert!(rel(volume(&mut s), want) < 1e-6, "{label}: {} vs {want}", volume(&mut s));
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(s.doc.features.len(), features, "{label}: one undo takes it away");
+    }
+}
+
+/// The same on the end edge of a wall: a flange on the side edge of another flange stops short
+/// of its ends, the wall is notched only along it and relieved beside it.
+#[test]
+fn an_edge_flange_on_a_wall_can_stop_short_of_its_edge_too() {
+    let mut s = Session::default();
+    setback_sheet(&mut s);
+    run(&mut s, "sheet.flange", json!({"edges": [[0, 50, 2]], "height": 40}));
+    let wall = volume(&mut s);
+    // The end edge is 36 mm long (the wall is 40 high, less its 4 mm setback). A tab 30 high.
+    for (label, start, end, len, reliefs) in
+        [("both", "5 mm", "10 mm", 21.0, 2.0), ("start only", "8 mm", "0", 28.0, 1.0), ("end only", "0", "8 mm", 28.0, 1.0)]
+    {
+        let before = s.doc.features.len();
+        run(&mut s, "sheet.flange", json!({"edges": [[1, 0, 20]], "height": 30, "start_setback": start, "end_setback": end}));
+        let flat = flat(&mut s);
+        let bends = flat["bends"].as_array().cloned().unwrap_or_default();
+        let tab = bends.last().cloned().unwrap_or_default();
+        assert!((tab["length"].as_f64().unwrap_or(0.0) - len).abs() < 1e-6, "{label}: {tab}");
+        assert_eq!(flat["outline"].as_array().map(Vec::len), Some(1), "{label}: the flat pattern is one piece");
+        // Where the tab reaches the base end of the wall, the wall's own bend is shortened by 4 mm
+        // as it is by a flange along the whole edge.
+        let shortened = if label == "start only" { PI / 4.0 * 12.0 * 4.0 } else { 0.0 };
+        let want = wall + len * bend_section(30.0) - 4.0 * len * 2.0 - reliefs * RELIEF_SLOT - shortened;
+        assert!(rel(volume(&mut s), want) < 1e-6, "{label}: {} vs {want}", volume(&mut s));
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(s.doc.features.len(), before, "{label}");
+    }
+}
+
+/// Set-backs are lengths, so a parameter drives them; edges that meet at a corner each stop short
+/// at their own ends, and a set-back that is negative, or leaves nothing of the edge, is refused
+/// with the design left as it was.
+#[test]
+fn flange_set_backs_follow_parameters_and_bad_ones_are_refused() {
+    let mut s = Session::default();
+    setback_sheet(&mut s);
+    run(&mut s, "parameters.add", json!({"name": "Inset", "expression": "10 mm"}));
+    run(&mut s, "sheet.flange", json!({"edges": [[0, 50, 2]], "height": 40, "start_setback": "Inset", "end_setback": "Inset * 2"}));
+    let length = |s: &mut Session| flat(s)["bends"][0]["length"].as_f64().unwrap_or(0.0);
+    assert!((length(&mut s) - 70.0).abs() < 1e-6);
+    run(&mut s, "parameters.change", json!({"name": "Inset", "expression": "5 mm"}));
+    assert!((length(&mut s) - 85.0).abs() < 1e-6, "the bend follows the parameter");
+    // The parameter change, then the flange.
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+
+    // Four edges, each stopping 10 mm short of both its ends: four bends, 80 and 130 long.
+    let four = json!([[0, 50, 2], [75, 0, 2], [150, 50, 2], [75, 100, 2]]);
+    run(&mut s, "sheet.flange", json!({"edges": four, "height": 30, "start_setback": "10 mm", "end_setback": "10 mm"}));
+    let mut lengths: Vec<f64> = flat(&mut s)["bends"].as_array().into_iter().flatten().filter_map(|b| b["length"].as_f64()).collect();
+    lengths.sort_by(f64::total_cmp);
+    assert_eq!(lengths, [80.0, 80.0, 130.0, 130.0]);
+    run(&mut s, "edit.undo", json!({}));
+
+    let features = s.doc.features.len();
+    for (params, why) in [
+        (json!({"edges": [[0, 50, 2]], "height": 30, "start_setback": "-1 mm"}), "zero or more"),
+        (json!({"edges": [[0, 50, 2]], "height": 30, "end_setback": "100 mm"}), "nothing of the edge"),
+        (json!({"edges": [[0, 50, 2]], "height": 30, "start_setback": "60 mm", "end_setback": "40 mm"}), "nothing of the edge"),
+        (json!({"edges": [[0, 50, 2]], "height": 30, "start_setback": "banana"}), "start_setback"),
+        (json!({"sketch": "Base", "start_setback": "5 mm"}), "only for edge flanges"),
+    ] {
+        let r = s.execute("sheet.flange", &params);
+        assert!(r.as_ref().is_err_and(|e| e.to_string().contains(why)), "{params}: {r:?}");
+        assert_eq!(s.doc.features.len(), features, "{params}: the design is as it was");
+    }
+}
+
+/// A return, a flange on the far (top) edge of a wall, stops short of the ends of that edge too:
+/// the wall keeps its top edge beyond the flange, is relieved beside the bend's ends, and its
+/// panel is not shortened where the return does not stand.
+#[test]
+fn a_return_on_a_wall_can_stop_short_of_its_edge_too() {
+    let mut s = Session::default();
+    setback_sheet(&mut s);
+    run(&mut s, "sheet.flange", json!({"edges": [[0, 50, 2]], "height": 40}));
+    let wall = volume(&mut s);
+    // The wall's top edge is 100 mm long and runs the way the base edge does: its start is at y = 100.
+    run(&mut s, "sheet.flange", json!({"edges": [[1, 50, 39]], "height": 20, "start_setback": "10 mm", "end_setback": "20 mm"}));
+    let flat = flat(&mut s);
+    let bends = flat["bends"].as_array().cloned().unwrap_or_default();
+    let tab = bends.last().cloned().unwrap_or_default();
+    assert!((tab["length"].as_f64().unwrap_or(0.0) - 70.0).abs() < 1e-6, "{tab}");
+    assert!((tab["start"][1].as_f64().unwrap_or(0.0) - 90.0).abs() < 1e-6, "{tab}");
+    assert!((tab["end"][1].as_f64().unwrap_or(0.0) - 20.0).abs() < 1e-6, "{tab}");
+    assert_eq!(flat["outline"].as_array().map(Vec::len), Some(1), "the flat pattern is one piece");
+    let want = wall + 70.0 * bend_section(20.0) - 4.0 * 70.0 * 2.0 - 2.0 * RELIEF_SLOT;
+    assert!(rel(volume(&mut s), want) < 1e-6, "{} vs {want}", volume(&mut s));
+}
+
+/// A flange with set-backs splits its edge in two: a 10 mm tab at y 31.5–41.5 on the right edge
+/// of a 200 x 390 base (1 mm, R 1) leaves that edge as y 0–30.5 and 42.5–390 beside its
+/// reliefs. A later flange picked on that edge stands on the stretch the pick is on, not on the
+/// one whose middle is nearest the pick, and its set-backs come off that stretch.
+#[test]
+fn a_flange_on_an_edge_that_set_backs_split_stands_on_the_stretch_picked() {
+    let tabbed = || {
+        let mut s = Session::default();
+        for (id, p) in [
+            ("sheet.manage_rules", json!({"name": "S1", "thickness": "1", "bend_radius": "1", "k_factor": 0.44, "active": true})),
+            ("sketch.create", json!({"plane": "XY", "name": "B"})),
+            ("sketch.line", json!({"points": [[0, 0], [200, 0], [200, 390], [0, 390]], "closed": true})),
+            ("sketch.finish", json!({})),
+            ("sheet.flange", json!({"sketch": "B"})),
+            ("sheet.flange", json!({"edges": [[200, 36.5, 1]], "height": 10, "start_setback": "31.5 mm", "end_setback": "348.5 mm"})),
+        ] {
+            run(&mut s, id, p);
+        }
+        s
+    };
+    // The y the last bend in the flat pattern runs between, low to high, and whether the flat
+    // pattern is one piece.
+    let span = |s: &mut Session| {
+        let flat = flat(s);
+        let bend = flat["bends"].as_array().and_then(|b| b.last()).cloned().unwrap_or_default();
+        let (a, b) = (bend["start"][1].as_f64().unwrap_or(f64::NAN), bend["end"][1].as_f64().unwrap_or(f64::NAN));
+        ((a.min(b), a.max(b)), flat["outline"].as_array().map(Vec::len) == Some(1))
+    };
+    let near = |(lo, hi): (f64, f64), want: (f64, f64)| (lo - want.0).abs() < 1e-6 && (hi - want.1).abs() < 1e-6;
+    let (tab, _) = span(&mut tabbed());
+    assert!(near(tab, (31.5, 41.5)), "the tab: {tab:?}");
+    // The edge runs up (counter-clockwise), so a stretch's start is its lower end.
+    for (y, start, end, want) in [
+        (50.0, None, None, (42.5, 390.0)),
+        (200.0, None, None, (42.5, 390.0)),
+        (385.0, None, None, (42.5, 390.0)),
+        (15.0, None, None, (0.0, 30.5)),
+        (29.0, None, None, (0.0, 30.5)),
+        (50.0, Some("10 mm"), Some("20 mm"), (52.5, 370.0)),
+        (300.0, Some("10 mm"), Some("20 mm"), (52.5, 370.0)),
+        (3.0, Some("5 mm"), Some("5 mm"), (5.0, 25.5)),
+        (29.0, Some("5 mm"), Some("5 mm"), (5.0, 25.5)),
+    ] {
+        let mut s = tabbed();
+        let mut p = json!({"edges": [[200, y, 1]], "height": 10});
+        if let (Some(start), Some(end)) = (start, end) {
+            p["start_setback"] = json!(start);
+            p["end_setback"] = json!(end);
+        }
+        run(&mut s, "sheet.flange", p);
+        let (bend, whole) = span(&mut s);
+        assert!(near(bend, want), "picked at y {y} with set-backs {start:?}, {end:?}: the bend runs {bend:?}, not {want:?}");
+        assert!(whole, "picked at y {y}: the flat pattern is one piece");
+    }
+}
+
+/// Set-backs on a flange panel with curves are refused for now, by name, and leave the design as
+/// it was: here the panel past a fold across a spline (#10922). A flange along that panel's whole
+/// straight edge still goes on, the panel giving way to its 0.001 mm chords.
+#[test]
+fn set_backs_on_a_curved_flange_panel_are_refused() {
+    let open = [
+        ("sketch.spline.fit_point", json!({"points": [[-60, 0], [-30, 45], [10, 30], [60, 50]]})),
+        ("sketch.line", json!({"points": [[60, 50], [60, -30], [-60, -30], [-60, 0]]})),
+    ];
+    let mut s = Session::default();
+    t2_curved_blank(&mut s, &open, "0.4");
+    // The side past x = 7 folds up with the spline. Its far edge (x = 60 flat, y −30 … 50) stands
+    // at the top, its outer face R + T past where the side that stays ends, BA / 2 short of 7.
+    run(&mut s, "sheet.fold", json!({"points": [[7, -200, 2], [7, 200, 2]], "fixed": [-50, 0, 2]}));
+    let high = bbox(&mut s)["max"][2].as_f64().unwrap_or(f64::NAN);
+    let edge = json!([[7.0 - FRAC_PI_2 * 0.9 + 3.0, 10, high]]);
+    let features = s.doc.features.len();
+    let r = s.execute("sheet.flange", &json!({"edges": edge, "height": 20, "start_setback": "10 mm", "end_setback": "20 mm"}));
+    assert!(r.as_ref().is_err_and(|e| e.to_string().contains("set-backs on a curved flange panel")), "{r:?}");
+    assert_eq!(s.doc.features.len(), features, "the design is as it was");
+    run(&mut s, "sheet.flange", json!({"edges": edge, "height": 20}));
+    let (v, f) = (volume(&mut s), flat(&mut s));
+    // Its bend runs on the line the panel was trimmed back to (the setback, 3 mm in from x = 60),
+    // from y −30 up to where the spline crosses that line.
+    let at = |v: &Value| v.as_f64().unwrap_or(f64::NAN);
+    let crossing = f["outline"][0].as_array().into_iter().flatten().find(|q| (at(&q[0]) - 57.0).abs() < 1e-9 && at(&q[1]) > 0.0).map(|q| at(&q[1]));
+    let bends = f["bends"].as_array().cloned().unwrap_or_default();
+    let flange = bends.last().cloned().unwrap_or_default();
+    let runs_to = |y: f64| (at(&flange["start"][1]) + 30.0).abs() < 1e-9 && (at(&flange["end"][1]) - y).abs() < 1e-9;
+    assert!(bends.len() == 2 && crossing.is_some_and(|y| y > 45.0 && runs_to(y)), "{f}");
+    assert!(rel(v, t2_volume_from_flat(&f)) < 3e-4, "volume {v} vs the flat's {}: {f}", t2_volume_from_flat(&f));
+}
+
 #[test]
 fn a_flange_bent_inside_keeps_the_base_sketchs_arcs_in_the_flat_pattern_and_the_dxf() {
     // A 200 x 100 plate with its corners rounded 8, drawn as arcs, and a 40 high flange on its
