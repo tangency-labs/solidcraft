@@ -189,7 +189,8 @@ Script mode (scx) gives the agent three tools instead of the usual ones: `run`, 
 `hole`, `sketch(...).extrude`, `fillet`, `hollow`, `with part(...)`, `cmd(...)` for any other
 command), which the server instructions list. Every `run` reply ends with what changed: bodies
 created, changed (volume before and after, bounding box) and removed, so the agent checks its work
-without extra calls. Measured against the usual tools on the same tasks, it cut the cost of a
+without extra calls. Its prototype (a Python server with the same tools), measured against the usual tools
+on the same tasks, cut the cost of a
 modelling session by 20-59 % at about the same accuracy; the tasks, the harness and the results are in
 [the scx write-up (#12522)](https://github.com/tangency-labs/solidcraft/pull/12522).
 
