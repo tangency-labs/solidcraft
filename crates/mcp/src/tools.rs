@@ -162,7 +162,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                 json!({
                     "command": string("Command id (see list_commands)"),
                     "params": {"type": "object", "description": "The command's parameters"},
-                    "verbose": {"type": "boolean", "description": "false: omit the full feature body list and sketch ids repeated outside `created`; keep created_bodies, changed_bodies and removed_bodies (default true)"},
+                    "verbose": {"type": "boolean", "description": "false: omit the full feature body list and sketch ids repeated outside `created`; keep created_bodies, changed_bodies and removed_bodies. When a sketch command creates more points than its new curves have ends (spline poles), `created.points` becomes `created.point_count` (default true)"},
                     "expect": expect_schema(),
                 }),
                 &["command"],
@@ -200,7 +200,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                     "coalesce_parameters": {"type": "boolean", "description": "Set each run of consecutive plain parameter edits (parameters.change or set_parameter with a name and a value, or changes) together, rebuilding the design once for the run instead of once per edit; a run that is refused goes step by step, naming the refused step. Other steps still see the design up to date. Each step keeps its own result; the run is one undo step (default false)"},
                     "timings": {"type": "boolean", "description": "Add `timings`: [{index, command, ms}] for every step run (the failing one included) and `total_ms` (default false)"},
                     "profile": {"type": "boolean", "description": "Like timings, and each step's `profile`: {boolean_ms, tessellate_ms, other_ms}, its time in kernel booleans, in tessellation and the rest (default false)"},
-                    "verbose": {"type": "boolean", "description": "false: a compact reply. Feature steps leave out the full body list (created_bodies, changed_bodies and removed_bodies stay), sketch steps the ids they repeat outside `created` (default true)"},
+                    "verbose": {"type": "boolean", "description": "false: a compact reply. Feature steps leave out the full body list (created_bodies, changed_bodies and removed_bodies stay), sketch steps the ids they repeat outside `created`, and `created.points` becomes `created.point_count` when there are more points than the new curves have ends (default true)"},
                     "expect": expect_schema(),
                 }),
                 &[],
@@ -1928,6 +1928,16 @@ fn compact(mut v: Value) -> Value {
             if o.get(k).is_some_and(|x| created.get(k) == Some(x)) {
                 o.remove(k);
             }
+        }
+    }
+    // More new points than the new curves have ends (an offset's spline poles, #9180): agents
+    // refer to those curves by id, so the points only fill the context. Keep how many there were.
+    if let Some(created) = o.get_mut("created").and_then(Value::as_object_mut) {
+        let count = |k: &str| created.get(k).and_then(Value::as_array).map_or(0, Vec::len);
+        let (points, curves) = (count("points"), count("curves"));
+        if curves > 0 && points > 2 * curves {
+            created.remove("points");
+            created.insert("point_count".into(), json!(points));
         }
     }
     v

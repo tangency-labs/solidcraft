@@ -475,7 +475,9 @@ Feature replies omit the full `bodies` list while keeping `feature`, `name`,
 `created_bodies`, `changed_bodies` and `removed_bodies`. A cut can therefore report a
 changed body even when no body name was added or removed. Sketch replies keep new
 IDs under `created` and omit only identical top-level `points`, `curves`,
-`constraints` and `dimensions` lists. Other fields and errors are unchanged;
+`constraints` and `dimensions` lists. When a sketch command creates more points than
+its new curves have ends (the poles of an offset's splines), `created.points` becomes
+`created.point_count`: refer to those curves by their ids. Other fields and errors are unchanged;
 inspection commands still return their complete results. Compaction uses the
 engine's reply directly, without an additional design-inspection request.
 
