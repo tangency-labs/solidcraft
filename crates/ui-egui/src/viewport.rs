@@ -2434,6 +2434,8 @@ const ACROSS_VIEW_REACH: f64 = 8192.0;
 /// orbit keeps the drawing. The GPU cuts the rest off at the view's edges.
 pub(crate) fn origin_axis_reach(half_height: f64) -> f64 {
     let floor = origin_size(half_height) * AXIS_LEN;
+    // An infinite view height (no view yet) still gets a finite length.
+    let floor = if floor.is_finite() { floor } else { origin_size(1.0) * AXIS_LEN };
     let reach = half_height * ACROSS_VIEW_REACH;
     if reach.is_finite() { reach.max(floor) } else { floor }
 }
