@@ -557,3 +557,16 @@ fn a_line_inside_a_longer_one_along_it_is_covered() {
     assert!(covered(&bent, &bent) && !covered(&[p(0.0, 0.0), p(5.0, 5.0)], &bent));
     assert!(!covered(&[p(0.0, 0.0), p(0.0, 0.0)], &[p(1.0, 0.0), p(1.0, 0.0)]), "two points apart");
 }
+
+/// A line inside a longer one along it leaves the longer one alone, whichever is drawn first: no
+/// layout sends the shorter one second today, so only this shows that order.
+#[test]
+fn a_line_inside_a_longer_one_is_drawn_once_whichever_comes_first() {
+    let p = |x: f64, y: f64| Vec2::new(x, y);
+    let (long, short) = (vec![p(0.0, 1.0), p(0.0, 20.0)], vec![p(0.0, 1.0), p(0.0, 13.0)]);
+    for order in [[long.clone(), short.clone()], [short, long.clone()]] {
+        let mut drawn = Drawn::default();
+        order.into_iter().for_each(|line| drawn.line(line));
+        assert!(drawn.lines.len() == 1 && same_line(&drawn.lines[0], &long), "{:?}", drawn.lines);
+    }
+}

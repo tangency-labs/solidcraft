@@ -70,6 +70,37 @@ impl Text {
     }
 }
 
+/// A dimension's lines, arrowheads and texts as its layout gives them, before its lines are stroked.
+#[derive(Default)]
+struct Drawn {
+    lines: Vec<Vec<Vec2>>,
+    /// Each one's tip and the unit direction it points in.
+    arrows: Vec<(Vec2, Vec2)>,
+    texts: Vec<Item>,
+    fonts: Vec<Font>,
+    why: Option<String>,
+    pending: bool,
+}
+
+impl Drawn {
+    /// `line`, unless a line already drawn covers it; a line it covers goes. A chain's neighbours
+    /// share an extension line, and a set's lines from its origin lie along each other.
+    fn line(&mut self, line: Vec<Vec2>) {
+        if !self.lines.iter().any(|other| covered(&line, other)) {
+            self.lines.retain(|other| !covered(other, &line));
+            self.lines.push(line);
+        }
+    }
+
+    /// `text` centred on `centre`, running along `dir`.
+    fn text(&mut self, text: Text, centre: Vec2, dir: Vec2) {
+        self.texts.extend(placed(text.runs, text.half, TEXT_MM, centre, dir));
+        self.fonts.extend(text.fonts);
+        self.why = self.why.take().or(text.why);
+        self.pending |= text.pending;
+    }
+}
+
 /// A dimension on paper.
 pub struct OnPaper {
     pub group: Group,
@@ -87,26 +118,15 @@ pub struct OnPaper {
 pub fn paper_group(dimension: &Dimension, resolved: &Resolved, frame: &ViewFrame, group: LineGroup, lettering: &PaperFonts) -> Option<OnPaper> {
     let line_mm = LineKind::Thin.width_mm(group);
     let on: Vec<Vec2> = resolved.points.iter().map(|p| frame.to_paper(*p)).collect();
-    let mut lines: Vec<Vec<Vec2>> = Vec::new();
-    let mut arrows = Vec::new();
-    let (mut texts, mut fonts, mut why, mut pending) = (Vec::new(), Vec::new(), None, false);
     let set = |text: Option<&str>| Text::set(text, TEXT_MM, lettering);
+    let mut drawn = Drawn::default();
     for piece in pieces(dimension, resolved, &on, &set)? {
         let layout = dim_layout_sized(&piece.frame, Some(piece.at), &SIZES, piece.text.half, [None, None]);
-        texts.extend(placed(piece.text.runs, piece.text.half, TEXT_MM, layout.text, layout.text_dir));
-        fonts.extend(piece.text.fonts);
-        why = why.or(piece.text.why);
-        pending |= piece.text.pending;
-        // A chain's neighbours share an extension line, and one line inside a longer one along it is
-        // drawn once, as the longer one.
-        for line in layout.lines {
-            if !lines.iter().any(|other| covered(&line, other)) {
-                lines.retain(|other| !covered(other, &line));
-                lines.push(line);
-            }
-        }
-        arrows.extend(layout.arrows);
+        drawn.text(piece.text, layout.text, layout.text_dir);
+        layout.lines.into_iter().for_each(|line| drawn.line(line));
+        drawn.arrows.extend(layout.arrows);
     }
+    let Drawn { mut lines, arrows, texts, fonts, why, pending } = drawn;
     for (tip, dir) in &arrows {
         lines.iter_mut().for_each(|line| stop_at_base(line, *tip, *dir));
     }
