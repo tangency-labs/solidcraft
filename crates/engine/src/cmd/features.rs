@@ -2366,8 +2366,106 @@ fn mirror(s: &mut Session, p: &Value) -> Result<Value> {
         add_feature(s, p, FeatureKind::Mirror { features, plane, bodies: bodies.iter().cloned().map(BodyName).collect(), combine, placements })?;
     if !combine {
         super::print_face::copies_keep_print_faces(s, &reply, &bodies);
+        copies_keep_looks(s, &reply, &bodies);
     }
     Ok(reply)
+}
+
+/// Copies are made of what the bodies they were made from are: each takes its source's physical
+/// material and appearance, unless it has its own (kept under its name from before). The copies
+/// are the bodies feature `reply` made, in the order of `sources`, as
+/// [`super::print_face::copies_keep_print_faces`] takes them.
+fn copies_keep_looks(s: &mut Session, reply: &Value, sources: &[String]) {
+    let Some(id) = reply.get("feature").and_then(Value::as_u64) else { return };
+    let state = s.model.state();
+    let copies: Vec<_> = state.bodies.iter().filter(|b| b.feature == id).collect();
+    if copies.len() != sources.len() {
+        return;
+    }
+    let pairs: Vec<(String, String)> = sources
+        .iter()
+        .zip(copies)
+        .filter_map(|(source, copy)| state.body(source).map(|b| (copy.definition_name().to_string(), b.definition_name().to_string())))
+        .collect();
+    let needs = |copy: &str, from: &str| {
+        (!s.doc.materials.contains_key(copy) && s.doc.materials.contains_key(from))
+            || (!s.doc.appearances.bodies.contains_key(copy) && s.doc.appearances.bodies.contains_key(from))
+    };
+    if !pairs.iter().any(|(copy, from)| needs(copy, from)) {
+        return;
+    }
+    let doc = s.doc_mut();
+    for (copy, from) in pairs {
+        if !doc.materials.contains_key(&copy)
+            && let Some(material) = doc.materials.get(&from).cloned()
+        {
+            doc.materials.insert(copy.clone(), material);
+        }
+        if !doc.appearances.bodies.contains_key(&copy)
+            && let Some(look) = doc.appearances.bodies.get(&from).cloned()
+        {
+            doc.appearances.bodies.insert(copy, look);
+        }
+    }
+}
+
+impl Session {
+    /// Whether mirroring bodies (`solid.mirror`'s parameters, `bodies` and `plane`) leaves a
+    /// copy overlapping or touching the body it was made from: the Mirror dialog then joins it
+    /// (Join), and otherwise makes it a body of its own (New Body).
+    ///
+    /// A copy meets its body exactly when the body reaches the mirror plane: what lies on the
+    /// plane stays where it is, in both; a body wholly to one side has its copy wholly to the
+    /// other. So no boolean is needed, only how far the body reaches along the plane's normal,
+    /// from its exact box (SMLib's tight one, never a mesh), the body turned first so the normal
+    /// is an axis unless it is one already. `None` when there is no body to mirror or it isn't
+    /// one of the design's own (a feature mirrored, a placed part, a mesh body).
+    pub fn mirror_meets(&self, p: &Value) -> Result<Option<bool>> {
+        let cmd = "solid.mirror";
+        let sources = string_list(cmd, p, "bodies")?;
+        if sources.is_empty() {
+            return Ok(None);
+        }
+        let plane = plane_param(self, p.get("plane"), cmd)?;
+        let state = self.model.state();
+        let (vals, _) = self.doc.param_values();
+        let pl = self.doc.resolve_plane_in(&vals, &plane, 0, Some(&state))?;
+        let Some(n) = pl.normal().normalized() else { return Ok(None) };
+        let level = pl.origin.dot(n);
+        // The normal as an axis, when it is one: the exact box reads the reach along it as it is.
+        let axis = [(0, n.x), (1, n.y), (2, n.z)].into_iter().find(|(_, c)| (c.abs() - 1.0).abs() < 1e-12).map(|(i, c)| (i, c.signum()));
+        // Otherwise a turn taking the normal to z, with two directions square to it.
+        let side = if n.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
+        let Some(u) = side.cross(n).normalized() else { return Ok(None) };
+        let v = n.cross(u);
+        let onto = [[u.x, v.x, n.x, 0.0], [u.y, v.y, n.y, 0.0], [u.z, v.z, n.z, 0.0], [0.0, 0.0, 0.0, 1.0]];
+        for name in &sources {
+            let Some(b) = state.body(name) else { return Ok(None) };
+            if b.body.is_mesh() {
+                return Ok(None);
+            }
+            let (low, high) = match axis {
+                Some((i, sign)) => {
+                    let bb = b.body.exact_bounds()?;
+                    let (lo, hi) = match i {
+                        0 => (bb.min.x, bb.max.x),
+                        1 => (bb.min.y, bb.max.y),
+                        _ => (bb.min.z, bb.max.z),
+                    };
+                    if sign > 0.0 { (lo, hi) } else { (-hi, -lo) }
+                }
+                None => {
+                    let bb = solidcraft_kernel::transform_matrix(&b.body, onto)?.exact_bounds()?;
+                    (bb.min.z, bb.max.z)
+                }
+            };
+            let tol = 2.0 * b.body.record().tolerance;
+            if low <= level + tol && high >= level - tol {
+                return Ok(Some(true));
+            }
+        }
+        Ok(Some(false))
+    }
 }
 
 /// Bodies picked where the viewport shows them: each world name ("Body1", or "Body1 (Occ:2)"
