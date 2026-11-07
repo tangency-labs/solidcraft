@@ -3,7 +3,9 @@
 //!
 //! - [`blend`]: edges rounded (circular, curvature-continuous or chord-sized) or chamfered at
 //!   equal distances, with the corners named set back, filled or left open; when some rounds
-//!   overflow their faces across cliffs and others fit, the overflowing ones go first.
+//!   overflow their faces across cliffs and others fit, the overflowing ones go first. With
+//!   record picks ([`blend_ordered`]), two rounds that meet at a sharp side edge are mitred or
+//!   swept there ([`Turn`]).
 //! - [`chamfer_sides`]: edges chamfered with a distance along a face each, and a second
 //!   distance or an angle on the other.
 //! - [`fillet_variable`]: one edge rounded with a radius law.
@@ -12,9 +14,10 @@
 //! - [`tangent_chain`]: the edges a blend of some edges runs on into tangentially, the kernel's.
 //!
 //! The kernel's session is driven as the C API's `round_edges` drove SMLib's executive:
-//! parameters, the set-back vertices, the corners (setbacks set, a chamfer's bevelled), the
-//! filleting, then `StitchAndOrient`. The geometry (sizes to offsets, the wedge, the law's curve
-//! and its corners, the room) is the kernel's; ops chooses, sequences and maps refusals.
+//! the turn, parameters, the set-back vertices, the corners (setbacks set, a chamfer's
+//! bevelled), the filleting, then `StitchAndOrient`. The geometry (sizes to offsets, the wedge,
+//! the law's curve and its corners, the room) is the kernel's; ops chooses, sequences and maps
+//! refusals.
 //!
 //! Each changes the body it is given, as the kernel does; a refused or failed one leaves it as
 //! it came in ([`crate::session`]'s edit wrapper).
@@ -87,6 +90,20 @@ pub enum Corners {
     Filled,
     /// Removed: each set-back corner's patch taken off, its hole returned ([`Hole`]).
     Open,
+}
+
+/// How two rounds of [`blend_ordered`] turn where they meet at a sharp side edge on a face
+/// they share (a boss's base at its upright edges, a pocket's floor at its corners): the blend
+/// corner's Turn.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Turn {
+    /// The rounds run on to where they cross and meet there in a crease.
+    #[default]
+    Mitre,
+    /// Each round ends on its section through the side edge, and the corner's face is that
+    /// section revolved about the side edge, tangent to both rounds: between planes at a
+    /// straight side edge, a torus. For [`Blend::Round`] only.
+    Swept,
 }
 
 /// A corner set back: its vertex and the setback along each of its edges.
@@ -522,6 +539,8 @@ struct Pass<'a> {
     /// Mark the set-back corners' patches and return them.
     patches: bool,
     overflow: Option<Overflow>,
+    /// How two rounds turn at a sharp side edge, set before the corners are made.
+    turn: Turn,
 }
 
 /// What one pass made: the faces new after it, and each set-back corner's patch.
@@ -530,10 +549,11 @@ struct Made {
     patches: Vec<Vec<FaceId>>,
 }
 
-/// One pass of the session on `b`: prepared, the set-back vertices named, the earlier pass's
-/// faces handed on, the corners made and set, the filleting, then `StitchAndOrient`. A pass that
-/// made no face is [`Error::NoEffect`]; a set-back corner whose patch has no face is
-/// [`Error::Unsupported`]. With `overflow`, a stop for overflowing blends fills `stopped`.
+/// One pass of the session on `b`: the turn set, prepared, the set-back vertices named, the
+/// earlier pass's faces handed on, the corners made and set, the filleting, then
+/// `StitchAndOrient`. A pass that made no face is [`Error::NoEffect`]; a set-back corner whose
+/// patch has no face is [`Error::Unsupported`]. With `overflow`, a stop for overflowing blends
+/// fills `stopped`.
 fn pass(
     k: &mut Kernel,
     b: &mut Brep,
@@ -545,6 +565,8 @@ fn pass(
     let mut chamfered = Vec::new();
     let done = {
         let mut s = FilletSession::new(k, b)?;
+        // read as the corners are made
+        s.set_swept_turns(p.turn == Turn::Swept);
         let prepared = prepare(k, &mut s, p.edges, p.section, p.law, &mut chamfered);
         // a set-back vertex is no Ball: its corner is the one the setback is set on
         if !p.section.chamfer() {
@@ -672,8 +694,13 @@ fn pass_or_refuse(k: &mut Kernel, b: &mut Brep, p: Pass<'_>) -> solidcore::Resul
     })
 }
 
-/// A plain pass of `edges` with `section`, handed `earlier`'s faces.
-fn together<'a>(edges: &'a [EdgeId], section: Section<'a>, earlier: &'a [FaceId]) -> Pass<'a> {
+/// A plain pass of `edges` with `section`, turning as `turn`, handed `earlier`'s faces.
+fn together<'a>(
+    edges: &'a [EdgeId],
+    section: Section<'a>,
+    turn: Turn,
+    earlier: &'a [FaceId],
+) -> Pass<'a> {
     Pass {
         edges,
         section,
@@ -682,6 +709,7 @@ fn together<'a>(edges: &'a [EdgeId], section: Section<'a>, earlier: &'a [FaceId]
         earlier,
         patches: false,
         overflow: None,
+        turn,
     }
 }
 
@@ -728,7 +756,8 @@ fn untagged(b: &mut Brep) -> solidcore::Result<()> {
 /// rounded at its size in a second pass that is handed the faces the first made, so it meets
 /// the first rounds as one blend. An asked edge with nothing left is `dropped`. Two rounds
 /// mitred at a face's concave corner go first together. Where none overflows on its own, or
-/// all do, the edges are rounded together as before. The result is `fresh`, untagged.
+/// all do, the edges are rounded together as before. Every pass turns as `turn`. The result is
+/// `fresh`, untagged.
 #[allow(clippy::too_many_arguments)] // the C API's overflow_first
 fn overflow_first(
     k: &mut Kernel,
@@ -737,6 +766,7 @@ fn overflow_first(
     edges: &[EdgeId],
     sizes: &[f64],
     section: fn(&[f64]) -> Section<'_>,
+    turn: Turn,
     mitred: &[EdgeId],
     dropped: &mut [bool],
 ) -> solidcore::Result<Result<Brep>> {
@@ -763,6 +793,7 @@ fn overflow_first(
             overflow: Some(Overflow {
                 classify_only: true,
             }),
+            turn,
         };
         match pass(k, b, alone, &mut stopped)? {
             Err(Refused::Error(why)) if stopped.overflow.is_none() => return Ok(Err(why)),
@@ -819,14 +850,15 @@ fn overflow_first(
     if lead.is_empty() || rest.is_empty() {
         // a single pass: its rounds go together
         let sizes: Vec<f64> = sizes.to_vec();
-        let one = pass_or_refuse(k, &mut fresh, together(&again, section(&sizes), &[]))?;
+        let one = pass_or_refuse(k, &mut fresh, together(&again, section(&sizes), turn, &[]))?;
         if let Err(e) = one {
             return Ok(Err(e));
         }
         untagged(&mut fresh)?;
         return Ok(Ok(fresh));
     }
-    let first = match pass_or_refuse(k, &mut fresh, together(&lead, section(&lead_sizes), &[]))? {
+    let lead_pass = together(&lead, section(&lead_sizes), turn, &[]);
+    let first = match pass_or_refuse(k, &mut fresh, lead_pass)? {
         Ok(made) => made.faces,
         Err(e) => return Ok(Err(e)),
     };
@@ -848,7 +880,7 @@ fn overflow_first(
     }
     if !rest_edges.is_empty() {
         // the second pass meets the first rounds as one blend: it is handed their faces
-        let second = together(&rest_edges, section(&rest_sizes), &first);
+        let second = together(&rest_edges, section(&rest_sizes), turn, &first);
         if let Err(e) = pass_or_refuse(k, &mut fresh, second)? {
             return Ok(Err(e));
         }
@@ -888,7 +920,8 @@ fn setbacks_fit(k: &Kernel, b: &Brep, setbacks: &[(VertexId, f64)]) -> solidcore
 /// overflow their faces across cliffs and others fit (more than one edge, no setbacks, corners
 /// filled), the overflowing ones go first and the others then round what is left of their
 /// edges, meeting them as one blend; an edge the overflow removed whole is reported dropped.
-/// A solid gives a solid.
+/// A solid gives a solid. Two rounds that meet at a sharp side edge on a face they share turn
+/// mitred ([`blend_ordered`] takes the [`Turn`]).
 ///
 /// # Errors
 /// [`Error::Argument`] for no edges, an index past its list or repeated, sizes neither one nor
@@ -913,19 +946,32 @@ pub fn blend(
     setbacks: &[SetBack],
     corners: Corners,
 ) -> Result<Blended> {
-    blend_impl(body, None, kind, edges, sizes, setbacks, corners)
+    blend_impl(
+        body,
+        None,
+        kind,
+        edges,
+        sizes,
+        setbacks,
+        corners,
+        Turn::Mitre,
+    )
 }
 
 /// Blend edges and setback vertices selected through the input record's [`crate::Order`].
 ///
 /// `edges` indexes `order.edges`; each [`SetBack::vertex`] indexes `order.vertices`.
 /// The order must belong to `body` (or have been mapped through its copy). Construction,
-/// sizes, corner handling and refusals are those of [`blend`]. Returned hole indices, when
-/// corners are open, refer to the result's native lists, as in [`blend`].
+/// sizes, corner handling and refusals are those of [`blend`]; two rounds that meet at a sharp
+/// side edge on a face they share turn as `turn` says. Returned hole indices, when corners are
+/// open, refer to the result's native lists, as in [`blend`].
 ///
 /// # Errors
 /// The errors of [`blend`], including [`Error::Argument`] for an absent index or an entity
-/// in the supplied order that does not belong to the body.
+/// in the supplied order that does not belong to the body, and for [`Turn::Swept`] with a
+/// blend other than [`Blend::Round`]. A swept turn the kernel does not build is refused as it
+/// classifies it: [`Error::NoRoom`] at a sharp concave side edge (no radius of the rounds
+/// passes it), [`Error::CornerUnsupported`] where the blend corner does not build one yet.
 pub fn blend_ordered(
     body: &Body,
     order: &crate::Order,
@@ -934,10 +980,22 @@ pub fn blend_ordered(
     sizes: &[f64],
     setbacks: &[SetBack],
     corners: Corners,
+    turn: Turn,
 ) -> Result<Blended> {
-    blend_impl(body, Some(order), kind, edges, sizes, setbacks, corners)
+    blend_impl(
+        body,
+        Some(order),
+        kind,
+        edges,
+        sizes,
+        setbacks,
+        corners,
+        turn,
+    )
 }
 
+/// [`blend`] and [`blend_ordered`]: the edges and setback vertices picked natively or through
+/// `order`, blended with every pass turning as `turn`.
 fn blend_impl(
     body: &Body,
     order: Option<&crate::Order>,
@@ -946,12 +1004,14 @@ fn blend_impl(
     sizes: &[f64],
     setbacks: &[SetBack],
     corners: Corners,
+    turn: Turn,
 ) -> Result<Blended> {
     let one_size = sizes.len() == 1;
     if edges.is_empty()
         || !(one_size || sizes.len() == edges.len())
         || !sizes.iter().all(|&s| size_ok(s))
         || !setbacks.iter().all(|s| size_ok(s.distance))
+        || (turn == Turn::Swept && kind != Blend::Round)
     {
         return Err(Error::Argument);
     }
@@ -1015,6 +1075,7 @@ fn blend_impl(
                     earlier: &[],
                     patches: false,
                     overflow: None,
+                    turn,
                 };
                 if let Err(e) = pass_or_refuse(k, b, p)? {
                     return Ok(Err(e));
@@ -1046,6 +1107,7 @@ fn blend_impl(
             overflow: may_go_first.then_some(Overflow {
                 classify_only: false,
             }),
+            turn,
         };
         let made = pass(k, b, p, &mut stopped)?;
         if stopped.overflow.is_some() {
@@ -1060,6 +1122,7 @@ fn blend_impl(
                 &picked,
                 &each,
                 section,
+                turn,
                 &mitred,
                 &mut dropped,
             )? {
@@ -1458,6 +1521,8 @@ fn chamfer_sides_impl(
             earlier: &[],
             patches: false,
             overflow: None,
+            // a swept turn is a round's: these are chamfers
+            turn: Turn::Mitre,
         };
         if let Err(e) = pass_or_refuse(k, b, p)? {
             return Ok(Err(e));
@@ -1663,6 +1728,8 @@ fn fillet_variable_impl(
             earlier: &[],
             patches: false,
             overflow: None,
+            // one edge: no two rounds meet to turn
+            turn: Turn::Mitre,
         };
         if let Err(e) = pass_or_refuse(k, b, p)? {
             return Ok(Err(e));

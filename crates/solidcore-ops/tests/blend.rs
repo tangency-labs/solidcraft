@@ -17,8 +17,10 @@ use std::f64::consts::PI;
 use std::io::Read as _;
 
 use solidcore::blend::definition_check::surface_kind_name;
+use solidcore::boolean::api_brep::{boolean_difference, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::Kernel;
+use solidcore::primitive::api_primitives::create_box;
 use solidcore::query::api_queries::{edge_closest_point, face_bounding_box};
 use solidcore::surface::procedural_blend::{BlendRef, ProceduralBlend};
 use solidcore::surface::surface::SurfaceKind;
@@ -31,9 +33,9 @@ use solidcore::{EdgeId, FaceId, Point2, Vec3};
 use solidcore_record::brep::Brep as Record;
 
 use solidcore_ops::{
-    blend, chamfer_sides, edge_faces_along, fillet_variable, make_box, make_cone, make_cylinder,
-    tangent_chain, Blend, Body, ChamferSecond, CheckLevel, Corners, Error, FitKind, SetBack,
-    Unblendable,
+    blend, blend_ordered, chamfer_sides, edge_faces_along, fillet_variable, make_box, make_cone,
+    make_cylinder, tangent_chain, Blend, Body, ChamferSecond, CheckLevel, Corners, Error, FitKind,
+    Order, SetBack, Turn, Unblendable,
 };
 
 /// The block's top front edge, 30 long, between the top (z = 10) and the front (y = 0).
@@ -128,6 +130,139 @@ fn three_rounds_meet_at_a_corner_filled_set_back_or_open() {
         assert!(h.edge < edges_n && h.face < faces);
     }
     assert!(made.holes[0].edges.len() >= 3);
+}
+
+/// The record order of `b`, and the record index of each edge of the loop through `corners`
+/// (x, y) at height `z`, in the loop's order.
+fn loop_edges(b: &Body, corners: [[f64; 2]; 4], z: f64) -> (Order, Vec<usize>) {
+    let (record, order) = b.to_record().unwrap();
+    let at = |i: u32, c: [f64; 2]| {
+        let p = record.vertices[i as usize].point;
+        (p[0] - c[0]).abs() + (p[1] - c[1]).abs() + (p[2] - z).abs() < 1e-9
+    };
+    let edges = (0..4)
+        .map(|i| {
+            let (a, c) = (corners[i], corners[(i + 1) % 4]);
+            record
+                .edges
+                .iter()
+                .position(|e| {
+                    let [s, t] = e.vertices;
+                    (at(s, a) && at(t, c)) || (at(s, c) && at(t, a))
+                })
+                .unwrap()
+        })
+        .collect();
+    (order, edges)
+}
+
+/// A 40 x 30 x 10 plate with a 10 x 10 x 5 boss on it (x 15..25, y 10..20), the boss's four
+/// base edges rounded r 1: at each upright boss edge two concave rounds turn round the sharp
+/// convex edge. Each base edge gains the spandrel A = (1 - pi/4) r^2 along its 10, and each
+/// corner the rounds' part past both walls, whose section's first moment about the upright edge
+/// is M = (5/6 - pi/4) r^3: mitred, 8 M in all; swept, the section revolved a quarter turn at
+/// each, 2 pi M, its face a torus. Unequal rounds are not swept yet. Along a pocket's floor the
+/// upright edges are sharp and concave: no ball turns round them, so the swept turn is refused
+/// there and the mitre builds, 60 A - 8 M. A swept turn is a round's.
+#[test]
+fn rounds_turn_round_a_boss_edge_mitred_or_swept() {
+    all_fixes();
+    let bx = |k: &mut Kernel, lo: [f64; 3], size: [f64; 3]| {
+        create_box(k, Vec3::new(lo[0], lo[1], lo[2]), size[0], size[1], size[2])
+    };
+    let boss = || {
+        built(|k| {
+            let plate = bx(k, [0.0; 3], [40.0, 30.0, 10.0])?;
+            let boss = bx(k, [15.0, 10.0, 10.0], [10.0, 10.0, 5.0])?;
+            boolean_union(k, plate, boss)
+        })
+    };
+    let pocket = || {
+        built(|k| {
+            let plate = bx(k, [0.0; 3], [40.0, 30.0, 10.0])?;
+            let cut = bx(k, [10.0, 10.0, 5.0], [20.0, 10.0, 6.0])?;
+            boolean_difference(k, plate, cut)
+        })
+    };
+    let base = [[15.0, 10.0], [25.0, 10.0], [25.0, 20.0], [15.0, 20.0]];
+    let floor = [[10.0, 10.0], [30.0, 10.0], [30.0, 20.0], [10.0, 20.0]];
+    let (a, m) = (1.0 - PI / 4.0, 5.0 / 6.0 - PI / 4.0);
+    assert_eq!(Turn::default(), Turn::Mitre);
+    for (turn, corners, faces) in [(Turn::Mitre, 8.0 * m, 15), (Turn::Swept, 2.0 * PI * m, 19)] {
+        let b = boss();
+        let (order, edges) = loop_edges(&b, base, 10.0);
+        blend_ordered(
+            &b,
+            &order,
+            Blend::Round,
+            &edges,
+            &[1.0],
+            &[],
+            Corners::Filled,
+            turn,
+        )
+        .unwrap();
+        assert!(b.check(CheckLevel::All).unwrap().is_valid(), "{turn:?}");
+        assert_eq!(b.counts().unwrap()[0], faces, "{turn:?}");
+        let v = b.volume(1e-10).unwrap();
+        assert!(rel(v, 12500.0 + 40.0 * a + corners) < 1e-9, "{turn:?}: {v}");
+        // swept, the four corners' faces are exact horn tori (R = r = 1), as the kernel reads
+        // the body back; mitred, there are none. That each blend face answers
+        // procedural_blend() is the kernel's definition ledger
+        // (crates/solidcore/tests/issue_2489_blend_faces_are_definitions.rs, the boss base with
+        // mitred and swept turns): an ops body reads back through its .smb, which keeps the
+        // exact rounds' and corners' forms but not their definitions
+        let (_, made) = kernel_copy(&b);
+        let tori: Vec<(f64, f64)> = made
+            .face_list()
+            .iter()
+            .filter_map(|&f| match made.face(f).unwrap().surface.as_ref()?.kind() {
+                SurfaceKind::Torus(t) => Some((t.major_radius(), t.minor_radius())),
+                _ => None,
+            })
+            .collect();
+        let want = if turn == Turn::Swept { 4 } else { 0 };
+        assert_eq!(tori, vec![(1.0, 1.0); want], "{turn:?}");
+    }
+    let swept = |b: &Body, order: &Order, kind, edges: &[usize], sizes: &[f64]| {
+        blend_ordered(
+            b,
+            order,
+            kind,
+            edges,
+            sizes,
+            &[],
+            Corners::Filled,
+            Turn::Swept,
+        )
+        .err()
+    };
+    let b = boss();
+    let (order, edges) = loop_edges(&b, base, 10.0);
+    let unequal = [1.0, 1.5, 1.0, 1.5];
+    let r = swept(&b, &order, Blend::Round, &edges, &unequal);
+    assert_eq!(r, Some(Error::CornerUnsupported));
+    let r = swept(&b, &order, Blend::Chamfer, &edges, &[1.0]);
+    assert_eq!(r, Some(Error::Argument));
+    let p = pocket();
+    let (order, edges) = loop_edges(&p, floor, 5.0);
+    let before = p.to_record().unwrap().0;
+    let r = swept(&p, &order, Blend::Round, &edges, &[1.0]);
+    assert_eq!(r, Some(Error::NoRoom));
+    assert_eq!(p.to_record().unwrap().0, before);
+    blend_ordered(
+        &p,
+        &order,
+        Blend::Round,
+        &edges,
+        &[1.0],
+        &[],
+        Corners::Filled,
+        Turn::Mitre,
+    )
+    .unwrap();
+    let v = p.volume(1e-10).unwrap();
+    assert!(rel(v, 11000.0 + 60.0 * a - 8.0 * m) < 1e-9, "{v}");
 }
 
 #[test]
@@ -405,7 +540,7 @@ fn definition_points(k: &Kernel, pb: &ProceduralBlend) -> Vec<Vec3> {
 }
 
 /// Select the cube's edge along x at y = z = 20, with its record Order.
-fn variable_ordered_edge(b: &Body) -> (solidcore_ops::Order, usize) {
+fn variable_ordered_edge(b: &Body) -> (Order, usize) {
     let (record, order) = b.to_record().unwrap();
     let edge = record
         .edges
@@ -500,7 +635,7 @@ fn an_ordered_variable_round_rejects_bad_selection_without_editing() {
     let b = make_box([0.0; 3], [20.0; 3]).unwrap();
     let (before, _) = b.to_record().unwrap();
     let (order, edge) = variable_ordered_edge(&b);
-    let law = |order: &solidcore_ops::Order, edge: usize, start| {
+    let law = |order: &Order, edge: usize, start| {
         solidcore_ops::fillet_variable_ordered(
             &b,
             order,
