@@ -191,6 +191,47 @@ fn a_chain_reads_each_point_to_the_next_along_one_line() {
     assert!(parts(tilted), "as the view shows them");
 }
 
+/// From a corner at 0, hole centres at 10, 30 and 60 along the front view's horizontal read 10, 30
+/// and 60 in any order, the farthest 60; a centre above another reads the same, and one in line with
+/// the origin reads 0. The line runs from the origin to the last target, whichever way that is, and
+/// a target before the origin along it is refused; a point behind the view's plane is foreshortened.
+#[test]
+fn a_set_reads_each_target_from_its_origin() {
+    let values = |set: FromOrigin| set.members.iter().map(|m| m.value).collect::<Vec<_>>();
+    let at = |x: f64, z: f64| Vec3::new(x, 0.0, z);
+    let holes = [at(30.0, 15.0), at(10.0, 15.0), at(60.0, 15.0)];
+    let set = from_origin(&front(), Vec3::ZERO, &holes, Horizontal).unwrap();
+    assert_eq!(set.farthest, Measured { value: 60.0, foreshortened: false });
+    assert_eq!(values(set), [30.0, 10.0, 60.0]);
+    let column = [at(30.0, 5.0), at(30.0, 25.0), at(0.0, 40.0), at(60.0, 0.0)];
+    assert_eq!(values(from_origin(&front(), Vec3::ZERO, &column, Horizontal).unwrap()), [30.0, 30.0, 0.0, 60.0]);
+    // From the right-hand end, the line runs left: the same distances.
+    let from_right = from_origin(&front(), at(60.0, 0.0), &[at(30.0, 15.0), at(0.0, 15.0)], Horizontal).unwrap();
+    assert_eq!(values(from_right), [30.0, 60.0]);
+    assert_eq!(values(from_origin(&front(), Vec3::ZERO, &[at(0.0, 30.0), at(0.0, 10.0)], Vertical).unwrap()), [30.0, 10.0]);
+    let slope = from_origin(&front(), Vec3::ZERO, &[at(3.0, 4.0), at(6.0, 8.0)], Aligned).unwrap();
+    assert!(values(slope).iter().zip([5.0, 10.0]).all(|(v, w)| close(*v, w)));
+    // Aligned runs from the origin to the last target, whichever way the others lie.
+    assert_eq!(values(from_origin(&front(), Vec3::ZERO, &[at(10.0, 0.0), at(0.0, 10.0)], Aligned).unwrap()), [0.0, 10.0]);
+    let behind = from_origin(&front(), Vec3::ZERO, &[Vec3::new(10.0, 7.0, 0.0), at(20.0, 0.0)], Horizontal).unwrap();
+    assert_eq!(behind.members.iter().map(|m| m.foreshortened).collect::<Vec<_>>(), [true, false]);
+    refused(from_origin(&front(), Vec3::ZERO, &[], Horizontal), "no targets");
+    refused(from_origin(&front(), Vec3::ZERO, &[at(-5.0, 0.0), at(20.0, 0.0)], Horizontal), "before its origin");
+    // The line runs toward the farthest target, whatever the order: one in line with the origin
+    // reads 0 wherever it comes, the origin itself among them, and noise on it changes nothing.
+    let reads = |set: FromOrigin, want: [f64; 3]| values(set).iter().zip(want).all(|(v, w)| (v - w).abs() <= 1e-9);
+    for in_line in [at(0.0, 5.0), Vec3::ZERO, at(-1e-12, 5.0), at(1e-12, 5.0)] {
+        let left = [at(-10.0, 0.0), at(-20.0, 0.0), in_line];
+        assert!(reads(from_origin(&front(), Vec3::ZERO, &left, Horizontal).unwrap(), [10.0, 20.0, 0.0]), "{in_line:?} last");
+        let first = [in_line, at(-10.0, 0.0), at(-20.0, 0.0)];
+        assert!(reads(from_origin(&front(), Vec3::ZERO, &first, Horizontal).unwrap(), [0.0, 10.0, 20.0]), "{in_line:?} first");
+    }
+    refused(from_origin(&front(), Vec3::ZERO, &[at(0.0, 5.0), Vec3::ZERO], Horizontal), "all lie in line with its origin");
+    refused(from_origin(&front(), Vec3::ZERO, &[at(10.0, 0.0), Vec3::ZERO], Aligned), "one point in this view");
+    refused(from_origin(&front(), Vec3::ZERO, &[at(f64::NAN, 0.0), at(20.0, 0.0)], Horizontal), "model point");
+    refused(from_origin(&front(), Vec3::ZERO, &[at(10.0, 0.0)], Along(Vec2::ZERO)), "direction to measure along");
+}
+
 /// A cylinder along X seen from the front has its silhouettes above and below its axis, and so does
 /// one leaning back toward Y; in the isometric view every way is square to the axis and the view's
 /// normal. Seen along its axis, a cylinder has no silhouettes.
@@ -337,7 +378,7 @@ fn random(state: &mut u64) -> u64 {
 fn measurements_seeded_never_panic_and_keep_their_rules() {
     let mut seed = 0x4896_19a0_d1e5_7c3b;
     let hostile = [0.0, -0.0, 1e-10, 1e12, 1.1e12, f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 1e300, -5.0];
-    let (mut lengths, mut angles, mut chains, mut silhouettes) = (0, 0, 0, 0);
+    let (mut lengths, mut angles, mut chains, mut silhouettes, mut sets) = (0, 0, 0, 0, 0);
     for case in 0..20_000 {
         let tidy = !random(&mut seed).is_multiple_of(4);
         let number = |seed: &mut u64| {
@@ -369,6 +410,13 @@ fn measurements_seeded_never_panic_and_keep_their_rules() {
                 let sum: f64 = chained.members.iter().map(|m| m.value).sum();
                 assert!(chained.members.iter().all(|m| m.value > EPS), "case {case}: {chained:?}");
                 assert!((sum - chained.overall.value).abs() <= 1e-9 * chained.overall.value.max(1.0), "case {case}: {chained:?}");
+            }
+        }
+        for direction in [Horizontal, Vertical, Aligned, Along(along)] {
+            if let Ok(set) = from_origin(&basis, a, &[b, c, d], direction) {
+                sets += 1;
+                assert!(set.members.iter().all(|m| m.value.is_finite() && m.value >= 0.0), "case {case}: {set:?}");
+                assert!(set.members.iter().all(|m| m.value <= set.farthest.value) && set.members.contains(&set.farthest), "case {case}: {set:?}");
             }
         }
         for from in [AngleFrom::Horizontal, AngleFrom::Vertical, ModelAxis(c - d), Edge(c, d)] {
@@ -403,7 +451,10 @@ fn measurements_seeded_never_panic_and_keep_their_rules() {
             assert!((drawn.value - model.value).abs() <= 1e-6, "case {case}: {drawn:?} {model:?}");
         }
     }
-    assert!(lengths > 5_000 && angles > 20_000 && chains > 2_000 && silhouettes > 20_000, "{lengths} {angles} {chains} {silhouettes}");
+    assert!(
+        lengths > 5_000 && angles > 20_000 && chains > 2_000 && silhouettes > 20_000 && sets > 2_000,
+        "{lengths} {angles} {chains} {silhouettes} {sets}"
+    );
 }
 
 /// Two faces the front view sees edge-on, square to X and 80 apart: 80 along the view or aligned, 80
