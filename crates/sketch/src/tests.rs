@@ -1922,3 +1922,26 @@ fn a_mirrored_fillet_over_three_quarters_of_a_turn_stays_the_arc_its_lines_leave
     assert!((sweep_deg(&sk, arc) - 300.0).abs() < 1e-6, "sweep {}", sweep_deg(&sk, arc));
     assert!(lines_leave_the_arc(&sk, arc, [l1, l2]));
 }
+
+/// #10521: a circle drawn twice inside a ring is one hole of the ring, not two. The ring between
+/// the outer circles keeps the area of the disc less that hole once.
+#[test]
+fn a_circle_drawn_twice_is_one_hole() {
+    for twin_radius in [1.6, 1.6 + 8.9e-11, 1.6 - 8.9e-11] {
+        let mut b = Sketch::new();
+        let inner = b.add_circle(v(0.0, 0.0), 1.6, None, None).unwrap();
+        let twin = b.add_circle(v(0.0, 0.0), twin_radius, None, None).unwrap();
+        let middle = b.add_circle(v(0.0, 0.0), 3.25, None, None).unwrap();
+        let outer = b.add_circle(v(0.0, 0.0), 4.0, None, None).unwrap();
+        let ps = find_profiles(&b);
+        let disc = |r: f64| PI * r * r;
+        let of = |c: usize| ps.iter().find(|p| p.outer_curves == vec![b.curves[c].id.clone()]).unwrap_or_else(|| panic!("no profile for curve {c}"));
+        assert!((of(inner).area - disc(1.6)).abs() < 1e-6);
+        assert!((of(twin).area - disc(1.6)).abs() < 1e-6);
+        // The ring around the twins has one hole: 33.18 - 8.04.
+        let ring = of(middle);
+        assert_eq!(ring.hole_curves.len(), 1, "radius {twin_radius}: {:?}", ring.hole_curves);
+        assert!((ring.area - (disc(3.25) - disc(1.6))).abs() < 1e-6, "radius {twin_radius}: {}", ring.area);
+        assert!((of(outer).area - (disc(4.0) - disc(3.25))).abs() < 1e-6);
+    }
+}
