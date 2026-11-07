@@ -588,6 +588,14 @@ pub struct Session {
     pub section: Option<(Vec3, Vec3)>,
     /// Whether the section's cut faces are hatched (`inspect.section`'s `hatch`; on by default).
     pub section_hatch: bool,
+    /// `section` and `section_hatch` are the design's shown Section Analysis
+    /// (`cmd::section::sync`), worked out again after every command.
+    section_derived: bool,
+    /// Whether every command brings `section` in line with the design (a scratch copy only does
+    /// for the section commands, which its dialog previews run).
+    section_sync: bool,
+    /// Where the design's sections cut in the current model (shared with scratch copies).
+    section_cache: cmd::section::SharedCache,
     /// Component identification colours are enabled when present; view state only.
     pub colored_components: Option<()>,
     /// Surface analysis shading the model (zebra, draft, curvature map).
@@ -802,7 +810,7 @@ impl Session {
 
     /// A session on `doc` evaluated as `model`, with what it hides.
     pub(crate) fn with_model(doc: Arc<Document>, visibility: Visibility, model: Model) -> Self {
-        Session {
+        let mut session = Session {
             stop: Default::default(),
             is_copy: false,
             saved: doc.clone(),
@@ -853,6 +861,9 @@ impl Session {
             foreign_copy: None,
             section: None,
             section_hatch: true,
+            section_derived: false,
+            section_sync: true,
+            section_cache: Default::default(),
             colored_components: None,
             analysis: None,
             continuity: Vec::new(),
@@ -874,7 +885,9 @@ impl Session {
             motion_traces: Default::default(),
             command_check: None,
             crash_journal: false,
-        }
+        };
+        cmd::section::sync(&mut session);
+        session
     }
 
     /// Become `fresh` (another design opened, recovered or started), keeping the settings that
@@ -1511,7 +1524,8 @@ impl Session {
         }
     }
 
-    /// Only persistent render intent, part properties, appearances or the browser's groups changed.
+    /// Only persistent render intent, part properties, appearances, the browser's groups or the
+    /// Section Analyses changed.
     /// Never evaluate or clear a stale model here.
     fn render_only_change(&self, before: &Snapshot) -> bool {
         self.active_sketch == before.active_sketch
@@ -1519,7 +1533,8 @@ impl Session {
             && (self.doc.differs_only_in_render(&before.doc)
                 || self.doc.differs_only_in_part_properties(&before.doc)
                 || self.doc.differs_only_in_appearance(&before.doc)
-                || self.doc.differs_only_in_browser(&before.doc))
+                || self.doc.differs_only_in_browser(&before.doc)
+                || self.doc.differs_only_in_sections(&before.doc))
     }
 
     /// Only what is hidden or shown changed (`browser.visibility`): the document and the model
@@ -1530,8 +1545,12 @@ impl Session {
 
     fn refresh_render(&mut self, previous: &Arc<Document>) {
         self.revision += 1;
-        // Geometry/placements have been proved identical. Retarget the cache's document key
-        // instead of discarding prepared meshes merely because the document Arc changed.
+        self.retarget_world_cache(previous);
+    }
+
+    /// Geometry/placements have been proved identical. Retarget the cache's document key
+    /// instead of discarding prepared meshes merely because the document Arc changed.
+    pub(crate) fn retarget_world_cache(&self, previous: &Arc<Document>) {
         if let Ok(mut cache) = self.world_cache.lock()
             && let Some(cache) = cache.as_mut()
             && Arc::ptr_eq(&cache.doc, previous)
@@ -1764,6 +1783,9 @@ impl Session {
                     // edit kept its model and joints valid, and a new session has had none.
                     let render_only = self.replacements == replacements && self.render_only_change(&before);
                     let display_only = !changed && hidden;
+                    // Section Analyses are kept in the design, with undo (#3977), but cut only the
+                    // view: like hiding a body, they leave an open feature editor valid (#10822).
+                    let sections_only = render_only && self.doc.section_analyses != before.doc.section_analyses;
                     let previous_doc = before.doc.clone();
                     if spec.undoable {
                         self.undo.push(before);
@@ -1778,6 +1800,10 @@ impl Session {
                             let sketch = edit.sketch;
                             self.refresh_live(edit);
                             self.live_links = Some((sketch, self.doc.clone(), self.revision));
+                        }
+                        None if sections_only => {
+                            self.refresh_render(&previous_doc);
+                            self.visibility_revision += 1;
                         }
                         None if render_only => self.refresh_render(&previous_doc),
                         None if display_only => self.refresh_display(),
@@ -1800,6 +1826,11 @@ impl Session {
                 Err(e)
             }
         };
+        // The shown Section Analysis follows the design: its plane, a face or construction plane
+        // it is on, and undo and redo.
+        if self.section_sync {
+            cmd::section::sync(self);
+        }
         if let Some((before, changed, failed)) = crash_outcome {
             // Refresh and body-name pinning can copy the shared document. Remember the final
             // document, so the next command does not mistake that work for an outside edit
@@ -1902,6 +1933,7 @@ impl Session {
         } else if !Arc::ptr_eq(&self.doc, &before.doc) || self.active_sketch != before.active_sketch || self.pending_moves != before.pending_moves {
             self.refresh();
         }
+        cmd::section::sync(self);
         Ok(())
     }
 
@@ -1968,6 +2000,9 @@ impl Session {
             foreign_copy: self.foreign_copy.clone(),
             section: None,
             section_hatch: true,
+            section_derived: false,
+            section_sync: false,
+            section_cache: self.section_cache.clone(),
             colored_components: None,
             analysis: None,
             continuity: Vec::new(),
@@ -2095,6 +2130,15 @@ impl Session {
         if let Some(original) = &prepared.editor_original {
             self.restore_editor_history(&prepared.source.doc, original);
         }
+        // Sections made or changed while the editor was open stay, also when its edit is undone.
+        if prepared.computed.doc.section_analyses != self.doc.section_analyses {
+            let computed_doc = prepared.computed.doc.clone();
+            prepared.computed.doc = with_sections_of(&computed_doc, &self.doc);
+            prepared.computed.retarget_world_cache(&computed_doc);
+            for snapshot in prepared.computed.undo.iter_mut().chain(&mut prepared.computed.redo) {
+                snapshot.doc = with_sections_of(&snapshot.doc, &self.doc);
+            }
+        }
         // Visibility may have changed while the worker ran. Undoing its first command must
         // restore that current view, including sketches, folders and joint glyphs.
         if let Some(before) = prepared.computed.undo.first_mut() {
@@ -2112,7 +2156,7 @@ impl Session {
     }
 
     fn same_document_context(&self, source: &Session) -> bool {
-        Arc::ptr_eq(&self.doc, &source.doc)
+        same_design(&self.doc, &source.doc)
             && self
                 .revision
                 .checked_sub(source.revision)
@@ -2129,9 +2173,16 @@ impl Session {
         if !self.same_document_context(source) {
             return Err(EngineError::Other("the design changed while the feature editor was open; its current timeline was preserved".into()));
         }
+        // The history goes back to the design as it was; sections made or changed while the
+        // editor was open stay after Cancel (#3977).
+        self.restore_editor_history(&source.doc, &original.doc);
+        if original.doc.section_analyses != self.doc.section_analyses {
+            let original_doc = original.doc.clone();
+            original.doc = with_sections_of(&original_doc, &self.doc);
+            original.retarget_world_cache(&original_doc);
+        }
         let params = original.doc.marker.map(|position| serde_json::json!({"position":position})).unwrap_or_else(|| serde_json::json!({}));
         crash::accepted_command(self, &self.doc, &original.doc, "timeline.roll_to", &params, !Arc::ptr_eq(&self.doc, &original.doc));
-        self.restore_editor_history(&source.doc, &original.doc);
         let undo = std::mem::take(&mut self.undo);
         let redo = std::mem::take(&mut self.redo);
         let selection = std::mem::take(&mut self.selection);
@@ -2149,6 +2200,9 @@ impl Session {
         for snapshot in self.undo.iter_mut().chain(&mut self.redo) {
             if Arc::ptr_eq(&snapshot.doc, source) {
                 snapshot.doc = original.clone();
+            } else if snapshot.doc.marker == source.marker && snapshot.doc.differs_only_in_sections(source) {
+                // A step on a Section Analysis taken in the editor keeps its sections (#3977).
+                snapshot.doc = with_sections_of(original, &snapshot.doc);
             }
         }
     }
@@ -2445,6 +2499,23 @@ fn image_host_availability(host: Option<&render::job::ImageHost>, expected: &ren
 
 /// Whether two designs differ at most in their features. Every field is named, so a new one has
 /// to be decided on here.
+/// The same design apart from its Section Analyses: they are saved with it (#3977) but cut only
+/// the view, so making or changing one while a feature editor is open keeps the editor's OK and
+/// Cancel, as hiding a body does (#10822).
+fn same_design(a: &Arc<Document>, b: &Arc<Document>) -> bool {
+    Arc::ptr_eq(a, b) || a.differs_only_in_sections(b)
+}
+
+/// `doc` with the Section Analyses of `from`.
+fn with_sections_of(doc: &Arc<Document>, from: &Document) -> Arc<Document> {
+    if doc.section_analyses == from.section_analyses {
+        return doc.clone();
+    }
+    let mut d = (**doc).clone();
+    d.section_analyses = from.section_analyses.clone();
+    Arc::new(d)
+}
+
 fn same_but_features(a: &Document, b: &Document) -> bool {
     let Document {
         newer_file: _,
@@ -2482,6 +2553,8 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         timeline_groups,
         browser_order,
         named_views,
+        // Section Analyses cut only the view: joints never read them.
+        section_analyses: _,
         visibility,
         next_component_color_index,
     } = a;

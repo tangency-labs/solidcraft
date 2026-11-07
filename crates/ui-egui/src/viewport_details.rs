@@ -168,6 +168,59 @@ fn continuity_description(app: &SolveApp, details: &mut Details) {
     details.actions.push(("copy".into(), tr("ui.details_copy_list")));
 }
 
+/// The command a details-card edit runs, and its parameters. A field of the Section Analysis
+/// shown (distance, flip, hatch) changes only that field through `inspect.section.edit`: the
+/// section keeps its plane, so a cut on an origin plane, a construction plane or a face goes on
+/// following it, and a distance expression the edit does not touch is kept. Rebuilding the cut
+/// as `{origin, normal}` (what `edit_params` does) made it a fixed plane (#3977). A new plane
+/// direction, and every other analysis, rebuilds the effect's own command.
+pub(crate) fn edit_command(app: &SolveApp, effect: &StatusItem, id: &str, value: &DetailValue) -> Option<(String, Value)> {
+    if let StatusSetting::Section { origin_mm, normal, .. } = effect.setting
+        && id != "plane"
+        && let Some(sec) = app.session.doc.section_analyses.visible()
+    {
+        return section_field(app, sec, origin_mm, normal, id, value).map(|params| ("inspect.section.edit".to_string(), params));
+    }
+    Some((effect.command.clone(), edit_params(app, effect, id, value)?))
+}
+
+/// `inspect.section.edit` parameters for one card field of `sec`, whose cut is now at
+/// `origin_mm` facing `normal`.
+fn section_field(
+    app: &SolveApp,
+    sec: &solidcraft_engine::doc::section_analysis::SectionAnalysis,
+    origin_mm: [f64; 3],
+    normal: [f64; 3],
+    id: &str,
+    value: &DetailValue,
+) -> Option<Value> {
+    use solidcraft_engine::doc::section_analysis::SectionPlane;
+    let (_, card_offset, n) = crate::viewport_status::section_coordinates(origin_mm, normal)?;
+    // The card shows the cut along `n`, its normal turned to point first-positive.
+    let card_flip = normal.iter().zip(n).map(|(a, b)| a * b).sum::<f64>() < 0.0;
+    match id {
+        "hatch" => Some(json!({"section":sec.id,"hatch":check(value)?})),
+        // Turning the box round turns the section's own side round (XZ's normal, for one, need
+        // not point along the card's axis).
+        "flip" => Some(json!({"section":sec.id,"flip":sec.flip != (check(value)? != card_flip)})),
+        // An origin plane passes through the world origin: the card's distance is the cut's
+        // coordinate on the plane's axis, which `at` takes.
+        "offset" if matches!(sec.plane, SectionPlane::Origin { .. }) => Some(json!({"section":sec.id,"at":mm_text(scalar(value)?)})),
+        // Any other plane: the card moves the cut along `n`, the section moves it along its
+        // plane's own normal (the cut's normal unless flipped), so the change is turned onto that.
+        "offset" => {
+            let own = if sec.offset.trim().is_empty() {
+                0.0
+            } else {
+                app.session.doc.eval(&sec.offset, solidcraft_engine::doc::expr::Kind::Length).ok()?
+            };
+            let along = if card_flip != sec.flip { -1.0 } else { 1.0 };
+            Some(json!({"section":sec.id,"offset":mm_text(own + (scalar(value)? - card_offset) * along)}))
+        }
+        _ => None,
+    }
+}
+
 /// Rebuild a complete command from current Session values for every single-field edit.
 /// The value passed by the widget changes exactly one companion of that current command.
 pub(crate) fn edit_params(app: &SolveApp, effect: &StatusItem, id: &str, value: &DetailValue) -> Option<Value> {
@@ -188,8 +241,12 @@ pub(crate) fn edit_params(app: &SolveApp, effect: &StatusItem, id: &str, value: 
                 base = base.into_iter().zip(new_n).map(|(o, n)| o - n * projection).collect();
             }
             let flip = normal.iter().zip(n).map(|(a, b)| a * b).sum::<f64>() < 0.0;
-            Some(json!({"plane":{"origin":base,"normal":new_n},"offset":format!("{} mm",if id=="offset"{scalar(value)?}else{old_offset}),
-                "flip":if id=="flip"{check(value)?}else{flip},"hatch":if id=="hatch"{check(value)?}else{hatch}}))
+            let offset = if id == "offset" { scalar(value)? } else { old_offset };
+            let hatch = if id == "hatch" { check(value)? } else { hatch };
+            // `replace`: the card edits the section shown in place; without it every field change
+            // would add a new Section Analysis to the design (#3977).
+            Some(json!({"plane":{"origin":base,"normal":new_n},"offset":mm_text(offset),
+                "flip":if id=="flip"{check(value)?}else{flip},"hatch":hatch,"replace":true}))
         }
         StatusSetting::Continuity { .. } => {
             let rows = app.session.continuity_details();
@@ -203,6 +260,12 @@ pub(crate) fn edit_params(app: &SolveApp, effect: &StatusItem, id: &str, value: 
         }
         StatusSetting::Environment => None,
     }
+}
+/// A length in mm as the design keeps it: to 13 significant digits, so a value typed in another
+/// unit (1.5 in) is saved as "38.1 mm", not with the float's last bits.
+fn mm_text(mm: f64) -> String {
+    let rounded = format!("{mm:.12e}").parse::<f64>().unwrap_or(mm);
+    format!("{} mm", if rounded == 0.0 { 0.0 } else { rounded })
 }
 fn scalar(value: &DetailValue) -> Option<f64> {
     match value {
@@ -226,8 +289,8 @@ pub(crate) fn dispatch(app: &mut SolveApp, ctx: &egui::Context, owner: &str, eve
             app.viewport_status.selected_record = app.session.continuity_details().get(selected).map(record_id);
         }
         DetailEvent::Change(id, value) => {
-            if let Some(params) = edit_params(app, &effect, &id, &value)
-                && let Err(error) = app.run(&effect.command, params)
+            if let Some((command, params)) = edit_command(app, &effect, &id, &value)
+                && let Err(error) = app.run(&command, params)
             {
                 app.set_status(error, true);
             }

@@ -440,9 +440,10 @@ pub(super) fn same_model_source(app: &SolveApp, document: &std::sync::Weak<solid
     };
     // Exhaustive by design: adding a Document field must update this comparison.
     // Match ergonomics bind references, including vectors and point-cloud data.
+    // Section Analyses cut only the view, never what is rendered.
     macro_rules! compare_authoring_fields {
         ($($field:ident),* $(,)?) => {{
-            let solidcraft_engine::doc::Document { render: _, $($field),* } = source.as_ref();
+            let solidcraft_engine::doc::Document { render: _, section_analyses: _, $($field),* } = source.as_ref();
             true $(&& $field == &app.session.doc.$field)*
         }};
     }
