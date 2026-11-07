@@ -1785,8 +1785,9 @@ fn section_segments(plane: &Plane, m: &Mesh, face: Option<u32>) -> (Vec<(Vec2, V
 }
 
 /// Re-fit each circle and arc of a fitted section through the exact section points near it.
-/// The outline stays closed: a line meeting an arc's end moves with it. An arc that meets
-/// another curve there keeps its fit, since moving that curve's end would take it off its circle.
+/// The outline stays closed: a line meeting an arc's end moves with it. Where the arc meets
+/// another curve, the refit stands only if that end stays put; else the arc keeps its fit,
+/// since moving the other curve's end would take it off its circle.
 fn refine_rounds(mut v: Vec<LinkGeom>, exact: &[Vec2], size: f64) -> Vec<LinkGeom> {
     // Ends this close meet: the fit joins crossings this close into one point.
     let meet = size * 1e-7;
@@ -1802,11 +1803,14 @@ fn refine_rounds(mut v: Vec<LinkGeom>, exact: &[Vec2], size: f64) -> Vec<LinkGeo
             LinkGeom::Line(s, t) | LinkGeom::Arc { a: s, b: t, .. } => s.dist(e) <= meet || t.dist(e) <= meet,
             _ => false,
         };
-        if v.iter().enumerate().any(|(j, h)| j != i && !matches!(h, LinkGeom::Line(..)) && (touches(h, a0) || touches(h, b0))) {
-            continue;
-        }
         let refined = refine_round(g, exact, size * 2e-3);
         let LinkGeom::Arc { a: a1, b: b1, .. } = refined else { continue };
+        let tears = |e0: Vec2, e1: Vec2| {
+            e1.dist(e0) > meet && v.iter().enumerate().any(|(j, h)| j != i && !matches!(h, LinkGeom::Line(..)) && touches(h, e0))
+        };
+        if tears(a0, a1) || tears(b0, b1) {
+            continue;
+        }
         for h in v.iter_mut() {
             if let LinkGeom::Line(s, t) = h {
                 for end in [s, t] {
