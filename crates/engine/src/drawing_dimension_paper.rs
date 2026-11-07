@@ -23,6 +23,8 @@ use solidcraft_sketch::{DimFrame, DimSizes, DimText, Outcome, PaperFonts, TextSt
 const SIZES: DimSizes = DimSizes { arrow: 3.0, gap: 1.0, overshoot: 2.0, offset: 10.0, above: true };
 /// A filled arrowhead, its line stopped at its base by [`stop_at_base`]: a note's leader ends in it too.
 pub(crate) const ARROW: Terminator = Terminator::Arrow { shape: ArrowShape::Filled, length_mm: SIZES.arrow, angle: PI / 9.0 };
+/// The gap between a text and the line beside it: a dimension's, a note's leader's and a balloon's circle's.
+pub(crate) const GAP_MM: f64 = SIZES.gap;
 /// The height of a dimension's capitals, and a note's unless it sets its own.
 pub(crate) const TEXT_MM: f64 = 3.5;
 /// How close two points of a layout are when they are one point.
@@ -98,7 +100,7 @@ pub struct OnPaper {
     pub why: Option<String>,
     /// Whether its text isn't there only until the search for a font to fall back to answers.
     pub pending: bool,
-    /// Where its parts sit ([`Layout`]): a note's is empty.
+    /// Where its parts sit ([`Layout`]): a note's and a balloon's are empty.
     pub layout: Layout,
 }
 

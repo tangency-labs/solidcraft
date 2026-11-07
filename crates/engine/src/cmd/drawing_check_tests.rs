@@ -321,6 +321,38 @@ fn a_parts_list_row_without_a_balloon_is_listed() {
     assert_eq!((rows(&reply), of_kind(&reply, "lost")), (vec![row], vec![named("balloon", &balloon)]), "{reply}");
 }
 
+/// A balloon moved off the paper is outside the sheet, as a dimension or a note is: a balloon is one
+/// of the sheet's objects since balloons came to the sheet. One on the paper isn't listed.
+#[test]
+fn a_balloon_off_the_paper_is_listed() {
+    let (mut s, view, _, at) = assembly();
+    let edge = json!({"point": [5, 0, 0], "path": [at]});
+    let balloon = run(&mut s, "drawing.balloon.add", json!({"view": view, "edge": edge, "at": [80, 20]}))["balloon"].clone();
+    assert!(of_kind(&checked(&mut s, json!({})), "outside_sheet").is_empty());
+    run(&mut s, "drawing.balloon.edit", json!({"balloon": balloon, "set": {"at": [1000, 20]}}));
+    let reply = checked(&mut s, json!({}));
+    assert_eq!(of_kind(&reply, "outside_sheet"), [named("balloon", &balloon)], "{reply}");
+}
+
+/// A deferred drawing whose model moved on lists its view's balloon as out of date, as a balloon, as
+/// it does a held view's dimension.
+#[test]
+fn a_held_views_balloon_is_out_of_date_as_a_balloon() {
+    let (mut s, view, _, at) = assembly();
+    let edge = json!({"point": [5, 0, 0], "path": [at]});
+    let balloon = run(&mut s, "drawing.balloon.add", json!({"view": view, "edge": edge, "at": [80, 20]}))["balloon"].clone();
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    run(&mut s, "drawing.update", json!({}));
+    assert!(of_kind(&checked(&mut s, json!({})), "out_of_date").is_empty());
+    with_model_changed(&mut s, |s| {
+        run(s, "solid.box", json!({"length": 20, "width": 20, "height": 40, "corner": [40, 60, 0], "body_name": "Tower", "operation": "new"}));
+    });
+    let reply = checked(&mut s, json!({}));
+    let mut expected = vec![named("balloon", &balloon), named("view", &view)];
+    expected.sort();
+    assert_eq!(of_kind(&reply, "out_of_date"), expected, "{reply}");
+}
+
 /// A view moved off its sheet's drawing space, a note on it with it, and an image off the paper, are outside the sheet;
 /// `sheet` narrows the check to one sheet, by id or name, a lost note in a view included.
 #[test]
