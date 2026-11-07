@@ -177,9 +177,19 @@ fn every_selection_kind_is_taken() {
     ];
     let schema = input_schema_for::<SelectSetParams>();
     let schema = schema.as_value();
+    // `conforms` doesn't check `const`, so each item is also matched to the branch of its `type`.
+    let branches = schema["$defs"]["SelectItem"]["anyOf"].as_array().cloned().unwrap_or_default();
+    assert!(!branches.is_empty(), "no SelectItem branches in {schema}");
+    // Every branch is one of the kinds listed here.
+    for b in &branches {
+        assert!(items.iter().any(|i| i["type"] == b["properties"]["type"]["const"]), "{b} isn't tried");
+    }
     for item in items {
         assert!(serde_json::from_value::<Sel>(item.clone()).is_ok(), "{item} isn't a Sel");
         assert!(serde_json::from_value::<SelectItem>(item.clone()).is_ok(), "{item}");
+        let kind = item["type"].as_str().unwrap_or_default();
+        let branch = branches.iter().find(|b| b["properties"]["type"]["const"] == kind);
+        assert!(branch.is_some_and(|b| conforms(schema, b, &item)), "no `{kind}` branch takes {item}");
         let p = json!({"items": [item]});
         assert!(conforms(schema, schema, &p), "{p} doesn't match {schema}");
     }
