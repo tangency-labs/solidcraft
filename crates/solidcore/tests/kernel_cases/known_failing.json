@@ -10,11 +10,6 @@
     "reason": "status 1001 instead of the refusal naming the size that fits"
   },
   {
-    "case": "fillets/4782-fillet-bar-edge-wider-than-both-faces",
-    "issue": "tangency-labs/solidcore#2948",
-    "reason": "continuity_order: got Box: no null seams want >= g1 at every blend seam"
-  },
-  {
     "case": "fillets/9-fillet-corner-curvature-with-reduce-fit",
     "issue": "tangency-labs/solidcraft#12645",
     "reason": "solid.fillet builds `corner: g2` with `fit: exact` only"

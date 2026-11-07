@@ -109,7 +109,7 @@
         "7": 2,
         "8": 1
       },
-      "expressible": 50,
+      "expressible": 51,
       "not_expressible": 16,
       "operation_expressible": 258,
       "reasons": {
@@ -117,7 +117,7 @@
         "refused or failed in SolidCraft, not in a kernel operation": 14
       },
       "ungraded": {
-        "continuity": 205,
+        "continuity": 204,
         "faces": 2,
         "refusal \"angle\"": 1,
         "refusal \"continues tangentially\"": 3,

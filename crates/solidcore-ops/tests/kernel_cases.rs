@@ -1072,6 +1072,131 @@ fn within(got: f64, want: f64, tol: &Value) -> bool {
     d <= tol["rel"].as_f64().unwrap_or(DEFAULT_REL) * want.abs()
 }
 
+/// One geometric seam expectation, independent of result entity numbering.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExpectedSeam {
+    #[serde(default)]
+    body: usize,
+    ends: [[f64; 3]; 2],
+    normal_dot: f64,
+    position_abs_mm: f64,
+    normal_dot_abs: f64,
+    max_edge_tolerance_mm: f64,
+    max_gap_mm: f64,
+}
+
+/// Grade each named seam exactly once, including its angle, gaps and tolerance cap.
+/// Endpoint pairs may be reversed; duplicate expectations cannot consume one edge twice.
+fn grade_seams(result: &[Slot], expected: &Value) -> Result<(), Stop> {
+    let seams: Vec<ExpectedSeam> = serde_json::from_value(expected.clone())
+        .map_err(|e| Stop::Fail(format!("invalid seam expectations: {e}")))?;
+    if seams.is_empty() {
+        return Err(Stop::Fail("seam expectations are empty".into()));
+    }
+    let mut used = BTreeSet::new();
+    for (number, seam) in seams.iter().enumerate() {
+        if !seam.ends.iter().flatten().all(|x| x.is_finite())
+            || !(-1.0..=1.0).contains(&seam.normal_dot)
+            || ![
+                seam.position_abs_mm,
+                seam.normal_dot_abs,
+                seam.max_edge_tolerance_mm,
+                seam.max_gap_mm,
+            ]
+            .iter()
+            .all(|x| x.is_finite() && *x >= 0.0)
+        {
+            return Err(Stop::Fail(format!("invalid seam {number}: {seam:?}")));
+        }
+        let slot = result
+            .get(seam.body)
+            .ok_or_else(|| Stop::Fail(format!("seam {number}: missing body {}", seam.body)))?;
+        let (record, order) = slot
+            .body
+            .to_record()
+            .map_err(|e| Stop::Fail(e.to_string()))?;
+        let close = |a: [f64; 3], b: [f64; 3]| {
+            a.iter()
+                .zip(b)
+                .all(|(x, y)| (x - y).abs() <= seam.position_abs_mm)
+        };
+        let matches: Vec<_> = record
+            .edges
+            .iter()
+            .enumerate()
+            .filter(|(_, edge)| {
+                let a = record.vertices[edge.vertices[0] as usize].point;
+                let b = record.vertices[edge.vertices[1] as usize].point;
+                (close(a, seam.ends[0]) && close(b, seam.ends[1]))
+                    || (close(a, seam.ends[1]) && close(b, seam.ends[0]))
+            })
+            .collect();
+        if matches.len() != 1 {
+            return Err(Stop::Fail(format!(
+                "seam {number}: {} edges match {:?}",
+                matches.len(),
+                seam.ends
+            )));
+        }
+        let (edge_index, edge) = matches[0];
+        if !used.insert((seam.body, edge_index)) {
+            return Err(Stop::Fail(format!(
+                "seam {number}: duplicate edge expectation"
+            )));
+        }
+        if edge.uses.len() != 2
+            || !edge.tolerance.is_finite()
+            || edge.tolerance < 0.0
+            || edge.tolerance > seam.max_edge_tolerance_mm
+        {
+            return Err(Stop::Fail(format!(
+                "seam {number}: {} uses, tolerance {} (cap {})",
+                edge.uses.len(),
+                edge.tolerance,
+                seam.max_edge_tolerance_mm
+            )));
+        }
+        let mut normals = Vec::new();
+        for edge_use in &edge.uses {
+            let face = edge_use.face as usize;
+            normals.push(
+                slot.body
+                    .face_normal_at_edge(&order, edge_index, face)
+                    .map_err(|e| Stop::Fail(e.to_string()))?,
+            );
+            let samples = slot
+                .body
+                .edge_face_gap_samples(&order, edge_index, face)
+                .map_err(|e| Stop::Fail(e.to_string()))?;
+            if samples.is_empty()
+                || samples.iter().any(|s| {
+                    !s.distance.value.is_finite()
+                        || !s.distance.bound.is_finite()
+                        || s.distance.bound < 0.0
+                        || s.distance.value > edge.tolerance + s.distance.bound
+                        || s.distance.value + s.distance.bound > seam.max_gap_mm
+                })
+            {
+                return Err(Stop::Fail(format!("seam {number}: invalid edge/face gap")));
+            }
+        }
+        let dot: f64 = normals[0]
+            .value
+            .iter()
+            .zip(normals[1].value)
+            .map(|(a, b)| a * b)
+            .sum();
+        if !dot.is_finite() || (dot - seam.normal_dot).abs() > seam.normal_dot_abs {
+            return Err(Stop::Fail(format!(
+                "seam {number}: normal dot {dot} (expected {})",
+                seam.normal_dot
+            )));
+        }
+    }
+    Ok(())
+}
+
 /// Runs a case's calls and grades the result against `rig` (or, for a hand-written case
 /// without one, `expected`): `Ok(deviation)` for a match.
 fn run_case(entry: &Path, e: &Value) -> Result<Option<f64>, Stop> {
@@ -1197,6 +1322,9 @@ fn run_case_with_records(
         );
     }
     let got = measure(&result).map_err(Stop::Fail)?;
+    if let Some(seams) = e["expected"].get("seams") {
+        grade_seams(&result, seams)?;
+    }
     let tol = &e["expected"]["tolerance"];
     let want = match e.get("rig") {
         Some(r) if r["measured"].is_object() => &r["measured"],
@@ -1246,6 +1374,93 @@ fn run_case_with_records(
     } else {
         Err(Stop::Fail(diffs.join(", ")))
     }
+}
+
+/// A wrong endpoint, angle, tolerance cap or duplicate seam cannot pass the grader.
+#[test]
+fn seam_expectations_grade_geometry_and_reject_bad_metadata() {
+    let body = Arc::new(solidcore_ops::make_box([0.0; 3], [10.0; 3]).unwrap());
+    let result = [Slot { body, order: None }];
+    let good = serde_json::json!([{
+        "ends": [[0, 0, 0], [10, 0, 0]],
+        "normal_dot": 0.0,
+        "position_abs_mm": 1e-9,
+        "normal_dot_abs": 1e-9,
+        "max_edge_tolerance_mm": 1.0,
+        "max_gap_mm": 1e-9
+    }]);
+    grade_seams(&result, &good).unwrap();
+    let mut reversed = good.clone();
+    reversed[0]["ends"] = serde_json::json!([[10, 0, 0], [0, 0, 0]]);
+    grade_seams(&result, &reversed).unwrap();
+    for (field, value) in [
+        ("ends", serde_json::json!([[0, 1, 0], [10, 1, 0]])),
+        ("normal_dot", serde_json::json!(-0.5)),
+        ("max_edge_tolerance_mm", serde_json::json!(0.0)),
+        ("max_gap_mm", serde_json::json!(-1.0)),
+        ("body", serde_json::json!(1)),
+        ("position_abs_mm", serde_json::json!(-1.0)),
+        ("normal_dot_abs", serde_json::json!("not a number")),
+    ] {
+        let mut wrong = good.clone();
+        wrong[0][field] = value;
+        assert!(grade_seams(&result, &wrong).is_err(), "accepted {wrong}");
+    }
+    for wrong in [
+        serde_json::json!([]),
+        serde_json::json!({}),
+        serde_json::json!([good[0].clone(), good[0].clone()]),
+    ] {
+        assert!(grade_seams(&result, &wrong).is_err(), "accepted {wrong}");
+    }
+}
+
+/// Inflated stored tolerances cannot hide a displaced support in the sampled gap check.
+#[test]
+fn seam_gaps_are_limited_independently_of_stored_tolerances() {
+    use solidcore_record::brep::Surface;
+
+    let body = solidcore_ops::make_box([0.0; 3], [10.0; 3]).unwrap();
+    let (mut record, _) = body.to_record().unwrap();
+    record.tolerance = 0.01;
+    for face in &mut record.faces {
+        match &mut face.surface {
+            Surface::Plane { origin, .. } => {
+                for x in origin {
+                    *x += 1e-4;
+                }
+            }
+            Surface::PlaneThrough {
+                origin,
+                u_point,
+                v_point,
+            } => {
+                for point in [origin, u_point, v_point] {
+                    for x in point {
+                        *x += 1e-4;
+                    }
+                }
+            }
+            other => panic!("box support is not planar: {other:?}"),
+        }
+    }
+    let (body, _) = Body::from_record(&record, true).unwrap();
+    let result = [Slot {
+        body: Arc::new(body),
+        order: None,
+    }];
+    let loose = serde_json::json!([{
+        "ends": [[0, 0, 0], [10, 0, 0]],
+        "normal_dot": 0.0,
+        "position_abs_mm": 1e-9,
+        "normal_dot_abs": 1e-9,
+        "max_edge_tolerance_mm": 0.01,
+        "max_gap_mm": 0.01
+    }]);
+    grade_seams(&result, &loose).unwrap();
+    let mut strict = loose;
+    strict[0]["max_gap_mm"] = serde_json::json!(1e-9);
+    assert!(grade_seams(&result, &strict).is_err());
 }
 
 #[test]

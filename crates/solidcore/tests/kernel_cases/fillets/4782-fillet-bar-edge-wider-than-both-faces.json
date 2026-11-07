@@ -86,9 +86,33 @@
   "case": "4782-fillet-bar-edge-wider-than-both-faces",
   "expected": {
     "body_count": 1,
-    "continuity": {
-      "order": "g1"
-    },
+    "seam_tolerance_basis": "The operand record's 2e-5 mm is an intersection tolerance, imported as a 1e-5 zone tolerance. Constant-radius preparation uses four times that edge zone tolerance (4e-5); crease sewing carries it to the seam, and record export doubles the zone to an 8e-5 intersection tolerance. Cap that metadata at 8e-5 independently of measured gaps. The seams themselves are exact straight cylinder/plane or plane/plane intersections: require every sampled distance plus its rounding bound within the same 1e-9 mm absolute positional allowance used for their endpoints, independently of the stored edge tolerance. This is a sampled regression check, not a whole-edge certificate.",
+    "seams": [
+      {
+        "ends": [[0.0, 1.3397459621556127, 0.0], [80.0, 1.3397459621556127, 0.0]],
+        "normal_dot": -0.5,
+        "position_abs_mm": 1e-9,
+        "normal_dot_abs": 1e-9,
+        "max_edge_tolerance_mm": 8e-5,
+        "max_gap_mm": 1e-9
+      },
+      {
+        "ends": [[0.0, 5.0, 3.6602540378443873], [80.0, 5.0, 3.6602540378443873]],
+        "normal_dot": -0.5,
+        "position_abs_mm": 1e-9,
+        "normal_dot_abs": 1e-9,
+        "max_edge_tolerance_mm": 8e-5,
+        "max_gap_mm": 1e-9
+      },
+      {
+        "ends": [[0.0, 5.0, 0.0], [80.0, 5.0, 0.0]],
+        "normal_dot": 0.0,
+        "position_abs_mm": 1e-9,
+        "normal_dot_abs": 1e-9,
+        "max_edge_tolerance_mm": 8e-5,
+        "max_gap_mm": 1e-9
+      }
+    ],
     "method": "a convex round past its faces' far edges is built on the faces continued and its removal subtracted (smlib_fillet): the section keeps the bar's 5x5 square [0,5]x[0,5] (y,z) within the round's circle, centre (10,-5), radius 10. The circle crosses z=0 at y = 10-sqrt(75) and y=5 at z = sqrt(75)-5, and contains the corner (5,0), so with u = 10-y the area is integral from 5 to sqrt(75) of (sqrt(100-u^2) - 5) du = 50 (pi/3 - pi/6) - 5 (sqrt(75) - 5) = 25 pi/3 - 5 sqrt(75) + 25 = 7.8786686; V = 80 area = 2000 pi/3 - 400 sqrt(75) + 2000 = 630.2934873",
     "source": "analytic",
     "sources": [
@@ -100,7 +124,8 @@
     "volume_mm3": 630.2934873,
     "what": "the long top edge of a 5x5 bar rounded r10, wider than both faces it rounds"
   },
-  "expressible": false,
+  "expressible": true,
+  "gallery_note": "R10 consumes the original y=0 and z=5 supports of the 5x5 bar: their tangent seams no longer exist. The round crosses z=0 and y=5 with 120-degree outward-normal angles, as the end view shows. The rig grades each crossing seam and the sharp planar seam exactly once from their endpoints, normal dots, gap samples and independent tolerance cap. The remaining direct regression checks the unchanged operand and the round's procedural definition. No kernel geometry changed; the original G1 grading was inapplicable.",
   "operation_expressible": true,
   "outcome": {
     "ran": true,
@@ -141,9 +166,7 @@
     "tagged",
     "blend_dropping"
   ],
-  "ungraded": [
-    "continuity: SolidCraft computes it"
-  ],
+  "ungraded": [],
   "what": "the long top edge of a 5x5 bar rounded r10, wider than both faces it rounds",
   "why_not": []
 }

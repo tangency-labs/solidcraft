@@ -47,7 +47,7 @@ Each case runs as the rig runs it, with the kernel's operations traced at the bo
 | `params` | The operation's arguments as SolidCraft passed them. A pick by points is `{kind, points, tolerance, picked}`: each point's pick is `{index, at}`, the entity's index in the body's list of its kind and where it is (an edge's ends, a vertex's point), or `{miss}`. |
 | `result` | The bodies the case ends with: `made` by an operation, or an `operand` carried through unchanged. |
 | `outcome` | `ran`, and for a stopped run the engine's error and the failing operation's `kernel_error`; `raw_counts`, the records' own face, edge and vertex counts. |
-| `expected` | SolidCraft's `expected.json`, unchanged (see its README for each field). |
+| `expected` | Exported `expected.json` values, or independently derived solidcore expectations. Optional `seams` are graded as described below, even when counts and volume come from `rig`. |
 | `rig` | SolidCraft's result at the pin: `status`, `error`, `refused_with`, `measured` (body count, merged face, edge and vertex counts, volume, area) and `known_failing`, the case's line in its area's known-failing list. |
 | `golden` | A ladder case's golden status and counts (never its time). |
 | `gallery_note` | Optional: what the case gallery (the site's `cases.html`) says beyond `what` and the case's status, such as why it passes, how its round ends or what its failure means. Nothing reads it but the site. |
@@ -56,6 +56,18 @@ Each case runs as the rig runs it, with the kernel's operations traced at the bo
 | `why_not` | Why the operation isn't the kernel's alone. |
 | `ungraded` | What SolidCraft grades that the kernel doesn't measure: `continuity`, `watertight`, `files`, `results`, `construction`, `flat_pattern`, counts that SolidCraft's merging across analytic surfaces changes, and a refusal graded on SolidCraft's wording of the kernel's error. |
 | `traced_ops` | Every operation the case's commands made, for reference. |
+
+### Seam expectations
+
+`expected.seams` is a nonempty array of geometric edge expectations. Each names a result
+`body` (zero-based, default `0`), two `ends` (either orientation), `normal_dot`,
+`position_abs_mm`, `normal_dot_abs`, `max_edge_tolerance_mm`, and `max_gap_mm`.
+Exactly one edge must match each endpoint pair, and no edge may be consumed twice.
+It must have two uses, the expected outward-normal dot, and a finite stored record
+intersection tolerance below its independent cap. Every edge/face sample's distance
+plus rounding bound must also fit `max_gap_mm`, independent of the stored tolerance.
+These are sampled regression checks, not whole-edge certificates. Derive coordinates,
+angles and caps from the construction, and explain the tolerance convention in the case.
 
 ## Adding a case
 
