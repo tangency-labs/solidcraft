@@ -7,7 +7,9 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Value, json};
 
-use super::check::whole;
+use solidcraft_geom::Vec3Geom as _;
+
+use super::check::{located, whole};
 
 /// Find where each value of a joint can go before the parts it moves touch another body. The
 /// design is not changed.
@@ -619,6 +621,268 @@ pub struct MotionStudyKeyInfo {
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct MotionStudyDeleted {
     /// The deleted study's name.
+    pub deleted: String,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+// ---- Exploded views (#12501) ----
+//
+// The exploded view handlers read their parameters from the raw JSON, so each key here reads as
+// its handler reads it and fails with its message. Whether an occurrence or a view exists stays
+// the handler's to check.
+
+/// Make an exploded view: occurrences moved apart, shown with `explode.show`. The design keeps
+/// its placements. One undo step. With `moves`, each occurrence moves as given; without, every
+/// top-level occurrence is pushed away from the assembly's centre by `scale` times its offset.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ExplodeCreateKeys {
+    /// The view's name. Default: "Exploded View" and the first number no view's name has.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// For the automatic view: how far each occurrence is pushed away from the assembly's
+    /// centre, as a multiple of its offset from it (a number from -100 to 100). Default: 1.
+    /// Not read, and so not checked, when `moves` is given.
+    #[serde(default, deserialize_with = "explode_scale", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "explode_scale_schema")]
+    pub scale: Option<f64>,
+    /// The moves, instead of the automatic view (at most 10 000): each an `occurrence` (by id or
+    /// name, or a component's name for its first occurrence) and its `translate`, in mm, as
+    /// [x, y, z] or {x, y, z}, less than 1e7 in length. An occurrence named twice is moved by
+    /// the last.
+    #[serde(default, deserialize_with = "explode_moves", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "explode_moves_schema")]
+    pub moves: Option<Vec<Value>>,
+}
+
+/// `explode.create`'s parameters: [`ExplodeCreateKeys`], where `scale` is read only without
+/// `moves`, as the handler does.
+#[derive(Debug)]
+pub struct ExplodeCreateParams(pub ExplodeCreateKeys);
+
+impl<'de> Deserialize<'de> for ExplodeCreateParams {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let mut value = Value::deserialize(d)?;
+        // `moves`, even `null`, is what the handler goes by: it never reads `scale` then.
+        if let Some(keys) = value.as_object_mut()
+            && keys.contains_key("moves")
+        {
+            keys.remove("scale");
+        }
+        serde_path_to_error::deserialize(&value).map(ExplodeCreateParams).map_err(|e| D::Error::custom(located(&e)))
+    }
+}
+
+impl JsonSchema for ExplodeCreateParams {
+    fn schema_name() -> Cow<'static, str> {
+        "ExplodeCreateParams".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        ExplodeCreateKeys::json_schema(generator)
+    }
+}
+
+/// `scale`: a number of at most 100 in size, with the handler's message for anything else,
+/// `null` included.
+fn explode_scale<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    Value::deserialize(d)?
+        .as_f64()
+        .filter(|x| x.is_finite() && x.abs() <= 100.0)
+        .map(Some)
+        .ok_or_else(|| D::Error::custom(whole("`scale` must be a number up to 100")))
+}
+
+fn explode_scale_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "For the automatic view: how far each occurrence is pushed away from the assembly's centre, as a multiple of its offset from it (a number from -100 to 100). Default: 1. Not read, and so not checked, when `moves` is given.",
+        "type": "number",
+        "minimum": -100,
+        "maximum": 100
+    })
+}
+
+/// Why the handler refuses `item`, one of `moves`, before looking at the design.
+/// The handler also looks each occurrence up as it goes, so a call with an unknown occurrence in
+/// an earlier move and a malformed later one gets the handler's "no occurrence" message with the
+/// check off and this shape message in strict; both refuse the call.
+fn explode_move_problem(item: &Value) -> Option<&'static str> {
+    if !matches!(item.get("occurrence"), Some(Value::Number(_) | Value::String(_))) {
+        return Some("an occurrence must be an id or a name");
+    }
+    let translate = item.get("translate").and_then(crate::params::vec3).filter(|v| v.len() < 1e7);
+    translate.is_none().then_some("each move needs `translate`: [x, y, z]")
+}
+
+/// `moves`: a list of at most 10 000 moves, each checked as [`explode_move_problem`] says. Given,
+/// `null` included, it must be a list, as the handler reads it.
+fn explode_moves<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<Value>>, D::Error> {
+    let Value::Array(moves) = Value::deserialize(d)? else {
+        return Err(D::Error::custom(whole("`moves` must be a list")));
+    };
+    if moves.len() > MAX_EXPLODE_ITEMS {
+        return Err(D::Error::custom(whole("too many moves")));
+    }
+    if let Some(problem) = moves.iter().find_map(explode_move_problem) {
+        return Err(D::Error::custom(whole(problem)));
+    }
+    Ok(Some(moves))
+}
+
+/// The most moves a view takes, and the most views a design has, as `cmd/motion.rs`'s `MAX_ITEMS`.
+const MAX_EXPLODE_ITEMS: usize = 10_000;
+
+fn explode_moves_schema(_: &mut SchemaGenerator) -> Schema {
+    let c = json!({"type": "number", "exclusiveMinimum": -1e7, "exclusiveMaximum": 1e7});
+    json_schema!({
+        "description": "The moves, instead of the automatic view (at most 10 000): each an `occurrence` (by id or name, or a component's name for its first occurrence) and its `translate`, in mm, as [x, y, z] or {x, y, z}, less than 1e7 in length. An occurrence named twice is moved by the last.",
+        "type": "array",
+        "maxItems": MAX_EXPLODE_ITEMS,
+        "items": {
+            "type": "object",
+            "required": ["occurrence", "translate"],
+            "properties": {
+                "occurrence": {"type": ["number", "string"]},
+                "translate": {
+                    "anyOf": [
+                        {"type": "array", "items": c, "minItems": 3, "maxItems": 3},
+                        {"type": "object", "properties": {"x": c, "y": c, "z": c}, "required": ["x", "y", "z"]}
+                    ]
+                }
+            }
+        }
+    })
+}
+
+/// An exploded view by its id (a number) or its name.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ViewRef(pub Value);
+
+impl<'de> Deserialize<'de> for ViewRef {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            v @ (Value::Number(_) | Value::String(_)) => Ok(ViewRef(v)),
+            _ => Err(D::Error::custom(whole("`view` must be an id or a name"))),
+        }
+    }
+}
+
+impl JsonSchema for ViewRef {
+    fn schema_name() -> Cow<'static, str> {
+        "ViewRef".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"description": "An exploded view's id (a number) or its name.", "type": ["number", "string"]})
+    }
+}
+
+/// Show an exploded view in the model: the occurrences are drawn moved apart, and the design
+/// keeps its placements. Without a view (or `none`), show the assembled placement again.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ExplodeShowParams {
+    /// The view to show, by id (a number) or name. Default: none, which shows the assembled
+    /// placement; `null` and the text `none` (in any case) mean the same.
+    #[serde(default)]
+    pub view: Option<ViewRef>,
+}
+
+/// List the design's exploded views. Nothing is changed.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ExplodeListParams {}
+
+/// Delete an exploded view. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = view_required)]
+pub struct ExplodeDeleteParams {
+    // Required in the schema (`view_required`), optional in the type: left out, the handler
+    // refuses it with its own message, not the check's "is required". `null` is refused too.
+    /// The view to delete, by id (a number) or name.
+    #[serde(default, deserialize_with = "some_view", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ViewRef")]
+    pub view: Option<ViewRef>,
+}
+
+/// `view`: an id or a name, with the handler's message for anything else, `null` included.
+fn some_view<'de, D: Deserializer<'de>>(d: D) -> Result<Option<ViewRef>, D::Error> {
+    ViewRef::deserialize(d).map(Some)
+}
+
+fn view_required(schema: &mut Schema) {
+    require(schema, "view");
+}
+
+/// One move of an exploded view.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ExplodeMoveInfo {
+    /// The occurrence, by id.
+    pub occurrence: u64,
+    /// How far it moves, in mm (world).
+    pub translate: [f64; 3],
+}
+
+impl From<&(u64, solidcore_record::Vec3)> for ExplodeMoveInfo {
+    fn from((occurrence, t): &(u64, solidcore_record::Vec3)) -> Self {
+        ExplodeMoveInfo { occurrence: *occurrence, translate: [t.x, t.y, t.z] }
+    }
+}
+
+/// What `explode.create` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ExplodeCreated {
+    /// The new view's id.
+    pub view: u64,
+    pub name: String,
+    pub moves: Vec<ExplodeMoveInfo>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// What `explode.show` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ExplodeShown {
+    /// The view shown, by id; `null` when the assembled placement is shown.
+    pub view: Option<u64>,
+    /// The view's name; not there when the assembled placement is shown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// What `explode.list` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ExplodeViews {
+    pub views: Vec<ExplodedViewInfo>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// An exploded view, as the design saves it.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ExplodedViewInfo {
+    pub id: u64,
+    pub name: String,
+    /// [occurrence id, translation in mm] pairs.
+    pub moves: Vec<(u64, [f64; 3])>,
+}
+
+impl From<&solidcraft_doc::motion::ExplodedView> for ExplodedViewInfo {
+    fn from(view: &solidcraft_doc::motion::ExplodedView) -> Self {
+        let moves = view.moves.iter().map(|(o, t)| (*o, [t.x, t.y, t.z])).collect();
+        ExplodedViewInfo { id: view.id, name: view.name.clone(), moves }
+    }
+}
+
+/// What `explode.delete` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ExplodeDeleted {
+    /// The deleted view's name.
     pub deleted: String,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

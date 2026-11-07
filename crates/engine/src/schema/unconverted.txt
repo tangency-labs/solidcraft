@@ -23,10 +23,6 @@ doc.recovery_discard
 doc.recovery_list
 document.inspect
 engine.commands
-explode.create
-explode.delete
-explode.list
-explode.show
 expr.evaluate
 face.delete
 file.export
