@@ -184,6 +184,18 @@ impl<'a> Lexer<'a> {
     fn expect(&mut self, c: u8) -> Result<(), String> {
         if self.eat(c)? { Ok(()) } else { self.fail(&format!("expected `{}`", c as char)) }
     }
+    /// Where the next line after `from` that starts with a keyword begins.
+    fn next_header_line(&self, from: usize) -> Option<usize> {
+        let rest = self.s.get(from..)?;
+        let mut at = rest.iter().position(|&c| c == b'\n')? + 1;
+        loop {
+            let line = at + rest.get(at..)?.iter().take_while(|c| matches!(c, b' ' | b'\t' | b'\r')).count();
+            if rest.get(line)?.is_ascii_uppercase() {
+                return Some(from + line);
+            }
+            at += rest.get(at..)?.iter().position(|&c| c == b'\n')? + 1;
+        }
+    }
     fn keyword(&mut self) -> Result<String, String> {
         self.ws()?;
         let st = self.i;
@@ -443,14 +455,30 @@ pub fn parse_with(text: &str, watch: Option<&dyn Progress>) -> Result<Exchange, 
             "HEADER" => {
                 lx.expect(b';')?;
                 loop {
-                    let k = lx.keyword()?;
-                    if k == "ENDSEC" {
+                    // The header only describes the file, and other CAD systems read past a
+                    // record that does not parse (#11650): skip to the next line that starts
+                    // with a keyword. If there is none, the file is not readable.
+                    let start = lx.i;
+                    let record = (|| {
+                        let k = lx.keyword()?;
+                        if k == "ENDSEC" {
+                            lx.expect(b';')?;
+                            return Ok(None);
+                        }
+                        lx.expect(b'(')?;
+                        let params = lx.list_rest(1)?;
                         lx.expect(b';')?;
-                        break;
-                    }
-                    lx.expect(b'(')?;
-                    let params = lx.list_rest(1)?;
-                    lx.expect(b';')?;
+                        Ok(Some((k, params)))
+                    })();
+                    let (k, params) = match record {
+                        Ok(Some(record)) => record,
+                        Ok(None) => break,
+                        Err(e) => {
+                            let Some(next) = lx.next_header_line(start) else { return Err(e) };
+                            lx.i = next;
+                            continue;
+                        }
+                    };
                     match k.as_str() {
                         "FILE_SCHEMA" => {
                             if let Some(Param::List(v)) = params.first() {
@@ -604,6 +632,33 @@ mod tests {
         assert_eq!(x[2], Param::Null);
         assert_eq!(x[3].as_ref_id(), Some(1));
         assert_eq!(x[4].as_f64(), Some(1e-3));
+    }
+
+    /// #11650: the header is metadata, so a malformed record in it must not stop the import.
+    #[test]
+    fn a_malformed_header_record_is_skipped() {
+        let t = "ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION((''), '2;1');1');
+
+FILE_NAME('','',(''),(''),'','sys','');
+
+FILE_SCHEMA (('AUTOMOTIVE_DESIGN'));
+ENDSEC;
+DATA;
+#1=CARTESIAN_POINT('p',(0.,1.,2.));
+ENDSEC;
+END-ISO-10303-21;
+";
+        let ex = parse(t).unwrap();
+        // The records after the broken one are still read.
+        assert_eq!(ex.originating_system, "sys");
+        assert_eq!(ex.schemas, vec!["AUTOMOTIVE_DESIGN"]);
+        assert_eq!(ex.get(1).unwrap().name(), "CARTESIAN_POINT");
+        // A header with nothing after the junk to resume at is still an error.
+        assert!(parse("ISO-10303-21;
+HEADER;
+FILE_NAME('a');junk').;ENDSEC;DATA;ENDSEC;END-ISO-10303-21;").is_err());
     }
 
     #[test]
