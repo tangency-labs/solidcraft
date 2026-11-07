@@ -201,6 +201,19 @@ fn same_regions(a: &[Region2], b: &[Region2], tol: f64) -> bool {
     a.len() == b.len() && a.iter().all(|x| b.iter().any(|y| same(x, y)))
 }
 
+/// Whether the recesses `a` read from a panel are the ones `b` it has, within `tol`: as many, and
+/// each from the same face, as deep, over the same region.
+fn same_recesses(a: &[Recess], b: Vec<&Recess>, tol: f64) -> bool {
+    a.len() == b.len()
+        && a.iter().all(|x| {
+            b.iter().any(|y| {
+                x.far == y.far
+                    && (x.depth - y.depth).abs() <= tol
+                    && same_regions(std::slice::from_ref(&x.region), std::slice::from_ref(&y.region), tol)
+            })
+        })
+}
+
 /// Whether every region of `a` lies in a region of `b` by their loops (so `a` ∩ `b` is `a`): its
 /// outline is that region's and it has each of that region's holes, or it lies in a new hole of
 /// one that does (a piece a cut left inside it, as faces of one body never overlap).
@@ -771,10 +784,18 @@ fn onto_panels(
                 }
             }
         }
-        // The panel's recesses are its floors as they are now.
-        recesses.retain(|r| r.panel != p);
-        recesses.extend(near_floors.into_iter().map(|(depth, region)| Recess { panel: p, region, far: false, depth }));
-        recesses.extend(far_floors.into_iter().map(|(depth, region)| Recess { panel: p, region, far: true, depth }));
+        // The panel's recesses are its floors as they are now. Floors read again as they were (a
+        // cut that changed nothing here) keep their records: each recess's depth stays as it was
+        // recorded, not as its floor's plane measures now.
+        let fresh: Vec<Recess> = near_floors
+            .into_iter()
+            .map(|(depth, region)| Recess { panel: p, region, far: false, depth })
+            .chain(far_floors.into_iter().map(|(depth, region)| Recess { panel: p, region, far: true, depth }))
+            .collect();
+        if !same_recesses(&fresh, recesses.iter().filter(|r| r.panel == p).collect(), tol) {
+            recesses.retain(|r| r.panel != p);
+            recesses.extend(fresh);
+        }
     }
     out.recesses = recesses;
     // Folded, a stretch of a bend beside which the cut took both panels' material, with no wall
