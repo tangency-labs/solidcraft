@@ -1594,6 +1594,11 @@ impl SolveApp {
                     let name = feature.map(|f| f.name.clone()).unwrap_or_default();
                     self.set_status(solidcraft_ui_text::format("timeline.edited_rolled_back", &[("name", &name)]), false);
                 }
+                "occurrence.ground" => {
+                    if let Some(note) = dialogs_assembly::ground_note(&self.session, v) {
+                        self.set_status(note, false);
+                    }
+                }
                 _ => {}
             }
             if id == "view.render_inspector" {

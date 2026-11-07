@@ -324,6 +324,15 @@ base to Cover:1, which is grounded, so it can move neither"; the base never move
 offers no button there. An as-built joint between two grounded parts holds them where they are and
 says nothing.
 
+Ungrounding a part solves its joints at once, and the part goes where they hold it.
+`occurrence.ground` answers the occurrences that moved (`moved`), where the part is now
+(`transform`), the joints that disagree (`conflicts`) and the joints the solve skips (`skipped`),
+such as one whose origin's face no longer exists. `skipped` covers the joints touching the part and
+the free parts joined to it. When no joint places the ungrounded part and a joint is skipped, the
+reply adds a `warning` and the status line names the joint and why ("Stack doesn't place B:1: joint
+origin: the face ... no longer exists (edit the joint to pick again)"). A part that a joint still
+holds where it sits gets no warning.
+
 `joint.drive` answers the joint's values as `joint.list` gives them, in degrees and millimetres
 with their units and limits, and `moved` says whether any part moved. A joint's origins are mated
 by default: B's z axis is turned against A's, as two faces meet. `flip: true` lines them up

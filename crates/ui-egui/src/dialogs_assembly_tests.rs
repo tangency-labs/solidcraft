@@ -1269,6 +1269,26 @@ fn ok_on_a_joint_from_the_base_to_a_grounded_part_names_the_base() {
     assert_eq!(app.status.clone().map(|(status, _, error)| (status, error)), Some((said, true)));
 }
 
+/// Ungrounding a part whose joint origin no longer resolves leaves it where it is, and the status
+/// line names the joint that skips it and why.
+#[test]
+fn ungrounding_a_part_a_joint_skips_says_which_joint_on_the_status_line() {
+    let (mut app, d) = grounded_pair();
+    crate::dialogs::run_dialog(&mut app, &d).unwrap();
+    if let Some(j) = app.session.doc_mut().assembly.joints.last_mut()
+        && let Snap::FaceCenter { face, .. } = &mut j.b.snap
+    {
+        *face = Some("F999:nothing".into());
+    }
+    let r = app.run("occurrence.ground", json!({"occurrence": "B:1", "grounded": false})).unwrap();
+    let skipped = &r["skipped"][0];
+    let why = skipped["why"].as_str().unwrap_or_default();
+    assert!(why.contains("no longer exists"), "{r}");
+    let said =
+        solidcraft_ui_text::format("joint.skips_part", &[("joint", skipped["name"].as_str().unwrap_or_default()), ("part", "B:1"), ("why", why)]);
+    assert_eq!(app.status.clone().map(|(status, _, error)| (status, error)), Some((said, false)));
+}
+
 /// Drive Joints opens on the joint picked in the browser; with none picked, on the first joint
 /// that moves.
 #[test]
