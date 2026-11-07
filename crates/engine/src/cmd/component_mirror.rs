@@ -202,30 +202,34 @@ fn opposite_hand(
 
 /// Place every occurrence the design keeps at a mirror image where its source and plane put it
 /// now, and drop the mirrors whose occurrence or source is gone. Run after the joints are solved,
-/// so a mirror follows a source a joint moved.
+/// so a mirror follows a source a joint moved. A mirror of a mirrored occurrence reads where
+/// the pass before placed its source, so the passes repeat until nothing moves: a chain of
+/// mirrors settles in as many passes as it is long.
 pub(crate) fn follow(s: &mut Session) {
-    if s.doc.assembly.mirrors.is_empty() {
-        return;
-    }
-    let st = s.model.state();
-    let (moves, _, gone) = occurrence_mirror::follow(&s.doc, Some(&st));
-    if moves.is_empty() && gone.is_empty() {
-        return;
-    }
-    let doc = s.doc_mut();
-    for k in gone.into_iter().rev() {
-        if k < doc.assembly.mirrors.len() {
-            doc.assembly.mirrors.remove(k);
+    for _ in 0..=s.doc.assembly.mirrors.len().min(occurrence_mirror::MAX_MIRRORS) {
+        if s.doc.assembly.mirrors.is_empty() {
+            return;
         }
-    }
-    for (id, t) in &moves {
-        if let Some(o) = doc.occurrences.iter_mut().find(|o| o.id == *id) {
-            o.transform = *t;
+        let st = s.model.state();
+        let (moves, _, gone) = occurrence_mirror::follow(&s.doc, Some(&st));
+        if moves.is_empty() && gone.is_empty() {
+            return;
         }
-    }
-    // A feature that reads where a part is placed sees the new placements.
-    if !moves.is_empty() {
-        s.model.evaluate(&s.doc);
+        let doc = s.doc_mut();
+        for k in gone.into_iter().rev() {
+            if k < doc.assembly.mirrors.len() {
+                doc.assembly.mirrors.remove(k);
+            }
+        }
+        for (id, t) in &moves {
+            if let Some(o) = doc.occurrences.iter_mut().find(|o| o.id == *id) {
+                o.transform = *t;
+            }
+        }
+        // A feature that reads where a part is placed sees the new placements.
+        if !moves.is_empty() {
+            s.model.evaluate(&s.doc);
+        }
     }
 }
 

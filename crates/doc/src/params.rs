@@ -644,6 +644,8 @@ pub enum ParamUser {
     Rule { kind: String, name: String, field: String },
     /// The plane a canvas lies on (`input` is its label, e.g. `Offset`).
     Canvas { canvas: u64, name: String, input: String },
+    /// The plane a mirrored occurrence is placed across (`input` is its label, e.g. `Offset`).
+    Mirror { occurrence: u64, name: String, input: String },
 }
 
 impl ParamUser {
@@ -659,6 +661,7 @@ impl ParamUser {
             ParamUser::Joint { name, input, .. } => format!("joint {name} ({input})"),
             ParamUser::Rule { kind, name, field } => format!("{kind} rule {name} ({field})"),
             ParamUser::Canvas { name, input, .. } => format!("canvas {name} ({input})"),
+            ParamUser::Mirror { name, input, .. } => format!("mirror plane of {name} ({input})"),
         }
     }
 }
@@ -813,6 +816,14 @@ impl Document {
             c.plane.walk_exprs(&mut |(label, e, _, _)| {
                 if uses(e) {
                     out.push(ParamUser::Canvas { canvas: c.id, name: c.name.clone(), input: label.into() });
+                }
+            });
+        }
+        for m in &self.assembly.mirrors {
+            m.plane.walk_exprs(&mut |(label, e, _, _)| {
+                if uses(e) {
+                    let name = self.occurrences.iter().find(|o| o.id == m.occurrence).map_or_else(|| m.occurrence.to_string(), |o| o.name.clone());
+                    out.push(ParamUser::Mirror { occurrence: m.occurrence, name, input: label.into() });
                 }
             });
         }
@@ -989,8 +1000,10 @@ impl Document {
                 n += 1;
             }
         }
-        for c in &mut self.canvases {
-            c.plane.walk_exprs_mut(&mut |(_, e, _, _)| {
+        // So do the planes mirrored occurrences are placed across.
+        let planes = self.canvases.iter_mut().map(|c| &mut c.plane).chain(self.assembly.mirrors.iter_mut().map(|m| &mut m.plane));
+        for plane in planes {
+            plane.walk_exprs_mut(&mut |(_, e, _, _)| {
                 let r = expr::rename_reference(e, old, new);
                 if r != *e {
                     *e = r.into();

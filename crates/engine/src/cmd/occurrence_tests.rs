@@ -1777,6 +1777,64 @@ fn mirrored_occurrences_survive_saving_and_hostile_mirrors_are_ignored() {
     assert_eq!(s.doc.assembly.mirrors.len(), 2);
 }
 
+/// A mirror plane placed by a parameter is one of the parameter's users: renaming the parameter
+/// renames it there, and the mirror keeps following the plane.
+#[test]
+fn a_mirror_plane_follows_a_renamed_parameter() {
+    let (mut s, _, _) = mirror_parts();
+    run(&mut s, "parameters.add", json!({"name": "gap", "expression": "5 mm"}));
+    let r = run(&mut s, "component.mirror", json!({"components": ["Plate"], "plane": {"origin": ["gap", 0, 0], "normal": [1, 0, 0]}}));
+    let mirror = r["mirrored"][0]["occurrence"].as_u64().unwrap();
+    let users = run(&mut s, "parameters.users", json!({"name": "gap"}));
+    assert_eq!(users["users"][0]["type"], "mirror", "{users}");
+    assert_eq!(users["users"][0]["occurrence"], mirror, "{users}");
+    assert!(s.execute("parameters.delete", &json!({"name": "gap"})).is_err(), "a parameter a mirror plane uses can't be deleted");
+    run(&mut s, "parameters.rename", json!({"name": "gap", "new_name": "offset"}));
+    run(&mut s, "parameters.change", json!({"name": "offset", "expression": "10 mm"}));
+    // The plate spans x 30…70: across x = 10 its image spans x −50…−10.
+    let (bbox, _) = placed(&mut s, mirror);
+    near(&bbox["min"][0], -50.0);
+    near(&bbox["max"][0], -10.0);
+}
+
+/// A mirror of a mirrored occurrence is placed from where its source is now, in the same refresh.
+#[test]
+fn a_mirror_of_a_mirror_follows_in_one_step() {
+    let (mut s, plate, _) = mirror_parts();
+    let r = run(&mut s, "component.mirror", json!({"components": ["Plate"], "plane": "YZ"}));
+    let first = r["mirrored"][0]["occurrence"].as_u64().unwrap();
+    let r = run(&mut s, "component.mirror", json!({"components": [first.to_string()], "plane": "XZ"}));
+    let second = r["mirrored"][0]["occurrence"].as_u64().unwrap();
+    // The plate spans x 30…70, y 10…30; the second image is it turned half about z: x −70…−30, y −30…−10.
+    run(&mut s, "occurrence.move", json!({"occurrence": plate, "translate": [10, 5, 0]}));
+    let (bbox, _) = placed(&mut s, second);
+    near(&bbox["min"][0], -80.0);
+    near(&bbox["max"][0], -40.0);
+    near(&bbox["min"][1], -35.0);
+    near(&bbox["max"][1], -15.0);
+}
+
+/// An occurrence a mirror places moves with its source only: aligning it, reaching with it and
+/// joining it are refused, as moving and dragging it are.
+#[test]
+fn a_mirrored_occurrence_is_not_aligned_reached_or_joined() {
+    let (mut s, _, bracket) = mirror_parts();
+    let r = run(&mut s, "component.mirror", json!({"components": ["Plate"], "plane": "YZ"}));
+    let mirror = r["mirrored"][0]["occurrence"].as_u64().unwrap();
+    let doc = s.doc.clone();
+    let at = |o: u64| json!({"occurrence": o, "point": [0, 0, 0], "z": [0, 0, 1]});
+    for (cmd, p) in [
+        ("occurrence.align", json!({"paths": [[mirror]], "from": [0, 0, 0], "to": [5, 0, 0]})),
+        ("joint.reach", json!({"occurrence": mirror, "point": [5, 0, 0]})),
+        ("joint.create", json!({"type": "rigid", "a": at(bracket), "b": at(mirror)})),
+        ("joint.create", json!({"type": "rigid", "a": at(mirror), "b": at(bracket)})),
+    ] {
+        let refused = s.execute(cmd, &p).unwrap_err().to_string();
+        assert!(refused.contains("mirror image of Plate:1"), "{cmd}: {refused}");
+        assert_eq!(s.doc, doc, "{cmd} changed the design");
+    }
+}
+
 /// A pattern of bodies made in a component copies them about its own component's axis, so
 /// moving that component's occurrence moves the copies of a body that lives elsewhere. The model
 /// kept between edits must show them where a fresh evaluation does: a root block patterned four

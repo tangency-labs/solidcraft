@@ -734,6 +734,10 @@ fn add_joint(s: &mut Session, mut j: Joint, p: &Value) -> Result<Value> {
         return Err(EngineError::Other("too many joints".into()));
     }
     check_sides(&j.a, &j.b, "joint.create")?;
+    // A mirror places its occurrence after the joints are solved, so a joint to one would not hold.
+    for side in [&j.a, &j.b] {
+        super::component::mirror::placed_by_mirror(s, side.occurrence, "joint.create")?;
+    }
     // Relations and loop-closing typed joints start where their parts are. A typed joint in
     // an open chain keeps its usual initial values; explicitly supplied values also keep theirs.
     if p.get("values").is_none()
@@ -1164,6 +1168,7 @@ const MAX_REACH_JOINTS: usize = 1000;
 fn reach(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "joint.reach";
     let occ = occurrence_id(s, p.get("occurrence"), cmd)?;
+    super::component::mirror::placed_by_mirror(s, occ, cmd)?;
     let given = |k: &str| p.get(k).and_then(vec3).filter(|v| v.is_finite() && v.len() < 1e9);
     let to = given("point").ok_or_else(|| bad(cmd, "`point` must be [x, y, z]"))?;
     let world = if occ == 0 { solidcraft_doc::IDENTITY } else { joints::occurrence_world(&s.doc, occ) };

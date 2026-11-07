@@ -550,7 +550,7 @@ impl JsonSchema for MirrorSymmetrySchema {
         "MirrorSymmetry".into()
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
-        json_schema!({"description": "auto, X, Y or Z (case ignored).", "type": "string", "pattern": "^(?i)(auto|x|y|z)$"})
+        json_schema!({"description": "auto, X, Y or Z (case ignored).", "type": "string", "pattern": "^([Aa][Uu][Tt][Oo]|[XxYyZz])$"})
     }
 }
 
