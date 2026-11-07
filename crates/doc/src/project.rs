@@ -86,6 +86,22 @@ fn cache_key(st: &ModelState, plane: &Plane, kind: LinkKind, src: &LinkSource) -
 
 /// Resolve a link source against the model state before the sketch.
 pub fn resolve(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, plane: &Plane, kind: LinkKind, src: &LinkSource) -> Result<Resolved> {
+    resolve_at(doc, vals, st, plane, kind, src, None)
+}
+
+/// [`resolve`] for a sketch evaluated in `frame` (where it is placed in the world: its
+/// component's placement, or the placement of the face it is attached to). A construction point
+/// is kept in its own component's frame and is brought into this one (#12075); without a frame
+/// it is taken in the root's.
+pub fn resolve_at(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    st: &ModelState,
+    plane: &Plane,
+    kind: LinkKind,
+    src: &LinkSource,
+    frame: Option<&crate::Mat>,
+) -> Result<Resolved> {
     let key = cache_key(st, plane, kind, src);
     if let Some(k) = &key
         && let Ok(c) = CACHE.lock()
@@ -93,7 +109,7 @@ pub fn resolve(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, 
     {
         return Ok(r.clone());
     }
-    let r = resolve_uncached(doc, vals, st, plane, kind, src)?;
+    let r = resolve_uncached(doc, vals, st, plane, kind, src, frame)?;
     if let Some(k) = key
         && let Ok(mut c) = CACHE.lock()
     {
@@ -110,6 +126,7 @@ fn resolve_uncached(
     plane: &Plane,
     kind: LinkKind,
     src: &LinkSource,
+    frame: Option<&crate::Mat>,
 ) -> Result<Resolved> {
     let lost = |what: &str| DocError::Invalid(format!("{what} no longer exists"));
     let mut moved = false;
@@ -286,9 +303,11 @@ fn resolve_uncached(
             vec![LinkGeom::Point(plane.to_local(ss.plane.to_world(p)))]
         }
         LinkSource::Origin => vec![LinkGeom::Point(plane.to_local(Vec3::ZERO))],
-        // A construction point, by name (#12075), where the timeline so far puts it.
+        // A construction point, by name (#12075), where the timeline so far puts it, in the
+        // sketch's frame.
         LinkSource::ConstructionPoint { name } => {
-            let p = crate::eval::construction_point_in(Some(doc), st, name, 0).map_err(|_| lost(&format!("point {name}")))?;
+            let frame = frame.copied().unwrap_or(crate::IDENTITY);
+            let p = crate::eval::construction_point_in(doc, st, name, &frame).map_err(|_| lost(&format!("point {name}")))?;
             vec![LinkGeom::Point(plane.to_local(p))]
         }
         LinkSource::Axis { name } => {
@@ -917,7 +936,21 @@ pub fn refresh_face_anchor_links(
     sk: &mut Sketch,
     anchor: &crate::FaceAnchor,
 ) -> Result<Vec<String>> {
-    refresh_links_in(doc, vals, st, plane, sk, Some(anchor))
+    refresh_links_in(doc, vals, st, plane, sk, Some(anchor), None)
+}
+
+/// [`refresh_links`] (or [`refresh_face_anchor_links`] with `anchor`) for a sketch evaluated in
+/// `frame`, as [`resolve_at`] takes it.
+pub fn refresh_links_at(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    st: &ModelState,
+    plane: &Plane,
+    sk: &mut Sketch,
+    anchor: Option<&crate::FaceAnchor>,
+    frame: Option<&crate::Mat>,
+) -> Result<Vec<String>> {
+    refresh_links_in(doc, vals, st, plane, sk, anchor, frame)
 }
 
 /// Remove degree-two straight stations introduced by coplanar face subdivision.
@@ -994,7 +1027,7 @@ fn merge_family_lines(geom: Vec<LinkGeom>) -> Result<Vec<LinkGeom>> {
 /// longer finds exactly that face or edge is not lost: the sketch fails, asking for the
 /// reference to be picked again ([`DocError::Reselect`]).
 pub fn refresh_links(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, plane: &Plane, sk: &mut Sketch) -> Result<Vec<String>> {
-    refresh_links_in(doc, vals, st, plane, sk, None)
+    refresh_links_in(doc, vals, st, plane, sk, None, None)
 }
 
 /// Lay every text that runs along a curve of its sketch along that curve as the solve left it.
@@ -1030,6 +1063,7 @@ fn refresh_links_in(
     plane: &Plane,
     sk: &mut Sketch,
     anchor: Option<&crate::FaceAnchor>,
+    frame: Option<&crate::Mat>,
 ) -> Result<Vec<String>> {
     let mut warn = Vec::new();
     let links = sk.links.clone();
@@ -1080,7 +1114,7 @@ fn refresh_links_in(
         } else if let Some((body, index, at)) = named_edge {
             resolve_named_edge(st, plane, l.kind, &body, index, at)
         } else {
-            resolve(doc, vals, st, plane, l.kind, &source)
+            resolve_at(doc, vals, st, plane, l.kind, &source, frame)
         };
         match resolved {
             Ok(r) => {

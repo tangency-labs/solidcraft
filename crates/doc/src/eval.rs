@@ -1704,8 +1704,15 @@ impl PlacementReads {
                 self.link(doc, st, b);
             }
             // In the sketch's own frame: the component's origin, axes and planes, its own axes, text.
-            // Construction points, like construction axes, are found by name (#12075).
-            L::Origin | L::ConstructionPoint { .. } | L::Axis { .. } | L::SketchAxis { .. } | L::Plane { .. } | L::Text { .. } => {}
+            // A construction point is kept in its own component's frame: the sketch reads where
+            // that component is placed (#12075).
+            L::ConstructionPoint { name } => match doc.find_feature(name) {
+                Some(point) => {
+                    self.components.insert(point.component);
+                }
+                None => self.all = true,
+            },
+            L::Origin | L::Axis { .. } | L::SketchAxis { .. } | L::Plane { .. } | L::Text { .. } => {}
         }
     }
 }
@@ -4436,9 +4443,10 @@ fn line_in_sketch_plane(ss: &SolvedSketch, origin: Vec3, dir: Vec3) -> Result<(V
     Ok((pl.to_local(origin), Vec2::new(d.dot(pl.x), d.dot(pl.y))))
 }
 
-/// A construction point `name` of the timeline so far, as evaluated, in the frame of component
-/// `comp` (#12075). Without a document (`doc` None) it is taken in its own component's frame.
-pub(crate) fn construction_point_in(doc: Option<&Document>, st: &ModelState, name: &str, comp: u64) -> Result<Vec3> {
+/// A construction point `name` of the timeline so far, as evaluated, in the frame `frame` places
+/// in the world: the frame a sketch is evaluated in, its component's placement or the placement
+/// of the face it is attached to (#12075). The point is kept in its own component's frame.
+pub(crate) fn construction_point_in(doc: &Document, st: &ModelState, name: &str, frame: &Mat) -> Result<Vec3> {
     let c = st
         .construct
         .iter()
@@ -4447,13 +4455,11 @@ pub(crate) fn construction_point_in(doc: Option<&Document>, st: &ModelState, nam
     let crate::construct::ConstructGeom::Point(p) = &c.geom else {
         return Err(DocError::Invalid(format!("`{name}` is not a construction point")));
     };
-    let Some(doc) = doc else { return Ok(*p) };
-    let owner = doc.feature(c.feature).map_or(0, |f| f.component);
-    if owner == comp || doc.occurrences.is_empty() {
+    if doc.occurrences.is_empty() {
         return Ok(*p);
     }
-    let inverse =
-        crate::mat_inverse(&doc.component_transform(comp)).ok_or_else(|| DocError::Invalid("the feature's component frame is invalid".into()))?;
+    let owner = doc.feature(c.feature).map_or(0, |f| f.component);
+    let inverse = crate::mat_inverse(frame).ok_or_else(|| DocError::Invalid("the sketch's frame cannot be inverted".into()))?;
     let relative = crate::mat_mul(&inverse, &doc.component_transform(owner));
     Ok(crate::apply_point(&relative, *p))
 }
@@ -7434,10 +7440,13 @@ fn eval_feature(
             // A text's outlines are rebuilt from its numbers when the links are refreshed: the
             // ones its expressions give come first.
             doc.apply_text_values(vals, &mut sk)?;
-            let mut warns = match anchor {
-                Some(anchor) => crate::project::refresh_face_anchor_links(doc, vals, &fst, &plane, &mut sk, anchor)?,
-                None => crate::project::refresh_links(doc, vals, &fst, &plane, &mut sk)?,
+            // The frame the sketch is evaluated in, where a construction point it projects is
+            // brought from its own component's (#12075).
+            let link_frame = match anchor.map(|anchor| anchor.author_frame(doc, f.component)) {
+                Some(Ok(frame)) => frame,
+                _ => doc.component_transform(f.component),
             };
+            let mut warns = crate::project::refresh_links_at(doc, vals, &fst, &plane, &mut sk, anchor, Some(&link_frame))?;
             drop(fst);
             sk.refresh_offsets()?;
             if let Some(w) = face_warning {

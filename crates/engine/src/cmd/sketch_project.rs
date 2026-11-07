@@ -5,7 +5,7 @@
 
 use serde_json::{Value, json};
 use solidcore_record::{Plane, Vec2, Vec3};
-use solidcraft_doc::project::resolve;
+use solidcraft_doc::project::{resolve, resolve_at};
 use solidcraft_doc::{Document, FeatureKind};
 use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{ConstraintKind, LinkKind, LinkSource, Sketch};
@@ -255,6 +255,20 @@ fn owner_frame(s: &Session, doc: &Document, comp: u64) -> solidcraft_doc::Mat {
     if comp == s.active_component { s.active_component_frame() } else { doc.component_transform(comp) }
 }
 
+/// The frame [`state_for_sketch`] puts sketch `id`'s model in: the attached face's placement for
+/// a sketch on a face, else its component's. `None` when the face's placement is gone.
+fn sketch_frame(s: &Session, doc: &Document, id: u64) -> Option<solidcraft_doc::Mat> {
+    let comp = doc.feature(id).map(|f| f.component).unwrap_or(0);
+    let attachment = doc.feature(id).and_then(|feature| match &feature.kind {
+        FeatureKind::Sketch { plane, .. } => super::sketch::face::anchor(plane),
+        _ => None,
+    });
+    match attachment {
+        Some(anchor) => anchor.author_frame(doc, comp).ok(),
+        None => Some(owner_frame(s, doc, comp)),
+    }
+}
+
 /// Re-resolve the links of a sketch being edited (`sk`, a copy of the stored sketch `id`)
 /// against the model before it, so edits see current reference geometry. Returns warnings.
 ///
@@ -284,10 +298,8 @@ pub(super) fn refresh(s: &Session, doc: &Document, id: u64, sk: &mut Sketch) -> 
         return vec!["lost face attachment; reattach explicitly".into()];
     };
     let Ok(plane) = sketch_plane(&doc, id, &st) else { return Vec::new() };
-    let refreshed = match attachment {
-        Some(anchor) => solidcraft_doc::project::refresh_face_anchor_links(&doc, &vals, &st, &plane, sk, anchor),
-        None => solidcraft_doc::project::refresh_links(&doc, &vals, &st, &plane, sk),
-    };
+    let frame = sketch_frame(s, &doc, id);
+    let refreshed = solidcraft_doc::project::refresh_links_at(&doc, &vals, &st, &plane, sk, attachment, frame.as_ref());
     // A link whose named face or edge is gone fails the sketch when it is evaluated; while it is
     // edited, that is what the refresh says.
     let warnings = match refreshed {
@@ -374,7 +386,8 @@ fn add_link_unless_present(
     // The model as the sketch's component sees it.
     let st = state_for_sketch(s, &doc, id, &st, &src.bodies())?;
     let plane = sketch_plane(&doc, id, &st)?;
-    let r = resolve(&doc, &vals, &st, &plane, kind, &src)?;
+    let frame = sketch_frame(s, &doc, id);
+    let r = resolve_at(&doc, &vals, &st, &plane, kind, &src, frame.as_ref())?;
     if skip_present && r.wires.is_empty() && sk.link_geometry_present(&r.geom) {
         return Ok(None);
     }
