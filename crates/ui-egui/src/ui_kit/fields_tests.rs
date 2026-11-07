@@ -1465,14 +1465,20 @@ fn dragging_a_value_rows_label_changes_its_literal_and_leaves_expressions_alone(
         let start = scenario::rect_of(&format!("dialog:label:{row}")).unwrap().center();
         let end = start + egui::vec2(dx, 0.0);
         let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers };
-        frame(ctx, vec![egui::Event::PointerMoved(start), button(start, true)], modifiers, values);
+        let start_out = frame(ctx, vec![egui::Event::PointerMoved(start), button(start, true)], modifiers, values);
+        if row == "Distance" {
+            assert_eq!(start_out.platform_output.cursor_icon, egui::CursorIcon::None, "cursor is hidden while scrubbing");
+            let cmds = start_out.viewport_output.get(&egui::ViewportId::ROOT).map(|v| &v.commands);
+            assert!(cmds.is_some_and(|c| c.contains(&egui::ViewportCommand::CursorVisible(false))), "cursor made invisible");
+            assert!(cmds.is_some_and(|c| c.contains(&egui::ViewportCommand::CursorGrab(egui::CursorGrab::Locked))), "cursor locked");
+            assert!(cmds.is_some_and(|c| c.contains(&egui::ViewportCommand::CursorPosition(start))), "cursor position hint set on lock");
+        }
         for step in 1..=4 {
             let out = frame(ctx, vec![egui::Event::PointerMoved(start + egui::vec2(dx * step as f32 / 4.0, 0.0))], modifiers, values);
             if row == "Distance" {
-                assert_eq!(out.platform_output.cursor_icon, egui::CursorIcon::None, "cursor is hidden while scrubbing");
+                assert_eq!(out.platform_output.cursor_icon, egui::CursorIcon::None, "cursor stays hidden while scrubbing");
                 let cmds = out.viewport_output.get(&egui::ViewportId::ROOT).map(|v| &v.commands);
-                assert!(cmds.is_some_and(|c| c.contains(&egui::ViewportCommand::CursorVisible(false))), "cursor made invisible");
-                assert!(cmds.is_some_and(|c| c.contains(&egui::ViewportCommand::CursorGrab(egui::CursorGrab::Locked))), "cursor locked");
+                assert!(!cmds.is_some_and(|c| c.contains(&egui::ViewportCommand::CursorGrab(egui::CursorGrab::Locked))), "no lock churn");
             }
         }
         let release = frame(ctx, vec![button(end, false)], modifiers, values);

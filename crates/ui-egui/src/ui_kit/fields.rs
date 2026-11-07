@@ -196,9 +196,13 @@ struct Scrub {
 }
 
 fn end_scrub(ui: &Ui, id: egui::Id, state: &Scrub) {
-    ui.ctx().send_viewport_cmd(ViewportCommand::CursorGrab(CursorGrab::None));
-    ui.ctx().send_viewport_cmd(ViewportCommand::CursorVisible(true));
+    // On Wayland, setting the cursor position while locked sets the compositor hint so the cursor
+    // returns to its starting point when the lock is lifted.
     ui.ctx().send_viewport_cmd(ViewportCommand::CursorPosition(state.start_pos));
+    ui.ctx().send_viewport_cmd(ViewportCommand::CursorGrab(CursorGrab::None));
+    // Set position again for platforms (X11, Windows, macOS) where warping applies to an unlocked cursor.
+    ui.ctx().send_viewport_cmd(ViewportCommand::CursorPosition(state.start_pos));
+    ui.ctx().send_viewport_cmd(ViewportCommand::CursorVisible(true));
     ui.ctx().data_mut(|data| data.remove::<Scrub>(id));
 }
 
@@ -228,8 +232,16 @@ pub(super) fn scrub(ui: &Ui, label: &Response, value: &mut String) -> bool {
 
     // While dragging, hide and lock the cursor so scrubbing continues infinitely without hitting screen boundaries.
     ui.ctx().set_cursor_icon(CursorIcon::None);
-    ui.ctx().send_viewport_cmd(ViewportCommand::CursorVisible(false));
-    ui.ctx().send_viewport_cmd(ViewportCommand::CursorGrab(CursorGrab::Locked));
+    let is_new = base.is_none();
+    let start_pos = if is_new {
+        let pos = ui.input(|i| i.pointer.press_origin().or_else(|| i.pointer.latest_pos())).unwrap_or_else(|| label.rect.center());
+        ui.ctx().send_viewport_cmd(ViewportCommand::CursorVisible(false));
+        ui.ctx().send_viewport_cmd(ViewportCommand::CursorGrab(CursorGrab::Locked));
+        ui.ctx().send_viewport_cmd(ViewportCommand::CursorPosition(pos));
+        pos
+    } else {
+        Pos2::ZERO
+    };
 
     let factor = ui.input(|i| {
         if i.modifiers.shift {
@@ -257,10 +269,7 @@ pub(super) fn scrub(ui: &Ui, label: &Response, value: &mut String) -> bool {
                 Scrub { anchor: now.number, start_pos: state.start_pos, accumulated: 0.0, step: scrub_step(now.number) * factor }
             }
         }
-        None => {
-            let start_pos = ui.input(|i| i.pointer.press_origin().or_else(|| i.pointer.latest_pos())).unwrap_or_default();
-            Scrub { anchor: now.number, start_pos, accumulated: 0.0, step: scrub_step(now.number) * factor }
-        }
+        None => Scrub { anchor: now.number, start_pos, accumulated: 0.0, step: scrub_step(now.number) * factor },
     };
 
     let text = scrub_text(scrubbed(state.anchor, state.accumulated, state.step), state.step, &now);
