@@ -49,6 +49,8 @@ component, and **Paste New** creates an independent copy. Move an occurrence wit
 triad, then **Capture Position** to keep it or **Revert** to put it back. SolidCraft asks before
 the next command if a move wasn't captured. **Ground** fixes an occurrence in place, and
 **Unground** (the same row of **Placement** in the browser's context menu) frees it again.
+A joint solve that moves a part drops the part's move not captured, so the part is shown where
+its joints put it; an exploded view stays shown.
 
 The design's first part is grounded when it is made: the first occurrence placed directly in the
 design by **New Component**, **Create Components from Bodies** or an import. Parts made after it,
