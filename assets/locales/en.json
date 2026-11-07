@@ -2645,6 +2645,8 @@
   "prefs.history": "History",
   "prefs.history_bar_groups": "Fold the History bar into groups",
   "prefs.history_bar_groups_note": "In a long history, a run of one component's features folds into one chip, and feature folders start folded. An inserted STEP assembly goes into a Group folder. Off shows each feature, starts folders open and makes no folder.",
+  "prefs.history_folder_kind_icon": "Folder icon from its features",
+  "prefs.history_folder_kind_icon_note": "A History folder whose features are all of one kind shows their icon.",
   "prefs.history_group_joints": "Group joints in the History",
   "prefs.history_group_joints_note": "Two or more joints show as one button with their count, and a click shows each one. Off shows each joint.",
   "prefs.history_origin_bodies": "Show origin and bodies at the top",
