@@ -7,7 +7,8 @@
 //! page's picking uses ([`crate::drawing_scene::hit`]).
 //!
 //! `drawing.status` (#4894 WE2) says where the drawing open stands: each view as the provider last
-//! drew it, and each dimension as the model has it now, in one read. `drawing.update` (#4892) lets a
+//! drew it, and each dimension as the model has it now and whether its sheet shows that yet, in one
+//! read. `drawing.update` (#4892) lets a
 //! deferred drawing draw from the model as it is now.
 
 use serde_json::Value;
@@ -40,7 +41,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(STATUS, "Drawing Status
     .doc_only()
     .contract(&STATUS_CONTRACT)
     .output(output_schema_for::<DrawingStatusResult>)
-    .params("→ {views: [{view, sheet, status: current|out_of_date|placeholder|failed, reason?}], dimensions: [{dimension, status: ok|overridden|ambiguous|suppressed|lost|unmeasurable, why?}], waiting: how many views are out of date, held?: true when a deferred drawing's wait for drawing.update}. current: drawn, from the model and with the settings the view has now. Balloons aren't listed: drawing.balloon.inspect reads each one. Read-only: nothing is drawn, and each body a dimension names is read once for the call."),
+    .params("→ {views: [{view, sheet, status: current|out_of_date|placeholder|failed, reason?}], dimensions: [{dimension, status: ok|overridden|ambiguous|suppressed|lost|unmeasurable, why?, out_of_date?: true when its sheet shows it as it last was}], waiting: how many views are out of date, held?: true when a deferred drawing's views or dimensions out of date wait for drawing.update}. current: drawn, from the model and with the settings the view has now. A dimension's status is its reading from the model now; out_of_date says the sheet doesn't show that yet: its view is out of date, or it was read from another model or record than it has now (as drawing.scene's out_of_date lists it). Balloons aren't listed: drawing.balloon.inspect reads each one. Read-only: nothing is drawn, and each body a dimension names is read once for the call."),
     CommandSpec::new(UPDATE, "Update Drawing", crate::checked!("drawing.update", update))
     .icon("update")
     .in_drawing()
@@ -77,7 +78,9 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(STATUS, "Drawing Status
 fn status(s: &mut Session, p: &Value) -> Result<Value> {
     let _: DrawingStatusParams = crate::schema::read(STATUS, p)?;
     let d = s.drawing(STATUS)?.clone();
-    let views: Vec<ViewStatusResult> = crate::drawing_scene::standing(s, &d)
+    let standing = crate::drawing_scene::standing(s, &d);
+    let views: Vec<ViewStatusResult> = standing
+        .views
         .into_iter()
         .map(|v| ViewStatusResult { view: ids::encode(v.view), sheet: ids::encode(v.sheet), status: v.status, reason: v.reason })
         .collect();
@@ -88,11 +91,11 @@ fn status(s: &mut Session, p: &Value) -> Result<Value> {
         .zip(read)
         .map(|(id, r)| {
             let (status, why, _) = super::drawing_dimension::status_words(r.status);
-            DimensionStatusResult { dimension: ids::encode(*id), status, why }
+            DimensionStatusResult { dimension: ids::encode(*id), status, why, out_of_date: standing.dimensions.contains(id) }
         })
         .collect();
     let waiting = views.iter().filter(|v| v.status == "out_of_date").count();
-    let held = waiting > 0 && crate::drawing_scene::held(s, &d);
+    let held = (waiting > 0 || !standing.dimensions.is_empty()) && crate::drawing_scene::held(s, &d);
     let reply = DrawingStatusResult { views, dimensions, waiting, held, param_warnings: Vec::new() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
@@ -101,7 +104,7 @@ fn update(s: &mut Session, p: &Value) -> Result<Value> {
     let _: DrawingUpdateParams = crate::schema::read(UPDATE, p)?;
     let d = s.drawing(UPDATE)?.clone();
     crate::drawing_scene::update(s);
-    let waiting = crate::drawing_scene::standing(s, &d).iter().filter(|v| v.status == "out_of_date").count();
+    let waiting = crate::drawing_scene::standing(s, &d).views.iter().filter(|v| v.status == "out_of_date").count();
     serde_json::to_value(DrawingUpdateResult { waiting, param_warnings: Vec::new() }).map_err(|e| EngineError::Other(e.to_string()))
 }
 

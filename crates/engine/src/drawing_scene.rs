@@ -322,10 +322,9 @@ pub fn as_shown(s: &mut Session, d: &Drawing, sheet: u64) -> Result<SheetScene> 
     extract(s, sheet)?;
     settle(s, d);
     let shown = extract(s, sheet)?;
-    // A held view's dimensions are out of date with it: listed after the views, never read again here
-    // against its old lines. `stale_dimensions` holds those of the views up to date.
-    let held = dimensions_on(d, shown.stale.iter().copied()).into_iter().map(|record| record.id);
-    let out_of_date = shown.stale.iter().copied().chain(held).chain(shown.stale_dimensions).collect();
+    // A held view's dimensions are listed after the views, never read again here against its old lines.
+    let dimensions = out_of_date_dimensions(d, &shown.stale, shown.stale_dimensions);
+    let out_of_date = shown.stale.iter().copied().chain(dimensions).collect();
     let (scene, objects) = (Arc::unwrap_or_clone(shown.scene), shown.objects.to_vec());
     Ok(SheetScene { scene, views: shown.views, objects, dimensions: shown.dimensions, out_of_date })
 }
@@ -497,6 +496,14 @@ fn draw_dimensions(
         }
     };
     wanted.iter().enumerate().map(|(at, record)| one(at, record)).collect()
+}
+
+/// The dimensions of `d` a sheet shows as they last were, by id: each of a view out of date
+/// (`stale_views`), as its view is, then `stale_dimensions`, those of the views up to date that were
+/// read from another record, model, drawing of their view or lettering ([`Cache::stale_dimensions`]).
+fn out_of_date_dimensions(d: &Drawing, stale_views: &[u64], stale_dimensions: Vec<u64>) -> Vec<u64> {
+    let held = dimensions_on(d, stale_views.iter().copied()).into_iter().map(|record| record.id);
+    held.chain(stale_dimensions).collect()
 }
 
 /// The dimensions of `views` of `d`, by view and id.
@@ -997,16 +1004,26 @@ pub struct ViewStanding {
     pub reason: Option<String>,
 }
 
+/// Where the drawing open stands with the provider ([`standing`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Standing {
+    /// Each view, in id order.
+    pub views: Vec<ViewStanding>,
+    /// The dimensions its sheets show as they last were ([`out_of_date_dimensions`]).
+    pub dimensions: Vec<u64>,
+}
+
 /// Each view of `d`, the drawing open, in id order, as the provider last drew it, whichever sheet it
-/// is on. It reads the cache, caught up first ([`catch_up`]): nothing is drawn. A view that drew but
-/// didn't fit its sheet's scene is as the last assembly left it, while that is still its sheet's
-/// scene ([`Cache::assembled`]).
-pub fn standing(s: &mut Session, d: &Drawing) -> Vec<ViewStanding> {
+/// is on, and the dimensions shown as they last were. It reads the cache, caught up first
+/// ([`catch_up`]): nothing is drawn. A view that drew but didn't fit its sheet's scene is as the last
+/// assembly left it, while that is still its sheet's scene ([`Cache::assembled`]).
+pub fn standing(s: &mut Session, d: &Drawing) -> Standing {
     forget_closed(s);
     let state = s.world_state().ok();
     if let Some(state) = &state {
         catch_up(s, d, d.views.iter().map(|v| v.id), state);
     }
+    let lettering = Lettering::of(s, d);
     let cache = &s.drawing_scenes;
     let assembled = cache.assembled(d).unwrap_or_default();
     let in_assembly = |id: u64| assembled.binary_search_by_key(&id, |v| v.view).ok().and_then(|at| assembled.get(at));
@@ -1021,7 +1038,15 @@ pub fn standing(s: &mut Session, d: &Drawing) -> Vec<ViewStanding> {
         };
         ViewStanding { view: view.id, sheet: view.sheet, status, reason }
     };
-    d.views.iter().map(one).collect()
+    let views: Vec<ViewStanding> = d.views.iter().map(one).collect();
+    let stale: Vec<u64> = views.iter().filter(|v| v.status == "out_of_date").map(|v| v.view).collect();
+    // Every sheet's views as `extract` takes one sheet's (`views_on`), but each on its own, so one
+    // that can't be placed leaves out only its own dimensions.
+    let on: Vec<(u64, ResolvedView, Vec2)> =
+        d.views.iter().filter_map(|v| Some((v.id, d.resolve_view(v.id).ok()?, d.view_centre(v.id).ok()?))).collect();
+    let stale_dimensions = state.as_ref().map_or_else(Vec::new, |state| cache.stale_dimensions(d, &on, state, &lettering));
+    let dimensions = out_of_date_dimensions(d, &stale, stale_dimensions.iter().map(|record| record.id).collect());
+    Standing { views, dimensions }
 }
 
 /// Sheet `sheet` of the drawing open, as the provider last drew it: at once, as nothing is drawn
