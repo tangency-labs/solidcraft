@@ -22,12 +22,12 @@
 //! showed the same bodies, where and as they are now (`SourceKey`), is up to date: an appearance,
 //! or an edit taken back, draws nothing. The provider evaluates no model either. Its cache is the
 //! session's view state, beside the drawing: never saved, never an undo step, and dropped when its
-//! drawing closes, all but its views' lines (`drawing_scene_kept.rs`), which the drawing opened
-//! again starts from.
+//! drawing closes, all but its views' and dimensions' lines (`drawing_scene_kept.rs`), which the
+//! drawing opened again starts from.
 //!
 //! A deferred drawing ([`Updates::Deferred`]) draws nothing once the model has moved on from its last
-//! `drawing.update`, which isn't saved: its last lines show, listed in `stale`, and every command that reads
-//! a sheet ([`as_shown`]) reads those and says so.
+//! `drawing.update`, which isn't saved: its last lines show, its views listed in `stale`, and every command
+//! that reads a sheet ([`as_shown`]) reads those and lists the views and their dimensions out of date.
 //!
 //! [`hit`] says which of a scene's objects is under a point of the sheet, the one rule for picking
 //! there: the sheet page's hover and `drawing.scene.hit`.
@@ -74,7 +74,7 @@ use crate::{EngineError, Result, Session};
 
 #[path = "drawing_scene_kept.rs"]
 mod kept;
-use kept::{KeptLines, KeptView};
+use kept::{Kept, KeptDimension, KeptLines, KeptView};
 
 /// The command the sheet scene answers for, in its errors.
 pub const CMD: &str = "drawing.scene";
@@ -322,7 +322,10 @@ pub fn as_shown(s: &mut Session, d: &Drawing, sheet: u64) -> Result<SheetScene> 
     extract(s, sheet)?;
     settle(s, d);
     let shown = extract(s, sheet)?;
-    let out_of_date = shown.stale.into_iter().chain(shown.stale_dimensions).collect();
+    // A held view's dimensions are out of date with it: listed after the views, never read again here
+    // against its old lines. `stale_dimensions` holds those of the views up to date.
+    let held = dimensions_on(d, shown.stale.iter().copied()).into_iter().map(|record| record.id);
+    let out_of_date = shown.stale.iter().copied().chain(held).chain(shown.stale_dimensions).collect();
     let (scene, objects) = (Arc::unwrap_or_clone(shown.scene), shown.objects.to_vec());
     Ok(SheetScene { scene, views: shown.views, objects, dimensions: shown.dimensions, out_of_date })
 }
@@ -872,14 +875,25 @@ impl Cache {
         }
     }
 
-    /// Drawing `drawing`'s lines kept when it closed, as its views' entries: from a world state that
-    /// has gone, so each is out of date until [`keep_what_shows_the_same`] finds it shows the same.
+    /// Drawing `drawing`'s lines kept when it closed, as its views' and dimensions' entries: from a
+    /// world state that has gone, so each view is out of date until [`keep_what_shows_the_same`] finds
+    /// it shows the same, and each dimension is read again once its view is up to date. A held
+    /// drawing draws neither, so it shows them as they were.
     fn take_kept(&mut self, drawing: u64) {
         let gone: Arc<ModelState> = Arc::default();
-        for (id, kept) in self.kept.take(drawing) {
+        let kept = self.kept.take(drawing);
+        for (id, kept) in kept.views {
             self.serial += 1;
             let entry = Entry { state: gone.clone(), shows: kept.shows, view: kept.view, drawn: kept.drawn, serial: self.serial };
             self.views.insert(id, entry);
+        }
+        // From the same gone state, so read again: its `view_serial`, from before the close, never
+        // matches its view's new one either.
+        for (id, kept) in kept.dimensions {
+            self.serial += 1;
+            let KeptDimension { record, view_serial, lettering, drawn } = kept;
+            let entry = DimensionEntry { state: gone.clone(), record, view_serial, lettering, drawn, serial: self.serial };
+            self.dimensions.insert(id, entry);
         }
     }
 
@@ -1284,14 +1298,17 @@ fn keep_what_shows_the_same(s: &mut Session, on: impl Iterator<Item = u64> + Clo
 }
 
 /// Drops the cache once its drawing isn't the one open: closing a drawing (or opening another) ends
-/// its scenes, and the world states they hold. Its views' lines are kept, for when it opens again,
-/// and forgotten with the drawing. [`Session::execute`] calls it after every command.
+/// its scenes, and the world states they hold. Its views' and dimensions' lines are kept, for when
+/// it opens again, and forgotten with the drawing. [`Session::execute`] calls it after every command.
 pub(crate) fn forget_closed(s: &mut Session) {
     let cache = &mut s.drawing_scenes;
     if let Some(drawing) = cache.drawing.filter(|d| s.open_drawing != Some(*d)) {
         let mut kept = std::mem::take(&mut cache.kept);
         let views = std::mem::take(&mut cache.views).into_iter().map(|(id, e)| (id, KeptView { view: e.view, drawn: e.drawn, shows: e.shows }));
-        kept.keep(drawing, views.collect());
+        let dimensions = std::mem::take(&mut cache.dimensions)
+            .into_iter()
+            .map(|(id, e)| (id, KeptDimension { record: e.record, view_serial: e.view_serial, lettering: e.lettering, drawn: e.drawn }));
+        kept.keep(drawing, Kept { views: views.collect(), dimensions: dimensions.collect() });
         *cache = Cache { kept, ..Cache::default() };
     }
     cache.kept.retain(|drawing| s.doc.drawings.iter().any(|d| d.id == drawing));
