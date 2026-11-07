@@ -691,6 +691,18 @@ fn segments_on_opposite_sides_cut_the_blank_at_the_junction() {
     let cut = |lp: &solidcore_record::Loop2, a: Vec2, b: Vec2| {
         lp.segs.iter().any(|s| matches!(s, Seg2::Line { a: p, b: q } if p.dist(a) < 1e-6 && q.dist(b) < 1e-6))
     };
+    let outline_of = |s: &mut Session| -> Vec<(Vec2, Vec2)> {
+        let es = entities(&export(s, json!({})));
+        es.iter().filter(|e| e.0 == "LINE" && e.1.iter().any(|(c, v)| *c == 8 && v == "OUTLINE")).map(|e| (point(e, 10), point(e, 11))).collect()
+    };
+    let near = |p: Vec2, q: Vec2| p.dist(q) < 1e-6;
+    let both_ways = |lines: &[(Vec2, Vec2)], a: Vec2, b: Vec2| {
+        lines.iter().any(|&(p, q)| near(p, a) && near(q, b)) && lines.iter().any(|&(p, q)| near(p, b) && near(q, a))
+    };
+    let no_errors = |s: &Session| {
+        let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+        assert!(errors.is_empty(), "unfold: {errors:?}");
+    };
     // The flat pattern: the outline runs out along the junction and back.
     let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
     assert!(
@@ -699,18 +711,27 @@ fn segments_on_opposite_sides_cut_the_blank_at_the_junction() {
         regions.iter().map(|r| r.outer.segs.len()).collect::<Vec<_>>()
     );
     // The DXF writes the same two lines, on the outline layer.
-    let es = entities(&export(&mut s, json!({})));
-    let outline: Vec<(Vec2, Vec2)> =
-        es.iter().filter(|e| e.0 == "LINE" && e.1.iter().any(|(c, v)| *c == 8 && v == "OUTLINE")).map(|e| (point(e, 10), point(e, 11))).collect();
-    let near = |p: Vec2, q: Vec2| p.dist(q) < 1e-6;
-    assert!(
-        outline.iter().any(|&(a, b)| near(a, from) && near(b, to)) && outline.iter().any(|&(a, b)| near(a, to) && near(b, from)),
-        "the DXF has no junction cut: {outline:?}"
-    );
+    let outline = outline_of(&mut s);
+    assert!(both_ways(&outline, from, to), "the DXF has no junction cut: {outline:?}");
     // Unfolding builds the flat solid from the same regions: the slit must not stop it.
     run(&mut s, "sheet.unfold", json!({}));
-    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
-    assert!(errors.is_empty(), "unfold: {errors:?}");
+    no_errors(&s);
+    // Stretches of different heights: the far edge steps at the junction, so the cut's outer end is
+    // that step's corner, an existing vertex of the blank. The cut still runs from the bend line to
+    // the shorter stretch's far edge, and the DXF writes it.
+    let mut differ = plate_in(sheet_of_2mm(), &[]);
+    run(&mut differ, "sheet.flange", flange([false, true], ["20 mm", "15 mm"]));
+    let step = Vec2::new(50.0, 3.0 - (PI + 12.0));
+    let regions = differ.model.state().sheets[0].flat_regions().unwrap_or_default();
+    assert!(
+        regions.iter().any(|r| cut(&r.outer, from, step) && cut(&r.outer, step, from)),
+        "the blank is not cut at the differing-height junction: {:?}",
+        regions.iter().map(|r| r.outer.segs.len()).collect::<Vec<_>>()
+    );
+    let outline = outline_of(&mut differ);
+    assert!(both_ways(&outline, from, step), "the DXF has no differing-height junction cut: {outline:?}");
+    run(&mut differ, "sheet.unfold", json!({}));
+    no_errors(&differ);
     // Same-side stretches of different heights: two bends, one piece, no cut at the junction.
     let mut same = plate_in(sheet_of_2mm(), &[]);
     run(&mut same, "sheet.flange", flange([false, false], ["20 mm", "15 mm"]));
