@@ -3742,6 +3742,13 @@ pub(crate) fn dialog_pick(app: &mut SolveApp, hit: &Hit, sel: Sel) {
         d.focus = true;
         d.awaiting_pick = false;
         d.pick_refused = None;
+    } else if crate::sketch_modify_ui::picks_entity(&d, &app.session, hit) {
+        // A curve the mirror line, centre or direction refuses joins the Entities list, and the
+        // window stays on the input it was on (#11700).
+        let on = d.active;
+        d.active = 0;
+        d.pick(&app.session, sel);
+        d.active = on;
     } else {
         d.pick(&app.session, sel);
     }

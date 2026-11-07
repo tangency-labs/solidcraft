@@ -14,7 +14,6 @@ cov-fillet-g2-mixed-corner [unsupported] refused as on SMLib d01d7b0: a G2 corne
 cov-fillet-g2-oblique-three-edge-corner [unsupported] refused on solidcore: its three edges meet at different wedge angles, and one curvature fillet takes the first edge's equal-area thumbweight for every edge (solidcore#2250, issuecomment-6563419897); SMLib d01d7b0 fails it too
 cov-fillet-g2-pocket-corner [fail] continuity_order: G1 at one seam where the corner patch meets a contact face (g2 wanted), as on SMLib d01d7b0
 cov-junction-boss-tilt-20-root-round [fail] fillet status 1001 on a cylinder tilted 20 degrees into the plate, as on SMLib
-cov-junction-tee-equal-round [fail] the result is not a closed solid, as on SMLib: equal pipes' intersection is two plane ellipses crossing, a corner the old corner code cannot join (the corner step)
 cov-junction-y-junction-120-round [unsupported] refused as on SMLib: the faces between the three intersection curves narrow to nothing at the two triple points, so the room check trips (the corner step)
 report-fillet-curvature-three-edges-at-bar-corner [fail] continuity_order: G1 at one seam where the corner patch meets a contact face (g2 wanted), as on SMLib d01d7b0 (see KNOWN_FAILING)
 report-fillet-curvature-three-edges-at-bar-corner-solver-residues [fail] continuity_order: G1 at one seam where the corner patch meets a contact face (g2 wanted), as on SMLib d01d7b0 (see KNOWN_FAILING)

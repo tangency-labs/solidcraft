@@ -2156,6 +2156,8 @@
   "ui.mesh_format_3mf": "3MF",
   "ui.mesh_format_3mf_tagged": "3MF com marcação de faces",
   "ui.mesh_format_stl": "STL",
+  "ui.mesh_import_origin": "Mover para a origem",
+  "ui.mesh_import_origin_tip": "Centraliza a malha em X e Y com a base em Z = 0. Desligado, a malha mantém as coordenadas salvas no arquivo.",
   "ui.mirror": "Espelhar",
   "ui.mirror_line": "Linha de espelho",
   "ui.move": "Mover",
