@@ -215,6 +215,7 @@ render.texture.list               rendering image resources; crates/engine/src/c
 render.texture.remove             rendering image resources; crates/engine/src/cmd/render/library_tests.rs::imported_wood_maps_reopen_without_source_and_keep_geometry_history_and_resource_users
 select.clear                      the selection
 select.filter                     the selection
+select.mode                       the selection: engine cmd/edit_tests.rs, ui-egui selection_mode_tests.rs
 select.same_look                  the selection
 select.set                        the selection
 selection.delete                  deletes what is selected through the commands that own each kind

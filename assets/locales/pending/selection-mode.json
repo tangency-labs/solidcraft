@@ -1,0 +1,98 @@
+{
+  "en": {
+    "navbar.selection.faces": "Faces & edges",
+    "navbar.selection.bodies": "Bodies",
+    "navbar.selection.features": "Features",
+    "navbar.selection.parts": "Parts",
+    "navbar.selection.components": "Components",
+    "navbar.selection.sketch": "Sketch geometry",
+    "cmd.select_mode": "Selection Mode",
+    "navbar.description.selection_mode": "Chooses what a click picks: faces and edges, bodies, features, parts, components or sketch geometry.",
+    "navbar.selection.heading": "What a click picks",
+    "navbar.selection_mode": "Selection mode"
+  },
+  "ar": {
+    "navbar.selection.faces": "الأوجه والحواف",
+    "navbar.selection.bodies": "الأجسام",
+    "navbar.selection.features": "الميزات",
+    "navbar.selection.parts": "القطع",
+    "navbar.selection.components": "المكوّنات",
+    "navbar.selection.sketch": "هندسة الرسم",
+    "cmd.select_mode": "وضع التحديد",
+    "navbar.description.selection_mode": "يختار ما تحدده النقرة: الأوجه والحواف أو الأجسام أو الميزات أو القطع أو المكوّنات أو هندسة الرسم.",
+    "navbar.selection.heading": "ما تحدده النقرة",
+    "navbar.selection_mode": "وضع التحديد"
+  },
+  "he": {
+    "navbar.selection.faces": "פאות ומקצועות",
+    "navbar.selection.bodies": "גופים",
+    "navbar.selection.features": "פיצ'רים",
+    "navbar.selection.parts": "חלקים",
+    "navbar.selection.components": "רכיבים",
+    "navbar.selection.sketch": "גאומטריית סקיצה",
+    "cmd.select_mode": "מצב בחירה",
+    "navbar.description.selection_mode": "קובע מה לחיצה בוחרת: פאות ומקצועות, גופים, פיצ'רים, חלקים, רכיבים או גאומטריית סקיצה.",
+    "navbar.selection.heading": "מה לחיצה בוחרת",
+    "navbar.selection_mode": "מצב בחירה"
+  },
+  "ja": {
+    "navbar.selection.faces": "面とエッジ",
+    "navbar.selection.bodies": "ボディ",
+    "navbar.selection.features": "フィーチャー",
+    "navbar.selection.parts": "部品",
+    "navbar.selection.components": "コンポーネント",
+    "navbar.selection.sketch": "スケッチジオメトリ",
+    "cmd.select_mode": "選択モード",
+    "navbar.description.selection_mode": "クリックで選択する対象（面とエッジ、ボディ、フィーチャー、部品、コンポーネント、スケッチジオメトリ）を切り替えます。",
+    "navbar.selection.heading": "クリックで選択する対象",
+    "navbar.selection_mode": "選択モード"
+  },
+  "vi": {
+    "navbar.selection.faces": "Bề mặt và cạnh",
+    "navbar.selection.bodies": "Thân khối",
+    "navbar.selection.features": "Các tính năng",
+    "navbar.selection.parts": "Chi tiết",
+    "navbar.selection.components": "Các thành phần",
+    "navbar.selection.sketch": "Hình học phác thảo",
+    "cmd.select_mode": "Chế độ chọn",
+    "navbar.description.selection_mode": "Chọn thứ mà một lần nhấp chuột sẽ chọn: bề mặt và cạnh, thân khối, tính năng, chi tiết, thành phần hoặc hình học phác thảo.",
+    "navbar.selection.heading": "Thứ một lần nhấp chuột chọn",
+    "navbar.selection_mode": "Chế độ chọn"
+  },
+  "zh": {
+    "navbar.selection.faces": "面和边",
+    "navbar.selection.bodies": "实体",
+    "navbar.selection.features": "特征",
+    "navbar.selection.parts": "零件",
+    "navbar.selection.components": "组件",
+    "navbar.selection.sketch": "草图几何",
+    "cmd.select_mode": "选择模式",
+    "navbar.description.selection_mode": "切换单击时选取的对象：面和边、实体、特征、零件、组件或草图几何。",
+    "navbar.selection.heading": "单击选取的对象",
+    "navbar.selection_mode": "选择模式"
+  },
+  "de": {
+    "navbar.selection.faces": "Flächen und Kanten",
+    "navbar.selection.bodies": "Körper",
+    "navbar.selection.features": "Funktionen",
+    "navbar.selection.parts": "Teile",
+    "navbar.selection.components": "Komponenten",
+    "navbar.selection.sketch": "Skizzengeometrie",
+    "cmd.select_mode": "Auswahlmodus",
+    "navbar.description.selection_mode": "Legt fest, was ein Klick auswählt: Flächen und Kanten, Körper, Funktionen, Teile, Komponenten oder Skizzengeometrie.",
+    "navbar.selection.heading": "Was ein Klick auswählt",
+    "navbar.selection_mode": "Auswahlmodus"
+  },
+  "ko": {
+    "navbar.selection.faces": "면과 모서리",
+    "navbar.selection.bodies": "바디",
+    "navbar.selection.features": "피처",
+    "navbar.selection.parts": "부품",
+    "navbar.selection.components": "구성요소",
+    "navbar.selection.sketch": "스케치 형상",
+    "cmd.select_mode": "선택 모드",
+    "navbar.description.selection_mode": "클릭으로 선택하는 대상을 정합니다: 면과 모서리, 바디, 피처, 부품, 구성요소 또는 스케치 형상.",
+    "navbar.selection.heading": "클릭으로 선택하는 대상",
+    "navbar.selection_mode": "선택 모드"
+  }
+}
