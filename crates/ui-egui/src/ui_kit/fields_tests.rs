@@ -764,6 +764,7 @@ fn a_focused_angle_field_nudges_by_one_degree_on_the_wheel() {
         vec![
             egui::Event::PointerMoved(at),
             egui::Event::MouseWheel {
+                source: egui::MouseWheelSource::Wheel,
                 unit: egui::MouseWheelUnit::Line,
                 delta: egui::vec2(0.0, 1.0),
                 modifiers: egui::Modifiers::NONE,
@@ -778,6 +779,7 @@ fn a_focused_angle_field_nudges_by_one_degree_on_the_wheel() {
         vec![
             egui::Event::PointerMoved(at),
             egui::Event::MouseWheel {
+                source: egui::MouseWheelSource::Wheel,
                 unit: egui::MouseWheelUnit::Line,
                 delta: egui::vec2(0.0, -1.0),
                 modifiers: egui::Modifiers::NONE,
@@ -794,6 +796,7 @@ fn a_focused_angle_field_nudges_by_one_degree_on_the_wheel() {
         vec![
             egui::Event::PointerMoved(away),
             egui::Event::MouseWheel {
+                source: egui::MouseWheelSource::Wheel,
                 unit: egui::MouseWheelUnit::Line,
                 delta: egui::vec2(0.0, 1.0),
                 modifiers: egui::Modifiers::NONE,
