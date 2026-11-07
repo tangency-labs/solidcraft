@@ -606,3 +606,18 @@ fn hole_from_a_sketch_on_a_standard_plane_inside_the_part_still_starts_at_the_su
     // Starts at the top (z 10) going down, not at z 0.
     assert!(!solid_at(&s, 0.0, 0.0, 7.5) && solid_at(&s, 0.0, 0.0, 3.0) && solid_at(&s, 0.0, 0.0, -3.0));
 }
+
+/// The copies of a hole from a sketch on an offset plane start at the plane too (#11538).
+#[test]
+fn patterned_copy_of_an_offset_plane_hole_starts_at_the_plane_too() {
+    let mut s = Session::default();
+    box_part(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": "12 mm", "name": "Pts"}));
+    run(&mut s, "sketch.point", json!({"point": [10, 20], "id": "p1"}));
+    run(&mut s, "sketch.finish", json!({}));
+    drill(&mut s, &["p1".to_string()], json!({"depth": 5}));
+    run(&mut s, "solid.pattern.rectangular", json!({"features": ["H"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 15, "name": "Row"}));
+    for x in [10.0, 25.0] {
+        assert!(solid_at(&s, x, 20.0, 6.5) && !solid_at(&s, x, 20.0, 7.5) && !solid_at(&s, x, 20.0, 11.5) && solid_at(&s, x, 20.0, 14.5), "x {x}");
+    }
+}

@@ -4559,11 +4559,17 @@ fn hole_spots(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, f
     if spots.is_empty() || spots.len() > 10_000 {
         return Err(DocError::Invalid("a hole needs 1…10000 points".into()));
     }
-    let from_inside = match points {
-        Some(sp) if !sp.single => sketch_plane_follows_face(doc, sp.sketch.0),
-        _ => true,
-    };
+    let from_inside = hole_from_inside(doc, f);
     Ok((spots.into_iter().map(|p| hole_on_surface_in(st, p, dir, hole_scope(f), from_inside)).collect(), dir))
+}
+
+/// Whether a hole's spots that lie inside a body move back to its surface: not for the points
+/// of a sketch on a derived plane (#11538).
+fn hole_from_inside(doc: &Document, f: &Feature) -> bool {
+    match &f.kind {
+        FeatureKind::Hole { points: Some(sp), .. } if !sp.single => sketch_plane_follows_face(doc, sp.sketch.0),
+        _ => true,
+    }
 }
 
 /// Whether the sketch lies on a picked face, a standard plane (or a plane given outright), so a hole at its points
@@ -4572,7 +4578,7 @@ fn hole_spots(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, f
 fn sketch_plane_follows_face(doc: &Document, sketch: u64) -> bool {
     fn picked(p: &PlaneRef) -> bool {
         match p {
-            PlaneRef::Origin { .. } | PlaneRef::Face { .. } | PlaneRef::Custom { .. } => true,
+            PlaneRef::Origin { .. } | PlaneRef::Face { .. } | PlaneRef::Custom { .. } | PlaneRef::Placed { .. } => true,
             PlaneRef::Flipped { base, .. } => picked(base),
             _ => false,
         }
@@ -6924,12 +6930,14 @@ fn replay(
             // a blind hole's depth counts from the face at the copy, not from the bottom of the
             // original hole under the original spot.
             let (spots, dir) = hole_spots_raw(vals, st, src)?;
+            // Copies start where the original does (#11538).
+            let from_inside = hole_from_inside(doc, src);
             for (k, m) in mats.iter().enumerate() {
                 let d = crate::apply_vector(m, dir).normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?;
                 let start = copies.len();
                 let mut on = Vec::with_capacity(spots.len());
                 for p in &spots {
-                    let at = hole_on_surface(st, crate::apply_point(m, *p), d, hole_scope(src));
+                    let at = hole_on_surface_in(st, crate::apply_point(m, *p), d, hole_scope(src), from_inside);
                     on.push((at, d));
                     let to = to.map(|t| crate::apply_point(m, t.0));
                     let depth = hole_depth_to(st, &at, d, &to, depth)?;
