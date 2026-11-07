@@ -8,6 +8,9 @@
 //! Reference edges (#37) place the first hole: with one picked, its marker has two arms along the
 //! edge and drags the hole along it at its distance; with two, the marker has its four arms again
 //! and a drag sets both distances. Any other hole in the dialog moves anywhere.
+//!
+//! With Create Hole › Several holes on one face (#12480), each hole on a face has its own marker:
+//! a drag moves that hole only (onto a face with other holes too) and a click takes that one out.
 
 use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
@@ -26,7 +29,13 @@ pub(super) static SPEC: Spec = Spec {
     many: true,
     places,
     move_to,
-    click: Some(|app, d, key| crate::hole_place::remove_place(d, &app.session, key)),
+    click: Some(|app, d, key| {
+        if crate::hole_place::several(app, d) {
+            crate::hole_place::several_change_item(&app.session, d, key, None);
+        } else {
+            crate::hole_place::remove_place(d, &app.session, key);
+        }
+    }),
     footprint,
     freedom: |app, d, key| crate::hole_refs::freedom(&app.session, d, key),
     turn: None,
@@ -34,11 +43,23 @@ pub(super) static SPEC: Spec = Spec {
 
 /// The holes placed so far, each at its face place with the face's outward normal (on a curved
 /// face, the normal where the hole is). A hole being edited whose face is gone keeps its place
-/// and the `direction` the edit restored, as a Rest's frame does, so it still has a marker.
+/// and the `direction` the edit restored, as a Rest's frame does, so it still has a marker. When a
+/// face takes several holes, each pick on it is a hole with its own marker.
 fn places(app: &SolveApp, d: &Dialog) -> Vec<Place> {
     let s = &app.session;
-    crate::hole_place::places(s, d)
-        .into_iter()
+    let held = if crate::hole_place::several(app, d) {
+        let items = d.inputs.first().map(|inp| inp.items.as_slice()).unwrap_or_default();
+        crate::hole_place::several_places(s, items)
+            .into_iter()
+            .filter_map(|i| match items.get(i) {
+                Some(Sel::Face { point, .. }) => Some((i, *point)),
+                _ => None,
+            })
+            .collect()
+    } else {
+        crate::hole_place::places(s, d)
+    };
+    held.into_iter()
         .filter_map(|(key, base)| {
             let Some(Sel::Face { body, index, .. }) = d.inputs.first()?.items.get(key) else { return None };
             let n = crate::dialogs::planar_face(s, body, *index)
@@ -56,12 +77,14 @@ fn places(app: &SolveApp, d: &Dialog) -> Vec<Place> {
 }
 
 /// The hole at `key` moved to the face place a click with `hits` would take (snapped as the
-/// pick is), unless that face already has another hole; held by a reference edge, as far along
-/// the edge as the pick is, and where the edge's line leaves the face first, refused with why.
+/// pick is), unless that face already has another hole and takes only one; held by a reference
+/// edge, as far along the edge as the pick is, and where the edge's line leaves the face first,
+/// refused with why.
 fn move_to(app: &SolveApp, d: &mut Dialog, hits: &[Hit], key: usize) -> bool {
     let s = &app.session;
     let Some(to) = face_pick(d, s, hits) else { return false };
     match crate::hole_refs::freedom(s, d, key) {
+        Freedom::Plane if crate::hole_place::several(app, d) => crate::hole_place::several_change_item(s, d, key, Some(to)),
         Freedom::Plane => crate::hole_place::move_place(d, s, key, to),
         Freedom::Line(_) => match to {
             Sel::Face { point, .. } => match crate::hole_refs::drag_to(s, d, key, point) {

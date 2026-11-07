@@ -349,6 +349,16 @@ fn several_change(s: &Session, d: &mut Dialog, n: usize, to: Option<Sel>) {
     set_places(s, d, places);
 }
 
+/// Move the hole placed by item `i` of the face input to `to`, or take it out, when a face takes
+/// several: the placement marker names a hole by its item (see `place_gizmo/hole.rs`). False when
+/// item `i` places no hole.
+pub(crate) fn several_change_item(s: &Session, d: &mut Dialog, i: usize, to: Option<Sel>) -> bool {
+    let items = d.inputs.first().map(|inp| inp.items.as_slice()).unwrap_or_default();
+    let Some(n) = several_places(s, items).iter().position(|&k| k == i) else { return false };
+    several_change(s, d, n, to);
+    true
+}
+
 /// When a face takes several Single holes (Preferences), a face pick adds a hole there, or takes
 /// out the hole it lands on (within its radius). True when the pick was taken so.
 pub(crate) fn pick_several(app: &SolveApp, d: &mut Dialog, sel: &Sel) -> bool {

@@ -136,6 +136,42 @@ fn a_click_within_the_markers_reach_takes_the_hole_out() {
 }
 
 #[test]
+fn with_several_holes_on_a_face_each_has_a_marker_that_drags_or_takes_out_only_its_hole() {
+    // Several holes on one face (#12480): three picks on the one top face are three holes, each
+    // with its own marker. A drag moves its hole across the face the others are on; a click on the
+    // marker's arm takes that hole out (a hole narrower than the click's 14 pt, so a pick there
+    // that missed the marker would add a hole instead).
+    let mut h = blocks();
+    crate::prefs::set(&mut h.app, &json!({"hole_several": true})).unwrap();
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    if let Some(crate::dialogs::Kind::Hole { diameter, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *diameter = "0.5 mm".into();
+    }
+    let spots = [Vec3::new(8.0, 8.0, 20.0), Vec3::new(20.0, 22.0, 20.0), Vec3::new(32.0, 8.0, 20.0)];
+    for p in spots {
+        let at = screen(&mut h, p);
+        h.step(&json!({"click": at})).unwrap();
+        h.frames(2);
+    }
+    let near = |got: &[Vec3], want: &[Vec3]| got.len() == want.len() && got.iter().zip(want).all(|(g, w)| g.dist(*w) < 0.2);
+    assert!(near(&places(&h), &spots), "three holes on the one face: {:?}", places(&h));
+    assert!(handle_at("hole:2").is_some() && handle_at("hole:3").is_none(), "a marker per hole");
+    // The middle hole dragged to another spot on the same face: the other two stay.
+    let moved = Vec3::new(20.0, 12.0, 20.0);
+    let ts = screen(&mut h, moved);
+    h.step(&json!({"drag": [{"handle": "hole:1"}, ts], "steps": 12})).unwrap();
+    h.settle();
+    assert!(near(&places(&h), &[spots[0], moved, spots[2]]), "only the dragged hole moved: {:?}", places(&h));
+    // The first marker's arm clicked: that hole goes, the moved one and the last stay.
+    h.frames(2);
+    let c = handle_at("hole:0").expect("the first hole's marker");
+    h.step(&json!({"click": [f64::from(c.x) + 14.0, f64::from(c.y)]})).unwrap();
+    h.frames(2);
+    assert!(near(&places(&h), &[moved, spots[2]]), "only the clicked hole went: {:?}", places(&h));
+    assert!(handle_at("hole:1").is_some() && handle_at("hole:2").is_none(), "{:?}", places(&h));
+}
+
+#[test]
 fn the_depth_arrow_stands_clear_of_the_marker_only_while_holes_move() {
     let mut h = blocks();
     h.step(&json!({"start": "solid.hole"})).unwrap();
