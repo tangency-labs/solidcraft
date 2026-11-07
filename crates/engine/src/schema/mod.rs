@@ -90,6 +90,7 @@ pub mod render_hdr;
 pub mod render_library;
 pub mod render_lights;
 pub mod render_presets;
+pub mod render_settings;
 pub mod render_shots;
 pub mod render_stage;
 pub mod render_surface_resources;
