@@ -1576,6 +1576,10 @@ pub(super) fn surface_prism_cut(
                     match kernel::planar_regions_boolean(std::slice::from_ref(own), std::slice::from_ref(&outline), kernel::BoolOp::Intersect, tol) {
                         Ok(on) if on.iter().map(Region2::area).sum::<f64>() > 1e-9 => {}
                         Ok(_) => continue,
+                        // The boolean failing leaves the cut to the body's own, the 3D path, as
+                        // each `Ok(Vec::new())` here does. That is the conservative choice, not an
+                        // equivalent one: the body's cut brings the panel's curves back as splines
+                        // fitted to them, which is what this path exists to avoid.
                         Err(_) => return Ok(Vec::new()),
                     }
                 }
