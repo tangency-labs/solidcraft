@@ -931,3 +931,37 @@ fn plane_tangent_on_a_mesh_body_says_it_has_no_faces() {
     let off = s.execute("construct.plane.tangent", &json!({"face": {"face": [100, 100, 100]}, "name": "T"})).expect_err("nothing there").to_string();
     assert!(off.contains("no face at") && !off.contains("Convert Mesh"), "{off}");
 }
+
+/// #11469, the converted path the report followed ("convert STL to body"): a finely tessellated
+/// cylinder 200 mm tall, inserted as STL and converted, takes a tangent plane on a facet at the
+/// picked point, with the facet's normal.
+#[test]
+fn plane_tangent_on_a_converted_mesh_facet() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-mesh-converted-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("cyl.stl");
+    let mut src = Session::default();
+    run(&mut src, "solid.cylinder", json!({"base": [0, 0, 0], "radius": 60, "height": 200, "body_name": "Cyl"}));
+    run(&mut src, "file.export", json!({"path": stl.to_string_lossy()}));
+    let mut s = Session::default();
+    run(&mut s, "file.insert_mesh", json!({"path": stl.to_string_lossy()}));
+    let _ = std::fs::remove_dir_all(&dir);
+    let (name, mesh) = s.world_state().unwrap().bodies.iter().find(|b| b.body.is_mesh()).map(|b| (b.name.clone(), b.body.clone())).expect("a mesh body");
+    // A side facet's centroid and normal, read from the mesh before it is converted.
+    let (pos, tris) = mesh.triangle_mesh().unwrap();
+    let (c, n) = tris
+        .iter()
+        .filter_map(|t| {
+            let [a, b, c] = t.map(|i| pos[i as usize]);
+            let n = (b - a).cross(c - a).normalized()?;
+            (n.z.abs() < 1e-6).then(|| ((a + b + c) * (1.0 / 3.0), n))
+        })
+        .next()
+        .expect("a side facet");
+    run(&mut s, "mesh.convert", json!({"body": name, "tolerance": "0.01 mm"}));
+    assert!(!s.world_state().unwrap().bodies.iter().any(|b| b.body.is_mesh()), "converted");
+    run(&mut s, "construct.plane.tangent", json!({"face": {"face": [c.x, c.y, c.z]}, "name": "T"}));
+    let t = plane(&s, "T");
+    assert!(parallel(t.normal(), n) && on_plane(&t, c), "{t:?} vs facet at {c:?} normal {n:?}");
+}
