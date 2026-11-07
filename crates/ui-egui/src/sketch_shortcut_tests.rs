@@ -462,7 +462,9 @@ fn lines(h: &Harness) -> Vec<([f64; 2], [f64; 2])> {
     let sid = h.app.session.active_sketch.unwrap();
     let state = h.app.session.model.state();
     let sketch = &state.sketch(sid).unwrap().sketch;
+    // Drawn lines only: not linked reference lines, such as a sketch axis's line (#9330).
     (0..sketch.curves.len())
+        .filter(|&c| !sketch.is_linked_curve(c))
         .filter_map(|c| match sketch.shape(c)? {
             Shape::Line { a, b } => Some(([a.x, a.y], [b.x, b.y])),
             _ => None,

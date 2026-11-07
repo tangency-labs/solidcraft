@@ -571,3 +571,187 @@ fn a_horizontal_line_ends_plumb_with_a_point_above_and_keeps_both() {
         "the line stays horizontal"
     );
 }
+
+/// The sketch's own X and Y axes, held on (point id, axis name): the points with a
+/// point-on-curve constraint to a sketch axis's line.
+fn held_on_axes(h: &Harness) -> Vec<(String, String)> {
+    use solidcraft_engine::sketch::{ConstraintKind::PointOnCurve, LinkSource};
+    let st = h.app.session.world_state().unwrap();
+    let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    let axis_of = |c: usize| {
+        let link = sk.curves.get(c)?.link.as_deref()?;
+        match &sk.link(link)?.source {
+            LinkSource::SketchAxis { name } => Some(name.clone()),
+            _ => None,
+        }
+    };
+    sk.constraints
+        .iter()
+        .filter_map(|k| match k.kind {
+            PointOnCurve { p, c } => Some((sk.points.get(p)?.id.clone(), axis_of(c)?)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// #9330: with the Point tool, a click two pixels off the sketch's X axis puts the point on it
+/// and holds it there; so does a line's first point two pixels off the Y axis. Nothing else is
+/// near, so before, the point took the grid and nothing held it. With the Origin hidden (its
+/// axes not drawn), or with axis snapping off in the Sketch preferences (the grid, as before),
+/// nothing snaps to them.
+#[test]
+fn a_point_drawn_near_a_sketch_axis_lands_on_it_and_stays_there() {
+    for (shown, snapping) in [(true, true), (false, true), (true, false)] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.app.set_origin_shown(shown);
+        h.app.preferences.sketch_snap_to_axes = snapping;
+        h.frames(3);
+        let [x, y] = h.at(&json!({"sketch":[12.3, 0]})).unwrap();
+        step(&mut h, json!({"start":"sketch.point"}));
+        step(&mut h, json!({"click":[x, y - 2.0]}));
+        step(&mut h, json!({"key":"Escape"}));
+        let [x, y] = h.at(&json!({"sketch":[0, 9.7]})).unwrap();
+        let [x1, y1] = h.at(&json!({"sketch":[15, 20]})).unwrap();
+        step(&mut h, json!({"start":"sketch.line"}));
+        step(&mut h, json!({"click":[x + 2.0, y]}));
+        step(&mut h, json!({"click":[x1, y1]}));
+        step(&mut h, json!({"key":"Escape"}));
+        step(&mut h, json!({"key":"Escape"}));
+        let held = held_on_axes(&h);
+        if !(shown && snapping) {
+            assert!(held.is_empty(), "Origin shown {shown}, axis snapping {snapping}: {held:?}");
+            continue;
+        }
+        let st = h.app.session.world_state().unwrap();
+        let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        let at = |id: &str| sk.point(sk.resolve_point(id).unwrap()).unwrap();
+        let on_x: Vec<&String> = held.iter().filter(|(_, a)| a == "x").map(|(p, _)| p).collect();
+        let on_y: Vec<&String> = held.iter().filter(|(_, a)| a == "y").map(|(p, _)| p).collect();
+        assert_eq!((on_x.len(), on_y.len()), (1, 1), "{held:?}");
+        let (px, py) = (at(on_x[0]), at(on_y[0]));
+        assert!(px.y.abs() < 1e-9 && (px.x - 12.3).abs() < 0.5, "on the X axis: {px:?}");
+        assert!(py.x.abs() < 1e-9 && (py.y - 9.7).abs() < 0.5, "on the Y axis: {py:?}");
+    }
+}
+
+/// #9330: a snap onto the X axis leaves the axis's line in the sketch. Once the Origin is
+/// hidden, or axis snapping is turned off in the Sketch preferences, a point placed near that
+/// axis is not snapped onto the line either: neither where nothing else is near, nor where a
+/// drawn line crosses the axis, where it is held on the drawn line alone.
+#[test]
+fn a_sketch_axis_line_takes_no_new_points_once_axis_snapping_is_off() {
+    use solidcraft_engine::sketch::ConstraintKind::PointOnCurve;
+    for hide_origin in [true, false] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.frames(3);
+        let [x, y] = h.at(&json!({"sketch":[12.3, 0]})).unwrap();
+        step(&mut h, json!({"start":"sketch.point"}));
+        step(&mut h, json!({"click":[x, y - 2.0]}));
+        step(&mut h, json!({"key":"Escape"}));
+        let snapped = held_on_axes(&h);
+        assert_eq!(snapped.len(), 1, "the first point snaps onto the X axis: {snapped:?}");
+        // A line across the X axis, its midpoint well away from it.
+        let [x0, y0] = h.at(&json!({"sketch":[30, -10]})).unwrap();
+        let [x1, y1] = h.at(&json!({"sketch":[30, 40]})).unwrap();
+        step(&mut h, json!({"start":"sketch.line"}));
+        step(&mut h, json!({"click":[x0, y0]}));
+        step(&mut h, json!({"click":[x1, y1]}));
+        step(&mut h, json!({"key":"Escape"}));
+        step(&mut h, json!({"key":"Escape"}));
+        if hide_origin {
+            h.app.set_origin_shown(false);
+        } else {
+            h.app.preferences.sketch_snap_to_axes = false;
+        }
+        h.frames(3);
+        let [x, y] = h.at(&json!({"sketch":[47.1, 0]})).unwrap();
+        let [cx, cy] = h.at(&json!({"sketch":[30, 0]})).unwrap();
+        step(&mut h, json!({"start":"sketch.point"}));
+        step(&mut h, json!({"click":[x, y - 2.0]}));
+        step(&mut h, json!({"click":[cx + 2.0, cy - 2.0]}));
+        step(&mut h, json!({"key":"Escape"}));
+        let what = if hide_origin { "Origin hidden" } else { "axis snapping off" };
+        assert_eq!(held_on_axes(&h), snapped, "{what}: only the first point is on the axis");
+        let st = h.app.session.world_state().unwrap();
+        let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        let on_drawn =
+            sk.constraints.iter().filter(|k| matches!(k.kind, PointOnCurve { c, .. } if sk.curves.get(c).is_some_and(|c| c.link.is_none()))).count();
+        assert_eq!(on_drawn, 1, "{what}: the point by the crossing is held on the drawn line");
+    }
+}
+
+/// The ids of the points on sketch axis lines (`Sketch::sketch_axis_line`): each line's two
+/// ends, 100 mm out on its axis.
+fn sketch_axis_line_ends(h: &Harness) -> Vec<String> {
+    use solidcraft_engine::sketch::LinkSource;
+    let st = h.app.session.world_state().unwrap();
+    let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    sk.points
+        .iter()
+        .filter(|p| p.link.as_deref().and_then(|l| sk.link(l)).is_some_and(|l| matches!(l.source, LinkSource::SketchAxis { .. })))
+        .map(|p| p.id.clone())
+        .collect()
+}
+
+/// #9330: a sketch axis's line ends 100 mm out on the axis. With axis snapping on, a drawing
+/// point by one of those ends snaps onto it, as onto any sketch point; with it off, it doesn't,
+/// for the reason the line itself takes no snaps then.
+#[test]
+fn an_end_of_a_sketch_axis_line_takes_no_points_once_axis_snapping_is_off() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.call("ui.camera", json!({"target": [0, 0, 0], "distance": 600}));
+    h.frames(3);
+    let [x, y] = h.at(&json!({"sketch":[12.3, 0]})).unwrap();
+    step(&mut h, json!({"start":"sketch.point"}));
+    step(&mut h, json!({"click":[x, y - 2.0]}));
+    let ends = sketch_axis_line_ends(&h);
+    assert_eq!(ends.len(), 2, "the X axis's line, with its two ends: {ends:?}");
+    let [ex, ey] = h.at(&json!({"sketch":[100, 0]})).unwrap();
+    let pos = egui::pos2(ex as f32 + 2.0, ey as f32 - 2.0);
+    let rect = h.app.viewport.rect.expect("viewport");
+    assert!(rect.contains(pos), "the line's end is in view: {pos:?} {rect:?}");
+    let proj = crate::viewport::projection(&h.app, rect);
+    for snapping in [true, false] {
+        h.app.preferences.sketch_snap_to_axes = snapping;
+        let (_, id) = crate::viewport::sketch_point_at(&h.app, &proj, pos).unwrap();
+        assert_eq!(id.as_ref().is_some_and(|id| ends.contains(id)), snapping, "axis snapping {snapping}: {id:?}");
+    }
+}
+
+/// #9330: once a snap onto the X axis has left the axis's line in the sketch, a later point near
+/// that axis is snapped by the axis snap, not projected onto the line: it is held on the axis
+/// with its free coordinate on the grid, as the first point was.
+#[test]
+fn a_later_point_near_a_sketch_axis_keeps_its_free_coordinate_on_the_grid() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.frames(3);
+    step(&mut h, json!({"start":"sketch.point"}));
+    for x in [12.3, 47.13] {
+        let [sx, sy] = h.at(&json!({"sketch":[x, 0]})).unwrap();
+        step(&mut h, json!({"click":[sx, sy - 2.0]}));
+    }
+    step(&mut h, json!({"key":"Escape"}));
+    let held = held_on_axes(&h);
+    assert_eq!(held.len(), 2, "both points are held on the X axis: {held:?}");
+    let grid = solidcraft_engine::view::grid_step(h.app.cam.half_height()).0 / 10.0;
+    let st = h.app.session.world_state().unwrap();
+    let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    for (id, axis) in &held {
+        let p = sk.point_index(id).and_then(|i| sk.points.get(i)).map(|p| p.pos).unwrap();
+        assert_eq!(axis, "x", "{id}");
+        assert!(p.y.abs() < 1e-9, "{id} on the axis: {p:?}");
+        assert!(((p.x / grid).round() * grid - p.x).abs() < 1e-9, "{id}'s x on the {grid} mm grid: {p:?}");
+    }
+}

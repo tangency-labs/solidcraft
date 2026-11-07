@@ -71,7 +71,7 @@ pub use profiles::{
     CurvePick, MAX_PROFILE_EDGES, Profile, ProfileSearch, distinct_curves, find_drawn_profiles, find_profiles, find_profiles_checked, merge_regions,
     profile_at_point, profile_by_curves, without_text_counters,
 };
-pub use shape::{Shape, intersections, intersections_within, nearest_crossing, nearest_curve_intersection};
+pub use shape::{Shape, intersections, intersections_within, nearest_crossing, nearest_curve_intersection, nearest_curve_intersection_among};
 pub use solver::solve_after_edit_with_analysis;
 pub use solver::{
     Analysis, CONSISTENT, DrivingValues, Hold, MAX_COMPONENT_VARS, SolveReport, SolveStatus, constraint_residual, determined_by, fillets_kept,

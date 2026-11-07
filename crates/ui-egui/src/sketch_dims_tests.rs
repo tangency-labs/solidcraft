@@ -426,9 +426,11 @@ fn a_line_end_on_a_spline_snaps_on_it_and_stays_on_it() {
     h.step(&json!({"click": {"world": [on.x, on.y, 0]}})).unwrap();
     let st = crate::open_meshing::session_world(&h.app.session);
     let sk = &st.sketch(sid).unwrap().sketch;
+    // The drawn line, not the sketch axis's line its start snapped onto (#9330).
     let b = sk
         .curves
         .iter()
+        .filter(|c| c.link.is_none())
         .find_map(|c| if let CurveKind::Line { b, .. } = c.kind { Some(b) } else { None })
         .unwrap_or_else(|| panic!("no line, {:?}", h.app.status));
     assert!(

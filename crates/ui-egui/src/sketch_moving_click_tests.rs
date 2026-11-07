@@ -23,9 +23,12 @@ fn moving_click(h: &mut Harness, at: [f64; 2], dx: f64) {
     h.call("ui.drag", json!({"x0":x - dx,"y0":y,"x1":x,"y1":y,"steps":4}));
 }
 
+/// The curves drawn in the sketch being edited: not linked reference curves, such as the line of
+/// a sketch axis a point snapped onto is held on (#9330).
 fn curves(h: &Harness) -> usize {
     let sid = h.app.session.active_sketch.unwrap();
-    h.app.session.model.state().sketch(sid).unwrap().sketch.curves.len()
+    let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
+    (0..sk.curves.len()).filter(|&i| !sk.is_linked_curve(i)).count()
 }
 
 #[test]
@@ -98,11 +101,13 @@ fn drag(h: &mut Harness, from: [f64; 2], to: [f64; 2]) {
     h.settle();
 }
 
-/// The lines of the sketch being edited, end to end.
+/// The lines drawn in the sketch being edited, end to end: not linked reference lines, such as
+/// the line of a sketch axis a point snapped onto is held on (#9330).
 fn lines(h: &Harness) -> Vec<[solidcore_record::Vec2; 2]> {
     let sid = h.app.session.active_sketch.unwrap();
     let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
     (0..sk.curves.len())
+        .filter(|&i| !sk.is_linked_curve(i))
         .filter_map(|i| match sk.shape(i) {
             Some(solidcraft_engine::sketch::Shape::Line { a, b }) => Some([a, b]),
             _ => None,
@@ -245,6 +250,12 @@ fn sketch(h: &Harness) -> solidcraft_engine::sketch::Sketch {
     h.app.session.model.state().sketch(sid).unwrap().sketch.clone()
 }
 
+/// The indices of `sk`'s drawn curves, in the order drawn: not linked reference curves, such as
+/// the line of a sketch axis a point snapped onto is held on (#9330).
+fn drawn(sk: &solidcraft_engine::sketch::Sketch) -> Vec<usize> {
+    (0..sk.curves.len()).filter(|&i| !sk.is_linked_curve(i)).collect()
+}
+
 /// The arc last drawn: centre, radius and where it starts and ends as drawn.
 fn last_arc(sk: &solidcraft_engine::sketch::Sketch) -> (solidcore_record::Vec2, f64, solidcore_record::Vec2, solidcore_record::Vec2) {
     let (index, curve) = sk.curves.iter().enumerate().rfind(|(_, c)| matches!(c.kind, CurveKind::Arc { .. })).expect("an arc");
@@ -287,11 +298,12 @@ fn a_rest_on_the_last_point_makes_the_next_click_a_tangent_arc_and_back_to_a_lin
     assert!(centre.dist(solidcore_record::Vec2::new(0.0, 10.0)) < 1e-6, "centre {centre:?}");
     assert!((radius - 10.0).abs() < 1e-6, "radius {radius}");
     assert!(start.dist(solidcore_record::Vec2::ZERO) < 1e-6 && end.dist(solidcore_record::Vec2::new(10.0, 10.0)) < 1e-6);
-    let (line, arc) = (sk.curves.first().unwrap(), sk.curves.get(1).unwrap());
+    let d = drawn(&sk);
+    let (line, arc) = (&sk.curves[d[0]], &sk.curves[d[1]]);
     let shared = sk.resolve_point(&format!("{}.end", line.id)) == sk.resolve_point(&format!("{}.start", arc.id));
     assert!(shared, "the arc starts on the line's own end");
     assert!(
-        sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Tangent { a: 0, b: 1 })),
+        sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Tangent { a, b } if (a, b) == (d[0], d[1]))),
         "tangent to the line: {:?}",
         sk.constraints
     );
@@ -305,7 +317,8 @@ fn a_rest_on_the_last_point_makes_the_next_click_a_tangent_arc_and_back_to_a_lin
     click_at(&mut h, [10.0, 30.0]);
     assert_eq!(curves(&h), 3, "{:?}", h.app.status);
     let sk = sketch(&h);
-    let (arc, line) = (sk.curves.get(1).unwrap(), sk.curves.get(2).unwrap());
+    let d = drawn(&sk);
+    let (arc, line) = (&sk.curves[d[1]], &sk.curves[d[2]]);
     assert!(matches!(line.kind, CurveKind::Line { .. }));
     let shared = sk.resolve_point(&format!("{}.end", arc.id)) == sk.resolve_point(&format!("{}.start", line.id));
     assert!(shared, "the line starts on the arc's end");
@@ -514,7 +527,9 @@ fn arcs_follow_one_another_each_tangent_to_the_last_and_a_pause_after_one_switch
         "from {start:?} to {end:?}"
     );
     assert!(
-        sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Tangent { a: 1, b: 2 })),
+        sk.constraints
+            .iter()
+            .any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Tangent { a, b } if (a, b) == (drawn(&sk)[1], drawn(&sk)[2]))),
         "tangent to the arc before it: {:?}",
         sk.constraints
     );
@@ -524,8 +539,9 @@ fn arcs_follow_one_another_each_tangent_to_the_last_and_a_pause_after_one_switch
     click_at(&mut h, [20.0, 40.0]);
     assert_eq!(curves(&h), 4, "{:?}", h.app.status);
     let sk = sketch(&h);
-    let CurveKind::Line { a: line_start, .. } = sk.curves[3].kind else { panic!("a line: {:?}", sk.curves[3]) };
-    let CurveKind::Arc { a: arc_end, .. } = sk.curves[2].kind else { panic!("an arc: {:?}", sk.curves[2]) };
+    let d = drawn(&sk);
+    let CurveKind::Line { a: line_start, .. } = sk.curves[d[3]].kind else { panic!("a line: {:?}", sk.curves[d[3]]) };
+    let CurveKind::Arc { a: arc_end, .. } = sk.curves[d[2]].kind else { panic!("an arc: {:?}", sk.curves[d[2]]) };
     let joined = line_start == arc_end || sk.point(line_start).unwrap().dist(sk.point(arc_end).unwrap()) < 1e-6;
     assert!(joined, "the line starts where the arc ends");
 }

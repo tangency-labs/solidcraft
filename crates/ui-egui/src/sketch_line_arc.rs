@@ -97,15 +97,19 @@ fn chain_point(sketch: &Sketch, id: &str, picked: Vec2) -> Option<Vec2> {
     if let Some(point) = sketch.resolve_point(id).and_then(|p| sketch.point(p)) {
         return Some(point);
     }
-    let exists = if let Some(curve) = id.strip_prefix("mid:") {
-        sketch.curve_index(curve).is_some()
+    // A snap's curve is one of the sketch's, or its own X or Y axis (`x`, `y`): the command
+    // adds the axis's line when it holds the point on it, so the sketch has no curve for it
+    // yet (#9330).
+    let curve = |c: &str| sketch.curve_index(c).is_some() || solidcraft_engine::sketch::sketch_axis_geom(c).is_some();
+    let exists = if let Some(c) = id.strip_prefix("mid:") {
+        sketch.curve_index(c).is_some()
     } else if let Some(snap) = id.strip_prefix("on:") {
-        let (curve, _) = snap.rsplit_once(':')?;
-        sketch.curve_index(curve).is_some()
+        let (c, _) = snap.rsplit_once(':')?;
+        curve(c)
     } else if let Some(snap) = id.strip_prefix("x:") {
         let (curves, _) = snap.rsplit_once(':')?;
         let (a, b) = curves.split_once('+')?;
-        sketch.curve_index(a).is_some() && sketch.curve_index(b).is_some()
+        curve(a) && curve(b)
     } else {
         id.starts_with("vertex:")
     };
