@@ -95,7 +95,7 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::heal::stitch::p1::{DefaultStitchCallback, Stitch, StitchCallback};
-use crate::heal::stitch::p2::MinGapRequest;
+use crate::heal::stitch::p2::{ClosedGap, MinGapRequest};
 use crate::kernel::Kernel;
 use crate::math::{Point2, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
@@ -1898,6 +1898,59 @@ pub(crate) fn stitch_faces_with_callback<'a, C: StitchCallback>(
         lists.as_ref().map(|(v, _)| v.as_slice()),
         lists.as_ref().map(|(_, e)| e.as_slice()),
     )
+}
+
+/// [`stitch_faces_with_callback`] that additionally returns each gap the stitch
+/// closed, with the tolerance growth its closure applied (not upstream,
+/// solidcore#2975). Nothing else the stitch does changes.
+///
+/// # Errors
+///
+/// Those of [`stitch_faces`].
+pub(crate) fn stitch_faces_with_gap_report(
+    k: &mut Kernel,
+    b: &mut Brep,
+    xsect_tol_3d: f64,
+    faces: Option<&[Option<FaceId>]>,
+    allow_spine_edges: bool,
+    identity: Option<crate::query::brep::BrepIdentity<'_>>,
+) -> Result<(StitchOutcome, Vec<ClosedGap>)> {
+    // lock brep bounding box, until goes out of scope
+    let mut lockit = LockBrepBox::new(k, b)?;
+    let b = lockit.brep();
+
+    // construct Stitch manager with the default keep/delete logic for glue pairs,
+    // recording each closure
+    let mut callback = DefaultStitchCallback::new();
+    let mut stitch = Stitch::new(&mut callback, xsect_tol_3d, true, true);
+    stitch.query_identity = identity;
+    stitch.fast_edge_compare = true;
+    stitch.ignore_problems = true;
+    stitch.squeeze_small_edges = true;
+    stitch.making_manifold_solid = !allow_spine_edges;
+    stitch.remove_laminar_slivers = true;
+    stitch.report_gaps = Some(Vec::new());
+
+    let mut lists = None;
+    if let Some(faces) = faces {
+        let mut vertices = Vec::new();
+        let mut edges = Vec::new();
+        for f in faces.iter().flatten() {
+            vertices.extend(face_vertices(b, *f)?);
+            edges.extend(face_edges(b, *f)?);
+        }
+        lists = Some((vertices, edges));
+    }
+    // pass the stitch call along (SER: its status is returned as is)
+    let outcome = do_stitching(
+        k,
+        b,
+        &mut stitch,
+        lists.as_ref().map(|(v, _)| v.as_slice()),
+        lists.as_ref().map(|(_, e)| e.as_slice()),
+    )?;
+    let gaps = stitch.take_gaps();
+    Ok((outcome, gaps))
 }
 
 // ---- ShrinkGeometry ------------------------------------------------------------------------

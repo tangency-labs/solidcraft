@@ -78,6 +78,7 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::geom::tol::ZONE_TOL_3D;
+use crate::heal::stitch::p2::ClosedGap;
 use crate::kernel::Kernel;
 use crate::math::{max2, Point3, Vec3};
 use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -2660,6 +2661,96 @@ fn stitch_faces(
     *lamina = usize::try_from(out.lamina_edges)
         .map_err(|_| SolidError::invalid_input(OP, "lamina edge count"))?;
     Ok(())
+}
+
+/// [`stitch_faces`] that also returns what the stitch closed: each gap, the
+/// entities, and the tolerance growth its closure applied (`solidcore#2975`).
+///
+/// # Errors
+///
+/// Those of [`stitch_faces`].
+fn stitch_faces_reported(
+    k: &mut Kernel,
+    b: &mut Brep,
+    tolerance: f64,
+    allow_spine: bool,
+    lamina: &mut usize,
+    gaps: &mut Vec<ClosedGap>,
+) -> Result<()> {
+    let (out, pass_gaps) = crate::topology::brep::p4::stitch_faces_with_gap_report(
+        k,
+        b,
+        tolerance,
+        None,
+        allow_spine,
+        None,
+    )?;
+    gaps.extend(pass_gaps);
+    *lamina = usize::try_from(out.lamina_edges)
+        .map_err(|_| SolidError::invalid_input(OP, "lamina edge count"))?;
+    Ok(())
+}
+
+/// [`stitch_and_orient`] that additionally reports what the stitch closed
+/// (`solidcore#2975`): for every gap it closed, the entities it glued, the gap it
+/// measured, and the tolerance growth its closure applied, so a caller (the local
+/// operation's soundness gate, booleans) decides on that bound. Nothing else the
+/// stitch does changes: the stitches and the orientation edit are the same, and the
+/// growth does not feed back into the construction.
+///
+/// # Errors
+///
+/// As [`stitch_and_orient`].
+pub fn stitch_and_orient_reported(
+    k: &mut Kernel,
+    b: &mut Brep,
+    options: &StitchAndOrientOptions,
+) -> Result<Vec<ClosedGap>> {
+    k.check_cancelled(OP)?;
+    let mut lamina = 0;
+    let mut gaps = Vec::new();
+    let mut tolerance = initial_stitch_tolerance(b.tolerance(), options.stitch_tolerance);
+    crate::error::ignore_status(crate::error::passed_on(
+        stitch_faces_reported(
+            k,
+            b,
+            tolerance,
+            options.allow_spine_edges,
+            &mut lamina,
+            &mut gaps,
+        ),
+        k.fixes.brep_edit_statuses_pass_on,
+    )?)?;
+    if lamina > 1 {
+        tolerance = if options.stitch_tolerance <= 0.0 {
+            tolerance * 20.0
+        } else {
+            tolerance * 10.0
+        };
+        crate::error::ignore_status(crate::error::passed_on(
+            stitch_faces_reported(
+                k,
+                b,
+                tolerance,
+                options.allow_spine_edges,
+                &mut lamina,
+                &mut gaps,
+            ),
+            k.fixes.brep_edit_statuses_pass_on,
+        )?)?;
+    }
+    plain_edit(k, b, |k, b, env| {
+        crate::error::ignore_status(orient_trimmed_surfaces(
+            k,
+            b,
+            Some(env),
+            true,
+            options.just_unify.unwrap_or(lamina > 0),
+            options.faces_to_swap.as_deref(),
+        ))?;
+        Ok(())
+    })?;
+    Ok(gaps)
 }
 
 /// `SmBrep::OrientTrimmedSurfaces(bNormalsOutward, bJustUnifyNormals, pFacesToSwapUV)`

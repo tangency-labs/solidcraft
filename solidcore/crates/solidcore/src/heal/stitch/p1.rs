@@ -111,6 +111,8 @@ use crate::topology::{
 };
 use crate::{Result, SolidError};
 
+use super::p2::{ClosedGap, ClosedGapKind};
+
 const OP: &str = "heal::stitch::p1";
 /// The operation of the `SM_API` entry points' `SM_ERR_INVALID_INPUT` (null arguments).
 const API_OP: &str = "heal::stitch::p1::api";
@@ -932,6 +934,27 @@ pub struct Stitch<'c> {
     /// Remove sliver faces smaller than tolerance first (`m_bRemoveLaminarSlivers`,
     /// default `FALSE`).
     pub remove_laminar_slivers: bool,
+    /// When `Some`, the stitch records what it closed: the entities, the gap it
+    /// measured, and the tolerance growth its editing applied (not upstream,
+    /// solidcore#2975). Nothing else changes.
+    pub report_gaps: Option<Vec<ClosedGap>>,
+}
+
+impl Stitch<'_> {
+    /// The collected gap records, taking them out (`Ok(vec![])` when the caller did
+    /// not ask for them).
+    pub(crate) fn take_gaps(&mut self) -> Vec<ClosedGap> {
+        self.report_gaps.take().unwrap_or_default()
+    }
+
+    /// Records one closed gap when the caller asked for the report. The growth is
+    /// how much the fused entity's tolerance rose over the larger of the two
+    /// operands' tolerances at the moment the stitcher decided to glue.
+    pub(crate) fn record_gap(&mut self, kind: ClosedGapKind, gap: f64, growth: f64) {
+        if let Some(gaps) = self.report_gaps.as_mut() {
+            gaps.push(ClosedGap { kind, gap, growth });
+        }
+    }
 }
 
 impl core::fmt::Debug for Stitch<'_> {
@@ -1151,6 +1174,7 @@ impl<'c> Stitch<'c> {
             split_edges_with_vertices: true,
             making_manifold_solid: true,
             remove_laminar_slivers: false,
+            report_gaps: None,
         }
     }
 
