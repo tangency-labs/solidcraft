@@ -12,8 +12,10 @@ use solidcraft_geom::prelude::*;
 use super::CommandSpec;
 use super::features::{add_feature, check_expr};
 use crate::params::{bad, bool_, expr, req_expr, str_, string_list, vec3};
+use crate::schema::features::FeatureResult;
 use crate::schema::plastic::{
-    AssignRuleParams, AssignRuleResult, ManageRulesParams, ManageRulesResult, RuleExpressions, RuleInfo, RuleValuesOrError, RulesParams, RulesResult,
+    AssignRuleParams, AssignRuleResult, BossParams, LipParams, ManageRulesParams, ManageRulesResult, RestParams, RuleExpressions, RuleInfo,
+    RuleValuesOrError, RulesParams, RulesResult, SnapFitParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -21,23 +23,47 @@ use crate::{EngineError, Result, Session};
 const MANAGE_RULES_CONTRACT: TypedContract<ManageRulesParams> = TypedContract::new();
 const ASSIGN_RULE_CONTRACT: TypedContract<AssignRuleParams> = TypedContract::new();
 const RULES_CONTRACT: TypedContract<RulesParams> = TypedContract::new();
+const BOSS_CONTRACT: TypedContract<BossParams> = TypedContract::new();
+const LIP_CONTRACT: TypedContract<LipParams> = TypedContract::new();
+const SNAP_FIT_CONTRACT: TypedContract<SnapFitParams> = TypedContract::new();
+const REST_CONTRACT: TypedContract<RestParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("plastic.boss", "Boss", boss).at("PLASTIC", "CREATE").icon("boss").params(
-        "position: [x,y,z] on a face; direction? (default: out of the face); diameter, height; hole_diameter?, hole_depth? (default: to the face); \
-         draft? (angle), fillet? (root radius); ribs? (count), rib_thickness?, rib_length? (out from the wall), rib_offset? (below the top); body?",
-    ),
-    CommandSpec::new("plastic.lip", "Lip", lip).at("PLASTIC", "CREATE").icon("lip").params(
-        "face: [x,y,z] on the rim face of a shelled body; width, height; type?: lip|groove; gap? (groove clearance); side?: inside|outside (which rim edge); body?",
-    ),
-    CommandSpec::new("plastic.snap_fit", "Snap Fit", snap_fit).at("PLASTIC", "CREATE").icon("snap_fit").params(
-        "position: [x,y,z] on a face; direction? (default: out of the face); hook: [x,y,z] (the catch's direction); length, thickness, width, catch_depth, catch_length; \
-         base_height? (extends the base below the face); new_body?: bool (make a separate body instead of joining); body?",
-    ),
-    CommandSpec::new("plastic.rest", "Rest", rest).at("PLASTIC", "CREATE").icon("rest").params(
-        "position: [x,y,z] on a face (the rest's centre); direction? (default: out of the face); width (round: the diameter); length? (a rectangle, along `along`); along?: [x,y,z]; \
-         height; draft? (angle; default: the body's plastic rule); thickness? (wall of a hollow rest); body?",
-    ),
+    CommandSpec::new("plastic.boss", "Boss", crate::checked!("plastic.boss", boss))
+        .at("PLASTIC", "CREATE")
+        .icon("boss")
+        .contract(&BOSS_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params(
+            "position: [x,y,z] on a face; direction? (default: out of the face); diameter, height; hole_diameter?, hole_depth? (default: to the face); \
+             draft? (angle), fillet? (root radius); ribs? (count), rib_thickness?, rib_length? (out from the wall), rib_offset? (below the top); body?",
+        ),
+    CommandSpec::new("plastic.lip", "Lip", crate::checked!("plastic.lip", lip))
+        .at("PLASTIC", "CREATE")
+        .icon("lip")
+        .contract(&LIP_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params(
+            "face: [x,y,z] on the rim face of a shelled body; width, height; type?: lip|groove; gap? (groove clearance); side?: inside|outside (which rim edge); body?",
+        ),
+    CommandSpec::new("plastic.snap_fit", "Snap Fit", crate::checked!("plastic.snap_fit", snap_fit))
+        .at("PLASTIC", "CREATE")
+        .icon("snap_fit")
+        .contract(&SNAP_FIT_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params(
+            "position: [x,y,z] on a face; direction? (default: out of the face); hook: [x,y,z] (the catch's direction); length, thickness, width, catch_depth, catch_length; \
+             base_height? (extends the base below the face); new_body?: bool (make a separate body instead of joining); body?",
+        ),
+    CommandSpec::new("plastic.rest", "Rest", crate::checked!("plastic.rest", rest))
+        .at("PLASTIC", "CREATE")
+        .icon("rest")
+        .contract(&REST_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params(
+            "position: [x,y,z] on a face (the rest's centre); direction? (default: out of the face); width (round: the diameter); length? (a rectangle, along `along`); along?: [x,y,z]; \
+             height; draft? (angle; default: the body's plastic rule); thickness? (wall of a hollow rest); body?",
+        ),
     CommandSpec::new("plastic.manage_rules", "Manage Plastic Rules", crate::checked!("plastic.manage_rules", manage_rules))
         .at("PLASTIC", "SETUP")
         .icon("plastic_rule")

@@ -85,10 +85,6 @@ parameters.graph
 parameters.import
 parameters.list
 parameters.users
-plastic.boss
-plastic.lip
-plastic.rest
-plastic.snap_fit
 render.aging.describe
 render.backends
 render.cancel
