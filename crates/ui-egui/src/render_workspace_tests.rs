@@ -8844,6 +8844,10 @@ fn live_image_imported_mesh_keeps_selected_and_hovered_face_and_body_feedback() 
     let host = CpuHost::for_platform().unwrap();
     h.app.session.set_render_job_host(Some(host.clone())).unwrap();
     h.app.render_workspace.image_host = Some(host);
+    if image_host(&h.app, ImageMethod::CpuRaytrace).is_err() {
+        eprintln!("live imported-mesh feedback test requires raytrace-cpu");
+        return;
+    }
     enter(&mut h.app, true).unwrap();
     h.app.render_workspace.view.raytrace.progressive = Some(CpuProgressiveOptions { samples_per_pixel: 3, seed: 81 });
     h.app.viewport.rect = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(256., 256.)));
@@ -12193,12 +12197,17 @@ fn cpu_volume_editor_fixture(path: bool, extinction: Option<f64>) -> Harness {
     h
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn cpu_atmosphere_pointer_fields_preserve_saved_camera_and_roundtrip_with_one_undo_each() {
     use solidcraft_engine::doc::render_settings::RenderJob;
     let mut h = cpu_volume_editor_fixture(true, None);
     let host = solidcraft_engine::render::job::CpuHost::for_platform().unwrap();
     h.app.session.set_render_job_host(Some(host)).unwrap();
+    if image_host(&h.app, ImageMethod::CpuRaytrace).is_err() {
+        eprintln!("CPU Atmosphere pointer field test requires raytrace-cpu");
+        return;
+    }
     let saved = h.app.session.doc.render.setups["Studio"].clone();
     h.app.cam.yaw += 0.2;
     let camera = h.app.cam;
