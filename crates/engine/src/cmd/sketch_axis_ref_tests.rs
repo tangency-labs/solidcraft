@@ -233,13 +233,15 @@ fn dimension_measures_a_line_to_an_origin_axis() {
     }
 }
 
-/// A lowercase axis reference is projected as an uppercase one is.
+/// An origin axis is `{"axis": "X"|"Y"|"Z"}`; lowercase `x`/`y` name the sketch's own axes, so
+/// `{"axis": "x"}` is refused and changes nothing.
 #[test]
-fn a_lowercase_axis_reference_is_projected() {
+fn a_lowercase_origin_axis_object_is_refused() {
     let mut s = on(json!("XY"));
     run(&mut s, "sketch.line", json!({"points": [[-4, 7], [10, 7]], "ids": ["l"]}));
-    run(&mut s, "sketch.dimension", json!({"entities": ["l", {"axis": "x"}], "value": "12"}));
-    assert!((pt(&sketch(&s), "l.start").y.abs() - 12.0).abs() < 1e-7, "12 from X");
+    let before = s.doc.to_json();
+    assert!(s.execute("sketch.dimension", &json!({"entities": ["l", {"axis": "x"}], "value": "12"})).is_err());
+    assert_eq!(s.doc.to_json(), before);
 }
 
 /// A line whose angle is already set keeps it: no Parallel is added to the axis.

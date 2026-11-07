@@ -491,9 +491,7 @@ pub(super) fn project_operands(s: &mut Session, p: &Value, cmd: &str, keys: &[&s
 /// `{vertex: [x,y,z], body?}`, or an origin axis `{axis: X|Y|Z}`.
 fn model_ref(v: &Value) -> bool {
     // Either case, as `source` takes it.
-    v.get("edge").is_some()
-        || v.get("vertex").is_some()
-        || v.get("axis").and_then(Value::as_str).is_some_and(|a| matches!(a, "X" | "Y" | "Z" | "x" | "y" | "z"))
+    v.get("edge").is_some() || v.get("vertex").is_some() || v.get("axis").and_then(Value::as_str).is_some_and(|a| matches!(a, "X" | "Y" | "Z"))
 }
 
 /// Project one model reference into the sketch and report the entity it stands for: an edge's

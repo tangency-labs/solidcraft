@@ -882,7 +882,7 @@ fn axis_pick(app: &SolveApp, tool: &Tool, name: &str) -> Option<String> {
         // the axis reference, which can't be mistaken for it.
         "sketch.constraint.coincident" => {
             let own = sketch_axis_of(app, name).filter(|id| {
-                let st = app.session.world_state();
+                let Ok(st) = app.session.world_state() else { return true };
                 !app.session
                     .active_sketch
                     .and_then(|s| st.sketch(s))
