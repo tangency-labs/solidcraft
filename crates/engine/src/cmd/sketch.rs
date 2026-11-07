@@ -3082,7 +3082,7 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
         // The distance holds one end of the line; it stays parallel to the linked line so the
         // whole line keeps that distance, unless something already sets its direction.
         if let Some((l, r)) = keep_parallel {
-            let directed = sk.constraints.iter().any(|c| match c.kind {
+            let directed = sk.constraints.iter().filter(|c| !c.driven).any(|c| match c.kind {
                 ConstraintKind::Horizontal { l: x } | ConstraintKind::Vertical { l: x } | ConstraintKind::LineAngle { l: x, .. } => x == l,
                 ConstraintKind::Parallel { a, b }
                 | ConstraintKind::Collinear { a, b }
