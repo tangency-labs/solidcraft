@@ -417,8 +417,20 @@ fn replace(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let ((curves, points, constraints), info) = edit(s, &json!({ "sketch": target }), cmd, false, |sk, doc| {
         let old: Vec<String> = sk.constraints.iter().filter_map(|c| c.param.clone()).collect();
-        let mut fresh = Sketch::new();
-        fresh.view = sk.view.clone();
+        // Emptied, but its id counters kept: the new contents' ids carry on from the old ones, so
+        // a reference to an old curve or point (a sweep path, a profile picked by its curves)
+        // finds nothing and says so, rather than taking a new, unrelated curve that happens to get
+        // the same id.
+        let mut fresh = sk.clone();
+        fresh.points.retain(|q| q.id == ORIGIN);
+        fresh.curves.clear();
+        fresh.constraints.clear();
+        fresh.patterns.clear();
+        fresh.links.clear();
+        fresh.offsets.clear();
+        fresh.freeform_offsets.clear();
+        fresh.wires.clear();
+        fresh.equations.clear();
         // The old contents' own dimension parameters go with them; one something else uses stays.
         sketch_store::write(doc, target, fresh.clone())?;
         for name in &old {

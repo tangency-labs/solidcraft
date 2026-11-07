@@ -382,6 +382,34 @@ fn replace_sketch_drops_the_old_dimension_parameters_nothing_else_uses() {
     assert!(s.doc.param("w").is_some(), "the user's parameter stays");
 }
 
+/// A feature that names the old contents' curves (here a profile picked by its curve ids) never
+/// takes the new contents' curves that happen to get the same ids: the new ids carry on from the
+/// old ones, so the reference finds nothing and the feature says so, instead of quietly building
+/// from unrelated geometry (30 x 20 x 5 = 3000 mm³ here).
+#[test]
+fn replace_sketch_never_rebinds_a_reference_to_an_old_curve_onto_a_new_one() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Small"}));
+    let square = strs(&run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}))["curves"]);
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Small", "distance": 5.0, "operation": "new_body", "profiles": [{"curves": square}]}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Big"}));
+    let rect = strs(&run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [30, 20]}))["curves"]);
+    run(&mut s, "sketch.finish", json!({}));
+    assert_eq!(square, rect, "both sketches numbered their curves alike: {square:?} {rect:?}");
+    assert!((volume(&s) - 500.0).abs() < 1e-6, "{}", volume(&s));
+    let before = s.doc.to_json();
+    match s.execute("sketch.replace", &json!({"sketch": "Small", "from": "Big"})) {
+        Ok(out) => {
+            let new = strs(&out["curves"]);
+            assert!(new.iter().all(|id| !square.contains(id)), "new ids, not the old ones again: {new:?} vs {square:?}");
+            assert!(s.model.results.iter().any(|r| r.error.is_some()), "the extrude says its curves are gone");
+        }
+        Err(_) => assert_eq!(s.doc.to_json(), before, "a refused replace changes nothing"),
+    }
+    assert!((volume(&s) - 3000.0).abs() > 1.0, "never built from the unrelated new curves: {}", volume(&s));
+}
+
 /// Sketch contents come from a sketch in another design file, at the same sketch coordinates; a
 /// dimension that named that design's parameter keeps its value, without the parameter.
 #[test]
