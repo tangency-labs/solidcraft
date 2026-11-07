@@ -4759,3 +4759,169 @@ fn a_picture_only_prompt_and_a_thought_have_no_copy_message_action() {
     assert!(crate::scenario::handle_at("agent_chat:copy:1").is_none(), "a thought has no copy action");
     assert!(h.widget("Copy message").is_none(), "nothing to click");
 }
+
+/// How many times the last frame drew `text` (#11986).
+fn drawn(h: &crate::scenario::Harness, text: &str) -> usize {
+    let mut n = 0;
+    for clipped in &h.shapes {
+        crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+            if let egui::Shape::Text(t) = shape
+                && t.galley.text() == text
+            {
+                n += 1;
+            }
+        });
+    }
+    n
+}
+
+/// A chat with a scripted agent, open and wide enough for a tool card's whole row (#11986).
+fn timed_chat() -> (crate::scenario::Harness, Script) {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    h.app.preferences.agent_chat_width = 520.0;
+    let script = Script::default();
+    h.app.agent_chat.backend = Some(Box::new(script.clone()));
+    h.app.agent_chat.state = Some(State::Ready);
+    h.frames(2);
+    (h, script)
+}
+
+/// Move everything in the conversation `ms` into the past, as if that long had gone by.
+fn age(chat: &mut AgentChat, ms: f64) {
+    for stamp in &mut chat.times {
+        stamp.at -= ms;
+    }
+    if let Some(turn) = chat.turn.as_mut() {
+        turn.began -= ms;
+        turn.heard -= ms;
+    }
+}
+
+/// #11986: each message and tool card says when it came in ("4 min ago", its exact time on
+/// hover), and a running call counts how long it has run.
+#[test]
+fn each_message_and_tool_card_shows_when_it_came_in() {
+    let (mut h, script) = timed_chat();
+    let ctx = h.ctx.clone();
+    send(&mut h.app, &ctx, "make a dodecahedron".into());
+    script.report(Event::Text { thought: false, text: "Starting with a sketch.".into() });
+    script.report(Event::Tool {
+        id: "t1".into(),
+        title: Some("sketch.inspect".into()),
+        kind: None,
+        status: Some(ToolStatus::InProgress),
+        input: None,
+        output: None,
+    });
+    h.frames(2);
+    assert_eq!(h.app.agent_chat.times.len(), h.app.agent_chat.items.len(), "every item has its time");
+    assert!(h.app.agent_chat.times.iter().all(times::Stamp::known));
+    age(&mut h.app.agent_chat, 4.0 * 60_000.0 + 5_000.0);
+    h.frames(2);
+    assert!(drawn(&h, "4 min ago") >= 2, "the prompt and the reply say when they came");
+    assert!(drawn(&h, "running for 4 min") > 0, "the running call counts how long it has run");
+    assert!(crate::scenario::rect_of("agent_chat:thinking").is_none(), "a running call counts for itself");
+    let exact = times::exact(&h.app.agent_chat.stamp(0)).unwrap();
+    assert!(exact.ends_with(" UTC") && exact.len() == "2026-11-04 14:17:05 UTC".len(), "{exact}");
+    // Once done, the card says when it came instead.
+    script.report(Event::Tool { id: "t1".into(), title: None, kind: None, status: Some(ToolStatus::Completed), input: None, output: None });
+    h.frames(2);
+    assert!(drawn(&h, "running for 4 min") == 0);
+    assert!(drawn(&h, "4 min ago") >= 3, "the done card says when it came in");
+}
+
+/// #11986: while the agent works with nothing running, the conversation counts how long since it
+/// last said or did something, so a long think is visibly still running; anything it does starts
+/// the count again.
+#[test]
+fn a_working_agent_shows_how_long_it_has_been_thinking() {
+    let (mut h, script) = timed_chat();
+    let ctx = h.ctx.clone();
+    send(&mut h.app, &ctx, "make a dodecahedron".into());
+    h.frames(2);
+    assert!(drawn(&h, "Thinking for 0 s") > 0, "the count starts with the message");
+    age(&mut h.app.agent_chat, 12.0 * 60_000.0);
+    h.frames(2);
+    assert!(drawn(&h, "Thinking for 12 min") > 0);
+    script.report(Event::Text { thought: true, text: "Placing the faces".into() });
+    h.frames(2);
+    assert!(drawn(&h, "Thinking for 0 s") > 0, "the agent did something: the count starts again");
+    age(&mut h.app.agent_chat, 2.0 * 3_600_000.0 + 5.0 * 60_000.0);
+    h.frames(2);
+    assert!(drawn(&h, "Thinking for 2 h 5 min") > 0);
+    // Waiting for the user is not thinking.
+    h.app.agent_chat.push(Item::Permission { key: 1, title: "Write a file".into(), options: Vec::new(), answer: None });
+    h.frames(2);
+    assert!(crate::scenario::rect_of("agent_chat:thinking").is_none(), "an open question is the user's turn");
+    ended(&script, "");
+    h.frames(2);
+    assert!(h.app.agent_chat.heard_at().is_none() && crate::scenario::rect_of("agent_chat:thinking").is_none(), "no count once it answered");
+}
+
+/// #11986: an answer says how long it took under its last item, and a stopped one says it ended.
+#[test]
+fn an_answer_says_how_long_it_took() {
+    let (mut h, script) = timed_chat();
+    let ctx = h.ctx.clone();
+    send(&mut h.app, &ctx, "make a dodecahedron".into());
+    script.report(Event::Text { thought: false, text: "Done: twelve faces.".into() });
+    h.frames(2);
+    age(&mut h.app.agent_chat, 23.0 * 60_000.0 + 30_000.0);
+    ended(&script, "");
+    h.frames(2);
+    assert!(drawn(&h, "Answered in 23 min") > 0);
+    let last = h.app.agent_chat.items.len() - 1;
+    assert!(h.app.agent_chat.stamp(last).took.is_some_and(|(_, answered)| answered), "on the answer's last item");
+    send(&mut h.app, &ctx, "and a cube".into());
+    h.frames(2);
+    age(&mut h.app.agent_chat, 90_000.0);
+    cancel(&mut h.app);
+    end_turn(&mut h.app);
+    h.frames(2);
+    assert!(drawn(&h, "Ended after 1 min") > 0, "a stopped answer did not answer");
+}
+
+/// #11986: the times stay beside their items when old ones go and when a waiting prompt is taken
+/// back, and a conversation emptied by New chat starts with none.
+#[test]
+fn item_times_stay_beside_their_items() {
+    let mut chat = AgentChat::default();
+    for i in 0..MAX_ITEMS {
+        chat.push(Item::Notice { text: format!("n{i}"), error: false });
+        if let Some(s) = chat.times.last_mut() {
+            s.at = i as f64 + 1.0;
+        }
+    }
+    chat.push(Item::Notice { text: "last".into(), error: false });
+    assert_eq!(chat.times.len(), chat.items.len());
+    assert!(matches!(chat.items.first(), Some(Item::Notice { text, .. }) if text == &format!("n{}", MAX_ITEMS / 10)));
+    assert_eq!(chat.stamp(0).at, (MAX_ITEMS / 10) as f64 + 1.0, "the first item kept its own time");
+    // An item added without a time shows none, and the next one is still in its place.
+    chat.items.push(Item::Notice { text: "untimed".into(), error: false });
+    chat.push(Item::Notice { text: "timed".into(), error: false });
+    let n = chat.items.len();
+    assert!(!chat.stamp(n - 2).known() && chat.stamp(n - 1).known());
+    chat.remove_item(0);
+    assert_eq!(chat.times.len(), chat.items.len());
+    assert_eq!(chat.stamp(0).at, (MAX_ITEMS / 10) as f64 + 2.0);
+}
+
+/// #11986: lengths of time read in whole seconds, minutes, then hours and minutes; a clock that
+/// went back reads as none, never as a negative time.
+#[test]
+fn lengths_of_time_read_in_seconds_minutes_and_hours() {
+    assert_eq!(times::span(0.0), "0 s");
+    assert_eq!(times::span(59_999.0), "59 s");
+    assert_eq!(times::span(60_000.0), "1 min");
+    assert_eq!(times::span(23.0 * 60_000.0 + 59_000.0), "23 min");
+    assert_eq!(times::span(3_600_000.0), "1 h 0 min");
+    assert_eq!(times::span(2.0 * 3_600_000.0 + 5.0 * 60_000.0), "2 h 5 min");
+    assert_eq!(times::span(-5_000.0), "0 s");
+    assert_eq!(times::span(f64::NAN), "0 s");
+    assert!(times::exact(&times::Stamp::default()).is_none() && times::ago(&times::Stamp::default(), 1.0).is_none());
+    let noon = times::Stamp { at: 1_793_793_600_000.0, took: None };
+    assert_eq!(times::exact(&noon).as_deref(), Some("2026-11-04 12:00:00 UTC"));
+    assert_eq!(times::running(&noon, noon.at + 30_000.0).as_deref(), Some("running for 30 s"));
+    assert_eq!(times::took(&times::Stamp { at: 1.0, took: Some((61_000.0, true)) }).as_deref(), Some("Answered in 1 min"));
+}
