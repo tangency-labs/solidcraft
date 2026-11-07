@@ -11,6 +11,7 @@
 
 mod attributes;
 mod cavity;
+mod clearance;
 mod crossing_loops;
 mod edgeuse;
 mod face;

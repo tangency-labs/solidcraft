@@ -76,6 +76,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::blend::fillet_section::interval::Ivl;
 use crate::boolean::merge::p4::KernelManifoldIntersector;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
@@ -409,26 +410,26 @@ impl OffsetExecutive {
     }
 
     /// Not upstream: in a local operation, records the edges of `original` that keep their
-    /// geometry: each whose faces, and every face at its vertices, keep their surfaces
-    /// (each is given a copy of its own by [`Self::set_local_surfaces`], none is among
-    /// its moved faces). A face given no surface there is offset by the executive's
-    /// distance (the offset geometry is chosen by whether surfaces were given, not by the
-    /// operation), so it moves, and no edge of it is kept. Such an edge is
-    /// where its surfaces met before and its ends stay put, so its offset edges keep the
-    /// face's own curves, not mated again (`EdgeuseOffset`, [`Self::keeps_edgeuse`]), and
-    /// the merge does not intersect its faces' offsets again. An edge between two faces
-    /// that stay but with a vertex on a moved face changes its length: it is intersected
-    /// again, as the edges of moved faces are.
+    /// geometry: each whose faces, and every face at its vertices, keep their surfaces,
+    /// and whose whole curve is certified clear of every moved surface's extension by
+    /// more than their summed local tolerances ([`super::clearance::separated`]).
+    /// A missing enclosure or an exhausted certificate budget never keeps an edge.
+    /// A face given no surface is offset by the executive's distance, so it moves and
+    /// no edge of it is kept. Kept edges retain their own curves (`EdgeuseOffset`,
+    /// [`Self::keeps_edgeuse`]); all others take the ordinary re-intersection path.
     ///
     /// # Errors
     ///
-    /// [`SolidError::NotFound`] for a dangling id.
-    pub(super) fn keep_unmoved_edges(&mut self, original: &Brep) -> Result<()> {
+    /// [`SolidError::NotFound`] for a dangling id; cancellation.
+    pub(super) fn keep_unmoved_edges(&mut self, kernel: &Kernel, original: &Brep) -> Result<()> {
         self.kept_edges.clear();
         self.kept_edgeuses.clear();
         if self.operation != OffsetOperation::LocalOperation {
             return Ok(());
         }
+        let Some(surfaces) = self.moved_clearance_surfaces(kernel, original)? else {
+            return Ok(());
+        };
         for e in bp1::edges(original, None)? {
             let mut faces = edge::faces(original, e, None)?;
             let (start, end) = vertex::edge_vertex_pair(original, e)?;
@@ -440,11 +441,83 @@ impl OffsetExecutive {
             if faces.is_empty() || !faces.iter().all(keeps_surface) {
                 continue;
             }
+            let Some(curve) = edge::curve(original, e)? else {
+                continue;
+            };
+            let interval = edge::interval(original, e)?;
+            let mut clear = true;
+            for (surface, tolerance) in &surfaces {
+                let tolerance = (Ivl::from(edge::tolerance(original, e)?.max(original.tolerance()))
+                    + Ivl::from(*tolerance))
+                .hi;
+                if !super::clearance::separated(kernel, curve, &interval, surface, tolerance)? {
+                    clear = false;
+                    break;
+                }
+            }
+            if !clear {
+                continue;
+            }
             self.kept_edges.insert(e);
             self.kept_edgeuses
                 .extend(edge::edgeuses(original, e, None, None)?);
         }
         Ok(())
+    }
+
+    /// The actual moved face images built by the local geometry creator, over the whole
+    /// extensions the mitre/merge will read, not just the original faces' trimmed boxes.
+    /// Each extension uses the same surface and recorded margin as
+    /// `extend_result_faces_prefix`. An unavailable extension proves no edge clear.
+    /// `None` also covers a moved face without a corresponding result surface.
+    fn moved_clearance_surfaces(
+        &self,
+        kernel: &Kernel,
+        original: &Brep,
+    ) -> Result<Option<Vec<(Surface, f64)>>> {
+        let mut surfaces = Vec::new();
+        for &moved in &self.moved_faces {
+            kernel.check_cancelled(OP)?;
+            let mut offsets = BTreeSet::new();
+            for faceuse in self.faceuse_to_faces.all_firsts() {
+                if original.faceuse(faceuse)?.face == Some(moved) {
+                    offsets.extend(self.faceuse_to_faces.seconds(faceuse));
+                }
+            }
+            if offsets.is_empty() {
+                return Ok(None);
+            }
+            let Some(result) = self.offset_brep.as_ref() else {
+                return Ok(None);
+            };
+            for offset in offsets {
+                let face = result.face(offset)?;
+                let Some(surface) = face.surface.as_ref() else {
+                    return Ok(None);
+                };
+                let margin = self.offset_extension_margin(offset);
+                let extended = if margin == 0.0 {
+                    surface.clone()
+                } else {
+                    match surface.extended_sides_keeping_parameters(
+                        kernel,
+                        &BoxSide::ALL,
+                        Continuity::Ruled,
+                        margin,
+                    ) {
+                        Ok(extended) => extended.surface,
+                        Err(e @ SolidError::Cancelled { .. }) => return Err(e),
+                        Err(_) => return Ok(None),
+                    }
+                };
+                let tolerance = face
+                    .tolerance
+                    .max(original.face(moved)?.tolerance)
+                    .max(original.tolerance());
+                surfaces.push((extended, tolerance));
+            }
+        }
+        Ok(Some(surfaces))
     }
 
     /// Not upstream: whether the offsets of original edge use `edgeuse` keep their face's
@@ -4114,7 +4187,7 @@ mod tests {
         .unwrap();
         let faces = bp1::faces(&brep, None).unwrap();
         let mut executive = OffsetExecutive::new(OffsetOperation::LocalOperation, 0.125, 1.0e-6);
-        executive.keep_unmoved_edges(&brep).unwrap();
+        executive.keep_unmoved_edges(&kernel, &brep).unwrap();
         assert!(executive.kept_edges.is_empty());
         assert!(executive.kept_edgeuses.is_empty());
 
@@ -4124,7 +4197,8 @@ mod tests {
             .collect();
         let moved = faces[0];
         executive.set_local_surfaces(&faces, surfaces, &[moved]);
-        executive.keep_unmoved_edges(&brep).unwrap();
+        seed_clearance_surfaces(&mut executive, &brep);
+        executive.keep_unmoved_edges(&kernel, &brep).unwrap();
         // a box face's 4 vertices touch 8 of its 12 edges: the other 4 are kept
         let touching: BTreeSet<EdgeId> = bp1::vertices(&brep, None)
             .unwrap()
@@ -4142,6 +4216,18 @@ mod tests {
         assert_eq!(executive.kept_edges, expected);
         // each edge has four uses: two per face, one on each of its face uses
         assert_eq!(executive.kept_edgeuses.len(), 16);
+    }
+
+    /// Minimal face-creation prefix for the keep-rule tests: the actual result surfaces
+    /// and the original-face-use correspondence the production prefix supplies.
+    fn seed_clearance_surfaces(executive: &mut OffsetExecutive, original: &Brep) {
+        let mut result = original.clone();
+        for (&f, surface) in executive.local_faces.iter().zip(&executive.local_surfaces) {
+            result.face_mut(f).unwrap().surface = Some(surface.clone());
+            let faceuse = face::upward_faceuse(original, f).unwrap().unwrap();
+            executive.faceuse_to_faces.relate_pair(faceuse, f).unwrap();
+        }
+        executive.set_offset_brep(result);
     }
 
     /// The tilted top z = x - 1 crosses the interiors of the bottom edges
@@ -4173,7 +4259,7 @@ mod tests {
             .iter()
             .map(|&f| {
                 if f == top {
-                    Surface::from(crate::surface::plane::Plane::from_normal(
+                    Surface::from(Plane::from_normal(
                         Vec3::new(1.0, 0.0, 0.0),
                         Vec3::new(-1.0, 0.0, 1.0),
                     ))
@@ -4184,7 +4270,8 @@ mod tests {
             .collect();
         let mut executive = OffsetExecutive::new(OffsetOperation::LocalOperation, 0.125, 1e-6);
         executive.set_local_surfaces(&faces, surfaces, &[top]);
-        executive.keep_unmoved_edges(&brep).unwrap();
+        seed_clearance_surfaces(&mut executive, &brep);
+        executive.keep_unmoved_edges(&kernel, &brep).unwrap();
         let mut crossing = 0;
         let mut far = 0;
         for e in bp1::edges(&brep, None).unwrap() {

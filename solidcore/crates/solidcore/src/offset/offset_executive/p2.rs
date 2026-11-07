@@ -777,8 +777,9 @@ impl OffsetExecutive {
         }
 
         let mapped = order_edgeuses_by_brep(original, &self.mapped_original_edgeuses())?;
-        // (not upstream) a local operation's edges whose surfaces all stay are kept
-        self.keep_unmoved_edges(original)?;
+        // (not upstream) unchanged incident surfaces and certified clearance from
+        // every moved surface are both required to keep a local operation's edge.
+        self.keep_unmoved_edges(kernel, original)?;
         with_mark_lock(kernel, ALL_MARKS, |kernel, mark_type| {
             // The same claimed mark reaches both mapped-edge passes. Source and
             // result keys stay disjoint through p1's synchronization and Copy calls.
