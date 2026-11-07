@@ -1,5 +1,6 @@
-//! Drawing's native layout anchor. No drawing document or paper scene is fabricated here.
-//! Missing tools expose only agreed options; source services keep their existing ownership.
+//! Drawing's native layout anchor. The centre is the sheet page (`drawing_sheet_page`) once a
+//! drawing is open; no drawing document or paper scene is fabricated here. Missing tools expose
+//! only agreed options; source services keep their existing ownership.
 
 use egui::{Rect, Sense, Stroke, pos2, vec2};
 
@@ -14,6 +15,8 @@ pub struct State {
     strip: Option<Rect>,
     strip_sizes: [Option<egui::Vec2>; 2],
     settings: Option<Rect>,
+    /// The sheet page's camera, zoom and drawn marks: screen only, never saved.
+    pub(crate) page: crate::drawing_sheet_page::Page,
 }
 
 pub fn active(app: &SolveApp) -> bool {
@@ -80,7 +83,7 @@ pub(crate) fn covered_rects(app: &SolveApp) -> Vec<Rect> {
     if !active(app) {
         return Vec::new();
     }
-    [app.drawing_workspace.strip, app.drawing_workspace.settings].into_iter().flatten().collect()
+    [app.drawing_workspace.strip, app.drawing_workspace.settings, app.drawing_workspace.page.card].into_iter().flatten().collect()
 }
 
 pub(crate) fn settings_rect(app: &SolveApp) -> Option<Rect> {
@@ -114,8 +117,12 @@ pub(crate) fn browser_contents(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 }
 
-/// There is intentionally no paper, sample geometry or camera until a scene provider exists.
+/// The sheet page draws the open drawing's sheet; with no drawing open there is no paper, sample
+/// geometry or camera, only a note.
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
+    if crate::drawing_sheet_page::show(app, ui) {
+        return;
+    }
     let rect = ui.max_rect();
     app.viewport.rect = Some(rect);
     let t = Tokens::get();
@@ -127,11 +134,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui.vertical_centered(|ui| {
             ui.heading(crate::i18n::tr_label("Drawing workspace"));
             ui.label(crate::i18n::tr_label("No drawing sheet is available yet."));
-            ui_kit::text(
-                ui,
-                crate::i18n::tr_label("Drawing files and the paper renderer are not implemented. Planned tools show their options where defined."),
-                ui_kit::Text::Note("drawing_waiting"),
-            );
+            ui_kit::text(ui, app.tr("ui.sheet_page.no_drawing"), ui_kit::Text::Note("drawing_waiting"));
         });
     });
 }
@@ -457,16 +460,8 @@ fn panel_body(app: &mut SolveApp, ui: &mut egui::Ui) {
         unavailable_row(ui, "Profile & units", "No drawing document");
         ui.separator();
         ui.heading(crate::i18n::tr_label("Screen appearance"));
-        ui.add_enabled_ui(false, |ui| {
-            ui_kit::row(ui, crate::i18n::tr_label("Paper colour"), |ui| {
-                ui_kit::dropdown_menu(ui, "drawing_paper_colour", crate::i18n::tr_label("Auto (Theme)"), |_| {});
-            });
-        });
-        ui_kit::text(
-            ui,
-            crate::i18n::tr_label("Paper colour will be available when the sheet renderer is implemented."),
-            ui_kit::Text::Note("drawing_paper_preference"),
-        );
+        let label = app.tr("ui.sheet_page.colour").to_owned();
+        ui_kit::row(ui, &label, |ui| crate::drawing_sheet_page::colour_choice(app, ui));
     }
 }
 

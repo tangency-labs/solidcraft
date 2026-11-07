@@ -830,6 +830,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         "ui.messages" => ok(crate::messages::control(app, p)),
         "ui.inspect" => ok(json!({
             "render": crate::render_workspace::inspect_state(app),
+            "sheet_page": crate::drawing_sheet_page::inspect(app),
             "ui": ui_state(app),
             "visibility": app.session.visibility,
             "viewport": app.viewport.rect.map(|r| json!([r.left(), r.top(), r.width(), r.height()])),
@@ -966,7 +967,13 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                     app.flat_view.fitted = false;
                     return ok(json!({"flat_pattern":true,"fitted":false}));
                 }
-                return err("Drawing has no sheet renderer or camera yet");
+                // The sheet page: fit and home show the whole sheet, actual_size shows it at 100 %.
+                match s("view").unwrap_or("home") {
+                    "fit" | "home" => crate::drawing_sheet_page::fit(app),
+                    "actual_size" => crate::drawing_sheet_page::actual_size(app, ctx),
+                    other => return err(format!("the drawing sheet has no `{other}` view: fit, home or actual_size")),
+                }
+                return ok(json!({"sheet_page": true}));
             }
             let v = s("view").unwrap_or("home");
             app.viewport.orbit_free = None;

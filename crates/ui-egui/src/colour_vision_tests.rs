@@ -480,6 +480,11 @@ const SHADED: [&str; 2] = ["analysis.draft", "analysis.access"];
 /// Tokens no colour vision mode needs to keep apart, and why. A new token fails
 /// `every_token_is_measured_or_carries_no_meaning` until it is in a group above or here.
 const NO_MEANING: &[(&str, &str)] = &[
+    ("paper_white", "the drawing sheet's paper on screen, a neutral surface; its lines carry the drawing"),
+    ("paper_warm", "the drawing sheet's paper on screen, a neutral surface; its lines carry the drawing"),
+    ("paper_dark", "the drawing sheet's paper on screen, a neutral surface; its lines carry the drawing"),
+    ("paper_ink", "the drawing's one ink on a light sheet, as printed; no category is told by its colour"),
+    ("paper_dark_ink", "the drawing's one ink on a dark sheet; no category is told by its colour"),
     ("figure_white", "neutral axis label and highlight ink; letters identify the axes"),
     ("figure_black", "neutral hatching and shadows; pattern and geometry carry the meaning"),
     ("pref_well", "neutral well behind a labelled control or illustration"),
