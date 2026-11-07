@@ -3087,13 +3087,20 @@ fn is_root(c: &u64) -> bool {
     *c == 0
 }
 
+/// The sine of the angle to the base normal below which [`onto_axis`] takes a line as square to the
+/// plane: nearer than that, which way the plane tilts would come from rounding in the line's direction.
+const SQUARE_SIN: f64 = 1e-6;
+
 /// `base` brought onto the line through `at` along the unit direction `dir`: tilted by the least
 /// turn that makes it parallel to the line, then moved along its normal until it holds the line.
-/// A base that already holds the line comes back unchanged (#6180).
+/// A base that already holds the line comes back unchanged (#6180). A line within
+/// [`SQUARE_SIN`] of the base normal counts as square to it and is refused.
 fn onto_axis(base: Plane, at: Vec3, dir: Vec3) -> Result<Plane> {
     let n = base.normal();
-    let to = (n - dir * dir.dot(n))
-        .normalized()
+    let along = n - dir * dir.dot(n);
+    let to = (along.len() > SQUARE_SIN)
+        .then(|| along.normalized())
+        .flatten()
         .ok_or_else(|| DocError::Invalid("the axis is square to the plane, so no plane at an angle from it goes through the axis".into()))?;
     let k = n.cross(to);
     let (sin, cos) = (k.len(), n.dot(to));

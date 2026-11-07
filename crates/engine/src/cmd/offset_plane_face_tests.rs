@@ -232,7 +232,24 @@ fn plane_at_angle_through_a_slanted_axis_holds_it_and_refuses_a_square_one() {
     let both =
         s.execute("construct.plane.at_angle", &json!({"base": "XY", "axis": axis, "angle": "30 deg", "through_axis": true, "direction_only": true}));
     assert!(both.is_err(), "{both:?}");
+    // A string is not a yes, even with parameter checking off.
+    let text = s.execute("construct.plane.at_angle", &json!({"base": "XY", "axis": axis, "angle": "30 deg", "through_axis": "true"}));
+    assert!(text.is_err(), "{text:?}");
+    // An axis a hair off the normal is square too: which way to tilt would be rounding noise.
+    let hair = 1e-7_f64;
+    let near = json!({"origin": [0, 0, 0], "dir": [hair.sin(), 0, hair.cos()]});
+    let nearly = s.execute("construct.plane.at_angle", &json!({"base": "XY", "axis": near, "angle": "30 deg", "through_axis": true}));
+    assert!(nearly.is_err(), "{nearly:?}");
     assert_eq!(s.doc.features.len(), features);
+    // A little further off, the plane stands up and holds the axis.
+    let tilt = 1e-5_f64;
+    let steep = json!({"origin": [3, 0, 0], "dir": [tilt.sin(), 0, tilt.cos()]});
+    run(&mut s, "construct.plane.at_angle", json!({"base": "XY", "axis": steep, "angle": "0 deg", "through_axis": true, "name": "Upright"}));
+    let upright = plane(&s, "Upright");
+    for t in [0.0, 50.0, -50.0] {
+        let p = Vec3::new(3.0 + t * tilt.sin(), 0.0, t * tilt.cos());
+        assert!(upright.height(p).abs() < 1e-9, "{p:?} off {upright:?}");
+    }
     // Without the option, turning XY about Z stays a turn within the plane, as before.
     run(&mut s, "construct.plane.at_angle", json!({"base": "XY", "axis": "Z", "angle": "30 deg", "name": "Spun"}));
     assert!((plane(&s, "Spun").normal().z - 1.0).abs() < 1e-9);

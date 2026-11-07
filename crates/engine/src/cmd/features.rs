@@ -2539,6 +2539,9 @@ fn plane_angle(s: &mut Session, p: &Value) -> Result<Value> {
         Some(t) => Some(Box::new(super::construct::geo(s, Some(t), cmd, "pivot")?)),
         None => None,
     };
+    if p.get("through_axis").is_some_and(|v| !v.is_boolean() && !v.is_null()) {
+        return Err(bad(cmd, "`through_axis` must be true or false"));
+    }
     let through_axis = crate::params::bool_(p, "through_axis").unwrap_or(false);
     if through_axis && direction_only {
         return Err(bad(cmd, "`through_axis` and `direction_only` exclude each other: pick one"));
