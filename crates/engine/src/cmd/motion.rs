@@ -164,7 +164,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("interference")
         .noundo()
         .params(analysis::INTERFERENCE_DOC),
-    CommandSpec::new("joint.sweep", "Sweep Joint", sweep::sweep).icon("interference").params(sweep::SWEEP_DOC),
+    CommandSpec::new("joint.sweep", "Sweep Joint", crate::checked!("joint.sweep", sweep::sweep))
+        .icon("interference")
+        .contract(&TypedContract::<crate::schema::joint_sweep::SweepParams>::new())
+        .output(output_schema_for::<crate::schema::joint_sweep::SweepResult>)
+        .params(sweep::SWEEP_DOC),
     CommandSpec::new("joint.find_limits", "Find Joint Limits", crate::checked!("joint.find_limits", sweep::find_limits))
         .icon("interference")
         .noundo()

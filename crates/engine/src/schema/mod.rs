@@ -73,6 +73,7 @@ pub mod file;
 pub mod frame;
 pub mod inspect;
 pub mod interference;
+pub mod joint_sweep;
 pub mod joints;
 pub mod libraries;
 pub mod mass_properties;
