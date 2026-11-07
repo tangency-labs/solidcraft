@@ -1360,6 +1360,16 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     {
         v.push(cmd(app, "sketch.spline.reverse", "Reverse Spline Direction").with(json!({ "curve": curve })));
     }
+    // #6502: a fit point spline without handles can be given them.
+    if let [curve] = curves.as_slice()
+        && ss
+            .sketch
+            .curve_index(curve)
+            .and_then(|i| ss.sketch.curves.get(i))
+            .is_some_and(|c| c.link.is_none() && matches!(&c.kind, CurveKind::Spline { control: false, handles, .. } if handles.is_empty()))
+    {
+        v.push(cmd(app, "sketch.spline.handles", "Show Tangent Handles").with(json!({ "curve": curve })));
+    }
     // #10783: a point of one spline of the sketch's own, alone, comes out of that spline.
     if let ([], [point]) = (curves.as_slice(), points.as_slice())
         && let Some(at) = ss.sketch.resolve_point(point)
@@ -3241,7 +3251,11 @@ mod tests {
         let count = |h: &crate::scenario::Harness, id: &str| {
             let state = crate::open_meshing::session_world(&h.app.session);
             let sk = &state.sketch(sid).unwrap().sketch;
-            sk.curves[sk.curve_index(id).unwrap()].kind.point_ids().len()
+            // Its fit points, not their tangent handles (#6502).
+            match &sk.curves[sk.curve_index(id).unwrap()].kind {
+                solidcraft_engine::sketch::CurveKind::Spline { pts, .. } => pts.len(),
+                kind => kind.point_ids().len(),
+            }
         };
         h.call("ui.view", json!({"view":"top"}));
         h.app.cam.distance = 80.0;
@@ -3301,7 +3315,9 @@ mod tests {
         let places = |h: &crate::scenario::Harness| {
             let state = h.app.session.world_state().unwrap();
             let sk = &state.sketch(sid).unwrap().sketch;
-            sk.curves[sk.curve_index(&fit).unwrap()].kind.point_ids().iter().map(|i| sk.point(*i).unwrap()).collect::<Vec<_>>()
+            // Its fit points, not their tangent handles (#6502), which go with a removed point.
+            let solidcraft_engine::sketch::CurveKind::Spline { pts, .. } = &sk.curves[sk.curve_index(&fit).unwrap()].kind else { panic!("a spline") };
+            pts.iter().map(|i| sk.point(*i).unwrap()).collect::<Vec<_>>()
         };
         h.call("ui.view", json!({"view":"top"}));
         h.app.cam.distance = 80.0;

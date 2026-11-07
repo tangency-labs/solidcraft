@@ -245,8 +245,27 @@ fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Opti
                 CurveKind::Circle { c: cc, r } => json!({"id": c.id, "type": "circle", "center": pid(cc), "center_at": sk.point(cc), "radius": r, "construction": c.construction, "fixed": sk.curve_locked(i), "fully_constrained": det}),
                 CurveKind::Arc { c: cc, a, b } => json!({"id": c.id, "type": "arc", "center": pid(cc), "start": pid(a), "end": pid(b), "center_at": sk.point(cc), "start_at": sk.point(a), "end_at": sk.point(b), "radius": sk.radius(i), "construction": c.construction, "fixed": sk.curve_locked(i), "fully_constrained": det}),
                 CurveKind::Ellipse { c: cc, m, r } => json!({"id": c.id, "type": "ellipse", "center": pid(cc), "major": pid(m), "center_at": sk.point(cc), "major_at": sk.point(m), "minor_radius": r, "construction": c.construction, "fixed": sk.curve_locked(i), "fully_constrained": det}),
-                CurveKind::Spline { ref pts, control, degree, periodic, ref nurbs } => {
-                    let mut v = json!({"id": c.id, "type": "spline", "points": pts.iter().map(|q| pid(*q)).collect::<Vec<_>>(), "points_at": pts.iter().map(|q| sk.point(*q)).collect::<Vec<_>>(), "control": control, "degree": degree, "periodic": periodic, "construction": c.construction, "fixed": sk.curve_locked(i), "fully_constrained": det});
+                CurveKind::Spline { ref pts, control, degree, periodic, ref nurbs, ref handles } => {
+                    let mut v = json!({
+                        "id": c.id,
+                        "type": "spline",
+                        "points": pts.iter().map(|q| pid(*q)).collect::<Vec<_>>(),
+                        "points_at": pts.iter().map(|q| sk.point(*q)).collect::<Vec<_>>(),
+                        "tangent_handles": handles.iter().map(|point| json!({
+                            "point": pid(*point),
+                            "at": sk.point(*point),
+                            "curve": sk.curves.iter().find(|candidate| {
+                                candidate.spline_handle_of.as_deref() == Some(c.id.as_str())
+                                    && matches!(candidate.kind, CurveKind::Line { a, b } if a == *point || b == *point)
+                            }).map(|candidate| candidate.id.clone()),
+                        })).collect::<Vec<_>>(),
+                        "control": control,
+                        "degree": degree,
+                        "periodic": periodic,
+                        "construction": c.construction,
+                        "fixed": sk.curve_locked(i),
+                        "fully_constrained": det
+                    });
                     // A control spline with its own knots (a projected free-form edge) says them.
                     if let (Some(n), Some(o)) = (nurbs, v.as_object_mut()) {
                         o.insert("knots".into(), json!(n.knots));

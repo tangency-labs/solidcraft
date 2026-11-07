@@ -304,6 +304,7 @@ sketch.slot.arc_three_point       2D sketch only (the sketch solver and engine t
 sketch.slot.center_point          2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.snap                       2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.solve                      2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.spline.handles             2D sketch only (crates/engine/src/cmd/sketch_create.rs: fit_spline_handles_are_visible_lines_and_accept_existing_constraints); no kernel operation
 sketch.spline.insert_point        2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.spline.remove_point        2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.spline.reverse             2D sketch only (the sketch solver and engine tests); no kernel operation

@@ -798,7 +798,7 @@ fn near_overlaps_that_are_not_one_path_keep_their_regions() {
         .iter()
         .map(|p| sk.add_point(*p, None).unwrap())
         .collect();
-    sk.add_curve(CurveKind::Spline { pts: ids.clone(), control: true, degree: 3, periodic: false, nurbs: None }, None).unwrap();
+    sk.add_curve(CurveKind::Spline { pts: ids.clone(), control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
     sk.add_line_pts(ids[3], ids[0], None).unwrap();
     let ps = find_profiles(&sk);
     assert_eq!(ps.len(), 1, "{:?}", ps.iter().map(|p| p.area).collect::<Vec<_>>());
@@ -1117,7 +1117,7 @@ fn exact_profiles_for_high_degree_and_cut_free_form_curves() {
         .iter()
         .map(|p| sk.add_point(*p, None).unwrap())
         .collect();
-    sk.add_curve(CurveKind::Spline { pts: ids.clone(), control: true, degree: 5, periodic: false, nurbs: None }, None).unwrap();
+    sk.add_curve(CurveKind::Spline { pts: ids.clone(), control: true, degree: 5, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
     sk.add_line_pts(ids[5], ids[0], None).unwrap();
     let pr = find_profiles(&sk);
     assert_eq!(pr.len(), 1);
@@ -1126,7 +1126,7 @@ fn exact_profiles_for_high_degree_and_cut_free_form_curves() {
     // A fit spline arch over a base line, cut by a vertical line at x = 10.
     let mut sk = Sketch::default();
     let ids: Vec<usize> = [v(0.0, 0.0), v(6.0, 9.0), v(14.0, 9.0), v(20.0, 0.0)].iter().map(|p| sk.add_point(*p, None).unwrap()).collect();
-    sk.add_curve(CurveKind::Spline { pts: ids.clone(), control: false, degree: 3, periodic: false, nurbs: None }, None).unwrap();
+    sk.add_curve(CurveKind::Spline { pts: ids.clone(), control: false, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
     sk.add_line_pts(ids[3], ids[0], None).unwrap();
     let (a, b) = (sk.add_point(v(10.0, -5.0), None).unwrap(), sk.add_point(v(10.0, 20.0), None).unwrap());
     sk.add_line_pts(a, b, None).unwrap();
@@ -1197,7 +1197,9 @@ fn a_degree_nine_control_spline_stays_exact_and_closes_a_profile_exactly() {
     let bump =
         [v(0.0, 0.0), v(1.5, 4.0), v(3.0, 7.0), v(5.0, 9.5), v(7.5, 11.0), v(12.5, 11.0), v(15.0, 9.5), v(17.0, 7.0), v(18.5, 4.0), v(20.0, 0.0)];
     let pts: Vec<usize> = bump.iter().map(|q| sk.add_point(*q, None).unwrap()).collect();
-    let s = sk.add_curve(CurveKind::Spline { pts: pts.clone(), control: true, degree: 9, periodic: false, nurbs: None }, None).unwrap();
+    let s = sk
+        .add_curve(CurveKind::Spline { pts: pts.clone(), control: true, degree: 9, periodic: false, nurbs: None, handles: Vec::new() }, None)
+        .unwrap();
     let pieces = sk.exact_pieces(s);
     assert_eq!(pieces.len(), 1, "{pieces:?}");
     let Seg2::Bezier { n, p } = pieces[0] else { panic!("{:?}", pieces[0]) };
@@ -1232,7 +1234,9 @@ fn a_degree_nine_control_spline_stays_exact_and_closes_a_profile_exactly() {
     // A degree above the cap is still refused.
     let mut high: Vec<usize> = pts.clone();
     high.push(sk.add_point(v(21.0, -2.0), None).unwrap());
-    assert!(sk.add_curve(CurveKind::Spline { pts: high, control: true, degree: 10, periodic: false, nurbs: None }, None).is_err());
+    assert!(
+        sk.add_curve(CurveKind::Spline { pts: high, control: true, degree: 10, periodic: false, nurbs: None, handles: Vec::new() }, None).is_err()
+    );
 }
 
 /// How far apart two curves run: the largest distance from a sample of either to the other.
@@ -1252,7 +1256,8 @@ fn wave_spline(sk: &mut Sketch, periodic: bool) -> (Vec<usize>, usize) {
         pts.pop();
         pts.push(pts[0]);
     }
-    let s = sk.add_curve(CurveKind::Spline { pts: pts.clone(), control: false, degree: 3, periodic, nurbs: None }, None).unwrap();
+    let s =
+        sk.add_curve(CurveKind::Spline { pts: pts.clone(), control: false, degree: 3, periodic, nurbs: None, handles: Vec::new() }, None).unwrap();
     (pts, s)
 }
 
@@ -1292,7 +1297,7 @@ fn a_fit_point_inserted_into_a_spline_keeps_the_curve_through_its_points() {
     assert!(k.insert_spline_point(s, old[2]).is_err());
     assert_eq!(k, sk, "a refused insertion changes nothing");
     let cv: Vec<usize> = old.iter().map(|q| k.add_point(*q + v(0.0, 30.0), None).unwrap()).collect();
-    let c = k.add_curve(CurveKind::Spline { pts: cv, control: true, degree: 3, periodic: false, nurbs: None }, None).unwrap();
+    let c = k.add_curve(CurveKind::Spline { pts: cv, control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
     assert!(k.insert_spline_point(c, v(20.0, 38.0)).is_err());
     let l = k.add_line(v(0.0, -10.0), v(50.0, -10.0), None, None, None).unwrap();
     assert!(k.insert_spline_point(l, v(20.0, -10.0)).is_err());
@@ -1406,7 +1411,9 @@ fn a_spline_keeps_its_joined_ends_and_closing_point() {
     let mut sk = Sketch::new();
     let places = [v(0.0, 0.0), v(10.0, 10.0), v(20.0, -10.0), v(30.0, 0.0)];
     let cv: Vec<usize> = places.iter().map(|q| sk.add_point(*q, None).unwrap()).collect();
-    let c = sk.add_curve(CurveKind::Spline { pts: cv.clone(), control: true, degree: 3, periodic: false, nurbs: None }, None).unwrap();
+    let c = sk
+        .add_curve(CurveKind::Spline { pts: cv.clone(), control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None)
+        .unwrap();
     assert_eq!(sk.remove_spline_point(c, cv[1]), Ok(true));
     assert!(matches!(sk.curves[c].kind, CurveKind::Spline { control: true, .. }));
     assert_eq!(spline_places(&sk, c), vec![places[0], places[2], places[3]]);
@@ -1648,7 +1655,7 @@ fn a_spline_with_its_own_knots_is_its_spans_exactly() {
     let ctrl = [v(0.0, 0.0), v(1.0, 2.0), v(2.0, 2.0), v(3.0, 0.0), v(4.0, -2.0), v(5.0, -2.0), v(6.0, 0.0)];
     let nurbs = Nurbs { knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 3.0, 3.0, 3.0, 3.0], weights: Vec::new() };
     let pts: Vec<usize> = ctrl.iter().map(|q| sk.add_point(*q, None).unwrap()).collect();
-    let kind = CurveKind::Spline { pts: pts.clone(), control: true, degree: 3, periodic: false, nurbs: Some(nurbs.clone()) };
+    let kind = CurveKind::Spline { pts: pts.clone(), control: true, degree: 3, periodic: false, nurbs: Some(nurbs.clone()), handles: Vec::new() };
     let s = sk.add_curve(kind.clone(), None).unwrap();
     let pieces = sk.exact_pieces(s);
     assert_eq!(pieces.len(), 2, "{pieces:?}");
@@ -1691,14 +1698,20 @@ fn a_spline_with_its_own_knots_is_its_spans_exactly() {
     for (i, k) in bad.iter().enumerate() {
         assert!(k.check(ctrl.len(), 3).is_err(), "{i}");
         assert!(
-            sk.add_curve(CurveKind::Spline { pts: pts.clone(), control: true, degree: 3, periodic: false, nurbs: Some(k.clone()) }, None).is_err(),
+            sk.add_curve(
+                CurveKind::Spline { pts: pts.clone(), control: true, degree: 3, periodic: false, nurbs: Some(k.clone()), handles: Vec::new() },
+                None,
+            )
+            .is_err(),
             "{i}"
         );
         assert!(k.point(&ctrl, 3, 0.5).is_none() && k.segs(&ctrl, 3).is_none() && k.polyline(&ctrl, 3).is_empty(), "{i}");
     }
     let fourfold = Nurbs { knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 3.0, 3.0, 3.0, 3.0], weights: Vec::new() };
     assert!(fourfold.check(8, 3).is_err());
-    assert!(sk.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: false, nurbs: Some(nurbs) }, None).is_err());
+    assert!(
+        sk.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: false, nurbs: Some(nurbs), handles: Vec::new() }, None).is_err()
+    );
 }
 
 /// #8639: two rounded rectangles drawn as closed control-point splines with the same straight
@@ -1724,7 +1737,7 @@ fn rounded_rectangles_sharing_their_sides_leave_every_profile_closed() {
         }
         let mut ids: Vec<usize> = pts.iter().map(|p| sk.add_point(*p, None).unwrap()).collect();
         ids.push(ids[0]);
-        sk.add_curve(CurveKind::Spline { pts: ids, control: true, degree: 3, periodic: false, nurbs: None }, None).unwrap();
+        sk.add_curve(CurveKind::Spline { pts: ids, control: true, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
     }
     let mut sk = Sketch::new();
     rounded(&mut sk, 0.55);
@@ -1921,4 +1934,42 @@ fn a_mirrored_fillet_over_three_quarters_of_a_turn_stays_the_arc_its_lines_leave
     assert!(rep.ok(), "{rep:?}");
     assert!((sweep_deg(&sk, arc) - 300.0).abs() < 1e-6, "sweep {}", sweep_deg(&sk, arc));
     assert!(lines_leave_the_arc(&sk, arc, [l1, l2]));
+}
+
+/// Scaling a fit spline's points and tangent handles scales its curve alike: a handle is measured
+/// against the chords beside its point, not an absolute length (#6502).
+#[test]
+fn scaling_a_spline_with_handles_scales_its_curve() {
+    let p = [Vec2::new(0.0, 0.0), Vec2::new(8.0, 6.0), Vec2::new(17.0, 2.0), Vec2::new(25.0, 10.0)];
+    let mut handles = crate::curves::fit_tangent_handles(&p, false).unwrap();
+    // A turned handle, so the curve is not the natural one.
+    handles[1] += Vec2::new(1.5, -2.0);
+    let before = crate::curves::fit_beziers_with_handles(&p, &handles, false).unwrap();
+    for f in [0.1, 3.0] {
+        let scaled: Vec<Vec2> = p.iter().map(|q| *q * f).collect();
+        let scaled_handles: Vec<Vec2> = handles.iter().map(|q| *q * f).collect();
+        let after = crate::curves::fit_beziers_with_handles(&scaled, &scaled_handles, false).unwrap();
+        for (a, b) in after.iter().zip(&before) {
+            for (x, y) in a.iter().zip(b) {
+                assert!(x.dist(*y * f) < 1e-9 * f.max(1.0), "scale {f}: {x:?} vs {:?}", *y * f);
+            }
+        }
+    }
+}
+
+/// Deleting a point a spline with tangent handles needs removes the spline, its tangent lines
+/// and its handle points: the sketch stays valid (#6502).
+#[test]
+fn deleting_a_fit_point_takes_the_splines_tangent_lines() {
+    let mut sk = Sketch::new();
+    let pts: Vec<usize> = [v(0.0, 0.0), v(8.0, 6.0), v(17.0, 2.0), v(25.0, 10.0)].iter().map(|p| sk.add_point(*p, None).unwrap()).collect();
+    let fit = pts[1];
+    let spline = sk.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
+    sk.add_spline_handles(spline).unwrap();
+    let before = sk.points.len();
+    sk.remove_points(&[fit]);
+    assert!(sk.curves.iter().all(|c| c.spline_handle_of.is_none()), "no tangent line is left without its spline");
+    assert!(!sk.curves.iter().any(|c| matches!(c.kind, CurveKind::Spline { .. })));
+    assert_eq!(sk.points.len(), before - 1 - 4, "the point and the four handle points go");
+    sk.validate_spline_handles().unwrap();
 }

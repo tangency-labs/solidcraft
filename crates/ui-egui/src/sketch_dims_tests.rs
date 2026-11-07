@@ -429,7 +429,8 @@ fn a_line_end_on_a_spline_snaps_on_it_and_stays_on_it() {
     let b = sk
         .curves
         .iter()
-        .find_map(|c| if let CurveKind::Line { b, .. } = c.kind { Some(b) } else { None })
+        // The line drawn, not a tangent handle line of the spline (#6502).
+        .find_map(|c| if let CurveKind::Line { b, .. } = c.kind { c.spline_handle_of.is_none().then_some(b) } else { None })
         .unwrap_or_else(|| panic!("no line, {:?}", h.app.status));
     assert!(
         sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::PointOnCurve { p, c } if p == b && c == spline)),

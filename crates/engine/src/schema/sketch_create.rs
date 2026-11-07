@@ -132,6 +132,33 @@ fn spline_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error>
     }
 }
 
+/// Give a fit point spline a tangent handle at each fit point, where the curve already runs.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SplineHandlesParams {
+    /// The spline's curve id.
+    #[serde(deserialize_with = "spline_id")]
+    pub curve: String,
+    /// The sketch (default: the one being edited).
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SketchRef")]
+    pub sketch: Option<SketchRef>,
+}
+
+/// What `sketch.spline.handles` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SplineHandlesResult {
+    /// The spline's curve id (unchanged).
+    pub curve: String,
+    /// The handle point ids, in fit point order.
+    pub handles: Vec<String>,
+    /// The sketch's solve: `{solved, dof}`.
+    pub sketch: Value,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// What `sketch.spline.reverse` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct SplineReverseResult {

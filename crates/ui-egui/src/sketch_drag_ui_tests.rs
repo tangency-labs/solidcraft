@@ -179,7 +179,7 @@ fn a_four_bar_edge_follows_a_stationary_pointer_and_keeps_the_grab() {
     let b = screen(&mut h, -7.0, 11.2);
     let undo = h.app.session.undo.len();
     press_and_move(&mut h, &[a, b]);
-    assert_eq!(h.app.viewport.point_drag.as_ref().map(|(id, _, _)| id.as_str()), Some("crank"), "grabbed the edge, not an endpoint");
+    assert_eq!(h.app.viewport.point_drag.as_ref().map(|(id, _, _, _, _)| id.as_str()), Some("crank"), "grabbed the edge, not an endpoint");
     h.frames(8);
     let nearest = Vec2::new(-10.0, 16.0).normalized().unwrap() * 10.0;
     assert!(point(&h, "crank.end").dist(nearest) < 0.05, "{:?}", point(&h, "crank.end"));
@@ -198,7 +198,7 @@ fn a_four_bar_release_uses_the_final_pointer_position() {
     let end = screen(&mut h, -10.0, 16.0);
     press_and_move(&mut h, &[a, b]);
     h.frames(8);
-    assert_eq!(h.app.viewport.point_drag.as_ref().map(|(id, _, _)| id.as_str()), Some("crank.end"));
+    assert_eq!(h.app.viewport.point_drag.as_ref().map(|(id, _, _, _, _)| id.as_str()), Some("crank.end"));
     release(&mut h, end);
     let nearest = Vec2::new(-10.0, 16.0).normalized().unwrap() * 10.0;
     assert!(point(&h, "crank.end").dist(nearest) < 0.05, "release left {:?}", point(&h, "crank.end"));
@@ -211,7 +211,7 @@ fn a_four_bar_edge_grab_keeps_its_pick_offset_when_rotating() {
     let a = screen(&mut h, -7.0, 0.25);
     let b = screen(&mut h, -7.0, 11.2);
     press_and_move(&mut h, &[a, b]);
-    assert_eq!(h.app.viewport.point_drag.as_ref().map(|(id, _, _)| id.as_str()), Some("crank"));
+    assert_eq!(h.app.viewport.point_drag.as_ref().map(|(id, _, _, _, _)| id.as_str()), Some("crank"));
     h.frames(8);
     release(&mut h, b);
     let local = Vec2::new(0.7, -0.025);
@@ -304,7 +304,11 @@ fn associated_spline_offset_hides_fit_nodes_and_follows_a_source_drag_live() {
     let original = h.app.session.world_state().unwrap().sketch(sid).unwrap().sketch.clone();
     let source = original.curve_index("s1").unwrap();
     let derived = original.curve_index(&output).unwrap();
-    let source_points = original.curves[source].kind.point_ids();
+    // The source's fit points; its tangent handles (#6502) show only while it is selected.
+    let source_points = match &original.curves[source].kind {
+        solidcraft_engine::sketch::CurveKind::Spline { pts, .. } => pts.clone(),
+        kind => kind.point_ids(),
+    };
     let derived_points = original.curves[derived].kind.point_ids();
     assert!(derived_points.len() > 100, "exercise the crowded generated fit nodes");
     for &i in &source_points {
@@ -485,7 +489,7 @@ fn a_centre_rectangles_centre_held_on_the_origin_keeps_the_rectangle_when_dragge
     let mut path = vec![a];
     path.extend(steps(a, b, 6));
     press_and_move(&mut h, &path);
-    assert_eq!(h.app.viewport.point_drag.as_ref().map(|(id, _, _)| id.as_str()), Some("p5"), "grabbed the centre, not the diagonal");
+    assert_eq!(h.app.viewport.point_drag.as_ref().map(|(id, _, _, _, _)| id.as_str()), Some("p5"), "grabbed the centre, not the diagonal");
     h.frames(4);
     release(&mut h, b);
     assert!(point(&h, "p5").len() < 1e-6, "the centre left the origin: {:?}", point(&h, "p5"));

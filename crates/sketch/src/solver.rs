@@ -274,9 +274,14 @@ impl State<'_> {
                 };
                 crate::curves::ellipse_polyline(self.p(*ci), self.p(*m), r)
             }
-            Some(CurveKind::Spline { pts, control, degree, periodic, nurbs }) => {
+            Some(CurveKind::Spline { pts, control, degree, periodic, nurbs, handles }) => {
                 let p = self.spline_points(pts, *periodic);
-                crate::curves::spline_polyline_mode(&p, *control, *degree, *periodic, nurbs.as_ref())
+                if handles.is_empty() || *control {
+                    crate::curves::spline_polyline_mode(&p, *control, *degree, *periodic, nurbs.as_ref())
+                } else {
+                    let handles: Vec<Vec2> = handles.iter().map(|point| self.p(*point)).collect();
+                    crate::curves::spline_polyline_with_handles(&p, &handles, *periodic)
+                }
             }
             Some(CurveKind::Conic { a, b, apex, rho }) => crate::curves::conic_polyline(self.p(*a), self.p(*apex), self.p(*b), *rho),
             _ => Vec::new(),
@@ -362,7 +367,7 @@ impl State<'_> {
                     })
                     .collect()
             }
-            Some(CurveKind::Spline { pts, control, degree, periodic, nurbs }) => {
+            Some(CurveKind::Spline { pts, control, degree, periodic, nurbs, handles }) => {
                 let p = self.spline_points(pts, *periodic);
                 if p.len() < 2 {
                     return Vec::new();
@@ -372,6 +377,13 @@ impl State<'_> {
                 } else if *control {
                     let k = (*degree as usize).min(solidcore_record::MAX_BEZIER_DEGREE).min(p.len().saturating_sub(1)).max(1);
                     crate::curves::bspline_beziers(&p, k).iter().filter_map(|span| solidcraft_geom::bezier(span)).collect()
+                } else if !handles.is_empty() {
+                    let handles: Vec<Vec2> = handles.iter().map(|point| self.p(*point)).collect();
+                    crate::curves::fit_beziers_with_handles(&p, &handles, *periodic)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|[p0, p1, p2, p3]| Seg2::Cubic { p0, p1, p2, p3 })
+                        .collect()
                 } else {
                     crate::curves::fit_beziers_mode(&p, *periodic)
                         .unwrap_or_default()
@@ -458,10 +470,15 @@ impl State<'_> {
                 let (cc, r) = self.round(c);
                 (cc - self.p(p)) / (r * r).max(1e-24)
             }
-            CurveKind::Spline { pts, control, degree, periodic, nurbs } => {
+            CurveKind::Spline { pts, control, degree, periodic, nurbs, handles } => {
                 let q = self.spline_points(pts, *periodic);
                 let at_end = pts.last() == Some(&p) && pts.first() != Some(&p);
-                crate::curves::end_curvature(&|t| crate::curves::spline_point_mode(&q, *control, *degree, *periodic, nurbs.as_ref(), t), at_end)
+                if handles.is_empty() || *control {
+                    crate::curves::end_curvature(&|t| crate::curves::spline_point_mode(&q, *control, *degree, *periodic, nurbs.as_ref(), t), at_end)
+                } else {
+                    let handles: Vec<Vec2> = handles.iter().map(|point| self.p(*point)).collect();
+                    crate::curves::end_curvature(&|t| crate::curves::spline_point_with_handles(&q, &handles, *periodic, t), at_end)
+                }
             }
             CurveKind::Conic { a, b, apex, rho } => {
                 let (pa, pb, px) = (self.p(*a), self.p(*b), self.p(*apex));
@@ -474,9 +491,14 @@ impl State<'_> {
         match self.sk.curves.get(c).map(|c| &c.kind)? {
             CurveKind::Line { a, b } => (self.p(*b) - self.p(*a)).normalized(),
             CurveKind::Circle { .. } | CurveKind::Arc { .. } => (self.p(p) - self.round(c).0).perp().normalized(),
-            CurveKind::Spline { pts, control, periodic, .. } => {
+            CurveKind::Spline { pts, control, periodic, handles, .. } => {
                 let q = self.spline_points(pts, *periodic);
-                crate::curves::spline_end_tangent_mode(&q, *control, *periodic, pts.last() == Some(&p) && pts.first() != Some(&p))
+                if handles.is_empty() {
+                    crate::curves::spline_end_tangent_mode(&q, *control, *periodic, pts.last() == Some(&p) && pts.first() != Some(&p))
+                } else {
+                    let handles: Vec<Vec2> = handles.iter().map(|point| self.p(*point)).collect();
+                    crate::curves::spline_end_tangent_with_handles(&q, &handles, *periodic, pts.last() == Some(&p) && pts.first() != Some(&p))
+                }
             }
             CurveKind::Conic { a, b, apex, .. } => {
                 if p == *a {

@@ -1170,7 +1170,17 @@ fn an_extruded_ellipse_or_spline_is_one_wall_named_by_its_curve() {
                 [(0., 0.), (10., -3.), (20., 4.), (30., 0.)].iter().map(|&(x, y)| sk.add_point(Vec2::new(x, y), None).unwrap()).collect();
             let (a, b) = (sk.add_point(Vec2::new(30., 20.), None).unwrap(), sk.add_point(Vec2::new(0., 20.), None).unwrap());
             let curve = sk
-                .add_curve(solidcraft_sketch::CurveKind::Spline { pts: pts.clone(), control: false, degree: 3, periodic: false, nurbs: None }, None)
+                .add_curve(
+                    solidcraft_sketch::CurveKind::Spline {
+                        pts: pts.clone(),
+                        control: false,
+                        degree: 3,
+                        periodic: false,
+                        nurbs: None,
+                        handles: Vec::new(),
+                    },
+                    None,
+                )
                 .unwrap();
             sk.add_line_pts(pts[3], a, None).unwrap();
             sk.add_line_pts(a, b, None).unwrap();
