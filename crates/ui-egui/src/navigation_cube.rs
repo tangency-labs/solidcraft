@@ -1,15 +1,22 @@
-//! Original, code-drawn navigation cube. Flat faces share invisible picking regions.
+//! Original, code-drawn navigation cube with chamfered edges and corners: every one of its
+//! 26 views (6 faces, 12 edges, 8 corners) is one flat facet that picks it.
 use super::*;
-use crate::icons::navigation::{Facet, arrow, curved_arrow, paint_cube};
+use crate::icons::navigation::{
+    CURVED_ARROW_RADIUS, Facet, ORBIT_ARROW_WING, arrow, curved_arrow, curved_arrow_bounds, curved_arrow_contains, paint_cube,
+};
 use solidcraft_engine::geom::Ring;
 
 pub(super) const SIZE: f32 = 112.0;
 // Paint and picking use the same original coordinate space, scaled as a group.
 pub(super) const DESIGN_SIZE: f32 = 164.0;
 const HALF: f64 = 40.0;
-// Corner squares lie on the six flat faces, preserving a sharp cube silhouette.
-// The remaining regions belong to the face, including the middle of each edge.
-const INSET: f64 = 0.68;
+// How deep an edge chamfer bites into its two faces, and how far a corner chamfer reaches
+// along each face edge, as fractions of the half side.
+const EDGE_CUT: f64 = 0.2;
+const CORNER_CUT: f64 = 0.36;
+// Half side of a face's octagon, and where its cut corners start.
+const FACE: f64 = 1.0 - EDGE_CUT;
+const CUT: f64 = FACE - CORNER_CUT;
 
 fn camera(app: &SolveApp) -> Camera {
     let mut cam = app.cam;
@@ -62,6 +69,21 @@ fn direction_label(d: Vec3) -> String {
         .join(" · ")
 }
 
+/// The view's name in the program's language; automation handles keep `direction_label`.
+///
+/// Each translated word arrives in display order already, but egui has no bidirectional layout, so
+/// the joined words are put in display order as a whole: in Arabic or Hebrew the first word ends up
+/// at the right. This assumes each heading is one word, as the shipped ones are; text without
+/// right-to-left letters comes back unchanged.
+fn view_name(d: Vec3) -> String {
+    let joined = direction_label(d)
+        .split(" · ")
+        .map(|part| crate::i18n::tr(&format!("ui.heading_{}", part.to_ascii_lowercase())).to_string())
+        .collect::<Vec<_>>()
+        .join(" · ");
+    crate::bidi::visual(&joined).into_owned()
+}
+
 fn facets(cam: &Camera, c: Pos2, half: f64) -> Vec<Facet> {
     if !cam.is_valid() {
         return Vec::new();
@@ -71,9 +93,10 @@ fn facets(cam: &Camera, c: Pos2, half: f64) -> Vec<Facet> {
     let inverse_eye_distance = inverse_focal / (1.0 + inverse_focal);
     let mut add = |d: Vec3, normal: Vec3, mut vertices: Vec<Vec3>, axes: Option<(Vec3, Vec3)>| {
         let depth = cam.from_frame(normal).dot(cam.back());
-        // All face planes are one unit from the origin. In perspective a face must look
-        // toward the finite eye, not merely toward the parallel view direction.
-        if depth <= inverse_eye_distance + 1e-5 {
+        // In perspective a facet must look toward the finite eye, not merely toward the
+        // parallel view direction. Face planes are one unit from the origin, chamfer planes
+        // farther, so each facet turns away at its own angle.
+        if depth <= normal.dot(vertices[0]) * inverse_eye_distance + 1e-5 {
             return;
         }
         let centre = vertices.iter().copied().fold(Vec3::ZERO, |sum, p| sum + p) / vertices.len() as f64;
@@ -84,41 +107,42 @@ fn facets(cam: &Camera, c: Pos2, half: f64) -> Vec<Facet> {
             let b = project(cam, *b, half) - projected_centre;
             a.y.atan2(a.x).total_cmp(&b.y.atan2(b.x))
         });
-        let vertices = Ring::new(vertices);
-        let outer_edges = vertices
-            .edges()
-            .map(|(a, b)| [(a.x, b.x), (a.y, b.y), (a.z, b.z)].into_iter().filter(|(a, b)| a.abs() == 1.0 && a == b).count() >= 2)
-            .collect();
+        // Neighbouring facets meet at an angle, so every boundary is a visible crease.
+        let outer_edges = vec![true; vertices.len()];
         let points = vertices.into_iter().map(|v| c + project(cam, v, half)).collect();
         out.push(Facet {
             direction: d,
             points,
             outer_edges,
             centre: at,
-            label: direction_label(d),
+            label: view_name(d),
             text_axes: axes.map(|(r, u)| (project_direction(cam, centre, r), -project_direction(cam, centre, u))),
             depth,
         });
     };
-    // Nine coplanar patches per square face. The middle and four side patches
-    // share the face target; three corner squares share one isometric target.
-    for (n, r, u) in [
+    let faces = [
         (Vec3::X, Vec3::Y, Vec3::Z),
         (-Vec3::X, -Vec3::Y, Vec3::Z),
         (Vec3::Y, -Vec3::X, Vec3::Z),
         (-Vec3::Y, Vec3::X, Vec3::Z),
         (Vec3::Z, Vec3::X, Vec3::Y),
         (-Vec3::Z, Vec3::X, -Vec3::Y),
-    ] {
-        let bands = [(-1.0, -INSET, -1.0), (-INSET, INSET, 0.0), (INSET, 1.0, 1.0)];
-        for (x0, x1, sx) in bands {
-            for (y0, y1, sy) in bands {
-                add(
-                    if sx != 0.0 && sy != 0.0 { n + r * sx + u * sy } else { n },
-                    n,
-                    [(x0, y0), (x1, y0), (x1, y1), (x0, y1)].into_iter().map(|(x, y)| n + r * x + u * y).collect(),
-                    if sx == 0.0 && sy == 0.0 { Some((r, u)) } else { None },
-                );
+    ];
+    // Each face is an octagon: its square with the four corners cut off.
+    for (n, r, u) in faces {
+        let corners = [(FACE, CUT), (CUT, FACE)].into_iter().flat_map(|(a, b)| [(a, b), (a, -b), (-a, b), (-a, -b)]);
+        add(n, n, corners.map(|(a, b)| n + r * a + u * b).collect(), Some((r, u)));
+    }
+    // Two perpendicular faces share an edge chamfer, three share a corner chamfer.
+    let normals = faces.map(|(n, ..)| n);
+    for (i, &a) in normals.iter().enumerate() {
+        for (j, &b) in normals.iter().enumerate().skip(i + 1).filter(|(_, b)| a.dot(**b) == 0.0) {
+            let along = a.cross(b);
+            let edge = [(a, b), (b, a)].into_iter().flat_map(|(p, q)| [p + q * FACE + along * CUT, p + q * FACE - along * CUT]);
+            add(a + b, (a + b) / (a + b).len(), edge.collect(), None);
+            for &c in normals.iter().skip(j + 1).filter(|c| a.dot(**c) == 0.0 && b.dot(**c) == 0.0) {
+                let corner = [(a, b, c), (a, c, b), (b, a, c), (b, c, a), (c, a, b), (c, b, a)].map(|(p, q, s)| p + q * FACE + s * CUT);
+                add(a + b + c, (a + b + c) / (a + b + c).len(), corner.to_vec(), None);
             }
         }
     }
@@ -172,14 +196,25 @@ pub(super) fn navigate(app: &mut SolveApp, action: Option<&str>, dir: Option<Vec
 }
 
 fn control(app: &mut SolveApp, ui: &mut egui::Ui, bounds: Rect, action: &str, tooltip: &str) -> bool {
-    crate::scenario::publish_handle(&format!("navigation_cube:control:{action}"), bounds.center());
-    let response = ui.interact(bounds, ui.scope_id().with(("navigation_cube", action)), Sense::click()).backing_on_hover_text(tooltip);
-    let hover = response.hovered();
-    if response.clicked() {
+    control_in(app, ui, bounds, bounds.center(), |_| true, action, tooltip)
+}
+
+/// A control whose target is the part of `bounds` that `inside` accepts (a curved arrow is no
+/// rectangle): only a pointer on that part hovers it, shows its tooltip, clicks or right-clicks it.
+/// `handle` is the point automation clicks.
+fn control_in(app: &mut SolveApp, ui: &mut egui::Ui, bounds: Rect, handle: Pos2, inside: impl Fn(Pos2) -> bool, action: &str, tooltip: &str) -> bool {
+    crate::scenario::publish_handle(&format!("navigation_cube:control:{action}"), handle);
+    let response = ui.interact(bounds, ui.scope_id().with(("navigation_cube", action)), Sense::click());
+    let over = response.hover_pos().is_none_or(&inside);
+    let response = if over { response.backing_on_hover_text(tooltip) } else { response };
+    let hover = response.hovered() && over;
+    let pressed_inside = response.interact_pointer_pos().is_none_or(&inside);
+    if response.clicked() && pressed_inside {
         navigate(app, Some(action), None);
     }
     // The control takes the right-click from the viewport under it: open the gizmo's menu.
     if response.secondary_clicked()
+        && pressed_inside
         && app.dialog.is_none()
         && let Some(at) = response.interact_pointer_pos()
     {
@@ -203,8 +238,27 @@ fn inverted_arrow(action: &str) -> Option<&'static str> {
     }
 }
 
+/// The orbit an arrow beside the cube's `side` performs, its tooltip, and the screen direction
+/// it points: always inward at the cube, whichever orbit the preference above gives it.
+fn orbit_arrow(side: &'static str, inverted: bool) -> (&'static str, &'static str, egui::Vec2) {
+    let action = if inverted { inverted_arrow(side).unwrap_or(side) } else { side };
+    let tooltip = match action {
+        "left" => "Orbit left 90°",
+        "right" => "Orbit right 90°",
+        "up" => "Orbit up 90°",
+        _ => "Orbit down 90°",
+    };
+    let inward = match side {
+        "left" => vec2(1.0, 0.0),
+        "right" => vec2(-1.0, 0.0),
+        "up" => vec2(0.0, 1.0),
+        _ => vec2(0.0, -1.0),
+    };
+    (action, tooltip, inward)
+}
+
 /// Preferences › Navigation: "Invert the curved roll arrows" (#10483). With it on, the two
-/// curved arrows at the cube's corner roll the view the other way within the screen plane: the
+/// curved arrows above the cube roll the view the other way within the screen plane: the
 /// clockwise arrow rolls counterclockwise and the counterclockwise arrow rolls clockwise. The
 /// arrow keeps its curl; the tooltip names the roll actually performed.
 fn inverted_roll(action: &str) -> Option<&'static str> {
@@ -240,7 +294,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         }
         let pieces: Vec<_> = faces.iter().filter(|f| f.direction == face.direction).collect();
         let centre = pieces.iter().fold(egui::Vec2::ZERO, |sum, f| sum + f.centre.to_vec2()) / pieces.len() as f32;
-        crate::scenario::publish_handle(&format!("navigation_cube:{}", face.label.to_ascii_lowercase().replace(" · ", "_")), centre.to_pos2());
+        crate::scenario::publish_handle(
+            &format!("navigation_cube:{}", direction_label(face.direction).to_ascii_lowercase().replace(" · ", "_")),
+            centre.to_pos2(),
+        );
         // Keep principal-axis handles for existing automation, using only visible faces.
         let world = app.cam.from_frame(face.direction);
         let axis = match (world.x, world.y, world.z) {
@@ -260,10 +317,9 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     if let Some(face) = hovered.and_then(|i| faces.get(i)) {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         ui.interact(Rect::from_center_size(hover.unwrap_or(face.centre), vec2(2.0, 2.0)), ui.scope_id().with("navigation_cube_tip"), Sense::hover())
-            .backing_on_hover_text(format!(
-                "{} view. Drag to orbit{}.",
-                face.label,
-                if app.preferences.free_orbit { "" } else { "; hold Shift to snap" }
+            .backing_on_hover_text(crate::i18n::format(
+                if app.preferences.free_orbit { "ui.navigation_cube_view_free" } else { "ui.navigation_cube_view" },
+                &[("view", &face.label)],
             ));
         if ui.input(|i| i.pointer.primary_clicked()) {
             navigate(app, None, Some(face.direction));
@@ -289,11 +345,11 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
 
 /// The Home button at the top left of a gizmo centred at `c`, painted while it is `active`.
 pub(super) fn home(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, c: Pos2, scale: f32, active: bool, t: Tokens) {
-    let home = Rect::from_center_size(c + vec2(-65.0, -65.0) * scale, vec2(26.0, 26.0) * scale);
+    let home = Rect::from_center_size(c + vec2(-69.0, -69.0) * scale, vec2(24.0, 24.0) * scale);
     crate::scenario::publish_target("axis_view:home", home);
     let home_hover = control(app, ui, home, "home", "Home: isometric view and fit model");
     if active {
-        icons::paint_icon(painter, home.shrink(4.0 * scale), "home", f32::from((if home_hover { t.accent } else { t.cube_face }).a()) / 255.0);
+        icons::paint_icon(painter, home.shrink(1.0 * scale), "home", f32::from((if home_hover { t.accent } else { t.cube_face }).a()) / 255.0);
     }
 }
 
@@ -301,42 +357,35 @@ pub(super) fn home(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
 /// while a cube face is square on, painted while the gizmo is `active`.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn arrows(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, c: Pos2, scale: f32, active: bool, square_on: bool, t: Tokens) {
-    let (distance, button_size) = if square_on { (54.0, 20.0) } else { (74.0, 16.0) };
-    for (action, offset, direction, tooltip) in [
-        ("left", vec2(-distance, 0.0), vec2(1.0, 0.0), "Orbit left 90°"),
-        ("right", vec2(distance, 0.0), vec2(-1.0, 0.0), "Orbit right 90°"),
-        ("up", vec2(0.0, -distance), vec2(0.0, 1.0), "Orbit up 90°"),
-        ("down", vec2(0.0, distance), vec2(0.0, -1.0), "Orbit down 90°"),
-    ] {
-        let (action, tooltip) = match app.preferences.invert_navigator_arrows.then(|| inverted_arrow(action)).flatten() {
-            Some(swapped) => (
-                swapped,
-                match swapped {
-                    "right" => "Orbit right 90°",
-                    "left" => "Orbit left 90°",
-                    "down" => "Orbit down 90°",
-                    _ => "Orbit up 90°",
-                },
-            ),
-            None => (action, tooltip),
-        };
+    let distance = if square_on { 54.0 } else { 74.0 };
+    // The target holds the whole drawn triangle, wings included, so it is at least as wide.
+    let button_size = 2.0 * ORBIT_ARROW_WING;
+    for (side, offset) in
+        [("left", vec2(-distance, 0.0)), ("right", vec2(distance, 0.0)), ("up", vec2(0.0, -distance)), ("down", vec2(0.0, distance))]
+    {
+        let (action, tooltip, direction) = orbit_arrow(side, app.preferences.invert_navigator_arrows);
         let at = c + offset * scale;
         let hovered = control(app, ui, Rect::from_center_size(at, vec2(button_size, button_size) * scale), action, tooltip);
         if active {
             arrow(painter, at, direction * scale, hovered, t);
         }
     }
-    for (action, offset, size, clockwise, tooltip) in [
-        ("counterclockwise", vec2(42.0, -72.0), vec2(40.0, 20.0), false, "Rotate view counterclockwise 90°"),
-        ("clockwise", vec2(72.0, -42.0), vec2(20.0, 40.0), true, "Rotate view clockwise 90°"),
-    ] {
+    // Two arcs above the cube, left of the top arrow curling counterclockwise and right of it
+    // clockwise; angles in degrees on the screen, y down.
+    for (action, from, to, tooltip) in
+        [("counterclockwise", -110.0_f32, -155.0_f32, "Rotate view counterclockwise 90°"), ("clockwise", -70.0, -25.0, "Rotate view clockwise 90°")]
+    {
         let (action, tooltip) = match app.preferences.invert_curved_roll_arrows.then(|| inverted_roll(action)).flatten() {
             Some(swapped) => (swapped, if swapped == "clockwise" { "Rotate view clockwise 90°" } else { "Rotate view counterclockwise 90°" }),
             None => (action, tooltip),
         };
-        let hovered = control(app, ui, Rect::from_center_size(c + offset * scale, size * scale), action, tooltip);
+        let (from, to) = (from.to_radians(), to.to_radians());
+        let middle = (from + to) / 2.0;
+        let at = c + vec2(middle.cos(), middle.sin()) * (CURVED_ARROW_RADIUS * scale);
+        let target = curved_arrow_bounds(c, from, to, scale);
+        let hovered = control_in(app, ui, target, at, |p| curved_arrow_contains(c, from, to, scale, p), action, tooltip);
         if active {
-            curved_arrow(painter, c + vec2(42.0, -42.0) * scale, clockwise, hovered, t, scale);
+            curved_arrow(painter, c, from, to, hovered, t, scale);
         }
     }
 }
@@ -344,6 +393,7 @@ pub(super) fn arrows(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Pain
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::icons::navigation::CURVED_ARROW_HEAD_LENGTH;
     #[cfg(test)]
     use crate::icons::navigation::{LABEL_PIXELS, face_text};
     use solidcraft_engine::render::{StandardView, UpAxis};
@@ -400,7 +450,7 @@ mod tests {
     fn perspective_cube_culls_sides_facing_away_and_ignores_model_framing() {
         let cam = Camera { yaw: -0.1, pitch: 0.1, fov: 0.6, ..Default::default() };
         let faces = facets(&cam, Pos2::ZERO, HALF);
-        assert_eq!(faces.len(), 9, "only the front face is visible from this finite eye");
+        assert_eq!(faces.len(), 9, "only the front face and its ring of chamfers face this finite eye");
         assert!(faces.iter().all(|face| face.direction.y == -1.0));
         let points = |cam: &Camera| facets(cam, Pos2::ZERO, HALF).into_iter().flat_map(|face| face.points).collect::<Vec<_>>();
         let expected = points(&cam);
@@ -413,62 +463,107 @@ mod tests {
         }
     }
 
+    /// Each orbit arrow points inward at the cube in both settings. By default it shows the way
+    /// the cube turns, so the camera moves against it; with "Invert the view cube rotation arrows"
+    /// the actions trade sides and the camera moves the way the arrow points.
     #[test]
-    fn cube_targets_are_only_six_faces_and_eight_corners_in_both_up_frames() {
+    fn orbit_arrows_point_at_the_cube_and_the_preference_picks_cube_or_camera() {
+        let mut h = crate::scenario::Harness::new();
+        for inverted in [false, true] {
+            for (side, outward) in [("left", vec2(-1.0, 0.0)), ("right", vec2(1.0, 0.0)), ("up", vec2(0.0, -1.0)), ("down", vec2(0.0, 1.0))] {
+                let (action, _, direction) = orbit_arrow(side, inverted);
+                let mut from = Camera::default();
+                from.set_view(StandardView::Front);
+                let to: Camera = serde_json::from_value(
+                    h.app.session.execute("view.navigate", &json!({"camera": from, "action": action})).unwrap()["camera"].clone(),
+                )
+                .unwrap();
+                let (r, u, _) = from.basis();
+                let moved = to.back() - from.back();
+                let on_screen = vec2(moved.dot(r) as f32, -moved.dot(u) as f32).normalized();
+                let along = if inverted { 1.0 } else { -1.0 };
+                assert!(on_screen.dot(direction) * along > 0.99, "{side} (inverted {inverted}): drawn {direction:?}, camera moves {on_screen:?}");
+                assert!(direction.dot(outward) < -0.99, "{side} (inverted {inverted}): the arrow points at the cube");
+            }
+        }
+    }
+
+    /// A chamfer's plane lies farther from the centre than a face's, so from a finite eye it
+    /// turns away at a different angle: every facet is drawn exactly when it faces the eye.
+    #[test]
+    fn perspective_cube_draws_exactly_the_facets_that_face_the_eye() {
+        let mut directions = Vec::new();
+        for x in -1..=1 {
+            for y in -1..=1 {
+                for z in -1..=1 {
+                    if (x, y, z) != (0, 0, 0) {
+                        directions.push(Vec3::new(f64::from(x), f64::from(y), f64::from(z)));
+                    }
+                }
+            }
+        }
+        // A facet's plane passes through a + b·FACE + c·CUT for its one, two or three axes.
+        let plane_distance = |d: Vec3| {
+            let axes = [d.x, d.y, d.z].iter().filter(|v| **v != 0.0).count();
+            ([1.0, FACE, CUT][..axes].iter().sum::<f64>()) / (axes as f64).sqrt()
+        };
+        let mut culled = 0;
+        for up in [UpAxis::Z, UpAxis::Y] {
+            for fov in [0.2618, 0.6, std::f64::consts::FRAC_PI_2] {
+                for step in 0..48 {
+                    let (yaw, pitch) = (f64::from(step) * 0.37, (f64::from(step) * 0.53).sin() * 1.4);
+                    let cam = Camera { up, yaw, pitch, fov, ..Default::default() };
+                    let eye_distance = 1.0 + 1.0 / inverse_focal_length(&cam);
+                    let drawn: Vec<Vec3> = facets(&cam, Pos2::ZERO, HALF).iter().map(|f| f.direction).collect();
+                    for &d in &directions {
+                        let margin = cam.from_frame(d / d.len()).dot(cam.back()) * eye_distance - plane_distance(d);
+                        if margin.abs() < 1e-4 {
+                            continue;
+                        }
+                        if margin < 0.0 && cam.from_frame(d / d.len()).dot(cam.back()) > 0.0 {
+                            culled += 1;
+                        }
+                        assert_eq!(drawn.contains(&d), margin > 0.0, "{up:?} fov {fov} yaw {yaw} pitch {pitch}: {}", direction_label(d));
+                    }
+                }
+            }
+        }
+        assert!(culled > 0, "the sweep must reach facets that only perspective hides");
+    }
+
+    #[test]
+    fn cube_targets_are_six_faces_twelve_edges_and_eight_corners_in_both_up_frames() {
         for up in [UpAxis::Z, UpAxis::Y] {
             let mut directions = Vec::new();
             for view in [StandardView::Front, StandardView::Back, StandardView::Top, StandardView::Bottom, StandardView::Left, StandardView::Right] {
                 let mut cam = Camera { up, ..Default::default() };
                 cam.set_view(view);
                 for facet in facets(&cam, Pos2::ZERO, HALF) {
-                    let axes = [facet.direction.x, facet.direction.y, facet.direction.z].into_iter().filter(|v| *v != 0.0).count();
-                    assert!(axes == 1 || axes == 3, "cube edges must not be independent targets: {}", facet.label);
                     if !directions.contains(&facet.direction) {
                         directions.push(facet.direction);
                     }
                 }
             }
-            assert_eq!(directions.len(), 14);
+            let rank = |d: &&Vec3| [d.x, d.y, d.z].into_iter().filter(|v| *v != 0.0).count();
+            assert_eq!([1, 2, 3].map(|n| directions.iter().filter(|d| rank(d) == n).count()), [6, 12, 8]);
         }
     }
 
     #[test]
-    fn former_edge_strips_click_the_face_and_hover_without_internal_seams() {
+    fn chamfers_around_a_square_on_face_click_their_edge_and_corner_views() {
         let mut h = crate::scenario::Harness::new();
         h.call("ui.prefs", json!({"navigator_style":"cube"}));
-        let ctx = crate::fonts::test_context();
         h.app.preferences.look_at_anim = false;
         for up in ["z", "y"] {
             h.call("ui.prefs", json!({"up_axis":up}));
-            h.call("ui.view", json!({"view":"front"}));
-            let camera = h.app.cam;
-            let outer = crate::scenario::rect_of("axis_view:outer").unwrap();
-            let half = HALF * f64::from(outer.width() / DESIGN_SIZE);
-            let faces = facets(&camera, outer.center(), half);
-            assert!(crate::scenario::handle_at("navigation_cube:front_right").is_none());
-            assert!(crate::scenario::handle_at("navigation_cube:top_front").is_none());
-            for direction in [Vec3::X, -Vec3::X, Vec3::Z, -Vec3::Z] {
-                let p = outer.center() + project(&camera, direction * 0.84, half);
-                let hovered = hit(&faces, p).unwrap();
-                assert_eq!(faces[hovered].direction, -Vec3::Y);
-                h.call("ui.move", json!({"x":p.x,"y":p.y}));
+            for (name, direction) in
+                [("top_front", Vec3::Z - Vec3::Y), ("front_right", Vec3::X - Vec3::Y), ("bottom_front_left", -Vec3::Z - Vec3::Y - Vec3::X)]
+            {
+                h.call("ui.view", json!({"view":"front"}));
+                let p = crate::scenario::handle_at(&format!("navigation_cube:{name}")).unwrap();
                 h.call("ui.click", json!({"x":p.x,"y":p.y}));
-                assert_eq!(h.app.cam, camera, "a former edge strip must select FRONT, never a diagonal view");
-                let t = Tokens::light();
-                let output = paint_frame(&ctx, |ui| {
-                    paint_cube(ui.painter(), &faces, Some(hovered), t, false, 1.0);
-                });
-                let centre = Rect::from_center_size(outer.center(), vec2(2.0, 2.0) * (INSET * half) as f32);
-                let mut outline = 0;
-                for shape in &output.shapes {
-                    if let Shape::LineSegment { points: [a, b], stroke } = &shape.shape
-                        && stroke.color == t.accent
-                    {
-                        outline += 1;
-                        assert!(!centre.contains(a.lerp(*b, 0.5)), "face subdivisions must not draw hover seams");
-                    }
-                }
-                assert_eq!(outline, 12, "one continuous face outline around the four corner targets");
+                let expected = h.app.cam.from_frame(direction.normalized().unwrap());
+                assert!(h.app.cam.back().dist(expected) < 2e-6, "{up} {name}");
             }
         }
     }
@@ -505,7 +600,7 @@ mod tests {
         let faces = facets(&Camera::default(), pos2(100.0, 100.0), HALF);
         for t in [Tokens::light(), Tokens::dark()] {
             assert_ne!(t.navigation_cube(false).cube_face, t.cube_face);
-            for name in ["FRONT", "RIGHT", "TOP · FRONT · RIGHT"] {
+            for name in ["FRONT", "RIGHT", "TOP · FRONT", "TOP · FRONT · RIGHT"] {
                 let hovered = faces.iter().position(|f| f.label == name).unwrap();
                 let output = paint_frame(&ctx, |ui| {
                     paint_cube(ui.painter(), &faces, Some(hovered), t.navigation_cube(true), false, 1.0);
@@ -526,7 +621,7 @@ mod tests {
     }
 
     #[test]
-    fn idle_principal_views_have_square_faces_without_visible_picking_seams() {
+    fn principal_views_show_the_face_ringed_by_its_four_edge_and_four_corner_chamfers() {
         let ctx = crate::fonts::test_context();
         for up in [UpAxis::Z, UpAxis::Y] {
             for view in [StandardView::Front, StandardView::Back, StandardView::Top, StandardView::Bottom, StandardView::Left, StandardView::Right] {
@@ -534,30 +629,24 @@ mod tests {
                 cam.set_view(view);
                 let centre = pos2(100.0, 100.0);
                 let faces = facets(&cam, centre, HALF);
-                assert_eq!(faces.len(), 9, "one square face partitioned into nine coplanar picking regions");
+                let rank = |f: &&Facet| [f.direction.x, f.direction.y, f.direction.z].into_iter().filter(|v| *v != 0.0).count();
+                assert_eq!([1, 2, 3].map(|n| faces.iter().filter(|f| rank(f) == n).count()), [1, 4, 4], "{up:?} {view:?}");
+                assert_eq!(faces.iter().filter(|f| f.text_axes.is_some()).count(), 1, "only the face carries a label");
                 let bounds = Rect::from_points(&faces.iter().flat_map(|f| f.points.iter().copied()).collect::<Vec<_>>());
                 let expected = Rect::from_center_size(centre, vec2(80.0, 80.0));
                 assert!(
                     bounds.min.distance(expected.min) < 1e-4 && bounds.max.distance(expected.max) < 1e-4,
-                    "the silhouette must reach all four square corners"
+                    "the chamfers reach the cube's outline"
                 );
                 let output = paint_frame(&ctx, |ui| {
                     paint_cube(ui.painter(), &faces, None, Tokens::light(), false, 1.0);
                 });
-                let mesh = output.shapes.iter().find_map(|s| if let Shape::Mesh(m) = &s.shape { Some(m) } else { None }).unwrap();
-                let fill = mesh.vertices.first().unwrap().color;
-                assert!(mesh.vertices.iter().all(|v| v.color == fill), "picking regions must have identical face shading");
-                for s in &output.shapes {
-                    if let Shape::LineSegment { points: [a, b], .. } = &s.shape {
-                        assert!(
-                            (a.x - expected.left()).abs() < 1e-4 && (b.x - expected.left()).abs() < 1e-4
-                                || (a.x - expected.right()).abs() < 1e-4 && (b.x - expected.right()).abs() < 1e-4
-                                || (a.y - expected.top()).abs() < 1e-4 && (b.y - expected.top()).abs() < 1e-4
-                                || (a.y - expected.bottom()).abs() < 1e-4 && (b.y - expected.bottom()).abs() < 1e-4,
-                            "idle outlines must lie on the cube perimeter, never on a picking boundary"
-                        );
-                    }
-                }
+                let seams = output
+                    .shapes
+                    .iter()
+                    .filter(|s| matches!(&s.shape, Shape::LineSegment { stroke, .. } if stroke.color == Tokens::light().cube_border));
+                // The octagon's 8 sides, then 3 more per edge strip and per corner hexagon.
+                assert_eq!(seams.count(), 32, "every facet boundary is drawn once");
             }
         }
     }
@@ -608,6 +697,43 @@ mod tests {
             assert!(!mesh.vertices.is_empty());
             assert!(mesh.vertices.iter().all(|v| (0.0..=1.0).contains(&v.uv.x) && (0.0..=1.0).contains(&v.uv.y)));
         }
+    }
+
+    #[test]
+    fn face_labels_follow_the_program_language_and_fit_their_face() {
+        let ctx = crate::fonts::test_context();
+        for catalog in crate::i18n::LOCALES {
+            let _language = crate::i18n::scope(catalog.id);
+            for (view, id) in [
+                (StandardView::Front, "ui.heading_front"),
+                (StandardView::Back, "ui.heading_back"),
+                (StandardView::Top, "ui.heading_top"),
+                (StandardView::Bottom, "ui.heading_bottom"),
+                (StandardView::Left, "ui.heading_left"),
+                (StandardView::Right, "ui.heading_right"),
+            ] {
+                let mut cam = Camera::default();
+                cam.set_view(view);
+                let faces = facets(&cam, pos2(100.0, 100.0), HALF);
+                let face = faces.iter().find(|f| f.text_axes.is_some()).unwrap();
+                assert_eq!(face.label, crate::i18n::tr(id), "{} {id}", catalog.id);
+                let output = paint_frame(&ctx, |ui| face_text(ui.painter(), face, Tokens::light().cube_text, 14.0));
+                for shape in &output.shapes {
+                    if let Shape::Mesh(mesh) = &shape.shape {
+                        assert!(mesh.vertices.iter().all(|v| contains(&face.points, v.pos)), "{} {id}: the label overflows its face", catalog.id);
+                    }
+                }
+            }
+        }
+        let _german = crate::i18n::scope("de");
+        let mut labels: Vec<_> =
+            facets(&Camera::default(), Pos2::ZERO, HALF).into_iter().filter(|f| f.text_axes.is_some()).map(|f| f.label).collect();
+        labels.sort();
+        assert_eq!(labels, ["OBEN", "RECHTS", "VORNE"]);
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"navigator_style":"cube", "language":"de"}));
+        assert!(crate::scenario::handle_at("navigation_cube:front").is_some(), "automation handles stay language-neutral");
+        assert!(crate::scenario::handle_at("navigation_cube:top_front_right").is_some());
     }
 
     #[test]
@@ -779,6 +905,101 @@ mod tests {
         assert!((h.app.cam.roll - camera.roll - std::f64::consts::FRAC_PI_2).abs() < 1e-6, "clockwise still rolls clockwise");
     }
 
+    /// An orbit arrow is hit where it is drawn, wings included, whether a cube face is square on
+    /// (the arrows sit nearer) or not.
+    #[test]
+    fn the_wings_of_an_orbit_arrow_are_clickable() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"navigator_style":"cube", "look_at_anim":false}));
+        for (view, distance) in [("front", 54.0_f32), ("iso", 74.0)] {
+            for (side, offset) in [("left", vec2(-1.0, 0.0)), ("right", vec2(1.0, 0.0)), ("up", vec2(0.0, -1.0)), ("down", vec2(0.0, 1.0))] {
+                let (_, _, inward) = orbit_arrow(side, false);
+                let across = vec2(-inward.y, inward.x);
+                for wing in [-1.0_f32, 1.0] {
+                    h.call("ui.view", json!({"view":view}));
+                    h.frames(2);
+                    let outer = crate::scenario::rect_of("axis_view:outer").unwrap();
+                    let scale = outer.width() / DESIGN_SIZE;
+                    // A wing tip, a little inside the drawn corner (see `arrow`).
+                    let tip = offset * distance - inward * 6.0 + across * wing * (ORBIT_ARROW_WING - 0.6);
+                    let p = outer.center() + tip * scale;
+                    let before = h.app.cam.back();
+                    h.call("ui.click", json!({"x":p.x,"y":p.y}));
+                    h.frames(2);
+                    assert!(h.app.cam.back().dist(before) > 1e-3, "{view} {side} wing {wing}: the click did not orbit");
+                }
+            }
+        }
+    }
+
+    /// A roll arrow is hit where it is drawn: its far end and its arrowhead roll the view too,
+    /// not only the middle of the band.
+    #[test]
+    fn the_whole_drawn_roll_arrow_is_clickable() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"navigator_style":"cube", "look_at_anim":false}));
+        let quarter = std::f64::consts::FRAC_PI_2;
+        let rolled = |delta: f64, way: f64| (delta - way).rem_euclid(std::f64::consts::TAU) < 1e-6;
+        // Each arrow, with the angles it is drawn between in `arrows`, and the roll it performs.
+        for (name, from, to, way) in [("counterclockwise", -110.0_f32, -155.0_f32, -quarter), ("clockwise", -70.0, -25.0, quarter)] {
+            let (from, to) = (from.to_radians(), to.to_radians());
+            let along = (to - from).signum();
+            let head_angle = CURVED_ARROW_HEAD_LENGTH / CURVED_ARROW_RADIUS;
+            // Near the start of the band, and in the arrowhead just short of its tip.
+            for (where_, angle) in [("start", from + along * 0.03), ("head", to + along * (head_angle - 0.05))] {
+                h.call("ui.view", json!({"view":"front"}));
+                h.frames(2);
+                let outer = crate::scenario::rect_of("axis_view:outer").unwrap();
+                let radius = CURVED_ARROW_RADIUS * outer.width() / DESIGN_SIZE;
+                let p = outer.center() + vec2(angle.cos(), angle.sin()) * radius;
+                let before = h.app.cam.roll;
+                h.call("ui.click", json!({"x":p.x,"y":p.y}));
+                h.frames(2);
+                assert!(rolled(h.app.cam.roll - before, way), "{name} {where_}: roll went {} -> {}", before, h.app.cam.roll);
+            }
+        }
+    }
+
+    /// The pointer target follows the drawn band and head, and stops there.
+    #[test]
+    fn a_roll_arrow_contains_its_band_and_head_and_nothing_else() {
+        let centre = pos2(200.0, 300.0);
+        let (from, to) = ((-110.0_f32).to_radians(), (-155.0_f32).to_radians());
+        let along = (to - from).signum();
+        let head_angle = CURVED_ARROW_HEAD_LENGTH / CURVED_ARROW_RADIUS;
+        for scale in [1.0, 2.5] {
+            let at = |angle: f32, radius: f32| centre + vec2(angle.cos(), angle.sin()) * (radius * scale);
+            let inside = |p| curved_arrow_contains(centre, from, to, scale, p);
+            let middle = (from + to) / 2.0;
+            assert!(inside(at(middle, CURVED_ARROW_RADIUS)), "the middle of the band, scale {scale}");
+            assert!(inside(at(from + along * 0.02, CURVED_ARROW_RADIUS)), "its start, scale {scale}");
+            assert!(inside(at(to + along * (head_angle - 0.05), CURVED_ARROW_RADIUS)), "its head, scale {scale}");
+            assert!(!inside(at(from - along * 0.3, CURVED_ARROW_RADIUS)), "before its start, scale {scale}");
+            assert!(!inside(at(to + along * (head_angle + 0.3), CURVED_ARROW_RADIUS)), "past its tip, scale {scale}");
+            assert!(!inside(at(middle, CURVED_ARROW_RADIUS * 0.5)), "towards the cube, scale {scale}");
+            assert!(!inside(at(middle, CURVED_ARROW_RADIUS * 1.3)), "outside the band, scale {scale}");
+        }
+    }
+
+    /// A tooltip that names an edge or a corner joins two or three translated words. Right-to-left
+    /// catalogs are stored in display order word by word, so the joined label is put in display
+    /// order as a whole (the first word at the right); other languages read as they are joined.
+    #[test]
+    fn joined_view_names_follow_the_script_direction() {
+        let top_front = Vec3::Z - Vec3::Y;
+        for (language, rtl) in [("he", true), ("ar", true), ("en", false), ("de", false)] {
+            let _language = crate::i18n::scope(language);
+            let logical = ["ui.heading_top", "ui.heading_front"].map(|id| crate::i18n::tr(id).to_string()).join(" · ");
+            let name = view_name(top_front);
+            if rtl {
+                assert_eq!(name, crate::bidi::visual(&logical), "{language}");
+                assert_ne!(name, logical, "{language}: the words must change places");
+            } else {
+                assert_eq!(name, logical, "{language}");
+            }
+        }
+    }
+
     /// #10483: with Preferences › Navigation "Invert the curved roll arrows" on, the two curved
     /// arrows trade rolls: the clockwise arrow rolls counterclockwise, and the counterclockwise
     /// arrow rolls clockwise.
@@ -903,7 +1124,14 @@ mod tests {
         h.call("ui.prefs", json!({"navigator_style":"cube"}));
         h.app.preferences.look_at_anim = false;
         let before = h.app.session.doc.to_json();
-        for (name, direction) in [("top", Vec3::Z), ("front", -Vec3::Y), ("right", Vec3::X), ("top_front_right", Vec3::Z - Vec3::Y + Vec3::X)] {
+        for (name, direction) in [
+            ("top", Vec3::Z),
+            ("front", -Vec3::Y),
+            ("right", Vec3::X),
+            ("top_front", Vec3::Z - Vec3::Y),
+            ("front_right", Vec3::X - Vec3::Y),
+            ("top_front_right", Vec3::Z - Vec3::Y + Vec3::X),
+        ] {
             h.call("ui.view", json!({"view":"iso"}));
             let p = crate::scenario::handle_at(&format!("navigation_cube:{name}")).unwrap();
             let scale = crate::scenario::rect_of("axis_view:outer").unwrap().width() / DESIGN_SIZE;

@@ -1,0 +1,233 @@
+{
+  "en": {
+    "ui.heading_back": "BACK",
+    "ui.heading_bottom": "BOTTOM",
+    "ui.heading_left": "LEFT",
+    "ui.navigation_cube_view": "{view} view. Drag to orbit; hold Shift to snap.",
+    "ui.navigation_cube_view_free": "{view} view. Drag to orbit."
+  },
+  "ar": {
+    "ui.heading_back": "خلف",
+    "ui.heading_bottom": "أسفل",
+    "ui.heading_left": "يسار",
+    "ui.navigation_cube_view": "عرض {view}. اسحب لتدوير العرض؛ اضغط Shift للالتقاط.",
+    "ui.navigation_cube_view_free": "عرض {view}. اسحب لتدوير العرض."
+  },
+  "bs": {
+    "ui.heading_back": "OTPOZADI",
+    "ui.heading_bottom": "ODOZDO",
+    "ui.heading_left": "SLIJEVA",
+    "ui.navigation_cube_view": "Pogled {view}. Povucite za orbitiranje; držite Shift za privlačenje.",
+    "ui.navigation_cube_view_free": "Pogled {view}. Povucite za orbitiranje."
+  },
+  "ca": {
+    "ui.heading_back": "POSTERIOR",
+    "ui.heading_bottom": "INFERIOR",
+    "ui.heading_left": "ESQUERRA",
+    "ui.navigation_cube_view": "Vista {view}. Arrossegueu per orbitar; manteniu Majúscules per ajustar.",
+    "ui.navigation_cube_view_free": "Vista {view}. Arrossegueu per orbitar."
+  },
+  "cs": {
+    "ui.heading_back": "ZEZADU",
+    "ui.heading_bottom": "ZDOLA",
+    "ui.heading_left": "ZLEVA",
+    "ui.navigation_cube_view": "Pohled {view}. Tažením otáčíte; podržením Shift přichytíte.",
+    "ui.navigation_cube_view_free": "Pohled {view}. Tažením otáčíte."
+  },
+  "de": {
+    "ui.heading_back": "HINTEN",
+    "ui.heading_bottom": "UNTEN",
+    "ui.heading_left": "LINKS",
+    "ui.navigation_cube_view": "Ansicht {view}. Ziehen zum Drehen, mit Umschalt einrasten.",
+    "ui.navigation_cube_view_free": "Ansicht {view}. Ziehen zum Drehen."
+  },
+  "es": {
+    "ui.heading_back": "POSTERIOR",
+    "ui.heading_bottom": "INFERIOR",
+    "ui.heading_left": "IZQUIERDA",
+    "ui.navigation_cube_view": "Vista {view}. Arrastra para orbitar; mantén Mayús para ajustar.",
+    "ui.navigation_cube_view_free": "Vista {view}. Arrastra para orbitar."
+  },
+  "fi": {
+    "ui.heading_back": "TAKAA",
+    "ui.heading_bottom": "ALHAALTA",
+    "ui.heading_left": "VASEMMALTA",
+    "ui.navigation_cube_view": "Näkymä {view}. Kierrä vetämällä. Pidä Shift painettuna tartuntaa varten.",
+    "ui.navigation_cube_view_free": "Näkymä {view}. Kierrä vetämällä."
+  },
+  "fr": {
+    "ui.heading_back": "ARRIÈRE",
+    "ui.heading_bottom": "DESSOUS",
+    "ui.heading_left": "GAUCHE",
+    "ui.navigation_cube_view": "Vue {view}. Faire glisser pour orbiter ; maintenir Maj pour aligner.",
+    "ui.navigation_cube_view_free": "Vue {view}. Faire glisser pour orbiter."
+  },
+  "gl": {
+    "ui.heading_back": "POSTERIOR",
+    "ui.heading_bottom": "INFERIOR",
+    "ui.heading_left": "ESQUERDA",
+    "ui.navigation_cube_view": "Vista {view}. Arrastra para orbitar; mantén Maiús para axustar.",
+    "ui.navigation_cube_view_free": "Vista {view}. Arrastra para orbitar."
+  },
+  "he": {
+    "ui.heading_back": "אחור",
+    "ui.heading_bottom": "תחתון",
+    "ui.heading_left": "שמאל",
+    "ui.navigation_cube_view": "מבט {view}. יש לגרור לסיבוב המבט; יש להחזיק Shift להצמדה.",
+    "ui.navigation_cube_view_free": "מבט {view}. יש לגרור לסיבוב המבט."
+  },
+  "hr": {
+    "ui.heading_back": "STRAGA",
+    "ui.heading_bottom": "ODOZDO",
+    "ui.heading_left": "SLIJEVA",
+    "ui.navigation_cube_view": "Pogled {view}. Povucite za orbitiranje; držite Shift za privlačenje.",
+    "ui.navigation_cube_view_free": "Pogled {view}. Povucite za orbitiranje."
+  },
+  "hu": {
+    "ui.heading_back": "HÁTULNÉZET",
+    "ui.heading_bottom": "ALULNÉZET",
+    "ui.heading_left": "BALOLDALI",
+    "ui.navigation_cube_view": "Nézet: {view}. Keringéshez húzza; illesztéshez tartsa lenyomva a Shift billentyűt.",
+    "ui.navigation_cube_view_free": "Nézet: {view}. Keringéshez húzza."
+  },
+  "id": {
+    "ui.heading_back": "BELAKANG",
+    "ui.heading_bottom": "BAWAH",
+    "ui.heading_left": "KIRI",
+    "ui.navigation_cube_view": "Tampilan {view}. Seret untuk orbit; tahan Shift untuk snap.",
+    "ui.navigation_cube_view_free": "Tampilan {view}. Seret untuk orbit."
+  },
+  "it": {
+    "ui.heading_back": "POSTERIORE",
+    "ui.heading_bottom": "INFERIORE",
+    "ui.heading_left": "SINISTRA",
+    "ui.navigation_cube_view": "Vista {view}. Trascina per orbitare; tieni premuto Shift per agganciare.",
+    "ui.navigation_cube_view_free": "Vista {view}. Trascina per orbitare."
+  },
+  "ja": {
+    "ui.heading_back": "背面",
+    "ui.heading_bottom": "下面",
+    "ui.heading_left": "左側面",
+    "ui.navigation_cube_view": "{view} ビュー。ドラッグで回転、Shift を押しながらでスナップ。",
+    "ui.navigation_cube_view_free": "{view} ビュー。ドラッグで回転。"
+  },
+  "ka": {
+    "ui.heading_back": "უკანა",
+    "ui.heading_bottom": "ქვედა",
+    "ui.heading_left": "მარცხენა",
+    "ui.navigation_cube_view": "ხედი {view}. გადაათრიეთ ორბიტისთვის; მისაბმელად დააჭირეთ Shift-ს.",
+    "ui.navigation_cube_view_free": "ხედი {view}. გადაათრიეთ ორბიტისთვის."
+  },
+  "ko": {
+    "ui.heading_back": "배면",
+    "ui.heading_bottom": "하면",
+    "ui.heading_left": "좌측면",
+    "ui.navigation_cube_view": "{view} 뷰. 드래그하면 회전하고, Shift를 누르고 있으면 스냅됩니다.",
+    "ui.navigation_cube_view_free": "{view} 뷰. 드래그하면 회전합니다."
+  },
+  "ms": {
+    "ui.heading_back": "BELAKANG",
+    "ui.heading_bottom": "BAWAH",
+    "ui.heading_left": "KIRI",
+    "ui.navigation_cube_view": "Pandangan {view}. Seret untuk orbit; tahan Shift untuk jajar.",
+    "ui.navigation_cube_view_free": "Pandangan {view}. Seret untuk orbit."
+  },
+  "nb": {
+    "ui.heading_back": "BAK",
+    "ui.heading_bottom": "BUNN",
+    "ui.heading_left": "VENSTRE",
+    "ui.navigation_cube_view": "Visning {view}. Dra for å rotere visningen; hold Shift for punktfangst.",
+    "ui.navigation_cube_view_free": "Visning {view}. Dra for å rotere visningen."
+  },
+  "nl": {
+    "ui.heading_back": "ACHTER",
+    "ui.heading_bottom": "ONDER",
+    "ui.heading_left": "LINKS",
+    "ui.navigation_cube_view": "Aanzicht {view}. Sleep om te roteren; houd Shift ingedrukt om te snappen.",
+    "ui.navigation_cube_view_free": "Aanzicht {view}. Sleep om te roteren."
+  },
+  "pl": {
+    "ui.heading_back": "TYŁ",
+    "ui.heading_bottom": "DÓŁ",
+    "ui.heading_left": "LEWY",
+    "ui.navigation_cube_view": "Widok {view}. Przeciągnij, aby obracać; przytrzymaj Shift, aby przyciągać.",
+    "ui.navigation_cube_view_free": "Widok {view}. Przeciągnij, aby obracać."
+  },
+  "pt-BR": {
+    "ui.heading_back": "TRASEIRA",
+    "ui.heading_bottom": "INFERIOR",
+    "ui.heading_left": "ESQUERDA",
+    "ui.navigation_cube_view": "Vista {view}. Arraste para orbitar; segure Shift para encaixar.",
+    "ui.navigation_cube_view_free": "Vista {view}. Arraste para orbitar."
+  },
+  "ro": {
+    "ui.heading_back": "SPATE",
+    "ui.heading_bottom": "JOS",
+    "ui.heading_left": "STÂNGA",
+    "ui.navigation_cube_view": "Vedere {view}. Trageți pentru orbitare; țineți apăsat Shift pentru agățare.",
+    "ui.navigation_cube_view_free": "Vedere {view}. Trageți pentru orbitare."
+  },
+  "ru": {
+    "ui.heading_back": "СЗАДИ",
+    "ui.heading_bottom": "СНИЗУ",
+    "ui.heading_left": "СЛЕВА",
+    "ui.navigation_cube_view": "Вид {view}. Перетаскивайте для вращения; удерживайте Shift для привязки.",
+    "ui.navigation_cube_view_free": "Вид {view}. Перетаскивайте для вращения."
+  },
+  "sr": {
+    "ui.heading_back": "ОТПОЗАДИ",
+    "ui.heading_bottom": "ОДОЗДО",
+    "ui.heading_left": "СЛЕВА",
+    "ui.navigation_cube_view": "Поглед {view}. Превуците за орбитирање; држите Shift за привлачење.",
+    "ui.navigation_cube_view_free": "Поглед {view}. Превуците за орбитирање."
+  },
+  "sv": {
+    "ui.heading_back": "BAK",
+    "ui.heading_bottom": "UNDERIFRÅN",
+    "ui.heading_left": "VÄNSTER",
+    "ui.navigation_cube_view": "Vy {view}. Dra för att orbitera; håll Shift för att snappa.",
+    "ui.navigation_cube_view_free": "Vy {view}. Dra för att orbitera."
+  },
+  "tr": {
+    "ui.heading_back": "ARKA",
+    "ui.heading_bottom": "ALT",
+    "ui.heading_left": "SOL",
+    "ui.navigation_cube_view": "{view} görünümü. Döndürmek için sürükleyin; hizalamak için Shift tuşunu basılı tutun.",
+    "ui.navigation_cube_view_free": "{view} görünümü. Döndürmek için sürükleyin."
+  },
+  "uk": {
+    "ui.heading_back": "ЗЗАДУ",
+    "ui.heading_bottom": "ЗНИЗУ",
+    "ui.heading_left": "ЗЛІВА",
+    "ui.navigation_cube_view": "Вид {view}. Перетягуйте, щоб обертати; утримуйте Shift для прив’язки.",
+    "ui.navigation_cube_view_free": "Вид {view}. Перетягуйте, щоб обертати."
+  },
+  "zh-TW": {
+    "ui.heading_back": "後視",
+    "ui.heading_bottom": "下視",
+    "ui.heading_left": "左視",
+    "ui.navigation_cube_view": "{view}視圖。拖曳以環轉；按住 Shift 可鎖點。",
+    "ui.navigation_cube_view_free": "{view}視圖。拖曳以環轉。"
+  },
+  "zh": {
+    "ui.heading_back": "后视",
+    "ui.heading_bottom": "下视",
+    "ui.heading_left": "左视",
+    "ui.navigation_cube_view": "{view}视图。拖动以环绕；按住 Shift 可吸附。",
+    "ui.navigation_cube_view_free": "{view}视图。拖动以环绕。"
+  },
+  "da": {
+    "ui.heading_back": "BAGFRA",
+    "ui.heading_bottom": "NEDEFRA",
+    "ui.heading_left": "FRA VENSTRE",
+    "ui.navigation_cube_view": "Visning {view}. Træk for at rotere; hold Skift for at fastgøre.",
+    "ui.navigation_cube_view_free": "Visning {view}. Træk for at rotere."
+  },
+  "vi": {
+    "ui.heading_back": "HÌNH CHIẾU SAU",
+    "ui.heading_bottom": "HÌNH CHIẾU DƯỚI",
+    "ui.heading_left": "HÌNH CHIẾU CẠNH TRÁI",
+    "ui.navigation_cube_view": "Hướng nhìn {view}. Kéo để xoay; giữ Shift để bắt dính.",
+    "ui.navigation_cube_view_free": "Hướng nhìn {view}. Kéo để xoay."
+  }
+}
