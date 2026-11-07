@@ -385,3 +385,33 @@ fn quarter_turn_reaches_keep_the_four_bar_closed_and_diagnostics_current() {
         }
     }
 }
+
+/// A ball joint at its rest pose (yaw, pitch and roll all 0) tilts toward a nudge of its tip in
+/// every direction, not only along its pitch (#12873): there yaw and roll turn about the same
+/// axis, so pitch alone tilts it, one way. The same holds a hair off the rest pose.
+#[test]
+fn a_ball_joint_at_rest_tilts_toward_a_sideways_nudge() {
+    let side = (22.0f64 * 22.0 - 1.0).sqrt();
+    for (start, to) in [
+        (None, Vec3::new(1.0, 0.0, side)),
+        (None, Vec3::new(0.0, 1.0, side)),
+        (None, Vec3::new(-1.0, 0.0, side)),
+        (None, Vec3::new(0.0, -1.0, side)),
+        (Some(Vec3::new(0.0, 1e-3, 22.0)), Vec3::new(1.0, 0.0, side)),
+    ] {
+        let mut s = Session::default();
+        part(&mut s, "Socket", [-1.0, -1.0, -1.0]);
+        part(&mut s, "Ball", [-1.0, -1.0, 21.0]);
+        let socket = occ(&s, "Socket");
+        run(&mut s, "occurrence.ground", json!({"occurrence": socket, "grounded": true}));
+        pin(&mut s, "ball", "Ball joint", "Socket", "Ball", Vec3::ZERO, Vec3::Z);
+        let tip = Vec3::new(0.0, 0.0, 22.0);
+        if let Some(near) = start {
+            reach(&mut s, "Ball", tip, json!({"point": pt(near)}));
+        }
+        let r = reach(&mut s, "Ball", tip, json!({"point": pt(to)}));
+        assert_eq!((&r["reached"], &r["moved"]), (&json!(true), &json!(true)), "from {start:?} to {to:?}: {r}");
+        assert!(got(&r).dist(to) < 1e-3, "from {start:?} to {to:?}: {r}");
+        assert!(place(&s, "Ball", tip).dist(to) < 1e-3, "from {start:?} to {to:?}: {r}");
+    }
+}
