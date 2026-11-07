@@ -933,6 +933,29 @@ fn a_dimension_gone_while_its_drawing_was_closed_is_not_shown_or_kept() {
     assert!(!s.drawing_scenes.dimensions.contains_key(&id));
 }
 
+/// A held deferred drawing closed, its model changed and opened again exports from the copy a
+/// background export runs on as the session does, before anything reads its sheet: its views' and
+/// its dimension's kept lines, out of date. The copy goes first, as a file export does, since the
+/// session's own export takes the kept lines back.
+#[test]
+fn a_reopened_held_drawing_exports_the_same_from_a_scratch_copy_before_its_sheet_is_read() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    front_edge(&mut s, front);
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    run(&mut s, "drawing.update", json!({}));
+    settled(&mut s, sheet);
+    run(&mut s, "drawing.close", json!({}));
+    let block = s.doc.features[0].id;
+    run(&mut s, "timeline.edit", json!({"feature": block.to_string(), "set": {"height": 40}}));
+    run(&mut s, "drawing.open", drawing);
+    let svg = json!({"sheet": ids::encode(sheet), "format": "svg"});
+    let there = s.scratch_as_shown().execute("drawing.export", &svg).unwrap();
+    let here = run(&mut s, "drawing.export", svg);
+    assert_eq!(here["out_of_date"].as_array().map(Vec::len), Some(3), "held, its two views' and its dimension's last lines: {here}");
+    assert_eq!((&there["svg"], &there["out_of_date"]), (&here["svg"], &here["out_of_date"]));
+}
+
 /// `drawing.update` on a drawing that follows the model changes nothing, and draws nothing itself.
 #[test]
 fn updating_an_automatic_drawing_changes_nothing() {

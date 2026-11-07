@@ -2079,7 +2079,7 @@ impl Session {
     /// since its last update keeps its views' last lines. The copy a sheet export runs on beside the
     /// window.
     pub fn scratch_as_shown(&self) -> Session {
-        Session { drawing_scenes: self.drawing_scenes.shown_copy(), ..self.scratch() }
+        Session { drawing_scenes: self.drawing_scenes.shown_copy(self.open_drawing), ..self.scratch() }
     }
 
     /// Evaluate a feature dialog's complete transaction, including the dependent timeline.
