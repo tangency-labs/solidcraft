@@ -39,6 +39,22 @@ sketch_scale = { master = "scale", accent = "sketch" }
 sketch_text = { master = "text", accent = "sketch" }
 surface_fair = { master = "spline_cv", accent = "surface" }
 mesh_export = { master = "export", accent = "mesh" }
+# Same toolbar row: colour the shared master so each command reads apart (#11482).
+component_from_bodies = { master = "component", accent = "form" }
+insert_design = { master = "component", accent = "mesh" }
+import_mesh = { master = "import", accent = "mesh" }
+import_point_cloud = { master = "import", accent = "construction" }
+component_properties = { master = "measure", accent = "form" }
+canvas_edit = { master = "canvas", accent = "form" }
+contact_check = { master = "interference", accent = "form" }
+view_save = { master = "camera", accent = "form" }
+# MODEL / SKETCH: New Sketch vs Edit Sketch shared the sketch master (#11482 / #12134).
+sketch_edit = { master = "edit", accent = "sketch" }
+# 3D sketch tools share 2D masters; construction accent marks them as off-plane (#11482).
+line3d = { master = "line", accent = "construction" }
+arc3d = { master = "arc3", accent = "construction" }
+spline3d = { master = "spline", accent = "construction" }
+point3d = { master = "point", accent = "construction" }
 
 # Legacy feature-history id for the same Split Body operation.
 split = "split_body"

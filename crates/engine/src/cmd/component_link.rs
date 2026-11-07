@@ -47,7 +47,7 @@ const LINKS_CONTRACT: TypedContract<LinksParams> = TypedContract::new();
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.insert_design", "Insert Design", crate::checked!("component.insert_design", insert_design))
         .at("SOLID", "ASSEMBLE")
-        .icon("component")
+        .icon("insert_design")
         .contract(&INSERT_DESIGN_CONTRACT)
         .output(output_schema_for::<InsertDesignResult>)
         .params(

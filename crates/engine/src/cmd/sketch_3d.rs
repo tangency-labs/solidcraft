@@ -14,23 +14,23 @@ use crate::params::{bad, req_vec3, vec3};
 use crate::{Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("sketch.line3d", "3D Line", line3d).icon("line").enabled(in_sketch_3d).params(concat!(
+    CommandSpec::new("sketch.line3d", "3D Line", line3d).icon("line3d").enabled(in_sketch_3d).params(concat!(
         "points: [[x,y,z]…] world points (2 or more): one 3D line per segment, joined end to end (needs 3D Sketch on)",
         created_doc!()
     )),
     CommandSpec::new("sketch.spline3d", "3D Spline", spline3d)
-        .icon("spline")
+        .icon("spline3d")
         .enabled(in_sketch_3d)
         .params(concat!("points: [[x,y,z]…] world fit points (2 or more): a smooth 3D curve through them (needs 3D Sketch on)", created_doc!())),
     CommandSpec::new("sketch.arc3d", "3D Arc", arc3d)
-        .icon("arc3")
+        .icon("arc3d")
         .enabled(in_sketch_3d)
         .params(concat!(
             "start, through, end: [x,y,z] world points: an exact circular arc through them, from start through through to end (needs 3D Sketch on). Stored exactly (centre, radius, angles), so path consumers can treat it as a true arc",
             created_doc!()
         )),
     CommandSpec::new("sketch.point3d", "3D Point", point3d)
-        .icon("point")
+        .icon("point3d")
         .enabled(in_sketch_3d)
         .params(concat!("point: [x,y,z] world point (needs 3D Sketch on)", created_doc!())),
     CommandSpec::new("sketch.move3d", "Move 3D Point", move3d)

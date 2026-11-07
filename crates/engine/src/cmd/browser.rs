@@ -85,7 +85,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(crate::schema::output_schema_for::<DocumentUnitsResult>)
         .params("units: mm|cm|m|in|ft (display and unit-less parameters; values keep their meaning)"),
     CommandSpec::new("view.save", "New Named View", view_save)
-        .icon("camera")
+        .icon("view_save")
         .params("name?; camera: {target: [x,y,z], yaw, pitch, distance, fov?} (replaces a view of the same name)"),
     CommandSpec::new("view.rename", "Rename Named View", view_rename).icon("rename").params("view: name, name"),
     CommandSpec::new("view.delete", "Delete Named View", view_delete).icon("delete").params("view: name"),

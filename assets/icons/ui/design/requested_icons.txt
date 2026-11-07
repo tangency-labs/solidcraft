@@ -5,6 +5,7 @@ align	false
 ambient_occlusion	false
 appearance	false
 arc3	false
+arc3d	false
 arc_center	false
 arc_slot	false
 arc_slot_center	false
@@ -44,6 +45,7 @@ c_tangent	false
 cam	false
 camera	false
 canvas	false
+canvas_edit	false
 capture	false
 center_of_mass	false
 centerline	false
@@ -63,6 +65,8 @@ colored_components	false
 combine	false
 compare	false
 component	false
+component_from_bodies	false
+component_properties	false
 compute	false
 cone	false
 configuration_table	false
@@ -80,6 +84,7 @@ construction_line_tangent_external	false
 construction_line_tangent_two	false
 construction_line_vertical	false
 contact_all	false
+contact_check	false
 contact_new	false
 contact_off	false
 contact_sets	false
@@ -134,9 +139,12 @@ hem	false
 hole	false
 home	false
 import	false
+import_mesh	false
+import_point_cloud	false
 import_tray	false
 include	false
 infinite	false
+insert_design	false
 inspect	false
 interference	false
 intersect	false
@@ -147,6 +155,7 @@ joint	false
 joint_origin	false
 library	false
 line	false
+line3d	false
 line_mid	false
 lip	false
 list	false
@@ -192,6 +201,7 @@ plastic_rule	false
 play	false
 plus	false
 point	false
+point3d	false
 point_along_path	false
 point_center	false
 point_edge_plane	false
@@ -260,6 +270,7 @@ sketch_chamfer_two	false
 sketch_chamfer_two_distances	false
 sketch_circ_pattern	false
 sketch_dxf	false
+sketch_edit	false
 sketch_fillet	false
 sketch_mirror	false
 sketch_move	false
@@ -274,6 +285,7 @@ snap_fit	false
 sphere	false
 spin	false
 spline	false
+spline3d	false
 spline_cv	false
 split	false
 split_body	false
@@ -321,6 +333,7 @@ trim	false
 undo	false
 unfold	false
 update	false
+view_save	false
 warning	false
 web	false
 ws_animate	false

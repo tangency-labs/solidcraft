@@ -91,7 +91,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<ContactSets>)
         .params("→ sets, enabled, all"),
     CommandSpec::new("contact.check", "Check Contact", crate::checked!("contact.check", check))
-        .icon("interference")
+        .icon("contact_check")
         .noundo()
         .contract(&CONTACT_NONE_CONTRACT)
         .output(output_schema_for::<ContactCheck>)
