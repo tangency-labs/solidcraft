@@ -151,25 +151,41 @@ pub fn dim_frame(sk: &Sketch, k: &ConstraintKind) -> Option<DimFrame> {
             }
             _ => return None,
         },
-        Angle { a, b, flip, .. } => {
-            let (a0, a1) = line_ends(sk, a)?;
-            let (b0, b1) = line_ends(sk, b)?;
-            let (da, mut db) = (unit(a1 - a0, Vec2::X), unit(b1 - b0, Vec2::Y));
-            if flip {
-                db = -db;
-            }
-            let den = da.cross(db);
-            let (ma, mb) = ((a0 + a1) * 0.5, (b0 + b1) * 0.5);
-            let vertex = if den.abs() < 1e-12 { (ma + mb) * 0.5 } else { a0 + da * ((b0 - a0).cross(db) / den) };
-            // The angle from `da` to `db` equals the one from `-da` to `-db`: draw the pair of
-            // rays that point at the lines themselves.
-            let score = |s: f64| (ma - vertex).dot(da * s) + (mb - vertex).dot(db * s);
-            let s = if score(1.0) >= score(-1.0) { 1.0 } else { -1.0 };
-            let (d0, d1) = (da * s, db * s);
-            DimFrame::Angular { vertex, d0, sweep: d0.cross(d1).atan2(d0.dot(d1)).rem_euclid(std::f64::consts::TAU) }
-        }
+        Angle { a, b, flip, .. } => return angle_frame(sk, a, b, flip, None),
         _ => return None,
     })
+}
+
+/// [`dim_frame`] for a dimension whose text is stored at `text` (as in [`encode_text`]): an
+/// angle between two lines is drawn in the sector that holds its text (#11800).
+pub fn dim_frame_placed(sk: &Sketch, k: &ConstraintKind, text: Option<Vec2>) -> Option<DimFrame> {
+    match *k {
+        ConstraintKind::Angle { a, b, flip, .. } => angle_frame(sk, a, b, flip, text),
+        _ => dim_frame(sk, k),
+    }
+}
+
+/// The angle from line `a` to line `b` (`b` reversed when `flip`). The angle from `da` to `db`
+/// equals the one from `-da` to `-db`, so it has two opposite sectors: the one that holds
+/// `text` (relative to the vertex), else the one whose rays point at the lines themselves.
+fn angle_frame(sk: &Sketch, a: usize, b: usize, flip: bool, text: Option<Vec2>) -> Option<DimFrame> {
+    let unit = |v: Vec2, or: Vec2| v.normalized().unwrap_or(or);
+    let (a0, a1) = line_ends(sk, a)?;
+    let (b0, b1) = line_ends(sk, b)?;
+    let (da, mut db) = (unit(a1 - a0, Vec2::X), unit(b1 - b0, Vec2::Y));
+    if flip {
+        db = -db;
+    }
+    let den = da.cross(db);
+    let (ma, mb) = ((a0 + a1) * 0.5, (b0 + b1) * 0.5);
+    let vertex = if den.abs() < 1e-12 { (ma + mb) * 0.5 } else { a0 + da * ((b0 - a0).cross(db) / den) };
+    let sweep = da.cross(db).atan2(da.dot(db)).rem_euclid(std::f64::consts::TAU);
+    let holds_text =
+        |s: f64| text.filter(|t| t.len() > 1e-12).is_some_and(|t| (t.angle() - (da * s).angle()).rem_euclid(std::f64::consts::TAU) <= sweep);
+    let score = |s: f64| (ma - vertex).dot(da * s) + (mb - vertex).dot(db * s);
+    let toward_lines = if score(1.0) >= score(-1.0) { 1.0 } else { -1.0 };
+    let s = [1.0, -1.0].into_iter().find(|s| holds_text(*s)).unwrap_or(toward_lines);
+    Some(DimFrame::Angular { vertex, d0: da * s, sweep })
 }
 
 /// The stored text position for text centred at `at`.
@@ -582,6 +598,34 @@ mod tests {
         let l = dim_layout(&DimFrame::Angular { vertex, d0, sweep }, None, 0.1, Vec2::ZERO);
         assert_eq!(l.arrows.len(), 2);
         assert!(l.text.x > 0.0 && l.text.y > 0.0);
+    }
+
+    #[test]
+    fn an_angle_is_drawn_in_the_opposite_sector_that_holds_its_text() {
+        // #11800: a base line ending at the origin and a line rising at 45° from there. Their
+        // 45° angle lies both above the base line's extension (up right) and below the rising
+        // line's extension (down left); it is drawn on the side its text was placed.
+        let mut sk = Sketch::new();
+        let a = sk.add_line(Vec2::new(-100.0, 0.0), Vec2::new(0.0, 0.0), None, None, None).unwrap_or(0);
+        let end = sk.curves[a].kind.point_ids()[1];
+        let b = sk.add_line(Vec2::new(0.0, 0.0), Vec2::new(50.0, 50.0), Some(end), None, None).unwrap_or(0);
+        let k = ConstraintKind::Angle { a, b, value: std::f64::consts::FRAC_PI_4, flip: false };
+        let first_ray = |text: Option<Vec2>| match dim_frame_placed(&sk, &k, text) {
+            Some(DimFrame::Angular { vertex, d0, sweep }) => {
+                assert!(close(vertex, Vec2::ZERO) && (sweep - std::f64::consts::FRAC_PI_4).abs() < 1e-12, "{vertex:?} {sweep}");
+                d0
+            }
+            other => panic!("no angular frame: {other:?}"),
+        };
+        assert!(close(first_ray(Some(Vec2::new(20.0, 8.0))), Vec2::X), "up right, above the extended base line");
+        assert!(close(first_ray(Some(Vec2::new(-20.0, -8.0))), -Vec2::X), "down left, below the extended rising line");
+        // Unplaced, or placed in a sector that measures another angle, it keeps the rays that
+        // point at the lines themselves, as before.
+        let toward_lines = -Vec2::X;
+        assert!(close(first_ray(None), toward_lines));
+        assert!(close(first_ray(Some(Vec2::new(0.0, 20.0))), toward_lines));
+        assert!(close(first_ray(Some(Vec2::ZERO)), toward_lines));
+        assert_eq!(dim_frame(&sk, &k), dim_frame_placed(&sk, &k, None));
     }
 
     #[test]
