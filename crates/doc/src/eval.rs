@@ -6962,6 +6962,16 @@ fn replay(
                 continue;
             }
         }
+        // A cut or intersect copy with no named targets works on the bodies of its source's
+        // component, as the source did, not those of the component active when the pattern
+        // was made (#12996).
+        let scoped;
+        let f = if matches!(op, Operation::Cut | Operation::Intersect) && targets.is_empty() && src.component != f.component {
+            scoped = Feature { component: src.component, ..f.clone() };
+            &scoped
+        } else {
+            f
+        };
         // New bodies from a pattern join their source when they touch it (as one feature would).
         if f.body_names.is_empty() {
             apply_traced(doc, st, f, copies, op, &targets)?;
