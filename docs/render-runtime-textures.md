@@ -1,6 +1,6 @@
-# Runtime planar opaque maps
+# Opaque surface maps
 
-The renderer supports built-in sources, absolute-color mode, explicit V orientation, linear roughness/metallic maps and content-addressed texture sharing. See [built-in library](render-built-in-library.md) for its bounded resource contract. Legacy examples below retain modulation and rows-down defaults.
+Surface maps provide base colour, OpenGL tangent-space normals, roughness and metallic values. Built-in sources can be saved with a shot using stable definition/feature/occurrence identity and pinned version/digests. See [built-in library](render-built-in-library.md) for its bounded resource contract. Legacy examples below retain modulation and rows-down defaults. Engineering geometry and material properties are unchanged.
 
 Progressive GPU jobs accept immutable per-body base-color and OpenGL tangent-space
 normal maps. Runtime commands capture file bytes once; queued work does not reopen paths.
@@ -12,6 +12,26 @@ physical grain orientation, offline reopening and native CPU execution.
 ```json
 {"progressive":true,"raytrace":{"textures":[{"body_index":3,"body_name":"Walnut tabletop","frame":{"origin":[0,0,480],"u":[900,0,0],"v":[0,90,0]},"base_color_srgb":"C:/art/wood.png","normal_opengl":"C:/art/wood-normal.png","normal_strength":0.35}]}}
 ```
+
+CPU ray tracing consumes saved opaque maps in direct lighting and the optional
+progressive Indirect lighting route. In the library, choose a surface and **Save
+maps to shot**. The same binding command works offline without a render host:
+
+```json
+{"name":"Studio","set":{"job":{"method":"cpu_raytrace","options":{"progressive":{"samples_per_pixel":16,"seed":9}}}},"surface":{"id":"SURF-001","body_index":0,"body_name":"Panel"}}
+```
+
+Pass this object to `render.library.surface.bind`; it is one Undo step. The target
+must match `render.scene`. Check and Start resolve the saved stable identity again.
+Missing, hidden, changed or ambiguous targets and mismatched installed source
+versions/digests refuse rather than rebinding another body. CPU temporary map paths
+remain unavailable. Imported design-owned images use the separate saved-resource
+workflow described in [portable surfaces](render-portable-surfaces-and-stages.md).
+CPU maps require an opaque target. With Indirect lighting, Glass may be assigned to
+another body, but maps and Glass cannot share a target. Selected custom reflections,
+anisotropic faces and procedural surface-effect overrides remain incompatible;
+authored settings stay intact and the request refuses. Raster does not consume
+these bindings. A CPU producer must be installed before a CPU image can start.
 
 Each `u` and `v` world-space vector spans one complete repeat, in millimetres. The
 vectors must be nonzero, orthogonal, and 0.001–1,000,000 mm long. The origin is UV
@@ -53,6 +73,9 @@ not change their encoded samples or introduce a new refusal. Portable design-own
 imports require normalized sRGB declarations for base color and validate static
 metadata before publication. The native CPU metadata worker also rejects conflicting
 base-color declarations. Normal and scalar roles retain their raw numerical channels.
+The cooperative native CPU map worker accepts static noninterlaced 8-bit PNG
+layouts and refuses JPEG, interlace, APNG and other depths. For CPU execution, normalize JPEG or interlaced images to this PNG contract before
+import. Import stores exact supplied bytes and performs no conversion.
 No implicit color-profile conversion is performed. The sRGB
 base/data normal distinction follows the public
 [Khronos glTF material semantics](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#materials),
@@ -76,6 +99,17 @@ sixteen-entry capacity. Captured scene options select at most six cached program
 The independent progressive device requests six storage buffers per shader
 stage. An adapter limited to fewer cannot install this executor; raster and
 tessellation device requirements remain unchanged.
+
+CPU completes the Effects→Maps→Aging closure before the hit's direct/GI BRDF,
+PDF and proposal, and before deterministic denoise guides. Supported combinations
+are documented in [CPU Path](render-cpu-path.md) and [CPU Glass](render-cpu-general-glass.md).
+Maps add no rays or sampling dimensions. Omitted maps allocate no prepared cache
+and retain the original image calculation. CPU work and registered-executor
+resource Arcs move into work; public requests retain summaries. Completed frames,
+raw EXR masters and status handles do not retain source bytes after work release.
+`work_released`, rather than a terminal phase alone, remains the retirement barrier.
+Cancellation, decode failure and late cancellation cannot publish a partial cache
+or completed image.
 
 Independent f64 tests cover explicit sRGB decoding, linear normal channels,
 repeat filtering, handedness, degenerate fallback, admission and lifecycle.

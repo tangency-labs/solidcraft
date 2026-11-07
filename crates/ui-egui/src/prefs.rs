@@ -30,6 +30,7 @@ mod interface;
 mod mouse3d;
 mod navbar;
 mod navigation;
+mod panel_layout;
 mod sketch;
 mod theme_picker;
 mod tools;
@@ -1067,6 +1068,9 @@ preference_settings! {
     /// left drag with the mapping's keys does: letting go of Shift partway through a Shift+middle
     /// orbit doesn't turn it into a pan (#9557). Off: the keys held decide on every frame, as before.
     nav_drag_keeps_mode: bool = true, PAGE_NAVIGATION => check_tr("nav.drag_keeps_mode.label");
+    /// An orbit drag that reaches the edge of the view moves the cursor to the opposite edge and
+    /// keeps turning; false stops the drag at the edge of the screen, as before.
+    orbit_cursor_wrap: bool = true, PAGE_NAVIGATION => check_tr("nav.orbit_cursor_wrap.label");
     /// View orientation widget: original signed axes (default) or compact cube.
     navigator_style: NavigatorStyle = NavigatorStyle::default(), PAGE_NAVIGATION;
     /// The custom view gizmo's colours: the cube's (themed) or the body's own (modeled).
@@ -1181,6 +1185,12 @@ preference_settings! {
     cut_preview_tint: bool = true, PAGE_GRAPHICS => check_id("prefs.cut_preview_tint");
     /// Restore the previous platform-specific fixed Render preview geometry budget.
     render_previous_geometry_budget: bool = false, PAGE_GRAPHICS => check_id("prefs.render_previous_geometry_budget");
+    /// Restore Raster for new Render setups, fixed CPU sampling and its mode selector.
+    /// Refit on entry and keep shot activation camera-neutral, with the previous preview
+    /// framing, navigation, picking and selection overlays. Disable automatic live feedback
+    /// and automatic result opening; retain the previous result/cancel viewing behavior.
+    /// GPU sample edits round to powers of two.
+    render_legacy_image_defaults: bool = false, PAGE_GRAPHICS => check_id("prefs.render_legacy_image_defaults");
     /// How finely the viewport tessellates curved faces and edges: `coarse`, `normal`, `fine` or
     /// `ultra` (#1287). Only the display plan the viewport draws; never the design or exports.
     display_quality: String = "normal".into(), PAGE_GRAPHICS;
@@ -1315,6 +1325,9 @@ preference_settings! {
     /// click shows its panels over the view until a command starts or the pointer leaves them.
     /// Off by default: the whole ribbon shows. `view.ribbon_tabs_only` switches it.
     ribbon_tabs_only: bool = false, PAGE_LAYOUT;
+    /// A double-click on a design tab renames the design in the tab; off, it maximizes the window
+    /// as the rest of the title bar does, as before.
+    tab_double_click_renames: bool = true, PAGE_LAYOUT;
     /// Where a dialog's OK and Cancel sit: under its inputs (the default) or in its title row (#6708).
     dialog_buttons: crate::ui_kit::DialogButtons = Default::default(), PAGE_LAYOUT;
     /// Where notices and offers stack: the view's bottom-right corner (the default) or the bottom
@@ -1365,6 +1378,14 @@ preference_settings! {
     /// A Play History button in the History controls, between Previous and Next (#3688). Off
     /// gives the four controls History had before; right-clicking the controls toggles it too.
     history_play_button: bool = true, PAGE_LAYOUT;
+    /// On, two or more joints show as one button with their count in the History, and a click
+    /// shows each one (#8884). Off, the default, shows each joint as the History always has.
+    history_group_joints: bool = false, PAGE_LAYOUT;
+    /// On, the History bar folds long runs of one component's features into chips and starts
+    /// feature folders folded, and a STEP insert that brings more than one item goes into a
+    /// `Group #N` folder (#8885). Off, the default, shows each feature, starts folders open and
+    /// makes no folder, as the bar always has.
+    history_bar_groups: bool = false, PAGE_LAYOUT;
     /// The vertical history (left, or under the browser) starts with the active component's Bodies
     /// folder and the Origin, as the browser shows them (#6490). The bottom strip is unchanged.
     timeline_origin_bodies: bool = false, PAGE_LAYOUT;
@@ -1465,6 +1486,10 @@ preference_settings! {
     /// hole moves the hole there (`hole_place`). Off by default: a second pick on its face takes
     /// the hole out, and a hole is moved by taking it out and picking again.
     hole_moves: bool = false, PAGE_TOOLS => check("Move holes by clicking or dragging");
+    /// A face takes several Single holes: a pick elsewhere on a face that has a hole adds another,
+    /// and a pick on a hole takes it out (`hole_place`). Off by default: a face takes one Single
+    /// hole, and a second pick on it takes the hole out (or moves it, with `hole_moves`).
+    hole_several: bool = false, PAGE_TOOLS => check_id("prefs.design_tools.hole_several");
     /// The browser's Origin folder starts hidden in designs that don't keep its eye themselves.
     hide_origin: bool = false, PAGE_DESIGN => check_tr("ui.hide_origin_by_default");
     /// Handles on the preview of a feature placed on a face (Rest, Boss, Snap Fit): a marker that
@@ -1622,6 +1647,10 @@ preference_settings! {
     /// Opening or editing a sketch turns the view to face it (the default). Off: the view stays as
     /// it is, and Look At faces the sketch when asked.
     sketch_open_look_at: bool = true, PAGE_SKETCH;
+    /// Two quick presses of Esc in a sketch, with nothing left to cancel, finish it (the default,
+    /// as before). Off: Esc only cancels the tool, dialog or selection and the sketch stays open;
+    /// Finish Sketch ends it (#12069).
+    escape_twice_finishes_sketch: bool = true, PAGE_SKETCH;
     /// A sketch started on a face of a body in another component than the active one activates
     /// that component first, so the sketch belongs to it (`sketch.create` `activate_part`,
     /// #10215). Off (the default): the sketch belongs to the active component, as before.
@@ -1663,6 +1692,9 @@ preference_settings! {
     /// converted to the unit the value is written in) and to an angle (degrees).
     dimension_step_mm: f64 = 1.0, PAGE_SKETCH, accept(DIMENSION_STEP_MM);
     dimension_step_deg: f64 = 1.0, PAGE_SKETCH, accept(DIMENSION_STEP_DEG);
+    /// The first length dimension of a sketch with nothing sized yet scales the whole drawing to
+    /// its value (#1365). Off: it sizes only what it measures (#4109).
+    first_dimension_scales: bool = true, PAGE_SKETCH;
     /// When true: Shift+click adds without removing; Primary toggles.
     /// When false (default): Shift and Primary both toggle.
     selection_shift_add_only: bool = false, PAGE_SKETCH;
@@ -1747,6 +1779,11 @@ pub struct PrefsWindow {
     font_filter: String,
     /// Search text on the Plugins page.
     pub(crate) plugin_query: String,
+    /// A failed Cancel retains the baseline until restoring it succeeds.
+    panel_restore_error: Option<String>,
+    panel_restore_details: bool,
+    panel_restore_retry: bool,
+    panel_popup_reset: bool,
     /// The followed theme file's state (#7573): its last good theme and why a read failed.
     pub(crate) follow: crate::theme_files::Follow,
     /// Filters every page. Empty leaves the selected page as it is.
@@ -1851,6 +1888,10 @@ pub(crate) fn open_profiles(app: &mut SolveApp) {
 #[derive(Clone)]
 struct Snapshot {
     prefs: Prefs,
+    panel_layout: Option<serde_json::Value>,
+    panel_layout_state: crate::panel_runtime::PanelLayoutSnapshot,
+    /// With no record yet, keep the small deferred legacy import state too.
+    panel_layout_deferred: Option<crate::panel_runtime::PanelLayoutPreferences>,
     dark: bool,
     layout: crate::shell::LayoutMode,
     grid: bool,
@@ -1872,8 +1913,13 @@ struct Snapshot {
 
 impl Snapshot {
     fn take(app: &SolveApp) -> Snapshot {
+        let panel_layout = crate::panel_runtime::preferences_value(app);
+        let panel_layout_deferred = panel_layout.is_none().then(|| app.panel_layout_preferences.clone());
         Snapshot {
             prefs: app.preferences.clone(),
+            panel_layout,
+            panel_layout_state: crate::panel_runtime::panel_layout_snapshot(app),
+            panel_layout_deferred,
             dark: app.ui.dark,
             layout: app.ui.layout,
             grid: app.ui.show_grid,
@@ -1892,7 +1938,8 @@ impl Snapshot {
             profile: app.settings_profiles.active.clone(),
         }
     }
-    fn restore(self, app: &mut SolveApp) {
+    /// Restore ordinary preferences after the panel transaction has succeeded.
+    fn restore_other_preferences(self, app: &mut SolveApp) {
         let graphics = (app.preferences.msaa, app.preferences.window_system.clone(), app.preferences.graphics_adapter.clone());
         let units_changed = app.preferences.default_units != self.prefs.default_units;
         // Update bookkeeping isn't a setting: a check that finished while the dialog was open stays.
@@ -1930,6 +1977,9 @@ impl Snapshot {
     fn matches(&self, app: &SolveApp) -> bool {
         let Snapshot {
             prefs,
+            panel_layout: _,
+            panel_layout_state,
+            panel_layout_deferred,
             dark,
             layout,
             grid,
@@ -1948,6 +1998,8 @@ impl Snapshot {
             profile,
         } = self;
         *prefs == app.preferences
+            && crate::panel_runtime::panel_layout_matches(app, panel_layout_state)
+            && panel_layout_deferred.as_ref().is_none_or(|deferred| *deferred == app.panel_layout_preferences)
             && *dark == app.ui.dark
             && *layout == app.ui.layout
             && *grid == app.ui.show_grid
@@ -2024,6 +2076,12 @@ pub(crate) fn held_overlay(app: &SolveApp) -> Option<serde_json::Map<String, ser
         m.insert(key.to_string(), value);
     }
     Some(m)
+}
+
+/// The outer option means the dialog owns a snapshot; the inner option keeps
+/// an absent layout distinct from a present, corrupt JSON null record.
+pub(crate) fn held_panel_layout(app: &SolveApp) -> Option<Option<serde_json::Value>> {
+    app.prefs_window.snapshot.as_ref().map(|snapshot| snapshot.panel_layout.clone())
 }
 
 /// The colour theme (#2255): Dark, Light, System, the built-in theme files and the imported
@@ -2627,6 +2685,11 @@ fn unfold(ctx: &egui::Context) {
 }
 
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
+    if std::mem::take(&mut app.prefs_window.panel_popup_reset)
+        || (app.prefs_window.section != PAGE_LAYOUT && app.prefs_window.filter.trim().is_empty())
+    {
+        panel_layout::closed(ctx);
+    }
     crate::settings_profiles::rename_popup(app, ctx);
     // File › Keyboard Shortcuts and Help › Keyboard Shortcuts open this dialog at that page.
     if app.keymap.open {
@@ -2635,6 +2698,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     app.prefs_window.import_tile = None;
     if !app.prefs_window.open {
+        panel_layout::closed(ctx);
         app.prefs_window.filter.clear();
         app.prefs_window.search_from = None;
         app.prefs_window.land_on = None;
@@ -2663,6 +2727,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let before = app.preferences.clone();
     let capturing = crate::keymap::capturing(app);
     let pending = apply_pending(app);
+    panel_layout::reserve_escape(ctx);
     let window = ui_kit::Window::new(egui::Id::unique("sc_prefs"), "settings", app.tr("ui.preferences"))
         .cards(10.0 / 3.0)
         .page_rows(24.0)
@@ -2675,9 +2740,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         })
         .fields()
         .actions("OK", "Cancel", Some("Apply"))
-        .apply_enabled(pending);
+        .apply_enabled(pending && app.prefs_window.panel_restore_error.is_none());
     let window = if capturing { window.keep_open_on_escape() } else { window };
     let mut selected = app.prefs_window.section;
+    let layout_page = selected == PAGE_LAYOUT;
     let (closed, action) = window.show_pages_with_header(
         ctx,
         &mut selected,
@@ -2687,8 +2753,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         clear_search,
         Some((Tokens::get().space_24 * 2.0, crate::settings_profiles::sidebar)),
         |ui| {
-            let defaults = ui_kit::button(ui, crate::i18n::tr("prefs.restore_page_defaults"), ui_kit::Button::Ghost)
-                .backing_on_hover_text(crate::i18n::tr("ui.reset_the_settings_on_this_page"));
+            let defaults = ui_kit::button(ui, crate::i18n::tr("prefs.restore_page_defaults"), ui_kit::Button::Ghost).backing_on_hover_text(
+                crate::i18n::tr(if layout_page { "ui.panel_layout.page_defaults_hint" } else { "ui.reset_the_settings_on_this_page" }),
+            );
             crate::scenario::publish_target("prefs:defaults", defaults.rect);
             if defaults.clicked() {
                 button = Some("defaults");
@@ -2722,9 +2789,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if app.preferences.up_axis != before.up_axis {
         up_axis_changed(app);
     }
+    if std::mem::take(&mut app.prefs_window.panel_restore_retry) {
+        close(app, true);
+    }
     match button {
         Some("defaults") => defaults(app, app.prefs_window.section),
-        Some("apply") => app.prefs_window.snapshot = Some(Snapshot::take(app)),
+        Some("apply") if app.prefs_window.panel_restore_error.is_none() => app.prefs_window.snapshot = Some(Snapshot::take(app)),
         Some("ok") => close(app, false),
         Some("cancel") => close(app, true),
         _ if closed => close(app, true),
@@ -2739,15 +2809,28 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// Close the dialog; `revert`: put back what was there when it opened (Cancel, Esc, ×).
 pub(crate) fn close(app: &mut SolveApp, revert: bool) {
+    let revert = revert || app.prefs_window.panel_restore_error.is_some();
     if let Some(s) = app.prefs_window.snapshot.take()
         && revert
     {
+        if let Err(reason) = crate::panel_runtime::restore_preferences(app, s.panel_layout.clone()) {
+            app.prefs_window.snapshot = Some(s);
+            app.prefs_window.open = true;
+            app.prefs_window.panel_restore_error = Some(solidcraft_engine::panels::commands::error_text(reason));
+            return;
+        }
+        if let Some(deferred) = &s.panel_layout_deferred {
+            app.panel_layout_preferences.clone_from(deferred);
+        }
         let up = app.preferences.up_axis.clone();
-        s.restore(app);
+        s.restore_other_preferences(app);
         if app.preferences.up_axis != up {
             up_axis_changed(app);
         }
     }
+    app.prefs_window.panel_restore_error = None;
+    app.prefs_window.panel_restore_details = false;
+    app.prefs_window.panel_popup_reset = true;
     app.prefs_window.open = false;
     app.prefs_window.filter.clear();
     app.prefs_window.search_from = None;
@@ -2769,7 +2852,49 @@ fn up_axis_changed(app: &mut SolveApp) {
 
 /// One page of the dialog. Inputs share the kit's aligned rows and tokenised controls.
 /// A search draws every page and keeps the controls that match.
+fn panel_restore_banner(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
+    let Some(reason) = app.prefs_window.panel_restore_error.clone() else { return };
+    let shown = ui_kit::Container::show_backing(
+        ui,
+        ui_kit::Container::new(ui.ctx(), ui_kit::Surface::Navigation)
+            .edge_frame(t.form_error_fill)
+            .stroke(egui::Stroke::new(1.0, t.form_error))
+            .corner_radius(t.control_radius)
+            .inner_margin(t.space_8),
+        |ui| {
+            ui.set_width((ui.available_width() - t.space_2).max(0.0));
+            ui.horizontal_wrapped(|ui| {
+                let (icon, _) = ui.allocate_exact_size(egui::vec2(t.space_16, t.space_16), egui::Sense::hover());
+                crate::icons::paint_ink(ui.painter(), icon, "status_warning", t.form_error);
+                ui.label(
+                    egui::RichText::new(app.tr("ui.panel_layout.restore_failed")).font(crate::fonts::semibold(t.font_label)).color(t.form_error),
+                );
+                let retry = ui_kit::button(ui, app.tr("ui.panel_layout.try_again"), ui_kit::Button::Primary);
+                crate::scenario::publish_target("prefs:panel_restore_retry", retry.rect);
+                if retry.clicked() {
+                    app.prefs_window.panel_restore_retry = true;
+                }
+                let details = ui_kit::button(ui, app.tr("ui.panel_layout.details"), ui_kit::Button::Normal);
+                crate::scenario::publish_target("prefs:panel_restore_details", details.rect);
+                if details.clicked() {
+                    app.prefs_window.panel_restore_details = !app.prefs_window.panel_restore_details;
+                }
+            });
+            if app.prefs_window.panel_restore_details {
+                ui.label(egui::RichText::new(&reason).color(t.form_ink).size(t.font_small));
+                if ui_kit::button(ui, app.tr("ui.panel_layout.copy"), ui_kit::Button::Ghost).clicked() {
+                    ui.ctx().copy_text(reason.clone());
+                }
+            }
+        },
+    );
+    shown.response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Alert, true, app.tr("ui.panel_layout.restore_failed")));
+    crate::scenario::publish_target("prefs:panel_restore_error", shown.response.rect);
+    ui.add_space(t.space_16);
+}
+
 fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
+    panel_restore_banner(app, ui, t);
     let _search = crate::prefs_search::begin(ui, &app.prefs_window.filter);
     if crate::prefs_search::querying(ui) {
         // Paint only the pages that match. A first pass is invisible, so the 3D mouse rows and the
@@ -3183,7 +3308,8 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
     match button.as_ref().and_then(|b| b.as_str()) {
         Some("ok") => close(app, false),
         Some("cancel") => close(app, true),
-        Some("apply") => app.prefs_window.snapshot = Some(Snapshot::take(app)),
+        Some("apply") if app.prefs_window.panel_restore_error.is_none() => app.prefs_window.snapshot = Some(Snapshot::take(app)),
+        Some("apply") => {}
         Some("defaults") => defaults(app, app.prefs_window.section),
         Some(b) => return Err(format!("unknown button `{b}` (ok, cancel, apply, defaults)")),
         None => {}
@@ -3457,7 +3583,7 @@ pub(crate) fn blur_availability(app: &SolveApp) -> crate::theme_options::Availab
 
 fn blur_availability_for(app: &SolveApp, offered: bool) -> crate::theme_options::Availability {
     use crate::theme_options::Availability::{Available, Unavailable};
-    let reduced = app.services.reduce_transparency.as_ref().and_then(|read| read(offered));
+    let reduced = app.services.reduce_transparency.as_ref().and_then(|read| read(offered || app.universal_panel_host_enabled()));
     if !offered && app.blur_session.harness_radius.is_none() {
         return Available;
     }
@@ -3497,7 +3623,7 @@ pub(crate) fn prepare_blur(app: &mut SolveApp, ctx: &egui::Context) {
         blur_availability_for(app, intent.offered)
     } else {
         if let Some(read) = &app.services.reduce_transparency {
-            read(intent.offered);
+            read(intent.offered || app.universal_panel_host_enabled());
         }
         crate::theme_options::Availability::Available
     };
@@ -4320,8 +4446,8 @@ mod tests {
         crate::theme_files::add(&mut app.preferences.custom_themes, file).unwrap();
         let entries = theme_picker::entries(&app);
         let state = theme_picker::State { tone: Some(true), high: Some(false), imported: false, ..Default::default() };
-        assert_eq!((state.count(&entries, "tone", false), state.count(&entries, "tone", true)), (8, 14));
-        assert_eq!((state.count(&entries, "contrast", false), state.count(&entries, "contrast", true)), (14, 4));
+        assert_eq!((state.count(&entries, "tone", false), state.count(&entries, "tone", true)), (8, 15));
+        assert_eq!((state.count(&entries, "contrast", false), state.count(&entries, "contrast", true)), (15, 4));
         assert_eq!(state.count(&entries, "imported", true), 0);
         let state = theme_picker::State { high: Some(true), imported: true, ..state };
         assert_eq!(state.count(&entries, "tone", true), 1);
@@ -6249,6 +6375,7 @@ mod tests {
             ("sketch_tab_always", json!(true), PAGE_LAYOUT),
             ("keep_work_on_tab_switch", json!(true), PAGE_LAYOUT),
             ("ribbon_reveal", json!(true), PAGE_LAYOUT),
+            ("tab_double_click_renames", json!(false), PAGE_LAYOUT),
             ("dialog_buttons", json!("top"), PAGE_LAYOUT),
             ("toast_place", json!("centre"), PAGE_LAYOUT),
             ("ribbon_icon_grid", json!(true), PAGE_LAYOUT),
@@ -6258,6 +6385,8 @@ mod tests {
             ("timeline_under_browser", json!(true), PAGE_LAYOUT),
             ("history_sketches", json!("under_feature"), PAGE_LAYOUT),
             ("history_play_button", json!(false), PAGE_LAYOUT),
+            ("history_group_joints", json!(true), PAGE_LAYOUT),
+            ("history_bar_groups", json!(true), PAGE_LAYOUT),
             ("browser_float", json!(true), PAGE_LAYOUT),
             ("browser_collapsed", json!(true), PAGE_LAYOUT),
             ("browser_show", json!("hover"), PAGE_LAYOUT),
@@ -6275,6 +6404,7 @@ mod tests {
             ("direct_interaction", json!(true), PAGE_TOOLS),
             ("hole_snaps", json!(true), PAGE_TOOLS),
             ("hole_moves", json!(true), PAGE_TOOLS),
+            ("hole_several", json!(true), PAGE_TOOLS),
             ("extrude_arrow_face_stops", json!(false), PAGE_TOOLS),
             ("extrude_auto_to_object", json!(false), PAGE_TOOLS),
             ("extrude_view_isometric", json!(true), PAGE_TOOLS),
@@ -7702,6 +7832,7 @@ mod tests {
                 ("project_options_dialog", "prefs.sketch.project_options"),
                 ("sketch_face_activates_part", "prefs.sketch_face_activates_part"),
                 ("sketch_open_look_at", "prefs.sketch_open_look_at"),
+                ("escape_twice_finishes_sketch", "prefs.sketch.escape_twice_finishes"),
                 ("selection_shift_add_only", "prefs.shift_add_ctrl_toggle"),
                 ("prefer_free_sketch_points", "prefs.sketch.prefer_free_points"),
                 ("select_other_hidden", "prefs.sketch.select_other_hidden"),
@@ -7807,7 +7938,7 @@ mod tests {
             assert!(applied.matches(&h.app), "Cancel after Defaults returns to Apply");
 
             // The session fields also roll back when the page was opened with the opposite values.
-            original.clone().restore(&mut h.app);
+            original.clone().restore_other_preferences(&mut h.app);
             h.call("ui.prefs", json!({"open":"Sketch","button":"defaults"}));
             assert_eq!((h.app.session.auto_project, h.app.ui.pick_bodies), (true, false));
             h.call("ui.prefs", json!({"button":"cancel"}));
@@ -8512,6 +8643,20 @@ mod tests {
     }
 
     #[test]
+    fn render_legacy_image_defaults_round_trips_and_resets() {
+        use serde_json::json;
+        let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        assert!(!app.preferences.render_legacy_image_defaults);
+        let out = super::set(&mut app, &json!({"render_legacy_image_defaults":true})).unwrap();
+        assert_eq!(out["render_legacy_image_defaults"], true);
+        let mut restored = crate::SolveApp::new(Default::default(), Default::default());
+        restored.load_prefs(&app.prefs());
+        assert!(restored.preferences.render_legacy_image_defaults);
+        super::defaults(&mut restored, super::PAGE_GRAPHICS);
+        assert!(!restored.preferences.render_legacy_image_defaults);
+    }
+
+    #[test]
     fn render_previous_geometry_budget_round_trips_and_resets() {
         use serde_json::json;
         let mut app = crate::SolveApp::new(Default::default(), Default::default());
@@ -8938,7 +9083,7 @@ mod tests {
         assert_eq!(read()["backend"], "vulkan");
         let saved = serde_json::to_value(&app.preferences).unwrap();
         assert_eq!(lenient(&saved).graphics_adapter, "Discrete large");
-        snapshot.restore(&mut app);
+        snapshot.restore_other_preferences(&mut app);
         assert_eq!(read()["adapter"], "");
         set(&mut app, &json!({"graphics_adapter":"Discrete small"})).unwrap();
         defaults(&mut app, PAGE_GRAPHICS);
@@ -8952,6 +9097,302 @@ mod tests {
     /// The settings `SolveApp::prefs` would write right now, parsed.
     fn saved_prefs(app: &SolveApp) -> serde_json::Value {
         serde_json::from_str(&app.prefs()).unwrap()
+    }
+
+    #[test]
+    fn refused_portable_layout_still_saves_other_settings_without_replacing_stored_recovery() {
+        use solidcraft_engine::panels::{FIXTURE_LAYOUT_V1, MAX_ENVELOPE_BYTES, PanelRegistry, commands::CatalogueState};
+
+        // A maximum-sized original v1 record is readable, but projecting its native
+        // window to portable v2 can exceed the envelope cap. Keep that real source.
+        let mut raw: serde_json::Value = serde_json::from_slice(FIXTURE_LAYOUT_V1).unwrap();
+        let native = json!({"type":"window","host":"legacy.window","origin":{"x":1900.0,"y":900.0},
+            "return_to":{"zone":"left","index":0,"size":{"width":280.0,"height":240.0},"collapsed":false}});
+        raw["layout"]["sections"][0]["location"] = native.clone();
+        raw["layout"]["instances"][0]["memory"]["location"] = native;
+        raw["retained_data"]["padding"] = json!("");
+        let overhead = serde_json::to_vec(&raw).unwrap().len();
+        raw["retained_data"]["padding"] = json!("x".repeat(MAX_ENVELOPE_BYTES - overhead));
+        let envelope = serde_json::to_vec(&raw).unwrap();
+        assert_eq!(envelope.len(), MAX_ENVELOPE_BYTES);
+        fn bytes(out: &mut Vec<u8>, value: &[u8]) {
+            out.extend_from_slice(&u32::try_from(value.len()).unwrap().to_le_bytes());
+            out.extend_from_slice(value);
+        }
+        let mut catalogue = b"SCPCAT01".to_vec();
+        catalogue.extend_from_slice(&1_u32.to_le_bytes()); // One immutable preset.
+        bytes(&mut catalogue, b"Legacy");
+        bytes(&mut catalogue, &envelope);
+        catalogue.push(0); // No rejected envelope.
+        catalogue.extend_from_slice(&0_u32.to_le_bytes()); // No user presets.
+        catalogue.extend_from_slice(&1_u32.to_le_bytes());
+        for text in ["fixture.workspace", "ui.panel", "Legacy"] {
+            bytes(&mut catalogue, text.as_bytes());
+        }
+        catalogue.extend_from_slice(&1_u32.to_le_bytes());
+        bytes(&mut catalogue, b"fixture.workspace");
+        bytes(&mut catalogue, &envelope);
+        catalogue.push(0);
+        CatalogueState::hydrate(&catalogue, &PanelRegistry::default()).unwrap();
+        let refused = json!({"version":1,"selected":"fixture.workspace",
+            "catalogue":solidcraft_engine::doc::canvas::base64_encode(&catalogue)});
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        app.load_prefs(&json!({"panel_layout":refused}).to_string());
+        app.ui.show_grid = false;
+        assert!(app.try_prefs().is_err());
+        let recovery = json!({"version":99,"library":["saved layout"],"rejected":{"source":"exact recovery"}});
+        let previous = json!({"grid":true,"panel_layout":recovery}).to_string();
+        let fallback: serde_json::Value = serde_json::from_str(&app.prefs_with_stored_panel_layout(Some(&previous)).unwrap()).unwrap();
+        assert_eq!(fallback["grid"], false);
+        assert_eq!(fallback["panel_layout"], recovery);
+        assert_eq!(crate::panel_runtime::preferences_value(&app), Some(refused.clone()));
+        control(&mut app, &json!({"open":"Layout"})).unwrap();
+        let held = held_panel_layout(&app);
+        app.prefs_with_stored_panel_layout(Some(&previous)).unwrap();
+        assert_eq!(held_panel_layout(&app), held, "fallback cannot replace the Cancel baseline");
+        assert_eq!(crate::panel_runtime::preferences_value(&app), Some(refused));
+    }
+
+    #[test]
+    fn stored_panel_fallback_preserves_null_absence_and_refuses_malformed_previous_settings() {
+        let app = SolveApp::new(Default::default(), Default::default());
+        for previous in [None, Some("{}"), Some("{\"grid\":false}")] {
+            let saved: serde_json::Value = serde_json::from_str(&app.prefs_with_stored_panel_layout(previous).unwrap()).unwrap();
+            assert!(saved.get("panel_layout").is_none());
+        }
+        let saved: serde_json::Value = serde_json::from_str(&app.prefs_with_stored_panel_layout(Some("{\"panel_layout\":null}")).unwrap()).unwrap();
+        assert_eq!(saved.get("panel_layout"), Some(&serde_json::Value::Null));
+        for previous in ["{", "null", "[]", "42"] {
+            assert!(app.prefs_with_stored_panel_layout(Some(previous)).is_err());
+        }
+    }
+
+    #[test]
+    fn deferred_panel_layout_records_follow_preferences_apply_cancel_and_held_writes() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        let original = json!({"version":99,"future":{"layout":"keep these bytes"}});
+        let changed = json!({"version":100,"future":{"layout":"another record"}});
+        app.load_prefs(&json!({"panel_layout":original}).to_string());
+        assert_eq!(crate::panel_runtime::preferences_value(&app), Some(original.clone()));
+        control(&mut app, &json!({"open":"Layout"})).unwrap();
+        app.load_prefs(&json!({"panel_layout":changed}).to_string());
+        assert!(apply_pending(&mut app));
+        assert_eq!(saved_prefs(&app)["panel_layout"], original, "unapplied recovery data cannot replace the saved record");
+        close(&mut app, true);
+        assert_eq!(crate::panel_runtime::preferences_value(&app), Some(original));
+        assert!(!app.prefs_window.open);
+
+        control(&mut app, &json!({"open":"Layout"})).unwrap();
+        app.load_prefs(&json!({"panel_layout":changed}).to_string());
+        control(&mut app, &json!({"button":"apply"})).unwrap();
+        assert_eq!(saved_prefs(&app)["panel_layout"], changed, "Apply establishes the next saved baseline");
+        assert!(!apply_pending(&mut app));
+        defaults(&mut app, PAGE_LAYOUT);
+        assert_eq!(crate::panel_runtime::preferences_value(&app), Some(changed), "a deferred future layout is not erased by Classic page reset");
+    }
+
+    #[test]
+    fn layout_page_defaults_preserve_arrangements_and_cancel_restores_the_library() {
+        use crate::panel_runtime;
+        use solidcraft_engine::panels::{LayoutAction, Mutation};
+
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.panel_fixture", json!({"preset":"docks","remember":true}));
+        h.frames(2);
+        h.app.run_panel_command("layout.save", &json!({"name":"Original"})).unwrap();
+        let baseline = panel_runtime::preferences_value(&h.app);
+        control(&mut h.app, &json!({"open":"Layout"})).unwrap();
+        let section = h.app.panel_runtime().unwrap().layout().layout().sections.first().unwrap().id.clone();
+        h.app
+            .dispatch_panel_layout(LayoutAction::Apply { expected_revision: None, mutations: vec![Mutation::Collapse { section, collapsed: true }] })
+            .unwrap();
+        h.app.run_panel_command("layout.save", &json!({"name":"Original","replace":true})).unwrap();
+        h.app.run_panel_command("layout.save", &json!({"name":"Temporary"})).unwrap();
+        h.app.run_panel_command("layout.workspace.select", &json!({"workspace":"panel_fixture.workspace.review"})).unwrap();
+        let edited = panel_runtime::preferences_value(&h.app);
+        defaults(&mut h.app, PAGE_LAYOUT);
+        assert_eq!(panel_runtime::preferences_value(&h.app), edited, "page defaults leave all panel arrangements and saved layouts alone");
+        close(&mut h.app, true);
+        assert_eq!(
+            panel_runtime::preferences_value(&h.app),
+            baseline,
+            "Cancel restores selection, every arrangement, and both new and replaced layouts"
+        );
+        assert!(!h.app.prefs_window.open);
+    }
+
+    #[test]
+    fn failed_layout_cancel_keeps_the_baseline_until_the_host_can_restore_it() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.panel_fixture", json!({"preset":"overflow","remember":true}));
+        h.frames(2);
+        control(&mut h.app, &json!({"open":"Layout"})).unwrap();
+        let baseline = held_panel_layout(&h.app);
+        let original_host = h.app.panel_runtime.take();
+        let mut smaller = crate::scenario::Harness::new();
+        smaller.call("ui.panel_fixture", json!({"preset":"docks","remember":true}));
+        smaller.frames(2);
+        h.app.panel_runtime = smaller.app.panel_runtime.take();
+        let current = crate::panel_runtime::preferences_value(&h.app);
+        for button in ["cancel", "apply", "ok"] {
+            control(&mut h.app, &json!({"button":button})).unwrap();
+            assert!(h.app.prefs_window.open);
+            assert!(h.app.prefs_window.panel_restore_error.is_some());
+            assert_eq!(held_panel_layout(&h.app), baseline, "a refused restore cannot replace the baseline");
+            assert_eq!(crate::panel_runtime::preferences_value(&h.app), current, "failed admission changes no live state");
+        }
+        h.app.panel_runtime = original_host;
+        close(&mut h.app, true);
+        assert!(!h.app.prefs_window.open);
+        assert!(h.app.prefs_window.snapshot.is_none());
+        assert!(h.app.prefs_window.panel_restore_error.is_none());
+    }
+
+    #[test]
+    fn panel_workspace_arrows_follow_a_mouse_click_without_turning_the_view() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":1100}));
+        h.call("ui.panel_fixture", json!({"preset":"docks","remember":true}));
+        h.call("ui.prefs", json!({"open":"Layout","language":"en"}));
+        h.frames(3);
+        let camera = h.app.cam;
+        h.step(&json!({"click":{"handle":"dialog:Layout workspace:Modeling"}})).unwrap();
+        h.step(&json!({"key":"ArrowRight"})).unwrap();
+        h.frames(2);
+        assert_eq!(crate::panel_runtime::layout_preferences_view(&h.app).unwrap().selected_workspace.0, "panel_fixture.workspace.sketch");
+        assert_eq!(h.app.cam, camera, "workspace arrows belong to Preferences after a pointer click");
+    }
+
+    #[test]
+    fn panel_save_popover_requires_explicit_replace_and_owns_the_first_escape() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":1100}));
+        h.call("ui.panel_fixture", json!({"preset":"docks","remember":true}));
+        h.call("ui.prefs", json!({"open":"Layout","language":"en"}));
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"prefs:panel_layout:save_as"}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"text":"Bench setup"})).unwrap();
+        h.step(&json!({"key":"Enter"})).unwrap();
+        h.frames(2);
+        assert_eq!(crate::panel_runtime::user_preset_names(&h.app), ["Bench setup"]);
+        h.step(&json!({"click":{"handle":"prefs:panel_layout:save_as"}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"text":"bench setup"})).unwrap();
+        h.step(&json!({"key":"Enter"})).unwrap();
+        h.frames(2);
+        assert_eq!(crate::panel_runtime::user_preset_names(&h.app), ["Bench setup"], "duplicate Enter never silently replaces or adds a layout");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(h.app.prefs_window.open, "the first Escape belongs to the save popover");
+        assert_eq!(crate::panel_runtime::user_preset_names(&h.app), ["Bench setup"]);
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(!h.app.prefs_window.open);
+        assert!(crate::panel_runtime::user_preset_names(&h.app).is_empty(), "Preferences Cancel undoes the saved layout");
+    }
+
+    #[test]
+    fn full_panel_library_wraps_and_keyboard_reaches_the_save_tile() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":1100}));
+        h.call("ui.panel_fixture", json!({"preset":"docks","remember":true}));
+        for index in 0..64 {
+            h.app.run_panel_command("layout.save", &json!({"name":format!("Saved {index:02}")})).unwrap();
+        }
+        h.call("ui.prefs", json!({"open":"Layout","language":"en"}));
+        h.frames(3);
+        let first = crate::scenario::rect_of("prefs:panel_layout:tile:Saved 00").unwrap();
+        let later = crate::scenario::rect_of("prefs:panel_layout:tile:Saved 10").unwrap();
+        assert!(later.top() > first.top(), "the grid wraps into rows rather than placing every row horizontally");
+        h.step(&json!({"click":{"handle":"prefs:panel_layout:tile:Saved 00"}})).unwrap();
+        h.step(&json!({"key":"End"})).unwrap();
+        h.frames(20);
+        h.step(&json!({"key":"Enter"})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("prefs:panel_layout:save_popover").is_some());
+        h.step(&json!({"click":{"handle":"prefs:panel_layout:replace"}})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("prefs:panel_layout:replace_confirm").is_some(), "a full library still requires explicit confirmation");
+        assert_eq!(crate::panel_runtime::user_preset_names(&h.app).len(), 64);
+    }
+
+    #[test]
+    fn absent_panel_layout_is_held_as_absent_and_cancel_restores_absence() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        control(&mut app, &json!({"open":"Layout"})).unwrap();
+        app.load_prefs(&json!({"panel_layout":{"version":99,"future":"retained"}}).to_string());
+        assert!(crate::panel_runtime::preferences_value(&app).is_some());
+        assert!(saved_prefs(&app).get("panel_layout").is_none(), "the held overlay must remove a newly introduced record");
+        close(&mut app, true);
+        assert!(crate::panel_runtime::preferences_value(&app).is_none());
+        assert!(saved_prefs(&app).get("panel_layout").is_none());
+    }
+
+    #[test]
+    fn present_null_panel_record_stays_present_during_preferences_transaction() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        app.load_prefs(&json!({"panel_layout":null}).to_string());
+        assert_eq!(crate::panel_runtime::preferences_value(&app), Some(serde_json::Value::Null));
+        control(&mut app, &json!({"open":"Layout"})).unwrap();
+        app.load_prefs(&json!({"panel_layout":{"version":99,"future":"retained"}}).to_string());
+        let held = saved_prefs(&app);
+        assert_eq!(
+            held.get("panel_layout"),
+            Some(&serde_json::Value::Null),
+            "a corrupt present record is not absence or permission for legacy import"
+        );
+        close(&mut app, true);
+        assert_eq!(crate::panel_runtime::preferences_value(&app), Some(serde_json::Value::Null));
+    }
+
+    #[test]
+    fn cancel_keeps_the_original_deferred_legacy_import_with_or_without_a_temporary_catalogue() {
+        use crate::panel_runtime;
+        use solidcraft_engine::panels::{InstanceId, LogicalRect, Point, Size};
+
+        for enroll in [false, true] {
+            let mut app = SolveApp::new(Default::default(), Default::default());
+            app.load_prefs(&json!({"preferences":{"browser_width":333.0}}).to_string());
+            control(&mut app, &json!({"open":"Layout"})).unwrap();
+            app.load_prefs(&json!({"preferences":{"browser_width":777.0}}).to_string());
+            app.preferences.browser_width = 333.0;
+            assert!(apply_pending(&mut app), "deferred import changes count even when ordinary preferences match");
+
+            let capacity = LogicalRect { origin: Point { x: 0.0, y: 0.0 }, size: Size { width: 1600.0, height: 1000.0 } };
+            if enroll {
+                panel_runtime::enable_host_specimen(&mut app, "docks").unwrap();
+                panel_runtime::enable_preferences(&mut app).unwrap();
+                app.panel_runtime.as_mut().unwrap().prepare_host(&app.session, capacity).unwrap();
+            }
+            close(&mut app, true);
+            assert!(!app.prefs_window.open);
+            assert!(panel_runtime::preferences_value(&app).is_none());
+            assert!(!panel_runtime::preferences_enabled(&app));
+
+            if !enroll {
+                panel_runtime::enable_host_specimen(&mut app, "docks").unwrap();
+            }
+            panel_runtime::enable_preferences(&mut app).unwrap();
+            app.panel_runtime.as_mut().unwrap().prepare_host(&app.session, capacity).unwrap();
+            assert_eq!(
+                panel_runtime::preferences_value(&app).unwrap()["legacy"]["browser_width"],
+                json!(333.0),
+                "Cancel retains the original legacy sidecar before migration"
+            );
+            let browser = InstanceId::new("specimen-0").unwrap();
+            panel_runtime::migrate_legacy_placements(
+                &mut app,
+                &[panel_runtime::LegacyPanelBinding { role: panel_runtime::LegacyPanelRole::Browser, instance: browser.clone() }],
+            )
+            .unwrap();
+            let layout = app.panel_runtime().unwrap().layout().layout();
+            let section = layout.containing(&browser).unwrap();
+            assert_eq!(layout.column(section.column.as_ref().unwrap()).unwrap().width, 333.0, "Cancel restores the original placement import");
+        }
     }
 
     #[test]
@@ -9541,6 +9982,24 @@ mod tests {
             h.call("ui.prefs", json!({"button":"cancel"}));
             assert_eq!(h.app.preferences.orbit_around, OrbitAround::Cursor);
         }
+    }
+
+    #[test]
+    fn orbit_cursor_wrap_defaults_on_and_can_be_turned_off() {
+        let old: Prefs = serde_json::from_value(json!({"nav":"solidworks"})).unwrap();
+        assert!(old.orbit_cursor_wrap, "saved preferences from before the option wrap");
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"open":"Navigation"}));
+        h.step(&json!({"click":{"handle":"prefs:orbit_cursor_wrap"}})).unwrap();
+        assert!(!h.app.preferences.orbit_cursor_wrap);
+        h.call("ui.prefs", json!({"button":"apply"}));
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert!(!restored.preferences.orbit_cursor_wrap);
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(h.app.preferences.orbit_cursor_wrap);
+        h.call("ui.prefs", json!({"orbit_cursor_wrap":false,"button":"apply"}));
+        assert!(!h.app.preferences.orbit_cursor_wrap);
     }
 
     #[test]

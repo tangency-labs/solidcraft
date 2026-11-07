@@ -671,7 +671,7 @@ impl<'a> Panel<'a> {
     }
 
     /// The painted anchor also drives dragging, including the shell's edge clearance.
-    fn bounded_anchor(&self, ctx: &egui::Context) -> egui::Pos2 {
+    pub(crate) fn bounded_anchor(&self, ctx: &egui::Context) -> egui::Pos2 {
         let viewport = self.viewport;
         let gap = super::Container::new(ctx, super::Surface::Feature).gap();
         let width = self.width.min(viewport.width().max(0.0));
@@ -1071,6 +1071,15 @@ impl<'a> Window<'a> {
     /// Returns whether the shared header's close action was clicked.
     pub fn show_body(self, ctx: &egui::Context, body: impl FnOnce(&mut Ui)) -> bool {
         self.fields().actions("", "", None).show(ctx, true, body).0
+    }
+
+    /// Show a temporary status window with no header dismissal or dialog shortcuts.
+    pub(crate) fn show_passive_body(mut self, ctx: &egui::Context, body: impl FnOnce(&mut Ui)) {
+        self.closeable = false;
+        // No footer handles either key, so leave both in the shared input queue.
+        self.enter_submits = true;
+        self.escape_closes = true;
+        self.actions("", "", None).show(ctx, true, body);
     }
 
     /// Draw shared header, content and optional footer, retaining the caller's IDs.

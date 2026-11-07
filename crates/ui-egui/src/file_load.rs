@@ -42,6 +42,8 @@ pub enum Kind {
     /// Read the active design's linked designs again (`component.update_links`, with the
     /// request's options: `component` or `components` reads only those links).
     UpdateLinks,
+    /// Read a point cloud's file again (`pointcloud.reload`, with the request's `cloud`).
+    ReloadCloud,
 }
 
 pub struct Request {
@@ -65,6 +67,9 @@ pub struct Request {
     /// Insert the file as a mesh whatever its extension says: a PLY goes to `pointcloud.insert`
     /// unless the person chose Insert Mesh for it (then it needs its faces).
     pub mesh: bool,
+    /// The level the caller's own `param_check` named and the warnings it found before the run:
+    /// the reply says both (#9184).
+    pub(crate) param_check: Option<(solidcraft_engine::schema::ParamCheck, Vec<String>)>,
 }
 
 impl Request {
@@ -79,10 +84,15 @@ impl Request {
             design: None,
             chat_turn: None,
             mesh: false,
+            param_check: None,
         }
     }
     fn insert(&self) -> bool {
         self.kind == Kind::Insert
+    }
+    /// It reads files the active design already names, and changes that design in place.
+    fn reads_again(&self) -> bool {
+        matches!(self.kind, Kind::UpdateLinks | Kind::ReloadCloud)
     }
     /// The command's parameters: the path and the caller's import options.
     fn params(&self) -> Value {
@@ -99,18 +109,26 @@ impl Request {
             Kind::Recover { id, dir } => ("doc.recover", json!({"id": id, "dir": dir})),
             Kind::ExportDxf => ("file.export_view_dxf", Value::Object(self.options.clone())),
             Kind::UpdateLinks => ("component.update_links", Value::Object(self.options.clone())),
+            Kind::ReloadCloud => ("pointcloud.reload", Value::Object(self.options.clone())),
         }
     }
     fn answer(&self, r: Result<Value, String>) {
         if let Some(reply) = &self.reply {
-            if crate::control::chat_turn_cancelled(self.chat_turn.as_deref()) {
-                let _ = reply.send(crate::control::cancelled_chat_response());
-                return;
+            let mut response = if crate::control::chat_turn_cancelled(self.chat_turn.as_deref()) {
+                crate::control::cancelled_chat_response()
+            } else {
+                match r {
+                    Ok(v) => json!({"ok": true, "result": v}),
+                    Err(e) => json!({"ok": false, "error": e}),
+                }
+            };
+            if let Some((level, warnings)) = &self.param_check {
+                crate::control::add_param_warnings(&mut response, warnings.clone());
+                if let Some(o) = response.as_object_mut() {
+                    o.insert("param_check".into(), json!(level.name()));
+                }
             }
-            let _ = reply.send(match r {
-                Ok(v) => json!({"ok": true, "result": v}),
-                Err(e) => json!({"ok": false, "error": e}),
-            });
+            let _ = reply.send(response);
         }
     }
 }
@@ -277,14 +295,26 @@ pub fn begin(app: &mut SolveApp, path: &str, insert: bool) {
     let _ = begin_request(app, Request::new(path, if insert { Kind::Insert } else { Kind::Open }));
 }
 
+/// A STEP, IGES, FreeCAD or Rhino file the app opens or inserts gets a `Group #N` history folder
+/// while "Fold the History bar into groups" is on, and none while it is off (#8885), unless the
+/// caller chose (`folder`).
+pub(crate) fn step_folder_option(app: &SolveApp, path: &str, options: &mut serde_json::Map<String, Value>) {
+    if solidcraft_engine::io::is_step_path(path) {
+        options.entry("folder").or_insert(Value::Bool(app.preferences.history_bar_groups));
+    }
+}
+
 /// Queue a file operation; on the web (no threads) it runs now.
-pub fn begin_request(app: &mut SolveApp, request: Request) -> Result<(), String> {
+pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), String> {
     if crate::control::chat_turn_cancelled(request.chat_turn.as_deref()) {
         request.answer(Err("the agent chat turn ended".into()));
         return Ok(());
     }
     if app.file_load.idle() && reuse_open(app, &request) {
         return Ok(());
+    }
+    if matches!(request.kind, Kind::Open | Kind::Insert) {
+        step_folder_option(app, &request.path, &mut request.options);
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -320,7 +350,7 @@ pub fn begin_request(app: &mut SolveApp, request: Request) -> Result<(), String>
                 }
                 r
             }
-            Kind::UpdateLinks => {
+            Kind::UpdateLinks | Kind::ReloadCloud => {
                 let (command, params) = request.command();
                 solidcraft_engine::io::vfs::allowing_hosts(&request.allow_hosts, || app.run(command, params))
             }
@@ -386,18 +416,43 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
     if cfg!(target_arch = "wasm32") || !matches!(req.method.as_str(), "engine.execute" | "command") {
         return Some(req);
     }
-    let command = req.params.get("command").or(req.params.get("id")).and_then(Value::as_str);
-    let kind = match command {
-        Some("doc.open") => Kind::Open,
-        Some("file.insert_step" | "file.insert_mesh" | "pointcloud.insert") => Kind::Insert,
-        Some("file.export_view_dxf") => Kind::ExportDxf,
+    // In any spelling the engine takes: another would run on the window thread.
+    let Some(id) =
+        req.params.get("command").or(req.params.get("id")).and_then(Value::as_str).and_then(solidcraft_engine::find_command).map(|spec| spec.id)
+    else {
+        return Some(req);
+    };
+    let kind = match id {
+        "doc.open" => Kind::Open,
+        "file.insert_step" | "file.insert_mesh" | "pointcloud.insert" => Kind::Insert,
+        "file.export_view_dxf" => Kind::ExportDxf,
+        "pointcloud.reload" => Kind::ReloadCloud,
         _ => return Some(req),
     };
     let params = req.params.get("params");
     let path = match params.and_then(|p| p.get("path")).and_then(Value::as_str) {
         Some(path) => path,
-        None if kind == Kind::ExportDxf => "",
+        None if matches!(kind, Kind::ExportDxf | Kind::ReloadCloud) => "",
         None => return Some(req),
+    };
+    // This never reaches `control::handle`, so the request's own `param_check` is taken here. The
+    // worker's session goes on to be the design's, which keeps its own level: the check comes first.
+    let level = match crate::control::request_param_check(&req.method, &req.params) {
+        Ok(level) => level,
+        Err(e) => {
+            let _ = req.reply.send(json!({"ok": false, "error": e}));
+            return None;
+        }
+    };
+    let param_check = match level
+        .map(|level| crate::control::contract_check_before_run(id, params.unwrap_or(&Value::Null), level).map(|found| (level, found)))
+        .transpose()
+    {
+        Ok(param_check) => param_check,
+        Err(e) => {
+            let _ = req.reply.send(json!({"ok": false, "error": e, "param_check": level.map(|level| level.name())}));
+            return None;
+        }
     };
     let scope = match crate::control::request_scope(app, &req.params) {
         Ok(scope) => scope,
@@ -409,7 +464,7 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
     // Everything but the path, as given: taking only `up` and `names` dropped an import's
     // `matrix` and `name`, so it landed at the origin with nothing said (#4676).
     let mut options = params.and_then(Value::as_object).cloned().unwrap_or_default();
-    if kind != Kind::ExportDxf {
+    if !matches!(kind, Kind::ExportDxf | Kind::ReloadCloud) {
         options.remove("path");
         options.retain(|_, v| !v.is_null());
     }
@@ -423,6 +478,7 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         design: None,
         chat_turn: req.chat_turn,
         mesh: false,
+        param_check,
     };
     let _ = begin_request(app, request);
     None
@@ -483,7 +539,7 @@ fn start(app: &mut SolveApp) {
     }
     let insert = request.insert();
     let before = if insert { crate::open_meshing::session_world(&app.session).bodies.iter().map(|b| b.name.clone()).collect() } else { Vec::new() };
-    let update = request.kind == Kind::UpdateLinks;
+    let update = request.reads_again();
     let mut scratch = if insert || update || request.kind == Kind::ExportDxf { app.session.scratch() } else { Session::default() };
     // A design opened or recovered here is run through the host's pre-command check too, and
     // evaluated under the user's validation mode.
@@ -1063,19 +1119,33 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                 request.answer(Ok(made.result));
             }
             _ if running.cancelled() => request.answer(Err("file operation cancelled".into())),
-            Ok(made) if request.kind == Kind::UpdateLinks && running.matches(&app.session) => {
+            Ok(made) if request.reads_again() && running.matches(&app.session) => {
                 let (id, _) = request.command();
                 app.session.accept_computed(made.session);
                 app.big_operation = true;
-                crate::linked_source::read_again(app, &request.options, &made.result);
+                if request.kind == Kind::UpdateLinks {
+                    crate::linked_source::read_again(app, &request.options, &made.result);
+                }
                 let r = Ok(made.result);
                 app.finish_command(id, &r);
+                // The reload is its own undo step: the open card folds only what comes after it.
+                if request.kind == Kind::ReloadCloud
+                    && let Some(panel) = app.tree.cloud_panel.as_mut()
+                {
+                    panel.depth = app.session.undo.len();
+                }
                 let language = crate::i18n::Locale::for_language(&app.preferences.language);
                 app.set_status(language.format("ui.command_done", &[("command", language.label(crate::command_label(id)))]), false);
                 // A design it could not read is said as when that was all it was asked.
                 if let Some(f) = r.as_ref().ok().and_then(|v| v["failed"].as_array()).and_then(|f| f.first()) {
                     let (name, why) = (f["name"].as_str().unwrap_or_default(), f["error"].as_str().unwrap_or_default());
                     app.set_status(format!("{name}: {why}"), true);
+                }
+                // What the file's reading left out is said too.
+                if let Some(w) =
+                    r.as_ref().ok().filter(|_| request.kind == Kind::ReloadCloud).and_then(|v| v["warnings"].as_array()).and_then(|w| w.first())
+                {
+                    app.set_status(w.as_str().unwrap_or_default().to_string(), false);
                 }
                 request.answer(r);
             }
@@ -1165,7 +1235,7 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
             }
             Err(e) => {
                 request.answer(Err(e.clone()));
-                if request.kind == Kind::UpdateLinks {
+                if request.reads_again() {
                     // Said as when the command ran here (the status line, the run's messages).
                     app.finish_command(request.command().0, &Err(e));
                 } else if let Kind::Recover { id, dir } = &request.kind {
@@ -1255,6 +1325,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
             None => app.session.doc.name.clone(),
         },
+        Kind::ReloadCloud => app.session.doc.name.clone(),
         _ => std::path::Path::new(&r.request.path).file_name().map(|p| p.to_string_lossy().to_string()).unwrap_or_default(),
     };
     let phase = r.phase.load(Ordering::Relaxed);
@@ -1299,6 +1370,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             Kind::Recover { .. } => "file_load.recovering",
             Kind::ExportDxf => "dxf.exporting",
             Kind::UpdateLinks => "file_load.updating_links",
+            Kind::ReloadCloud => "file_load.reloading_cloud",
         })
     };
     let icon = match r.request.kind {
@@ -1307,6 +1379,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         Kind::Recover { .. } => "restore",
         Kind::ExportDxf => "export",
         Kind::UpdateLinks => "update",
+        Kind::ReloadCloud => "import",
     };
     let (closed, action) = ui_kit::Window::new(card_id, icon, title)
         .cards(((cover.width() - 16.0) / crate::theme::Tokens::get().form_card_width).clamp(0.5, 1.3))
@@ -2008,5 +2081,27 @@ mod tests {
             }
         }
         assert!(read && after_read, "the import's progress showed while its file was read, then the open went on");
+    }
+
+    /// The app asks a STEP-family open or insert for a `Group #N` history folder only while "Fold
+    /// the History bar into groups" is on (#8885); a caller's own `folder` stays, and other files
+    /// are left alone.
+    #[test]
+    fn a_step_open_asks_for_a_history_folder_as_the_bar_groups() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        let asked = |app: &SolveApp, path: &str, folder: Option<bool>| {
+            let mut options = serde_json::Map::new();
+            if let Some(folder) = folder {
+                options.insert("folder".into(), Value::Bool(folder));
+            }
+            step_folder_option(app, path, &mut options);
+            options.get("folder").cloned()
+        };
+        assert!(!app.preferences.history_bar_groups, "off by default");
+        assert_eq!(asked(&app, "a.step", None), Some(Value::Bool(false)), "no folder while the bar's groups are off");
+        app.preferences.history_bar_groups = true;
+        assert_eq!(asked(&app, "a.stp", None), Some(Value::Bool(true)), "a folder while they are on");
+        assert_eq!(asked(&app, "a.step", Some(false)), Some(Value::Bool(false)), "the caller's choice stays");
+        assert_eq!(asked(&app, "a.stl", None), None, "a mesh has no folders");
     }
 }

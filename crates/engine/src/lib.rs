@@ -27,6 +27,7 @@ pub mod product_scene;
 pub mod recovery;
 pub mod render_jobs;
 pub mod render_lights;
+pub mod render_preparation;
 pub mod sample;
 pub mod schema;
 #[cfg(not(target_arch = "wasm32"))]
@@ -1799,6 +1800,11 @@ impl Session {
                 Err(e)
             }
         };
+        // A sketch open for editing that failed (a projected edge lost by name) is still shown, its
+        // lost link marked, so it can be repaired from inside it (#12085).
+        if outermost {
+            self.model.hold_failed_sketch(&self.doc, self.active_sketch);
+        }
         if let Some((before, changed, failed)) = crash_outcome {
             // Refresh and body-name pinning can copy the shared document. Remember the final
             // document, so the next command does not mistake that work for an outside edit
@@ -1813,7 +1819,14 @@ impl Session {
     fn define_inline(&mut self, id: &str, mut v: Value) -> Result<Value> {
         let mut doc = (*self.doc).clone();
         let defined = doc.define_inline().map_err(|e| EngineError::BadParams { cmd: id.to_string(), msg: e.to_string() })?;
-        let Some(first) = defined.first() else { return Ok(v) };
+        let Some(first) = defined.first() else {
+            // Only definitions of parameters that already exist, typed again as they were made:
+            // nothing new to report, but the text now names the parameter.
+            if doc != *self.doc {
+                self.doc = Arc::new(doc);
+            }
+            return Ok(v);
+        };
         if let Some(out) = v.as_object_mut() {
             out.insert("defined".into(), serde_json::json!(first.name));
             out.insert("definitions".into(), serde_json::json!(defined));

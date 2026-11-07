@@ -127,9 +127,10 @@ crate::dialog_descriptor::dialog_descriptors! {
             offset: String = "0 mm".into() => shown_expr(distance, ValueKind::Length),
         } => json!({"offset": offset});
         AnglePlane("construct.plane.at_angle", "PLANE AT ANGLE", [("Plane", PLANES | PLANAR_FACES, false), ("Axis", AXIS_PICKS, false)],
-            FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { angle, .. } }) {
+            FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { angle, direction_only, .. } }) {
             angle: String = "45 deg".into() => shown_expr(angle, ValueKind::Angle),
-        } => json!({"angle": angle});
+            direction_only: bool = false => *direction_only,
+        } => json!({"angle": angle, "direction_only": direction_only});
         // With a reference plane, the plane touches where the face turns towards it (#8822).
         TangentPlane("construct.plane.tangent", "TANGENT PLANE", [("Face", FACES, false), ("Reference plane", PLANES | PLANAR_FACES, false)],
             FeatureKind::ConstructionPlane { plane: PlaneRef::Tangent { angle, .. } }) {
@@ -1464,7 +1465,7 @@ impl Dialog {
             }
             Kind::Pipe { diameter, .. } => ("Diameter", ValueKind::Length, diameter),
             Kind::Stock { margin } => ("Margin", ValueKind::Length, margin),
-            Kind::AnglePlane { angle } => ("Angle", ValueKind::Angle, angle),
+            Kind::AnglePlane { angle, .. } => ("Angle", ValueKind::Angle, angle),
             Kind::Scale { per_axis: true, .. } => return None,
             Kind::Scale { factor, .. } => ("Scale", ValueKind::Unitless, factor),
             Kind::OffsetFaces { distance } => ("Distance", ValueKind::Length, distance),
@@ -1588,7 +1589,7 @@ impl Dialog {
     /// lies on that face (a circle's centre) is taken at the point, as a points input picks it.
     pub(crate) fn candidate_on(&self, s: &Session, h: &Hit, snap: Option<&FaceSnap>) -> Option<Sel> {
         if matches!(self.kind, Kind::SketchModify(_)) {
-            return crate::sketch_modify_ui::candidate(self, s, h);
+            return crate::sketch_modify_ui::pick_candidate(self, s, h);
         }
         if let Some(target) = self.extrude_target(s, h) {
             return Some(target);
@@ -2833,6 +2834,10 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
         object_type_row(d, ui);
         return;
     }
+    if crate::hole_folder::active(d) {
+        crate::hole_folder::note(app, d, ui);
+        return;
+    }
     let Kind::Hole { opts, .. } = &mut d.kind else { return };
     let mut m = usize::from(opts.multiple);
     choice_row(ui, "Placement", "hole_place", &mut m, &["Single", "Multiple"]);
@@ -3864,7 +3869,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let panel = if let Some(column) = column {
         panel.width(column.width()).joined(crate::ui_kit::DockEdges { left: true, top: true, ..Default::default() })
     } else if wide && side == crate::frame::Side::Left {
-        let available = app.viewport.palette_rect.map_or(vp.width(), |r| (r.left() - vp.left() - t.space_8).max(0.0));
+        let available = crate::sketch_palette::room_left_of(app, ctx, vp);
         panel.width(card_width(&d).min(available))
     } else if manager {
         panel.width(card_width(&d))
@@ -4994,6 +4999,9 @@ pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>
     let mut cmds = dialog_commands(app, &normalized)?;
     exact_regions(d, &mut cmds);
     crate::op_auto::scope_targets(app, d, &mut cmds)?;
+    if crate::hole_folder::active(d) {
+        return crate::hole_folder::commands(app, d, cmds);
+    }
     if let Some((id, _)) = d.editing {
         let (cmd, mut params) = cmds.into_iter().next().ok_or("nothing to apply")?;
         if let Some(feature) = app.session.doc.feature(id) {
@@ -5558,14 +5566,18 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 None => ("construct.plane.tangent", json!({"face": face, "angle": null})),
             }
         }
-        Kind::AnglePlane { .. } => {
+        Kind::AnglePlane { direction_only, .. } => {
             need(0, "a plane")?;
             let base = plane_arg(app, sels(d, 0).first())?;
             let axis = match sels(d, 1).first() {
                 Some(x) => axis_param(app, x)?,
                 None => d.extra.get("axis").cloned().ok_or("pick an axis")?,
             };
-            ("construct.plane.at_angle", json!({"base": base, "axis": axis}))
+            let mut p = json!({"base": base, "axis": axis, "direction_only": direction_only});
+            if *direction_only && let Some(pivot) = angle_pivot(d) {
+                p["pivot"] = construct_ref(app, pivot)?;
+            }
+            ("construct.plane.at_angle", p)
         }
         Kind::Rib { web, thickness, depth, flip, normal } => {
             need(0, "open sketch curves")?;
@@ -5764,14 +5776,20 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
         Kind::Move { .. } => return Ok(vec![("solid.move".into(), crate::dialogs_move::params(app, d)?)]),
         Kind::Hole { diameter, depth, kind, cb_diameter, cb_depth, cs_diameter, cs_angle, opts } => {
-            need(0, if opts.multiple { "sketch points" } else { "a face position" })?;
+            let folder = crate::hole_folder::active(d);
+            if !folder {
+                need(0, if opts.multiple { "sketch points" } else { "a face position" })?;
+            }
             let ty = match *kind {
                 0 if opts.angled => "drilled",
                 k => HOLE_TYPES.get(k).copied().unwrap_or("simple"),
             };
             // One hole per picked face position, or one Hole feature per sketch for sketch points.
             let mut places: Vec<Value> = Vec::new();
-            if opts.multiple {
+            if folder {
+                // Every hole of a folder keeps its own place (`hole_folder`).
+                places.push(json!({}));
+            } else if opts.multiple {
                 let mut by_sketch: Vec<(u64, Vec<String>)> = Vec::new();
                 for x in sels(d, 0) {
                     if let Sel::SketchPoint { id } = x
@@ -5799,10 +5817,16 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 );
             } else {
                 // One hole per pick: a curved surface split at its seam is picked whole (both
-                // halves, the clicked one first), but the hole goes where it was clicked only.
+                // halves, the clicked one first), but the hole goes where it was clicked only. A
+                // face takes one hole, or several when Preferences says so.
+                let several = crate::hole_place::several(app, d).then(|| crate::hole_place::several_places(s, sels(d, 0)));
                 let mut taken: Vec<Sel> = Vec::new();
-                for x in sels(d, 0) {
-                    if !matches!(x, Sel::Face { .. }) || taken.iter().any(|t| same_face(t, x)) {
+                for (i, x) in sels(d, 0).iter().enumerate() {
+                    let skip = match &several {
+                        Some(places) => !places.contains(&i),
+                        None => !matches!(x, Sel::Face { .. }) || taken.iter().any(|t| same_face(t, x)),
+                    };
+                    if skip {
                         continue;
                     }
                     taken.extend(crate::viewport::grouped_selection(s, x));
@@ -6562,7 +6586,15 @@ pub(crate) fn offset_through_point(d: &Dialog) -> Option<&Sel> {
     sels(d, 1).first()
 }
 
-/// A stored point reference back into a dialog pick: a body vertex or a sketch point.
+/// Pivot pick on Plane at Angle when "Use axis direction only" is on.
+pub(crate) fn angle_pivot(d: &Dialog) -> Option<&Sel> {
+    if !matches!(d.kind, Kind::AnglePlane { direction_only: true, .. }) {
+        return None;
+    }
+    d.inputs.iter().find(|i| i.label == "Pivot").and_then(|i| i.items.first())
+}
+
+/// A stored point reference back into a dialog pick: a body vertex, sketch point or construction point.
 fn point_sel(s: &Session, g: &solidcraft_engine::doc::construct::GeoRef) -> Option<Sel> {
     use solidcraft_engine::doc::construct::GeoRef;
     match g {
@@ -6571,6 +6603,9 @@ fn point_sel(s: &Session, g: &solidcraft_engine::doc::construct::GeoRef) -> Opti
             _ => None,
         },
         GeoRef::SketchPoint { sketch, point } => Some(Sel::SketchPoint { id: format!("{sketch}:{point}") }),
+        GeoRef::ConstructPoint { name } => Some(Sel::ConstructionPoint { name: name.to_string() }),
+        GeoRef::Origin => Some(Sel::Vertex { body: String::new(), point: Vec3::ZERO }),
+        GeoRef::Point { p } => Some(Sel::Vertex { body: String::new(), point: *p }),
         _ => None,
     }
 }
@@ -7446,7 +7481,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { base, axis_origin, axis_dir, line, .. } } => {
+        FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { base, axis_origin, axis_dir, line, direction_only, pivot, .. } } => {
             let mut d = start("construct.plane.at_angle")?;
             d.kind = Kind::simple_restore(&f.kind)?;
             if let Some(inp) = d.inputs.first_mut() {
@@ -7467,6 +7502,13 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 }
                 (None, None) => {
                     d.extra.insert("axis".into(), json!({"origin": pt3(*axis_origin), "dir": pt3(*axis_dir)}));
+                }
+            }
+            if *direction_only {
+                const PIVOT: Accept = selection::VERTICES | selection::POINTS | selection::CONSTRUCTION_POINTS;
+                set_object_accepting(&mut d.inputs, &mut d.active, "Pivot", PIVOT, true);
+                if let Some(inp) = d.inputs.iter_mut().find(|i| i.label == "Pivot") {
+                    inp.items = pivot.as_deref().and_then(|g| point_sel(s, g)).into_iter().collect();
                 }
             }
             d
@@ -7716,7 +7758,7 @@ mod refused_ok_tests {
         let mut dialog = Dialog::for_command(&app, "construct.plane.at_angle").expect("the command has a dialog");
         dialog.inputs[0].items = vec![Sel::Plane { name: "XY".into() }];
         dialog.inputs[1].items = vec![Sel::Axis { name: "X".into() }];
-        if let Kind::AnglePlane { angle } = &mut dialog.kind {
+        if let Kind::AnglePlane { angle, .. } = &mut dialog.kind {
             *angle = "30 deg".into();
         }
 
