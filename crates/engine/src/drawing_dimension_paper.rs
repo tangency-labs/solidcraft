@@ -94,9 +94,11 @@ pub fn paper_group(dimension: &Dimension, resolved: &Resolved, frame: &ViewFrame
         fonts.extend(piece.text.fonts);
         why = why.or(piece.text.why);
         pending |= piece.text.pending;
-        // A chain's neighbours share an extension line.
+        // A chain's neighbours share an extension line, and one line inside a longer one along it is
+        // drawn once, as the longer one.
         for line in layout.lines {
-            if !lines.iter().any(|other| same_line(other, &line)) {
+            if !lines.iter().any(|other| covered(&line, other)) {
+                lines.retain(|other| !covered(other, &line));
                 lines.push(line);
             }
         }
@@ -252,6 +254,18 @@ fn at_of(place: &TextPlace) -> Option<Vec2> {
 
 fn same_line(a: &[Vec2], b: &[Vec2]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(p, q)| p.dist(*q) <= SAME_POINT_MM)
+}
+
+/// Whether `by` already draws `line`: the same line, or for two straight lines, `line` lies along
+/// `by` within its ends. Only one dimension's own lines are weighed, so no other's change.
+fn covered(line: &[Vec2], by: &[Vec2]) -> bool {
+    let (&[p, q], &[a, b]) = (line, by) else { return same_line(line, by) };
+    let Some(u) = (b - a).normalized() else { return same_line(line, by) };
+    let within = |x: Vec2| {
+        let along = (x - a).dot(u);
+        (x - a).dot(u.perp()).abs() <= SAME_POINT_MM && (-SAME_POINT_MM..=a.dist(b) + SAME_POINT_MM).contains(&along)
+    };
+    within(p) && within(q)
 }
 
 /// Ends `line` at the base of the arrowhead on its end, if it runs into one there, so no line shows

@@ -490,3 +490,21 @@ fn hostile_points_and_offsets_never_panic() {
         }
     }
 }
+
+/// A straight line inside a longer one along it is drawn by the longer one; a line that runs past
+/// its ends, beside it or across it isn't, and a bent line only by the same bent line.
+#[test]
+fn a_line_inside_a_longer_one_along_it_is_covered() {
+    let p = |x: f64, y: f64| Vec2::new(x, y);
+    let long = [p(0.0, 1.0), p(0.0, 20.0)];
+    assert!(covered(&[p(0.0, 1.0), p(0.0, 13.0)], &long));
+    assert!(covered(&[p(0.0, 20.0), p(0.0, 5.0)], &long), "either way round");
+    assert!(covered(&long, &long));
+    assert!(!covered(&[p(0.0, 1.0), p(0.0, 21.0)], &long), "past its end");
+    assert!(!covered(&[p(0.5, 1.0), p(0.5, 13.0)], &long), "beside it");
+    assert!(!covered(&[p(-1.0, 5.0), p(1.0, 5.0)], &long), "across it");
+    assert!(!covered(&long, &[p(0.0, 1.0), p(0.0, 13.0)]), "the shorter doesn't draw the longer");
+    let bent = [p(0.0, 0.0), p(5.0, 5.0), p(10.0, 0.0)];
+    assert!(covered(&bent, &bent) && !covered(&[p(0.0, 0.0), p(5.0, 5.0)], &bent));
+    assert!(!covered(&[p(0.0, 0.0), p(0.0, 0.0)], &[p(1.0, 0.0), p(1.0, 0.0)]), "two points apart");
+}
