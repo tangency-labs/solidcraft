@@ -111,10 +111,7 @@ render.status
 select.clear
 select.set
 selection.delete
-sheet.export_bend_table
 sheet.export_dxf
-sheet.flat_pattern
-sheet.path_flange
 sketch.arc.center_point
 sketch.arc.tangent
 sketch.arc.three_point
