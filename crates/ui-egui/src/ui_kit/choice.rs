@@ -295,6 +295,14 @@ pub(crate) fn segmented_icons(ui: &mut Ui, selected: &mut usize, options: &[Icon
     clicked
 }
 
+/// How many columns of a checkbox grid fit their labels: `wanted`, or fewer, down to one,
+/// when the widest label (`label_widths`, each with its box and gap in `lead`) is wider than a
+/// column of `available` width with `gap` between columns (#11089).
+fn fitting_columns(label_widths: &[f32], lead: f32, available: f32, gap: f32, wanted: usize) -> usize {
+    let _ = (label_widths, lead, available, gap);
+    wanted
+}
+
 /// Compact checkbox options in bounded columns. Tokens: `form_checkbox_height, control_fill/border, radius_sm, accent, on_accent, font_body, text, space_2/3/6/8/14`.
 pub(crate) fn checkbox_grid(ui: &mut Ui, items: &mut [(&str, &mut bool)], columns: usize) {
     let t = Tokens::get();

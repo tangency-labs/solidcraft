@@ -410,3 +410,21 @@ fn output_radio_rows_keep_titles_summaries_and_disabled_choices_in_both_themes()
         }
     }
 }
+
+/// #11089: a checkbox grid keeps its columns while the labels fit them, and gives up columns, down
+/// to one, when the widest label would be cut ("..." in a translated dialog).
+#[test]
+fn a_checkbox_grid_gives_up_columns_for_labels_that_do_not_fit() {
+    // Two columns in 300 px with an 8 px gap are 146 px each; 20 px go to the box and gap.
+    let fits = |labels: &[f32], available: f32, wanted: usize| super::fitting_columns(labels, 20.0, available, 8.0, wanted);
+    assert_eq!(fits(&[100.0, 120.0], 300.0, 2), 2, "short labels keep both columns");
+    assert_eq!(fits(&[100.0, 126.0], 300.0, 2), 2, "a label that exactly fits its column keeps it");
+    assert_eq!(fits(&[100.0, 127.0], 300.0, 2), 1, "a label a pixel too wide for a column takes the full row");
+    assert_eq!(fits(&[100.0, 240.0], 300.0, 2), 1, "a long German label");
+    assert_eq!(fits(&[100.0, 400.0], 300.0, 2), 1, "one column is the least, even when nothing fits");
+    // Three columns step down to two before one.
+    assert_eq!(fits(&[60.0, 80.0, 70.0], 300.0, 3), 3);
+    assert_eq!(fits(&[60.0, 130.0, 70.0], 300.0, 3), 2);
+    assert_eq!(fits(&[60.0, 130.0, 70.0], 300.0, 1), 1, "a single column stays one");
+    assert_eq!(fits(&[], 300.0, 2), 2, "no labels, no change");
+}
