@@ -3575,7 +3575,7 @@ pub(crate) fn blur_availability(app: &SolveApp) -> crate::theme_options::Availab
 
 fn blur_availability_for(app: &SolveApp, offered: bool) -> crate::theme_options::Availability {
     use crate::theme_options::Availability::{Available, Unavailable};
-    let reduced = app.services.reduce_transparency.as_ref().and_then(|read| read(offered));
+    let reduced = app.services.reduce_transparency.as_ref().and_then(|read| read(offered || app.universal_panel_host_enabled()));
     if !offered && app.blur_session.harness_radius.is_none() {
         return Available;
     }
@@ -3615,7 +3615,7 @@ pub(crate) fn prepare_blur(app: &mut SolveApp, ctx: &egui::Context) {
         blur_availability_for(app, intent.offered)
     } else {
         if let Some(read) = &app.services.reduce_transparency {
-            read(intent.offered);
+            read(intent.offered || app.universal_panel_host_enabled());
         }
         crate::theme_options::Availability::Available
     };

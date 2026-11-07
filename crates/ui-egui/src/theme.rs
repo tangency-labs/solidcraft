@@ -30,6 +30,8 @@ thread_local! {
     /// The palette of a theme file (`theme_files`) in place of the built-in one of its base
     /// (dark or light), per thread like the rest. `None`: the built-in palettes.
     static CUSTOM: Cell<Option<Custom>> = const { Cell::new(None) };
+    /// Paint-only panel palette. It never changes authored theme state or cache generations.
+    static PANEL_TOKENS: Cell<Option<Tokens>> = const { Cell::new(None) };
     static CUSTOM_GENERATION: Cell<u64> = const { Cell::new(0) };
     /// The application bar's logo in the theme's accent instead of its own logo colours
     /// (Preferences › Interface › Logo), per thread like the rest.
@@ -575,6 +577,21 @@ pub(crate) fn scoped_tokens(tokens: Tokens) -> impl Drop {
     let restore = Restore(CUSTOM.get());
     set_custom(Some(Custom { dark: is_dark(), tokens }));
     restore
+}
+
+/// Temporarily bind a panel's paint palette without publishing a theme change.
+pub(crate) fn scoped_panel_tokens(tokens: Tokens) -> impl Drop {
+    struct Restore {
+        previous: Option<Tokens>,
+        // The override belongs to this UI thread, so its guard must not move to another one.
+        _thread: std::marker::PhantomData<std::rc::Rc<()>>,
+    }
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            PANEL_TOKENS.set(self.previous);
+        }
+    }
+    Restore { previous: PANEL_TOKENS.replace(Some(tokens)), _thread: std::marker::PhantomData }
 }
 
 /// A tab's selection colours. This is deliberately separate from the global widget style:
@@ -1328,6 +1345,9 @@ impl Tokens {
     /// [`Tokens::get`] in another colour vision mode: the Colour vision preference previews the
     /// mode being chosen before it is applied (#7152).
     pub fn get_in(mode: ColorVision) -> Tokens {
+        if let Some(tokens) = PANEL_TOKENS.get() {
+            return tokens;
+        }
         if let Some(published) = PUBLISHED.get().filter(|p| p.environment == Environment::current()) {
             if mode == published.environment.vision {
                 return published.tokens;

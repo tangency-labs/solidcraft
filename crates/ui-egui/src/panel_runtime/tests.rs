@@ -2,6 +2,274 @@ use solidcraft_engine::panels::*;
 
 use super::*;
 
+fn surface_test_palette(dark: bool) -> crate::theme::Tokens {
+    let mut tokens = if dark { crate::theme::Tokens::dark() } else { crate::theme::Tokens::light() };
+    tokens.panel = if dark { egui::Color32::BLACK } else { egui::Color32::WHITE };
+    let ink = if dark { egui::Color32::WHITE } else { egui::Color32::BLACK };
+    tokens.text = ink;
+    tokens.text_dim = ink;
+    tokens.form_ink = ink;
+    tokens.form_dim = ink;
+    tokens.dialog_label = ink;
+    tokens
+}
+
+#[test]
+fn panel_surface_contrast_covers_actual_light_dark_and_bundled_high_contrast() {
+    use egui::Color32;
+    use solidcraft_engine::geom::srgb::{decode8, encode8};
+    let high_contrast = crate::theme_files::resolve(crate::theme_files::find("high-contrast", &[]).unwrap());
+    // Independent stored-premultiplied source-over for both real renderer target
+    // formats. This does not call the production contrast/bounds predicate.
+    let blend = |source: Color32, ground: Color32, linear: bool| {
+        let remain = 1.0 - f64::from(source.a()) / 255.0;
+        let channel = |source: u8, ground: u8| {
+            if linear {
+                encode8(decode8(source) + decode8(ground) * remain)
+            } else {
+                (f64::from(source) + f64::from(ground) * remain).round().clamp(0.0, 255.0) as u8
+            }
+        };
+        Color32::from_rgb(channel(source.r(), ground.r()), channel(source.g(), ground.g()), channel(source.b(), ground.b()))
+    };
+    let inks = |tokens: &crate::theme::Tokens| [tokens.text, tokens.text_dim, tokens.form_ink, tokens.form_dim, tokens.dialog_label];
+    for (name, authored) in [("light", crate::theme::Tokens::light()), ("dark", crate::theme::Tokens::dark()), ("high-contrast", high_contrast)] {
+        let ctx = egui::Context::default();
+        let _scope = crate::theme::scoped_panel_tokens(authored);
+        assert!(inks(&authored).iter().all(|ink| ink.a() == 255), "these shipped canonical ink pairs are opaque: {name}");
+        for floating in [false, true] {
+            let raw = crate::ui_kit::panel_host_frame(&ctx, floating).fill.to_srgba_unmultiplied();
+            let opaque = Color32::from_rgb(raw[0], raw[1], raw[2]);
+            let impossible = inks(&authored).iter().any(|ink| crate::theme::contrast_ratio(*ink, opaque) < 4.5);
+            for translucency_percent in [0.0_f32, 50.0, 100.0] {
+                let requested = 1.0 - translucency_percent / 100.0;
+                let style = HostSurfaceStyle::capture(&ctx, false, Some(requested), None);
+                let appearance = style.appearance(PanelSurface::Translucent, floating);
+                let palette = style.palette(appearance);
+                match &appearance.contrast {
+                    ContrastOutcome::Readable { effective_background_alpha } => {
+                        assert!(!impossible, "a shipped unreadable authored pair cannot be reported compliant: {name}");
+                        assert!(*effective_background_alpha >= requested);
+                        assert_eq!(inks(palette), inks(&authored), "ordinary resolution preserves every canonical ink: {name}");
+                    }
+                    ContrastOutcome::RetainReadableFallback { reason } => {
+                        assert!(impossible, "fallback is justified by an independently checked opaque pair: {name}");
+                        assert_eq!(*reason, ContrastFailure::UnreadableAtFullOpacity);
+                        assert_eq!(appearance.fill.a(), 255);
+                    }
+                }
+                for viewport in [0, 1, 64, 117, 192, 254, 255] {
+                    for linear in [false, true] {
+                        let background = blend(appearance.fill, Color32::from_gray(viewport), linear);
+                        for ink in inks(palette) {
+                            let physical_ink = blend(ink, background, linear);
+                            assert!(
+                                crate::theme::contrast_ratio(physical_ink, background) >= 4.5,
+                                "{name}: primary/muted text at translucency {translucency_percent}, viewport {viewport}, linear={linear}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn captured_panel_surfaces_protect_all_inks_at_requested_translucencies() {
+    let ctx = egui::Context::default();
+    for dark in [false, true] {
+        let tokens = surface_test_palette(dark);
+        let _scope = crate::theme::scoped_panel_tokens(tokens);
+        for translucency_percent in [0.0_f32, 50.0, 100.0] {
+            let opacity = 1.0 - translucency_percent / 100.0;
+            let style = HostSurfaceStyle::capture(&ctx, false, Some(opacity), None);
+            for floating in [false, true] {
+                let appearance = style.appearance(PanelSurface::Translucent, floating);
+                let ContrastOutcome::Readable { effective_background_alpha } = appearance.contrast else {
+                    panic!("valid theme must remain authored")
+                };
+                assert!(effective_background_alpha >= opacity);
+                assert_eq!(effective_background_alpha, f32::from(appearance.fill.a()) / 255.0);
+                assert_eq!(style.palette(appearance), &tokens);
+                assert!(super::surfaces::surface_readable(appearance.fill, style.palette(appearance)));
+                if appearance.fill.a() > (opacity * 255.0).ceil() as u8 {
+                    let [r, g, b, alpha] = appearance.fill.to_srgba_unmultiplied();
+                    let previous = egui::Color32::from_rgba_unmultiplied(r, g, b, alpha - 1);
+                    assert!(!super::surfaces::surface_readable(previous, &tokens), "chosen byte is the first readable candidate");
+                }
+            }
+            assert_eq!(style.appearance(PanelSurface::Opaque, false).fill.a(), 255);
+        }
+    }
+}
+
+#[test]
+fn panel_contrast_checks_interior_luminance_and_translucent_muted_inks() {
+    let mut tokens = surface_test_palette(false);
+    // This ink has >=4.5 contrast against both black and white, yet an interior
+    // viewport background can match it exactly. Endpoint checks alone are false.
+    let middle = egui::Color32::from_gray(117);
+    tokens.form_dim = middle;
+    assert!(crate::theme::contrast_ratio(middle, egui::Color32::BLACK) >= 4.5);
+    assert!(crate::theme::contrast_ratio(middle, egui::Color32::WHITE) >= 4.5);
+    assert!(!super::surfaces::surface_readable(egui::Color32::TRANSPARENT, &tokens));
+    tokens.form_dim = egui::Color32::from_rgba_unmultiplied(0, 0, 0, 240);
+    assert!(super::surfaces::surface_readable(egui::Color32::WHITE, &tokens), "RGBA ink is composited rather than rejected");
+    tokens.form_dim = egui::Color32::TRANSPARENT;
+    assert!(!super::surfaces::surface_readable(egui::Color32::WHITE, &tokens), "invisible muted ink cannot satisfy contrast");
+}
+
+#[test]
+fn panel_contrast_encloses_actual_premultiplied_gpu_blends() {
+    use egui::Color32;
+    use solidcraft_engine::geom::srgb::{decode8, encode8};
+    // Independent physical source-over oracle: read stored premultiplied bytes,
+    // never the production readability predicate or unpremultiplication helper.
+    let physical = |source: Color32, background: Color32, linear: bool, dither: f64| {
+        let remain = 1.0 - f64::from(source.a()) / 255.0;
+        let channel = |source: u8, background: u8| {
+            let source = f64::from(source) + dither;
+            if linear {
+                // Test source channels here are integer and undithered on the
+                // linear path; transfer-function fixtures independently cover it.
+                encode8(decode8(source.round().clamp(0.0, 255.0) as u8) + decode8(background) * remain)
+            } else {
+                (source + f64::from(background) * remain).round().clamp(0.0, 255.0) as u8
+            }
+        };
+        Color32::from_rgb(channel(source.r(), background.r()), channel(source.g(), background.g()), channel(source.b(), background.b()))
+    };
+    let premultiplied = Color32::from_rgba_premultiplied(32, 32, 32, 128);
+    let ground = Color32::from_gray(1);
+    assert_eq!(physical(premultiplied, ground, false, 0.0), Color32::from_gray(32));
+    assert_eq!(crate::theme::composite(premultiplied, ground), Color32::from_gray(33), "round-trip reconstruction is a different blend");
+    for background in [0, 1, 64, 117, 192, 254, 255] {
+        let ground = Color32::from_gray(background);
+        let (low, high) = super::surfaces::composite_bounds(premultiplied, ground);
+        for (linear, dither) in [(false, -0.475), (false, 0.0), (false, 0.475), (true, 0.0)] {
+            let actual = physical(premultiplied, ground, linear, dither);
+            assert!(low.r() <= actual.r() && actual.r() <= high.r(), "actual stored-byte blend lies inside conservative bounds");
+        }
+    }
+    let ctx = egui::Context::default();
+    for dark in [false, true] {
+        let mut tokens = surface_test_palette(dark);
+        tokens.form_dim = if dark { Color32::from_rgba_unmultiplied(255, 255, 255, 240) } else { Color32::from_rgba_unmultiplied(0, 0, 0, 240) };
+        let _scope = crate::theme::scoped_panel_tokens(tokens);
+        let style = HostSurfaceStyle::capture(&ctx, false, Some(0.0), None);
+        let appearance = style.appearance(PanelSurface::Translucent, false);
+        assert!(matches!(appearance.contrast, ContrastOutcome::Readable { .. }));
+        for viewport in [0, 1, 64, 117, 192, 254, 255] {
+            for linear in [false, true] {
+                let background = physical(appearance.fill, Color32::from_gray(viewport), linear, 0.0);
+                for ink in [tokens.text, tokens.text_dim, tokens.form_ink, tokens.form_dim, tokens.dialog_label] {
+                    let text = physical(ink, background, linear, 0.0);
+                    assert!(
+                        crate::theme::contrast_ratio(text, background) >= 4.5,
+                        "independent framebuffer blend preserves both primary and muted text"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn panel_surface_cache_tracks_dark_mode_even_with_identical_authored_tokens() {
+    struct RestoreDark(bool);
+    impl Drop for RestoreDark {
+        fn drop(&mut self) {
+            crate::theme::set_dark(self.0);
+        }
+    }
+    let _restore = RestoreDark(crate::theme::is_dark());
+    let ctx = egui::Context::default();
+    let mut tokens = surface_test_palette(false);
+    tokens.form_dim = tokens.panel;
+    let _scope = crate::theme::scoped_panel_tokens(tokens);
+    crate::theme::set_dark(false);
+    let light = HostSurfaceStyle::capture(&ctx, false, Some(0.5), None);
+    crate::theme::set_dark(true);
+    let dark = HostSurfaceStyle::capture(&ctx, false, Some(0.5), Some(&light));
+    let light_appearance = light.appearance(PanelSurface::Translucent, false);
+    let dark_appearance = dark.appearance(PanelSurface::Translucent, false);
+    assert_ne!(light_appearance.fill, dark_appearance.fill, "fallback family changes despite identical captured authored tokens");
+    assert_eq!(HostSurfaceStyle::capture(&ctx, false, Some(0.5), Some(&dark)), dark);
+}
+
+#[test]
+fn invalid_panel_theme_reports_failure_and_uses_opaque_known_tokens() {
+    let ctx = egui::Context::default();
+    let mut tokens = surface_test_palette(false);
+    tokens.form_dim = tokens.panel;
+    tokens.space_4 = 7.0;
+    let _scope = crate::theme::scoped_panel_tokens(tokens);
+    for override_alpha in [Some(0.5), Some(f32::NAN), Some(f32::INFINITY), Some(-0.1), Some(1.1)] {
+        let style = HostSurfaceStyle::capture(&ctx, false, override_alpha, None);
+        let appearance = style.appearance(PanelSurface::Translucent, false);
+        let expected = if override_alpha.is_some_and(|a| !a.is_finite() || !(0.0..=1.0).contains(&a)) {
+            ContrastFailure::InvalidTokens
+        } else {
+            ContrastFailure::UnreadableAtFullOpacity
+        };
+        assert_eq!(appearance.contrast, ContrastOutcome::RetainReadableFallback { reason: expected });
+        assert_eq!(appearance.fill.a(), 255);
+        assert!(super::surfaces::surface_readable(appearance.fill, style.palette(appearance)));
+        assert_eq!(style.palette(appearance).space_4, tokens.space_4, "fallback does not change layout metrics");
+        let cached = HostSurfaceStyle::capture(&ctx, false, override_alpha, Some(&style));
+        assert_eq!(cached, style, "even an invalid raw NaN override has a stable bitwise cache key");
+    }
+}
+
+#[test]
+fn panel_surface_capture_matches_shared_frames_and_respects_accessibility() {
+    let ctx = egui::Context::default();
+    let tokens = surface_test_palette(false);
+    let _scope = crate::theme::scoped_panel_tokens(tokens);
+    let style = HostSurfaceStyle::capture(&ctx, false, None, None);
+    for floating in [false, true] {
+        let requested = crate::ui_kit::panel_host_frame(&ctx, floating).fill;
+        assert!(style.appearance(PanelSurface::Translucent, floating).fill.a() >= requested.a());
+    }
+    assert_eq!(HostSurfaceStyle::capture(&ctx, false, None, Some(&style)), style);
+    let forced = HostSurfaceStyle::capture(&ctx, true, Some(0.0), Some(&style));
+    assert_ne!(forced, style);
+    for floating in [false, true] {
+        let appearance = forced.appearance(PanelSurface::Translucent, floating);
+        assert_eq!(appearance.fill.a(), 255);
+        assert!(super::surfaces::surface_readable(appearance.fill, forced.palette(appearance)));
+    }
+    let second_context = egui::Context::default();
+    assert_eq!(HostSurfaceStyle::capture(&second_context, false, None, Some(&style)), style);
+    let mut changed = tokens;
+    changed.text_dim = egui::Color32::from_gray(20);
+    let _changed = crate::theme::scoped_panel_tokens(changed);
+    assert_ne!(HostSurfaceStyle::capture(&ctx, false, None, Some(&style)), style);
+}
+
+#[test]
+fn panel_paint_palette_scope_restores_nested_tokens_without_changing_base_theme() {
+    let before = crate::theme::Tokens::get();
+    let base = crate::theme::Tokens::base();
+    let mut outer = before;
+    outer.text = outer.file_primary_ink;
+    {
+        let _outer = crate::theme::scoped_panel_tokens(outer);
+        assert_eq!(crate::theme::Tokens::get(), outer);
+        assert_eq!(crate::theme::Tokens::get_in(crate::theme::ColorVision::Off), outer);
+        assert_eq!(crate::theme::Tokens::base(), base);
+        {
+            let inner = surface_test_palette(false);
+            let _inner = crate::theme::scoped_panel_tokens(inner);
+            assert_eq!(crate::theme::Tokens::get(), inner);
+        }
+        assert_eq!(crate::theme::Tokens::get(), outer);
+    }
+    assert_eq!(crate::theme::Tokens::get(), before);
+    assert_eq!(crate::theme::Tokens::base(), base);
+}
+
 fn prepare_preference_fixture(app: &mut crate::SolveApp) {
     app.panel_runtime
         .as_mut()
@@ -12111,12 +12379,18 @@ fn captured_renderer_alpha_reaches_new_sections_and_alpha_only_drift_invalidates
         h.app.ui.layout = mode;
         h.frames(2);
         let painted = h.app.universal_panel_frame().unwrap().layout.clone();
+        let captured_style = painted.geometry_policy.surfaces.as_ref().unwrap();
         let alpha = HostSurfaceAlpha {
-            docked: crate::ui_kit::panel_host_frame(&h.ctx, false).fill.a(),
-            floating: crate::ui_kit::panel_host_frame(&h.ctx, true).fill.a(),
+            docked: captured_style.appearance(PanelSurface::FollowZone, false).fill.a(),
+            floating: captured_style.appearance(PanelSurface::FollowZone, true).fill.a(),
         };
         assert_eq!(painted.geometry_policy.surface_alpha, Some(alpha), "the actual app captures the shared renderer policy before allocation");
-        assert!(painted.sections.iter().all(|card| card.paint_alpha == Some(alpha.docked)));
+        for card in &painted.sections {
+            let appearance = captured_style.appearance(card.surface, card.peek || card.zone == Zone::Floating);
+            assert_eq!(card.paint_alpha, Some(appearance.fill.a()));
+            assert_eq!(card.contrast.as_ref(), Some(&appearance.contrast));
+            assert_eq!(card.paint_alpha, Some(255), "Classic's default opaque policy is preserved");
+        }
         let gap = crate::ui_kit::Container::for_layout(mode, crate::ui_kit::Surface::Panel).gap();
         assert_eq!(gap, if mode == crate::shell::LayoutMode::Floating { 7.0 } else { 0.0 });
         assert_eq!(painted.metrics.gap, gap);
@@ -12159,6 +12433,17 @@ fn captured_renderer_alpha_reaches_new_sections_and_alpha_only_drift_invalidates
             .unwrap()
         };
         let reference = resolve(&policy);
+        let mut styled_policy = policy.clone();
+        styled_policy.default_opaque = false;
+        styled_policy.surfaces = Some(HostSurfaceStyle::capture(&h.ctx, false, Some(0.5), None));
+        let styled = resolve(&styled_policy);
+        for card in &styled.sections {
+            let appearance = styled_policy.surfaces.as_ref().unwrap().appearance(card.surface, card.peek || card.zone == Zone::Floating);
+            assert_eq!(card.paint_alpha, Some(appearance.fill.a()));
+            assert_eq!(card.contrast.as_ref(), Some(&appearance.contrast));
+        }
+        assert_eq!(styled.render_domain, reference.render_domain);
+        assert_eq!(styled.controls, reference.controls, "appearance leaves all pointer bounds and identities intact");
         let action = transaction(vec![
             fixture_open("fixture.log", "alpha-dock", "alpha-dock", Zone::Right, 1).unwrap(),
             Mutation::Open {

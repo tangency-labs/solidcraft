@@ -457,35 +457,43 @@ fn universal_kit_chrome_uses_one_container_and_preserves_parent_clipping_and_foc
     let mut calls = 0;
     let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
         ui.set_clip_rect(clip);
-        panel_host_surface(ui, egui::Id::unique("synthetic-section"), bounds, false, |ui, content_clip| {
-            calls += 1;
-            assert_eq!(ui.clip_rect(), clip);
-            assert!(clip.contains_rect(content_clip));
-            let outer_frames = ui.stack().iter().filter(|node| node.frame().fill != egui::Color32::TRANSPARENT).count();
-            assert!(outer_frames <= 1, "a section must not introduce nested outer frames");
-            let title = panel_host_control(
-                ui,
-                egui::Id::unique("synthetic-header"),
-                header,
-                HostChrome {
-                    label: "Synthetic long localized panel title",
-                    icon: Some("list"),
-                    icon_only: false,
-                    attention: true,
-                    selected: false,
-                    enabled: true,
-                    drag: true,
-                    title: true,
-                    grip_only: false,
-                    rtl: false,
-                },
-            );
-            let resize = panel_host_sash(ui, egui::Id::unique("synthetic-sash"), sash, "Resize synthetic neighbours");
-            assert!(title.sense.is_focusable());
-            assert!(resize.sense.is_focusable());
-            assert_eq!(title.rect, header);
-            assert_eq!(resize.rect, sash);
-        });
+        panel_host_surface(
+            ui,
+            egui::Id::unique("synthetic-section"),
+            bounds,
+            false,
+            panel_host_frame(ui.ctx(), false).fill,
+            None,
+            |ui, content_clip| {
+                calls += 1;
+                assert_eq!(ui.clip_rect(), clip);
+                assert!(clip.contains_rect(content_clip));
+                let outer_frames = ui.stack().iter().filter(|node| node.frame().fill != egui::Color32::TRANSPARENT).count();
+                assert!(outer_frames <= 1, "a section must not introduce nested outer frames");
+                let title = panel_host_control(
+                    ui,
+                    egui::Id::unique("synthetic-header"),
+                    header,
+                    HostChrome {
+                        label: "Synthetic long localized panel title",
+                        icon: Some("list"),
+                        icon_only: false,
+                        attention: true,
+                        selected: false,
+                        enabled: true,
+                        drag: true,
+                        title: true,
+                        grip_only: false,
+                        rtl: false,
+                    },
+                );
+                let resize = panel_host_sash(ui, egui::Id::unique("synthetic-sash"), sash, "Resize synthetic neighbours");
+                assert!(title.sense.is_focusable());
+                assert!(resize.sense.is_focusable());
+                assert_eq!(title.rect, header);
+                assert_eq!(resize.rect, sash);
+            },
+        );
     });
     assert!(calls >= 1);
     let tree = output.platform_output.accesskit_update.as_ref().unwrap();
@@ -528,12 +536,12 @@ fn universal_surface_uses_adaptive_workspace_fill_and_rounding_with_safe_content
                 if free_card {
                     // A new floating Area first measures invisibly, even with fade disabled.
                     crate::test_support::frame(&ctx, egui::RawInput { time: Some(0.0), ..Default::default() }, |ui| {
-                        panel_host_surface(ui, egui::Id::unique("adaptive-surface"), bounds, free_card, |_, _| {});
+                        panel_host_surface(ui, egui::Id::unique("adaptive-surface"), bounds, free_card, expected.fill, None, |_, _| {});
                     });
                 }
                 for time in [1.0, 2.0] {
                     let output = crate::test_support::frame(&ctx, egui::RawInput { time: Some(time), ..Default::default() }, |ui| {
-                        panel_host_surface(ui, egui::Id::unique("adaptive-surface"), bounds, free_card, |ui, clip| {
+                        panel_host_surface(ui, egui::Id::unique("adaptive-surface"), bounds, free_card, expected.fill, None, |ui, clip| {
                             assert!(ui.is_visible() && !ui.is_sizing_pass(), "assert the first visible paint and its subsequent frame");
                             assert!(bounds.contains_rect(clip));
                             let stroke = expected.stroke.width;
@@ -2594,5 +2602,88 @@ fn page_sidebar_footer_stays_visible_when_the_page_list_scrolls() {
         assert_eq!(scenario::rect_of("dialog:pages_footer"), Some(footer));
         assert!(footer.contains_rect(scenario::rect_of("prefs:profile").unwrap()));
         assert!(nav.contains_rect(scenario::rect_of("prefs:page:Plugins").unwrap()), "last page is reachable in {theme}");
+    }
+}
+
+#[test]
+fn host_surface_fallback_paints_readable_plain_labels_without_changing_body_layout() {
+    use solidcraft_engine::panels::{ContrastOutcome, PanelSurface};
+    let bounds = egui::Rect::from_min_size(egui::pos2(40.0, 40.0), egui::vec2(320.0, 180.0));
+    for floating in [false, true] {
+        for fallback in [false, true] {
+            let ctx = crate::fonts::test_context();
+            let mut authored = Tokens::get();
+            authored.panel = egui::Color32::WHITE;
+            authored.text = egui::Color32::BLACK;
+            authored.text_dim = egui::Color32::BLACK;
+            authored.form_ink = egui::Color32::BLACK;
+            authored.form_dim = egui::Color32::BLACK;
+            authored.dialog_label = egui::Color32::BLACK;
+            if fallback {
+                authored.text = authored.panel;
+            }
+            let _authored = crate::theme::scoped_panel_tokens(authored);
+            let style = crate::panel_runtime::HostSurfaceStyle::capture(&ctx, false, Some(0.0), None);
+            let appearance = style.appearance(PanelSurface::Translucent, floating);
+            let failed = matches!(appearance.contrast, ContrastOutcome::RetainReadableFallback { .. });
+            assert_eq!(failed, fallback, "exercise both authored paint and deliberately unreadable fallback");
+            let palette = failed.then(|| style.palette(appearance));
+            if floating {
+                crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+                    panel_host_surface(ui, egui::Id::unique("captured-fill"), bounds, floating, appearance.fill, palette, |_, _| {});
+                });
+            }
+            let font = egui::FontId::monospace(19.0);
+            let mut expected_ink = egui::Color32::TRANSPARENT;
+            let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+                ui.style_mut().override_font_id = Some(font.clone());
+                ui.spacing_mut().item_spacing = egui::vec2(13.0, 17.0);
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                ui.visuals_mut().override_text_color = Some(authored.panel);
+                let parent_visuals = ui.visuals().clone();
+                let parent_spacing = ui.spacing().item_spacing;
+                let parent_fonts = ui.style().text_styles.clone();
+                let parent_wrap = ui.style().wrap_mode;
+                expected_ink = palette.map_or(authored.panel, |tokens| tokens.text);
+                panel_host_surface(ui, egui::Id::unique("captured-fill"), bounds, floating, appearance.fill, palette, |ui, clip| {
+                    assert_eq!(Tokens::get(), palette.copied().unwrap_or(authored));
+                    assert_eq!(ui.spacing().item_spacing, parent_spacing);
+                    assert_eq!(ui.style().text_styles, parent_fonts);
+                    assert_eq!(ui.style().override_font_id, Some(font.clone()));
+                    assert_eq!(ui.style().wrap_mode, parent_wrap);
+                    if palette.is_none() {
+                        assert_eq!(ui.visuals(), &parent_visuals, "normal bodies inherit unchanged visuals");
+                    }
+                    assert!(bounds.contains_rect(clip));
+                    ui.label("Readable captured panel");
+                });
+                assert_eq!(Tokens::get(), authored);
+                assert_eq!(ui.visuals(), &parent_visuals, "fallback visuals restore immediately");
+                assert_eq!(ui.spacing().item_spacing, parent_spacing);
+                assert_eq!(ui.style().text_styles, parent_fonts);
+            });
+            let (mut backgrounds, mut labels) = (0, 0);
+            for shape in &output.shapes {
+                crate::test_support::each_shape(&shape.shape, &mut |shape| match shape {
+                    egui::Shape::Rect(rect) if rect.rect == bounds && rect.fill != egui::Color32::TRANSPARENT => {
+                        assert_eq!(rect.fill, appearance.fill, "actual paint uses the captured fill");
+                        backgrounds += 1;
+                    }
+                    egui::Shape::Text(text) if text.galley.job.text == "Readable captured panel" => {
+                        for section in &text.galley.job.sections {
+                            let ink = text.override_text_color.unwrap_or_else(|| {
+                                if section.format.color == egui::Color32::PLACEHOLDER { text.fallback_color } else { section.format.color }
+                            });
+                            assert_eq!(ink, expected_ink, "the actual plain-label galley uses readable fallback ink");
+                            assert_eq!(section.format.font_id, font, "fallback preserves the body's chosen font");
+                        }
+                        labels += 1;
+                    }
+                    _ => {}
+                });
+            }
+            assert!(backgrounds > 0 && labels > 0, "inspect real background and label paint");
+            assert_eq!(Tokens::get(), authored);
+        }
     }
 }
