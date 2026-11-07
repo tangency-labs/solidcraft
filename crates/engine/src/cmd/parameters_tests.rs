@@ -389,6 +389,27 @@ fn csv_and_json_round_trip() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A value a spreadsheet would run as a formula is exported as text, with a `'` first, and
+/// imports back as it was (#12728). A plain number keeps its sign, and `;` makes a field quoted.
+#[test]
+fn csv_keeps_formulas_as_text_and_imports_them_back() {
+    let mut s = Session::default();
+    let rows = [("d3", "4", "plain"), ("a", "=d3", "+2 for the fit"), ("b", "=5", "'=kept"), ("c", "-5 mm", "@x"), ("e", "6", "one; two")];
+    for (name, expression, comment) in rows {
+        run(&mut s, "parameters.add", json!({"name": name, "expression": expression, "comment": comment}));
+    }
+    let csv = run(&mut s, "parameters.export", json!({"format": "csv"}))["text"].as_str().unwrap_or_default().to_string();
+    for written in [",'=d3,", ",'+2 for the fit,", ",'=5,", ",''=kept,", ",'-5 mm,-5,'@x,", ",\"one; two\","] {
+        assert!(csv.contains(written), "{written}: {csv}");
+    }
+    let mut t = Session::default();
+    run(&mut t, "parameters.import", json!({"text": csv}));
+    for (name, _, comment) in rows {
+        let (before, after) = (s.doc.param(name), t.doc.param(name));
+        assert_eq!(after.map(|p| (p.expr.as_str(), p.comment.as_str())), before.map(|p| (p.expr.as_str(), comment)), "{name}: {csv}");
+    }
+}
+
 #[test]
 fn csv_round_trips_comments_with_line_breaks() {
     for comment in ["line one\nline two", "\r\nfirst, \"quoted\"\r\n\r\nlast\r\n", "one\rtwo"] {

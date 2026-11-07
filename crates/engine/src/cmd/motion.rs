@@ -860,7 +860,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
                     c += &format!(
                         "{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
                         r["step"],
-                        p["occurrence"].as_str().unwrap_or_default().replace(',', " "),
+                        solidcraft_doc::csv::field(p["occurrence"].as_str().unwrap_or_default()),
                         n("origin", 0),
                         n("origin", 1),
                         n("origin", 2),
