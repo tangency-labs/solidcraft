@@ -970,6 +970,9 @@ pub struct VisibilityState {
     /// Whether the Origin folder is hidden. Present when set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin_hidden: Option<bool>,
+    /// Component Origin folders explicitly shown, by complete occurrence path. Present when any.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shown_component_origins: Vec<Vec<u64>>,
     /// Sketches whose closed profiles are not shaded, by feature id. Present when there are any.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hidden_profiles: Vec<u64>,
@@ -994,6 +997,7 @@ impl From<&solidcraft_doc::Visibility> for VisibilityState {
             shown_sketches: v.shown_sketches.clone(),
             hidden_joints: v.hidden_joints.clone(),
             origin_hidden: v.origin_hidden,
+            shown_component_origins: v.shown_component_origins.clone(),
             hidden_profiles: v.hidden_profiles.clone(),
             shown_dimensions: v.shown_dimensions.clone(),
             locked_bodies: v.locked_bodies.clone(),
