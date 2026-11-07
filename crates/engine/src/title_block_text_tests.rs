@@ -8,6 +8,7 @@ use solidcraft_geom::paper::text::TextRun;
 use solidcraft_geom::paper::{Item, ObjectKind};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::title_block::CellLayout;
+use solidcraft_sketch::paper_lines;
 
 use super::*;
 use crate::Session;

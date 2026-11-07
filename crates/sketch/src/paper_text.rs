@@ -28,7 +28,8 @@
 //! - The search for those fonts reads whole files for the known ones and hashes the ones it finds,
 //!   so the window never waits for it: [`paper_text_now`] asks a thread (`font-search`) and refuses
 //!   with [`SketchError::FontPending`] until the answers are in. Answers, misses too, are kept for
-//!   the process. [`paper_text`] does the search where it is called.
+//!   the process. [`paper_text`] does the search where it is called. A sheet sets its texts through
+//!   [`PaperFonts`], which makes that choice once, and reads each answer as an [`Outcome`].
 //! - The browser has no font folders: there the web covers Arabic, Chinese, Japanese and Korean, a
 //!   font each ([`fallback`]). Text is refused with [`SketchError::FontPending`], whichever way it's
 //!   asked for, until each font it asked the web app for has come or failed.
@@ -198,6 +199,57 @@ pub fn paper_lines_now(
     style: &TextStyle,
 ) -> Result<PaperLines> {
     measure(dirs, text, family, language, height, wrap, style, false)
+}
+
+/// A drawing's lettering for its sheet's texts: the font `family` (empty: the built-in font) and
+/// `language`, with the font folders listed once. `wait`: fonts to fall back to are searched for
+/// where a text is set (an export, `drawing.inspect`); else the search's thread is asked, for the
+/// window's sheet, as [`paper_text_now`] does. The one place a sheet's text chooses its way in.
+pub struct PaperFonts {
+    family: String,
+    language: String,
+    dirs: Vec<PathBuf>,
+    wait: bool,
+}
+
+impl PaperFonts {
+    pub fn new(family: &str, language: &str, wait: bool) -> PaperFonts {
+        PaperFonts::in_dirs(font_dirs(), family, language, wait)
+    }
+
+    /// [`PaperFonts::new`] with the fonts installed in `dirs`.
+    pub fn in_dirs(dirs: Vec<PathBuf>, family: &str, language: &str, wait: bool) -> PaperFonts {
+        PaperFonts { family: family.to_string(), language: language.to_string(), dirs, wait }
+    }
+
+    /// `text` measured as [`paper_lines`] measures it.
+    pub fn lines(&self, text: &str, height: f64, wrap: Option<f64>, style: &TextStyle) -> Result<PaperLines> {
+        measure(&self.dirs, text, Some(&self.family), &self.language, height, wrap, style, self.wait)
+    }
+
+    /// `text` set as [`paper_text`] sets it.
+    pub fn text(&self, text: &str, at: Vec2, height: f64, angle: f64, style: &TextStyle) -> Result<Option<(Vec<TextRun>, Vec<Font>)>> {
+        set_text(&self.dirs, text, Some(&self.family), &self.language, (at, height, angle), style, self.wait)
+    }
+}
+
+/// What became of a text set on a sheet: set; pending until the search for a font to fall back to
+/// answers (the window's sheet only); or refused, with why.
+#[derive(Debug)]
+pub enum Outcome<T> {
+    Set(T),
+    Pending,
+    Refused(String),
+}
+
+impl<T> From<Result<T>> for Outcome<T> {
+    fn from(set: Result<T>) -> Outcome<T> {
+        match set {
+            Ok(set) => Outcome::Set(set),
+            Err(SketchError::FontPending) => Outcome::Pending,
+            Err(why) => Outcome::Refused(why.to_string()),
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

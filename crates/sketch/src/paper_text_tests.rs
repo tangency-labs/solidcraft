@@ -484,6 +484,32 @@ fn the_windows_way_in_waits_for_no_search() {
     assert_eq!((runs.len(), fonts.len()), (2, 2));
 }
 
+/// A sheet's texts take one of three outcomes, the same rule whichever way in: asking is pending
+/// until the search answers, then sets what waiting sets; waiting is never pending; a character no
+/// font has is refused with why.
+#[test]
+fn a_sheets_text_is_set_pending_or_refused() {
+    let folder = Folder::new("outcomes", &["a.ttf"]);
+    let (asking, waiting) = (PaperFonts::in_dirs(folder.dirs(), "", "", false), PaperFonts::in_dirs(folder.dirs(), "", "", true));
+    let plain = TextStyle::default();
+    assert!(matches!(Outcome::from(asking.lines("A \u{30c6}", 5.0, None, &plain)), Outcome::Pending));
+    let Outcome::Set(asked) = Outcome::from(answered(|| asking.lines("A \u{30c6}", 5.0, None, &plain))) else { panic!("not set") };
+    let Outcome::Set(waited) = Outcome::from(waiting.lines("A \u{30c6}", 5.0, None, &plain)) else { panic!("not set") };
+    assert_eq!(asked.lines, waited.lines);
+    let set = |text: std::result::Result<Option<(Vec<TextRun>, Vec<Font>)>, SketchError>| match Outcome::from(text) {
+        Outcome::Set(Some((runs, _))) => runs.len(),
+        _ => 0,
+    };
+    assert_eq!(set(answered(|| asking.text("A\u{30c6}", AT, 5.0, 0.0, &plain))), 2);
+    assert_eq!(set(waiting.text("A\u{30c6}", AT, 5.0, 0.0, &plain)), 2);
+    let refused = |text: std::result::Result<Option<(Vec<TextRun>, Vec<Font>)>, SketchError>| match Outcome::from(text) {
+        Outcome::Refused(why) => why,
+        _ => String::new(),
+    };
+    assert!(refused(answered(|| asking.text("Size \u{1200}", AT, 5.0, 0.0, &plain))).contains("no glyph for '\u{1200}'"));
+    assert!(refused(waiting.text("Size \u{1200}", AT, 5.0, 0.0, &plain)).contains("no glyph for '\u{1200}'"));
+}
+
 #[test]
 fn a_font_fallen_back_to_takes_its_nearest_style() {
     // BIZ UDPGothic has no italic and no bold: it leans, and bold isn't refused for it.

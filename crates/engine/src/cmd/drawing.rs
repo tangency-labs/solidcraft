@@ -20,6 +20,7 @@ use solidcraft_doc::{Document, ids};
 use solidcraft_geom::cell::Warning;
 use solidcraft_geom::drawing_view::ProjectedSide;
 use solidcraft_geom::paper::line::LineGroup;
+use solidcraft_sketch::PaperFonts;
 
 use super::CommandSpec;
 use crate::params::{bad, str_};
@@ -450,7 +451,9 @@ fn title_block_cells(doc: &Document, tree: &mut Tree<'_>, d: &Drawing, at: usize
         Some(sheet) => sheet.title_block.as_ref().zip(sheet.title_block_layout()?),
         None => None,
     };
-    let notes = block.map(|(block, placed)| title_block_text::lay(block, &placed, &d.font, &d.language, &shown, true).notes).unwrap_or_default();
+    let notes = block
+        .map(|(block, placed)| title_block_text::lay(block, &placed, &PaperFonts::new(&d.font, &d.language, true), &shown).notes)
+        .unwrap_or_default();
     let note = |note: &Note| match note {
         Note::Fit(Warning::Chars { count, max }) => json!({"fit": "chars", "count": count, "max": max}),
         Note::Fit(Warning::Height) => json!({"fit": "height"}),
