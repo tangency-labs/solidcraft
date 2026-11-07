@@ -88,6 +88,21 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         }
                     }
                 });
+                // A built-in pattern behind the model, in the view's colours.
+                let label = app.tr("prefs.background_pattern");
+                ui_kit::row(ui, label, |ui| {
+                    let mut labels = vec![app.tr("prefs.pattern_none").to_string()];
+                    labels.extend(crate::backdrop::PATTERNS.iter().map(|(_, name)| app.tr(name).to_string()));
+                    let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
+                    let before = crate::backdrop::PATTERNS.iter().position(|(id, _)| *id == app.preferences.background_pattern).map_or(0, |i| i + 1);
+                    let mut selected = before;
+                    let response = ui_kit::dropdown(ui, "background_pattern", &mut selected, &labels);
+                    crate::scenario::publish_target("prefs:background_pattern", response.rect);
+                    if selected != before {
+                        app.preferences.background_pattern =
+                            selected.checked_sub(1).and_then(|i| crate::backdrop::PATTERNS.get(i)).map_or_else(String::new, |(id, _)| id.to_string());
+                    }
+                });
                 // A picture of the user's behind the model.
                 let label = app.tr("prefs.background_image");
                 ui_kit::row(ui, label, |ui| {
