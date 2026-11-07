@@ -807,7 +807,7 @@ mod tests {
     #[test]
     fn rounded_rectangle_preserves_its_authored_dashes() {
         let ctx = crate::fonts::test_context();
-        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             let t = Tokens::light();
             let drawing = Ctx { t: &t, sample: None, palette: Palette::Figure, origin: pos2(10.0, 10.0), scale: 1.0 };
             draw(
@@ -822,6 +822,7 @@ mod tests {
                 None,
             );
         });
+        output.textures_delta.clear();
         // A dashed outline is separate path segments, never a solid rectangle stroke.
         assert!(output.shapes.len() > 4);
         assert!(output.shapes.iter().all(|shape| !matches!(shape.shape, Shape::Rect(_))));

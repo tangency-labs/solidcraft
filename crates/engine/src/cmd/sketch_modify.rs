@@ -13,6 +13,13 @@ use super::sketch::{add_c, coincident_points, dof_now, edit, ids_of, line_or_axi
 use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, bool_, expr, num, req_expr, req_vec2, str_, string_list, vec2, vec2_list};
+use crate::schema::sketch_modify::{
+    BreakParams, BreakResult, ChamferDistanceAngleParams, ChamferEqualParams, ChamferResult, ChamferTwoParams, CircularPatternParams, ExtendParams,
+    ExtendResult, FilletParams, FilletResult, MAX_BREAK_POINTS, MAX_COPIES, MAX_INSTANCES, MAX_PATH_POINTS, MirrorParams, MirrorResult, MoveParams,
+    MoveResult, OffsetBreakParams, OffsetBreakResult, OffsetParams, OffsetResult, OffsetSide, PatternResult, RectangularPatternParams, ScaleParams,
+    ScaleResult, TrimOutcome, TrimParams, TrimPathParams, TrimPathResult, TrimResult,
+};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
 #[path = "sketch_pattern.rs"]
@@ -20,28 +27,54 @@ mod pattern;
 #[path = "sketch_support.rs"]
 mod support;
 
+const TRIM_CONTRACT: TypedContract<TrimParams> = TypedContract::new();
+const TRIM_PATH_CONTRACT: TypedContract<TrimPathParams> = TypedContract::new();
+const BREAK_CONTRACT: TypedContract<BreakParams> = TypedContract::new();
+const EXTEND_CONTRACT: TypedContract<ExtendParams> = TypedContract::new();
+const FILLET_CONTRACT: TypedContract<FilletParams> = TypedContract::new();
+const CHAMFER_EQUAL_CONTRACT: TypedContract<ChamferEqualParams> = TypedContract::new();
+const CHAMFER_TWO_CONTRACT: TypedContract<ChamferTwoParams> = TypedContract::new();
+const CHAMFER_DISTANCE_ANGLE_CONTRACT: TypedContract<ChamferDistanceAngleParams> = TypedContract::new();
+const OFFSET_CONTRACT: TypedContract<OffsetParams> = TypedContract::new();
+const OFFSET_BREAK_CONTRACT: TypedContract<OffsetBreakParams> = TypedContract::new();
+const MIRROR_CONTRACT: TypedContract<MirrorParams> = TypedContract::new();
+const MOVE_CONTRACT: TypedContract<MoveParams> = TypedContract::new();
+const SCALE_CONTRACT: TypedContract<ScaleParams> = TypedContract::new();
+const CIRCULAR_PATTERN_CONTRACT: TypedContract<CircularPatternParams> = TypedContract::new();
+const RECTANGULAR_PATTERN_CONTRACT: TypedContract<RectangularPatternParams> = TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("sketch.fillet", "Fillet", fillet)
+    CommandSpec::new("sketch.fillet", "Fillet", crate::checked!("sketch.fillet", fillet))
+        .contract(&FILLET_CONTRACT)
+        .output(output_schema_for::<FilletResult>)
         .at("SKETCH", "MODIFY")
         .icon("sketch_fillet")
         .enabled(in_sketch)
         .params(concat!("point: corner shared by two curves (\"l1.end\") | points: [corners] (all rounded alike: one radius, the rest equal; a corner is a point reference or {a, b}, the two curves meeting there) | a, b: two lines or arcs meeting at a corner (two lines that share no end are first brought to where they meet: the nearer end of a line that stops short moves there, and a line that runs past is cut there, losing its shorter piece); radius: expr. A corner that dimensions or constraints measure to stays as a virtual sharp corner on both curves' extensions (`virtual_corners`; the moved ones in `moved_to_virtual_corner`). An ellipse's axis line is never a side of a corner (also for the chamfers)", created_doc!())),
-    CommandSpec::new("sketch.chamfer.equal_distance", "Equal Distance Chamfer", chamfer_equal)
+    CommandSpec::new("sketch.chamfer.equal_distance", "Equal Distance Chamfer", crate::checked!("sketch.chamfer.equal_distance", chamfer_equal))
+        .contract(&CHAMFER_EQUAL_CONTRACT)
+        .output(output_schema_for::<ChamferResult>)
         .at("SKETCH", "MODIFY")
         .icon("sketch_chamfer")
         .enabled(in_sketch)
         .params(concat!("point | points: [corners] (every corner cut alike; a corner is a point reference or {a, b}) | a, b: a corner of two lines (two that share no end are first brought to where they meet, as in sketch.fillet); distance", created_doc!())),
-    CommandSpec::new("sketch.chamfer.distance_angle", "Distance and Angle Chamfer", chamfer_dist_angle)
+    CommandSpec::new("sketch.chamfer.distance_angle", "Distance and Angle Chamfer", crate::checked!("sketch.chamfer.distance_angle", chamfer_dist_angle))
+        .contract(&CHAMFER_DISTANCE_ANGLE_CONTRACT)
+        .output(output_schema_for::<ChamferResult>)
         .at("SKETCH", "MODIFY")
         .icon("sketch_chamfer_angle")
         .enabled(in_sketch)
         .params(concat!("point | points: [corners] (every corner cut alike; a corner is a point reference or {a, b}, and a point's `a` is the first of its two lines in curve order) | a, b: a corner of two lines (two that share no end are first brought to where they meet, as in sketch.fillet); distance: along a, angle: deg from a", created_doc!())),
-    CommandSpec::new("sketch.chamfer.two_distance", "Two Distance Chamfer", chamfer_two)
+    CommandSpec::new("sketch.chamfer.two_distance", "Two Distance Chamfer", crate::checked!("sketch.chamfer.two_distance", chamfer_two))
+        .contract(&CHAMFER_TWO_CONTRACT)
+        .output(output_schema_for::<ChamferResult>)
         .at("SKETCH", "MODIFY")
         .icon("sketch_chamfer_two_distances")
         .enabled(in_sketch)
         .params(concat!("point | points: [corners] (every corner cut alike; a corner is a point reference or {a, b}, and a point's `a` is the first of its two lines in curve order) | a, b: a corner of two lines (two that share no end are first brought to where they meet, as in sketch.fillet); distance: along a, distance2: along b", created_doc!())),
-    CommandSpec::new("sketch.offset", "Offset", offset)
+    CommandSpec::new("sketch.offset", "Offset", crate::checked!("sketch.offset", offset))
+        .contract(&OFFSET_CONTRACT)
+        .output(output_schema_for::<OffsetResult>)
         .at("SKETCH", "MODIFY")
         .icon("offset")
         .key("O")
@@ -53,33 +86,45 @@ pub static COMMANDS: &[CommandSpec] = &[
             "instances?: whole number or unitless expression, 1…100 (default 1): each instance after the first offsets the instance before it by the same distance again, so instance n stands n distances from the curves picked. Every instance of a side is driven by that side's own dimension, and each entry of `sides` names its `instance`; an instance the shape cannot take refuses the whole command",
             created_doc!()
         )),
-    CommandSpec::new("sketch.offset.break", "Break Offset Association", break_offset).icon("sketch_break")
+    CommandSpec::new("sketch.offset.break", "Break Offset Association", crate::checked!("sketch.offset.break", break_offset))
+        .contract(&OFFSET_BREAK_CONTRACT)
+        .output(output_schema_for::<OffsetBreakResult>).icon("sketch_break")
         .enabled(in_sketch)
         .params("curve: derived offset curve id (retains geometry and makes its points editable)"),
-    CommandSpec::new("sketch.trim", "Trim", trim)
+    CommandSpec::new("sketch.trim", "Trim", crate::checked!("sketch.trim", trim))
+        .contract(&TRIM_CONTRACT)
+        .output(output_schema_for::<TrimResult>)
         .at("SKETCH", "MODIFY")
         .icon("trim")
         .key("T")
         .enabled(in_sketch)
         .params(concat!("curve: id, at: [x,y] (the piece to remove: between the nearest intersections around it). Trimming a line source or its single-line offset releases linked extents (offset_released: curve ids), retaining their driving normal-distance dimensions and parallel relations", created_doc!())),
-    CommandSpec::new("sketch.trim.path", "Trim Along Path", trim_path)
+    CommandSpec::new("sketch.trim.path", "Trim Along Path", crate::checked!("sketch.trim.path", trim_path))
+        .contract(&TRIM_PATH_CONTRACT)
+        .output(output_schema_for::<TrimPathResult>)
         .icon("trim")
         .enabled(in_sketch)
         .params(concat!(
             "points: [[x,y]…] (2…2000 positions: a path drawn across the sketch). Every piece the path crosses is removed as `sketch.trim` removes the piece at that crossing, in the order the path crosses them; a piece crossed again after it is gone is not trimmed twice; eligible single-line offset outputs are trimmed while preserving their distance; projected geometry, infinite lines, other offset outputs and pieces trim refuses are passed over (why in `skipped`). dry_run?: bool (report without changing the design). One undo step → trimmed: [each trim's result], removed: [[[x,y]…]] (each removed piece as a polyline)",
             created_doc!()
         )),
-    CommandSpec::new("sketch.extend", "Extend", extend)
+    CommandSpec::new("sketch.extend", "Extend", crate::checked!("sketch.extend", extend))
+        .contract(&EXTEND_CONTRACT)
+        .output(output_schema_for::<ExtendResult>)
         .at("SKETCH", "MODIFY")
         .icon("extend")
         .enabled(in_sketch)
         .params("curve: id, at: [x,y] near the end to extend (a line runs on to the nearest curve, or the previewed reach when nothing is in the way; an arc grows along its circle and closes into a whole circle when nothing stops it) | curves: [id, id] (two lines or arcs of this sketch, grown until they meet and joined there), at?: [[x,y],[x,y]] (one point per curve: the end to grow; default the end nearest the meeting point). `curve` and `curves` exclude each other; the two-curve form returns moved: the meeting point's id"),
-    CommandSpec::new("sketch.break", "Break", break_cmd)
+    CommandSpec::new("sketch.break", "Break", crate::checked!("sketch.break", break_cmd))
+        .contract(&BREAK_CONTRACT)
+        .output(output_schema_for::<BreakResult>)
         .at("SKETCH", "MODIFY")
         .icon("sketch_break")
         .enabled(in_sketch)
         .params(concat!("curve: id, at: [x,y] (split at intersections; at a point where the curve ends and another curve meets, the curve gets its own end there and the two are no longer joined) | points: [[x,y]…] (1…1000 positions projected onto the curve; duplicates are merged)", created_doc!())),
-    CommandSpec::new("sketch.scale", "Sketch Scale", scale)
+    CommandSpec::new("sketch.scale", "Sketch Scale", crate::checked!("sketch.scale", scale))
+        .contract(&SCALE_CONTRACT)
+        .output(output_schema_for::<ScaleResult>)
         .at("SKETCH", "MODIFY")
         .icon("sketch_scale")
         .enabled(in_sketch)
@@ -90,34 +135,47 @@ pub static COMMANDS: &[CommandSpec] = &[
         .key("G")
         .enabled(in_sketch)
         .params("entities: [curve/point ids], factor?: number (scale), angle?: degrees (turn), center?: [x,y] or point ref (what scales and turns stay put; default [0,0]), translate?: [dx,dy] (applied last); scales, turns and moves in one step"),
-    CommandSpec::new("sketch.move", "Move/Copy Sketch Entities", move_copy)
+    CommandSpec::new("sketch.move", "Move/Copy Sketch Entities", crate::checked!("sketch.move", move_copy))
+        .contract(&MOVE_CONTRACT)
+        .output(output_schema_for::<MoveResult>)
         .at("SKETCH", "MODIFY")
         .icon("sketch_move")
         .enabled(in_sketch)
         .params(concat!("entities: [ids], translate?: [dx,dy], angle?: deg, center?: [x,y], copy?: bool, rotate_constraints?: bool (default true; false keeps constraints unchanged); a rotation turns the constraints tied to the sketch axes when all their geometry moves (horizontal and vertical relations and dimensions swap at odd quarter turns and stay at half turns, line angles turn with the line) and removes the horizontal and vertical ones that cannot hold at other angles; picking a text outline or linked point transforms its whole text source once, and copies remain editable text; copy also accepts drawn 3D curves, preserving exact arcs and height above the sketch plane", created_doc!())),
-    CommandSpec::new("sketch.mirror", "Mirror", mirror)
+    CommandSpec::new("sketch.mirror", "Mirror", crate::checked!("sketch.mirror", mirror))
+        .contract(&MIRROR_CONTRACT)
+        .output(output_schema_for::<MirrorResult>)
         .at("SKETCH", "PATTERN")
         .icon("sketch_mirror")
         .enabled(in_sketch)
         .params(concat!("entities: [curve/point ids], line: straight curve id, x / y for a sketch axis, or {axis: X|Y|Z} for an origin axis (the mirror line is the axis's projection into the sketch plane; an axis perpendicular to the plane is refused) (symmetry constraints are added)", created_doc!())),
-    CommandSpec::new("sketch.pattern.circular", "Circular Pattern", pattern_circular)
+    CommandSpec::new("sketch.pattern.circular", "Circular Pattern", crate::checked!("sketch.pattern.circular", pattern_circular))
+        .contract(&CIRCULAR_PATTERN_CONTRACT)
+        .output(output_schema_for::<PatternResult>)
         .at("SKETCH", "PATTERN")
         .icon("sketch_circ_pattern")
         .enabled(in_sketch)
         .params(concat!("entities: [ids], center: [x,y] or point ref, count: 2…500 (number or unitless expression, retained through edits), angle?: total deg, number or expression (default 360); alignment?: left|center|right (default right); reversed?: bool (default false). Quantity includes the original. Center balances copies around it; reversed flips the direction and extra side for even totals. Partial arcs span angle with angle/(count-1) spacing; full turns use angle/count. Adds associative pattern constraints; a coordinate center creates a constrainable point. Returns pattern and center ids. pattern?: existing pattern id to edit (omitted values retained; surviving instance ids retained)", created_doc!())),
-    CommandSpec::new("sketch.pattern.rectangular", "Rectangular Pattern", pattern_rect)
+    CommandSpec::new("sketch.pattern.rectangular", "Rectangular Pattern", crate::checked!("sketch.pattern.rectangular", pattern_rect))
+        .contract(&RECTANGULAR_PATTERN_CONTRACT)
+        .output(output_schema_for::<PatternResult>)
         .at("SKETCH", "PATTERN")
         .icon("sketch_rect_pattern")
         .enabled(in_sketch)
         .params(concat!("entities: [ids], count, spacing; count2?, spacing2?; counts: positive integer numbers or expressions, at most 500 instances total; spacings: length numbers or expressions; direction?, direction2?: sketch line ids (live references); dir?, dir2?: [x,y] vectors (defaults: sketch x, perpendicular to direction 1); alignment?, alignment2?: left|center|right (default right). Signed spacings reverse each direction. reversed?, reversed2?: bool (default false); reverses placement and the extra side of even centered totals. Quantities include the original. Adds associative pattern constraints. Returns pattern id. pattern?: existing pattern id to edit (omitted values retained; surviving instance ids retained)", created_doc!())),
 ];
 
+/// A reply built from its typed value, which is what the command's output schema describes.
+fn reply(cmd: &str, value: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(value).map_err(|e| bad(cmd, e.to_string()))
+}
+
+/// The strings of a JSON list, or `None` when it isn't one.
+fn strings(v: &Value) -> Option<Vec<String>> {
+    v.as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
+}
+
 const TOL: f64 = 1e-7;
-const MAX_COPIES: usize = 500;
-/// The most offsets `sketch.offset` stacks one behind the other in a single run. Each instance
-/// is its own association, so this stays below the sketch's own caps on analytic offset groups
-/// and free-form associations (both 128).
-const MAX_INSTANCES: usize = 100;
 
 fn curve_arg(sk: &Sketch, p: &Value, cmd: &str) -> Result<usize> {
     let id = str_(p, "curve").ok_or_else(|| bad(cmd, "`curve` must be a curve id"))?;
@@ -293,6 +351,18 @@ fn split_at(sk: &mut Sketch, ci: usize, ts: &[f64], cmd: &str) -> Result<(Vec<us
         _ => return Err(bad(cmd, "not supported yet for ellipses, splines and conics")),
     }
     Ok((pieces, pts))
+}
+
+/// Points placed at a share of curve `ci`'s length (Divide Curve) stay on what is left of it, free to
+/// slide: a trim or a break changes the length they share, and holding the shares would move them.
+pub(super) fn loosen_along(sk: &mut Sketch, ci: usize) {
+    for k in &mut sk.constraints {
+        if let ConstraintKind::PointAlong { p, c, .. } = k.kind
+            && c == ci
+        {
+            k.kind = ConstraintKind::PointOnCurve { p, c };
+        }
+    }
 }
 
 /// Keep the pieces of a split tied together: lines collinear, arcs on one circle.
@@ -511,14 +581,11 @@ fn trim(s: &mut Session, p: &Value) -> Result<Value> {
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let ci = curve_arg(sk, p, cmd)?;
         let released = release_line_offsets(sk, doc, ci, cmd)?;
-        let (mut out, _) = remove_piece(sk, ci, at, cmd)?;
-        if !released.is_empty() {
-            out["offset_released"] = json!(released);
-        }
+        let (out, _) = remove_piece(sk, ci, at, cmd)?;
         doc.prune_model_params();
-        Ok(out)
+        Ok(out.released(released))
     })?;
-    Ok(json!({"result": out, "sketch": info}))
+    reply(cmd, TrimResult { result: out, sketch: info, param_warnings: Vec::new() })
 }
 
 /// Source lines and their single-line offsets can have independent endpoints. Materialize
@@ -673,7 +740,8 @@ fn hold_cut(sk: &mut Sketch, before: Option<&Sketch>, midpoints: &[usize], pi: u
 /// Remove the piece of curve `ci` around `at`: between the nearest intersections on either
 /// side, or the whole curve when nothing crosses it. Returns what `sketch.trim` reports and the
 /// removed piece as a polyline.
-fn remove_piece(sk: &mut Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<(Value, Vec<Vec2>)> {
+fn remove_piece(sk: &mut Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<(TrimOutcome, Vec<Vec2>)> {
+    loosen_along(sk, ci);
     let id = sk.curves.get(ci).map(|c| c.id.clone()).unwrap_or_default();
     if sk.curves.get(ci).is_some_and(|c| c.infinite) {
         return Err(bad(cmd, "an infinite line has no ends to trim back to: make it a normal line first"));
@@ -685,7 +753,8 @@ fn remove_piece(sk: &mut Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<(Valu
             Some(pts) => pts.iter().filter_map(|q| Some(Vec2::new(q.get(0)?.as_f64()?, q.get(1)?.as_f64()?))).collect(),
             None => whole,
         };
-        return Ok((json!({"trimmed": id, "pieces": r["curves"]}), removed));
+        let pieces = r.get("curves").and_then(strings);
+        return Ok((TrimOutcome::Freeform { trimmed: id, pieces, offset_released: Vec::new() }, removed));
     }
     let sh = sk.shape(ci).ok_or_else(|| bad(cmd, "curve"))?;
     let tq = sh.param(sh.project(at));
@@ -694,7 +763,7 @@ fn remove_piece(sk: &mut Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<(Valu
         // Nothing crosses it: the whole curve goes.
         let removed = sk.polyline(ci);
         sk.remove_curves(&[ci]);
-        return Ok((json!({"deleted": id}), removed));
+        return Ok((TrimOutcome::Deleted { deleted: id, offset_released: Vec::new() }, removed));
     }
     refuse_offset_ends(sk, ci, "trim", cmd)?;
     // For parallel lines, any point on the output measures the same normal distance.
@@ -775,14 +844,12 @@ fn remove_piece(sk: &mut Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<(Valu
     }
     let removed = sk.polyline(gone);
     sk.remove_curves(&[gone]);
-    Ok((json!({"trimmed": id}), removed))
+    Ok((TrimOutcome::Trimmed { trimmed: id, offset_released: Vec::new() }, removed))
 }
 
 /// Most crossings one `sketch.trim.path` trims (each one splits a curve, so this also caps the
 /// work a hostile path can ask for).
 const MAX_PATH_TRIMS: usize = 500;
-/// Most positions in a trim path.
-const MAX_PATH_POINTS: usize = 2_000;
 
 /// The first place along `path` after `after` (segment, parameter along it) where the path
 /// crosses a curve that a trim may change: (segment, parameter, curve, the crossing point). Crossings are found on the
@@ -847,6 +914,10 @@ fn seg_cross(a: Vec2, b: Vec2, c: Vec2, d: Vec2) -> Option<(f64, Vec2)> {
 
 /// Preview or trim the pieces crossed by a path, skipping protected or unsupported geometry.
 fn trim_path(s: &mut Session, p: &Value) -> Result<Value> {
+    reply("sketch.trim.path", trim_path_reply(s, p)?)
+}
+
+fn trim_path_reply(s: &mut Session, p: &Value) -> Result<TrimPathResult> {
     let cmd = "sketch.trim.path";
     let path = vec2_list(cmd, p, "points", MAX_PATH_POINTS)?;
     if path.len() < 2 {
@@ -858,13 +929,13 @@ fn trim_path(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(o) = q.as_object_mut() {
             o.remove("dry_run");
         }
-        let mut out = trim_path(&mut t, &q)?;
-        out["dry_run"] = json!(true);
+        let mut out = trim_path_reply(&mut t, &q)?;
+        out.dry_run = Some(true);
         return Ok(out);
     }
     let ((trimmed, removed, skipped), info) = edit(s, p, cmd, false, |sk, doc| {
-        let mut trimmed: Vec<Value> = Vec::new();
-        let mut removed: Vec<Value> = Vec::new();
+        let mut trimmed: Vec<TrimOutcome> = Vec::new();
+        let mut removed: Vec<Vec<[f64; 2]>> = Vec::new();
         let mut skipped: Vec<String> = Vec::new();
         let mut after = (0, f64::NEG_INFINITY);
         for _ in 0..MAX_PATH_TRIMS {
@@ -873,16 +944,13 @@ fn trim_path(s: &mut Session, p: &Value) -> Result<Value> {
             // A piece trim refuses (a closed spline crossed once) stays as it was.
             let before = sk.clone();
             let cut = release_line_offsets(sk, doc, ci, cmd).and_then(|released| {
-                let (mut out, gone) = remove_piece(sk, ci, q, cmd)?;
-                if !released.is_empty() {
-                    out["offset_released"] = json!(released);
-                }
-                Ok((out, gone))
+                let (out, gone) = remove_piece(sk, ci, q, cmd)?;
+                Ok((out.released(released), gone))
             });
             match cut {
                 Ok((out, gone)) => {
                     trimmed.push(out);
-                    removed.push(json!(gone.iter().map(|v| [v.x, v.y]).collect::<Vec<_>>()));
+                    removed.push(gone.iter().map(|v| [v.x, v.y]).collect());
                 }
                 Err(e) => {
                     *sk = before;
@@ -899,7 +967,7 @@ fn trim_path(s: &mut Session, p: &Value) -> Result<Value> {
         doc.prune_model_params();
         Ok((trimmed, removed, skipped))
     })?;
-    Ok(json!({"trimmed": trimmed, "removed": removed, "skipped": skipped, "sketch": info}))
+    Ok(TrimPathResult { trimmed, removed, skipped, sketch: info, dry_run: None, param_warnings: Vec::new() })
 }
 
 /// Cuts closer than this to a curve's end or to each other are one place (mm).
@@ -907,7 +975,7 @@ const BREAK_GAP: f64 = 1e-6;
 
 fn break_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.break";
-    let points = if p.get("points").is_some() { Some(vec2_list(cmd, p, "points", 1000)?) } else { None };
+    let points = if p.get("points").is_some() { Some(vec2_list(cmd, p, "points", MAX_BREAK_POINTS)?) } else { None };
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let ci = curve_arg(sk, p, cmd)?;
         if points.is_none()
@@ -916,6 +984,7 @@ fn break_cmd(s: &mut Session, p: &Value) -> Result<Value> {
             separate_end(sk, ci, end)?;
             return Ok(ids_of(sk, &[ci]));
         }
+        loosen_along(sk, ci);
         if sk.curves.get(ci).is_some_and(|c| c.kind.is_freeform()) {
             let r = if let Some(points) = &points {
                 super::sketch_freeform::break_at_points(sk, ci, points, cmd)?
@@ -984,7 +1053,7 @@ fn break_cmd(s: &mut Session, p: &Value) -> Result<Value> {
         tie(sk, &pieces)?;
         Ok(ids_of(sk, &pieces))
     })?;
-    Ok(json!({"curves": out, "sketch": info}))
+    reply(cmd, BreakResult { curves: out, sketch: info, param_warnings: Vec::new() })
 }
 
 /// The end of curve `ci` at `at` that another curve also ends at or passes through: Break there
@@ -1369,7 +1438,7 @@ fn arc_end_held(sk: &Sketch, ci: usize, end: usize) -> bool {
         use solidcraft_sketch::ConstraintKind::*;
         match c.kind {
             Coincident { p, q } => p == end || q == end,
-            Fix { p } | PointOnCurve { p, .. } | Midpoint { p, .. } => p == end,
+            Fix { p } | PointOnCurve { p, .. } | PointAlong { p, .. } | Midpoint { p, .. } => p == end,
             HorizontalPoints { p, q } | VerticalPoints { p, q } | Symmetric { p, q, .. } => p == end || q == end,
             _ => false,
         }
@@ -1464,7 +1533,7 @@ fn extend(s: &mut Session, p: &Value) -> Result<Value> {
         };
         grow_line(sk, ci, aim)
     })?;
-    Ok(json!({"moved": out, "sketch": info}))
+    reply(cmd, ExtendResult { moved: out, sketch: info, param_warnings: Vec::new() })
 }
 
 /// Grow line `ci` past the end `aim` names, to `aim.hit`: a new line when that end is joined to
@@ -1487,7 +1556,7 @@ fn grow_line(sk: &mut Sketch, ci: usize, aim: LineAim) -> Result<String> {
         match c.kind {
             Coincident { p, q } => p == end || q == end,
             Fix { p } => p == end,
-            PointOnCurve { p, .. } => p == end,
+            PointOnCurve { p, .. } | PointAlong { p, .. } => p == end,
             Midpoint { p, .. } => p == end,
             HorizontalPoints { p, q } | VerticalPoints { p, q } => p == end || q == end,
             Symmetric { p, q, .. } => p == end || q == end,
@@ -2152,8 +2221,8 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
         }
         Ok((arcs, cons, pname, kept_json(kept)))
     })?;
-    let (vc, moved) = out.3;
-    Ok(json!({"curves": out.0, "constraints": out.1, "param": out.2, "virtual_corners": vc, "moved_to_virtual_corner": moved, "sketch": info}))
+    let (curves, constraints, param, (virtual_corners, moved_to_virtual_corner)) = out;
+    reply(cmd, FilletResult { curves, constraints, param, virtual_corners, moved_to_virtual_corner, sketch: info, param_warnings: Vec::new() })
 }
 
 /// The virtual corners kept and the constraints moved to them, for a response.
@@ -2367,8 +2436,8 @@ fn chamfer(s: &mut Session, p: &Value, cmd: &str, dists: impl Fn(f64) -> Result<
         }
         Ok((ids_of(sk, &lines), kept_json(kept)))
     })?;
-    let (curves, (vc, moved)) = out;
-    Ok(json!({"curves": curves, "virtual_corners": vc, "moved_to_virtual_corner": moved, "sketch": info}))
+    let (curves, (virtual_corners, moved_to_virtual_corner)) = out;
+    reply(cmd, ChamferResult { curves, virtual_corners, moved_to_virtual_corner, sketch: info, param_warnings: Vec::new() })
 }
 
 /// Cut one corner (`point` or `a`, `b`) of two lines with a straight line, `dists` giving how
@@ -3153,30 +3222,25 @@ fn offset(s: &mut Session, p: &Value) -> Result<Value> {
         doc.params.retain(|p| !made.contains(&p.name) || param.as_ref() == Some(&p.name) || param2.as_ref() == Some(&p.name));
         Ok((sides, param, param2))
     })?;
-    let curves: Vec<&String> = sides.iter().flat_map(|(_, side)| side.curves.iter()).collect();
-    let constraints: Vec<&String> = sides.iter().flat_map(|(_, side)| side.constraints.iter()).collect();
-    let each: Vec<Value> = sides
+    let curves: Vec<String> = sides.iter().flat_map(|(_, side)| side.curves.iter().cloned()).collect();
+    let constraints: Vec<String> = sides.iter().flat_map(|(_, side)| side.constraints.iter().cloned()).collect();
+    let each: Vec<OffsetSide> = sides
         .iter()
-        .map(|(instance, side)| {
-            let mut entry = json!({"distance": side.distance, "curves": side.curves, "param": side.param, "instance": instance});
-            if let Some(association) = &side.association {
-                entry["association"] = json!(association);
-            }
-            entry
+        .map(|(instance, side)| OffsetSide {
+            distance: side.distance,
+            curves: side.curves.clone(),
+            param: side.param.clone(),
+            instance: *instance,
+            association: side.association.clone(),
         })
         .collect();
-    let mut response = json!({"curves":curves,"constraints":constraints,"sketch":info,"sides":each,"param":param,"instances":instances});
-    if let Some(param2) = param2 {
-        response["param2"] = json!(param2);
-    }
     // One side keeps the single `association` it always returned. Two sides, or an instance
     // behind another, have one each in `sides`, so there is no single association left to name.
-    if let [(_, only)] = sides.as_slice()
-        && let Some(association) = &only.association
-    {
-        response["association"] = json!(association);
-    }
-    Ok(response)
+    let association = match sides.as_slice() {
+        [(_, only)] => only.association.clone(),
+        _ => None,
+    };
+    reply(cmd, OffsetResult { curves, constraints, sketch: info, sides: each, param, instances, param2, association, param_warnings: Vec::new() })
 }
 
 fn break_offset(s: &mut Session, p: &Value) -> Result<Value> {
@@ -3267,11 +3331,7 @@ fn break_offset(s: &mut Session, p: &Value) -> Result<Value> {
         Ok((output.to_string(), None))
     })?;
     s.doc_mut().prune_model_params();
-    let mut response = json!({"curve":out.0,"sketch":info});
-    if let Some(curves) = out.1 {
-        response["curves"] = json!(curves);
-    }
-    Ok(response)
+    reply(cmd, OffsetBreakResult { curve: out.0, sketch: info, curves: out.1, param_warnings: Vec::new() })
 }
 
 /// A broken logical boundary becomes ordinary geometry. Keep downstream features
@@ -3516,7 +3576,7 @@ fn mirror(s: &mut Session, p: &Value) -> Result<Value> {
         }
         Ok((ids_of(sk, &made), cons))
     })?;
-    Ok(json!({"curves": out.0, "constraints": out.1, "sketch": info}))
+    reply(cmd, MirrorResult { curves: out.0, constraints: out.1, sketch: info, param_warnings: Vec::new() })
 }
 
 fn point_or_ref(sk: &Sketch, p: &Value, k: &str, cmd: &str) -> Result<Vec2> {
@@ -3726,7 +3786,7 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(ids_of(sk, &cs))
     })?;
     s.doc_mut().prune_model_params();
-    Ok(json!({"curves": out, "sketch": info}))
+    reply(cmd, MoveResult { curves: out, sketch: info, param_warnings: Vec::new() })
 }
 
 /// Scale, turn and move the entities in one step: scaled about `center`, then turned about it,
@@ -3824,7 +3884,7 @@ fn scale(s: &mut Session, p: &Value) -> Result<Value> {
         transform_in_place(sk, &cs, &ps, &f, k, cmd)?;
         Ok(ids_of(sk, &cs))
     })?;
-    Ok(json!({"curves": out, "sketch": info}))
+    reply(cmd, ScaleResult { curves: out, sketch: info, param_warnings: Vec::new() })
 }
 
 #[cfg(test)]

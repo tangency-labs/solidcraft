@@ -148,14 +148,16 @@ pub const SPEEDS: [f64; 5] = [0.25, 0.5, 1.0, 2.0, 4.0];
 const STEPS_PER_S: f64 = 24.0;
 
 /// The next playback step: `by` steps on; at the end it starts over (looping) or stops there.
-/// Returns the step and whether it still plays.
+/// Returns the step and whether it still plays. The dialog shows the nearest whole step, so the
+/// end is passed once that would be after the last step.
 pub fn advance(step: f64, by: f64, total: u32, looping: bool) -> (f64, bool) {
     let last = f64::from(total);
     let next = step + by.max(0.0);
-    if next <= last {
+    if next.round() <= last {
         (next, true)
     } else if looping && last > 0.0 {
-        (next % (last + 1.0), true)
+        // Past the last whole step it starts over from step 0, keeping what is left of `by`.
+        (((next + 0.5) % (last + 1.0) - 0.5).max(0.0), true)
     } else {
         (last, false)
     }
@@ -608,14 +610,19 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
     });
     form_row(ui, "Step", |ui| {
         ui.horizontal(|ui| {
-            if crate::ui_kit::slider(
+            // The slider shows whole steps. It gets a rounded copy: an integer slider rounds its
+            // value every frame, which would drop the part of a step that playback has gained.
+            let mut whole = step.round().min(f64::from(total));
+            let slid = crate::ui_kit::slider(
                 ui,
-                step,
+                &mut whole,
                 0.0..=f64::from(total),
                 crate::ui_kit::Slider { show_value: false, integer: true, ..Default::default() },
-            )
-            .dragged()
-            {
+            );
+            if slid.changed() {
+                *step = whole;
+            }
+            if slid.dragged() {
                 *playing = false;
             }
         });
@@ -815,6 +822,55 @@ mod tests {
         assert_eq!(advance(9.5, 2.0, 10, true), (0.5, true));
         assert_eq!(advance(9.5, 2.0, 10, false), (10.0, false));
         assert_eq!(advance(4.0, -3.0, 10, false), (4.0, true));
+    }
+
+    /// Play runs on by itself at every speed, with no input: a frame's part of a step is kept
+    /// until it makes a whole one (the Step slider showed whole steps by rounding the playhead,
+    /// so at 1× and 60 frames a second it never left step 0, #12620).
+    #[test]
+    fn play_advances_without_input_at_every_speed() {
+        let mut h = crate::scenario::Harness::new();
+        for (name, x) in [("A", 0), ("B", 30)] {
+            h.app.run("component.activate", json!({"component": "root"})).unwrap();
+            h.app.run("component.create", json!({ "name": name })).unwrap();
+            h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0]})).unwrap();
+        }
+        let a = json!({"occurrence": "A:1", "face": [10, 10, 10]});
+        h.app.run("joint.create", json!({"type": "revolute", "a": a, "b": {"occurrence": "B:1", "face": [40, 10, 0]}})).unwrap();
+        h.app.start("motion.study");
+        h.frames(3);
+        for (index, speed) in SPEEDS.iter().enumerate() {
+            let Some(Kind::Motion(Mo::MotionStudy { steps, tracks, step, playing, looping, speed: chosen, .. })) =
+                h.app.dialog.as_mut().map(|d| &mut d.kind)
+            else {
+                panic!("no Motion Study dialog");
+            };
+            *steps = "1000".into();
+            *tracks = vec![Track { joint: 0, index: 0, points: vec![(0, "0 deg".into()), (1000, "90 deg".into())] }];
+            (*step, *playing, *looping, *chosen) = (0.0, true, false, index);
+            // One second at 60 frames a second, nothing touched.
+            h.frames(60);
+            let (_, at) = match h.app.dialog.as_ref().map(|d| &d.kind) {
+                Some(Kind::Motion(Mo::MotionStudy { step, playing, .. })) => (*playing, *step),
+                _ => panic!("no Motion Study dialog"),
+            };
+            let nominal = STEPS_PER_S * speed;
+            assert!((at - nominal).abs() <= 2.0, "{speed}×: at step {at} after 1 s, not about {nominal}");
+        }
+        // With Loop on, a 10-step study at 1× goes round about 2.2 times in a second and plays on.
+        if let Some(Kind::Motion(Mo::MotionStudy { steps, step, playing, looping, speed, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *steps = "10".into();
+            (*step, *playing, *looping, *speed) = (0.0, true, true, 2);
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for _ in 0..60 {
+            h.frame();
+            if let Some(Kind::Motion(Mo::MotionStudy { step, playing, .. })) = h.app.dialog.as_ref().map(|d| &d.kind) {
+                assert!(*playing, "the loop stopped at step {step}");
+                seen.insert(step.round() as u32);
+            }
+        }
+        assert_eq!(seen.len(), 11, "every step 0..=10 is shown: {seen:?}");
     }
 
     /// What a dialog shows goes away when it closes; an exploded view applied with OK stays.

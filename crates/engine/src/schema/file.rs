@@ -294,6 +294,10 @@ pub struct OpenParams {
     /// its parts) into a new history folder named `Group #N`. Default: false.
     #[serde(default)]
     pub folder: Option<bool>,
+    /// For a 3MF, STL, OBJ or glTF file only (refused for any other): true moves the mesh so its
+    /// box is centred on X and Y with its base on Z = 0. Default: false.
+    #[serde(default)]
+    pub origin: Option<bool>,
     /// For a design: saving to its own file is refused (`file.save_as` keeps the changes
     /// elsewhere). Default: false.
     #[serde(default)]
@@ -456,6 +460,9 @@ pub struct OpenedFile {
     /// With `exporter`: the direction that program's files have up, `z` or `y`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exporter_up: Option<String>,
+    /// A mesh file opened with `origin`: the shift [x, y, z] that moved it to the origin.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moved_to_origin: Option<Vec<f64>>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
