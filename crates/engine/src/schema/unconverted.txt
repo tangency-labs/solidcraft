@@ -24,15 +24,10 @@ motion.trace.edit
 motion.trace.keep
 render.aging.describe
 render.backends
-render.cancel
 render.effects.describe
-render.export
 render.preflight
-render.result.pin
-render.result.regrade
 render.scene
 render.start
-render.status
 sheet.export_dxf
 sketch.dimension
 sketch.draw.dimensioned
