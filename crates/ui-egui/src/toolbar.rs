@@ -487,11 +487,13 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let step = if compact_actions { 22.0 } else { 34.0 };
         // Save, Undo and Redo use the same actions as the File menu and shortcuts.
         let shown = design_shown(app) && idle;
-        let tip = |id: &str, key: &str| {
+        // The keys as the platform names them (Cmd on macOS); Redo has two (#12902).
+        let tip = |id: &str, keys: &[&str]| {
             let label = app.tr(id);
-            if shown { format!("{label} ({key})") } else { crate::i18n::format("ui.needs_design", &[("command", label)]) }
+            let keys = keys.iter().map(|key| crate::keymap::display(key)).collect::<Vec<_>>().join(", ");
+            if shown { format!("{label} ({keys})") } else { crate::i18n::format("ui.needs_design", &[("command", label)]) }
         };
-        let (save_tip, undo_tip, redo_tip) = (tip("ui.save", "Ctrl+S"), tip("ui.undo", "Ctrl+Z"), tip("ui.redo", "Ctrl+Y"));
+        let (save_tip, undo_tip, redo_tip) = (tip("ui.save", &["Ctrl+S"]), tip("ui.undo", &["Ctrl+Z"]), tip("ui.redo", &["Ctrl+Y", "Ctrl+Shift+Z"]));
         if click(ui, x, "save", &save_tip, shown) {
             save(app);
         }
@@ -3659,6 +3661,8 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 // Close the design shown (asking first when it is unsaved); closing the last one
                 // shows the start page (#5366).
                 Key::W if !mods.shift && !mods.alt => crate::documents::close(app, app.docs.active, false),
+                // Ctrl+Shift+Z redoes like Ctrl+Y (#12902): it used to fall into Undo, Shift ignored.
+                Key::Z if mods.shift => drop(app.run("edit.redo", json!({}))),
                 Key::Z => {
                     if !crate::tools::undo_spline_point(app) {
                         drop(app.run("edit.undo", json!({})));
