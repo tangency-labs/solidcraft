@@ -48,6 +48,7 @@ impl Default for EnvironmentRequest {
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct ProgressiveStart {
+    caustics: Option<solidcraft_render::job::CausticOptions>,
     studio_weights: Option<[f64; 3]>,
     aging: solidcraft_doc::render_aging::SavedAgingStack,
     #[serde(default)]
@@ -193,7 +194,7 @@ fn normalize_saved_job(s: &Session, params: &Value, command: &str) -> Result<Opt
             "lens":options.lens,"lighting":options.lighting,"tone_map":options.tone_map,
             "denoise":options.denoise,"environment":options.environment,
             "finishing":options.finishing,"backdrop":options.backdrop,"linear_exr":options.linear_exr,
-            "adaptive":options.adaptive,"transmission_samples":options.transmission_samples,"volume":options.volume,"nested_media":options.nested_media,"aging":options.aging
+            "caustics":options.caustics,"adaptive":options.adaptive,"transmission_samples":options.transmission_samples,"volume":options.volume,"nested_media":options.nested_media,"aging":options.aging
             })
         }
     };
@@ -715,6 +716,7 @@ fn prepare_progressive(
     options.aging = super::effects::resolve_aging(s, &scene, &input.aging, command)?;
     options.nested_media = input.nested_media;
     options.volume = input.volume;
+    options.caustics = input.caustics;
     options.adaptive = input.adaptive;
     options.transmission_samples = input.transmission_samples.unwrap_or(1);
     options.validate().map_err(job_error)?;

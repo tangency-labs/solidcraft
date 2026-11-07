@@ -1658,6 +1658,11 @@ const ELEMENTS: &[Element] = &[
             field(ui, &mut s.value);
         });
     }),
+    element!("sized_row", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
+        sized_row(ui, "Gallery", row_height() * 2.0, |ui| {
+            text_field(ui, &mut s.value, "Name");
+        });
+    }),
     element!("expr_row", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
         expr_row(ui, "Gallery", &mut s.value);
     }),
@@ -1766,6 +1771,21 @@ const ELEMENTS: &[Element] = &[
     element!("text_field", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
         row(ui, "Gallery", |ui| {
             text_field(ui, &mut s.value, "Name");
+        });
+    }),
+    element!("text_field_reserving", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
+        row(ui, "Gallery", |ui| {
+            let t = Tokens::get();
+            let reserve = t.space_24 * 2.0;
+            let (_, response) = text_field_reserving(ui, &mut s.value, "Name", reserve);
+            let counter = egui::Rect::from_min_max(egui::pos2(response.rect.right() - reserve, response.rect.top()), response.rect.max);
+            ui.painter().text(
+                counter.center(),
+                egui::Align2::CENTER_CENTER,
+                format!("{}/64", s.value.chars().count()),
+                egui::FontId::proportional(t.font_small),
+                t.form_dim,
+            );
         });
     }),
     element!("focused_text_field", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
@@ -1915,6 +1935,11 @@ const ELEMENTS: &[Element] = &[
     element!("button", "dialog:row:Gallery", Some("dialog:button:Gallery:Add"), |ui, _| {
         row(ui, "Gallery", |ui| {
             button(ui, "Add", Button::Normal);
+        });
+    }),
+    element!("button_danger_outlined", "dialog:row:Gallery", Some("dialog:button:Gallery:Replace"), |ui, _| {
+        row(ui, "Gallery", |ui| {
+            button(ui, "Replace", Button::DangerOutlined);
         });
     }),
     element!("button_at", |ui, _| {
@@ -2120,7 +2145,8 @@ fn every_element_has_geometry_and_stays_in_its_allocation_in_both_themes() {
                     );
                 }
                 if published.0.starts_with("dialog:row:") {
-                    assert_eq!(rect.height(), Tokens::get().control_height, "{name}");
+                    let expected_height = if name == "sized_row" { row_height() * 2.0 } else { Tokens::get().control_height };
+                    assert_eq!(rect.height(), expected_height, "{name}");
                 }
                 for shape in output.shapes {
                     // Native icon-only buttons keep an empty text shape. It has no vertices;

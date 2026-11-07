@@ -3533,3 +3533,118 @@ mod native_camera_queue_preparation {
         assert_eq!(host.admitted_bytes(), 0);
     }
 }
+
+#[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
+#[test]
+fn tessellated_cpu_sheet_saved_and_prospective_bindings_certify_and_render_without_saving_the_draft() {
+    use solidcraft_doc::render_optics::{OpticalBoundary, OpticalMaterial, SavedOptics};
+    use solidcraft_render::job::{ImageRequest, Phase};
+    let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+    let directory = std::env::temp_dir().join(format!("solidcraft-cpu-path-tiled-sheets-{}-{nonce}", std::process::id()));
+    std::fs::create_dir(&directory).unwrap();
+    let mut s = Session::default();
+    for (name, offset) in [("SavedSheet", 0), ("DraftSheet", 30)] {
+        let path = directory.join(format!("{name}.obj"));
+        let mut source = format!("o {name}\n");
+        for y in 0..2 {
+            for x in 0..2 {
+                let x = offset - 10 + x * 10;
+                let y = -10 + y * 10;
+                source.push_str(&format!("v {x} {y} 0\nv {} {y} 0\nv {} {} 0\nv {x} {} 0\n", x + 10, x + 10, y + 10, y + 10));
+            }
+        }
+        for cell in 0..4 {
+            let index = cell * 4 + 1;
+            source.push_str(&format!("f {index} {} {}\nf {index} {} {}\n", index + 1, index + 2, index + 2, index + 3));
+        }
+        std::fs::write(&path, source).unwrap();
+        s.execute("file.insert_mesh", &json!({"path":path})).unwrap();
+    }
+    let scene = crate::product_scene::extract(&s).unwrap();
+    assert_eq!(scene.meshes.len(), 2);
+    assert!(scene.meshes.iter().all(|body| body.mesh.triangles.len() == 8));
+    let saved_name = scene.meshes[0].name.clone();
+    let draft_name = scene.meshes[1].name.clone();
+    let targets = s.execute("render.library.targets", &json!({})).unwrap();
+    let draft_target = targets["items"].as_array().unwrap().iter().find(|row| row["name"] == draft_name).unwrap()["stable_target"].clone();
+    let mut camera = solidcraft_render::Camera { target: solidcore_record::Vec3::new(15.0, 0.0, 0.0), distance: 30.0, ..Default::default() };
+    camera.set_view(solidcraft_render::StandardView::Top);
+    s.execute(
+        "render.settings.set",
+        &json!({"name":"Sheets","set":{"camera":camera,"width":8,"height":4,
+        "job":{"method":"cpu_raytrace","options":{"path":{"max_depth":8},"progressive":{"samples_per_pixel":4,"seed":81},
+        "lights":[],"environment":{"color":[1,1,1],"intensity":1},"output":{"linear_exr":true}}}}}),
+    )
+    .unwrap();
+    s.execute(
+        "render.optics.bind",
+        &json!({"name":"Sheets","body_index":0,"body_name":saved_name,"expected_revision":s.revision,
+        "optics":{"boundary":"thin_sheet","ior":1,"thickness_mm":2,"absorption_per_mm":[0.1,0.2,0]}}),
+    )
+    .unwrap();
+    let persisted = solidcraft_io::write_design_container(&s.doc).unwrap();
+    std::fs::remove_dir_all(directory).unwrap();
+    s = Session::new(solidcraft_io::read_design(&persisted).unwrap());
+    s.execute("render.scene", &json!({})).unwrap();
+    let saved = s.doc.render.setups["Sheets"].clone();
+    let mut draft = saved.clone();
+    draft
+        .optics
+        .set(
+            SavedOptics {
+                target: serde_json::from_value(draft_target).unwrap(),
+                optics: OpticalMaterial {
+                    boundary: OpticalBoundary::ThinSheet,
+                    ior: 1.0,
+                    thickness_mm: 2.0,
+                    absorption_per_mm: [0.3, 0.0, 0.2],
+                    ..Default::default()
+                },
+            },
+            false,
+        )
+        .unwrap();
+    let host = CpuHost::for_platform().unwrap();
+    s.set_render_job_host(Some(host.clone())).unwrap();
+    let document = s.doc.clone();
+    let geometry = s.model.state();
+    let history = (s.revision, s.evaluations, s.undo.len(), s.redo.len(), s.is_dirty());
+    let named = s.execute("render.preflight", &json!({"setup":"Sheets"})).unwrap();
+    let checked = s.execute("render.preflight", &json!({"settings":draft})).unwrap();
+    assert_eq!(named["request"]["raytrace"]["dielectrics"].as_array().unwrap().len(), 1);
+    let captured: ImageRequest = serde_json::from_value(checked["request"].clone()).unwrap();
+    let optics = &captured.raytrace.as_ref().unwrap().dielectrics;
+    assert_eq!(optics.len(), 2, "prospective stable optics add to the saved binding");
+    for (name, absorption) in [(&saved_name, [0.1, 0.2, 0.0]), (&draft_name, [0.3, 0.0, 0.2])] {
+        let input = optics.iter().find(|input| input.body_name == *name).unwrap();
+        assert_eq!(input.boundary, solidcraft_render::job::DielectricBoundary::ThinSheet);
+        assert_eq!((input.ior, input.thickness_mm, input.absorption_per_mm), (1.0, 2.0, absorption));
+    }
+    let runtime = json!({"integrator":"raytrace","settings":{"camera":camera,"width":8,"height":4},"raytrace":captured.raytrace});
+    assert_eq!(s.execute("render.preflight", &runtime).unwrap()["request"], checked["request"]);
+    let mut legacy = json!({"settings":draft});
+    legacy["settings"]["job"]["options"].as_object_mut().unwrap().remove("path");
+    assert!(
+        s.execute("render.preflight", &legacy).unwrap_err().to_string().contains("unsupported dielectric boundary tessellation"),
+        "successful Path checks must actually certify the eight-triangle mesh, not just forward optics metadata"
+    );
+    assert_eq!(host.admitted_bytes(), 0, "Check releases its complete preparation certificate");
+    let run = |s: &mut Session, params: Value| {
+        let started = s.execute("render.start", &params).unwrap();
+        let job = serde_json::from_value(started["job"].clone()).unwrap();
+        let handle = s.render_job_handle(job).unwrap();
+        let status = handle.wait_timeout(std::time::Duration::from_secs(30)).unwrap();
+        assert_eq!(status.progress.phase, Phase::Completed, "{:?}", status.error);
+        let frame = handle.frame().unwrap().unwrap();
+        (frame.png().to_vec(), frame.linear_exr().unwrap().to_vec())
+    };
+    let original = run(&mut s, json!({"setup":"Sheets"}));
+    let prospective = run(&mut s, json!({"settings":draft,"replace":true}));
+    assert_ne!(original, prospective, "the second prospective optical assignment must change the actual pixels");
+    let mut runtime = runtime;
+    runtime["replace"] = json!(true);
+    assert_eq!(prospective, run(&mut s, runtime));
+    assert_eq!(s.doc.render.setups["Sheets"], saved);
+    assert!(Arc::ptr_eq(&document, &s.doc) && Arc::ptr_eq(&geometry, &s.model.state()));
+    assert_eq!(history, (s.revision, s.evaluations, s.undo.len(), s.redo.len(), s.is_dirty()));
+}
