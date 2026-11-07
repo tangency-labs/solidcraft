@@ -422,28 +422,30 @@ mod tests {
         use solidcore_record::Vec2;
         use solidcraft_sketch::LinkGeom;
         let v = Vec2::new;
-        // The R2 round of a 10 x 10 square misses its circle (centre (8, 8)) by only 1e-8, and an
-        // arc of radius 10 runs on from its end. The refit moves that joint by 1e-8, far less
-        // than the fit's own join distance, so the round is refitted as before the fix for
-        // tangency-labs/solidcore#2908, and the joint stays within a profile's 1e-4.
-        let c = v(8., 8. + 1e-8);
-        let (p, q) = (v(10., c.y), v(8., 10. + 1e-8));
+        // The R2 round of a 10 x 10 square misses its circle (centre (8, 8)) by `s`, and an arc of
+        // radius 10 runs on from its end. The refit moves that joint by `s`. While that is within
+        // the 1e-4 a profile joins ends across, the round is refitted as before the fix for
+        // tangency-labs/solidcore#2908, and the profile still closes.
         let exact: Vec<Vec2> =
             (0..=8).map(|k| f64::from(k) * std::f64::consts::FRAC_PI_8 / 2.).map(|t| v(8. + 2. * t.cos(), 8. + 2. * t.sin())).collect();
-        let bulge = v(8., 20. + 1e-8);
-        let from = bulge + v(-(10f64.to_radians().sin()), -(10f64.to_radians().cos())) * 10.;
-        let fitted = vec![
-            LinkGeom::Line(v(0., 0.), v(10., 0.)),
-            LinkGeom::Line(v(10., 0.), p),
-            LinkGeom::Arc { c, a: p, b: q },
-            LinkGeom::Arc { c: bulge, a: from, b: q },
-            LinkGeom::Line(from, v(0., 10.)),
-            LinkGeom::Line(v(0., 10.), v(0., 0.)),
-        ];
-        let out = super::super::refine_rounds(fitted, &exact, 200f64.sqrt());
-        let (Some(LinkGeom::Arc { c, b, .. }), Some(LinkGeom::Arc { b: joint, .. })) = (out.get(2), out.get(3)) else { panic!("{out:?}") };
-        assert!(c.dist(v(8., 8.)) < 1e-12, "the round is refitted: {out:?}");
-        assert!(b.dist(*joint) < 1e-4, "{out:?}");
+        for s in [1e-8, 1e-6, 1e-5, 5e-5, 9e-5] {
+            let c = v(8., 8. + s);
+            let (p, q) = (v(10., c.y), v(8., 10. + s));
+            let bulge = v(8., 20. + s);
+            let from = bulge + v(-(10f64.to_radians().sin()), -(10f64.to_radians().cos())) * 10.;
+            let fitted = vec![
+                LinkGeom::Line(v(0., 0.), v(10., 0.)),
+                LinkGeom::Line(v(10., 0.), p),
+                LinkGeom::Arc { c, a: p, b: q },
+                LinkGeom::Arc { c: bulge, a: from, b: q },
+                LinkGeom::Line(from, v(0., 10.)),
+                LinkGeom::Line(v(0., 10.), v(0., 0.)),
+            ];
+            let out = super::super::refine_rounds(fitted, &exact, 200f64.sqrt());
+            let (Some(LinkGeom::Arc { c, b, .. }), Some(LinkGeom::Arc { b: joint, .. })) = (out.get(2), out.get(3)) else { panic!("{out:?}") };
+            assert!(c.dist(v(8., 8.)) < 1e-12, "shift {s}: the round is refitted: {out:?}");
+            assert!(b.dist(*joint) < 1e-4, "shift {s}: {out:?}");
+        }
     }
 
     #[test]
