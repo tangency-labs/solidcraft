@@ -2636,10 +2636,12 @@ pub(crate) fn screen_box(proj: &Proj, b: &solidcraft_engine::geom::Aabb3, px: f3
     Some(r.expand(px))
 }
 
-/// Mesh outlines have no B-rep identity, but their points and lengths can be measured.
-/// Keep them out of modeling operands and invalidate hover picks when Measure opens/closes.
+/// Mesh outlines have no B-rep identity, but their points and lengths can be measured, and their
+/// corners and edges picked for a new origin (Pick Origin, #13136): an imported mesh is what
+/// most often needs one. Keep them out of modeling operands and invalidate hover picks when
+/// Measure or Pick Origin starts or ends.
 fn measuring_mesh_edges(app: &SolveApp) -> bool {
-    app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Measure { .. }))
+    app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Measure { .. })) || crate::browser::picking_origin(app)
 }
 
 fn edge_pickable(app: &SolveApp, mesh: &solidcraft_engine::geom::Mesh, index: usize) -> bool {
@@ -7817,6 +7819,36 @@ mod tests {
         app.fit_view();
         let proj = projection(&app, rect);
         assert!(!origin_hidden_by_body(&app, &proj), "a body away from the origin does not cover it");
+    }
+
+    /// #13136: an imported mesh's corners are no picks for modelling, but Pick Origin snaps to
+    /// them: armed, the corner under the pointer is offered and becomes the new origin's point.
+    #[test]
+    fn pick_origin_snaps_to_an_imported_meshs_corner() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-pick-origin-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let stl = dir.join("cabinet.stl").to_string_lossy().to_string();
+        let mut maker = solidcraft_engine::Session::default();
+        maker.execute("solid.box", &json!({"length": 30, "width": 20, "height": 45, "corner": [40, 60, 0]})).unwrap();
+        maker.execute("file.export", &json!({"path": stl})).unwrap();
+        let mut s = solidcraft_engine::Session::default();
+        let occurrence = s.execute("file.insert_mesh", &json!({"path": stl})).unwrap()["occurrence"].as_u64().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut app = SolveApp::new(s, crate::Services::default());
+        app.fit_view();
+        let corner = Vec3::new(70.0, 80.0, 45.0);
+        let proj = projection(&app, Rect::from_min_size(Pos2::ZERO, vec2(800., 600.)));
+        let at = proj.to_screen(corner).unwrap();
+        let on_corner = |hits: &[Hit]| hits.iter().any(|h| matches!(h, Hit::Vertex { point, .. } if point.dist(corner) < 1e-6));
+        assert!(!on_corner(&pick_all(&app, &proj, at)), "a mesh's corner is no pick otherwise");
+        let mut movement = crate::browser::OccMove::new(occurrence);
+        movement.picking = true;
+        app.tree.occurrence_move = Some(movement);
+        let hits = pick_all(&app, &proj, at);
+        assert!(on_corner(&hits), "{hits:?}");
+        crate::browser::pick_origin(&mut app, &hits);
+        let picked = app.tree.occurrence_move.as_ref().and_then(|m| m.pivot).unwrap();
+        assert!(picked.dist(corner) < 1e-6, "{picked:?}");
     }
 
     #[test]
