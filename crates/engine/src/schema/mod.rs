@@ -71,6 +71,7 @@ pub mod features;
 pub mod features_more;
 pub mod file;
 pub mod inspect;
+pub mod interference;
 pub mod joints;
 pub mod libraries;
 pub mod mass_properties;
