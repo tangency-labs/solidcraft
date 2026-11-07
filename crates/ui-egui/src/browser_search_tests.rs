@@ -621,6 +621,26 @@ fn a_found_sketch_keeps_its_patterns_folded() {
     assert!(handle_at(&row).is_some());
 }
 
+/// A found body shows none of the features that built it (#11945's Features under bodies): features
+/// aren't searched, so they would be rows the search didn't find. The fold opened by hand comes back
+/// when the search ends.
+#[test]
+fn a_found_body_keeps_its_features_folded() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "name": "Base", "body_name": "Plate"})).unwrap();
+    h.app.run("solid.fillet", json!({"body": "Plate", "edges": [[10, 0, 10]], "radius": 1, "name": "Round"})).unwrap();
+    assert_eq!(h.call("ui.prefs", json!({"browser_body_features": true}))["ok"], true);
+    h.frames(3);
+    click(&mut h, "fold:Plate");
+    assert_eq!(count("Round"), 1, "under Plate, before the search");
+    search(&mut h, "Plate");
+    assert_eq!((total(&h), count("Plate")), (1, 1));
+    assert!(count("Round") == 0 && handle_at("fold:Plate").is_none(), "{:?}", rows());
+    h.app.tree.search.clear();
+    h.frames(2);
+    assert_eq!(count("Round"), 1, "the fold opened by hand is kept");
+}
+
 /// Names in other scripts match, ignoring case where the script has one, and the field's limit
 /// counts letters, not bytes.
 #[test]
