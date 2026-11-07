@@ -182,12 +182,13 @@ fn kernel(flag: bool) -> Kernel {
 /// the solid is the tube formula's to the tolerance times its boundary area. Measured at
 /// t2: the offset face's area 6.7e-9 off the closed form (`N_SrfOffset`'s fit: 1.4e-8),
 /// the volume 2.4e-8, from the two end caps, ruled between the sheet's edge and the
-/// offset edge the executive fits; their exact step walls are S2's (§1.2).
+/// offset edge the executive fits; their exact step walls are S2's (§1.2). On the
+/// default kernel: S1 is no opt-in.
 #[test]
 fn parabola_thickens_to_its_certified_offset() {
     for two in [false, true] {
         for (d, t, towards) in [(2.0, 2.0, true), (-2.0, 2.0, false), (5.0, 5.0, true)] {
-            let mut k = kernel(true);
+            let mut k = Kernel::default();
             let sheet = parabola_sheet(&mut k, two);
             let mut b = thicken(&mut k, sheet, d).unwrap();
             assert_eq!(b.face_list().len(), 6);
@@ -212,10 +213,12 @@ fn parabola_thickens_to_its_certified_offset() {
     }
 }
 
+/// t11 towards the centre folds at the apex (radius 10): the default kernel refuses it,
+/// naming 10 (D5), where SMLib's port failed on its broken topology.
 #[test]
 fn parabola_fold_is_refused_naming_its_apex_radius() {
     for two in [false, true] {
-        let mut k = kernel(true);
+        let mut k = Kernel::default();
         let sheet = parabola_sheet(&mut k, two);
         let err = thicken(&mut k, sheet, 11.0).unwrap_err();
         let Some(failure) = err.failure() else {
