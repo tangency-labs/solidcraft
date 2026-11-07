@@ -4395,6 +4395,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcraft-web-folder"
+version = "0.40.0-rc.2"
+dependencies = [
+ "serde_json",
+ "sha2 0.10.9",
+]
+
+[[package]]
 name = "spade"
 version = "2.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
