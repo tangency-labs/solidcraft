@@ -1,11 +1,13 @@
-//! A sheet's tables placed (#3874 P8b): each parts list's or revision table's rows read, its columns
-//! fitted to what the drawing's fonts really set, and the whole where its record says. A table's
-//! corner can only be named once its size is known, so it is laid out at the origin first and placed
-//! second; one measure of each word serves both.
+//! A sheet's tables placed and on paper (#3874 P8b, P8c): each parts list's or revision table's rows
+//! read, its columns fitted to what the drawing's fonts really set, the whole where its record says,
+//! and its words in its cells. A table's corner can only be named once its size is known, so it is
+//! laid out at the origin first and placed second; one measure of each word serves both, and its
+//! words go on paper as they were measured, never shaped again.
 //!
 //! - A word is measured through the drawing's lettering ([`PaperFonts`]), the one rule a sheet's
 //!   text is set by. In the window, a word whose font is still being looked for makes its table
 //!   pending: it is read again until the search answers, as the title block is.
+//! - A word no font can set is left off and its table says why; the table still draws.
 //! - A parts list reads the design open, as `drawing.inspect` does, weighed only when a column shows
 //!   a mass.
 //! - A table that can't be read or laid out says why, and the rest of the sheet still draws.
@@ -22,8 +24,9 @@ use solidcraft_doc::bom::{self, Tree};
 use solidcraft_doc::drawing::table::{Corner, Kind, Place, SheetTable};
 use solidcraft_doc::drawing::{Drawing, Sheet};
 use solidcraft_geom::Aabb2;
-use solidcraft_geom::cell::Part;
-use solidcraft_geom::paper::{Group, ObjectKind};
+use solidcraft_geom::cell::{HAlign, Part};
+use solidcraft_geom::paper::text::Font;
+use solidcraft_geom::paper::{Group, Item, ObjectKind};
 use solidcraft_geom::table::{Heading, Row, Table, TableLayout};
 use solidcraft_sketch::{Outcome, PaperFonts, PaperLines, TextStyle};
 
@@ -33,6 +36,16 @@ use crate::Session;
 pub(crate) struct Placed {
     pub rows: Vec<Row>,
     pub layout: TableLayout,
+    /// Its words as the layout measured them.
+    words: Words,
+}
+
+/// A table on paper: its lines and words, the fonts its words use, and why a word is left off.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct OnPaper {
+    pub group: Group,
+    pub fonts: Vec<Font>,
+    pub why: Option<String>,
 }
 
 /// Why a table isn't placed: its words wait for a font (the window only), or it can't be.
@@ -41,10 +54,10 @@ pub(crate) enum Unplaced {
     Failed(String),
 }
 
-/// A sheet's tables as its scene draws them, in id order: each one's lines, or why it isn't drawn.
+/// A sheet's tables as its scene draws them, in id order: each one on paper, or why it isn't drawn.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct SheetTables {
-    pub tables: Vec<(u64, std::result::Result<Group, String>)>,
+    pub tables: Vec<(u64, std::result::Result<OnPaper, String>)>,
     /// Whether a table waits for a font to fall back to: it is left off until the search answers.
     pub pending: bool,
 }
@@ -54,8 +67,8 @@ pub(crate) fn sheet_tables(s: &Session, d: &Drawing, sheet: &Sheet, lettering: &
     let space = drawing_space(sheet);
     let mut out = SheetTables::default();
     for record in d.tables.iter().filter(|t| t.sheet == sheet.id) {
-        match place(s, d, record, space, lettering) {
-            Ok(placed) => out.tables.push((record.id, Ok(placed.layout.paper(record.id, kind_of(record))))),
+        match place(s, d, record, space, lettering).map(|placed| placed.paper(record.id, kind_of(record), record.table.cap_mm, lettering)) {
+            Ok(on_paper) => out.tables.push((record.id, Ok(on_paper))),
             Err(Unplaced::Pending) => out.pending = true,
             Err(Unplaced::Failed(why)) => out.tables.push((record.id, Err(why))),
         }
@@ -81,46 +94,91 @@ pub(crate) fn drawing_space(sheet: &Sheet) -> Aabb2 {
 pub(crate) fn place(s: &Session, d: &Drawing, record: &SheetTable, space: Aabb2, lettering: &PaperFonts) -> std::result::Result<Placed, Unplaced> {
     let rows = rows_of(s, d, record).map_err(Unplaced::Failed)?;
     let table = &record.table;
-    let words = Words::new(lettering);
-    let measure = |text: &str, cap_mm: f64| words.width(text, cap_mm);
+    let words = Words::default();
+    let measure = |text: &str, cap_mm: f64| words.width(lettering, text, cap_mm);
     let sized = table.layout(&rows, Vec2::ZERO, &measure).map_err(|e| Unplaced::Failed(e.to_string()))?;
     let corner = corner_of(record.place, table.heading, sized.outline.size(), space);
     let layout = table.layout(&rows, corner, &measure).map_err(|e| Unplaced::Failed(e.to_string()))?;
     if words.pending.get() {
         return Err(Unplaced::Pending);
     }
-    Ok(Placed { rows, layout })
+    Ok(Placed { rows, layout, words })
 }
 
-/// A table's words, each measured once in the drawing's lettering: a table repeats its words, and a
-/// word costs a font lookup. A word no font can set measures nothing (its cell is noted once it is
-/// set on paper); one whose font is still being looked for makes the table pending.
-struct Words<'a> {
-    lettering: &'a PaperFonts,
-    measured: RefCell<HashMap<(String, u64), Option<PaperLines>>>,
+impl Placed {
+    /// The table on paper as the `kind` of object `object` is: its lines, then each cell's lines of
+    /// text, each standing on the anchor its layout gives, set as `lettering` measured it for the
+    /// layout. A word no font can set is left off and noted. None is pending: [`place`] measured every
+    /// word (a line is a word or words it measured) and refuses a table while any is.
+    pub(crate) fn paper(&self, object: u64, kind: ObjectKind, cap_mm: f64, lettering: &PaperFonts) -> OnPaper {
+        let mut out = OnPaper { group: self.layout.paper(object, kind), fonts: Vec::new(), why: None };
+        let mut unset: Vec<String> = Vec::new();
+        for cell in std::iter::once(&self.layout.heading).chain(&self.layout.rows).flat_map(|row| &row.cells) {
+            // The anchor is the line's left, middle or right as its column aligns; a word is measured
+            // from its left, with the width the layout used, so it is shaped once for both.
+            let along = match cell.align {
+                HAlign::Left => 0.0,
+                HAlign::Centre => 0.5,
+                HAlign::Right => 1.0,
+            };
+            for line in &cell.lines {
+                let set = self.words.read(lettering, &line.text, cap_mm, |measured| match measured {
+                    Outcome::Set(lines) => match lines.set(line.at - Vec2::new(widest(lines) * along, 0.0), 0.0) {
+                        Ok(set) => Outcome::Set(set),
+                        Err(e) => Outcome::Refused(e.to_string()),
+                    },
+                    Outcome::Pending => Outcome::Pending,
+                    Outcome::Refused(why) => Outcome::Refused(why.clone()),
+                });
+                match set {
+                    Outcome::Set(Some((runs, fonts))) => {
+                        out.group.items.extend(runs.into_iter().map(Item::Text));
+                        out.fonts.extend(fonts);
+                    }
+                    // Never pending here ([`place`]): nothing to set.
+                    Outcome::Set(None) | Outcome::Pending => {}
+                    Outcome::Refused(why) => unset.push(format!("`{}`: {why}", line.text)),
+                }
+            }
+        }
+        if let Some(first) = unset.first() {
+            let more = if unset.len() > 1 { format!(" (and {} more)", unset.len() - 1) } else { String::new() };
+            out.why = Some(format!("the drawing's fonts can't set {first}{more}"));
+        }
+        out
+    }
+}
+
+/// A table's words, each measured once in the drawing's lettering, left-aligned: a table repeats its
+/// words, and a word costs a font lookup. One whose font is still being looked for makes the table
+/// pending.
+#[derive(Default)]
+struct Words {
+    measured: RefCell<HashMap<(String, u64), Outcome<PaperLines>>>,
     pending: std::cell::Cell<bool>,
 }
 
-impl<'a> Words<'a> {
-    fn new(lettering: &'a PaperFonts) -> Words<'a> {
-        Words { lettering, measured: RefCell::new(HashMap::new()), pending: std::cell::Cell::new(false) }
+impl Words {
+    /// What `read` makes of `text` measured at `cap_mm` in `lettering`, measured on its first read.
+    fn read<T>(&self, lettering: &PaperFonts, text: &str, cap_mm: f64, read: impl FnOnce(&Outcome<PaperLines>) -> T) -> T {
+        let mut measured = self.measured.borrow_mut();
+        let outcome = measured
+            .entry((text.to_string(), cap_mm.to_bits()))
+            .or_insert_with(|| Outcome::from(lettering.lines(text, cap_mm, None, &TextStyle::default())));
+        if matches!(outcome, Outcome::Pending) {
+            self.pending.set(true);
+        }
+        read(outcome)
     }
 
-    /// The width of `text`'s widest line at `cap_mm`.
-    fn width(&self, text: &str, cap_mm: f64) -> f64 {
-        let mut measured = self.measured.borrow_mut();
-        let lines = measured.entry((text.to_string(), cap_mm.to_bits())).or_insert_with(|| {
-            match Outcome::from(self.lettering.lines(text, cap_mm, None, &TextStyle::default())) {
-                Outcome::Set(lines) => Some(lines),
-                Outcome::Pending => {
-                    self.pending.set(true);
-                    None
-                }
-                Outcome::Refused(_) => None,
-            }
-        });
-        lines.as_ref().map_or(0.0, |lines| lines.lines.iter().map(|(_, width)| *width).fold(0.0, f64::max))
+    /// The width of `text`'s widest line at `cap_mm`: nothing for one that can't be set.
+    fn width(&self, lettering: &PaperFonts, text: &str, cap_mm: f64) -> f64 {
+        self.read(lettering, text, cap_mm, |outcome| if let Outcome::Set(lines) = outcome { widest(lines) } else { 0.0 })
     }
+}
+
+fn widest(lines: &PaperLines) -> f64 {
+    lines.lines.iter().map(|(_, width)| *width).fold(0.0, f64::max)
 }
 
 /// The point [`Table::layout`] takes for a table of `size` placed at `place`: the right end of its

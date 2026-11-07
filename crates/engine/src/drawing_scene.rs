@@ -8,8 +8,8 @@
 //! projection symbol, in the drawing's projection ([`TitleBlockLayout::paper`]), with its labels
 //! and values set on them ([`title_block_text`]). Images placed on the sheet sit between the border
 //! and the views ([`groups`]), so a view's lines draw over a photo. Each table stands where its
-//! record places it ([`crate::drawing_table_paper`]): read and measured with the title block's text, as they read the
-//! same design and fonts. A shaded view's group holds
+//! record places it, with its words ([`crate::drawing_table_paper`]): read and measured with the
+//! title block's text, as they read the same design and fonts. A shaded view's group holds
 //! its pictures under its lines; nothing here draws their pixels ([`crate::drawing_picture`]).
 //!
 //! [`build`] draws a sheet at once, each view the one way: its lines worked out centred on the view,
@@ -851,10 +851,10 @@ impl Assembly {
             let state = |drawn, failed, why| TableState { table: *table, drawn, failed, why };
             states.push(match read {
                 Err(why) => state(false, true, Some(why.clone())),
-                Ok(group) => match self.add(group, &[], Vec2::ZERO) {
+                Ok(on_paper) => match self.add(&on_paper.group, &on_paper.fonts, Vec2::ZERO) {
                     Ok(bounds_mm) => {
-                        self.objects.push(SheetObject { object: *table, kind: group.kind, bounds_mm, boundary_mm: None });
-                        state(true, false, None)
+                        self.objects.push(SheetObject { object: *table, kind: on_paper.group.kind, bounds_mm, boundary_mm: None });
+                        state(true, false, on_paper.why.clone())
                     }
                     Err(LeftOut::TooManyRecords) => {
                         state(false, false, Some(format!("with its lines the sheet is more than a paper scene's {MAX_RECORDS} records")))

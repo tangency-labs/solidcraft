@@ -296,6 +296,103 @@ fn the_window_keeps_a_table_until_what_it_reads_changes() {
     assert!(names.contains(&"Long bolt"), "the list shows the part's new name: {names:?}");
 }
 
+/// A table's words stand in its cells: each line on its baseline, its left, middle or right at the
+/// anchor its layout gives as its column aligns. The scene carries their fonts, the export draws
+/// each one, and a redraw gives the same scene.
+#[test]
+fn a_tables_words_stand_where_their_cells_say() {
+    use solidcraft_geom::cell::HAlign;
+    use solidcraft_geom::paper::Item;
+
+    let mut s = assembly();
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let table = id_of(&run(&mut s, ADD, json!({"sheet": ids::encode(sheet), "kind": "parts_list"})));
+    let mut words = 0;
+    for (align, along) in [(HAlign::Left, 0.0), (HAlign::Centre, 0.5), (HAlign::Right, 1.0)] {
+        put_table(&mut s, table, |record| record.table.columns.iter_mut().for_each(|column| column.align = align));
+        let d = s.drawing("test").unwrap().clone();
+        let scene = crate::drawing_scene::build(&s, &d, sheet).unwrap().scene;
+        let lettering = PaperFonts::new(&d.font, &d.language, true);
+        let record = d.tables.by_id(table).unwrap();
+        let placed = place(&s, &d, record, drawing_space(&d.sheets[0]), &lettering).ok().unwrap();
+        let group = scene.groups.iter().find(|g| g.object == table).unwrap();
+        let mut runs: Vec<_> = group.items.iter().filter_map(|item| if let Item::Text(run) = item { Some(run) } else { None }).collect();
+        let lines: Vec<_> =
+            std::iter::once(&placed.layout.heading).chain(&placed.layout.rows).flat_map(|row| &row.cells).flat_map(|cell| &cell.lines).collect();
+        assert!(lines.iter().any(|line| line.text == "Bolt") && lines.iter().any(|line| line.text == "QTY"), "{lines:?}");
+        assert_eq!(lines.len(), runs.len(), "{align:?}");
+        words = lines.len();
+        for line in lines {
+            let at = runs.iter().position(|run| run.text == line.text && (run.origin.y - line.at.y).abs() < 1e-9).unwrap();
+            let run = runs.swap_remove(at);
+            assert!((run.origin.x + run.reach() * along - line.at.x).abs() < 1e-9, "{align:?} {line:?} {:?}", run.origin);
+            assert_eq!(run.angle, 0.0);
+        }
+        assert!(!scene.fonts.is_empty());
+        assert_eq!(scene, crate::drawing_scene::build(&s, &d, sheet).unwrap().scene, "the same scene on a redraw");
+    }
+    let exported = s.execute("drawing.export", &json!({"sheet": ids::encode(sheet), "format": "svg"})).unwrap();
+    let svg = exported["svg"].as_str().unwrap();
+    let group = svg.split(&format!("data-object=\"{table}\"")).nth(1).unwrap().split("</g>").next().unwrap();
+    assert_eq!(group.matches("<path fill=\"#000\" stroke=\"none\" d=\"").count(), words, "each word is in the file: {group}");
+}
+
+/// A word no font can set is left off and its table says why; the table and the rest of its words
+/// still draw. Here an override puts an unassigned code point in one cell.
+#[test]
+fn a_word_no_font_can_set_is_left_off_and_says_why() {
+    use solidcraft_geom::paper::Item;
+
+    let mut s = assembly();
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let table = id_of(&run(&mut s, ADD, json!({"sheet": ids::encode(sheet), "kind": "parts_list"})));
+    let texts = |s: &Session| {
+        let d = s.drawing("test").unwrap().clone();
+        let scene = crate::drawing_scene::build(s, &d, sheet).unwrap().scene;
+        let group = scene.groups.iter().find(|g| g.object == table).cloned().unwrap();
+        group.items.iter().filter(|item| matches!(item, Item::Text(_))).count()
+    };
+    let plain = texts(&s);
+    assert_eq!(on_sheet(&s, table).0.why, None);
+    let key = inspected(&mut s, table)["rows"][0]["key"].as_str().unwrap().to_string();
+    let overrides = json!([{"row": key, "column": "name", "text": "\u{378}"}]);
+    run(&mut s, EDIT, json!({"table": ids::encode(table), "set": {"overrides": overrides}}));
+    let (state, bounds) = on_sheet(&s, table);
+    assert!(state.drawn && !state.failed && bounds.is_some(), "{state:?}");
+    assert!(state.why.as_deref().is_some_and(|why| why.contains('\u{378}') && why.contains("can't set")), "{state:?}");
+    assert_eq!(texts(&s) + 1, plain, "only that word goes");
+    let scene = s.execute("drawing.scene", &json!({"sheet": ids::encode(sheet)})).unwrap();
+    assert_eq!((&scene["tables"][0]["status"], &scene["tables"][0]["drawn"]), (&json!("ok"), &json!(true)), "{scene}");
+    assert!(scene["tables"][0]["why"].as_str().is_some(), "{scene}");
+}
+
+/// The window's sheet never waits for the search for a font to fall back to: a table's word in a
+/// script the drawing's font lacks leaves the table off until the search answers, and the settled
+/// sheet is the one `build` gives (which waits). The character is this test's alone, so no other
+/// test has searched for it first.
+#[test]
+fn a_tables_word_waits_for_its_font_off_the_windows_thread() {
+    let mut s = assembly();
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let table = id_of(&run(&mut s, ADD, json!({"sheet": ids::encode(sheet), "kind": "parts_list"})));
+    crate::drawing_scene::extract(&mut s, sheet).unwrap();
+    let key = inspected(&mut s, table)["rows"][0]["key"].as_str().unwrap().to_string();
+    let overrides = json!([{"row": key, "column": "name", "text": "Bolt \u{30f9}"}]);
+    run(&mut s, EDIT, json!({"table": ids::encode(table), "set": {"overrides": overrides}}));
+    let started = std::time::Instant::now();
+    let mut answer = crate::drawing_scene::extract(&mut s, sheet).unwrap();
+    assert!(answer.waiting_for_fonts, "the answer says its text is waiting");
+    assert!(answer.tables.iter().all(|t| t.table != table), "off the sheet while it waits: {:?}", answer.tables);
+    while crate::drawing_scene::step(&mut s) || answer.waiting_for_fonts {
+        assert!(started.elapsed().as_secs() < 120, "the sheet never settled");
+        std::thread::yield_now();
+        answer = crate::drawing_scene::extract(&mut s, sheet).unwrap();
+    }
+    let d = s.drawing("test").unwrap().clone();
+    assert_eq!(*answer.scene, crate::drawing_scene::build(&s, &d, sheet).unwrap().scene);
+    assert!(answer.tables.iter().any(|t| t.table == table && t.drawn), "{:?}", answer.tables);
+}
+
 /// A list's sheet documents the component it starts with.
 #[test]
 fn a_new_list_lists_what_its_sheet_documents() {
