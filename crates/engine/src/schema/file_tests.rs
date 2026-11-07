@@ -17,7 +17,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<ExportMeshParams>(), &["bodies", "path", "quality"]);
     assert_keys(input_schema_for::<Export3mfParams>(), &["bodies", "objects", "path", "quality"]);
     assert_keys(input_schema_for::<ExportUrdfParams>(), &["effort", "mesh_prefix", "path", "velocity"]);
-    assert_keys(input_schema_for::<OpenParams>(), &["folder", "max_points", "names", "path", "read_only", "units", "up"]);
+    assert_keys(input_schema_for::<OpenParams>(), &["folder", "max_points", "names", "origin", "path", "read_only", "units", "up"]);
     assert_keys(input_schema_for::<RecoveryListParams>(), &["dir"]);
     assert_keys(input_schema_for::<RecoverParams>(), &["dir", "discard", "id"]);
     assert_keys(input_schema_for::<RecoveryDiscardParams>(), &["all", "dir", "id"]);
