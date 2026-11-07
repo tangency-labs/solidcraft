@@ -350,6 +350,17 @@ fn completion_matches_parameters_anywhere_in_their_name() {
     let c = run(&mut s, "parameters.complete", json!({"prefix": "THICK"}));
     assert_eq!(texts(&c), ["cab_side_thickness"], "any case: {c}");
     assert!(texts(&run(&mut s, "parameters.complete", json!({"prefix": "xyz"}))).is_empty());
+    // #11978: the starts of the name's words, in order, find it; out of order they don't.
+    let c = run(&mut s, "parameters.complete", json!({"prefix": "2 * cabthi"}));
+    assert_eq!(texts(&c), ["cab_side_thickness"], "{c}");
+    assert_eq!(texts(&run(&mut s, "parameters.complete", json!({"prefix": "doowid"}))), ["door_width"]);
+    assert!(texts(&run(&mut s, "parameters.complete", json!({"prefix": "thicab"}))).is_empty());
+    // A match by word starts alone comes after every name that contains the word, even a
+    // favourite: `inner_diameter` has no `id` in it.
+    run(&mut s, "parameters.add", json!({"name": "inner_diameter", "expression": "6 mm"}));
+    run(&mut s, "parameters.favorite", json!({"name": "inner_diameter", "favorite": true}));
+    let c = run(&mut s, "parameters.complete", json!({"prefix": "id"}));
+    assert_eq!(texts(&c), ["cab_side_thickness", "side", "door_width", "inner_diameter"], "{c}");
     // Functions keep matching from the start: `in` is not `sin(`.
     let c = run(&mut s, "parameters.complete", json!({"prefix": "in"}));
     assert!(!c["suggestions"].as_array().unwrap().iter().any(|x| x["text"] == "sin("), "{c}");

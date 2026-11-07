@@ -248,6 +248,12 @@ pub(crate) fn text_field(ui: &mut Ui, value: &mut String, hint: &str) -> (bool, 
     (enter, changed)
 }
 
+/// Plain field reserving trailing space for an in-field value such as a counter.
+pub(crate) fn text_field_reserving(ui: &mut Ui, value: &mut String, hint: &str, reserve: f32) -> (bool, Response) {
+    let (enter, _, response) = editor_reserving(ui, value, hint, false, reserve);
+    (enter, response)
+}
+
 /// [`text_field`] with a tooltip; returns (Enter, changed). Tokens: `same as field`.
 pub(crate) fn text_field_tip(ui: &mut Ui, value: &mut String, hint: &str, tip: &str) -> (bool, bool) {
     let (enter, changed, response) = editor(ui, value, hint, false);

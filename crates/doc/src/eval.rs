@@ -143,7 +143,7 @@ impl ModelBody {
 
     /// Face measurements for joint origins, at their original chord tolerance. Pose changes
     /// and scratch copies share them; a geometry edit makes a new body and cache.
-    pub(crate) fn joint_faces(&self) -> Result<Arc<[kernel::FaceInfo]>> {
+    pub fn joint_faces(&self) -> Result<Arc<[kernel::FaceInfo]>> {
         let measure = || {
             #[cfg(test)]
             cost_tests::count(|c| c.joint_faces += 1);
@@ -1647,6 +1647,21 @@ impl PlacementReads {
         }
     }
 
+    /// The bodies To / From Object's stored face names find, each where it is placed: evaluation
+    /// finds a named face by its name ([`with_named_face_points`] fails a feature whose name finds
+    /// none). Everything when a name is missing or empty, finds no one body, or `st` is `None`:
+    /// the face is then found by its point, on whatever body lies there.
+    fn object_faces(&mut self, st: Option<&ModelState>, names: Option<&[String]>) {
+        let bodies: Option<Vec<&str>> = st.zip(names).and_then(|(st, names)| {
+            let first_of_its_name = |b: &&ModelBody| st.body(&b.name).is_some_and(|first| std::ptr::eq(first, *b));
+            names.iter().map(|n| crate::name_lookup::face_body(st, n).filter(first_of_its_name).map(|b| b.name.as_str())).collect()
+        });
+        match bodies {
+            Some(bodies) => bodies.into_iter().for_each(|b| self.placed_body(st, b)),
+            None => self.all = true,
+        }
+    }
+
     /// The same target selection as `apply_traced`, expanded only over the timeline input.
     fn drawn_targets(&mut self, st: Option<&ModelState>, f: &Feature) {
         let Some(st) = st else {
@@ -1826,11 +1841,22 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
             }
         }
     }
+    // The faces To / From Object names, in `face_points` order.
+    let object_names = match &f.kind {
+        FeatureKind::Extrude { extent, .. } => usize::from(extent.to.is_some()) + usize::from(extent.from.is_some()),
+        FeatureKind::Revolve { to, .. } => usize::from(to.is_some()),
+        _ => 0,
+    };
     match &f.kind {
-        // To / From Object finds its target where that target's component is placed (#928),
-        // over every body.
-        FeatureKind::Extrude { extent, .. } if extent.to.is_some() || extent.from.is_some() => reads.all = true,
-        FeatureKind::Revolve { to: Some(_), .. } => reads.all = true,
+        // To / From Object finds its target where the target's body is placed (#928): only that
+        // body's placement, not every part's (#6325). Its tools meet their targets as other
+        // joins and cuts do.
+        kind if object_names > 0 => {
+            reads.object_faces(st, f.face_names.get(..object_names));
+            if drawn_tools_change_bodies(kind) {
+                reads.drawn_targets(st, f);
+            }
+        }
         // A mirror of placed bodies follows the placements it was picked at and its own component's
         // frame, not every occurrence: moving an unrelated one leaves it (and its cache) alone.
         FeatureKind::Mirror { placements, bodies, .. } if !placements.is_empty() => return mirror_placements_digest(doc, f, placements, bodies),
@@ -8739,6 +8765,7 @@ impl PlacedBodies {
             let mut fresh = ModelBody::new(name.to_string(), placed.body.clone(), b.feature);
             fresh.mesh = placed.mesh.clone();
             fresh.measured = placed.measured.clone();
+            fresh.joint_faces = placed.joint_faces.clone();
             fresh.mesh_placement = placed.mesh_placement.clone();
             fresh.plan = placed.plan.clone();
             fresh.plan_mesh = placed.plan_mesh.clone();

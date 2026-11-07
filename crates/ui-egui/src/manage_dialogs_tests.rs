@@ -418,7 +418,7 @@ fn parameter_inventory_remains_reachable_with_regular_draft_rows() {
     h.step(&json!({"text":"missing_parameter"})).unwrap();
     h.step(&json!({"key":"Enter"})).unwrap();
     assert_eq!(scenario::count_of("param:new:valid"), Some(0.0));
-    assert!(h.app.params.as_ref().unwrap().error.is_some());
+    assert!(h.app.params.as_ref().unwrap().banner().is_some());
     assert_eq!(h.app.session.doc.params.iter().filter(|p| !p.model).count(), 2);
     h.step(&json!({"click":{"handle":"dialog:Filter"}})).unwrap();
     assert!(!h.app.params.as_ref().unwrap().adding, "an abandoned nameless draft disappears");
@@ -799,6 +799,53 @@ fn physical_material_discard_and_invalid_save_leave_document_and_history_unchang
     assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc));
     assert_eq!(history, (h.app.session.undo.len(), h.app.session.redo.len()));
     assert_eq!(revision, h.app.session.revision);
+}
+
+#[test]
+fn physical_material_refused_save_keeps_its_message_until_the_draft_changes() {
+    let mut h = fixture();
+    h.app.start("material.assign");
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"material:new"}})).unwrap();
+    physical_type(&mut h, "name", "Steel");
+    physical_type(&mut h, "density", "7.8");
+    h.step(&json!({"click":{"handle":"material:save"}})).unwrap();
+    assert!(physical_editor(&mut h).editing(), "a built-in name is refused");
+    let refused = physical_editor(&mut h).error().map(str::to_owned);
+    assert!(refused.as_deref().is_some_and(|e| e.contains("Steel")), "{refused:?}");
+    h.frames(3);
+    assert_eq!(physical_editor(&mut h).error().map(str::to_owned), refused, "the message stays while the draft does");
+    // Renaming the draft takes the refusal away before Save is clicked again.
+    physical_type(&mut h, "name", "Steel 2");
+    h.frames(2);
+    assert_eq!(physical_editor(&mut h).error(), None, "the message was about the name Steel, which is gone");
+    // The message is about the command Save ran (#641): the same draft again is refused again.
+    physical_type(&mut h, "name", "Steel");
+    h.frames(2);
+    h.step(&json!({"click":{"handle":"material:save"}})).unwrap();
+    assert!(physical_editor(&mut h).editing());
+    assert_eq!(physical_editor(&mut h).error().map(str::to_owned), refused, "the same reason again");
+}
+
+/// A refusal that depends on the design (the name is taken) goes once the design changes under
+/// the same draft (#641): after an undo, Save would succeed.
+#[test]
+fn physical_material_refused_save_goes_when_the_design_changes() {
+    let mut h = fixture();
+    h.app.run("material.create", json!({"name":"Alu","density_g_cm3":2.7})).unwrap();
+    h.app.start("material.assign");
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"material:new"}})).unwrap();
+    physical_type(&mut h, "name", "Alu");
+    physical_type(&mut h, "density", "2.7");
+    h.step(&json!({"click":{"handle":"material:save"}})).unwrap();
+    assert!(physical_editor(&mut h).editing(), "a taken name is refused");
+    let refused = physical_editor(&mut h).error().map(str::to_owned);
+    assert!(refused.as_deref().is_some_and(|e| e.contains("Alu")), "{refused:?}");
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.frames(2);
+    assert!(physical_editor(&mut h).editing(), "the draft stays open");
+    assert_eq!(physical_editor(&mut h).error(), None, "the design no longer has an Alu, so the message is stale");
 }
 
 fn complete_physical_card() -> serde_json::Value {

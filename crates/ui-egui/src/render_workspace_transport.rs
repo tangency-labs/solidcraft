@@ -56,6 +56,7 @@ pub(super) fn adaptive_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     app.render_workspace.view.dirty |= before != app.render_workspace.view.studio.adaptive;
 }
 pub(super) fn glass_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
+    caustics_controls(app, ui);
     if app.render_workspace.view.method == super::ImageMethod::CpuRaytrace {
         cpu_glass_controls(app, ui);
         return;
@@ -81,6 +82,46 @@ pub(super) fn glass_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::text(ui, app.tr("render.nested_help"), ui_kit::Text::Note("render.nested_help"));
     app.render_workspace.view.dirty |=
         before != (app.render_workspace.view.studio.nested_media, app.render_workspace.view.studio.transmission_samples);
+}
+
+fn caustics_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let before = app.render_workspace.view.studio.caustics;
+    let mut enabled = before.is_some();
+    let can_enable = app.render_workspace.view.method == super::ImageMethod::GpuRaytrace
+        || (app.render_workspace.view.method == super::ImageMethod::CpuRaytrace && app.render_workspace.view.raytrace.path.is_some());
+    let response = ui.add_enabled_ui(enabled || can_enable, |ui| ui_kit::checkbox(ui, app.tr("render.caustics_enable"), &mut enabled));
+    crate::scenario::publish_target("render:caustics:enable", response.inner.rect);
+    if response.inner.changed() {
+        app.render_workspace.view.studio.caustics = enabled.then(solidcraft_engine::render::job::CausticOptions::default);
+    }
+    if let Some(options) = &mut app.render_workspace.view.studio.caustics {
+        let photons = crate::i18n::tr("render.caustics_photons");
+        ui_kit::row(ui, photons, |ui| {
+            let field = ui_kit::number_field_preserving(ui, &mut options.photons, 1..=65536, 64.0, "");
+            crate::scenario::publish_target("render:caustics:photons", field.rect);
+            field
+        });
+        let radius = crate::i18n::tr("render.caustics_radius");
+        ui_kit::row(ui, radius, |ui| {
+            let field = ui_kit::number_field_preserving(ui, &mut options.radius_mm, 1e-6..=1e6, 0.1, " mm");
+            crate::scenario::publish_target("render:caustics:radius", field.rect);
+            field
+        });
+        let seed = crate::i18n::tr("render.children.seed");
+        ui_kit::row(ui, seed, |ui| {
+            let field = ui_kit::number_field_preserving(ui, &mut options.seed, 0..=u32::MAX, 1.0, "");
+            crate::scenario::publish_target("render:caustics:seed", field.rect);
+            field
+        });
+        let depth = crate::i18n::tr("render.caustics_depth");
+        ui_kit::row(ui, depth, |ui| {
+            let field = ui_kit::number_field_preserving(ui, &mut options.max_depth, 1..=16, 1.0, "");
+            crate::scenario::publish_target("render:caustics:depth", field.rect);
+            field
+        });
+    }
+    ui_kit::text(ui, app.tr("render.caustics_help"), ui_kit::Text::Note("render.caustics_help"));
+    app.render_workspace.view.dirty |= before != app.render_workspace.view.studio.caustics;
 }
 
 /// CPU has one progressive Fresnel event per film ordinal. GPU strata and its
