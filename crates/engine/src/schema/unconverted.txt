@@ -185,7 +185,6 @@ sketch.toggle_driven
 solid.align
 solid.chamfer
 solid.coil
-solid.combine
 solid.draft
 solid.emboss
 solid.hole
