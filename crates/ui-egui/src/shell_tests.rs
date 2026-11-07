@@ -1836,8 +1836,8 @@ fn compact_layout_is_saved_and_survives_cancel_apply_defaults_and_bad_input() {
     let undo = h.app.session.undo.len();
     let camera = h.app.cam;
     h.call("ui.prefs", json!({"open":"Layout"}));
-    crate::prefs::reveal_preference(&mut h, "dialog:Workspace:Compact");
-    h.step(&json!({"click":{"handle":"dialog:Workspace:Compact"}})).unwrap();
+    crate::prefs::reveal_preference(&mut h, "dialog:Panel style:Compact");
+    h.step(&json!({"click":{"handle":"dialog:Panel style:Compact"}})).unwrap();
     h.call("ui.prefs", json!({"button":"ok"}));
     h.settle();
     assert!(h.app.dialog.is_some(), "changing layout keeps the active tool");

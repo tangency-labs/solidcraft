@@ -396,7 +396,7 @@ fn tile(app: &SolveApp, ui: &mut Ui, item: Tile<'_>, view: &LayoutPreferencesVie
         ui.painter().circle_filled(pos2(text_rect.left() + 3.5, text_rect.center().y), 3.5, t.pref_note);
         text_rect.min.x += t.space_12;
     }
-    let font = if selected || matches!(item, Tile::Save) { crate::fonts::semibold(12.0) } else { FontId::proportional(12.0) };
+    let font = if selected || matches!(item, Tile::Save) { crate::fonts::semibold(t.font_body) } else { FontId::proportional(t.font_body) };
     let mut job = egui::text::LayoutJob::single_section(name.to_owned(), egui::TextFormat::simple(font, ink));
     job.wrap.max_width = text_rect.width();
     job.wrap.max_rows = 1;
@@ -590,7 +590,7 @@ fn popover(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView, state:
                         }
                         PopoverKind::Replace { name } => {
                             let question = crate::i18n::format("ui.panel_layout.confirm_replace", &[("name", name)]);
-                            ui.label(egui::RichText::new(question).size(12.5).color(t.form_ink));
+                            ui.label(egui::RichText::new(question).size(t.font_label).color(t.form_ink));
                             ui.horizontal_wrapped(|ui| {
                                 let cancel = ui_kit::button(ui, app.tr("ui.panel_layout.cancel"), ui_kit::Button::Ghost);
                                 focus_ids.push(cancel.id);
@@ -688,7 +688,7 @@ fn save_field(
             counter.center(),
             Align2::CENTER_CENTER,
             format!("{count}/64"),
-            FontId::proportional(11.5),
+            FontId::proportional(t.font_caption),
             if count > 64 { t.form_error } else { t.form_dim },
         );
         enter || (response.has_focus() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)))
@@ -743,7 +743,7 @@ fn validation_alert(app: &SolveApp, ui: &mut Ui, message: &str, color: egui::Col
         .horizontal(|ui| {
             let (rect, _) = ui.allocate_exact_size(vec2(t.space_14, t.space_14), Sense::hover());
             crate::icons::paint_ink(ui.painter(), rect, "status_warning", color);
-            ui.label(egui::RichText::new(app.tr(message)).size(11.5).color(color))
+            ui.label(egui::RichText::new(app.tr(message)).size(t.font_caption).color(color))
         })
         .inner;
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Alert, true, app.tr(message)));
@@ -765,14 +765,7 @@ fn trap_focus(ui: &Ui, ids: &[Id]) {
 }
 
 fn danger_button(ui: &mut Ui, label: &str) -> Response {
-    let t = Tokens::get();
-    ui.add(
-        egui::Button::new(egui::RichText::new(label).color(t.form_error).size(12.5))
-            .fill(t.control_fill)
-            .stroke(Stroke::new(1.0, t.form_error))
-            .corner_radius(t.control_radius)
-            .min_size(vec2(0.0, t.control_height)),
-    )
+    ui_kit::button(ui, egui::RichText::new(label).size(Tokens::get().font_label), ui_kit::Button::DangerOutlined)
 }
 
 fn run(app: &mut SolveApp, command: &str, params: serde_json::Value, applied: Option<(&str, &LayoutPreferencesView)>) -> bool {

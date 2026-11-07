@@ -1768,6 +1768,21 @@ const ELEMENTS: &[Element] = &[
             text_field(ui, &mut s.value, "Name");
         });
     }),
+    element!("text_field_reserving", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
+        row(ui, "Gallery", |ui| {
+            let t = Tokens::get();
+            let reserve = t.space_24 * 2.0;
+            let (_, response) = text_field_reserving(ui, &mut s.value, "Name", reserve);
+            let counter = egui::Rect::from_min_max(egui::pos2(response.rect.right() - reserve, response.rect.top()), response.rect.max);
+            ui.painter().text(
+                counter.center(),
+                egui::Align2::CENTER_CENTER,
+                format!("{}/64", s.value.chars().count()),
+                egui::FontId::proportional(t.font_small),
+                t.form_dim,
+            );
+        });
+    }),
     element!("focused_text_field", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
         row(ui, "Gallery", |ui| {
             focused_text_field(ui, &mut s.value, "Name");
@@ -1915,6 +1930,11 @@ const ELEMENTS: &[Element] = &[
     element!("button", "dialog:row:Gallery", Some("dialog:button:Gallery:Add"), |ui, _| {
         row(ui, "Gallery", |ui| {
             button(ui, "Add", Button::Normal);
+        });
+    }),
+    element!("button_danger_outlined", "dialog:row:Gallery", Some("dialog:button:Gallery:Replace"), |ui, _| {
+        row(ui, "Gallery", |ui| {
+            button(ui, "Replace", Button::DangerOutlined);
         });
     }),
     element!("button_at", |ui, _| {

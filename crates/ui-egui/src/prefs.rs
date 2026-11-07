@@ -2848,8 +2848,8 @@ fn panel_restore_banner(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
     let Some(reason) = app.prefs_window.panel_restore_error.clone() else { return };
     let shown = ui_kit::Container::show_backing(
         ui,
-        egui::Frame::NONE
-            .fill(t.form_error_fill)
+        ui_kit::Container::new(ui.ctx(), ui_kit::Surface::Navigation)
+            .edge_frame(t.form_error_fill)
             .stroke(egui::Stroke::new(1.0, t.form_error))
             .corner_radius(t.control_radius)
             .inner_margin(t.space_8),
