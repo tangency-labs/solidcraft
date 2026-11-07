@@ -1224,10 +1224,38 @@ fn law_peak() {
 #[ignore = "opt-in per-span certificate diagnostic (#3078)"]
 fn variable_round_certificate_work() {
     let cases = [
-        ("ops peak", [10.0, 20.0, 30.0], Point3::new(10.0, 0.0, 30.0), Point3::new(10.0, 20.0, 30.0), LINEAR, &[2.0, 4.0, 2.0][..]),
-        ("ops dip", [20.0; 3], CUBE_FROM, CUBE_TO, LINEAR, &[4.0, 2.0, 4.0][..]),
-        ("ops dip peak", [20.0; 3], CUBE_FROM, CUBE_TO, &[0.0, 0.0, 0.25, 0.75, 1.0, 1.0][..], &[4.0, 2.0, 4.0, 2.0][..]),
-        ("ops dip peak reversed", [20.0; 3], CUBE_TO, CUBE_FROM, &[0.0, 0.0, 0.25, 0.75, 1.0, 1.0][..], &[4.0, 2.0, 4.0, 2.0][..]),
+        (
+            "ops peak",
+            [10.0, 20.0, 30.0],
+            Point3::new(10.0, 0.0, 30.0),
+            Point3::new(10.0, 20.0, 30.0),
+            LINEAR,
+            &[2.0, 4.0, 2.0][..],
+        ),
+        (
+            "ops dip",
+            [20.0; 3],
+            CUBE_FROM,
+            CUBE_TO,
+            LINEAR,
+            &[4.0, 2.0, 4.0][..],
+        ),
+        (
+            "ops dip peak",
+            [20.0; 3],
+            CUBE_FROM,
+            CUBE_TO,
+            &[0.0, 0.0, 0.25, 0.75, 1.0, 1.0][..],
+            &[4.0, 2.0, 4.0, 2.0][..],
+        ),
+        (
+            "ops dip peak reversed",
+            [20.0; 3],
+            CUBE_TO,
+            CUBE_FROM,
+            &[0.0, 0.0, 0.25, 0.75, 1.0, 1.0][..],
+            &[4.0, 2.0, 4.0, 2.0][..],
+        ),
     ];
     for (name, size, from, to, knots, radii) in cases {
         let mut k = law_kernel();
@@ -1237,14 +1265,24 @@ fn variable_round_certificate_work() {
         eprintln!("CASE {name}");
         let notes = k.profiler.take_notes();
         assert!(notes.iter().any(|s| s.starts_with("span begin")));
-        for note in notes { eprintln!("{note}"); }
-        k.take_profile().write_jsonl(&mut std::io::stderr()).unwrap();
+        assert!(!notes.iter().any(|s| s == "diagnostic capture overflow"));
+        let enclosure_calls = notes.iter().filter(|s| s.starts_with("enclose s=")).count() as u64;
+        for note in notes {
+            eprintln!("{note}");
+        }
+        let profile = k.take_profile();
+        assert_eq!(enclosure_calls, profile.summary.iter().find(|s| s.name == "blend::certificate::gn_enclose_over").unwrap().count);
+        profile.write_jsonl(&mut std::io::stderr()).unwrap();
     }
     let k = gn_kernel();
     k.profiler.capture_notes();
     let (pieces, _) = law_corner_pieces(&k, [2.0, 4.0, 2.0]);
     assert_eq!(pieces.pieces.len(), 2);
     eprintln!("CASE helper peak");
-    for note in k.profiler.take_notes() { eprintln!("{note}"); }
-    k.take_profile().write_jsonl(&mut std::io::stderr()).unwrap();
+    // This existing curve-only helper has no support faces/definition certificate.
+    // Keep that zero-work control distinct from the certified executive inputs.
+    assert!(k.profiler.take_notes().is_empty());
+    let profile = k.take_profile();
+    assert!(!profile.summary.iter().any(|s| s.name == "blend::certificate::gn_certify_span"));
+    profile.write_jsonl(&mut std::io::stderr()).unwrap();
 }

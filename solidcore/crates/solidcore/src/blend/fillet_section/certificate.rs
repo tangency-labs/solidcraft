@@ -1742,7 +1742,26 @@ pub fn arc_row_terms_over(
     }
     let [rho0, rho1] = &rho;
     let Some((h, w)) = arc_rows(rho0, rho1, &mc, o) else {
-        crate::profile::profile_note!(k, "arc reject circle rho={rho:?} centre={mc:?}");
+        #[cfg(feature = "profile")]
+        {
+            // Repeat only the failed positivity test for the diagnostic; never use
+            // the observation to decide certification or alter its arithmetic.
+            let mut b11 = Tay::<Ivl>::zero();
+            let mut b22 = Tay::<Ivl>::zero();
+            let mut b12 = Tay::<Ivl>::zero();
+            for ((&r1, &r2), &mq) in rho0.iter().zip(rho1).zip(&mc) {
+                let b1 = r1 - mq;
+                let b2 = r2 - mq;
+                b11 = b11 + b1 * b1;
+                b22 = b22 + b2 * b2;
+                b12 = b12 + b1 * b2;
+            }
+            crate::profile::profile_note!(k, "arc reject radii2={:?},{:?} required_lo>0", b11.at(0), b22.at(0));
+            if b11.at(0).is_positive() && b22.at(0).is_positive() {
+                let half = (Tay::<Ivl>::lift(1.0) + b12 / tay_sqrt(&(b11 * b22))) * Tay::<Ivl>::lift(0.5);
+                crate::profile::profile_note!(k, "arc reject half={:?} required_lo>0", half.at(0));
+            }
+        }
         return false;
     };
     // |S - O| <= |m - O| + the ball's radius over the piece
@@ -1824,7 +1843,15 @@ pub fn gn_certify_span(
     mut defs: Option<&mut GnDefs<'_>>,
 ) -> Result<f64> {
     crate::profile::profile_scope!(k, "blend::certificate::gn_certify_span");
-    crate::profile::profile_note!(k, "span begin s=[{},{}] target={} n={} law={}", a.s, b.s, target, n, law.is_some());
+    crate::profile::profile_note!(
+        k,
+        "span begin s=[{},{}] target={} n={} law={}",
+        a.s,
+        b.s,
+        target,
+        n,
+        law.is_some()
+    );
     // the series' orders are checked once (the fork leaves them to its callers)
     Trunc::new(4 + TAYLOR, n)?;
     let mut bound_out = f64::INFINITY;
@@ -2010,7 +2037,10 @@ pub fn gn_certify_span(
             }
         }
         if !proved {
-            crate::profile::profile_note!(k, "level reject enclosure_or_rows m4={m4:?} uv4={uv4:?}");
+            crate::profile::profile_note!(
+                k,
+                "level reject enclosure_or_rows m4={m4:?} uv4={uv4:?}"
+            );
             continue;
         }
         // the level's bound with the uv curves' term `uv` (#2690: taken with each
@@ -2049,7 +2079,11 @@ pub fn gn_certify_span(
                     };
                     let den = lj - kh * yj;
                     let num = wj.hi * da + kh * xj + kh * yj * rows.r;
-                    crate::profile::profile_note!(k, "row bound row={j} den={den} w_lo={lj} kh_w4={} num={num}", kh * yj);
+                    crate::profile::profile_note!(
+                        k,
+                        "row bound row={j} den={den} w_lo={lj} kh_w4={} num={num}",
+                        kh * yj
+                    );
                     let positive = den > 0.0;
                     bound = if positive {
                         cmax(bound, num / den)
@@ -2077,7 +2111,10 @@ pub fn gn_certify_span(
                 v.w = [cmin(lo, rlo), cmax(hi, rhi)];
             }
         }
-        crate::profile::profile_note!(k, "level bound={bound} target={target} uv4={uv4:?} m4={m4:?}");
+        crate::profile::profile_note!(
+            k,
+            "level bound={bound} target={target} uv4={uv4:?} m4={m4:?}"
+        );
         bound_out = cmin(bound_out, bound);
         if bound_out <= target {
             break;
