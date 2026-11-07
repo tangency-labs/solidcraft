@@ -2533,6 +2533,12 @@ fn pick_from_browser(app: &mut SolveApp, x: Sel) {
         app.dialog = Some(d);
         return;
     }
+    if let Sel::Axis { name } = &x
+        && app.dialog.is_none()
+        && crate::tools::pick_axis_from_browser(app, name)
+    {
+        return;
+    }
     let hit = match &x {
         Sel::Plane { name } => crate::viewport::Hit::Plane { name: name.clone(), point: solidcore_record::Vec3::ZERO },
         Sel::Axis { name } => crate::viewport::Hit::Axis { name: name.clone() },

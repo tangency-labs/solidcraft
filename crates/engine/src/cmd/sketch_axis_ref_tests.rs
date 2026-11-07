@@ -195,6 +195,66 @@ fn other_line_constraints_take_sketch_axes() {
     assert_eq!(names, ["x", "y"]);
 }
 
+/// A point picked with an origin axis (in the view or the browser) goes onto the axis's
+/// projection, either pick order, and stays on it when the point is dragged.
+#[test]
+fn coincident_takes_an_origin_axis_reference() {
+    let mut s = on(json!("XY"));
+    run(&mut s, "sketch.point", json!({"point": [7, 9], "id": "u"}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "u", "b": {"axis": "X"}}));
+    assert!(pt(&sketch(&s), "u").y.abs() < 1e-7, "on X");
+    run(&mut s, "sketch.point", json!({"point": [3, 4], "id": "v"}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": {"axis": "Y"}, "b": "v"}));
+    assert!(pt(&sketch(&s), "v").x.abs() < 1e-7, "on Y");
+    // Z is seen end on: the point goes to where it pierces the sketch.
+    run(&mut s, "sketch.point", json!({"point": [5, -2], "id": "w"}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "w", "b": {"axis": "Z"}}));
+    assert!(pt(&sketch(&s), "w").len() < 1e-7, "on Z");
+    let from = pt(&sketch(&s), "u");
+    run(&mut s, "sketch.drag", json!({"entity": "u", "from": [from.x, from.y], "to": [12, 6]}));
+    assert!(pt(&sketch(&s), "u").y.abs() < 1e-7, "still on X after a drag");
+}
+
+/// A line dimensioned to an origin axis is their distance, not the line's length, and the
+/// line stays parallel to the axis.
+#[test]
+fn dimension_measures_a_line_to_an_origin_axis() {
+    // Either pick order: the axis is the reference and the line is kept parallel to it.
+    for entities in [json!(["l", {"axis": "X"}]), json!([{"axis": "X"}, "l"])] {
+        let mut s = on(json!("XY"));
+        run(&mut s, "sketch.line", json!({"points": [[-4, 7], [10, 7]], "ids": ["l"]}));
+        let out = run(&mut s, "sketch.dimension", json!({"entities": entities, "value": "12"}));
+        let sk = sketch(&s);
+        assert!((pt(&sk, "l.start").y.abs() - 12.0).abs() < 1e-7, "12 from X ({entities})");
+        assert!((pt(&sk, "l.end").y - pt(&sk, "l.start").y).abs() < 1e-7, "kept parallel to X, so all of it is 12 from X ({entities})");
+        assert!((pt(&sk, "l.end").dist(pt(&sk, "l.start")) - 12.0).abs() > 1.0, "not the line's length");
+        // What it measures once solved, not the 7 before (the Parallel after it is not it).
+        assert!((out["measured"].as_f64().unwrap_or(f64::NAN) - 12.0).abs() < 1e-6, "{out}");
+    }
+}
+
+/// An origin axis is `{"axis": "X"|"Y"|"Z"}`; lowercase `x`/`y` name the sketch's own axes, so
+/// `{"axis": "x"}` is refused and changes nothing.
+#[test]
+fn a_lowercase_origin_axis_object_is_refused() {
+    let mut s = on(json!("XY"));
+    run(&mut s, "sketch.line", json!({"points": [[-4, 7], [10, 7]], "ids": ["l"]}));
+    let before = s.doc.to_json();
+    assert!(s.execute("sketch.dimension", &json!({"entities": ["l", {"axis": "x"}], "value": "12"})).is_err());
+    assert_eq!(s.doc.to_json(), before);
+}
+
+/// A line whose angle is already set keeps it: no Parallel is added to the axis.
+#[test]
+fn a_line_with_an_angle_gets_no_parallel_to_the_axis() {
+    let mut s = on(json!("XY"));
+    run(&mut s, "sketch.line", json!({"points": [[-4, 7], [10, 7]], "ids": ["l"]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l"], "type": "angle", "value": "0 deg"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l", {"axis": "X"}], "value": "12"}));
+    let sk = sketch(&s);
+    assert!(!sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_sketch::ConstraintKind::Parallel { .. })), "{:?}", sk.constraints);
+}
+
 #[test]
 fn the_axis_survives_save_and_load() {
     let mut s = on(json!("YZ"));

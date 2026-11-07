@@ -2992,6 +2992,8 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
         let is_round = |c: usize| matches!(sk.curves.get(c).map(|c| &c.kind), Some(CurveKind::Circle { .. } | CurveKind::Arc { .. }));
         // The other reading of an angle between two lines (see below).
         let mut alt: Option<(ConstraintKind, f64)> = None;
+        // A free line measured to a linked one (an origin axis, a projected edge): (line, link).
+        let mut keep_parallel: Option<(usize, usize)> = None;
         let (mut k, mut cur): (ConstraintKind, f64) = match (e0, e1) {
             ((None, Some(c)), None) if ty == "sweep" => {
                 let angle = arc_len(sk, c).zip(sk.radius(c)).map(|(len, r)| len / r).ok_or_else(|| bad(cmd, "sweep needs an arc"))?;
@@ -3099,13 +3101,22 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
                 let (da, db) = (a1 - a0, b1 - b0);
                 if da.cross(db).abs() < 1e-9 * da.len() * db.len() && ty != "angle" {
                     // Parallel lines: distance between them (a diameter about a centerline).
-                    let (a, b, b0) = if sk.curves.get(a).is_some_and(|c| c.centerline) { (a, b, b0) } else { (b, a, a0) };
+                    // The reference is a centerline, else the linked line (an origin axis) in
+                    // either pick order, so the free line is the one kept parallel to it.
+                    let linked = |c: usize| sk.curves.get(c).is_some_and(|c| c.link.is_some());
+                    // A centerline comes first, then a linked line, whichever was picked first.
+                    let centerline = |c: usize| sk.curves.get(c).is_some_and(|c| c.centerline);
+                    let a_ref = centerline(a) || (!centerline(b) && linked(a) && !linked(b));
+                    let (a, b, b0) = if a_ref { (a, b, b0) } else { (b, a, a0) };
                     let (bq, _) = line_ends(sk, b);
                     let (a0, a1) = line_pts(sk, a).unwrap_or_default();
                     let d = (a1 - a0).normalized().map(|d| d.cross(b0 - a0).abs()).unwrap_or(0.0);
                     if diameter_about(sk, a, &ty) {
                         (ConstraintKind::LinearDiameter { p: bq, l: a, value: 2.0 * d }, 2.0 * d)
                     } else {
+                        if linked(a) && !linked(b) {
+                            keep_parallel = Some((b, a));
+                        }
                         (ConstraintKind::PointLineDistance { p: bq, l: a, value: d }, d)
                     }
                 } else {
@@ -3249,11 +3260,34 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
         let name = k.name();
         let id = sk.add_constraint(k, Some(pname.clone()))?;
         new_id = id.clone();
+        // The distance holds one end of the line; it stays parallel to the linked line so the
+        // whole line keeps that distance, unless something already sets its direction.
+        if let Some((l, r)) = keep_parallel {
+            // The line's own ends, for Horizontal/Vertical set on its two points.
+            let ends = match sk.curves.get(l).map(|c| &c.kind) {
+                Some(CurveKind::Line { a, b }) => Some((*a, *b)),
+                _ => None,
+            };
+            let directed = sk.constraints.iter().filter(|c| !c.driven).any(|c| match c.kind {
+                ConstraintKind::HorizontalPoints { p, q } | ConstraintKind::VerticalPoints { p, q } => {
+                    ends.is_some_and(|(a, b)| (p == a && q == b) || (p == b && q == a))
+                }
+                ConstraintKind::Horizontal { l: x } | ConstraintKind::Vertical { l: x } | ConstraintKind::LineAngle { l: x, .. } => x == l,
+                ConstraintKind::Parallel { a, b }
+                | ConstraintKind::Collinear { a, b }
+                | ConstraintKind::Perpendicular { a, b }
+                | ConstraintKind::Angle { a, b, .. } => a == l || b == l,
+                _ => false,
+            });
+            if !directed {
+                sk.add_constraint(ConstraintKind::Parallel { a: l, b: r }, None)?;
+            }
+        }
         place_text(sk, &id, text_at);
         Ok((pname, name, measured(is_angle, cur)))
     })?;
     // Report what the dimension measures once the sketch is solved, not the geometry before.
-    let current = solved_measure(s, p, cmd).unwrap_or(current);
+    let current = solved_measure(s, p, cmd, &new_id).unwrap_or(current);
     if driven {
         let mut out = json!({"param": Value::Null, "driven": true, "type": kind_name, "measured": current.0, "unit": current.1, "sketch": info});
         if let Some(axis) = axis {
@@ -3304,9 +3338,10 @@ fn measured(is_angle: bool, v: f64) -> (f64, &'static str) {
 }
 
 /// What the dimension just added (the sketch's last constraint) measures on the solved sketch.
-fn solved_measure(s: &Session, p: &Value, cmd: &str) -> Option<(f64, &'static str)> {
+/// The dimension is found by its id: a Parallel added after it is not it.
+fn solved_measure(s: &Session, p: &Value, cmd: &str, id: &str) -> Option<(f64, &'static str)> {
     let sk = sketch_store::read(&s.doc, sketch_store::target(s, p, cmd).ok()?).ok()?;
-    let k = &sk.constraints.last()?.kind;
+    let k = &sk.constraints.iter().find(|c| c.id == id)?.kind;
     Some(measured(k.is_angle(), solidcraft_sketch::measure_dimension(sk, k)?))
 }
 
