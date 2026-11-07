@@ -143,6 +143,9 @@ pub struct Page {
     scale: f64,
     /// The sheet and the size it was last fitted to: Fit Sheet again when either changes.
     fitted: Option<(u64, [u64; 2])>,
+    /// The canvas size the sheet was fitted on, while nothing has moved it since: the sheet is
+    /// fitted again when the canvas changes size (a window resized, a panel opened).
+    fitted_on: Option<egui::Vec2>,
     /// The sheet shown, when the drawing still has it.
     pub(crate) sheet: Option<u64>,
     marks: Option<Marks>,
@@ -155,7 +158,7 @@ pub struct Page {
 impl Default for Page {
     fn default() -> Self {
         let cam = Camera { yaw: 0.0, pitch: std::f64::consts::FRAC_PI_2, fov: 0.0, distance: 1000.0, ..Camera::default() };
-        Page { cam, scale: true_size(1.0, 1.0), fitted: None, sheet: None, marks: None, card: None, shown: None }
+        Page { cam, scale: true_size(1.0, 1.0), fitted: None, fitted_on: None, sheet: None, marks: None, card: None, shown: None }
     }
 }
 
@@ -166,12 +169,14 @@ pub fn fit(app: &mut SolveApp) {
 
 /// The sheet at true size, about the canvas's centre.
 pub fn actual_size(app: &mut SolveApp, ctx: &egui::Context) {
+    app.drawing_workspace.page.fitted_on = None;
     app.drawing_workspace.page.scale = true_size_now(app, ctx);
 }
 
 /// The sheet at `zoom` (1 is 100 %), about the canvas's centre, within [`ZOOM`].
 pub fn set_zoom(app: &mut SolveApp, ctx: &egui::Context, zoom: f64) {
     if zoom.is_finite() {
+        app.drawing_workspace.page.fitted_on = None;
         app.drawing_workspace.page.scale = true_size_now(app, ctx) * zoom.clamp(*ZOOM.start(), *ZOOM.end());
     }
 }
@@ -253,6 +258,11 @@ fn framed(canvas: Rect, area: Rect, size: Vec2, true_size: f64) -> (Vec2, f64) {
     (Vec2::new(x, y), scale)
 }
 
+/// The part of the canvas no ribbon, Browser or History covers.
+fn free_area(app: &SolveApp, canvas: Rect) -> Rect {
+    crate::shell::workspace_content(app, crate::shell::content_rect(app, canvas))
+}
+
 /// The camera's distance that shows `scale` points per millimetre on a canvas `height` tall.
 fn distance_for(scale: f64, height: f32) -> f64 {
     (f64::from(height.max(1.0)) / (2.0 * scale.max(1e-9) * 0.4)).clamp(1e-3, 1e7)
@@ -261,12 +271,18 @@ fn distance_for(scale: f64, height: f32) -> f64 {
 /// Draws the sheet of the drawing open, and says whether there was one to draw: without a drawing
 /// open the workspace shows its own message.
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
-    app.drawing_workspace.page.card = None;
+    // The zoom card stays covered from last frame while the camera reads this frame's input.
     app.drawing_workspace.page.shown = None;
-    let Ok(drawing) = app.session.drawing(drawing_scene::CMD).cloned() else { return false };
+    let Ok(drawing) = app.session.drawing(drawing_scene::CMD).cloned() else {
+        app.drawing_workspace.page.card = None;
+        return false;
+    };
     let page = &mut app.drawing_workspace.page;
     let sheet = page.sheet.filter(|id| drawing.sheets.iter().any(|s| s.id == *id)).or_else(|| drawing.sheets.first().map(|s| s.id));
-    let Some(sheet) = sheet else { return false };
+    let Some(sheet) = sheet else {
+        page.card = None;
+        return false;
+    };
     page.sheet = Some(sheet);
     let t = Tokens::get();
     let canvas = ui.max_rect();
@@ -277,6 +293,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     let view = match drawing_scene::extract(&mut app.session, sheet) {
         Ok(view) => view,
         Err(e) => {
+            app.drawing_workspace.page.card = None;
             message(ui, canvas, &e.to_string(), t.error);
             return true;
         }
@@ -290,15 +307,20 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     let base = true_size_now(app, ui.ctx());
     let key = (sheet, [size.x.to_bits(), size.y.to_bits()]);
     let page = &mut app.drawing_workspace.page;
+    if page.fitted_on.is_some_and(|size| size != canvas.size()) {
+        page.fitted = None;
+    }
     if page.fitted != Some(key) {
-        let area = crate::shell::workspace_content(app, canvas);
+        let area = free_area(app, canvas);
         let (target, scale) = framed(canvas, area, size, base);
         let page = &mut app.drawing_workspace.page;
         page.cam.target.x = target.x;
         page.cam.target.y = target.y;
         page.scale = scale;
         page.fitted = Some(key);
+        page.fitted_on = Some(canvas.size());
     }
+    let framed_as = (app.drawing_workspace.page.cam.target, app.drawing_workspace.page.scale);
     let page = &mut app.drawing_workspace.page;
     page.cam.distance = distance_for(page.scale, canvas.height());
     with_sheet_camera(app, |app| {
@@ -308,6 +330,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     let scale = OnScreen::of(&page.cam, canvas).scale;
     page.scale = if scale.is_finite() && scale > 0.0 { scale.clamp(base * ZOOM.start(), base * ZOOM.end()) } else { base };
     page.cam.distance = distance_for(page.scale, canvas.height());
+    // Moved by the user, not only worked out again from its distance.
+    if page.cam.target != framed_as.0 || (page.scale / framed_as.1 - 1.0).abs() > 1e-9 {
+        page.fitted_on = None;
+    }
     let at = OnScreen::of(&page.cam, canvas);
     let ppp = f64::from(ui.ctx().pixels_per_point().max(0.1));
     // One flattening per zoom octave: finer than a fifth of a pixel at its most zoomed out.
@@ -339,7 +365,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     let waiting = view.stale.len() + view.stale_dimensions.len();
     if working {
         let text = crate::i18n::format("ui.sheet_page.working", &[("count", &waiting.max(1).to_string())]);
-        hint(&painter, crate::shell::workspace_content(app, canvas), &text);
+        hint(&painter, free_area(app, canvas), &text);
     }
     zoom_card(app, ui, canvas, at.scale / base);
     crate::navigation_bar_view::show(app, ui, canvas);
@@ -468,7 +494,7 @@ fn hint(painter: &egui::Painter, area: Rect, text: &str) {
 /// The zoom readout, typed or dragged, with 100 % and Fit Sheet, at the free canvas's lower right.
 fn zoom_card(app: &mut SolveApp, ui: &mut egui::Ui, canvas: Rect, zoom: f64) {
     let t = Tokens::get();
-    let area = crate::shell::workspace_content(app, canvas);
+    let area = free_area(app, canvas);
     let container = Container::new(ui.ctx(), Surface::Panel);
     let frame = container.frame(ui.ctx(), t.panel, crate::frame::Side::Right).inner_margin(4);
     let size = app.drawing_workspace.page.card.map_or(vec2(t.space_24 * 10.0, t.space_24 + 10.0), |r| r.size());

@@ -101,6 +101,18 @@ fn fit_sheet_shows_the_whole_sheet_and_zoom_stays_in_range() {
     let paper = crate::scenario::rect_of("sheet:paper").unwrap();
     let canvas = h.app.viewport.rect.unwrap();
     assert!(canvas.contains_rect(paper), "{paper:?} in {canvas:?}");
+    // A fitted sheet is fitted again when the window changes size, until something moves it.
+    h.call("ui.resize", json!({"width": 900, "height": 600}));
+    h.frames(4);
+    assert!(whole(&page(&mut h)), "refitted in a smaller window: {}", page(&mut h));
+    h.call("ui.resize", json!({"width": 1400, "height": 900}));
+    h.frames(4);
+    let ctx = h.ctx.clone();
+    set_zoom(&mut h.app, &ctx, 1.5);
+    h.frames(2);
+    h.call("ui.resize", json!({"width": 1200, "height": 800}));
+    h.frames(4);
+    assert!((number(&page(&mut h)["zoom"]) - 1.5).abs() < 1e-9, "a chosen zoom stays through a resize");
     for (zoom, want) in [(1000.0, 32.0), (0.001, 0.05), (2.0, 2.0)] {
         let ctx = h.ctx.clone();
         set_zoom(&mut h.app, &ctx, zoom);
