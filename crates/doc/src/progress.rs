@@ -151,6 +151,12 @@ pub fn watch<R>(progress: Arc<Progress>, f: impl FnOnce() -> R) -> R {
     solidcraft_kernel::watch::watching(kernel, f)
 }
 
+/// Whether the watch over this thread's evaluations asked them to stop. Work done after that may
+/// have been cut short: it is not kept.
+pub fn cancelled() -> bool {
+    CURRENT.with(|c| c.borrow().as_ref().is_some_and(|cur| cur.progress.is_cancelled()))
+}
+
 /// Entered at the start of an evaluation; the guard leaves it.
 pub(crate) struct Evaluation {
     outer: bool,
