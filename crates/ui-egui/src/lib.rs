@@ -2548,13 +2548,20 @@ impl SolveApp {
     }
 
     fn leave_sketch(&mut self, command: &str) {
+        // A sketch started in this session and never given geometry is the same as Cancel:
+        // Finish would otherwise leave an empty feature in the timeline (#10839).
+        let drop_empty = command == "sketch.finish" && self.preferences.delete_empty_sketch && self.session.active_sketch_is_new_and_empty();
         self.prepare_sketch_exit();
-        if self.session.sketch_restore_marker().is_some() {
-            // Finishing now restores the marker in the engine: evaluate the complete
-            // command ahead so rebuilding later features stays off the window thread.
-            let _ = self.run_heavy(command, json!({}));
-        } else {
-            let _ = self.run(command, json!({}));
+        let chosen = if drop_empty { "sketch.cancel" } else { command };
+        let heavy = self.session.sketch_restore_marker().is_some();
+        let left = if heavy { self.run_heavy(chosen, json!({})).is_ok() } else { self.run(chosen, json!({})).is_ok() };
+        if drop_empty && !left && self.session.active_sketch.is_some() {
+            let heavy = self.session.sketch_restore_marker().is_some();
+            if heavy {
+                let _ = self.run_heavy("sketch.finish", json!({}));
+            } else {
+                let _ = self.run("sketch.finish", json!({}));
+            }
         }
     }
 

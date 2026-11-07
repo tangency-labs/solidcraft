@@ -1107,6 +1107,29 @@ impl Session {
         self.sketch_entry.as_ref().filter(|entry| Some(entry.sketch) == self.active_sketch).and_then(|entry| entry.restore_marker)
     }
 
+    /// The open sketch was created in this editing session and still holds no geometry, so
+    /// Finish can leave it the way Cancel does (#10839). An edited sketch is not new, even
+    /// after every curve is deleted.
+    pub fn active_sketch_is_new_and_empty(&self) -> bool {
+        let Some(id) = self.active_sketch else { return false };
+        let created = self.sketch_entry.as_ref().is_some_and(|entry| entry.sketch == id && entry.doc.feature(id).is_none());
+        created
+            && self.doc.feature(id).is_some_and(|feature| match &feature.kind {
+                solidcraft_doc::FeatureKind::Sketch { sketch, .. } => {
+                    sketch.curves.is_empty()
+                        && sketch.constraints.is_empty()
+                        && sketch.patterns.is_empty()
+                        && sketch.links.is_empty()
+                        && sketch.offsets.is_empty()
+                        && sketch.freeform_offsets.is_empty()
+                        && sketch.wires.is_empty()
+                        && sketch.equations.is_empty()
+                        && sketch.points.len() <= 1
+                }
+                _ => false,
+            })
+    }
+
     /// Mutable document (copy-on-write).
     pub fn doc_mut(&mut self) -> &mut Document {
         self.forget_document_caches();

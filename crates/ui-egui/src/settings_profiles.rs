@@ -53,6 +53,7 @@ const PROFILE_KEYS: &[&str] = &[
     "browser_width",
     "center_arc_follows_cursor",
     "color_vision",
+    "delete_empty_sketch",
     "dialog_buttons",
     "dialog_place",
     "direct_interaction",

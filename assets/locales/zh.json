@@ -2547,6 +2547,8 @@
   "prefs.dark_parts_shading": "保持深色零件的形状",
   "prefs.dark_parts_shading_help": "以线性光照和柔和的天空补光着色视图，使深色面保留渐变而不变成一片黑色",
   "prefs.dead_zone_note": "斜线区域为死区：此范围内的移动将被忽略。",
+  "prefs.delete_empty_sketch": "完成时删除新建的空草图",
+  "prefs.delete_empty_sketch_help": "完成草图会去掉本次新建、且还没有曲线、点或约束的草图。编辑已有草图时会保留。关闭：空草图留在时间线中。",
   "prefs.default": "默认",
   "prefs.design": "设计",
   "prefs.design_note": "新设计的初始设置。",

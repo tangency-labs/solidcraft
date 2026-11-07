@@ -2547,6 +2547,8 @@
   "prefs.dark_parts_shading": "Keep the shape of dark parts",
   "prefs.dark_parts_shading_help": "Shade the view in linear light with a soft sky fill, so dark faces keep a gradient instead of turning black",
   "prefs.dead_zone_note": "The hatched band is the dead zone: motion inside it is ignored.",
+  "prefs.delete_empty_sketch": "Remove a new empty sketch on Finish",
+  "prefs.delete_empty_sketch_help": "Finish Sketch drops a sketch created in this session when it still has no curves, points or constraints. An edited sketch stays. Off: the empty sketch stays in the timeline.",
   "prefs.default": "default",
   "prefs.design": "Design",
   "prefs.design_note": "What new designs start with.",

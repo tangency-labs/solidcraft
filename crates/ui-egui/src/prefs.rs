@@ -1672,6 +1672,9 @@ preference_settings! {
     /// tangent arc, and the same again back to lines (#9489). Off (the default): resting there
     /// does nothing, and tangent arcs are the Arc tool's.
     line_hover_tangent_arc: bool = false, PAGE_SKETCH;
+    /// Finish Sketch removes a sketch created in this session when it still has no curves,
+    /// points or constraints (#10839). Off: the empty sketch stays in the timeline.
+    delete_empty_sketch: bool = true, PAGE_SKETCH;
     /// Allow ordinary edge picks through faces in Shaded with hidden edges.
     /// Off preserves the visible-only picking used in v0.30.1.
     select_hidden_edges: bool = false, PAGE_SKETCH;
@@ -6427,6 +6430,7 @@ mod tests {
             ("sketch_align_points", json!(true), PAGE_SKETCH),
             ("sketch_recent_snap", json!(true), PAGE_SKETCH),
             ("line_hover_tangent_arc", json!(true), PAGE_SKETCH),
+            ("delete_empty_sketch", json!(false), PAGE_SKETCH),
             ("ribbon_click_ends_tool", json!(false), PAGE_SKETCH),
             ("msaa", json!(8), PAGE_GRAPHICS),
             ("single_surface_analysis", json!(false), PAGE_GRAPHICS),
@@ -7814,6 +7818,7 @@ mod tests {
                 ("sketch_align_points", "prefs.sketch.align_points"),
                 ("line_drag_draws_one", "prefs.line_drag_draws_one"),
                 ("line_hover_tangent_arc", "prefs.line_hover_tangent_arc"),
+                ("delete_empty_sketch", "prefs.delete_empty_sketch"),
                 ("center_arc_follows_cursor", "prefs.sketch.center_arc"),
                 ("sketch_construction_lines", "prefs.sketch_construction_lines"),
                 ("sketch_auto_dimensions", "prefs.sketch.auto_dimensions"),
