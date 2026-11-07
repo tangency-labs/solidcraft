@@ -443,6 +443,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("sheet.flat_pattern", "Flat Pattern"),
     ("sheet.manage_rules", "Sheet Rules"),
     ("sheet.path_flange", "Path"),
+    ("frame.plate", "Plate"),
     ("sketch.cancel", "Cancel"),
     ("sketch.circle.center", "Circle"),
     ("sketch.constraint.coincident", "Coincident"),

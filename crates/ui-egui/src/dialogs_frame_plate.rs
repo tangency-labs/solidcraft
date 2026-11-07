@@ -2,9 +2,10 @@
 
 use serde_json::{Map, Value, json};
 use solidcraft_engine::Sel;
-use solidcraft_engine::doc::FeatureKind;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::doc::frame::{PlateHoles, PlateShape};
+use solidcraft_engine::doc::{FeatureKind, PlaneRef};
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::dialogs::{Kind, shown_expr};
@@ -124,7 +125,12 @@ pub fn commands(app: &SolveApp, p: &Plate, inputs: &[SelInput], extra: &Map<Stri
     Ok(vec![("frame.plate".into(), args)])
 }
 
-pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelInput>, Map<String, Value>)> {
+pub fn for_feature(
+    app: &SolveApp,
+    kind: &FeatureKind,
+    component: u64,
+    frame: &solidcraft_engine::doc::Mat,
+) -> Option<(Kind, Vec<SelInput>, Map<String, Value>)> {
     let FeatureKind::FramePlate { plane, shape, holes, thickness, offset, x_offset, y_offset, angle, .. } = kind else { return None };
     let (_, mut inputs) = start(app, "frame.plate")?;
     let mut p = Plate::default();
@@ -160,23 +166,23 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             p.pattern_angle = shown_expr(angle, ValueKind::Angle);
         }
     }
-    // Pick a point on material, rather than the area centroid inside a hollow member's bore.
-    if let Some(anchor) = solidcraft_engine::doc::face_anchor::plane_face_anchor(plane) {
+    // The point picked on the face (on material, not in a hollow member's bore), moved onto the
+    // face's exact plane as it is now: it stays on the face when an edit moves the face along
+    // its normal. (The anchor plane's origin is the foot of the plane from the origin, which can
+    // lie off the face.)
+    if let PlaneRef::Face { at, .. } = plane
+        && let Some(anchor) = solidcraft_engine::doc::face_anchor::plane_face_anchor(plane)
+    {
         let state = app.session.model.state();
-        if let Some(body) = state.body(&anchor.target.body) {
+        if let Some(body) = state.body(&anchor.target.body)
+            && let Ok(current) = app.session.doc.resolve_face_anchor(anchor, component, &state)
+            && let Some(index) = app.session.doc.configuration_face_indices(body, &anchor.target).ok().and_then(|is| is.first().copied())
+            && let Some(input) = inputs.first_mut()
+        {
+            let n = current.normal();
+            let on_face = *at - n * (*at - current.origin).dot(n);
             let name = app.session.doc.world_body_name(&state, &body.name, anchor.component, &anchor.path);
-            let indices = app.session.doc.configuration_face_indices(body, &anchor.target).ok();
-            let world = app.session.world_state().ok();
-            if let Some(placed) = world.as_ref().and_then(|world| world.body(&name)) {
-                let mesh = placed.mesh();
-                if let Some((triangle, index)) =
-                    mesh.triangles.iter().zip(&mesh.tri_face).find(|(_, index)| indices.as_ref().is_some_and(|is| is.contains(&(**index as usize))))
-                    && let Some([a, b, c]) = mesh.tri(triangle)
-                    && let Some(input) = inputs.first_mut()
-                {
-                    input.items = vec![Sel::Face { body: name, index: *index as usize, point: (a + b + c) / 3. }];
-                }
-            }
+            input.items = vec![Sel::Face { body: name, index, point: solidcraft_engine::doc::apply_point(frame, on_face) }];
         }
     }
     Some((Kind::FramePlate(p), inputs, Map::new()))
