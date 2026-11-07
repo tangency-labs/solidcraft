@@ -76,6 +76,15 @@ share the machine instead of each defaulting to one worker per CPU. Setting
 `RUST_TEST_THREADS` or `ACTION_MATRIX_JOBS` yourself overrides that split, and leaving
 `SOLIDCRAFT_TEST_JOBS` unset keeps the original all-at-once behaviour.
 
+The default libtest runner limits each test executable to **60 minutes from launch**, not each
+individual test. Set `SOLIDCRAFT_TEST_TIMEOUT_SECONDS` to a nonnegative integer to choose another
+limit in seconds, or `0` for the previous unlimited wait. Invalid values fail before the test build.
+On timeout the runner terminates and reaps the direct child, reports the binary name and its
+captured stdout/stderr as a failure, and continues the other jobs. Descendants spawned by tests
+are not terminated. This bounds a hung binary's run; it does not fix a GPU driver deadlock.
+The build, sequential doc/wasm side commands and optional nextest runner are not covered by this
+setting and keep their own existing policies.
+
 ## Test-level scheduling for full local CI
 
 Install [cargo-nextest](https://nexte.st/docs/installation/pre-built-binaries/), then set
