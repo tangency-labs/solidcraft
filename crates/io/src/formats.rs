@@ -179,7 +179,7 @@ const URDF_OPTIONS: &[OptionSpec] = &[
     OptionSpec { param: "effort", label: "Joint effort", kind: OptionKind::Number { default: 1000.0, min: 0.0, max: 1e9, unit: "" } },
     OptionSpec { param: "velocity", label: "Joint velocity", kind: OptionKind::Number { default: 10.0, min: 0.0, max: 1e9, unit: "" } },
     OptionSpec { param: "images", label: "Pictures as textured visuals", kind: OptionKind::Bool { default: false } },
-    OptionSpec { param: "mimic", label: "Couple motion links", kind: OptionKind::Bool { default: true } },
+    OptionSpec { param: "mimic", label: "Couple motion links", kind: OptionKind::Bool { default: false } },
     OptionSpec {
         param: "collision",
         label: "Collision",
