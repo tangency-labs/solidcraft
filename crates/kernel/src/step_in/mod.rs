@@ -550,18 +550,30 @@ impl Reader {
     }
 
     fn find_colour(&self, styles: Option<&Param>) -> Option<[f32; 3]> {
-        // A stack: the styles are read in the order the file lists them, first listed first.
         let mut queue: Vec<u64> = styles?.as_list()?.iter().filter_map(Param::as_ref_id).collect();
-        queue.reverse();
         let mut seen = HashSet::new();
         while let Some(id) = queue.pop() {
             if seen.len() > 64 || !seen.insert(id) {
                 continue;
             }
             let e = self.ex.get(id)?;
-            // A curve or point style colours the edges or points of the item, not its surface:
-            // its colour must not become the solid's (#12291).
-            if matches!(e.name(), "CURVE_STYLE" | "POINT_STYLE" | "SYMBOL_STYLE" | "TEXT_STYLE" | "NULL_STYLE") {
+            // A curve or point style colours the edges or points of the item, not its surface, and
+            // a surface style's boundary, silhouette or grid lines are curves drawn on it: their
+            // colour must not become the solid's (#12291).
+            if matches!(
+                e.name(),
+                "CURVE_STYLE"
+                    | "CURVE_STYLE_RENDERING"
+                    | "POINT_STYLE"
+                    | "SYMBOL_STYLE"
+                    | "TEXT_STYLE"
+                    | "NULL_STYLE"
+                    | "SURFACE_STYLE_BOUNDARY"
+                    | "SURFACE_STYLE_SILHOUETTE"
+                    | "SURFACE_STYLE_SEGMENTATION_CURVE"
+                    | "SURFACE_STYLE_CONTROL_GRID"
+                    | "SURFACE_STYLE_PARAMETER_LINE"
+            ) {
                 continue;
             }
             if e.name() == "COLOUR_RGB" {
@@ -588,13 +600,11 @@ impl Reader {
                     _ => {}
                 }
             }
-            let mut found = Vec::new();
             for r in &e.records {
                 for p in &r.params {
-                    walk(p, &mut found, 0);
+                    walk(p, &mut queue, 0);
                 }
             }
-            queue.extend(found.into_iter().rev());
         }
         None
     }

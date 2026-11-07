@@ -2892,6 +2892,21 @@ fn a_curve_style_beside_a_surface_style_does_not_colour_the_solid() {
         assert_eq!(imp.bodies.len(), 1, "{name}: {:?}", imp.warnings);
         assert_eq!(imp.bodies[0].color, Some([1.0, 0.5, 0.0]), "{name}");
     }
+    // A surface style whose boundary lines are drawn in another colour is still its fill's colour.
+    let mut t = String::from(HEAD);
+    t += &cube_entities();
+    t += &context(20, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += "#60=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#101),#20);
+#70=STYLED_ITEM('',(#71),#101);
+";
+    t += &surface.replace("SURFACE_SIDE_STYLE('',(#74))", "SURFACE_SIDE_STYLE('',(#74,#78))");
+    t += "#78=SURFACE_STYLE_BOUNDARY(#79);
+#79=CURVE_STYLE_RENDERING(.CONSTANT_SHADING.,#80);
+#80=SURFACE_RENDERING_PROPERTIES(#84);
+#84=COLOUR_RGB('',0.,0.,1.);
+";
+    t += TAIL;
+    assert_eq!(step_import(&t).unwrap().bodies[0].color, Some([1.0, 0.5, 0.0]), "boundary lines");
     // A solid styled with a curve style alone has no colour of its own.
     let mut t = String::from(HEAD);
     t += &cube_entities();
