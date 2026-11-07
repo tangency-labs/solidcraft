@@ -449,6 +449,40 @@ mod tests {
     }
 
     #[test]
+    fn two_arcs_refitted_the_same_way_keep_their_joint() {
+        use solidcore_record::Vec2;
+        use solidcraft_sketch::LinkGeom;
+        let v = Vec2::new;
+        // The R2 round of a 10 x 10 square and the arc of radius 10 running on from it both miss
+        // their circles (centres (8, 8) and (8, 20)) by `s` in the same direction. Both refits move
+        // their joint from (8, 10 + s) to (8, 10), so the two refitted arcs still meet, as they do
+        // before the fix for tangency-labs/solidcore#2908, even where `s` is past a profile's 1e-4.
+        let round = (0..=8).map(|k| f64::from(k) * std::f64::consts::FRAC_PI_8 / 2.).map(|t| v(8. + 2. * t.cos(), 8. + 2. * t.sin()));
+        let side = [261., 263., 265., 267., 269.].map(|d: f64| v(8. + 10. * d.to_radians().cos(), 20. + 10. * d.to_radians().sin()));
+        let exact: Vec<Vec2> = round.chain(side).collect();
+        for s in [1e-5, 2e-4, 5e-4] {
+            let c = v(8., 8. + s);
+            let (p, q) = (v(10., c.y), v(8., 10. + s));
+            let bulge = v(8., 20. + s);
+            let from = bulge + v(-(10f64.to_radians().sin()), -(10f64.to_radians().cos())) * 10.;
+            let fitted = vec![
+                LinkGeom::Line(v(0., 0.), v(10., 0.)),
+                LinkGeom::Line(v(10., 0.), p),
+                LinkGeom::Arc { c, a: p, b: q },
+                LinkGeom::Arc { c: bulge, a: from, b: q },
+                LinkGeom::Line(from, v(0., 10.)),
+                LinkGeom::Line(v(0., 10.), v(0., 0.)),
+            ];
+            let out = super::super::refine_rounds(fitted, &exact, 200f64.sqrt());
+            let (Some(LinkGeom::Arc { c: c1, b: b1, .. }), Some(LinkGeom::Arc { c: c2, b: b2, .. })) = (out.get(2), out.get(3)) else {
+                panic!("{out:?}")
+            };
+            assert!(c1.dist(v(8., 8.)) < 1e-9 && c2.dist(v(8., 20.)) < 1e-9, "shift {s}: both arcs are refitted: {out:?}");
+            assert!(b1.dist(*b2) < 1e-4, "shift {s}: {out:?}");
+        }
+    }
+
+    #[test]
     fn boundaries_touching_at_a_vertex_project() {
         // Two squares of one face family meet only at the corner (1, 1): four boundary edges meet
         // there (a pinch), and the walk keeps each square's loop on its own face.
