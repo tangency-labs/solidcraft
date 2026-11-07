@@ -104,6 +104,7 @@ fn remap_geo(g: &mut crate::construct::GeoRef, ids: &BTreeMap<u64, u64>, bodies:
             }
         }
         GeoRef::Plane { plane } => remap_plane(plane, ids, bodies, depth + 1)?,
+        GeoRef::Snap { of, .. } => remap_geo(of, ids, bodies, depth + 1)?,
         _ => {}
     }
     Ok(())

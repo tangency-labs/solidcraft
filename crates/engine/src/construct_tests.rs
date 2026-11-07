@@ -908,3 +908,29 @@ fn construction_on_a_moved_body_moves_with_it() {
     let (o, d) = axis(&s, "Tether");
     assert!(on_line(o, d, Vec3::new(0.0, 0.0, 20.0)) && on_line(o, d, Vec3::new(0.0, 50.0, 20.0)), "{o:?} {d:?}");
 }
+
+/// Snap points (#11228): a construction built from an edge's middle or a hole's centre keeps it
+/// as a reference on that edge or face, so it follows the model.
+#[test]
+fn snapped_centres_and_middles_follow_the_model() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "h", "expression": "20 mm"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": "h", "body_name": "Box"}));
+    run(&mut s, "solid.cylinder", json!({"base": [20, 15, -1], "radius": 4, "height": "h + 2 mm", "operation": "cut"}));
+    let snap = |of: Value, kind: &str, at: [f64; 3]| json!({"type": "snap", "of": of, "kind": kind, "at": at});
+    let top_front = json!({"type": "edge", "at": [10, 0, 20]});
+    run(&mut s, "construct.point.vertex", json!({"point": snap(top_front, "middle", [20.0, 0.0, 20.0]), "name": "Mid"}));
+    // The hole's wall: the centre of its top end, not its bottom one.
+    let wall = json!({"type": "face", "at": [24, 15, 10]});
+    run(&mut s, "construct.point.vertex", json!({"point": snap(wall, "centre", [20.0, 15.0, 20.0]), "name": "Top"}));
+    let side = json!({"type": "edge", "at": [40, 5, 20]});
+    run(&mut s, "construct.axis.two_points", json!({"a": snap(side, "middle", [40.0, 15.0, 20.0]), "b": {"vertex": [0, 0, 0]}, "name": "Diag"}));
+    run(&mut s, "parameters.change", json!({"name": "h", "expression": "50 mm"}));
+    assert!(near(point(&s, "Mid"), Vec3::new(20.0, 0.0, 50.0)), "{:?}", point(&s, "Mid"));
+    assert!(near(point(&s, "Top"), Vec3::new(20.0, 15.0, 50.0)), "{:?}", point(&s, "Top"));
+    let (o, d) = axis(&s, "Diag");
+    assert!(on_line(o, d, Vec3::new(40.0, 15.0, 50.0)) && on_line(o, d, Vec3::ZERO), "{o:?} {d:?}");
+    // A snap point of something with none of that kind is refused when it is built.
+    let bad = s.execute("construct.point.vertex", &json!({"point": snap(json!({"type": "origin"}), "middle", [0.0, 0.0, 0.0])}));
+    assert!(bad.is_err() || construction_points(&s).len() == 2, "{bad:?}");
+}
