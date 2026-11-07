@@ -13,7 +13,9 @@ pub mod design_lock;
 mod design_metadata;
 mod dxf;
 mod dxf_out;
+mod excellon;
 pub mod formats;
+mod gerber;
 pub use design::{
     DesignCompression, DesignContainerReader, DesignPreview, FileKind, THUMBNAIL_SIZE, file_kind, is_design_container, read_design_file,
     read_design_geometry, read_design_preview, read_design_thumbnail, read_design_thumbnail_file, read_drawing, read_drawing_file,
@@ -41,6 +43,8 @@ pub mod vfs;
 
 pub use dxf::{read_dxf, write_dxf};
 pub use dxf_out::{DxfEntity, DxfLayer, DxfLinetype, DxfShape, loop_shapes, seg_shape, write_dxf_drawing};
+pub use excellon::{DrillArc, DrillHit, DrillSlot, Drills, read_excellon};
+pub use gerber::{GerberOutline, read_gerber_outline};
 pub use legacy_dir::{APP_ID, LEGACY_APP_ID, PREVIOUS_APP_IDS, adopt_legacy_dir, legacy_flatpak_paths};
 pub use safe_write::{backup_path, write_atomic};
 pub use sketch2d::{Geom2, MAX_DRAWING_BYTES};
