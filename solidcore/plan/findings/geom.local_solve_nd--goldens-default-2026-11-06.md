@@ -1,5 +1,7 @@
 # geom.local_solve_nd: unconditional correction and current-main goldens (2026-11-06)
 
+The [November 7 addendum](geom.local_solve_nd--goldens-default-2026-11-06--addendum-2026-11-07-3022.md) records the later rebase and resolution of the #2508 test blocker. The measurements below describe November 6.
+
 - Issue / PR: #2782 / #2791; migration requested in #2816.
 - Base: `1483513fe`; measured production: unchanged at `1d9d097dd` (rebased correction). Only the N-D default and its forwarding change production behaviour.
 - Complete initial check: 283 units, 251 pass / 32 changed, no added/removed/broken case. The main golden is the old value, not the C++ reference.
