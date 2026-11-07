@@ -24,7 +24,7 @@
 
 use solidcraft_geom::cell::{Content, MISSING, Part, Source};
 use solidcraft_geom::drawing_view::Scale;
-use solidcraft_geom::revision::Field;
+use solidcraft_geom::revision::{Field, RevisionRow};
 use solidcraft_geom::title_block::{CellKind, TitleBlock};
 
 use super::Drawing;
@@ -97,10 +97,7 @@ pub fn has_key(source: Source, key: &str) -> bool {
 
 /// Why `source` can't have the field `key`, when it can't.
 pub fn no_field(source: Source, key: &str) -> Option<String> {
-    (!has_key(source, key)).then(|| {
-        let source = serde_json::to_value(source).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
-        format!("the {source} has no field `{key}`")
-    })
+    (!has_key(source, key)).then(|| format!("the {} has no field `{key}`", source_name(source)))
 }
 
 /// Why `content` can't be read, when it can't: the first of its fields its source doesn't have.
@@ -126,6 +123,11 @@ pub fn check_block(block: &TitleBlock) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// A field's source as a block names it: `component`, `drawing`, `sheet` and so on.
+fn source_name(source: Source) -> String {
+    serde_json::to_value(source).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default()
 }
 
 /// What a sheet's fields read: its drawing, its place among the drawing's sheets, and the component
@@ -160,6 +162,29 @@ impl Values<'_> {
             _ if source == Source::Component && matches!(self.component, Documented::Gone) => FieldState::Lost,
             _ => FieldState::Empty,
         }
+    }
+
+    /// The fields of `content` with no value, each as `source.key` (`component.part_number`): what
+    /// [`text`](Values::text) shows as [`MISSING`]. A revision field before the sheet's first revision
+    /// row isn't one: the drawing has no revision to show yet.
+    pub fn empty_fields(&self, content: &Content) -> Vec<String> {
+        let unrevised = self.newest().is_none();
+        let empty = |part: &Part| match part {
+            Part::Field { source: Source::Revision, .. } if unrevised => None,
+            Part::Field { source, key, .. } => {
+                self.field(*source, key).is_none_or(|v| v.is_empty()).then(|| format!("{}.{key}", source_name(*source)))
+            }
+            Part::Text(_) => None,
+        };
+        content.0.iter().filter_map(empty).collect()
+    }
+
+    /// The newest revision row in the sheet's scope: the drawing's, or the sheet's own once rows are
+    /// per sheet.
+    fn newest(&self) -> Option<&RevisionRow> {
+        let d = self.drawing;
+        let scope = if d.revisions.per_sheet { Some(d.sheets.get(self.sheet)?.id) } else { None };
+        d.revisions.newest(scope)
     }
 
     /// The field `key` of `source`, when it has a value.
@@ -198,11 +223,7 @@ impl Values<'_> {
                     _ => None,
                 }
             }
-            Source::Revision => {
-                // The newest row in the sheet's scope: the drawing's, or the sheet's own once rows are per sheet.
-                let scope = if d.revisions.per_sheet { Some(d.sheets.get(self.sheet)?.id) } else { None };
-                d.revisions.newest(scope)?.field(key).map(str::to_string)
-            }
+            Source::Revision => self.newest()?.field(key).map(str::to_string),
             Source::Component => {
                 let c = self.component.component()?;
                 match key {

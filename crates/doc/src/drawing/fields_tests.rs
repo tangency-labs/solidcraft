@@ -93,6 +93,30 @@ fn revision_fields_read_the_newest_row() {
     assert_eq!(shown(&d, 0, None, date()), "2 2026-10-30");
 }
 
+/// The fields a cell shows nothing for, by source and key: a component's empty part number and a
+/// prompt nobody answered, not its name, the sheet's number or literal text. A revision field is
+/// one only once the drawing has a revision row, and then only while that row lacks it.
+#[test]
+fn empty_fields_are_named_by_source_and_key() {
+    let mut d = drawing();
+    let metadata = Metadata::default();
+    let bracket = Component { name: "Bracket", metadata: &metadata, properties: None, material: None, mass: None };
+    let content = Content(vec![
+        field(Source::Component, "name"),
+        Part::Text(" ".into()),
+        field(Source::Component, "part_number"),
+        field(Source::Sheet, "number"),
+        field(Source::Prompt, "checked_by"),
+        field(Source::Revision, "date"),
+    ]);
+    let empty = |d: &Drawing| Values { drawing: d, sheet: 0, component: Documented::Present(bracket) }.empty_fields(&content);
+    assert_eq!(empty(&d), ["component.part_number", "prompt.checked_by"]);
+    Arc::make_mut(&mut d.revisions).add(None, 901).unwrap();
+    assert_eq!(empty(&d), ["component.part_number", "prompt.checked_by", "revision.date"]);
+    Arc::make_mut(&mut d.revisions).set(901, Field::Date, "2026-11-07").unwrap();
+    assert_eq!(empty(&d), ["component.part_number", "prompt.checked_by"]);
+}
+
 /// A component's fields: its name and part properties, its free-text properties, and the material
 /// and mass the caller worked out; without a component, or a value, or with an empty one, nothing.
 #[test]

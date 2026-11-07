@@ -32,6 +32,8 @@ pub struct CellText {
     pub text: String,
     /// The cell's own value, when text typed over it is shown instead.
     pub replaced: Option<String>,
+    /// The fields of its own value with nothing to show ([`Values::empty_fields`]).
+    pub empty: Vec<String>,
 }
 
 /// What a cell's text on paper says of itself: what doesn't fit, or why the text is off the sheet.
@@ -82,12 +84,16 @@ pub fn shown(doc: &Document, tree: &mut Tree<'_>, d: &Drawing, at: usize) -> Vec
             _ => None,
         })
         .collect();
-    let values = read(doc, tree, d, at, texts.iter().map(|(_, content)| *content));
-    let cell = |((name, _), value): ((&String, &Content), String)| match sheet.title_block_overrides.get(name) {
-        Some(typed) => CellText { name: name.clone(), text: typed.clone(), replaced: Some(value) },
-        None => CellText { name: name.clone(), text: value, replaced: None },
-    };
-    texts.into_iter().zip(values).map(cell).collect()
+    with_values(doc, tree, d, at, texts.iter().map(|(_, content)| *content), |values| {
+        let cell = |&(name, content): &(&String, &Content)| {
+            let (value, empty) = (values.text(content), values.empty_fields(content));
+            match sheet.title_block_overrides.get(name) {
+                Some(typed) => CellText { name: name.clone(), text: typed.clone(), replaced: Some(value), empty },
+                None => CellText { name: name.clone(), text: value, replaced: None, empty },
+            }
+        };
+        texts.iter().map(cell).collect()
+    })
 }
 
 /// `contents` as sheet `at` of `d` shows them, in their order: text as written, each field read
