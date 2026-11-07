@@ -3515,6 +3515,8 @@ fn apply_traced_with(
             });
             let live: std::collections::BTreeSet<&str> = state.bodies.iter().map(|b| b.name.as_str()).collect();
             state.threads.retain(|t| live.contains(t.body.as_str()));
+            // A sheet whose material the boolean took away goes with its body.
+            state.surface_sheets.retain(|s| live.contains(s.body.as_str()));
             // A cut can leave a body in pieces: each piece becomes its own body ("Bar", "Bar (1)"),
             // numbered on past names already taken (a body cut in pieces before). Only a cut that
             // made more pieces than the body had splits it: the pieces of a join stay together.

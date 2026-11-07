@@ -1875,15 +1875,15 @@ mod tests {
         }
         let saved = saved_geometry(&s, &s.doc).unwrap();
         let records = &saved.records;
-        let sheets = records["sheets"].as_array().unwrap();
+        let sheets = records["surface_sheets"].as_array().unwrap();
         let texts: std::collections::HashSet<String> = sheets.iter().map(Value::to_string).collect();
         assert_eq!(texts.len(), sheets.len(), "each sheet once");
         let mut held = std::collections::HashSet::new();
         for (r, feature) in s.model.results.iter().zip(records["features"].as_array().unwrap()) {
             let state = &records["states"][feature["state"].as_u64().unwrap() as usize];
-            let named = state["sheets"].as_array().unwrap();
-            assert_eq!(named.len(), r.state.sheets.len());
-            for (i, sheet) in named.iter().zip(&r.state.sheets) {
+            let named = state["surface_sheets"].as_array().unwrap();
+            assert_eq!(named.len(), r.state.surface_sheets.len());
+            for (i, sheet) in named.iter().zip(&r.state.surface_sheets) {
                 let written = &sheets[i.as_u64().unwrap() as usize];
                 assert_eq!(*written, serde_json::to_value(sheet).unwrap(), "{}: the record of its own sheet", r.name);
                 held.insert(written.to_string());
@@ -2052,17 +2052,17 @@ mod tests {
         };
         let size = |s: &Session| serde_json::to_vec(&saved_geometry(s, &s.doc).unwrap().records).unwrap().len();
         let (few, many) = (design(2), design(12));
-        let sheet = serde_json::to_vec(&many.model.state().sheets).unwrap().len();
+        let sheet = serde_json::to_vec(&many.model.state().surface_sheets).unwrap().len();
         let per_feature = (size(&many) - size(&few)) / 10;
         assert!(per_feature * 2 < sheet, "each later feature adds {per_feature} bytes, the sheet is {sheet}");
         // Taken from the file as saved: the sheet is the one evaluated.
-        let flat = many.model.state().sheets.clone();
+        let flat = many.model.state().surface_sheets.clone();
         let path = std::env::temp_dir().join(format!("solidcraft-sheet-cache-{}.solidcraft", std::process::id()));
         std::fs::write(&path, many.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap()).unwrap();
         let mut reopened = Session::default();
         reopened.execute("doc.open", &json!({"path":path})).unwrap();
         assert!(reopened.model.results.iter().zip(&many.model.results).all(|(a, b)| a.ms == b.ms), "taken from the file, not evaluated");
-        assert_eq!(serde_json::to_value(&reopened.model.state().sheets).unwrap(), serde_json::to_value(&flat).unwrap());
+        assert_eq!(serde_json::to_value(&reopened.model.state().surface_sheets).unwrap(), serde_json::to_value(&flat).unwrap());
         std::fs::remove_file(path).unwrap();
     }
 
