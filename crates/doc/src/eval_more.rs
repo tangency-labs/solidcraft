@@ -598,10 +598,10 @@ fn surface_sheet_at(st: &ModelState, body: &Option<crate::BodyName>, name: Optio
         return st.surface_sheets.iter().position(|s| &s.body == n);
     }
     let p = pick?;
-    if let Some(n) = name.filter(|n| !n.is_empty()) {
-        if let Some(i) = st.surface_sheets.iter().position(|s| s.free_edge_by_name(n, p).is_some()) {
-            return Some(i);
-        }
+    if let Some(n) = name.filter(|n| !n.is_empty())
+        && let Some(i) = st.surface_sheets.iter().position(|s| s.free_edge_by_name(n, p).is_some())
+    {
+        return Some(i);
     }
     // A sheet that refuses the pick (a bend line, not a free edge) is the pick's, so its reason
     // is the feature's.

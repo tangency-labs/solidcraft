@@ -1364,8 +1364,10 @@ fn export_bend_table(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "`format` must be csv or json"));
     }
     let (body, rule, t, k, bends, table) = match surfaces_of(s, p) {
-        Some(sk) if sk.flat_matches_body().is_err() => return Err(sk.flat_matches_body().unwrap_err().into()),
-        Some(sk) => (sk.body.clone(), sk.rule.clone(), sk.thickness, sk.k_factor, sk.shown().bend_infos(), surface_flat_json(&sk)),
+        Some(sk) => {
+            sk.flat_matches_body()?;
+            (sk.body.clone(), sk.rule.clone(), sk.thickness, sk.k_factor, sk.shown().bend_infos(), surface_flat_json(&sk))
+        }
         None => {
             let sh = sheet_of(s, p, cmd)?;
             sh.flat_matches_body()?;

@@ -2662,7 +2662,7 @@ impl SurfaceSheet {
     fn bored_named(&self, body: Body, names: Vec<Option<String>>, frames: &[Option<Rigid3>]) -> Result<(Body, Vec<Option<String>>)> {
         let mut out = (body, names);
         for b in &self.bores {
-            let one = SurfaceSheet { bores: vec![b.clone()], ..self.clone() };
+            let one = SurfaceSheet { bores: vec![*b], ..self.clone() };
             let body = one.bored(out.0, frames)?;
             out.1 = crate::sheet::carried(&out.1, &body);
             out.0 = body;

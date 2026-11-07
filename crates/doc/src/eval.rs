@@ -2955,7 +2955,7 @@ fn absorb_sheet_cuts(
     // is caught there.
     for (i, absorbed) in crate::sheet_surface_cuts::absorb(before, after, f, weigh || !cuts)? {
         let (mut sk, built, note) = match absorbed {
-            crate::sheet_surface_cuts::Absorbed::Read(sk, built, note) => (sk, built, note),
+            crate::sheet_surface_cuts::Absorbed::Read(sk, built, note) => (*sk, built, note),
             crate::sheet_surface_cuts::Absorbed::Refused(why) if cuts => return Err(DocError::Invalid(why)),
             crate::sheet_surface_cuts::Absorbed::Refused(_) => {
                 if let Some(sk) = after.surface_sheets.get_mut(i).filter(|sk| sk.altered_by.is_none()) {
@@ -3009,13 +3009,14 @@ fn track_altered_sheets(before: &ModelState, after: &mut ModelState, f: &Feature
     }
     for sk in after.surface_sheets.iter_mut() {
         let Some(old) = before.surface_sheets.iter().find(|s| s.body == sk.body) else { continue };
-        if old.altered_by.is_some() && (f.kind.is_sheet() || old.sheet != sk.sheet) {
-            if let Some(lost) = sk.altered_by.take() {
-                append_warning(
-                    warning,
-                    format!("`{}` is rebuilt from its sheet metal features: what {lost} changed is not kept (not supported yet)", sk.body),
-                );
-            }
+        if old.altered_by.is_some()
+            && (f.kind.is_sheet() || old.sheet != sk.sheet)
+            && let Some(lost) = sk.altered_by.take()
+        {
+            append_warning(
+                warning,
+                format!("`{}` is rebuilt from its sheet metal features: what {lost} changed is not kept (not supported yet)", sk.body),
+            );
         }
     }
     let ModelState { sheets, bodies, .. } = after;
@@ -7598,10 +7599,13 @@ fn eval_feature(
             }
             // A join one sheet thick in the plane of a flat panel of a sheet made from surfaces
             // becomes part of that panel.
-            if *operation == Operation::Join && to_body.is_none() && matches!(f.kind, FeatureKind::Extrude { .. }) && !st.surface_sheets.is_empty() {
-                if !more::surface_sheet_join(f, st, &crate::plain(targets), constructor.as_ref())?.is_empty() {
-                    return Ok(());
-                }
+            if *operation == Operation::Join
+                && to_body.is_none()
+                && matches!(f.kind, FeatureKind::Extrude { .. })
+                && !st.surface_sheets.is_empty()
+                && !more::surface_sheet_join(f, st, &crate::plain(targets), constructor.as_ref())?.is_empty()
+            {
+                return Ok(());
             }
             // A join one sheet thick in the plane of a panel becomes part of that panel. A Join to an
             // object (#6424) is left to the generic path below, which joins the object as well.

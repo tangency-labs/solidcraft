@@ -1116,7 +1116,7 @@ impl SurfaceSheet {
                 crate::sheet_surface::Piece::Panel(i) | crate::sheet_surface::Piece::Tab(_, i) => {
                     let (Some(frame), Some(Some(at))) = (frames.get(i).copied().flatten(), dev.placements.get(i)) else { return None };
                     let own = at.inverse().region(region);
-                    boxes.push((Some(i).filter(|_| matches!(piece, crate::sheet_surface::Piece::Panel(_))), slab(&frame, &own)));
+                    boxes.push((matches!(piece, crate::sheet_surface::Piece::Panel(_)).then_some(i), slab(&frame, &own)));
                     if matches!(piece, crate::sheet_surface::Piece::Panel(_)) && matches!(self.sheet.panels.get(i)?.surface, Surface::Plane) {
                         panels.push((i, frame, own));
                     }
@@ -1126,7 +1126,7 @@ impl SurfaceSheet {
                     let zone = dev.zones.get(z)?;
                     let mut b = solidcraft_geom::Aabb3::EMPTY;
                     let pts = region.outer.polyline(1e-3);
-                    for (p, q) in (&pts).edges() {
+                    for (p, q) in pts.edges() {
                         for k in 0..=16 {
                             let x = p.lerp(*q, k as f64 / 16.0);
                             for depth in [0.0, t] {

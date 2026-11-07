@@ -470,8 +470,9 @@ fn solve<const N: usize>(mut m: [[f64; N]; N], mut rhs: [f64; N]) -> Option<[f64
         rhs.swap(col, pivot);
         for row in col + 1..N {
             let f = m[row][col] / m[col][col];
-            for k in col..N {
-                m[row][k] -= f * m[col][k];
+            let (above, below) = m.split_at_mut(row);
+            for (a, p) in below[0][col..].iter_mut().zip(&above[col][col..]) {
+                *a -= f * p;
             }
             rhs[row] -= f * rhs[col];
         }

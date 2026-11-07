@@ -244,7 +244,7 @@ pub(crate) fn lift(base: &Rigid3, r: &Rigid2) -> Rigid3 {
 /// What [`absorb`] made of a sheet: the sheet read with its body built again and the cut's note,
 /// or why the sheet can't hold the change.
 pub(crate) enum Absorbed {
-    Read(SurfaceSheet, Body, Option<String>),
+    Read(Box<SurfaceSheet>, Body, Option<String>),
     Refused(String),
 }
 
@@ -282,7 +282,7 @@ pub(crate) fn absorb(before: &ModelState, after: &ModelState, f: &Feature, weigh
         match cut(&sk, &was, &now, weigh) {
             Ok((cut, built)) => {
                 let note = parted_note(&cut, sk.loose.len());
-                out.push((i, Absorbed::Read(cut, built, note)));
+                out.push((i, Absorbed::Read(Box::new(cut), built, note)));
             }
             Err(e) => out.push((i, Absorbed::Refused(format!("`{}`: what {} cut {e}", sk.body, f.name)))),
         }
