@@ -725,10 +725,16 @@ jobs:
         run: |
           tag="v$VERSION"
           sha256sum --check SHA256SUMS.txt
+          # Generated notes start at the newest published release, pre-releases included. Left
+          # to GitHub they start at the Latest stable one, and the list outgrows the 125,000
+          # characters a release body may have.
+          start=()
+          prev="$(gh release list --exclude-drafts --limit 1 --json tagName --jq '.[0].tagName // empty')"
+          if [ -n "$prev" ]; then start=(--notes-start-tag "$prev"); fi
           # Stage all packages before publishing. Published tags are never replaced.
           gh release create "$tag" --draft --prerelease --latest=false \
             --title "SolidCraft v$VERSION (nightly)" --target "$GITHUB_SHA" \
-            --notes-file ../notes.md --generate-notes -- *
+            --notes-file ../notes.md --generate-notes "${start[@]}" -- *
           gh release edit "$tag" --draft=false --prerelease --latest=false
           echo "### Published nightly: $tag (\`${GITHUB_SHA::9}\`)" >>"$GITHUB_STEP_SUMMARY"
       - name: Create or update the draft release
@@ -760,8 +766,13 @@ jobs:
               --target "$GITHUB_SHA" --prerelease="$PRERELEASE"
             gh release upload "$tag" --clobber -- *
           else
+            # As for nightlies: start the generated notes at the newest published release.
+            start=()
+            prev="$(gh release list --exclude-drafts --limit 1 --json tagName --jq '.[0].tagName // empty')"
+            if [ -n "$prev" ]; then start=(--notes-start-tag "$prev"); fi
             gh release create "$tag" --draft --title "SolidCraft v$VERSION" \
-              --target "$GITHUB_SHA" --notes-file ../notes.md --generate-notes "${pre[@]}" -- *
+              --target "$GITHUB_SHA" --notes-file ../notes.md --generate-notes "${start[@]}" \
+              "${pre[@]}" -- *
           fi
           {
             echo "Draft **SolidCraft v$VERSION** at \`${GITHUB_SHA::9}\`:"
@@ -783,6 +794,9 @@ jobs:
             echo "No SNAPCRAFT_STORE_CREDENTIALS secret: skipping the Snap Store upload."
           fi
       - name: Upload the snaps to the Snap Store
+        # The store can refuse an upload while an earlier one waits for review; the GitHub
+        # release is already staged by then, so that doesn't fail the job.
+        continue-on-error: true
         if: >-
           steps.snapstore.outputs.configured == 'true' && (github.event_name == 'schedule' ||
           (github.ref == 'refs/heads/release' && (github.event_name == 'push' || inputs.draft)))
