@@ -33,7 +33,8 @@ pub fn rows(ui: &mut egui::Ui, f: &mut UrdfExport) -> bool {
 
 /// The parameters of `file.export`, or what is wrong with the form.
 pub fn params(f: &UrdfExport, path: &str) -> Result<Value, String> {
-    let mut p = json!({"path": path, "format": "urdf", "mimic": f.mimic, "collision": if f.hulls { "convex_hull" } else { "mesh" }});
+    let mut p =
+        json!({"path": path, "format": "urdf", "mimic": f.mimic, "place_meshes": true, "collision": if f.hulls { "convex_hull" } else { "mesh" }});
     if !f.mesh_prefix.trim().is_empty() {
         p["mesh_prefix"] = json!(f.mesh_prefix.trim());
     }
@@ -89,7 +90,7 @@ mod tests {
     #[test]
     fn empty_numbers_are_left_to_the_exports_fallback() {
         let p = params(&form(), "r.urdf").unwrap();
-        assert_eq!(p, json!({"path": "r.urdf", "format": "urdf", "mimic": true, "collision": "mesh"}));
+        assert_eq!(p, json!({"path": "r.urdf", "format": "urdf", "mimic": true, "place_meshes": true, "collision": "mesh"}));
     }
 
     #[test]
@@ -98,7 +99,7 @@ mod tests {
         let p = params(&f, "r.urdf").unwrap();
         assert_eq!(
             p,
-            json!({"path": "r.urdf", "format": "urdf", "mimic": false, "collision": "convex_hull", "mesh_prefix": "package://r/meshes/", "effort": 5.0, "velocity": 2.5})
+            json!({"path": "r.urdf", "format": "urdf", "mimic": false, "place_meshes": true, "collision": "convex_hull", "mesh_prefix": "package://r/meshes/", "effort": 5.0, "velocity": 2.5})
         );
     }
 
