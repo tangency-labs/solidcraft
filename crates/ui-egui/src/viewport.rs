@@ -39,6 +39,10 @@ mod removed_later_tests;
 #[path = "viewport_plane_target_tests.rs"]
 mod plane_target_tests;
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "viewport_projected_shadow_tests.rs"]
+mod projected_shadow_tests;
+
 #[cfg(test)]
 #[path = "viewport_ground_tests.rs"]
 mod ground_tests;
@@ -682,6 +686,7 @@ fn sketch_scene_key(app: &SolveApp, proj: &Proj) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     scene_key(app).hash(&mut h);
     app.ui.ground_shadow.hash(&mut h);
+    app.preferences.ground_shadow_style.hash(&mut h);
     // The grid this scene draws follows the view when the preference says so (#1470): turning it
     // on or off redraws even while the camera holds still.
     app.ui.show_grid.hash(&mut h);
@@ -1930,10 +1935,14 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
     let mut sc = GpuScene::default();
     let s = &app.session;
     let st = crate::open_meshing::shown_world(app);
-    if app.ui.ground_shadow && app.ui.visual_style != 2 && app.cam.pitch > 0.0 {
+    if app.ui.ground_shadow
+        && app.ui.visual_style != 2
+        && (app.cam.pitch > 0.0 || app.preferences.ground_shadow_style == crate::prefs::GroundShadowStyle::Projected)
+    {
         let geometry = shadow_geometry(app, &st);
         sc.shadow = geometry.bytes.as_ref().clone();
         sc.palette = geometry.palette;
+        sc.projected_shadow = geometry.projection;
     } else if let Ok(mut cache) = app.viewport.shadow.lock()
         && cache.as_ref().is_some_and(|c| !std::sync::Arc::ptr_eq(&c.state, &st))
     {
@@ -2110,12 +2119,16 @@ struct ShadowGeometry {
     state: std::sync::Arc<solidcraft_engine::doc::ModelState>,
     bytes: std::sync::Arc<Vec<u8>>,
     palette: std::sync::Arc<crate::gpu::Palette>,
+    projection: Option<std::sync::Arc<solidcraft_gpu::view::ground_shadow::Projection>>,
 }
 
 /// Changing sides of the ground only changes whether this small shadow is drawn; it never
 /// rebuilds the model's bodies or uploads their plans and colours again.
 fn shadow_geometry(app: &SolveApp, st: &std::sync::Arc<solidcraft_engine::doc::ModelState>) -> ShadowGeometry {
-    let key = scene_key(app);
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    scene_key(app).hash(&mut hash);
+    app.preferences.ground_shadow_style.hash(&mut hash);
+    let key = hash.finish();
     if let Some(geometry) =
         app.viewport.shadow.lock().ok().and_then(|c| c.as_ref().filter(|c| c.key == key && std::sync::Arc::ptr_eq(&c.state, st)).cloned())
     {
@@ -2123,7 +2136,13 @@ fn shadow_geometry(app: &SolveApp, st: &std::sync::Arc<solidcraft_engine::doc::M
     }
     let mut scene = GpuScene::default();
     ground_shadow(&mut scene, app, ground_boxes(app, st));
-    let geometry = ShadowGeometry { key, state: st.clone(), bytes: std::sync::Arc::new(scene.shadow), palette: scene.palette };
+    let geometry = ShadowGeometry {
+        key,
+        state: st.clone(),
+        bytes: std::sync::Arc::new(scene.shadow),
+        palette: scene.palette,
+        projection: scene.projected_shadow,
+    };
     if let Ok(mut cache) = app.viewport.shadow.lock() {
         *cache = Some(geometry.clone());
     }
@@ -2183,6 +2202,7 @@ fn ground_height(app: &SolveApp, bounds: solidcraft_engine::geom::Aabb3) -> f64 
 
 /// A soft dark ellipse on the ground under each group of shown bodies (darkest in the middle).
 fn ground_shadow(sc: &mut GpuScene, app: &SolveApp, framed: Vec<solidcraft_engine::geom::Aabb3>) {
+    let first = sc.shadow.len();
     let all = framed.iter().fold(solidcraft_engine::geom::Aabb3::EMPTY, |a, b| a.union(b));
     if all.is_empty() {
         return;
@@ -2197,6 +2217,12 @@ fn ground_shadow(sc: &mut GpuScene, app: &SolveApp, framed: Vec<solidcraft_engin
         }
         let at = |r: f64, a: f64| app.cam.from_frame(Vec3::new(c.x + rx * r * a.cos(), c.y + ry * r * a.sin(), z)).to_f32();
         shadow_ellipse(sc, dark, at);
+    }
+    if app.preferences.ground_shadow_style == crate::prefs::GroundShadowStyle::Projected
+        && let Some(mut projection) = solidcraft_gpu::view::ground_shadow::Projection::new(all, z, &app.cam, dark as f32 / 255.0 * 0.8, Vec::new())
+    {
+        projection.fallback = sc.shadow.split_off(first);
+        sc.projected_shadow = Some(std::sync::Arc::new(projection));
     }
 }
 

@@ -599,6 +599,29 @@ fn display_menu(app: &mut SolveApp, ui: &mut egui::Ui) {
             activate(app, slot);
         }
     }
+    let mode = crate::prefs::ground_shadow_mode(app);
+    let key = match mode {
+        "off" => "ui.ground_shadow_off",
+        "projected" => "ui.ground_shadow_projected",
+        _ => "ui.ground_shadow_ellipse",
+    };
+    let mut style = NavigationMenuRow::new("ground_shadow_style", app.tr("ui.ground_shadow_style"), "");
+    style.detail = Some(app.tr(key));
+    style.submenu = true;
+    let response = style.show(ui);
+    crate::scenario::publish_target("view:ground_shadow_style", response.rect);
+    Container::new(ui.ctx(), Surface::Popup).menu(&response).frame(ui_kit::navigation_popup_frame()).show(|ui| {
+        for (value, key) in [("off", "ui.ground_shadow_off"), ("ellipse", "ui.ground_shadow_ellipse"), ("projected", "ui.ground_shadow_projected")] {
+            let mut row = NavigationMenuRow::new(value, app.tr(key), "");
+            row.selected = mode == value;
+            let choice = row.show(ui);
+            crate::scenario::publish_target(&format!("view:ground_shadow:{value}"), choice.rect);
+            if choice.clicked() {
+                let _ = app.run("view.ground_shadow", json!({"mode":value}));
+                ui.close();
+            }
+        }
+    });
     separator(ui);
     heading(ui, app.tr("navbar.projection_heading"));
     for (perspective, key) in [(false, "navbar.orthographic"), (true, "navbar.perspective")] {

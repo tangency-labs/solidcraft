@@ -121,6 +121,33 @@ fn shadow_cache_follows_visibility_and_world_up() {
 }
 
 #[test]
+fn projected_shadow_visibility_reuses_model_batches_and_projection_geometry() {
+    let ctx = crate::fonts::test_context();
+    let mut app = app();
+    app.preferences.ground_shadow_style = crate::prefs::GroundShadowStyle::Projected;
+    frame(&mut app, &ctx);
+    let model_key = app.viewport.key;
+    let state = app.session.world_state().unwrap();
+    let projection = shadow_geometry(&app, &state).projection.unwrap();
+    app.viewport.slot.lock().unwrap().take();
+    for pitch in [-0.7, 0.7] {
+        app.cam.pitch = pitch;
+        frame(&mut app, &ctx);
+        assert_eq!(app.viewport.key, model_key);
+        assert!(app.viewport.slot.lock().unwrap().is_none());
+        assert!(std::sync::Arc::ptr_eq(&projection, &shadow_geometry(&app, &state).projection.unwrap()));
+    }
+    app.ui.ground_shadow = false;
+    frame(&mut app, &ctx);
+    assert!(app.viewport.slot.lock().unwrap().is_none());
+    assert!(app.viewport.sketch_slot.lock().unwrap().take().unwrap().projected_shadow.is_none());
+    app.ui.ground_shadow = true;
+    frame(&mut app, &ctx);
+    assert!(app.viewport.slot.lock().unwrap().is_none());
+    assert!(std::sync::Arc::ptr_eq(&projection, &shadow_geometry(&app, &state).projection.unwrap()));
+}
+
+#[test]
 fn face_feedback_reuses_geometry_but_retains_fresh_pick_points() {
     let mut app = app();
     app.viewport.hover = Some(Hit::Face { body: "Body1".into(), index: 0, point: Vec3::new(10.0, 0.0, 5.0) });

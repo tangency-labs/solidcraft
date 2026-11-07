@@ -1,0 +1,50 @@
+{
+  "en": {
+    "ui.ground_shadow_ellipse": "Ellipse",
+    "ui.ground_shadow_off": "Off",
+    "ui.ground_shadow_projected": "Projected",
+    "ui.ground_shadow_style": "Ground shadow style"
+  },
+  "ja": {
+    "ui.ground_shadow_ellipse": "楕円",
+    "ui.ground_shadow_off": "なし",
+    "ui.ground_shadow_projected": "投影",
+    "ui.ground_shadow_style": "地面の影の方式"
+  },
+  "zh": {
+    "ui.ground_shadow_ellipse": "椭圆",
+    "ui.ground_shadow_off": "关闭",
+    "ui.ground_shadow_projected": "投影",
+    "ui.ground_shadow_style": "地面阴影样式"
+  },
+  "de": {
+    "ui.ground_shadow_ellipse": "Ellipse",
+    "ui.ground_shadow_off": "Aus",
+    "ui.ground_shadow_projected": "Projiziert",
+    "ui.ground_shadow_style": "Bodenschattenstil"
+  },
+  "ko": {
+    "ui.ground_shadow_ellipse": "타원",
+    "ui.ground_shadow_off": "끄기",
+    "ui.ground_shadow_projected": "투영",
+    "ui.ground_shadow_style": "바닥 그림자 스타일"
+  },
+  "ar": {
+    "ui.ground_shadow_ellipse": "بيضاوي",
+    "ui.ground_shadow_off": "إيقاف",
+    "ui.ground_shadow_projected": "مُسقَط",
+    "ui.ground_shadow_style": "نمط ظل الأرض"
+  },
+  "he": {
+    "ui.ground_shadow_ellipse": "אליפסה",
+    "ui.ground_shadow_off": "כבוי",
+    "ui.ground_shadow_projected": "מוקרן",
+    "ui.ground_shadow_style": "סגנון צל הקרקע"
+  },
+  "vi": {
+    "ui.ground_shadow_ellipse": "Hình elip",
+    "ui.ground_shadow_off": "Tắt",
+    "ui.ground_shadow_projected": "Chiếu",
+    "ui.ground_shadow_style": "Kiểu bóng trên mặt đất"
+  }
+}

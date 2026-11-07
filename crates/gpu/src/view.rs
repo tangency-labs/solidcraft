@@ -21,6 +21,7 @@ mod ao;
 pub use ao::GroundAo;
 mod clouds;
 pub use clouds::{CELL_SIZE, Cell, CloudFilter, CloudStyle, ColorMode, FILTERS, GpuCloud, cloud_cell};
+pub mod ground_shadow;
 #[cfg(not(target_arch = "wasm32"))]
 mod msaa_check;
 mod oit;
@@ -502,6 +503,7 @@ pub struct GpuScene {
     pub palette: Arc<Palette>,
     /// Non-selectable virtual ground receiving viewport AO, separate from model triangles.
     pub ground_ao: Option<GroundAo>,
+    pub projected_shadow: Option<Arc<ground_shadow::Projection>>,
     /// Opaque triangles. A zero normal draws the colour flat (unlit).
     pub tris: Vec<u8>,
     /// Opaque triangles of open bodies, drawn as `tris` but left out of a section's crossing
@@ -1711,6 +1713,7 @@ struct GlassSource {
 
 #[derive(Default)]
 struct Batches {
+    projection: Option<Arc<ground_shadow::Projection>>,
     /// What the last scene taken uploaded.
     uploads: UploadStats,
     /// The blocks' see-through triangles the global glass stream was assembled from (block key,
@@ -1728,6 +1731,7 @@ struct Batches {
     open_tris: Option<Batch>,
     ground_ao: Option<Batch>,
     ground_input: Option<GroundAo>,
+    shadow_fallback: Option<Batch>,
     pbr: Option<Batch>,
     trans: Option<Batch>,
     shadow: Option<Batch>,
@@ -1819,6 +1823,8 @@ impl Batches {
                 None => self.palette = Some(PaletteGpu::new(device, queue, uniform, bgl, palette, &mut written)),
             }
             self.uploads.palette = written;
+            self.projection = sc.projected_shadow.clone();
+            self.shadow_fallback = sc.projected_shadow.as_ref().and_then(|p| upload(device, "sc_shadow_fallback", &p.fallback, TRI_SIZE));
             self.planned = match tess {
                 Some((tess, encoder)) => self.planned(device, tess, encoder, &sc.planned, donor.as_deref_mut()),
                 None => Vec::new(),
@@ -2169,6 +2175,8 @@ pub struct Renderer {
     /// What the frame `prepare` drew offscreen (supersampled, or for see-through surfaces),
     /// published when `paint` copies it into the view.
     ss_stats: DrawStats,
+    shadow: Option<ground_shadow::Resources>,
+    shadow_key: Option<(u64, u64, bool, [u32; 4], usize, Option<(u64, [[u32; 4]; 4])>)>,
     /// The AO depth prepass resources (a 1 × 1 stand-in while ambient occlusion is off).
     ao: ao::Resources,
     ground_ao: wgpu::RenderPipeline,
@@ -3146,6 +3154,8 @@ impl Renderer {
                 ao: ao.join(),
                 ground_ao: ground_ao.join(),
                 ground_ao_key: None,
+                shadow: None,
+                shadow_key: None,
                 depth_reset,
                 section_stencil,
                 #[cfg(test)]
@@ -3653,6 +3663,7 @@ impl Renderer {
                 .and_then(|ground| upload(device, "sc_ground_ao", &ground.vertices_with_radius(preview, cb.ao_radius), TRI_SIZE));
             res.ground_ao_key = Some(ground_key);
         }
+        res.prepare_shadow(device, queue, encoder, cb);
         queue.write_buffer(&res.uniform, 0, &uniform_bytes(cb, cb.size_px[0], cb.size_px[1], res.linear_out, res.target.reversed_depth()));
         if let Some(a) = &cb.access
             && a.version != res.access_version
@@ -3776,6 +3787,31 @@ impl Renderer {
         if let Ok(mut s) = self.stats.lock() {
             *s = DrawStats { lowered: self.lowered, ..drawn };
         }
+    }
+
+    /// Refresh the camera-independent coverage only when its casters change.
+    fn prepare_shadow(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, cb: &Frame) {
+        let Some(original) = self.sketch.projection.clone().or_else(|| self.model.projection.clone()) else {
+            self.shadow = None;
+            self.shadow_key = None;
+            return;
+        };
+        let motion = cb.moving.as_ref().map(|moving| (moving.key, moving.transform.map(|column| column.map(f32::to_bits))));
+        let key = (cb.key, cb.pv_key, cb.pv_hide, cb.clip.map(f32::to_bits), Arc::as_ptr(&original) as usize, motion);
+        if self.shadow_key == Some(key) {
+            return;
+        }
+        if self.shadow.is_none() {
+            self.shadow = ground_shadow::Resources::new(device, &self.image_bgl, &self.uniform_bgl);
+        }
+        let projection = original.with_preview(if cb.pv_hide { None } else { cb.preview_bounds });
+        let projection = projection.as_ref().unwrap_or(&original);
+        let preview = if cb.pv_hide { &self.empty } else { &self.preview };
+        if let Some(shadow) = &mut self.shadow {
+            let moving = cb.moving.as_ref().map(|moving| (&self.moving, moving.transform));
+            shadow.prepare(device, queue, encoder, projection, cb.clip, [&self.model, preview], moving, &self.bind);
+        }
+        self.shadow_key = Some(key);
     }
 
     /// The target the pipelines draw into.
@@ -4072,6 +4108,24 @@ impl Renderer {
         tris(pass, &res.trans, &m.shadow);
         pass.set_bind_group(0, scene_bind(sk, &res.bind), &[]);
         tris(pass, &res.trans, &sk.shadow);
+        pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
+        let shadow_source = if sk.projection.is_some() { sk } else { m };
+        pass.set_bind_group(0, scene_bind(shadow_source, &res.bind), &[]);
+        if shadow_source.projection.as_ref().is_some_and(|p| p.visible(cb.back)) {
+            if let Some(shadow) = &res.shadow {
+                pass.set_pipeline(&res.image);
+                pass.set_bind_group(1, &shadow.bind, &[]);
+                if let Some(quad) = &shadow.quad {
+                    for (buffer, count) in &quad.parts {
+                        pass.set_vertex_buffer(0, buffer.slice(..));
+                        pass.draw(0..*count, 0..1);
+                        tally.triangles(*count, 1);
+                    }
+                }
+            } else {
+                tris(pass, &res.trans, &shadow_source.shadow_fallback);
+            }
+        }
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
         if phase == Phase::BeforeSeeThrough {
             return;

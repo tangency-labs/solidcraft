@@ -707,8 +707,57 @@ pub(crate) fn render_offscreen_ao(
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn render_offscreen_layers(
+    scene: GpuScene,
+    sketch: GpuScene,
+    view_proj: [[f32; 4]; 4],
+    back: [f32; 3],
+    eye: [f32; 4],
+    size: u32,
+    tess: Option<&str>,
+    analysis: [f32; 8],
+    colors: [f32; 36],
+) -> Option<Vec<u8>> {
+    offscreen_layers(
+        scene,
+        Some(sketch),
+        None,
+        view_proj,
+        back,
+        eye,
+        size,
+        Offscreen {
+            tess,
+            product: false,
+            srgb: false,
+            analysis,
+            analysis_colors: colors,
+            ssaa: 1.0,
+            ao_radius: 0.0,
+            ao_samples: solidcraft_gpu::view::AO_SAMPLES,
+        },
+    )
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
 fn offscreen(
     scene: GpuScene,
+    highlight: Option<GpuScene>,
+    view_proj: [[f32; 4]; 4],
+    back: [f32; 3],
+    eye: [f32; 4],
+    size: u32,
+    options: Offscreen<'_>,
+) -> Option<Vec<u8>> {
+    offscreen_layers(scene, None, highlight, view_proj, back, eye, size, options)
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[allow(clippy::too_many_arguments)]
+fn offscreen_layers(
+    scene: GpuScene,
+    sketch: Option<GpuScene>,
     highlight: Option<GpuScene>,
     view_proj: [[f32; 4]; 4],
     back: [f32; 3],
@@ -732,8 +781,8 @@ fn offscreen(
         upload_error: None,
         key: 1,
         slot: Arc::new(Mutex::new(Some(scene))),
-        sketch_key: 0,
-        sketch_slot: none(),
+        sketch_key: u64::from(sketch.is_some()),
+        sketch_slot: Arc::new(Mutex::new(sketch)),
         hl_key: u64::from(highlight.is_some()),
         hl_slot: Arc::new(Mutex::new(highlight)),
         pv_key: 0,
