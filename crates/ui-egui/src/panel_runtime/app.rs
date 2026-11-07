@@ -181,8 +181,9 @@ impl AppPanelRuntime {
     pub(super) fn apply_legacy_preferences(
         &mut self,
         session: &Session,
-        mutations: Vec<Mutation>,
+        mut mutations: Vec<Mutation>,
         weights: Vec<(InstanceId, f32)>,
+        widths: Vec<(InstanceId, f32)>,
         legacy: super::preferences::LegacyPanelPlacements,
     ) -> PanelResult<()> {
         self.reconcile(session)?;
@@ -193,8 +194,19 @@ impl AppPanelRuntime {
             let source_catalogue = context.catalogue.state().clone();
             let source = commands::current_envelope_snapshot(context.catalogue, &current, context.registry)?;
             let preparation = preparation_context(&source)?;
-            let action = LayoutAction::Apply { expected_revision: Some(current.revision), mutations };
+            let action = LayoutAction::Apply { expected_revision: Some(current.revision), mutations: mutations.clone() };
             let mut projected = context.sink.project_in_context(action, &preparation)?;
+            if !widths.is_empty() {
+                // Resolve reused/new columns after moves, then let the shared
+                // reducer apply their widths and update every member together.
+                for (instance, width) in widths {
+                    let column =
+                        projected.containing(&instance)?.column.clone().ok_or_else(|| error(Rule::Placement, "legacy side column disappeared"))?;
+                    mutations.push(Mutation::SetColumnWidth { column, width });
+                }
+                let action = LayoutAction::Apply { expected_revision: Some(current.revision), mutations };
+                projected = context.sink.project_in_context(action, &preparation)?;
+            }
             for (instance, weight) in weights {
                 let id = projected.containing(&instance)?.id.clone();
                 let section = projected

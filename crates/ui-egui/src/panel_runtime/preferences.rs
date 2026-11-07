@@ -549,6 +549,7 @@ pub fn migrate_legacy_placements(app: &mut crate::SolveApp, bindings: &[LegacyPa
     let mut instances = BTreeSet::new();
     let mut sections = integration.preference_identity_reservations()?;
     let mut mutations = Vec::new();
+    let mut widths = Vec::new();
     let mut ordered: Vec<_> = bindings.iter().collect();
     ordered.sort_by_key(|binding| binding.role);
     let mut browser_section = bindings
@@ -576,6 +577,9 @@ pub fn migrate_legacy_placements(app: &mut crate::SolveApp, bindings: &[LegacyPa
         let mut size = existing.size;
         if zone.side() {
             size.width = width.clamp(spec.min_size.width, spec.max_size.width);
+            if binding.role != LegacyPanelRole::History || !legacy.history_under_browser {
+                widths.push((binding.instance.clone(), size.width));
+            }
         }
         let section = next_section_id_with_reservations(layout, &sections)?;
         sections.insert(section.clone());
@@ -619,7 +623,7 @@ pub fn migrate_legacy_placements(app: &mut crate::SolveApp, bindings: &[LegacyPa
     } else {
         Vec::new()
     };
-    integration.apply_legacy_preferences(&app.session, mutations, weights, legacy)
+    integration.apply_legacy_preferences(&app.session, mutations, weights, widths, legacy)
 }
 
 /// Profiles contain the selected workspace and every workspace's current known

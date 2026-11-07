@@ -9247,7 +9247,7 @@ mod tests {
         h.call("ui.prefs", json!({"open":"Layout","language":"en"}));
         h.frames(3);
         let camera = h.app.cam;
-        h.step(&json!({"click":{"handle":"dialog:Layout workspace:Modelling"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:Layout workspace:Modeling"}})).unwrap();
         h.step(&json!({"key":"ArrowRight"})).unwrap();
         h.frames(2);
         assert_eq!(crate::panel_runtime::layout_preferences_view(&h.app).unwrap().selected_workspace.0, "panel_fixture.workspace.sketch");
@@ -9300,8 +9300,8 @@ mod tests {
         assert!(later.top() > first.top(), "the grid wraps into rows rather than placing every row horizontally");
         h.step(&json!({"click":{"handle":"prefs:panel_layout:tile:Saved 00"}})).unwrap();
         h.step(&json!({"key":"End"})).unwrap();
-        h.frames(3);
-        h.step(&json!({"click":{"handle":"prefs:panel_layout:save_as"}})).unwrap();
+        h.frames(20);
+        h.step(&json!({"key":"Enter"})).unwrap();
         h.frames(2);
         assert!(crate::scenario::rect_of("prefs:panel_layout:save_popover").is_some());
         h.step(&json!({"click":{"handle":"prefs:panel_layout:replace"}})).unwrap();
@@ -9368,6 +9368,11 @@ mod tests {
             }
             panel_runtime::enable_preferences(&mut app).unwrap();
             app.panel_runtime.as_mut().unwrap().prepare_host(&app.session, capacity).unwrap();
+            assert_eq!(
+                panel_runtime::preferences_value(&app).unwrap()["legacy"]["browser_width"],
+                json!(333.0),
+                "Cancel retains the original legacy sidecar before migration"
+            );
             let browser = InstanceId::new("specimen-0").unwrap();
             panel_runtime::migrate_legacy_placements(
                 &mut app,
