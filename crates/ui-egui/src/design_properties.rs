@@ -377,7 +377,7 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
 
 /// Draw the Properties window of the body or component the menu asked about (mass, volume,
 /// area, centre of mass, bounding box and counts; a component's first moments and moment of
-/// inertia), when it is open. Close dismisses it.
+/// inertia; an occurrence's position and rotation), when it is open. Close dismisses it.
 pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
     show_measuring(app, ctx);
     let Some((title, v)) = app.menu.props.clone() else { return };
@@ -417,6 +417,7 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
         }
     }
     rows.push(("Faces / edges / vertices", format!("{} / {} / {}", total["faces"], total["edges"], total["vertices"])));
+    let placement = v.get("placement").cloned();
     let (k, unit) = crate::prefs::unit_scale(&app.session.doc.units);
     let first = point(&total["first_moment_g_mm"]).filter(|_| number(total, "mass_g") > 0.0).map(|m| {
         let m: Vec<String> = [m.x, m.y, m.z].iter().map(|x| number_text(app, x * k)).collect();
@@ -438,6 +439,9 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
     let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_props"), "settings", &heading).actions("", "Close", None).show(ctx, true, |ui| {
         for (label, value) in &rows {
             ui_kit::row(ui, crate::i18n::tr_label(label), |ui| ui_kit::text(ui, value, ui_kit::Text::Cell));
+        }
+        if let Some(placement) = &placement {
+            show_placement(app, ui, placement);
         }
         if let Some(first) = &first {
             ui_kit::row(ui, &first_label, |ui| ui_kit::text(ui, first, ui_kit::Text::Cell));
@@ -476,6 +480,52 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
     if closed || action == ui_kit::Action::Cancel {
         close_object(app);
     }
+}
+
+/// Position and rotation of an occurrence, in its parent or in the world, and a copy of the
+/// 3×4 matrix `occurrence.move` takes.
+fn show_placement(app: &SolveApp, ui: &mut egui::Ui, placement: &Value) {
+    let id = ui.make_persistent_id("sc_props_placement_frame");
+    let mut frame = ui.data(|d| d.get_temp(id).unwrap_or(0usize));
+    if frame > 1 {
+        frame = 0;
+    }
+    ui_kit::row(ui, crate::i18n::tr_label("Frame"), |ui| {
+        ui_kit::dropdown(ui, "sc_props_frame", &mut frame, &["In parent", "World"]);
+    });
+    ui.data_mut(|d| d.insert_temp(id, frame));
+    let Some(pose) = placement.get(if frame == 0 { "in_parent" } else { "world" }) else { return };
+    let unit = crate::prefs::unit_scale(&app.session.doc.units).1;
+    if let Some(p) = point(&pose["position"]) {
+        let text = format!("({}) {unit}", [p.x, p.y, p.z].map(|x| crate::prefs::show_mm_bare(app, x)).join(", "));
+        ui_kit::row(ui, crate::i18n::tr_label("Position"), |ui| ui_kit::text(ui, &text, ui_kit::Text::Cell));
+    }
+    if let (Some(axis), Some(angle)) = (point(&pose["axis"]), pose.get("angle_deg").and_then(Value::as_f64)) {
+        let a = [axis.x, axis.y, axis.z].map(|x| number_text(app, x)).join(", ");
+        let text = format!("({a}) · {}°", number_text(app, angle));
+        ui_kit::row(ui, crate::i18n::tr_label("Rotation"), |ui| ui_kit::text(ui, &text, ui_kit::Text::Cell));
+    }
+    let Some(text) = matrix_copy(&pose["matrix"]) else { return };
+    let copy_label = app.tr("ui.properties.copy_matrix").to_string();
+    ui_kit::row(ui, "", |ui| {
+        let button = ui_kit::button(ui, &copy_label, ui_kit::Button::Small);
+        crate::scenario::publish_handle("properties:copy_placement", button.rect.center());
+        if button.clicked() {
+            ui.ctx().copy_text(text.clone());
+        }
+    });
+}
+
+/// The 3×4 matrix as `occurrence.move` takes it: three rows, translation in the last column.
+fn matrix_copy(m: &Value) -> Option<String> {
+    let rows = m.as_array().filter(|rows| rows.len() == 3)?;
+    let mut out = Vec::with_capacity(3);
+    for row in rows {
+        let cells = row.as_array().filter(|cells| cells.len() == 4)?;
+        let cells: Vec<String> = cells.iter().map(|n| n.as_f64().map(|x| x.to_string()).unwrap_or_else(|| "NaN".to_string())).collect();
+        out.push(format!("[{}]", cells.join(", ")));
+    }
+    Some(format!("[{}]", out.join(", ")))
 }
 
 #[cfg(test)]
@@ -681,6 +731,53 @@ mod tests {
         h.step(&json!({"widget": "Close"})).unwrap();
         assert!(h.app.menu.props_measuring.is_none() && h.app.menu.props.is_none(), "Close drops the measurement");
         assert!(progress.is_cancelled(), "Close stops the worker");
+    }
+
+    /// #12721: Properties of an occurrence shows its position and rotation, in the parent or in
+    /// the world, and copies the 3×4 matrix.
+    #[test]
+    fn occurrence_properties_show_position_and_rotation_in_the_parent_or_the_world() {
+        let mut h = Harness::new();
+        let arm = h.app.run("component.create", json!({"name": "arm", "grounded": false})).unwrap()["occurrence"].as_u64().unwrap();
+        let bracket = h.app.run("component.create", json!({"name": "bracket", "parent": "arm"})).unwrap()["occurrence"].as_u64().unwrap();
+        for (command, params) in [
+            ("sketch.create", json!({"plane": "XY"})),
+            ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]})),
+            ("sketch.finish", json!({})),
+            ("solid.extrude", json!({"distance": 8})),
+            ("component.activate", json!({"component": 0})),
+        ] {
+            h.app.run(command, params).unwrap();
+        }
+        h.app.run("occurrence.move", json!({"occurrence": arm, "matrix": [[1, 0, 0, 116], [0, 1, 0, 235], [0, 0, 1, 1492]]})).unwrap();
+        h.app.run("occurrence.move", json!({"occurrence": bracket, "matrix": [[0, 0, 1, 0], [0, 1, 0, -120], [-1, 0, 0, 0]]})).unwrap();
+        let measured = h.app.run("occurrence.properties", json!({"occurrence": bracket, "path": [arm, bracket]})).unwrap();
+        h.app.menu.props = Some(("bracket:1".into(), measured));
+        h.frames(2);
+        for label in ["Frame", "In parent", "Position", "Rotation"] {
+            assert!(h.widget(label).is_some(), "{label}");
+        }
+        let parent = format!("({}) mm", [0.0, -120.0, 0.0].map(|x| crate::prefs::show_mm_bare(&h.app, x)).join(", "));
+        assert!(h.widget(&parent).is_some(), "{parent}");
+        let copy = crate::scenario::handle_at("properties:copy_placement").expect("copy");
+        let (request, _reply) = crate::control::ControlRequest::new("ui.click", json!({"x": copy.x, "y": copy.y}));
+        crate::control::handle(&mut h.app, &h.ctx, &request);
+        let mut copied = Vec::new();
+        for _ in 0..4 {
+            h.frame();
+            copied.extend(h.output.commands.iter().filter_map(|c| match c {
+                egui::OutputCommand::CopyText(text) => Some(text.clone()),
+                _ => None,
+            }));
+        }
+        let text = copied.last().expect("Copy matrix puts the placement on the clipboard");
+        assert!(text.contains("-120"), "{text}");
+        h.step(&json!({"widget": "In parent"})).unwrap();
+        h.frames(2);
+        h.step(&json!({"widget": "World"})).unwrap();
+        h.frames(2);
+        let world_at = format!("({}) mm", [116.0, 115.0, 1492.0].map(|x| crate::prefs::show_mm_bare(&h.app, x)).join(", "));
+        assert!(h.widget(&world_at).is_some(), "{world_at}");
     }
 
     /// #8706: Properties of an assembly from the Browser's menu returns at once with the card
