@@ -11,7 +11,7 @@
 | `crates/kernel` | B-rep solid(s) selected in the document | Source geometry; no CAD code duplicated |
 | `crates/geom` | surface mesh / measures (`mesh.rs`, `tess`) | Starting point for volume meshing |
 | Gmsh | volume hex mesh from the B-rep/surface mesh | **Main gap**: SolidCraft tessellates surfaces; hex volume mesh needs Gmsh. Licence: GPLv2-or-later w/ linking exception + commercial option — external process preferred; FFI needs licence review |
-| `crates/doc` | materials ($E,\nu,k,\rho$), bodies, parameters | Units mm/kg/s; coherent stress mN/mm², 1 mN/mm² = 0.001 MPa |
+| `crates/doc` | materials ($E,\nu,k,\rho$), bodies, parameters | Units mm/kg/s; convert material inputs on entry: pressure/$E$ Pa ×0.001 → mN/mm², candidate density kg/m³ ×10⁻⁹ → kg/mm³, assigned density g/cm³ ×10⁻⁶ → kg/mm³, conductivity W/(m·K) ×1000 → mN/(s·K); coherent stress mN/mm², 1 mN/mm² = 0.001 MPa |
 | `crates/engine` | commands: create study, set load/constraint, solve | Undo/redo, CLI and MCP for free |
 | `crates/gpu` | wgpu device + WGSL kernels | Reuses the viewport's wgpu stack (v30) |
 | `crates/render` | result fields → per-vertex colours + legend | No second viewer; ParaView only for `.vtu` |
