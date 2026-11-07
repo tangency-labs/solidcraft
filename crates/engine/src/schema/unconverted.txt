@@ -98,9 +98,7 @@ sheet.export_bend_table
 sheet.export_dxf
 sheet.flat_pattern
 sheet.path_flange
-sketch.arc.center_point
 sketch.arc.tangent
-sketch.arc.three_point
 sketch.auto_constrain
 sketch.auto_constrain_from_datum
 sketch.auto_project
@@ -108,10 +106,7 @@ sketch.blend_curve
 sketch.break_link
 sketch.centerline
 sketch.chain
-sketch.circle.center
-sketch.circle.three_point
 sketch.circle.three_tangent
-sketch.circle.two_point
 sketch.circle.two_tangent
 sketch.conic
 sketch.constrainer
@@ -139,13 +134,11 @@ sketch.inspect
 sketch.intersect
 sketch.intersection_curve
 sketch.isoparametric_curve
-sketch.line
 sketch.line.midpoint
 sketch.line3d
 sketch.move3d
 sketch.move_point
 sketch.options
-sketch.point
 sketch.point3d
 sketch.polygon.circumscribed
 sketch.polygon.edge
