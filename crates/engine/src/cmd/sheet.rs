@@ -80,7 +80,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&PERFORATE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params(
-        "diameter, pitch: expr; margin?: expr (clear of edges, cut-outs, bends and the outline; default: the diameter); pattern?: staggered (60°, default) | square; body?; sketch? + profiles? (the outline: closed profiles of a sketch on a face of the sheet; holes only inside them, out of their inner loops) - a perforation field over the whole flat sheet or inside the outline: holes in the flat pattern (perforations), the DXF (layer PERFORATION) and the measured volume, not cut into the B-rep (#732)",
+        "diameter, pitch: expr; margin?: expr (clear of edges, cut-outs, bends and the outline; default: the diameter); pattern?: staggered (60°, default) | square; shape?: round (default) | hex (diameter across flats, a corner up: a honeycomb on the staggered pattern) | slot (diameter wide, length? long overall, along the rows); row_pitch?: expr (between rows; default: from the pitch and pattern); body?; sketch? + profiles? (the outline: closed profiles of a sketch on a face of the sheet; holes only inside them, out of their inner loops) - a perforation field over the whole flat sheet or inside the outline: holes in the flat pattern (perforations, with their count and open share), the DXF (layer PERFORATION) and the measured volume, not cut into the B-rep (#732)",
     ),
     CommandSpec::new("sheet.hem", "Hem", crate::checked!("sheet.hem", hem))
         .at("SHEET METAL", "CREATE")
@@ -614,6 +614,14 @@ pub(crate) fn perforation_pattern(t: &str) -> std::result::Result<&str, &'static
     }
 }
 
+/// A perforation's `shape`.
+pub(crate) fn perforation_shape(t: &str) -> std::result::Result<&str, &'static str> {
+    match t {
+        "round" | "hex" | "slot" => Ok(t),
+        _ => Err("`shape` is \"round\" (default), \"hex\" or \"slot\""),
+    }
+}
+
 fn perforate(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sheet.perforate";
     let diameter = req_expr(cmd, p, "diameter")?;
@@ -625,6 +633,18 @@ fn perforate(s: &mut Session, p: &Value) -> Result<Value> {
         check_expr(s, m, Kind::Length, cmd, "margin")?;
     }
     let pattern = str_(p, "pattern").map(|t| perforation_pattern(t).map(str::to_string).map_err(|why| bad(cmd, why))).transpose()?;
+    let shape = str_(p, "shape").map(|t| perforation_shape(t).map(str::to_string).map_err(|why| bad(cmd, why))).transpose()?;
+    let length = expr(p, "length");
+    match (&length, shape.as_deref()) {
+        (Some(l), Some("slot")) => check_expr(s, l, Kind::Length, cmd, "length")?,
+        (None, Some("slot")) => return Err(bad(cmd, "a slot needs its `length` (overall, along the rows)")),
+        (Some(_), _) => return Err(bad(cmd, "`length` is a slot's: it needs `shape: \"slot\"`")),
+        (None, _) => {}
+    }
+    let row_pitch = expr(p, "row_pitch");
+    if let Some(r) = &row_pitch {
+        check_expr(s, r, Kind::Length, cmd, "row_pitch")?;
+    }
     // The outline: only a sketch named here, never the active one.
     let sketch = match p.get("sketch") {
         Some(_) => Some(SketchId(feature_sketch(s, p, cmd)?)),
@@ -632,7 +652,8 @@ fn perforate(s: &mut Session, p: &Value) -> Result<Value> {
         None => None,
     };
     let profiles = p.get("profiles").map(|_| profiles(p, cmd)).transpose()?;
-    add_feature(s, p, FeatureKind::SheetPerforate { diameter, pitch, margin, pattern, body: str_(p, "body").map(BodyName::from), sketch, profiles })
+    let body = str_(p, "body").map(BodyName::from);
+    add_feature(s, p, FeatureKind::SheetPerforate { diameter, pitch, margin, pattern, body, sketch, profiles, shape, length, row_pitch })
 }
 
 fn hem(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1063,7 +1084,7 @@ fn pocket_json(p: &solidcraft_doc::sheet::SheetPocket, t: f64) -> Value {
 
 /// A converted body's flat as `sheet.flat_pattern` reports a sheet's, with how many of its panels are rolls
 /// and the largest stretch any panel's flat leaves.
-fn surface_flat_json(sk: &solidcraft_doc::SurfaceSheet) -> Value {
+fn surface_flat_json(sk: &solidcraft_doc::SurfaceSheet) -> Result<Value> {
     let sk = &sk.shown();
     let loops: Vec<Ring<Vec2>> = sk.regions.iter().map(|r| r.outer.polyline(1e-3)).collect();
     let size = loops.iter().fold(Aabb2::EMPTY, |b, l| b.union(&l.bounds())).size();
@@ -1096,16 +1117,24 @@ fn surface_flat_json(sk: &solidcraft_doc::SurfaceSheet) -> Value {
         .iter()
         .map(|b| json!({"panel": b.panel, "start": [b.base.x, b.base.y, b.base.z], "axis": [b.axis.x, b.axis.y, b.axis.z], "diameter": b.radius * 2.0, "length": b.height.abs()}))
         .collect();
-    let perforations: Vec<Value> = sk
-        .perforations
-        .iter()
-        .map(|p| {
-            let n = sk.perforation_holes(p).len();
-            json!({"feature": p.feature, "diameter": p.diameter, "pitch": p.pitch, "margin": p.margin,
-                "pattern": if p.square { "square" } else { "staggered" }, "count": n,
-                "open_area_mm2": n as f64 * std::f64::consts::PI * (p.diameter / 2.0).powi(2)})
-        })
-        .collect();
+    // Each field with its holes' shape, its rows' pitch, and how much of it they open.
+    let mut perforations = Vec::new();
+    for p in &sk.perforations {
+        let field = sk.shaped_perforation(p);
+        let stats = sk.perforation_stats(p)?;
+        let mut v = json!({"feature": p.feature, "diameter": p.diameter, "pitch": p.pitch, "row_pitch": field.row_spacing(), "margin": p.margin,
+            "pattern": if p.square { "square" } else { "staggered" }, "count": stats.holes, "open_area_mm2": stats.open_area,
+            "field_area_mm2": stats.field_area, "open_share": stats.open_share, "nominal_open_share": field.nominal_open_share()});
+        match field.shape {
+            solidcraft_doc::PerforationShape::Round => v["shape"] = json!("round"),
+            solidcraft_doc::PerforationShape::Hex => v["shape"] = json!("hex"),
+            solidcraft_doc::PerforationShape::Slot { length } => {
+                v["shape"] = json!("slot");
+                v["length"] = json!(length);
+            }
+        }
+        perforations.push(v);
+    }
     let roll_table: Vec<Value> = sk
         .roll_infos()
         .iter()
@@ -1122,7 +1151,7 @@ fn surface_flat_json(sk: &solidcraft_doc::SurfaceSheet) -> Value {
     if !sk.slits.is_empty() {
         out["slits"] = Value::Array(sk.slits.iter().map(|[a, b]| json!([pt(a), pt(b)])).collect());
     }
-    out
+    Ok(out)
 }
 
 /// The flat-pattern caller's historical whole-circle compatibility bound.
@@ -1183,7 +1212,7 @@ fn flat_pattern(s: &mut Session, p: &Value) -> Result<Value> {
 pub(crate) fn flat_reply(s: &Session, body: Option<&str>, cmd: &str) -> Result<Value> {
     let sk = surfaces_named(s, body, cmd)?;
     sk.flat_matches_body()?;
-    Ok(surface_flat_json(&sk))
+    surface_flat_json(&sk)
 }
 
 /// How the flat DXF writes the curves that are neither lines nor circular arcs.
@@ -1281,12 +1310,24 @@ fn surface_dxf(s: &Session, sk: &solidcraft_doc::SurfaceSheet, o: &DxfOptions) -
     let sk = &sk.shown();
     let rule = s.doc.sheet_rule(Some(&sk.rule));
     let display = sheet::AngleDisplay::parse(&rule.angle_display).unwrap_or_default();
+    // A round hole is one CIRCLE; a hexagon or a slot its outline's lines and arcs.
+    let (mut perforation, mut perforation_outlines) = (Vec::new(), Vec::new());
+    for p in &sk.perforations {
+        let field = sk.shaped_perforation(p);
+        let holes = sk.try_perforation_holes(p)?;
+        if field.shape.is_round() {
+            perforation.extend(holes.into_iter().map(|c| (c, p.diameter / 2.0)));
+        } else {
+            perforation_outlines.extend(holes.into_iter().map(|c| field.hole_loop(c)));
+        }
+    }
     let drawing = FlatDrawing {
         body: sk.body.clone(),
         regions: sk.regions.clone(),
         pockets: sk.pockets.clone(),
         letters: sheet::Letters::of(&sk.labels),
-        perforation: sk.perforations.iter().flat_map(|p| sk.perforation_holes(p).into_iter().map(|c| (c, p.diameter / 2.0))).collect(),
+        perforation,
+        perforation_outlines,
         bends: sk.bend_infos(),
         rolls: sk.roll_lines.iter().map(|l| (l.start, l.end)).collect(),
         slits: sk.slits.iter().map(|[a, b]| (*a, *b)).collect(),
@@ -1297,15 +1338,17 @@ fn surface_dxf(s: &Session, sk: &solidcraft_doc::SurfaceSheet, o: &DxfOptions) -
 }
 
 /// What a flat pattern's DXF draws: the flat material, the pockets machined in it, which of its
-/// loops are text, the perforation's holes, the bends, their notes' angles read as `display`, the
-/// rolls' lines (where each starts and ends, and its middle), and the cuts with no width along
-/// the junctions of split edges whose stretches bend to opposite sides.
+/// loops are text, the perforation's holes (round ones as centre and radius, others as their
+/// outlines), the bends, their notes' angles read as `display`, the rolls' lines (where each
+/// starts and ends, and its middle), and the cuts with no width along the junctions of split
+/// edges whose stretches bend to opposite sides.
 struct FlatDrawing {
     body: String,
     regions: Vec<solidcore_record::Region2>,
     pockets: Vec<solidcraft_doc::sheet::SheetPocket>,
     letters: sheet::Letters,
     perforation: Vec<(Vec2, f64)>,
+    perforation_outlines: Vec<solidcore_record::Loop2>,
     bends: Vec<solidcraft_doc::sheet::BendInfo>,
     rolls: Vec<(Vec2, Vec2)>,
     slits: Vec<(Vec2, Vec2)>,
@@ -1376,7 +1419,21 @@ impl FlatDrawing {
         // Slits (two lines each) and rolls (one line each) are planned like bends: at most two
         // entities and a bend's few values apiece.
         let lines = self.bends.len().saturating_add(self.rolls.len()).saturating_add(self.slits.len().saturating_mul(2));
-        let mut file = DxfFile::for_flat_pattern_export(loops.len(), lines, self.perforation.len())?;
+        // The contours' curves; a hexagonal or slotted hole is its outline's lines and arcs, through
+        // the same converter.
+        let style = match o.curves {
+            DxfCurves::Exact => DxfPathStyle::Exact,
+            DxfCurves::Arcs => DxfPathStyle::Arcs { tolerance_mm: solidcraft_kernel::PLANAR_FIT_TOL },
+        };
+        let mut outlines = Vec::with_capacity(self.perforation_outlines.len());
+        let mut pieces = 0usize;
+        for (i, hole) in self.perforation_outlines.iter().enumerate() {
+            let shapes = flat_loop_shapes(hole, style)
+                .map_err(|e| EngineError::Other(format!("flat-pattern body {:?}, perforation hole {}: {e}", self.body, i + 1)))?;
+            pieces = pieces.saturating_add(shapes.len());
+            outlines.push(shapes);
+        }
+        let mut file = DxfFile::for_flat_pattern_export(loops.len(), lines, self.perforation.len(), pieces)?;
         if !o.one_layer {
             // These four baseline roles exist even without matching geometry. The
             // compatibility writer keeps their historical sorted table order.
@@ -1385,10 +1442,6 @@ impl FlatDrawing {
             }
         }
         for (i, (_, h, layer)) in loops.into_iter().enumerate() {
-            let style = match o.curves {
-                DxfCurves::Exact => DxfPathStyle::Exact,
-                DxfCurves::Arcs => DxfPathStyle::Arcs { tolerance_mm: solidcraft_kernel::PLANAR_FIT_TOL },
-            };
             let shapes = flat_loop_shapes(h, style)
                 .map_err(|e| EngineError::Other(format!("flat-pattern body {:?}, layer {layer:?}, contour {}: {e}", self.body, i + 1)))?;
             if !shapes.is_empty() {
@@ -1415,10 +1468,13 @@ impl FlatDrawing {
                 file.push(layer, bend_note(b, height, self.display), None)?;
             }
         }
-        if !self.perforation.is_empty() {
+        if !self.perforation.is_empty() || pieces > 0 {
             let layer = dxf_layer(&mut file, "PERFORATION", o.one_layer)?;
             for (c, r) in &self.perforation {
                 file.push(layer, DxfShape::Circle { c: *c, r: *r }, None)?;
+            }
+            for shape in outlines.into_iter().flatten() {
+                file.push(layer, shape, None)?;
             }
         }
         // A roll's lines on a layer of their own, so that a reader of the bend layers doesn't
@@ -1588,7 +1644,7 @@ fn export_bend_table(s: &mut Session, p: &Value) -> Result<Value> {
     sk.flat_matches_body()?;
     let bends = sk.shown().bend_infos();
     let text = if format == BendTableFormat::Json {
-        serde_json::to_string_pretty(&surface_flat_json(&sk)).map_err(|e| EngineError::Other(e.to_string()))?
+        serde_json::to_string_pretty(&surface_flat_json(&sk)?).map_err(|e| EngineError::Other(e.to_string()))?
     } else {
         // Always quote text fields: body/rule names may include commas, quotes or newlines, or start
         // as a spreadsheet formula does.

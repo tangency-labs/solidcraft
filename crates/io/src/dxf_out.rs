@@ -3137,7 +3137,7 @@ mod tests {
 
     #[test]
     fn flat_profile_keeps_sorted_legacy_tables_and_authored_entity_order() {
-        let mut file = DxfFile::for_flat_pattern_export(1, 1, 1).unwrap();
+        let mut file = DxfFile::for_flat_pattern_export(1, 1, 1, 0).unwrap();
         let outline = file.declare_layer("OUTLINE", 7, DxfLinetype::Continuous, None).unwrap();
         let cut = file.declare_layer("CUT", 4, DxfLinetype::Continuous, None).unwrap();
         file.declare_layer("BEND_UP", 1, DxfLinetype::Dashed, None).unwrap();
@@ -3184,13 +3184,13 @@ mod tests {
 
     #[test]
     fn flat_profile_charges_note_source_work_and_rejects_overflow_plans() {
-        assert!(DxfFile::for_flat_pattern_export(usize::MAX, 0, 0).is_err());
-        assert!(DxfFile::for_flat_pattern_export(0, usize::MAX, 0).is_err());
-        let mut file = DxfFile::for_flat_pattern_export(0, 1, 0).unwrap();
+        assert!(DxfFile::for_flat_pattern_export(usize::MAX, 0, 0, 0).is_err());
+        assert!(DxfFile::for_flat_pattern_export(0, usize::MAX, 0, 0).is_err());
+        let mut file = DxfFile::for_flat_pattern_export(0, 1, 0, 0).unwrap();
         let layer = file.declare_layer("BEND_NOTES", 8, DxfLinetype::Continuous, None).unwrap();
         file.push(layer, DxfShape::Text { at: Vec2::ZERO, height: 3.0, angle_deg: 0.0, text: "a".repeat(2049) }, None).unwrap();
         assert!(write_dxf_file(&file).unwrap_err().to_string().contains("note text"));
-        let mut wrong = DxfFile::for_flat_pattern_export(0, 1, 0).unwrap();
+        let mut wrong = DxfFile::for_flat_pattern_export(0, 1, 0, 0).unwrap();
         let layer = wrong.declare_layer("BEND_UP", 1, DxfLinetype::Dashed, None).unwrap();
         wrong.push(layer, DxfShape::Circle { c: Vec2::ZERO, r: 1.0 }, None).unwrap();
         assert!(write_dxf_file(&wrong).unwrap_err().to_string().contains("declared producer"));
@@ -3200,21 +3200,21 @@ mod tests {
     // every named role and a pocket under each contour fits the plan's layer count.
     #[test]
     fn flat_profile_admits_roll_lines_on_their_own_layer() {
-        let mut file = DxfFile::for_flat_pattern_export(1, 1, 0).unwrap();
+        let mut file = DxfFile::for_flat_pattern_export(1, 1, 0, 0).unwrap();
         let roll = file.declare_layer("ROLL", 3, DxfLinetype::Continuous, None).unwrap();
         file.push(roll, DxfShape::Line(Vec2::ZERO, Vec2::X), None).unwrap();
         let written = write_dxf_file(&file).unwrap();
         assert_eq!(entities(&written).iter().map(|e| field(&e.1, 8)).collect::<Vec<_>>(), ["ROLL"]);
 
-        let mut circle = DxfFile::for_flat_pattern_export(1, 1, 0).unwrap();
+        let mut circle = DxfFile::for_flat_pattern_export(1, 1, 0, 0).unwrap();
         let roll = circle.declare_layer("ROLL", 3, DxfLinetype::Continuous, None).unwrap();
         circle.push(roll, DxfShape::Circle { c: Vec2::ZERO, r: 1.0 }, None).unwrap();
         assert!(write_dxf_file(&circle).unwrap_err().to_string().contains("declared producer"));
-        let mut dashed = DxfFile::for_flat_pattern_export(1, 1, 0).unwrap();
+        let mut dashed = DxfFile::for_flat_pattern_export(1, 1, 0, 0).unwrap();
         let declared = dashed.declare_layer("ROLL", 3, DxfLinetype::Dashed, None);
         assert!(declared.unwrap_err().to_string().contains("declared producer"));
 
-        let mut every = DxfFile::for_flat_pattern_export(1, 1, 1).unwrap();
+        let mut every = DxfFile::for_flat_pattern_export(1, 1, 1, 0).unwrap();
         for (name, color, linetype) in [
             ("OUTLINE", 7, DxfLinetype::Continuous),
             ("CUT", 4, DxfLinetype::Continuous),
@@ -3231,6 +3231,41 @@ mod tests {
         }
         assert_eq!(every.layers().len(), 11);
         write_dxf_file(&every).unwrap();
+    }
+
+    // A hexagonal or slotted hole is its lines and arcs on PERFORATION, planned as pieces beside the
+    // round holes' circles: they write, a piece past the plan does not, and other shapes stay refused
+    // there.
+    #[test]
+    fn flat_profile_admits_shaped_perforation_lines_and_arcs() {
+        let circle = DxfShape::Circle { c: Vec2::new(5.0, 5.0), r: 1.0 };
+        let slot = [
+            DxfShape::Line(Vec2::ZERO, Vec2::new(2.0, 0.0)),
+            DxfShape::Arc { c: Vec2::new(2.0, 0.5), r: 0.5, a0: -90.0, a1: 90.0 },
+            DxfShape::Line(Vec2::new(2.0, 1.0), Vec2::new(0.0, 1.0)),
+            DxfShape::Arc { c: Vec2::new(0.0, 0.5), r: 0.5, a0: 90.0, a1: 270.0 },
+        ];
+        // Every piece the plan counts is pushed; the first one past it is refused there.
+        let filled = |pieces: usize| -> Result<DxfFile<DxfShape>> {
+            let mut file = DxfFile::for_flat_pattern_export(0, 0, 1, pieces)?;
+            let layer = file.declare_layer("PERFORATION", 3, DxfLinetype::Continuous, None)?;
+            file.push(layer, circle.clone(), None)?;
+            for shape in &slot {
+                file.push(layer, shape.clone(), None)?;
+            }
+            Ok(file)
+        };
+        let written = write_dxf_file(&filled(slot.len()).unwrap()).unwrap();
+        let written = entities(&written);
+        assert_eq!(written.iter().map(|e| e.0.as_str()).collect::<Vec<_>>(), ["CIRCLE", "LINE", "ARC", "LINE", "ARC"]);
+        assert!(written.iter().all(|e| field(&e.1, 8) == "PERFORATION"));
+        let short = filled(slot.len() - 1).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(short.contains("entity count limit"), "{short}");
+
+        let mut text = DxfFile::for_flat_pattern_export(0, 0, 0, 1).unwrap();
+        let layer = text.declare_layer("PERFORATION", 3, DxfLinetype::Continuous, None).unwrap();
+        text.push(layer, DxfShape::Text { at: Vec2::ZERO, height: 3.0, angle_deg: 0.0, text: "a".into() }, None).unwrap();
+        assert!(write_dxf_file(&text).unwrap_err().to_string().contains("declared producer"));
     }
 
     #[test]
@@ -3279,7 +3314,7 @@ mod tests {
         // 167 * 200_000 * 129 = 4_308_600_000 exceeds u32::MAX,
         // although these contours contain only 668 actual line entities.
         assert!(167u64 * 200_000 * 129 > u64::from(u32::MAX));
-        let mut file = DxfFile::for_flat_pattern_export(167, 0, 0).unwrap();
+        let mut file = DxfFile::for_flat_pattern_export(167, 0, 0, 0).unwrap();
         let layer = file.declare_layer("OUTLINE", 7, DxfLinetype::Continuous, None).unwrap();
         for i in 0..167 {
             let x = f64::from(i) * 2.0;

@@ -414,6 +414,204 @@ fn perforated_sheet_inertia_removes_analytic_hole_cylinders_and_turns_with_the_s
     verify_assembly(&mut s, rotated, [100.0 - center[1], 40.0 + center[0], 10.0 + center[2]]);
 }
 
+/// A plate `size` from the origin less prisms of volume `hole` through it round `centres`, each
+/// with the inertia `own` about its centre (along x, y and z): the volume left, its centre of
+/// mass and its inertia about that, at unit density.
+fn plate_less_prisms(size: [f64; 3], centres: &[[f64; 2]], hole: f64, own: [f64; 3]) -> (f64, [f64; 3], [[f64; 3]; 3]) {
+    let plate = size[0] * size[1] * size[2];
+    let middle = size.map(|v| v / 2.0);
+    let volume = plate - centres.len() as f64 * hole;
+    let sum = |k: usize| centres.iter().map(|c| c[k]).sum::<f64>();
+    let center = [(plate * middle[0] - hole * sum(0)) / volume, (plate * middle[1] - hole * sum(1)) / volume, middle[2]];
+    // The plate's inertia about its middle, less each prism's about its own centre and its
+    // parallel-axis term, then moved to the centre of mass.
+    let mut inertia = [[0.0; 3]; 3];
+    for i in 0..3 {
+        inertia[i][i] = plate * (size[(i + 1) % 3].powi(2) + size[(i + 2) % 3].powi(2)) / 12.0;
+    }
+    let shift = |inertia: &mut [[f64; 3]; 3], mass: f64, d: [f64; 3], own: [f64; 3]| {
+        let d2: f64 = d.iter().map(|v| v * v).sum();
+        for i in 0..3 {
+            for j in 0..3 {
+                inertia[i][j] -= if i == j { own[i] + mass * d2 } else { 0.0 } - mass * d[i] * d[j];
+            }
+        }
+    };
+    for c in centres {
+        shift(&mut inertia, hole, [c[0] - middle[0], c[1] - middle[1], 0.0], own);
+    }
+    shift(&mut inertia, volume, [center[0] - middle[0], center[1] - middle[1], 0.0], [0.0; 3]);
+    (volume, center, inertia)
+}
+
+/// Hexagonal and slotted perforation holes come off a sheet as prisms of their outlines. On a
+/// flat 30 x 20 x 0.8 plate: six hexagons 4 across their flats, corner up, on a square grid of 10
+/// a margin of 1 in (columns x = 1 + 2 + 10k, rows y = 1 + 4/√3 + 10k), each 8√3 in area and 8√3
+/// round; four slots 2 wide and 8 long on a square grid of 12 (x = 1 + 4 + 12k, y = 1 + 1 + 12k),
+/// each 12 + π in area and 12 + 2π round. Their second moments about their centres: a regular
+/// hexagon's are 5√3/16 of its side (4/√3) to the fourth about every line; a slot's, its straight
+/// part (s long, 2 wide) and the two half discs of radius 1 at its ends, are
+/// 2s³/12 + πs²/4 + 4s/3 + π/4 along it and 8s/12 + π/4 across. Folded, a slot on the panel the
+/// fold turns up stands with it; unfolded, every slot lies in the flat. A fold made later through
+/// a hexagon is not integrated yet.
+#[test]
+fn perforated_sheet_hexagonal_and_slotted_holes_come_off_as_prisms_of_their_outlines() {
+    use std::f64::consts::{FRAC_PI_2, PI};
+    let (t, root3) = (0.8, 3f64.sqrt());
+    // A slot's second moments along it and across it, its straight part `s` long.
+    let slot = |s: f64| (2.0 * s.powi(3) / 12.0 + PI * s * s / 4.0 + 4.0 * s / 3.0 + PI / 4.0, 8.0 * s / 12.0 + PI / 4.0);
+    // A prism's inertia about its centre from its outline's second moments: along x, y and z.
+    let own =
+        |face: f64, (along, across): (f64, f64)| [t * across + face * t.powi(3) / 12.0, t * along + face * t.powi(3) / 12.0, t * (along + across)];
+    let hexagons = json!({"diameter": "4", "pitch": "10", "margin": "1", "pattern": "square", "shape": "hex"});
+    let slots = json!({"diameter": "2", "pitch": "12", "margin": "1", "pattern": "square", "shape": "slot", "length": "8"});
+    let hex_moment = 5.0 * root3 / 16.0 * (4.0 / root3).powi(4);
+    // Each field: its holes' area, perimeter and second moments, and their centres.
+    let cases = [
+        (
+            &hexagons,
+            (8.0 * root3, 8.0 * root3, (hex_moment, hex_moment)),
+            [3.0, 13.0, 23.0].iter().flat_map(|&x| [1.0 + 4.0 / root3, 11.0 + 4.0 / root3].map(|y| [x, y])).collect::<Vec<_>>(),
+        ),
+        (&slots, (12.0 + PI, 12.0 + 2.0 * PI, slot(6.0)), [5.0, 17.0].iter().flat_map(|&x| [2.0, 14.0].map(|y| [x, y])).collect()),
+    ];
+    for (field, (face, rim, moments), centres) in cases {
+        let mut s = Session::default();
+        panel_blank(&mut s, 30.0, 20.0);
+        run(&mut s, "sheet.perforate", field.clone());
+        run(&mut s, "material.assign", json!({"bodies": ["Panel"], "material": "Steel"}));
+        let flat = run(&mut s, "sheet.flat_pattern", json!({}));
+        assert_eq!(flat["perforations"][0]["count"], centres.len(), "{field}");
+        let (volume, center, inertia) = plate_less_prisms([30.0, 20.0, t], &centres, face * t, own(face, moments));
+        let n = centres.len() as f64;
+        let area = 1280.0 - n * 2.0 * face + n * rim * t;
+        let density = s.doc.density("Panel");
+        for command in ["component.properties", "inspect.measure"] {
+            let result = run(&mut s, command, json!({}));
+            close(&result["total"]["volume_mm3"], volume);
+            close(&result["total"]["mass_g"], volume * density / 1000.0);
+            close(&result["total"]["area_mm2"], area);
+            for (axis, expected) in center.iter().enumerate() {
+                close(&result["bodies"][0]["center_of_mass"][axis], *expected);
+            }
+        }
+        let inertia = inertia.map(|row| row.map(|v| v * density / 1000.0));
+        tensor_close(&run(&mut s, "component.properties", json!({}))["total"]["inertia_g_mm2"], inertia, 1e-9);
+    }
+    // Folded first at x = 10 (its zone π/2·(0.8 + 0.44·0.8) wide), then slots 2 wide and 4 long a
+    // margin of 0 in, every 10: the one at x = 12 would reach into the zone, so x = 2 lies on the
+    // fixed panel and x = 22 on the panel the fold turns up, which stands at the zone's start plus
+    // R + t/2, the slot's centre (22 less the zone's far edge) above the bend's top, R + t.
+    let mut s = Session::default();
+    panel_blank(&mut s, 30.0, 10.0);
+    run(
+        &mut s,
+        "sheet.fold",
+        json!({"points": [[10, 0, 0], [10, 10, 0]], "angle": "90 deg", "radius": "0.8", "position": "centerline", "fixed": [2, 5, 0]}),
+    );
+    let before = run(&mut s, "component.properties", json!({}));
+    run(&mut s, "sheet.perforate", json!({"diameter": "2", "pitch": "10", "margin": "0", "pattern": "square", "shape": "slot", "length": "4"}));
+    assert_eq!(run(&mut s, "sheet.flat_pattern", json!({}))["perforations"][0]["count"], 2);
+    let allowance = FRAC_PI_2 * (0.8 + 0.44 * 0.8);
+    let bend_start = 10.0 - allowance / 2.0;
+    let (left, right) = ([2.0, 1.0, 0.4], [bend_start + 1.2, 1.0, 1.6 + 22.0 - bend_start - allowance]);
+    let hole = (4.0 + PI) * t;
+    let volume = before["total"]["volume_mm3"].as_f64().unwrap() - 2.0 * hole;
+    let result = run(&mut s, "component.properties", json!({}));
+    close(&result["total"]["volume_mm3"], volume);
+    for axis in 0..3 {
+        let old = before["total"]["center_of_mass"][axis].as_f64().unwrap();
+        close(&result["total"]["center_of_mass"][axis], old + hole * (2.0 * old - left[axis] - right[axis]) / volume);
+    }
+    // Its inertia: the folded sheet's about its centre of mass, moved to the new centre, less each
+    // slot's about its own centre and its parallel-axis term. With Sxx the slot's ∫x² along it and
+    // Syy its ∫y² across it, a prism t deep has t·Syy + V t²/12 about its length, t·Sxx + V t²/12
+    // about its width and t·(Sxx + Syy) through the sheet. The slot on the fixed panel lies along
+    // x, across y and through z; the one on the turned-up panel stands along z, across y and
+    // through x, so its x and z terms trade places.
+    let rho = s.doc.density("Panel") / 1000.0;
+    let (sxx, syy) = slot(2.0);
+    let depth = hole * t * t / 12.0;
+    let lying = [t * syy + depth, t * sxx + depth, t * (sxx + syy)];
+    let standing = [t * (sxx + syy), t * sxx + depth, t * syy + depth];
+    let (m0, m) = (before["total"]["mass_g"].as_f64().unwrap(), hole * rho);
+    let c0: [f64; 3] = [0, 1, 2].map(|k| before["total"]["center_of_mass"][k].as_f64().unwrap());
+    let c: [f64; 3] = [0, 1, 2].map(|k| (m0 * c0[k] - m * (left[k] + right[k])) / (m0 - 2.0 * m));
+    // The parallel-axis term of `mass` a distance `d` from the centre: mass (|d|² E − d dᵀ).
+    let moved = |mass: f64, d: [f64; 3]| {
+        let d2: f64 = d.iter().map(|v| v * v).sum();
+        [0, 1, 2].map(|i| [0, 1, 2].map(|j| mass * (if i == j { d2 } else { 0.0 } - d[i] * d[j])))
+    };
+    let mut expected = tensor(&before["total"]["inertia_g_mm2"]);
+    let terms = [
+        (m0, [0, 1, 2].map(|k| c0[k] - c[k]), [0.0; 3], 1.0),
+        (m, [0, 1, 2].map(|k| left[k] - c[k]), lying.map(|v| v * rho), -1.0),
+        (m, [0, 1, 2].map(|k| right[k] - c[k]), standing.map(|v| v * rho), -1.0),
+    ];
+    for (mass, d, own, sign) in terms {
+        let p = moved(mass, d);
+        for i in 0..3 {
+            for j in 0..3 {
+                expected[i][j] += sign * (p[i][j] + if i == j { own[i] } else { 0.0 });
+            }
+        }
+    }
+    // The inertia reported is the body's measured gyration times its exact mass, which on a bent
+    // body agree to about 1e-7; a slot turned the wrong way would be off by t·(Sxx − Syy)·ρ in two
+    // terms, far past 1e-5.
+    tensor_close(&result["total"]["inertia_g_mm2"], expected, 1e-5);
+    run(&mut s, "sheet.unfold", json!({}));
+    let (volume, center, inertia) = plate_less_prisms([30.0, 10.0, t], &[[2.0, 1.0], [22.0, 1.0]], hole, own(4.0 + PI, slot(2.0)));
+    let result = run(&mut s, "component.properties", json!({}));
+    close(&result["total"]["volume_mm3"], volume);
+    for (axis, expected) in center.iter().enumerate() {
+        close(&result["total"]["center_of_mass"][axis], *expected);
+    }
+    let density = s.doc.density("Panel");
+    tensor_close(&result["total"]["inertia_g_mm2"], inertia.map(|row| row.map(|v| v * density / 1000.0)), 1e-9);
+    // A fold made after hexagons, through them, is not integrated yet; the flat keeps its holes.
+    let mut s = Session::default();
+    panel_blank(&mut s, 30.0, 20.0);
+    run(&mut s, "sheet.perforate", hexagons);
+    run(
+        &mut s,
+        "sheet.fold",
+        json!({"points": [[13, 0, 0], [13, 20, 0]], "angle": "90 deg", "radius": "0.8", "position": "centerline", "fixed": [2, 10, 0]}),
+    );
+    assert_eq!(run(&mut s, "sheet.flat_pattern", json!({}))["perforations"][0]["count"], 6);
+    let refused = s.execute("component.properties", &json!({})).map(|_| ()).unwrap_err().to_string();
+    assert!(refused.contains("not supported yet"), "{refused}");
+}
+
+/// A hexagon beside a bend's end, in line with the bend's zone but clear of it, lies on its flat
+/// panel. An L-shaped blank, its legs 60 x 20 and 30 x 20, with a flange on the short inner edge
+/// (y = 20, x 30..60) and then hexagons 2 across their flats, every 4: the leg beside the zone's
+/// end holds holes in line with the zone, and every hole is a prism 2√3 in area through 0.8.
+#[test]
+fn perforated_sheet_hexagon_beside_a_bends_end_lies_on_its_panel() {
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "Panel 0.8", "thickness": "0.8", "active": true}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Blank"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [60, 0], [60, 20], [30, 20], [30, 40], [0, 40]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Blank", "body_name": "Panel"}));
+    run(&mut s, "sheet.flange", json!({"edges": [[45, 20, 0.8]], "height": 10}));
+    let before = run(&mut s, "component.properties", json!({}));
+    run(&mut s, "sheet.perforate", json!({"diameter": "2", "pitch": "4", "margin": "1", "shape": "hex"}));
+    let flat = run(&mut s, "sheet.flat_pattern", json!({}));
+    let n = flat["perforations"][0]["count"].as_u64().unwrap();
+    // [min x, max x, min y, max y] of the zone in the flat; a hexagon reaches 1 along x and 2/√3 along y.
+    let zone: Vec<f64> = (0..4).map(|k| flat["bend_zones"][0][k].as_f64().unwrap()).collect();
+    let sheet = s.model.state().surface_sheets[0].shown();
+    let holes = sheet.perforation_holes(&sheet.perforations[0]);
+    assert_eq!(holes.len() as u64, n);
+    let reach = 2.0 / 3f64.sqrt();
+    let beside = holes.iter().filter(|c| (c.x + 1.0 < zone[0] || c.x - 1.0 > zone[1]) && c.y + reach > zone[2] && c.y - reach < zone[3]).count();
+    assert!(beside > 0, "no hole beside the zone's end: {zone:?}");
+    let result = run(&mut s, "component.properties", json!({}));
+    close(&result["total"]["volume_mm3"], before["total"]["volume_mm3"].as_f64().unwrap() - n as f64 * 2.0 * 3f64.sqrt() * 0.8);
+}
+
 #[test]
 fn properties_reject_hostile_identifiers_and_options() {
     let mut s = Session::default();

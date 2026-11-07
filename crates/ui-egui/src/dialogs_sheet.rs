@@ -22,6 +22,8 @@ use solidcraft_theme::Tokens;
 
 const PERFORATION_PATTERNS: [&str; 2] = ["staggered", "square"];
 const PERFORATION_LABELS: [&str; 2] = ["ui.perforate_staggered", "ui.perforate_square"];
+const PERFORATION_SHAPES: [&str; 3] = ["round", "hex", "slot"];
+const PERFORATION_SHAPE_LABELS: [&str; 3] = ["ui.perforate_round", "ui.perforate_hex", "ui.perforate_slot"];
 
 const FOLD_POSITIONS: [&str; 4] = ["centerline", "start", "end", "mould"];
 const FOLD_POSITION_LABELS: [&str; 4] = ["Centerline", "Start of Bend", "End of Bend", "Outside Mould Line"];
@@ -78,11 +80,14 @@ crate::dialog_descriptor::dialog_descriptors! {
     #[derive(Clone, Debug)]
     pub enum Sm {
         Perforate("sheet.perforate", "ui.perforate_title", [("Body (last if none)", BODIES | FACES, false)],
-            FeatureKind::SheetPerforate { diameter, pitch, margin, pattern, .. }) {
+            FeatureKind::SheetPerforate { diameter, pitch, margin, pattern, shape, length, row_pitch, .. }) {
             diameter: String = "3 mm".into() => diameter.to_string(),
             pitch: String = "6 mm".into() => pitch.to_string(),
             margin: String = String::new() => margin.as_deref().map(str::to_string).unwrap_or_default(),
             pattern: usize = 0 => pattern.as_deref().and_then(|p| PERFORATION_PATTERNS.iter().position(|x| *x == p)).unwrap_or(0),
+            shape: usize = 0 => shape.as_deref().and_then(|p| PERFORATION_SHAPES.iter().position(|x| *x == p)).unwrap_or(0),
+            length: String = String::new() => length.as_deref().map(str::to_string).unwrap_or_default(),
+            row_pitch: String = String::new() => row_pitch.as_deref().map(str::to_string).unwrap_or_default(),
         } => json!({"diameter": diameter, "pitch": pitch, "pattern": PERFORATION_PATTERNS.get(*pattern).copied().unwrap_or("staggered")});
         Hem("sheet.hem", "HEM", [("Edges", EDGES, true)],
             FeatureKind::SheetHem { length, gap, flip, .. }) {
@@ -496,9 +501,14 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                 crate::ui_kit::options(ui, "sheet_options", &mut [("Flip", flip)]);
             }
         }
-        Sm::Perforate { diameter, pitch, margin, pattern } => {
+        Sm::Perforate { diameter, pitch, margin, pattern, shape, length, row_pitch } => {
+            choice_row(ui, "Shape", "sm_perforate_shape", shape, &PERFORATION_SHAPE_LABELS);
             enter |= expr_row(ui, "ui.diameter", diameter);
+            if PERFORATION_SHAPES.get(*shape) == Some(&"slot") {
+                enter |= expr_row(ui, "ui.perforate_length", length);
+            }
             enter |= expr_row(ui, "ui.perforate_pitch", pitch);
+            enter |= hint_row(ui, "ui.perforate_row_pitch", row_pitch, solidcraft_ui_text::tr_label("ui.perforate_row_pitch_default"));
             enter |= hint_row(ui, "Margin", margin, solidcraft_ui_text::tr_label("ui.perforate_margin_default"));
             choice_row(ui, "Pattern", "sm_perforate_pattern", pattern, &PERFORATION_LABELS);
         }
@@ -1108,9 +1118,18 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
             put(&mut p, &[("radius", radius)]);
             ("sheet.path_flange", p)
         }
-        Sm::Perforate { margin, .. } => {
+        Sm::Perforate { margin, shape, length, row_pitch, .. } => {
             let mut p = json!({});
-            put(&mut p, &[("margin", margin)]);
+            put(&mut p, &[("margin", margin), ("row_pitch", row_pitch)]);
+            // Round is the default; a slot takes its length.
+            match PERFORATION_SHAPES.get(*shape).copied() {
+                Some("slot") => {
+                    p["shape"] = json!("slot");
+                    put(&mut p, &[("length", length)]);
+                }
+                Some(other @ "hex") => p["shape"] = json!(other),
+                _ => {}
+            }
             match items(inputs, 0).first() {
                 Some(Sel::Body { name }) => p["body"] = json!(name),
                 Some(Sel::Face { body, .. }) => p["body"] = json!(body),
@@ -1585,6 +1604,20 @@ pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dial
                 painter.circle_stroke(centre, radius, Stroke::new(1.4, t.text));
             }
         }
+        // A field's one outline, moved to each of its holes in view.
+        for (outline, reach, centres) in &app.flat_view.perforation_outlines {
+            let reach = (reach * scale) as f32;
+            if !reach.is_finite() || reach * 2.0 * pixels_per_point < 1.0 {
+                continue;
+            }
+            for c in centres {
+                let centre = to((c.x, c.y));
+                if centre.x.is_finite() && centre.y.is_finite() && clip.intersects(Rect::from_center_size(centre, vec2(reach * 2.0, reach * 2.0))) {
+                    let points = outline.iter().map(|p| to((p.x + c.x, p.y + c.y))).collect();
+                    painter.add(egui::Shape::closed_line(points, Stroke::new(1.4, t.text)));
+                }
+            }
+        }
     }
     // A pocket retains material below (or above) the cut. Dashed contours and a depth
     // annotation distinguish it from the solid through-cut boundaries.
@@ -1694,6 +1727,9 @@ pub struct FlatView {
     /// Flat centres stay out of the command JSON and are reused while navigating.
     perforation_key: Option<(std::sync::Weak<solidcraft_engine::doc::ModelState>, String)>,
     perforations: Vec<(Vec2, f64)>,
+    /// Hexagonal and slotted holes, by field: the outline of one round the origin as a polyline,
+    /// how far it reaches, and the holes' centres.
+    perforation_outlines: Vec<(Vec<Vec2>, f64, Vec<Vec2>)>,
 }
 
 impl Default for FlatView {
@@ -1702,7 +1738,7 @@ impl Default for FlatView {
         cam.set_view(solidcraft_viewport::StandardView::Top);
         cam.fov = 0.0;
         cam.up = solidcraft_viewport::UpAxis::Z;
-        FlatView { cam, fitted: false, perforation_key: None, perforations: Vec::new() }
+        FlatView { cam, fitted: false, perforation_key: None, perforations: Vec::new(), perforation_outlines: Vec::new() }
     }
 }
 
@@ -1715,12 +1751,26 @@ impl FlatView {
         }
         self.perforation_key = Some((state_key, body.to_owned()));
         self.perforations.clear();
+        self.perforation_outlines.clear();
         // Bound overlay storage and drawing work, including designs with many fields.
         const MAX_HOLES: usize = 1_000_000;
         let Some(sk) = state.surface_sheets.iter().find(|sk| sk.body == body).map(|sk| sk.shown()) else { return };
+        let mut held = 0usize;
         for field in sk.perforations.iter().filter(|f| f.diameter.is_finite() && f.diameter > 0.0) {
-            let remaining = MAX_HOLES.saturating_sub(self.perforations.len());
-            self.perforations.extend(sk.perforation_holes(field).into_iter().take(remaining).map(|centre| (centre, field.diameter / 2.0)));
+            if held >= MAX_HOLES {
+                break;
+            }
+            let holes: Vec<Vec2> = sk.perforation_holes(field).into_iter().take(MAX_HOLES - held).collect();
+            held += holes.len();
+            let shaped = sk.shaped_perforation(field);
+            if shaped.shape.is_round() {
+                self.perforations.extend(holes.into_iter().map(|centre| (centre, field.diameter / 2.0)));
+            } else {
+                // One outline round the origin, moved to each hole as it is drawn.
+                let outline: Vec<Vec2> = shaped.hole_loop(Vec2::default()).polyline(1e-2).iter().copied().collect();
+                let reach = outline.iter().map(|p| p.len()).fold(0.0, f64::max);
+                self.perforation_outlines.push((outline, reach, holes));
+            }
         }
     }
 

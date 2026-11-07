@@ -1321,7 +1321,7 @@ pub(super) fn sheet_eval(
             rebuild_surface_sheet(st, i)
         }
         FeatureKind::SheetPath { edge, body, .. } => Err(no_free_edge(st, body, Some(edge.0))),
-        FeatureKind::SheetPerforate { diameter, pitch, margin, pattern, body, sketch, profiles } => {
+        FeatureKind::SheetPerforate { diameter, pitch, margin, pattern, body, sketch, profiles, shape, length, row_pitch } => {
             // Without a body name the field goes on the newest sheet.
             let i = match body {
                 Some(n) => st.surface_sheets.iter().position(|s| &s.body == n),
@@ -1344,6 +1344,25 @@ pub(super) fn sheet_eval(
                     "perforation needs diameter > 0, pitch > diameter and margin >= 0 (diameter {d}, pitch {pitch}, margin {margin})"
                 )));
             }
+            // The holes' shape and the distance between rows (#732).
+            let shape = match (shape.as_deref(), length) {
+                (None | Some("round"), None) => crate::PerforationShape::Round,
+                (Some("hex"), None) => crate::PerforationShape::Hex,
+                (Some("slot"), Some(l)) => {
+                    let length = val(vals, l, Kind::Length)?;
+                    if !(length.is_finite() && length > d) {
+                        return Err(DocError::Invalid(format!("a perforation slot is longer than it is wide (length {length}, diameter {d})")));
+                    }
+                    crate::PerforationShape::Slot { length }
+                }
+                (Some("slot"), None) => return Err(DocError::Invalid("a perforation slot needs its length".into())),
+                (None | Some("round" | "hex"), Some(_)) => return Err(DocError::Invalid("a perforation's length is a slot's".into())),
+                (Some(o), _) => return Err(DocError::Invalid(format!("perforation shape {o:?}: use \"round\", \"hex\" or \"slot\""))),
+            };
+            let row_pitch = row_pitch.as_ref().map(|e| val(vals, e, Kind::Length)).transpose()?;
+            if let Some(r) = row_pitch.filter(|r| !(r.is_finite() && *r > 0.0)) {
+                return Err(DocError::Invalid(format!("a perforation's row pitch is more than 0 (row pitch {r})")));
+            }
             let outline = match sketch {
                 Some(sk) => {
                     let ss = st.sketch(sk.0).ok_or_else(|| DocError::Unknown(format!("sketch {sk}")))?;
@@ -1354,7 +1373,16 @@ pub(super) fn sheet_eval(
                 None => None,
             };
             let sh = st.surface_sheets.get_mut(i).ok_or_else(|| DocError::Invalid("sheet".into()))?;
-            sh.perforations.push(crate::sheet::SheetPerforation { feature: f.id, diameter: d, pitch, margin, square, from_right: false, outline });
+            let field = crate::sheet::SheetPerforation { feature: f.id, diameter: d, pitch, margin, square, from_right: false, outline };
+            // Holes of a shape, or rows of a pitch, of their own: room between the holes, and a
+            // grid within the work limit. A round field on its pattern's rows is as it always was.
+            let shaped = crate::ShapedPerforation { field: &field, shape, row_pitch };
+            if !shaped.is_plain() {
+                shaped.check_spacing()?;
+                shaped.check_sites(&sh.regions)?;
+                sh.perforation_shapes.push((f.id, shape, row_pitch));
+            }
+            sh.perforations.push(field);
             // It keeps clear of the bends the sheet has now; a bend made later runs through it.
             let joints = sh.sheet.joints.len();
             sh.perforation_joints.push((f.id, joints));

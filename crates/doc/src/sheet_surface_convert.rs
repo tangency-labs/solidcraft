@@ -3247,6 +3247,11 @@ pub struct SurfaceSheet {
     /// it, as a press brake bends perforated stock.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub perforation_joints: Vec<(u64, usize)>,
+    /// For each perforation field with holes of a shape or rows of a pitch of its own, by its
+    /// feature: the holes' shape and the distance between rows. A field with none is round holes
+    /// on its pattern's rows.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub perforation_shapes: Vec<(u64, crate::PerforationShape, Option<f64>)>,
     /// The sketch lines that made panels' edges: the panel (by its key, `Panel::name`), each line's
     /// id and its ends in that panel's chart. Any panel a sketch made has its own (a base flange's);
     /// a rim on one is made by that line (see [`RimEdge::Sketch`]).
@@ -3591,6 +3596,7 @@ impl SurfaceSheet {
             frames: Vec::new(),
             perforations: Vec::new(),
             perforation_joints: Vec::new(),
+            perforation_shapes: Vec::new(),
             sketch_curves: Vec::new(),
             rims: Vec::new(),
             parts: Vec::new(),
@@ -3782,6 +3788,7 @@ impl SurfaceSheet {
             frames: Vec::new(),
             perforations: Vec::new(),
             perforation_joints: Vec::new(),
+            perforation_shapes: Vec::new(),
             sketch_curves,
             rims: Vec::new(),
             parts: Vec::new(),
@@ -3792,14 +3799,48 @@ impl SurfaceSheet {
         Ok((sheet, solid))
     }
 
+    /// A perforation field with its holes' shape and the distance between its rows (see
+    /// [`Self::perforation_shapes`]).
+    pub fn shaped_perforation<'a>(&self, p: &'a crate::sheet::SheetPerforation) -> crate::ShapedPerforation<'a> {
+        let (shape, row_pitch) =
+            self.perforation_shapes.iter().find(|(f, ..)| *f == p.feature).map_or((crate::PerforationShape::Round, None), |(_, s, r)| (*s, *r));
+        crate::ShapedPerforation { field: p, shape, row_pitch }
+    }
+
     /// Hole centres of a perforation field in the flat: a grid continuous over the developed flat,
     /// margin clear of its edges, its cut-outs and the zones of the bends the sheet had when the
     /// field was made (see [`crate::sheet::perforation_grid`]). A bend made after the field runs
-    /// through it, as a press brake bends perforated stock.
+    /// through it, as a press brake bends perforated stock. No holes for a field whose grid
+    /// [`Self::try_perforation_holes`] refuses.
     pub fn perforation_holes(&self, p: &crate::sheet::SheetPerforation) -> Vec<Vec2> {
+        self.try_perforation_holes(p).unwrap_or_default()
+    }
+
+    /// [`Self::perforation_holes`]: round holes on the pattern's rows by
+    /// [`crate::sheet::perforation_grid`], other holes by their own outlines (see
+    /// `ShapedPerforation::grid`). Refused: a shaped field whose numbers make no grid, whose
+    /// holes meet, or whose grid is past the work limit.
+    pub fn try_perforation_holes(&self, p: &crate::sheet::SheetPerforation) -> Result<Vec<Vec2>> {
         let before = self.perforation_joints.iter().find(|(f, _)| *f == p.feature).map_or(0, |(_, n)| *n);
         let zones: Vec<Region2> = self.bends.iter().filter(|b| b.joint < before).map(|b| b.zone.clone()).collect();
-        crate::sheet::perforation_grid(&self.regions, &zones, p)
+        let field = self.shaped_perforation(p);
+        if field.is_plain() {
+            return Ok(crate::sheet::perforation_grid(&self.regions, &zones, p));
+        }
+        field.grid(&self.regions, &zones)
+    }
+
+    /// A perforation field's figures: its holes, their open area, the area of the field (the
+    /// outline on the sheet's material, else the whole flat) and the open share of it, where
+    /// those are known. Refused only where [`Self::try_perforation_holes`] refuses the grid,
+    /// never for a round field on its pattern's rows.
+    pub fn perforation_stats(&self, p: &crate::sheet::SheetPerforation) -> Result<crate::PerforationStats> {
+        let field = self.shaped_perforation(p);
+        let holes = self.try_perforation_holes(p)?.len();
+        let open_area = field.open_area(holes);
+        let field_area = field.field_area(&self.regions);
+        let open_share = field_area.map(|a| if a > 0.0 { open_area / a } else { 0.0 });
+        Ok(crate::PerforationStats { holes, open_area, field_area, open_share })
     }
 
     /// Whether the flat describes the body: refused while a feature the sheet can't hold changed

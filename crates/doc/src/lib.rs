@@ -97,6 +97,7 @@ mod sheet_surface_cuts;
 mod sheet_surface_features;
 mod sheet_surface_fold;
 mod sheet_surface_perforation;
+mod sheet_surface_perforation_shapes;
 mod sheet_surface_shadow;
 pub mod sketch_equation;
 pub use sheet_surface_convert::{
@@ -104,6 +105,7 @@ pub use sheet_surface_convert::{
     measure_sheet_body,
 };
 pub use sheet_surface_cuts::{Loose, Recess};
+pub use sheet_surface_perforation_shapes::{PerforationShape, PerforationStats, ShapedPerforation};
 pub mod text_params;
 pub mod thread_forms;
 pub mod tolerance;
