@@ -1543,6 +1543,9 @@ preference_settings! {
     send_slicer: String = String::new();
     /// Slicers that can load a file into the window that is already open do so (default on).
     slicer_single_instance: bool = true, 0;
+    /// Export STL, Export 3MF and Send to Slicer start with the design's body in Bodies when it
+    /// has just one (#13098). Off: the list starts empty, as before.
+    export_selects_only_body: bool = true, 0;
     /// How strongly a print face stands out in the viewport (#8429): the share of the section
     /// colour in its tint, 0 to 1; its outline follows. 0 draws no highlight.
     print_face_highlight: f32 = 0.2, PAGE_GENERAL, accept(0.0..=1.0);

@@ -139,6 +139,14 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     let quality = QUALITIES.iter().position(|q| q.1 == p.save_mesh_quality).unwrap_or(0);
     let kind = Kind::SaveMesh(SaveMesh { format, quality, open, slicer, stale: true, shown: None });
     let mut inputs = vec![SelInput::new("Bodies", BODIES, true)];
+    // The design's only body is the one to export (#13098); with more, nothing says which.
+    let only = body_picks(app, false);
+    if app.preferences.export_selects_only_body
+        && only.len() == 1
+        && let Some(input) = inputs.first_mut()
+    {
+        input.items = only;
+    }
     if open {
         inputs.push(SelInput::new("Print face", PLANAR_FACES, true));
     }
@@ -1009,5 +1017,40 @@ mod tests {
         assert!(crate::print_face_ui::is_print_face(&h.app, "One", one_top), "One is not being sent: its print face stays");
         assert!(matches!(&h.app.status, Some((_, _, true))));
         assert_eq!(shown(&h), 1);
+    }
+
+    /// A design with one body opens Export STL, Export 3MF and Send to Slicer with that body in
+    /// Bodies, so OK exports it straight away (#13098). With two bodies, or with the preference
+    /// off, the list starts empty as before.
+    #[test]
+    fn the_only_body_starts_selected() {
+        let bodies = |h: &mut crate::scenario::Harness, id: &str| {
+            h.app.dialog = None;
+            // Nothing selected: what is selected is pre-selected anyway.
+            let _ = h.app.run("select.clear", json!({}));
+            h.app.start(id);
+            h.settle();
+            h.app.dialog.as_ref().map(|d| d.inputs[0].items.clone()).unwrap_or_default()
+        };
+        let mut h = crate::scenario::Harness::new();
+        h.app.services.pick_program = Some(Box::new(|| Box::pin(async { None })));
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"operation":"new_body","body_name":"One"})).unwrap();
+        let one = vec![Sel::Body { name: "One".into() }];
+        assert!(h.app.preferences.export_selects_only_body, "on by default");
+        for id in ["file.save_mesh", "file.send_to_slicer"] {
+            assert_eq!(bodies(&mut h, id), one, "{id}");
+        }
+        let (_, p) = commands(
+            &SaveMesh { format: 0, quality: 0, open: false, slicer: String::new(), stale: true, shown: None },
+            &h.app.dialog.as_ref().unwrap().inputs,
+        )
+        .map(|mut c| c.remove(0))
+        .unwrap();
+        assert_eq!(p["bodies"], json!(["One"]));
+        h.app.preferences.export_selects_only_body = false;
+        assert!(bodies(&mut h, "file.save_mesh").is_empty(), "the preference keeps the old empty list");
+        h.app.preferences.export_selects_only_body = true;
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[20,0,0],"operation":"new_body","body_name":"Two"})).unwrap();
+        assert!(bodies(&mut h, "file.save_mesh").is_empty(), "with two bodies nothing says which one is meant");
     }
 }

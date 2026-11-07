@@ -1,0 +1,34 @@
+{
+  "en": {
+    "ui.export_selects_only_body": "Select the only body when exporting a mesh",
+    "ui.export_selects_only_body_tip": "Export STL, Export 3MF and Send to Slicer start with the design's body selected when it has just one."
+  },
+  "de": {
+    "ui.export_selects_only_body": "Einzigen Körper beim Mesh-Export auswählen",
+    "ui.export_selects_only_body_tip": "Als STL exportieren, Als 3MF exportieren und An Slicer senden starten mit dem Körper des Designs ausgewählt, wenn es nur einen hat."
+  },
+  "ar": {
+    "ui.export_selects_only_body": "تحديد الجسم الوحيد عند تصدير شبكة",
+    "ui.export_selects_only_body_tip": "تبدأ أوامر تصدير STL وتصدير 3MF والإرسال إلى برنامج التقطيع بتحديد جسم التصميم عندما لا يحتوي إلا على جسم واحد."
+  },
+  "he": {
+    "ui.export_selects_only_body": "בחירת הגוף היחיד בייצוא רשת",
+    "ui.export_selects_only_body_tip": "ייצוא STL, ייצוא 3MF ושליחה לסלייסר מתחילים כשגוף התכנון כבר נבחר, כשיש בו גוף אחד בלבד."
+  },
+  "ja": {
+    "ui.export_selects_only_body": "メッシュのエクスポート時に唯一のボディを選択する",
+    "ui.export_selects_only_body_tip": "デザインのボディが 1 つだけのとき、STL をエクスポート、3MF をエクスポート、スライサーに送るはそのボディを選択した状態で始まります。"
+  },
+  "ko": {
+    "ui.export_selects_only_body": "메시 내보내기 시 유일한 바디 선택",
+    "ui.export_selects_only_body_tip": "디자인에 바디가 하나뿐이면 STL 내보내기, 3MF 내보내기, 슬라이서로 보내기가 그 바디를 선택한 상태로 시작합니다."
+  },
+  "vi": {
+    "ui.export_selects_only_body": "Chọn khối duy nhất khi xuất lưới",
+    "ui.export_selects_only_body_tip": "Xuất tệp STL, Xuất tệp 3MF và Gửi sang phần mềm cắt lớp bắt đầu với khối của thiết kế đã được chọn khi thiết kế chỉ có một khối."
+  },
+  "zh": {
+    "ui.export_selects_only_body": "导出网格时选中唯一的实体",
+    "ui.export_selects_only_body_tip": "设计只有一个实体时，导出 STL、导出 3MF 和发送到切片软件会在打开时选中该实体。"
+  }
+}
