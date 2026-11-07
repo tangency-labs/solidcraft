@@ -2,9 +2,10 @@
 //! point (#3423), the grip points the catch and the Catch Direction combo follows.
 
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::FeatureKind;
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::dialogs::Kind;
 use crate::dialogs_plastic::{Pl, hook_dirs};

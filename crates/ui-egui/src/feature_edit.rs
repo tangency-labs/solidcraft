@@ -49,8 +49,8 @@ impl SolveApp {
             original.execute("timeline.roll_to", &params).map_err(|error| error.to_string())?;
             let mut rolled = original.scratch();
             rolled.execute("timeline.roll_to", &serde_json::json!({"position": index})).map_err(|error| error.to_string())?;
-            original.world_state().warm_display_at(quality, || true);
-            rolled.world_state().warm_display_at(quality, || true);
+            original.world_state().map_err(|error| error.to_string())?.warm_display_at(quality, || true);
+            rolled.world_state().map_err(|error| error.to_string())?.warm_display_at(quality, || true);
             Ok((original, rolled))
         };
         let (tx, done) = std::sync::mpsc::channel();

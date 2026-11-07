@@ -2,8 +2,9 @@
 
 use egui::Stroke;
 use serde_json::{Value, json};
+use solidcore_record::Vec2;
 use solidcraft_engine::cmd::{construction_line_choice, construction_line_mode, construction_line_solutions, construction_segment};
-use solidcraft_engine::geom::Vec2;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::tools::Tool;
@@ -59,7 +60,7 @@ pub fn line_type_switch(ui: &mut egui::Ui, t: &mut Tool) {
         return;
     }
     let Some(i) = t.dims.iter().position(|b| b.label == "Length") else { return };
-    let Some(length_box) = ui.ctx().memory(|m| m.area_rect(egui::Id::new(("sc_dim_area", i)))) else { return };
+    let Some(length_box) = ui.ctx().memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i)))) else { return };
     let tokens = crate::theme::Tokens::get();
     let has_length = typed_length(t).is_some();
     let reason = crate::i18n::tr("ui.construction.normal_needs_length");
@@ -69,11 +70,11 @@ pub fn line_type_switch(ui: &mut egui::Ui, t: &mut Tool) {
     let mut selected = usize::from(has_length && t.normal);
     let frame = crate::ui_kit::Container::popup_frame(ui.style()).inner_margin(egui::Margin::same(1)).fill(tokens.panel);
     crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::Canvas)
-        .area(egui::Id::new("sc_construction_switch"))
+        .area(egui::Id::unique("sc_construction_switch"))
         .fixed_pos(length_box.left_bottom() + egui::vec2(0.0, tokens.space_2))
         .order(egui::Order::Background)
         .show(ui.ctx(), |ui| {
-            frame.show(ui, |ui| {
+            crate::ui_kit::Container::show_backing(ui, frame, |ui| {
                 let segments = crate::ui_kit::Segments {
                     disabled_reasons: if has_length { &[] } else { &refused },
                     targets: &["construction_switch:construction", "construction_switch:normal"],
@@ -170,7 +171,7 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, hits: &[Hit], at: Option<(V
             _ => None,
         });
         if let Some(id) = picked {
-            let state = app.session.world_state();
+            let state = crate::open_meshing::session_world(&app.session);
             let valid = active.and_then(|sid| state.sketch(sid)).is_some_and(|ss| {
                 ss.sketch.curve_index(&id).and_then(|i| ss.sketch.curves.get(i)).is_some_and(|c| {
                     use solidcraft_engine::sketch::CurveKind;
@@ -232,7 +233,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
     let Some(pointer) = &t.hover else { return };
     let Some(mode) = construction_line_mode(t.cmd) else { return };
     let Some(p) = params(app, t, pointer, true) else { return };
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let Some(ss) = app.session.active_sketch.and_then(|sid| state.sketch(sid)) else { return };
     let Ok(lines) = construction_line_solutions(&ss.sketch, &p, mode) else { return };
     let chosen = construction_line_choice(&lines, &p).ok();

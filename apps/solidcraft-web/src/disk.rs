@@ -467,7 +467,7 @@ mod web {
 
     async fn open_db() -> Result<IdbDatabase, String> {
         let factory = web_sys::window().ok_or("no window")?.indexed_db().map_err(err)?.ok_or("this browser has no IndexedDB")?;
-        let request: IdbOpenDbRequest = factory.open_with_u32(DB, 1).map_err(err)?;
+        let request: IdbOpenDbRequest = factory.open_with_u32(&crate::channel::key(DB), 1).map_err(err)?;
         let target = request.clone();
         let upgrade = Closure::once_into_js(move || {
             if let Ok(db) = target.result().and_then(|r| r.dyn_into::<IdbDatabase>()) {
@@ -553,7 +553,7 @@ mod web {
     /// Open a design remembered from an earlier session (a recent one, after a reload): ask once
     /// for access to the file (call in the click), read it into the engine's files and queue it
     /// to open. A file that is gone is forgotten and dropped from the recent designs.
-    pub fn restore(files: &Rc<Files>, path: &str) {
+    pub fn restore(files: &Rc<Files>, path: &str, on_opened: Option<Box<dyn FnOnce()>>) {
         let Some((id, name)) = parse(path) else { return };
         let (files, path, id, name) = (files.clone(), path.to_string(), id.to_string(), name.to_string());
         spawn_local(async move {
@@ -568,6 +568,9 @@ mod web {
                     files.opened.borrow_mut().push(path);
                     files.wake();
                     touch(&id).await;
+                    if let Some(done) = on_opened {
+                        done();
+                    }
                 }
                 Err(e) => {
                     let gone = e.contains("NotFoundError") || e.contains("could not be found") || e.contains("no longer remembers");

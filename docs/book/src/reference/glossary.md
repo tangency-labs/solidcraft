@@ -33,6 +33,13 @@ later pull requests, one topic at a time, each pointing at its entry here.
 
 ## Terms
 
+### abbe number
+
+Number measuring optical dispersion as `(nd - 1) / (nF - nC)` at the Fraunhofer d, F and C wavelengths.
+
+- **In SolidCraft:** Glass `model.dispersion.abbe_number`; larger values give less chromatic dispersion.
+- **For translators:** an optical material quantity, not a sample or photon count.
+
 ### appearance
 
 How a body, face or component looks on screen and in renders.
@@ -106,6 +113,18 @@ a tree.
 - **For translators:** not the web browser. A language with its own CAD word for the tree may use
   it (in French, *arborescence*), so that "browser" and "web browser" don't share a word. See
   *web browser*.
+
+### caustic
+
+A concentration or structured redistribution of light caused by reflection or refraction.
+
+- **In SolidCraft:** Render job `caustics` controls the photon estimate for point and hard directional sources; finite sources also have camera-path estimates.
+
+### chromatic dispersion
+
+Variation of refractive index with wavelength that can separate colours along refracted paths.
+
+- **In SolidCraft:** Glass `model.dispersion`; the current renderer uses three representative wavelength bands.
 
 ### component
 
@@ -246,6 +265,12 @@ makes is a *group*.
 - **Elsewhere:** folder, node.
 - **For translators:** not a group and not a folder on disk.
 
+### gather radius
+
+Radius of the surface neighbourhood used to estimate illumination from nearby photon hits.
+
+- **In SolidCraft:** Caustics `radius_mm`; smaller values preserve sharper details and require more photons to reduce noise.
+
 ### group
 
 A named container that someone makes, in the browser or in the timeline, to keep items together.
@@ -303,6 +328,14 @@ component changes every copy. The browser names occurrences with a number, such 
 - **Elsewhere:** occurrence, instance, component instance.
 - **For translators:** not a *pattern instance*.
 
+### opaque path lighting
+
+Indirect diffuse and specular illumination computed by tracing finite light paths between opaque surfaces. Shown as **Indirect lighting (opaque surfaces)** in Sampling.
+
+- **In SolidCraft:** optional CPU `job.options.path` / runtime `raytrace.path`, enabled explicitly in Sampling.
+- **Don't use:** ambient occlusion, glass, full optical parity.
+- **For translators:** this describes light transport; it is unrelated to a modelling path or physical material density.
+
 ### part number
 
 A design property that holds the identifier an organisation gives a design.
@@ -311,6 +344,13 @@ A design property that holds the identifier an organisation gives a design.
   `document.metadata.set`.
 - **Don't use:** part number for a standard part's size.
 - **For translators:** see *Words with more than one meaning*, "part".
+
+### path depth
+
+The maximum number of shaded surfaces in a rendering path, starting with the first visible surface. A depth of 1 uses direct lighting only; higher values allow more light bounces. This does not count CAD mesh vertices.
+
+- **In SolidCraft:** CPU `path.max_depth` is 1–16; longer paths are truncated.
+- **For translators:** a count, not a geometric depth in millimetres or timeline depth.
 
 ### pattern instance
 
@@ -430,6 +470,12 @@ a standard size.
 - **Elsewhere:** standard part, library part, fastener, catalogue part.
 - **For translators:** see *Words with more than one meaning*, "part".
 
+### thin-film interference
+
+Interference between coherent optical waves reflected at the interfaces of a thin layer.
+
+- **In SolidCraft:** Glass `model.thin_film`, with `ior` and `thickness_nm`; this differs from an incoherent ideal Glass sheet.
+
 ### timeline
 
 The ordered list of a design's features, which SolidCraft computes from first to last.
@@ -439,6 +485,18 @@ The ordered list of a design's features, which SolidCraft computes from first to
 - **Don't use:** feature history, history (for the timeline).
 - **Elsewhere:** timeline, history, feature tree.
 - **For translators:** not the undo history.
+
+### turn (of two rounds)
+
+How two rounds of a fillet continue where they turn round a sharp corner edge between them, such
+as the rounds along a boss's base at its upright edges: in a mitre, or swept round the corner
+edge as a torus.
+
+- **In SolidCraft:** the `turn` parameter of `solid.fillet` and its design-file key, `mitre`
+  (the default) or `swept`; the Fillet dialog's Turns row.
+- **Don't use:** corner (that is what fills a corner where three rounded edges meet, `corner`).
+- **Elsewhere:** mitred corner, swept corner, corner sweep.
+- **For translators:** "Mitre" and "Swept" name the two shapes, not a direction of travel.
 
 ### view angles
 
@@ -519,8 +577,8 @@ Search lists both under the same name, and the label lookup gives both the same 
 ## A feature's type
 
 A feature type has one name: its design-file key, such as `sheet_flange`. The label (Flange) is
-its display name. Replies and scripts should use the design-file key; today `timeline.inspect`
-reports a different name (`EdgeFlangeFeature`), so a script can't match one against the other.
+its display name. Replies and scripts use the design-file key (`timeline.inspect` reports both
+`type: "sheet_flange"` and `type_name: "EdgeFlangeFeature"`).
 
 ## Open questions for the maintainer
 

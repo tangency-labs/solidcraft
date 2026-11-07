@@ -176,9 +176,7 @@ pub(super) fn duplicate(app: &mut SolveApp, name: &str) -> Result<(), String> {
 }
 
 pub(super) fn revert(app: &mut SolveApp, name: &str) -> Result<(), String> {
-    app.run("render.settings.apply", json!({"name":name}))?;
-    app.follow_view_request(false);
-    Ok(())
+    inspector::restore_saved_camera(app, name)
 }
 
 /// E7: saved camera, lens, exposure and frame in approved order.
@@ -190,7 +188,7 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, shot: &str) {
     let mut name = app.render_workspace.view.frame.name.as_ref().map(|(_, text)| text.clone()).unwrap_or_else(|| shot.into());
     let invalid = RenderSettings::validate_name(&name).is_err();
     let response = ui_kit::row(ui, app.tr("render.frame_name"), |ui| {
-        ui_kit::bounded_cell_editor(ui, ui.id().with(("shot_name", shot)), &mut name, "", invalid, 128)
+        ui_kit::bounded_cell_editor(ui, ui.scope_id().with(("shot_name", shot)), &mut name, "", invalid, 128)
     });
     crate::scenario::publish_target("render:shot:name", response.rect);
     let commit = response.lost_focus() || (response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
@@ -235,7 +233,7 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, shot: &str) {
     let title = app.tr("render.page_camera").to_string();
     ui_kit::section(ui, "render_shot_camera", &title, true, |ui| camera(app, ui, shot));
     let title = app.tr("render.shot_lens").to_string();
-    ui_kit::section_method(ui, "render_shot_lens", &title, true, "GPU", |ui| lens(app, ui, shot, &saved));
+    ui_kit::section(ui, "render_shot_lens", &title, true, |ui| lens(app, ui, shot, &saved));
     let title = app.tr("render.shot_exposure_section").to_string();
     ui_kit::section(ui, "render_shot_exposure", &title, true, |ui| exposure(app, ui, shot, &saved));
     let title = app.tr("render.stage_frame").to_string();
@@ -266,7 +264,6 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, shot: &str) {
             crate::scenario::publish_target("render:shot:output", response.rect);
             if response.clicked() {
                 let _ = app.run("view.render_select", json!({"kind":"output"}));
-                app.render_workspace.view.inspector.page = inspector::Page::Output;
             }
         });
     });
@@ -322,7 +319,7 @@ fn camera(app: &mut SolveApp, ui: &mut egui::Ui, shot: &str) {
     ui_kit::row(ui, app.tr("render.shot_target"), |ui| {
         ui_kit::number_fields(ui, &mut target, -1e9..=1e9, 0.1, "");
     });
-    camera.target = solidcraft_engine::geom::Vec3::new(target[0], target[1], target[2]);
+    camera.target = solidcore_record::Vec3::new(target[0], target[1], target[2]);
     for (key, value) in [("camera.shot_yaw", &mut camera.yaw), ("camera.shot_pitch", &mut camera.pitch), ("camera.shot_roll", &mut camera.roll)] {
         let mut degrees = value.to_degrees();
         if ui_kit::row(ui, app.tr(key), |ui| ui_kit::number_field(ui, &mut degrees, (-1e6f64).to_degrees()..=1e6f64.to_degrees(), 0.5, "°")).changed()
@@ -360,35 +357,101 @@ pub(super) fn look_at_selection(app: &mut SolveApp, shot: &str) -> Result<(), St
     set_camera(app, shot, solidcraft_engine::render::Camera { target: bounds.center(), ..app.cam })
 }
 
+/// Change only saved lens intent. Camera updates keep their explicit Update shot action.
+pub(super) fn set_lens(app: &mut SolveApp, shot: &str, lens: Option<solidcraft_engine::render::job::ThinLens>) -> Result<(), String> {
+    use solidcraft_engine::doc::render_settings::RenderJob;
+    let saved = app.session.doc.render.setups.get(shot).ok_or_else(|| app.tr("render.ribbon_no_saved_camera").to_string())?;
+    let active = app.render_workspace.view.name == shot;
+    let establishing_job = active && saved.job.is_none();
+    let mut candidate = if active {
+        super::setups::snapshot_with_lens(app, lens)?
+    } else {
+        let mut candidate = saved.clone();
+        match &mut candidate.job {
+            Some(RenderJob::CpuRaytrace { options, .. }) => options.lens = lens,
+            Some(RenderJob::GpuPath { options, .. }) => options.lens = lens,
+            _ => return Err(app.tr("render.shot_lens_raytrace_reason").into()),
+        }
+        candidate
+    };
+    // Numerical lens intent uses the visible method, but never adopts navigation.
+    candidate.camera = saved.camera;
+    candidate.validate().map_err(|error| error.to_string())?;
+    let patch = if establishing_job {
+        let mut patch = serde_json::to_value(&candidate).map_err(|error| error.to_string())?;
+        if let Some(fields) = patch.as_object_mut() {
+            fields.remove("camera");
+        }
+        patch
+    } else {
+        // Validate the visible draft above, but save only lens intent on the saved job.
+        // Independent method and sampling edits keep their own dirty state.
+        let mut job = saved.job.clone();
+        match &mut job {
+            Some(RenderJob::CpuRaytrace { options, .. }) => options.lens = lens,
+            Some(RenderJob::GpuPath { options, .. }) => options.lens = lens,
+            _ => return Err(app.tr("render.shot_lens_raytrace_reason").into()),
+        }
+        json!({"job":job})
+    };
+    edit_settings(app, shot, patch)?;
+    if active {
+        app.render_workspace.view.studio.lens_enabled = lens.is_some();
+        if let Some(value) = lens {
+            app.render_workspace.view.studio.lens = value;
+        }
+        app.render_workspace.view.raytrace.lens = lens;
+        if establishing_job {
+            let view = &mut app.render_workspace.view;
+            let camera = view.clean_setup.as_ref().map_or(app.cam, |clean| clean.camera);
+            view.clean_setup = Some(RenderSetup { camera, ..candidate });
+            view.clean_persisted = true;
+            view.clean_name = shot.into();
+        }
+        super::setups::refresh_dirty(app);
+    }
+    Ok(())
+}
+
 fn lens(app: &mut SolveApp, ui: &mut egui::Ui, shot: &str, saved: &RenderSetup) {
     use solidcraft_engine::doc::render_settings::RenderJob;
-    let gpu = matches!(saved.job, Some(RenderJob::GpuPath { .. }));
-    let enabled = gpu && app.cam.fov > 0.0;
-    let lens = match &saved.job {
-        Some(RenderJob::GpuPath { options, .. }) => options.lens,
-        _ => None,
+    // A fresh native CPU default is transient until the first numerical edit.
+    // Read its visible method here; opening Frame must not write that job to Studio.
+    let current = if app.render_workspace.view.name == shot {
+        super::setups::snapshot(app).or_else(|_| super::setups::draft(app)).unwrap_or_else(|_| saved.clone())
+    } else {
+        saved.clone()
+    };
+    let (supported, sampling, lens) = match &current.job {
+        Some(RenderJob::CpuRaytrace { options, .. }) => (true, options.progressive.is_some(), options.lens),
+        Some(RenderJob::GpuPath { options, .. }) => (true, true, options.lens),
+        _ => (false, false, None),
     };
     let mut on = lens.is_some();
     let mut value = lens.unwrap_or(app.render_workspace.view.studio.lens);
-    let changed = ui
-        .add_enabled_ui(enabled, |ui| {
-            let mut changed = ui_kit::checkbox(ui, app.tr("render.shot_dof"), &mut on).changed();
-            ui.add_enabled_ui(on, |ui| {
-                changed |= ui_kit::row(ui, app.tr("render.shot_aperture"), |ui| {
-                    ui_kit::number_field(ui, &mut value.aperture_radius_mm, 0.0..=1e7, 0.1, " mm")
-                })
+    let perspective = saved.camera.fov > 0.0 && app.cam.fov > 0.0;
+    let compatible = supported && sampling && perspective;
+    // Removing an authored lens remains possible after navigating to orthographic.
+    let mut changed = false;
+    ui.add_enabled_ui(supported && (on || compatible), |ui| {
+        let response = ui_kit::checkbox(ui, app.tr("render.shot_dof"), &mut on);
+        crate::scenario::publish_target("render:shot:dof", response.rect);
+        changed |= response.changed();
+    });
+    ui.add_enabled_ui(on && compatible, |ui| {
+        changed |=
+            ui_kit::row(ui, app.tr("render.shot_aperture"), |ui| ui_kit::number_field(ui, &mut value.aperture_radius_mm, 0.0..=1e7, 0.1, " mm"))
                 .changed();
-                changed |= ui_kit::row(ui, app.tr("render.shot_focus_distance"), |ui| {
-                    ui_kit::number_field(ui, &mut value.focus_distance_mm, 1e-6..=1e9, 1.0, " mm")
-                })
-                .changed();
-            });
-            changed
+        changed |= ui_kit::row(ui, app.tr("render.shot_focus_distance"), |ui| {
+            ui_kit::number_field(ui, &mut value.focus_distance_mm, 1e-6..=1e9, 1.0, " mm")
         })
-        .inner;
-    let reason = if !gpu {
-        Some("render.shot_lens_gpu_reason")
-    } else if !enabled {
+        .changed();
+    });
+    let reason = if !supported {
+        Some("render.shot_lens_raytrace_reason")
+    } else if !sampling {
+        Some("render.shot_lens_cpu_progressive_reason")
+    } else if !perspective {
         Some("render.shot_lens_perspective_reason")
     } else if !on {
         Some("render.shot_lens_enable_reason")
@@ -398,16 +461,8 @@ fn lens(app: &mut SolveApp, ui: &mut egui::Ui, shot: &str, saved: &RenderSetup) 
     if let Some(key) = reason {
         ui_kit::text(ui, app.tr(key), ui_kit::Text::Note(key));
     }
-    if changed && enabled {
-        let mut job = saved.job.clone();
-        if let Some(solidcraft_engine::doc::render_settings::RenderJob::GpuPath { options, .. }) = &mut job {
-            options.lens = on.then_some(value);
-        }
-        let action = edit_settings(app, shot, json!({"job":job}));
-        if action.is_ok() && app.render_workspace.view.name == shot {
-            app.render_workspace.view.studio.lens_enabled = on;
-            app.render_workspace.view.studio.lens = value;
-        }
+    if changed {
+        let action = set_lens(app, shot, on.then_some(value));
         result(app, action);
     }
 }
@@ -451,11 +506,24 @@ pub(super) fn frame_rect(aspect: f64, viewport: Rect) -> Option<Rect> {
 }
 
 pub(crate) fn overlay_visible(app: &SolveApp) -> bool {
-    !app.render_workspace.view.result
-        && (app.render_workspace.view.stage == Stage::Frame
-            || (app.render_workspace.view.inspector.page == inspector::Page::Camera && selected(app).is_some()))
+    !app.render_workspace.view.result && (app.render_workspace.view.stage == Stage::Frame || selected(app).is_some())
 }
 
+/// Actual output-camera frame, independent of inspector focus and transient guides.
+/// Retained result/compare views use their captured image dimensions separately.
+pub(crate) fn render_rect(app: &SolveApp, viewport: Rect) -> Rect {
+    if app.preferences.render_legacy_image_defaults {
+        return preview_rect(app, viewport).unwrap_or(viewport);
+    }
+    let free = crate::shell::workspace_content(app, crate::render_ui::canvas(app, viewport));
+    // With no surrounding chrome, an equal-aspect image uses the same full
+    // rectangle as Design. The normal workspace still keeps its card margin.
+    let frame_area = if free == viewport { free } else { free.shrink(Tokens::get().space_8) };
+    frame_rect(super::image_aspect(&app.render_workspace.view.draft), frame_area).unwrap_or(free)
+}
+
+/// Contextual composition guides may preview a transient/selected-shot aspect.
+/// Their visibility/aspect must never choose the nonlegacy rendered projection.
 pub(crate) fn preview_rect(app: &SolveApp, viewport: Rect) -> Option<Rect> {
     if !overlay_visible(app) {
         return None;
@@ -485,7 +553,7 @@ pub(crate) fn overlay(app: &mut SolveApp, ui: &mut egui::Ui, viewport: Rect) {
     let label = format!("{aspect} · {} × {}", saved.width, saved.height);
     ui_kit::Container::navigation_card(
         ui.ctx(),
-        egui::Id::new("render_frame_size_chip"),
+        egui::Id::unique("render_frame_size_chip"),
         frame.left_top() + vec2(t.space_8, t.space_8),
         egui::Align2::LEFT_TOP,
         |ui| {
@@ -501,7 +569,7 @@ pub(crate) fn overlay(app: &mut SolveApp, ui: &mut egui::Ui, viewport: Rect) {
     };
     ui_kit::Container::navigation_card(
         ui.ctx(),
-        egui::Id::new("render_frame_lens_chip"),
+        egui::Id::unique("render_frame_lens_chip"),
         pos2(frame.left() + t.space_8, frame.bottom() - t.space_8),
         egui::Align2::LEFT_BOTTOM,
         |ui| {

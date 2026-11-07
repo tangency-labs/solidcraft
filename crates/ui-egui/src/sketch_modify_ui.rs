@@ -28,10 +28,11 @@
 
 use egui::Pos2;
 use serde_json::{Map, Value, json};
+use solidcore_record::{Vec2, Vec3};
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::Document;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
-use solidcraft_engine::geom::{Vec2, Vec3};
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::sketch::{PatternAlignment, VariableUnit};
 
 use crate::SolveApp;
@@ -61,6 +62,8 @@ pub const MODIFIERS: &[ToolModifiers] = &[
     ToolModifiers { tool: "sketch.chamfer.distance_angle", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     // Formulas only: no picks and no viewport modifier chords.
     ToolModifiers { tool: "sketch.equation_curve", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
+    // Divide Curve: curves and a count; no viewport modifier chords.
+    ToolModifiers { tool: "sketch.point.divide", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
 ];
 
 /// The equation curve's two forms: x(t) and y(t), or y = f(x).
@@ -71,6 +74,11 @@ const CHAMFER_TYPE_ICONS: [&str; 3] = ["sketch_chamfer_equal", "sketch_chamfer_t
 
 /// The engine's own cap on the copies one sketch pattern may make.
 const MAX_COPIES: f64 = 500.0;
+/// The engine's own cap on the pieces Divide Curve cuts one curve into.
+const DIVIDE_MAX: i64 = 500;
+
+/// The engine's own cap on the offsets `sketch.offset` stacks one behind the other.
+const MAX_OFFSET_INSTANCES: i64 = 100;
 
 /// The offset directions, in the words and the order `solid.extrude` already uses for them.
 /// One Side offsets the way the distance points. Two Sides adds an independent distance the
@@ -102,8 +110,10 @@ pub enum Mod {
     /// `sketch.offset`: the curves to offset, the distance typed and whether the connected
     /// chain follows. A positive distance is left of the chain, as the command defines it;
     /// `flip` reverses whatever sign the field holds. `mode` indexes [`OFFSET_MODES`], and
-    /// `distance2` is the other side's distance that Two Sides asks for.
-    Offset { distance: String, distance2: String, mode: usize, chain: bool, flip: bool },
+    /// `distance2` is the other side's distance that Two Sides asks for. `instances` is how many
+    /// offsets stand one behind the other, each the same distance again from the one before it:
+    /// one, the offset by itself, by default.
+    Offset { distance: String, distance2: String, instances: String, mode: usize, chain: bool, flip: bool },
     /// `sketch.mirror`: the entities and the line they reflect in. The command has no number of
     /// its own, so the window's whole job is to show what is picked and let a pick be changed
     /// before anything is committed.
@@ -112,8 +122,9 @@ pub enum Mod {
     /// turn about the centre, and whether the originals stay behind. The command already
     /// carries the copy flag, so the Create Copy row needs no engine change.
     Move { x: String, y: String, angle: String, copy: bool },
-    /// `sketch.transform`: the picked entities scaled, turned and moved as one, about the middle
-    /// of their box. `x` and `y` move that middle, `factor` scales and `angle` turns about it.
+    /// `sketch.transform`: the picked entities scaled, turned and moved as one, about the picked
+    /// Center point or else the middle of their box. `x` and `y` move that point, `factor` scales
+    /// and `angle` turns about it.
     /// `frame` is the box (middle and size in the sketch, kept up to date from the picks by
     /// `sketch_transform_ui`) the window's size rows and the handles work on.
     Transform { x: String, y: String, factor: String, angle: String, frame: Option<([f64; 2], [f64; 2])> },
@@ -143,11 +154,17 @@ pub enum Mod {
     /// form (an index into [`EQUATION_FORMS`]), x(t) and y(t) (or y(x)), the variable's range and
     /// how far the curve may stray from the formulas.
     Equation { form: usize, x: String, y: String, start: String, end: String, tolerance: String, range_unit: bool },
+    /// `sketch.point.divide` (#8969): the curves picked are each divided into `count` pieces of equal
+    /// length by points held at their shares of it.
+    Divide { count: String },
 }
 
 impl Mod {
     pub fn previews(&self) -> bool {
-        matches!(self, Self::Mirror | Self::PatternRect { .. } | Self::PatternCirc { .. } | Self::Offset { .. } | Self::Corner { .. })
+        matches!(
+            self,
+            Self::Mirror | Self::PatternRect { .. } | Self::PatternCirc { .. } | Self::Offset { .. } | Self::Corner { .. } | Self::Divide { .. }
+        )
     }
 
     pub fn title(&self) -> &'static str {
@@ -162,6 +179,7 @@ impl Mod {
             Mod::Corner { chamfer: false, .. } => "FILLET",
             Mod::Corner { .. } => "CHAMFER",
             Mod::Equation { .. } => "EQUATION CURVE",
+            Mod::Divide { .. } => "DIVIDE CURVE",
         }
     }
 
@@ -178,7 +196,7 @@ impl Mod {
             Mod::PatternCirc { angle, .. } => Some(("Angle", ValueKind::Angle, angle)),
             Mod::Corner { chamfer: false, size, .. } => Some(("Radius", ValueKind::Length, size)),
             Mod::Corner { size, .. } => Some(("Distance", ValueKind::Length, size)),
-            Mod::Equation { .. } => None,
+            Mod::Equation { .. } | Mod::Divide { .. } => None,
         }
     }
 }
@@ -192,7 +210,10 @@ fn inputs(k: &Mod) -> Vec<SelInput> {
         // AXES is the mask that takes a straight sketch curve (`selection::SelInput::accepts`).
         Mod::Mirror => vec![SelInput::new("Entities", CURVES | SKETCH_POINTS | PROFILES, true), SelInput::new("Mirror line", AXES, false)],
         Mod::Move { .. } => vec![SelInput::new("Entities", CURVES | SKETCH_POINTS | PROFILES, true), SelInput::new("Center", SKETCH_POINTS, false)],
-        Mod::Transform { .. } => vec![SelInput::new("Entities", CURVES | SKETCH_POINTS | PROFILES, true)],
+        // Center: the point Scale and Angle work about (#11718); empty, the middle of the picks' box.
+        Mod::Transform { .. } => {
+            vec![SelInput::new("Entities", CURVES | SKETCH_POINTS | PROFILES, true), SelInput::new("Center", SKETCH_POINTS, false)]
+        }
         // The direction is optional: `sketch.pattern.rectangular` documents sketch x as its
         // default, the way the engine reads it.
         Mod::PatternRect { .. } => vec![
@@ -209,6 +230,7 @@ fn inputs(k: &Mod) -> Vec<SelInput> {
         // point (#1824), for both.
         Mod::Corner { .. } => vec![SelInput::new("Corners", SKETCH_POINTS | CURVES, true)],
         Mod::Equation { .. } => Vec::new(),
+        Mod::Divide { .. } => vec![SelInput::new("Curves", CURVES, true)],
     }
 }
 
@@ -227,6 +249,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "sketch.offset" => Mod::Offset {
             distance: crate::dialogs::length_default(&app.session, "2"),
             distance2: crate::dialogs::length_default(&app.session, "2"),
+            instances: "1".into(),
             mode: 0,
             chain: true,
             flip: false,
@@ -272,6 +295,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             tolerance: "0.01 mm".into(),
             range_unit: false,
         },
+        "sketch.point.divide" => Mod::Divide { count: "4".into() },
         _ => return None,
     };
     let i = inputs(&k);
@@ -282,7 +306,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
 /// OK runs `sketch.equation_curve.edit` on it.
 pub fn edit_equation(app: &mut SolveApp, id: &str) -> bool {
     let Some(sid) = app.session.active_sketch else { return false };
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let Some(eq) = state.sketch(sid).and_then(|s| s.sketch.equation_of(id)).cloned() else { return false };
     let kind = Mod::Equation {
         form: usize::from(eq.x.is_none()),
@@ -304,7 +328,7 @@ pub fn edit_equation(app: &mut SolveApp, id: &str) -> bool {
 pub(crate) fn selected_equation(app: &SolveApp) -> Option<String> {
     let [Sel::SketchCurve { id, .. }] = app.session.selection.as_slice() else { return None };
     let sid = app.session.active_sketch?;
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     state.sketch(sid)?.sketch.equation_of(id).map(|e| e.curve.clone())
 }
 
@@ -315,7 +339,7 @@ pub fn candidate(d: &Dialog, session: &solidcraft_engine::Session, hit: &Hit) ->
     match hit {
         Hit::SketchCurve { sketch, .. } | Hit::SketchPoint { sketch, .. } | Hit::Profile { sketch, .. } if *sketch != active => None,
         Hit::SketchCurve { id, .. } if matches!(d.kind, Kind::SketchModify(Mod::Corner { .. })) => {
-            let state = session.world_state();
+            let state = crate::open_meshing::session_world(session);
             let sk = &state.sketch(active)?.sketch;
             if sk.is_spatial_corner_curve(id) {
                 return None;
@@ -332,7 +356,7 @@ pub fn candidate(d: &Dialog, session: &solidcraft_engine::Session, hit: &Hit) ->
 pub fn edit_pattern(app: &mut SolveApp, id: &str) -> bool {
     use solidcraft_engine::sketch::SketchPatternKind;
     let Some(sid) = app.session.active_sketch else { return false };
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let Some(sk) = state.sketch(sid).map(|s| &s.sketch) else { return false };
     let Some(pattern) = sk.patterns.iter().find(|p| p.id == id) else { return false };
     let input = |key: &str, fallback: String| pattern.expressions.get(key).cloned().unwrap_or(fallback);
@@ -392,9 +416,7 @@ pub fn edit_pattern(app: &mut SolveApp, id: &str) -> bool {
 pub fn double_click_pattern(app: &mut SolveApp, pos: Pos2) -> bool {
     let Some(glyph) = crate::sketch_tools::glyph_at(pos) else { return false };
     let Some(sid) = app.session.active_sketch else { return false };
-    let id = app
-        .session
-        .world_state()
+    let id = crate::open_meshing::session_world(&app.session)
         .sketch(sid)
         .and_then(|ss| ss.sketch.patterns.iter().find(|p| p.instances.iter().any(|i| i.constraints.contains(&glyph))).map(|p| p.id.clone()));
     id.is_some_and(|id| edit_pattern(app, &id))
@@ -468,12 +490,13 @@ pub(crate) fn command(k: &Mod) -> &'static str {
         Mod::Corner { ctype: 2, .. } => "sketch.chamfer.distance_angle",
         Mod::Corner { .. } => "sketch.chamfer.equal_distance",
         Mod::Equation { .. } => "sketch.equation_curve",
+        Mod::Divide { .. } => "sketch.point.divide",
     }
 }
 
 /// Repeatable operations offer Apply for another selection, with the same typed values.
 pub(crate) fn repeatable(k: &Mod) -> bool {
-    matches!(k, Mod::Offset { .. } | Mod::Mirror | Mod::PatternRect { .. } | Mod::PatternCirc { .. })
+    matches!(k, Mod::Offset { .. } | Mod::Mirror | Mod::PatternRect { .. } | Mod::PatternCirc { .. } | Mod::Divide { .. })
 }
 
 /// A labelled value row. The value carries its own unit text ("2 mm", "45 deg").
@@ -526,12 +549,15 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document) -> bool {
     let mut enter = false;
     match k {
         Mod::Scale { factor } => enter |= number(ui, "Factor", factor),
-        Mod::Offset { distance, distance2, mode, chain, flip } => {
+        Mod::Offset { distance, distance2, instances, mode, chain, flip } => {
             icons(ui, "Direction", &OFFSET_MODES, &OFFSET_MODE_ICONS, mode);
             enter |= number(ui, "Distance", distance);
             if *mode == TWO_SIDES {
                 enter |= number(ui, "Distance 2", distance2);
             }
+            // Every instance after the first offsets the one before it by Distance again, so the
+            // arrows walk the offset outwards one ring at a time.
+            enter |= quantity(ui, doc, "Instances", instances, 1, MAX_OFFSET_INSTANCES);
             ui_kit::section(ui, "offset_options", "Options", true, |ui| {
                 if *mode != SYMMETRIC {
                     ui_kit::checkbox_grid(ui, &mut [("Flip", flip), ("Chain", chain)], 2);
@@ -585,6 +611,10 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document) -> bool {
             alignment(ui, "Alignment", a, reversed);
             pattern_hint(ui);
         }
+        Mod::Divide { count } => {
+            enter |= quantity(ui, doc, "Segments", count, 2, DIVIDE_MAX);
+            ui_kit::text(ui, crate::i18n::tr("sketch.divide_hint"), ui_kit::Text::Note("divide"));
+        }
         Mod::Equation { form, x, y, start, end, tolerance, range_unit } => {
             ui_kit::choice_row(ui, "Form", "equation_form", form, &EQUATION_FORMS);
             if *form == 0 {
@@ -625,7 +655,7 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document) -> bool {
 /// in it.
 fn sketch_dir(app: &SolveApp, sel: &Sel) -> Option<Vec2> {
     let dir = crate::dialogs::axis_of(app, sel)?.1;
-    let plane = app.session.world_state().sketch(app.session.active_sketch?)?.plane;
+    let plane = crate::open_meshing::session_world(&app.session).sketch(app.session.active_sketch?)?.plane;
     Vec2::new(dir.dot(plane.x), dir.dot(plane.y)).normalized()
 }
 
@@ -638,7 +668,7 @@ pub fn arrow(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
     let Kind::SketchModify(k) = &d.kind else { return None };
     match k {
         Mod::PatternRect { alignment, reversed, .. } => {
-            let plane = app.session.world_state().sketch(app.session.active_sketch?)?.plane;
+            let plane = crate::open_meshing::session_world(&app.session).sketch(app.session.active_sketch?)?.plane;
             let dir = pattern_dir(app, d)?;
             Some(plane.dir_to_world(if (*alignment == PatternAlignment::Left) ^ *reversed { -dir } else { dir }))
         }
@@ -662,7 +692,7 @@ fn pattern_dir(app: &SolveApp, d: &Dialog) -> Option<Vec2> {
 /// the first, as the command does.
 pub fn arrow2(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
     let Kind::SketchModify(Mod::PatternRect { alignment2, reversed2, .. }) = &d.kind else { return None };
-    let plane = app.session.world_state().sketch(app.session.active_sketch?)?.plane;
+    let plane = crate::open_meshing::session_world(&app.session).sketch(app.session.active_sketch?)?.plane;
     let dir = match d.inputs.get(2).and_then(|i| i.items.first()) {
         Some(sel) => sketch_dir(app, sel)?,
         None => match d.extra.get("dir2").and_then(|v| serde_json::from_value::<Vec2>(v.clone()).ok()).and_then(Vec2::normalized) {
@@ -712,7 +742,7 @@ pub(crate) fn point_id<'a>(session: &solidcraft_engine::Session, sel: &'a Sel) -
     let active = session.active_sketch?;
     // Custom local ids may themselves contain ':'. Preserve them before interpreting a
     // legacy qualified selection, whose owner must match the sketch being edited.
-    if session.world_state().sketch(active).is_some_and(|sk| sk.sketch.point_index(id).is_some()) {
+    if crate::open_meshing::session_world(session).sketch(active).is_some_and(|sk| sk.sketch.point_index(id).is_some()) {
         Some(id)
     } else {
         (owner.parse::<u64>().ok() == Some(active)).then_some(point)
@@ -721,13 +751,15 @@ pub(crate) fn point_id<'a>(session: &solidcraft_engine::Session, sel: &'a Sel) -
 
 /// The curves and lone points picked in input `i`, as the engine's `entities` list. A profile
 /// pick expands to every curve of its boundary and its holes (#8390).
-fn entity_ids(session: &solidcraft_engine::Session, inputs: &[SelInput], i: usize) -> Vec<String> {
+pub(crate) fn entity_ids(session: &solidcraft_engine::Session, inputs: &[SelInput], i: usize) -> Vec<String> {
     let mut out = Vec::new();
     for x in items(inputs, i) {
         match x {
             Sel::SketchCurve { id, .. } => out.push(id.clone()),
             Sel::Profile { sketch, index } => {
-                if let Some(ids) = session.world_state().sketch(*sketch).and_then(|ss| ss.profiles.get(*index)).map(|p| p.curve_ids()) {
+                if let Some(ids) =
+                    crate::open_meshing::session_world(session).sketch(*sketch).and_then(|ss| ss.profiles.get(*index)).map(|p| p.curve_ids())
+                {
                     out.extend(ids);
                 }
             }
@@ -796,6 +828,15 @@ fn whole(app: &SolveApp, label: &str, text: &str) -> Result<u64, String> {
     Ok(v.round() as u64)
 }
 
+/// Validate a typed offset instance count before sending it to the command.
+fn offset_instances(app: &SolveApp, text: &str) -> Result<u64, String> {
+    let v = app.session.doc.eval(text.trim(), ValueKind::Unitless).map_err(|e| format!("Instances: {e}"))?;
+    if !v.is_finite() || !(1.0..=MAX_OFFSET_INSTANCES as f64).contains(&v) || (v - v.round()).abs() > 1e-9 {
+        return Err(format!("Instances must be a whole number from 1 to {MAX_OFFSET_INSTANCES}"));
+    }
+    Ok(v.round() as u64)
+}
+
 /// A typed length as the command wants it, in millimetres. A bare number means the design's
 /// units, as a typed sketch value does everywhere else. `value` above reads an empty row as
 /// zero, which a Move window wants and a pattern spacing does not.
@@ -847,7 +888,7 @@ fn corner_ref(app: &SolveApp, point: &str, flip: bool) -> Result<Value, String> 
     }
     let gone = || "that corner is no longer in the sketch".to_string();
     let sketch = app.session.active_sketch.ok_or("open a sketch first")?;
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let sk = &state.sketch(sketch).ok_or_else(gone)?.sketch;
     let index = sk.resolve_point(point).ok_or_else(gone)?;
     let (a, b) = crate::sketch_tools::corner_curves(sk, index, false).ok_or("a chamfer needs a corner of exactly two lines")?;
@@ -901,16 +942,21 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             let f = factor(app, text)?;
             let turn = value(app, angle, ValueKind::Angle, "Angle")?.to_degrees();
             let (dx, dy) = (value(app, x, ValueKind::Length, "X")?, value(app, y, ValueKind::Length, "Y")?);
-            ("sketch.transform", json!({"entities": entities, "factor": f, "angle": turn, "center": middle, "translate": [dx, dy]}))
+            let center = items(inputs, 1).first().and_then(|sel| point_id(&app.session, sel)).map_or_else(|| json!(middle), |id| json!(id));
+            ("sketch.transform", json!({"entities": entities, "factor": f, "angle": turn, "center": center, "translate": [dx, dy]}))
         }
-        Mod::Offset { distance, distance2, mode, chain, flip } => {
+        Mod::Offset { distance, distance2, instances, mode, chain, flip } => {
             let curves = curve_ids(inputs, 0);
             if curves.is_empty() {
                 return Err("Select the curves to offset first".into());
             }
             // Symmetric hides Flip, so a flip left over from another mode does not travel with it.
             signed_length(app, "Distance", distance, *flip && *mode != SYMMETRIC)?;
-            let mut params = json!({"curves": curves, "distance": distance.trim(), "flip": *flip && *mode != SYMMETRIC, "chain": chain});
+            // The count is not kept in the design, so the command gets the number it evaluates to
+            // rather than the text, the way Scale and the pattern spacings send theirs.
+            let count = offset_instances(app, instances)?;
+            let mut params =
+                json!({"curves": curves, "distance": distance.trim(), "flip": *flip && *mode != SYMMETRIC, "chain": chain, "instances": count});
             if let Value::Object(m) = &mut params {
                 if *mode == SYMMETRIC {
                     m.insert("symmetric".into(), json!(true));
@@ -937,15 +983,11 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 Some(sel @ Sel::Axis { name }) if matches!(name.as_str(), "X" | "Y" | "Z") => {
                     if let Some(axis) = crate::tools::sketch_axis_of(app, name) {
                         json!(axis)
-                    } else {
-                        let (origin, dir) = crate::dialogs::axis_of(app, sel).ok_or("Select an origin axis")?;
-                        let st = app.session.world_state();
-                        let plane =
-                            st.sketch(app.session.active_sketch.ok_or("No sketch is being edited")?).ok_or("The sketch no longer exists")?.plane;
-                        if plane.normal().dot(dir).abs() > 1e-9 || plane.normal().dot(origin - plane.origin).abs() > 1e-6 {
-                            return Err("The origin axis must lie in the sketch plane".into());
-                        }
+                    } else if sketch_dir(app, sel).is_some() {
+                        // An axis outside the plane still gives the line it makes in the plane.
                         json!({"axis":name})
+                    } else {
+                        return Err("The origin axis is perpendicular to the sketch plane, so it has no line in the plane".into());
                     }
                 }
                 Some(_) => return Err("The mirror line must be a straight curve of this sketch or an origin axis in its plane".into()),
@@ -1007,6 +1049,17 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             }
             ("sketch.pattern.rectangular", p)
         }
+        Mod::Divide { count } => {
+            let curves = curve_ids(inputs, 0);
+            if curves.is_empty() {
+                return Err("Select the curves to divide first".into());
+            }
+            let v = app.session.doc.eval(count.trim(), ValueKind::Unitless).map_err(|e| format!("Segments: {e}"))?;
+            if !v.is_finite() || !(2.0..=DIVIDE_MAX as f64).contains(&v) || (v - v.round()).abs() > 1e-9 {
+                return Err(format!("Segments must be a whole number from 2 to {DIVIDE_MAX}"));
+            }
+            ("sketch.point.divide", json!({"curves": curves, "segments": v.round()}))
+        }
         Mod::PatternCirc { count, angle, alignment, reversed } => {
             let entities = entity_ids(&app.session, inputs, 0);
             if entities.is_empty() {
@@ -1014,8 +1067,10 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             }
             let center = match items(inputs, 1).first() {
                 Some(Sel::Vertex { body, point }) if body.is_empty() => {
-                    let plane =
-                        app.session.world_state().sketch(app.session.active_sketch.ok_or("open a sketch first")?).ok_or("sketch is missing")?.plane;
+                    let plane = crate::open_meshing::session_world(&app.session)
+                        .sketch(app.session.active_sketch.ok_or("open a sketch first")?)
+                        .ok_or("sketch is missing")?
+                        .plane;
                     let p = plane.to_local(*point);
                     json!([p.x, p.y])
                 }

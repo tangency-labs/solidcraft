@@ -1,10 +1,12 @@
 //! Frame members (#4003): one body per straight line of a frame sketch, its cross-section a
 //! profile laid square to the line (`frame::member_axes`) and run from one end to the other.
 
+use solidcraft_geom::prelude::*;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashSet};
 
-use solidcraft_geom::{Aabb2, Plane, Region2, Ring, Vec2, Vec3};
+use solidcore_record::{Plane, Region2, Vec2, Vec3};
+use solidcraft_geom::{Aabb2, Ring};
 use solidcraft_kernel as kernel;
 use solidcraft_sketch::CurveKind;
 

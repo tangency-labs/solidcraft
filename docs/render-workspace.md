@@ -1,6 +1,6 @@
 # Integrated Render workspace (R3)
 
-The native image panel offers CPU raster, optional CPU ray tracing and
+The native image panel offers CPU raster for schematic output, optional CPU ray tracing and
 [GPU path tracing](render-path.md) as explicit image methods. All three methods can be edited and saved offline. Check and Start are enabled
 only when the selected method has an installed supporting host; an unavailable method never falls back.
 
@@ -12,7 +12,75 @@ the asynchronous protocol, image limits, captured revisions and PNG export. The 
 Choose **Render** in the workspace switcher after finishing a modelling operation.
 The current integrated GPU renderer shows a separate product scene. Return to Design
 restores its camera, projection preference and existing viewport drawing policy.
-The live product preview remains independent of the selected image method.
+New native setups select CPU ray tracing with progressive sampling when the installed
+host supports it. Existing saved final settings keep their interpretation.
+Preferences > Graphics > **Use previous Render image defaults** restores the previous manual workflow.
+
+A first entry with an active saved shot restores its authored camera when that camera
+is more than the untouched default. An uncomposed setup still fits the current product.
+Leaving Render remembers its transient camera separately from Design, so returning
+preserves framing and a saved lens stays paired with its perspective projection.
+Clicking a shot in the tree or Shots strip activates its numerical settings and
+complete saved camera, including an active shot when its camera differs. Unsaved
+edits retain Save/Discard/Keep. The standalone editor-selection command only focuses
+its editor; numerical reloads, saves and Undo do not navigate. The compatibility preference keeps
+the former camera-neutral thumbnail and entry-refit behaviour.
+
+## Live image feedback
+
+Render automatically computes a separate live image after visual edits settle for
+200 ms. Appearance, lighting, camera, visibility and image settings invalidate the
+capture; selecting an editor alone does not. The selected ray-traced method is retained.
+The stage bar identifies the live resolution and accepted/current sample count and
+offers Pause/Resume (`view.render_live {paused: true|false}`). Live resolution follows
+the active output frame inside the free product canvas, with a longest edge of
+512 pixels. Common output ratios use exact integer multiples; otherwise the live
+image uses the nearest bounded pixel dimensions and picking uses that captured
+aspect. Final output size and saved sampling settings are unchanged. Invalid
+authored dimensions/sampling are refused before constructing the small live copy. An older image is marked as updating and cannot
+be used to pick geometry against a different projection.
+
+Automatic images belong to an isolated scratch session. They do not enter retained
+results or replace the completed image selected for Copy, Export or Regrade. An
+explicit Render action displays its progressing image. If live capture or rendering
+is still releasing resources, the captured final request waits for cleanup; a changed
+source cancels that pending request instead of silently rendering different settings.
+
+CPU progressive and GPU jobs publish each complete nonfinal pass. Adaptive GPU
+feedback distinguishes pilot passes from production iterations; each production
+pixel has its own budget, and pilots are excluded from the final image. Fast
+passes can coalesce between screen repaints. Unsupported combinations are not silently
+converted to fixed sampling. Unsupported CPU optical combinations also retain their
+settings and show their reason. These remain open parts of complete CPU/GPU parity.
+
+## Retained comparisons and all-shot rendering
+
+The result viewer retains up to eight completed images per document tab, outside
+the design and undo history. `render.compare {left, right}` accepts `"live"` or a
+zero-based retained-result index (oldest first); the sides must differ. It resolves
+indices to job identities so later index shifts cannot retarget an open comparison.
+`render.compare {off:true}` leaves comparison. The shared segments toggle the two
+sources, Swap exchanges them, and the shared divider stays within 5–95%. Both sides
+share image pan/zoom; the live product uses the captured camera and current design.
+Dragging the divider cannot navigate either camera. Copy, export and regrade use
+the compared result on the right (or the left when the right is Live). That selection
+remains stable while new results arrive; evicting a source ends its comparison.
+
+The Output footer's **All shots (n)** runs `render.batch`. The command snapshots up
+to 32 saved shot cameras and names and uses one common image setup. The UI supplies
+the current draft as `request` (the existing `render.start` parameters); a headless
+`render.batch {}` uses the first saved setup in name order. Each queued shot keeps its
+own captured camera while all other options remain the same. Each admission runs
+through `render.start`, one job at a time. No shots, an active render/queue or stale
+geometry refuses without editing the design or history.
+
+`render.status {}` advances an explicitly started queue and returns
+`{queue:{running,waiting,job,shot,error}}`; a status call with a job also includes
+that queue metadata. The UI ticks advance queues in active and background tabs.
+`render.cancel {}` cancels the active batch job and drops all waiting shots; an
+explicit job ID retains the single-job cancellation API. Opening a stage, editor
+or queue readout never starts a batch. The Shots strip reports running and waiting
+counts, and completed shots enter the same retained-result list.
 
 ## Stage bar and floating docks
 
@@ -22,7 +90,7 @@ above the Render label and Workspace caption. The header is 36 pt; the remaining
 52 pt contains the tools, centred vertically below a 1 pt divider. Numbered **Look**, **Light**, **Frame** and **Output** chips
 run `view.render_stage {stage: look|light|frame|output}`. The selection belongs to the
 open document tab's view state; it is not saved in the design. Opening a stage never
-applies or saves settings or starts an image job. It focuses the existing Inspector
+applies or saves settings or submits a final image job. It focuses the existing Inspector
 page, while every Inspector page and registered Render command remains reachable.
 The headless command validates and echoes the request without changing the document.
 
@@ -64,7 +132,11 @@ Apply prepares a review without changing the method or saved settings.
 The shared `ui_kit::ReviewAndApply` dialog presents a resource card, Replaces/Kept,
 variant controls and explicit acknowledgement before applying. Studio, rig fit,
 environment, ground/stage, physical plan, fixed quality budget and uniform/spatial
-maps use this composition. A captured review expires when the document, revision,
+maps use this composition. Canonical Draft, Balanced and High quality chips instead
+apply their listed fixed GPU budget as one reversible numerical edit. Sampling shows
+size, samples, depth, seed and noise reduction; the chip hover lists all three budgets.
+Other image settings and the saved/live cameras are kept. Library specifications
+retain the acknowledged review. A captured review expires when the document, revision,
 shot, method or settings change. Rig fitting offers centre, extent, captured bounds
 and emitters-only projection. Quality review reports projected dimensions, samples,
 depth and omissions; `render.quality.prepare` remains reachable through command
@@ -101,19 +173,29 @@ edits or evaluates the design, moves the camera or creates an undo step.
 
 **CPU raster** produces the existing preview PNG with approximate transparency.
 **CPU ray tracing** requires a native worker and the `raytrace-cpu` build feature.
-Its panel offers **Single image** with 1, 4 or 16 spatial samples per pixel, or
-**CPU progressive** with 1–64 accumulated samples and a separate seed. Both use
+Fresh native setups use **CPU progressive** with sample and seed controls. The
+normal UI presents progressive sampling as the active mode; a loaded fixed
+setup keeps its existing 1, 4 or 16 spatial samples until the user explicitly
+adopts progressive sampling. The compatibility preference also exposes the old
+Single image / Progressive selector. Sample and image limits follow the selected
+[CPU resource profile](render-cpu-resource-profiles.md). Both routes use
 Neutral / Warm and cool / Key and rim lighting, cast shadows and exposure from
-−16 to +16 EV. Progressive sampling has a 1,048,576-pixel and 16,777,216 pixel × sample
-limit; the UI proposes a smaller size only as an explicit action. It requires an
-opaque background; the panel explains the incompatibility and lets the user clear
-Transparent background. Additional collapsible sections expose body reflections,
+−16 to +16 EV. The UI proposes a smaller size only as an explicit action. Transparent
+background exports straight-alpha edge coverage for both sampling modes; body and
+face opacity still require 100%. Bloom, backdrop and photographic effects require
+opaque output and remain explicit refusals. Additional collapsible sections expose body reflections,
 captured HDR or constant environments, directional lights and point lights. Reflection
 bindings require explicit confirmation after a document change; reusing a name cannot
 redirect them to another body. Check and the current job display their separate HDR
 capture metadata. See [CPU workspace controls](render-cpu-workspace.md) for units,
-limits and the immutable capture contract. CPU glass, emission, surface effects,
-anisotropy, area lights and spot cones remain API capabilities without panel editors.
+limits and the immutable capture contract. The common Glass editor supports stable
+saved targets. Without Indirect lighting, CPU Glass uses the certified sheet/box
+subset. With Indirect lighting, [general Glass](render-cpu-general-glass.md) adds
+certified closed meshes under its geometry, transmission and scattering restrictions.
+The Lights editor exposes point/spot and rectangular lights. Emission, surface effects
+and anisotropy retain their bounded API contracts. Indirect lighting has its own
+Sampling controls and validates saved or temporary optical bindings against the
+selected transport; unsupported combinations refuse without removing the bindings.
 
 **GPU path tracing** preserves asynchronous shader preparation and its timing display.
 Its independent image device requires Vulkan; the live viewport may use another backend.
@@ -124,17 +206,19 @@ maximum path depth (1–16) and random seed. Exposure (−32 to +32 EV) lives in
 exposure field controls the selected image method. Switching methods retains their
 local numeric drafts while submitting and saving only the active method. Reloading
 or choosing another setup replaces those drafts with the saved numeric intent.
-The live product preview keeps its fixed studio response and does not apply image
-exposure, environments, lens or material overrides.
+Automatic ray-traced live images use the captured image exposure, environment, lens and
+supported material effects at interactive resolution. The integrated direct-light preview
+is the fallback while no live image is available, or for Raster and the compatibility workflow.
 
 Effects > Tone exposes Reinhard / ACES fitted tone mapping. Sampling > Path tracing
-owns optional final edge-aware denoising; Shot owns thin-lens depth of field. Positive aperture
+owns optional edge-aware noise reduction for progressive and final display images;
+Shot owns thin-lens depth of field. Positive aperture
 requires a perspective product camera. Denoising preserves raw accumulation but can
-soften detail; glass and sharp specular first hits bypass its final spatial filter.
+soften detail; glass and sharp specular first hits bypass its spatial filter.
 
 The Environment Browser row opens the Environment editor. The legacy Environment
 and Background pages use that same editor, with five sections in order: Source,
-Orientation and strength, Backdrop, Ground and stage, and Atmosphere (GPU).
+Orientation and strength, Backdrop, Ground and stage, and Atmosphere (CPU/GPU).
 Source offers None, Artistic sky, HDR file and embedded HDR for GPU, or None,
 Constant and HDR for CPU. Change opens the Environments scope of Studios and
 environments. Embedded HDR shows its name, kind and saved-in-design status; sky
@@ -160,9 +244,13 @@ shared **Remove the saved stage?** confirmation. The fields expose extent margin
 clearance gap and linear reflectance, followed by the saved panel count.
 Atmosphere edits the bounded participating medium: enable, world bounds in mm,
 extinction, scattering albedo and phase. The transitional Aging page's airborne
-section calls this same function. CPU and raster show the controls faded with
-the GPU requirement. These controls use existing render state and commands;
-opening the editor never changes the design or renderer.
+section calls this same function. CPU supports Atmosphere with explicit
+progressive Indirect lighting. Positive extinction cannot combine with Glass,
+selected-medium subsurface scattering or surface Denoise; unsupported combinations
+keep their authored values and explain the refusal. Raster shows the controls
+faded with the raytrace requirement. These controls use existing render state and
+commands; opening the editor never changes the design or renderer. See
+[CPU Atmosphere](render-cpu-volume.md) for its bounds and compatibility conditions.
 
 The panel distinguishes a pending file, a checked file and **HDR saved inside this
 design**. It shows dimensions, declared colour primaries and intensity; the source
@@ -184,7 +272,7 @@ The look card's source tag opens the inheritance chain. Reset restores the picke
 target's values from when it was opened; Save to library uses the existing design
 library export flow.
 
-Glass and absorption (GPU), Clear coat (GPU), Maps (GPU), Saved with this shot,
+Glass and absorption (CPU/GPU), Clear coat (CPU/GPU), built-in Maps (CPU/GPU), Saved with this shot,
 and Reflections (CPU) follow in that order and start collapsed. Unsupported
 methods remain visible with an explanation; opening a section never changes the
 renderer. Optical bindings currently target one whole visible body, so face,
@@ -201,27 +289,46 @@ compute absorption per millimetre via -ln(T) / distance. Glass exposes boundary,
 IOR, thickness, RGB absorption, straight shadow transmission and closed-solid
 interior scattering. Thickness is disabled for closed glass, which uses geometric
 distance. Glass cannot share a body with coat or maps. Full topology, orientation,
-overlap and optical-boundary checks run during GPU preparation; Check does not
-certify those properties.
+overlap and optical-boundary checks use the selected producer. CPU without
+Indirect lighting keeps its strict sheet/axis-aligned-box subset. Explicit CPU
+Path supports certified general closed meshes, nested media and selected-medium
+scattering; GPU has its own certificate and nested-mode policy. The common
+controls never bypass those geometry or combination checks. See
+[renderer parity](render-parity.md) for historical qualification and this change's Glass follow-up.
 
-Clear coat retains weight, roughness and IOR. Maps retain the bounded PNG/JPEG
-picker flow for base colour, normal, metallic and roughness images, world-space
-origin and U/V repeat vectors, normal strength, V orientation and base replacement.
-The backend's map-size, encoded-byte, repeat and assignment limits still apply.
-File-picker completion checks the original document, revision and body identity.
+Clear coat retains weight, roughness and IOR in common CPU/GPU saved bindings.
+Built-in surfaces can save base-colour, normal, metallic and roughness maps for
+both methods, with stable target identity and a definition-local frame. External
+PNG/JPEG picker maps remain GPU-only temporary inputs; portable external-map
+import is separate unqualified work. The map-size, encoded-byte, repeat and
+assignment limits still apply. File-picker completion checks the original
+document, revision and body identity.
 
-These local overrides are temporary on the document tab. Save these optics uses
-render.optics.bind to save physical glass with the shot; replacement requires the
-explicit Replace this body's saved optics checkbox. Coat and local image maps
-remain temporary, and the save action explains that limit. Remove saved opens the
+Local edits remain prospective on the document tab until saved. Save these optics
+uses render.optics.bind; replacing different saved Glass requires the explicit
+Replace this body's saved optics checkbox. Save coat to shot uses the separate
+stable coat binding. Built-in surface bindings are also saved; external image
+file mappings remain temporary. Remove saved opens the
 shared Remove saved optics? confirmation before render.optics.unbind; stale
 confirmations cannot affect a changed document. Saved authored surface bindings
 remain manageable in Saved with this shot. Reflections retains this body's
 Off/Mirror/Rough CPU binding and explicit target confirmation.
 
-Active GPU overrides still cause Check/Start to refuse a CPU request. Both buttons
-submit the same freshly validated runtime parameters and the engine captures file
-contents at that boundary.
+CPU uses the common IOR/Beer controls, while transport choices remain explicit.
+Without Path, general boundaries, scattering and transmitted shadows refuse.
+With Path, certified general Glass and thin transmitted shadows are supported;
+closed transmitted shadows and external Atmosphere with Glass still refuse.
+Coat/maps cannot share a Glass target, but unrelated opaque targets keep their
+supported effects. Check and Start each use fresh captured intent. Strict
+preparation performs the full general-Glass certificate and carries its proof
+into that prepared job's renderer. A separate Render click prepares a fresh
+capture; it does not reuse an earlier Check proof.
+Saved target A and prospective target B merge as stable assignments; checked file
+HDR capture preserves them on CPU and GPU without an ordinal-override detour.
+Unsupported combinations refuse and no implicit Save occurs. See
+[PR #11087](https://github.com/tangency-labs/solidcraft/pull/11087) for this
+follow-up's exact source and qualification. Historical CI7 and opaque native
+results remain separate.
 
 Check and Start build the same request from the current product camera, size and
 selected method, including when Render Result is open. Every click revalidates host
@@ -295,11 +402,13 @@ for each open document, and loading a setup preserves completed images and resul
 | Active method | Saved numeric intent |
 | --- | --- |
 | CPU raster | Transparency, with zero exposure |
-| CPU ray tracing | Single-image AA or progressive SPP/seed, preset or custom directional lights, point/spot lights, area lights and their samples/seed, shadows, constant RGB environment or embedded HDR with rotation/intensity/samples, setup exposure |
+| CPU ray tracing | Transparency, fixed AA or progressive SPP/seed, resource profile, optional opaque path depth, guided noise reduction, physical lens, tone map/finishing/backdrop and raw EXR retention, certified saved optical bindings, preset or custom directional lights, point/spot and area lights with samples/seed, shadows, constant RGB environment or embedded HDR with rotation/intensity/samples, setup exposure |
 | GPU path tracing | Transparency, samples/depth/seed, tone map, denoise, lens, RGB studio lighting/sun/area lights, procedural sky or embedded HDR with rotation/intensity/explicit colour assumption, setup exposure |
 
-The CPU panel preserves existing area-light and spot-cone fields even though it does
-not yet edit every field. Opening a GPU setup retains non-power-of-two sample counts,
+CPU path lighting can combine with certified optical bindings under the
+[general Glass restrictions](render-cpu-general-glass.md). Incompatible saved
+intent still refuses before HDR IO or scene capture. Opening a GPU
+setup retains non-power-of-two sample counts,
 RGB environment values, exact sky gradients and radians. Explicit empty light lists,
 black environments and absent settings remain distinct. The only exposure authority
 is `RenderSetup.exposure_ev`: CPU requests lower it to their raytrace options with zero
@@ -316,10 +425,12 @@ payload. The engine limits each source to 16 MiB and the design to 64 resources/
 
 Check and Start use the same complete typed setup and then perform normal host, scene
 and capture admission. Temporary bindings can still use an embedded HDR through the
-runtime resource selector. GPU maps and all body bindings, including disabled
-assignments, cannot yet be saved as a complete job.
-The panel explains the limitation and refuses Save before changing the document.
-Those inputs can still execute through the existing transient request route. Older
+runtime resource selector. Saved stable Glass, clear-coat and built-in surface
+bindings travel with complete CPU/GPU jobs. Temporary runtime body bindings,
+including disabled assignments and external GPU image maps, still cannot be saved
+by full-job Save; use the explicit portable binding actions for supported inputs.
+The panel explains those limitations and refuses unsupported Save before changing
+the document. Temporary inputs can still execute through the transient request route. Older
 setups with nondefault legacy environment rotation/intensity are also retained and
 refused for full-job saving until explicitly converted; their values are never erased.
 
@@ -331,10 +442,12 @@ Orbit around, zoom to the cursor, the SpaceMouse, the middle double-click, F6 an
 view or navigation cube all work and
 **Fit Product** frames visible product bodies without including sketches or selection.
 
-While Frame shows the picture's frame, **Fit Product** and the fit on entering Render keep
-the product inside that frame rather than the viewport, so a picture taller than wide moves
-the camera back. The fit on entering waits for the saved setup to load, so it frames that
-setup's aspect, not the draft it replaces. `render.camera.fit` takes the picture's `aspect`
+In the normal workflow, **Fit Product**, entry fit, product drawing, navigation,
+live capture and picking always use the active output frame inside the free canvas.
+Selecting Shot, Sampling, Effects or Output changes neither its camera nor aspect;
+a portrait output therefore stays portrait in every editor. Entry fit waits for
+the saved setup to load. The previous Frame-only projection policy remains behind
+**Use previous Render image defaults**. `render.camera.fit` takes the picture's `aspect`
 (width over height, 0.000001 to 1000000, default 1) and refuses a fit whose camera would be
 out of range, leaving the current camera as it was.
 
@@ -343,7 +456,8 @@ and unsupported modes remain saved intent: the strict resolver reports the unsup
 viewport request. **Use Integrated Preview** is an explicit draft change, never an
 automatic fallback. The method selector describes the desired image execution independently of the
 installed host. It does not claim support for a saved final-mode or external-engine
-preference. Saved image settings do not change the fixed live product preview.
+preference. The integrated schematic fallback keeps its existing drawing policy;
+its normal-workflow framing still follows the active output aspect.
 
 ## Host capabilities and resources
 
@@ -481,8 +595,11 @@ Frame's floating panel offers five aspect presets and Custom, plus composition g
 Clicking a preset saves its output dimensions in one undo step; Custom preserves dimensions.
 `view.render_frame` independently validates and echoes transient aspect/guide preferences;
 headless calls never edit a design. Guides are per-document UI state, never saved in design JSON.
-The frame and its size/lens chips appear only in Frame or the Shot editor. Product preview,
-navigation and picking use the fitted frame aspect; image jobs and the Result canvas omit guides.
+Composition guides and their size/lens chips appear only in Frame or the Shot editor.
+Their transient/selected-shot aspect is independent of the active output camera;
+hiding or changing those guides never changes normal-workflow product framing,
+live pixels or picking. Image jobs and the Result canvas omit guides. Retained
+results and comparison images continue to use their captured dimensions.
 
 The shared Browser lists Environment (with its source), Lights, saved Shots,
 Objects and Output (with image dimensions and format). Shots **+** opens the
@@ -535,7 +652,7 @@ Output, each with a summary and its own editor. Sampling owns Quality, GPU Path
 tracing, Adaptive, Glass transport and CPU ray tracing. Method-specific controls
 stay visible and faded with their reason on other methods. Effects owns Tone,
 Creative looks, Lens effects, Finishing and Regrade, in that order; its controls
-need GPU path tracing. Effect edits patch the saved job with `render.settings.set`;
+support CPU ray tracing and GPU path tracing. Effect edits patch the saved job with `render.settings.set`;
 opening an editor never saves or switches methods. Check owns the preflight notes,
 This request, Renderers and collapsed Under the hood diagnostics. The legacy
 Effects, Output and Diagnostics pages call the same editors.
@@ -544,11 +661,32 @@ The stage bar's Check chip and Output's note count open Check. Check now runs th
 read-only `render.preflight` without admitting a job. Notes offer links to their
 owning editor. Copy report and diagnostic JSON use `render.preflight.copy` and the
 platform clipboard queue; headless calls only validate and echo bounded text.
-Named quality presets, EXR export and rendering all shots remain faded with their
-existing reasons. Destination selection uses the completed-image export picker.
+GPU Draft, Balanced and High apply a fresh canonical fixed budget in one undo step.
+Sampling shows resolution, samples, path depth, seed and noise reduction; hovering
+the chips lists all three budgets. Imported library specifications keep their
+acknowledged review. The saved camera and other effects stay
+intact; an incompatible combination leaves the draft unchanged. The highlight
+follows the actual budget fields and returns to Custom after an edit. These GPU
+budgets remain disabled on CPU and Raster. CPU keeps its own sample controls;
+Raster remains the schematic method. EXR export is
+available only for the selected completed image with an actual retained master.
+Destination selection uses the completed-image export picker. The pinned Render
+Image / All shots footer starts the active setup or queues all saved shots through
+`render.batch`; opening the editor never starts a job.
 
 Render and Cancel stay in the stage bar. Active jobs also show a single-row progress
 pill with Cancel. The result viewer retains Copy, export, close, Fit/100% and shared
 pan/zoom. R starts the active setup; Escape closes the image without cancelling its job.
 
 Preferences › Graphics offers “Use previous Render preview geometry budget” (`render_previous_geometry_budget`). It restores the fixed limit (512 MiB on 64-bit desktop, 128 MiB elsewhere); by default, desktop previews use the device-based budget. Changes apply to the next preview frame.
+
+
+CPU Glass uses the common body editor and stable saved optical targets. Fixed
+jobs retain the strict sheet/axis-aligned-box subset and refuse scattering or
+transmitted shadows. Explicit Indirect lighting selects the certified general
+Glass path, including its conditional thin-shadow and scattering contracts.
+Reopened controls preserve the actual saved numbers. Edits are prospective;
+Save/replacement/Remove own document changes. Unchanged hydration and Discard do
+not save or start a final job. The multi-target merge in this change does not
+imply an automatic Save. See [general Glass](render-cpu-general-glass.md) and
+[the qualification record](render-parity.md#qualification).

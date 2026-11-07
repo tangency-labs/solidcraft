@@ -4,6 +4,7 @@
 
 use crate::scenario::Harness;
 use serde_json::json;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::sketch::CurveKind;
 
 fn harness(command: &str) -> Harness {
@@ -55,7 +56,7 @@ fn clicks_that_move_place_their_points() {
         // The points went where the button was let go: the first one is at its spot.
         let sid = h.app.session.active_sketch.unwrap();
         let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
-        let first = solidcraft_engine::geom::Vec2::new(points[0][0], points[0][1]);
+        let first = solidcore_record::Vec2::new(points[0][0], points[0][1]);
         // (A three-point circle keeps only its centre: through all three, its radius is 20.)
         let through = sk.curves.iter().any(|c| matches!(c.kind, CurveKind::Circle { r, .. } if (r - 20.0).abs() < 0.5));
         assert!(sk.points.iter().any(|p| (p.pos - first).len() < 0.5) || through, "{command}: no point at {first:?}");
@@ -82,7 +83,7 @@ fn a_short_drag_starts_a_rectangle_circle_or_polygon_by_clicks() {
         assert_eq!(curves(&h), count, "{command}: {:?}", h.app.status);
         let sid = h.app.session.active_sketch.unwrap();
         let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
-        let far = solidcraft_engine::geom::Vec2::new(second[0], second[1]);
+        let far = solidcore_record::Vec2::new(second[0], second[1]);
         let circle = |c: &solidcraft_engine::sketch::Curve| matches!(c.kind, CurveKind::Circle { r, .. } if (r - far.len()).abs() < 0.5);
         let on_shape = sk.points.iter().any(|p| (p.pos - far).len() < 0.5) || sk.curves.iter().any(circle);
         assert!(on_shape, "{command}: the second click wasn't where it was let go");
@@ -98,7 +99,7 @@ fn drag(h: &mut Harness, from: [f64; 2], to: [f64; 2]) {
 }
 
 /// The lines of the sketch being edited, end to end.
-fn lines(h: &Harness) -> Vec<[solidcraft_engine::geom::Vec2; 2]> {
+fn lines(h: &Harness) -> Vec<[solidcore_record::Vec2; 2]> {
     let sid = h.app.session.active_sketch.unwrap();
     let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
     (0..sk.curves.len())
@@ -120,7 +121,7 @@ fn a_line_drag_draws_one_line_with_the_preference() {
     drag(&mut h, [-20.0, 0.0], [20.0, 10.0]);
     let drawn = lines(&h);
     assert_eq!(drawn.len(), 1, "one line: {:?}", h.app.status);
-    let near = |p: solidcraft_engine::geom::Vec2, q: [f64; 2]| (p - solidcraft_engine::geom::Vec2::new(q[0], q[1])).len() < 0.5;
+    let near = |p: solidcore_record::Vec2, q: [f64; 2]| (p - solidcore_record::Vec2::new(q[0], q[1])).len() < 0.5;
     assert!(near(drawn[0][0], [-20.0, 0.0]) && near(drawn[0][1], [20.0, 10.0]), "from the press to the release: {drawn:?}");
     let tool = h.app.tool.as_ref().expect("the Line tool stays on");
     assert_eq!((tool.cmd, tool.pts.len()), ("sketch.line", 0), "no chain goes on from the line's end");
@@ -160,7 +161,7 @@ fn without_the_preference_a_line_drag_is_a_click_where_it_is_let_go() {
     assert!(lines(&h).is_empty());
     let tool = h.app.tool.as_ref().unwrap();
     assert_eq!(tool.pts.len(), 1);
-    assert!((tool.pts[0].0 - solidcraft_engine::geom::Vec2::new(20.0, 10.0)).len() < 0.5, "{:?}", tool.pts);
+    assert!((tool.pts[0].0 - solidcore_record::Vec2::new(20.0, 10.0)).len() < 0.5, "{:?}", tool.pts);
 }
 
 /// The preference saves, and the Sketch page's checkbox, Restore Defaults and Cancel treat it as
@@ -197,6 +198,26 @@ fn chain_with_a_line(on: bool) -> Harness {
     h
 }
 
+/// #10653: Tangent Arc's first click on a line between its ends is refused at once, with the
+/// tool's hint as the error, and picks nothing; a click on the line's end starts the arc.
+#[test]
+fn a_tangent_arc_first_click_off_a_curves_end_is_refused_at_once() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[20,0]],"connect":false,"infer":false})).unwrap();
+    h.app.cam.distance = 120.0;
+    h.settle();
+    h.step(&json!({"start":"sketch.arc.tangent"})).unwrap();
+    click_at(&mut h, [10.0, 0.0]);
+    let refused = h.app.status.as_ref().is_some_and(|s| s.2 && s.0.contains("click the end of a line or arc"));
+    assert!(refused, "{:?}", h.app.status);
+    assert_eq!(h.app.tool.as_ref().map(|t| t.pts.len()), Some(0), "nothing picked");
+    click_at(&mut h, [20.0, 0.0]);
+    click_at(&mut h, [30.0, 10.0]);
+    assert_eq!(curves(&h), 2, "{:?}", h.app.status);
+    assert!(sketch(&h).curves.iter().any(|c| matches!(c.kind, CurveKind::Arc { .. })), "the arc from the line's end");
+}
+
 fn click_at(h: &mut Harness, at: [f64; 2]) {
     h.step(&json!({"move":{"sketch":at}})).unwrap();
     h.frames(2);
@@ -225,9 +246,7 @@ fn sketch(h: &Harness) -> solidcraft_engine::sketch::Sketch {
 }
 
 /// The arc last drawn: centre, radius and where it starts and ends as drawn.
-fn last_arc(
-    sk: &solidcraft_engine::sketch::Sketch,
-) -> (solidcraft_engine::geom::Vec2, f64, solidcraft_engine::geom::Vec2, solidcraft_engine::geom::Vec2) {
+fn last_arc(sk: &solidcraft_engine::sketch::Sketch) -> (solidcore_record::Vec2, f64, solidcore_record::Vec2, solidcore_record::Vec2) {
     let (index, curve) = sk.curves.iter().enumerate().rfind(|(_, c)| matches!(c.kind, CurveKind::Arc { .. })).expect("an arc");
     let CurveKind::Arc { c, a, b } = curve.kind else { panic!("not an arc: {curve:?}") };
     let centre = sk.point(c).unwrap();
@@ -265,9 +284,9 @@ fn a_rest_on_the_last_point_makes_the_next_click_a_tangent_arc_and_back_to_a_lin
     assert_eq!(curves(&h), 2, "{:?}", h.app.status);
     let sk = sketch(&h);
     let (centre, radius, start, end) = last_arc(&sk);
-    assert!(centre.dist(solidcraft_engine::geom::Vec2::new(0.0, 10.0)) < 1e-6, "centre {centre:?}");
+    assert!(centre.dist(solidcore_record::Vec2::new(0.0, 10.0)) < 1e-6, "centre {centre:?}");
     assert!((radius - 10.0).abs() < 1e-6, "radius {radius}");
-    assert!(start.dist(solidcraft_engine::geom::Vec2::ZERO) < 1e-6 && end.dist(solidcraft_engine::geom::Vec2::new(10.0, 10.0)) < 1e-6);
+    assert!(start.dist(solidcore_record::Vec2::ZERO) < 1e-6 && end.dist(solidcore_record::Vec2::new(10.0, 10.0)) < 1e-6);
     let (line, arc) = (sk.curves.first().unwrap(), sk.curves.get(1).unwrap());
     let shared = sk.resolve_point(&format!("{}.end", line.id)) == sk.resolve_point(&format!("{}.start", arc.id));
     assert!(shared, "the arc starts on the line's own end");
@@ -488,10 +507,10 @@ fn arcs_follow_one_another_each_tangent_to_the_last_and_a_pause_after_one_switch
     assert_eq!(curves(&h), 3, "{:?}", h.app.status);
     let sk = sketch(&h);
     let (centre, radius, start, end) = last_arc(&sk);
-    assert!(centre.dist(solidcraft_engine::geom::Vec2::new(20.0, 10.0)) < 1e-6, "centre {centre:?}");
+    assert!(centre.dist(solidcore_record::Vec2::new(20.0, 10.0)) < 1e-6, "centre {centre:?}");
     assert!((radius - 10.0).abs() < 1e-6, "radius {radius}");
     assert!(
-        start.dist(solidcraft_engine::geom::Vec2::new(10.0, 10.0)) < 1e-6 && end.dist(solidcraft_engine::geom::Vec2::new(20.0, 20.0)) < 1e-6,
+        start.dist(solidcore_record::Vec2::new(10.0, 10.0)) < 1e-6 && end.dist(solidcore_record::Vec2::new(20.0, 20.0)) < 1e-6,
         "from {start:?} to {end:?}"
     );
     assert!(

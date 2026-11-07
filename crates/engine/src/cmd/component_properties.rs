@@ -1,10 +1,12 @@
 //! Physical properties of an assembly placement, with original body material assignments.
+use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::{Document, Mat};
+use solidcraft_geom::Aabb3;
 use solidcraft_geom::inertia::{self, Tensor3};
-use solidcraft_geom::{Aabb3, Vec3};
 
 use crate::params::bad;
 use crate::{Result, Session};
@@ -35,13 +37,7 @@ fn linear(m: &Mat) -> Tensor3 {
 }
 
 fn placed_doc(s: &Session) -> Document {
-    let mut doc = (*s.doc).clone();
-    for occurrence in &mut doc.occurrences {
-        if let Some(transform) = s.pending_moves.get(&occurrence.id) {
-            occurrence.transform = *transform;
-        }
-    }
-    doc
+    s.design_document().into_owned()
 }
 
 /// A property total must cover the entire assembly. The display traversal intentionally
@@ -216,7 +212,7 @@ fn properties(s: &Session, doc: &Document, selected: &[u64], descendants: bool, 
     let selected_placements = if selected.is_empty() {
         subtree(doc, (0, Vec::new(), solidcraft_doc::IDENTITY), descendants, cmd)?
     } else {
-        let placement = s.occurrence_placement(selected).map_err(|e| bad(cmd, e.to_string()))?;
+        let placement = s.occurrence_placement_with(selected, &s.uncaptured_moves()).map_err(|e| bad(cmd, e.to_string()))?;
         subtree(doc, (placement.component, selected.to_vec(), placement.world), descendants, cmd)?
     };
     // Each component's bodies (with their index in the model), the timeline looked up once rather
@@ -238,7 +234,12 @@ fn properties(s: &Session, doc: &Document, selected: &[u64], descendants: bool, 
     #[cfg(test)]
     work::count(|w| w.spreads += spread_bodies.len());
     let spreads = solidcraft_kernel::map_on_threads(&spread_bodies, 16, |&i| {
-        state.bodies.get(i).and_then(|b| solidcraft_io::mass_properties(&b.body).ok().flatten()).and_then(|m| m.gyration())
+        let body = state.bodies.get(i)?;
+        let mut measured = solidcraft_io::mass_properties(&body.body).ok().flatten()?;
+        if let Some(sheet) = state.sheets.iter().find(|sheet| sheet.body == body.definition_name()) {
+            sheet.correct_perforation_mass_properties(&mut measured, &solidcraft_doc::IDENTITY).ok()?;
+        }
+        measured.gyration()
     });
     let spread: BTreeMap<usize, Tensor3> = spread_bodies.into_iter().zip(spreads).filter_map(|(i, g)| Some((i, g.flatten()?))).collect();
     // A window waiting for the result (the Properties window) sees how far it is and can stop it.
@@ -258,7 +259,17 @@ fn properties(s: &Session, doc: &Document, selected: &[u64], descendants: bool, 
             }
             done += 1;
             let transform: Mat = doc.model_body_offset(body).map(|offset| solidcraft_doc::mat_mul(&transform, offset)).unwrap_or(transform);
-            let measured = measure_placed(body, transform)?;
+            let mut measured = measure_placed(body, transform)?;
+            if let Some(sheet) = state.sheets.iter().find(|sheet| sheet.body == body.definition_name() && !sheet.perforations.is_empty()) {
+                let mut corrected = body.measure()?;
+                corrected.volume = measured.volume;
+                corrected.area = measured.area;
+                corrected.centroid = measured.centroid;
+                sheet.correct_perforation_properties(&mut corrected, &transform)?;
+                measured.volume = corrected.volume;
+                measured.area = corrected.area;
+                measured.centroid = corrected.centroid;
+            }
             let density = doc.density(&body.name);
             let body_mass = measured.volume * density / 1000.0;
             let closed = measured.closed;

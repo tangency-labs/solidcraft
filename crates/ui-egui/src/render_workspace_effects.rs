@@ -74,21 +74,12 @@ pub(super) fn layer_actions(app: &SolveApp, ui: &mut egui::Ui, prefix: &str, sel
     (movement, remove)
 }
 
-pub(super) fn aging_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
-    super::wear::controls(app, ui);
-    if app.render_workspace.view.method != ImageMethod::GpuRaytrace {
-        return;
-    }
-    let title = app.tr("render.aging_airborne").to_string();
-    ui_kit::section(ui, "render_aging_atmosphere", &title, false, |ui| {
-        note(app, ui, "render.aging_airborne_help");
-        super::environment::atmosphere(app, ui);
-    });
-}
-
 pub(super) fn presentation_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
-    ui_kit::banner(ui, ui_kit::AssistantTone::Neutral, |ui| note(app, ui, "render.children.effects_banner"));
-    let enabled = app.render_workspace.view.method == ImageMethod::GpuRaytrace;
+    ui_kit::banner(ui, ui_kit::AssistantTone::Neutral, |ui| note(app, ui, "render.presentation_banner"));
+    let enabled = app.render_workspace.view.method != ImageMethod::Raster;
+    if app.render_workspace.view.method == ImageMethod::CpuRaytrace {
+        note(app, ui, "render.output_presentation_limits");
+    }
     ui.add_enabled_ui(enabled, |ui| presentation_editor(app, ui));
 }
 fn presentation_editor(app: &mut SolveApp, ui: &mut egui::Ui) {
@@ -113,6 +104,15 @@ fn presentation_editor(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
         });
         crate::scenario::publish_target("render:tone-map", response.response.rect);
+        let label = app.tr("render.studio_denoise").to_string();
+        let response = ui_kit::checkbox(ui, &label, &mut app.render_workspace.view.studio.denoise);
+        crate::scenario::publish_target("render:denoise-enable", response.rect);
+        if app.render_workspace.view.studio.denoise {
+            note(app, ui, "render.studio_denoise_help");
+            if app.render_workspace.view.method == ImageMethod::CpuRaytrace {
+                note(app, ui, "render.cpu_denoise_help");
+            }
+        }
     });
     let mut editor = std::mem::take(&mut app.render_workspace.view.inspector.effects);
     let before = app.render_workspace.view.studio.finishing;
@@ -253,6 +253,7 @@ fn presentation_editor(app: &mut SolveApp, ui: &mut egui::Ui) {
 /// Output edits save one numerical job patch; merely revealing Effects is read-only.
 /// Both the legacy page and the Browser child use this command-backed editor.
 pub(super) fn output_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let before_setup = setups::draft(app);
     let before = app.render_workspace.view.studio.clone();
     let dirty = app.render_workspace.view.dirty;
     presentation_controls(app, ui);
@@ -260,15 +261,10 @@ pub(super) fn output_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     if (before.finishing, before.tone_map, before.denoise, before.linear_exr) == (after.finishing, after.tone_map, after.denoise, after.linear_exr) {
         return;
     }
-    let result = setups::snapshot(app).and_then(|setup| {
-        let name = app.render_workspace.view.name.clone();
-        app.run("render.settings.set", serde_json::json!({"name":name,"set":{"job":setup.job}})).map(|_| ())
-    });
+    let result = before_setup.and_then(|setup| setups::persist_editor(app, &setup));
     if let Err(error) = result {
         app.render_workspace.view.studio = before;
         app.render_workspace.view.dirty = dirty;
         app.set_status(error, true);
-    } else {
-        app.render_workspace.view.dirty = true;
     }
 }

@@ -25,7 +25,7 @@ pub(crate) fn decoration(app: &SolveApp, names: &[String]) -> Decoration {
     if !super::active(app) {
         return Decoration::default();
     }
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let bodies: Vec<_> = names.iter().filter_map(|name| state.body(name)).collect();
     let Some(body) = bodies.first() else { return Decoration::default() };
     let look = object_look(app, body);
@@ -51,7 +51,7 @@ fn object_look(app: &SolveApp, body: &ModelBody) -> Option<Look> {
 }
 
 pub(crate) fn same_look(app: &SolveApp, names: &[String]) -> bool {
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let mut looks = names.iter().filter_map(|name| state.body(name)).map(|body| app.session.doc.model_display_look(body));
     let Some(first) = looks.next() else { return false };
     looks.all(|look| look == first)
@@ -70,7 +70,7 @@ fn section(app: &mut SolveApp, ui: &mut egui::Ui, key: &str) -> bool {
     let open = browser::is_open(app, &id, true);
     let label = app.tr(&format!("render.tree_{key}")).to_string();
     let add_label = app.tr(if key == "lights" { "render.tree_add_light" } else { "render.tree_add_shot" }).to_string();
-    let pending = app.tr("render.light_backend_limit").to_string();
+    let pending = app.tr("render.method_limit_raster").to_string();
     let actions = [ui_kit::TreeAction {
         icon: "plus",
         hover_only: false,
@@ -80,7 +80,7 @@ fn section(app: &mut SolveApp, ui: &mut egui::Ui, key: &str) -> bool {
     }];
     let row = browser::draw_row(
         ui,
-        ui.id().with(&id),
+        ui.scope_id().with(&id),
         &Row {
             label: &label,
             name: true,
@@ -92,7 +92,7 @@ fn section(app: &mut SolveApp, ui: &mut egui::Ui, key: &str) -> bool {
             secondary: &match key {
                 "lights" => light_types(app).len(),
                 "shots" => app.session.doc.render.setups.len(),
-                _ => app.session.world_state().bodies.len(),
+                _ => crate::open_meshing::session_world(&app.session).bodies.len(),
             }
             .to_string(),
             fold: Some(open),
@@ -105,13 +105,13 @@ fn section(app: &mut SolveApp, ui: &mut egui::Ui, key: &str) -> bool {
         crate::scenario::publish_target(&id, rect);
     }
     if row.actions.iter().any(|r| r.clicked()) {
-        // The existing Shots manager owns naming and saving. This navigation never saves.
+        // Shot naming and saving use the existing Save shot prompt.
         if key == "lights" {
             if let Err(error) = super::light::edit(app, "render.lights.add", None, Some(json!({"kind":"area"}))) {
                 app.set_status(error, true);
             }
         } else {
-            app.start("render.settings.get");
+            app.start("render.settings.set");
         }
     }
     if row.clicked && key == "lights" {
@@ -143,6 +143,11 @@ pub(crate) fn light_types(app: &SolveApp) -> Vec<&'static str> {
 }
 pub(crate) fn environment(app: &SolveApp) -> (String, String) {
     let view = &app.render_workspace.view;
+    if view.method == ImageMethod::GpuRaytrace && view.studio.environment == studio::Environment::None && view.studio.lighting_enabled {
+        // An explicit constant, including black, is not the implicit studio.
+        // It owns RGB radiance, not the legacy draft rotation/intensity pair.
+        return (app.tr("render.tree_constant").to_string(), String::new());
+    }
     let fixed = || (app.tr("render.tree_fixed_studio").to_string(), view.draft.environment_rotation, view.draft.environment_intensity);
     let source = |input: &hdr::Input| match input {
         hdr::Input::EmbeddedResource { resource } => format!("{} {resource}", app.tr("render.tree_hdr")),
@@ -154,6 +159,7 @@ pub(crate) fn environment(app: &SolveApp) -> (String, String) {
     let (name, rotation, intensity) = match view.method {
         ImageMethod::CpuRaytrace => match view.cpu.environment {
             cpu::Environment::Hdr => (source(&view.cpu.hdr), view.cpu.rotation_rad, view.cpu.intensity),
+            cpu::Environment::Sky => (app.tr("render.studio_sky").into(), view.cpu.rotation_rad, view.cpu.intensity),
             cpu::Environment::Constant => (app.tr("render.tree_constant").into(), 0.0, view.cpu.intensity),
             cpu::Environment::None => fixed(),
         },
@@ -180,7 +186,7 @@ pub(crate) fn sections(app: &mut SolveApp, ui: &mut egui::Ui) {
     let environment_label = app.tr("render.tree_environment").to_string();
     let row = browser::draw_row(
         ui,
-        ui.id().with("render_environment"),
+        ui.scope_id().with("render_environment"),
         &Row {
             label: &environment_label,
             name: true,
@@ -200,7 +206,6 @@ pub(crate) fn sections(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     if row.clicked {
         select(app, "environment", None);
-        app.render_workspace.view.inspector.page = inspector::Page::Environment;
     }
     if section(app, ui, "lights") {
         for (index, light) in super::light::rows(app).unwrap_or_default().iter().enumerate() {
@@ -213,7 +218,7 @@ pub(crate) fn sections(app: &mut SolveApp, ui: &mut egui::Ui) {
             let actions = [ui_kit::TreeAction { icon: "lookat", hover_only: true, label: &solo_label, reason: None, target: &solo_target }];
             let row = browser::draw_row(
                 ui,
-                ui.id().with(("render_light", id)),
+                ui.scope_id().with(("render_light", id)),
                 &Row {
                     depth: 1,
                     label: &label,
@@ -243,7 +248,6 @@ pub(crate) fn sections(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             if row.clicked {
                 select(app, "light", Some(id));
-                app.render_workspace.view.inspector.page = inspector::Page::Lighting;
             }
         }
     }
@@ -253,7 +257,7 @@ pub(crate) fn sections(app: &mut SolveApp, ui: &mut egui::Ui) {
             let active = name == app.render_workspace.view.name;
             let row = browser::draw_row(
                 ui,
-                ui.id().with(("render_shot", &name)),
+                ui.scope_id().with(("render_shot", &name)),
                 &Row {
                     depth: 1,
                     label: &name,
@@ -302,7 +306,7 @@ pub(crate) fn output(app: &mut SolveApp, ui: &mut egui::Ui) {
     let subtitle = format!("{size} · {format}");
     let row = browser::draw_row(
         ui,
-        ui.id().with("render_output"),
+        ui.scope_id().with("render_output"),
         &Row {
             label: app.tr("render.tree_output"),
             icon: "render_image",
@@ -326,7 +330,7 @@ pub(crate) fn output(app: &mut SolveApp, ui: &mut egui::Ui) {
         let subtitle = crate::render_workspace::output_child_summary(app, kind);
         let row = browser::draw_row(
             ui,
-            ui.id().with(("render_output_child", kind)),
+            ui.scope_id().with(("render_output_child", kind)),
             &Row {
                 depth: 1,
                 label: app.tr(key),
@@ -353,7 +357,7 @@ pub(crate) struct LookGroup {
 
 pub(crate) fn groups(app: &SolveApp) -> Vec<LookGroup> {
     let mut groups: Vec<LookGroup> = Vec::new();
-    for body in &app.session.world_state().bodies {
+    for body in &crate::open_meshing::session_world(&app.session).bodies {
         for look in app.session.doc.model_used_looks(body) {
             if let Some(group) = groups.iter_mut().find(|g| g.look == look) {
                 group.objects.push(body.name.clone());
@@ -379,7 +383,7 @@ fn wear(app: &mut SolveApp, ui: &mut egui::Ui) {
     let subtitle = wear_subtitle(app);
     let row = browser::draw_row(
         ui,
-        ui.id().with("render_wear"),
+        ui.scope_id().with("render_wear"),
         &Row {
             depth: 1,
             label: app.tr("render.wear_title"),
@@ -423,7 +427,7 @@ pub(crate) fn objects(app: &mut SolveApp, ui: &mut egui::Ui, hover_bodies: &mut 
         );
         let row = browser::draw_row(
             ui,
-            ui.id().with(("render_look", &key)),
+            ui.scope_id().with(("render_look", &key)),
             &Row {
                 depth: 1,
                 label: &label,
@@ -443,7 +447,7 @@ pub(crate) fn objects(app: &mut SolveApp, ui: &mut egui::Ui, hover_bodies: &mut 
             browser::toggle(app, &key, true);
         }
         let source = group.objects.first().and_then(|name| {
-            let state = app.session.world_state();
+            let state = crate::open_meshing::session_world(&app.session);
             let body = state.body(name)?;
             let face = if app.session.doc.model_display_look(body) == group.look {
                 None
@@ -481,7 +485,7 @@ pub(crate) fn objects(app: &mut SolveApp, ui: &mut egui::Ui, hover_bodies: &mut 
                 });
                 let row = browser::draw_row(
                     ui,
-                    ui.id().with((&key, &name)),
+                    ui.scope_id().with((&key, &name)),
                     &Row {
                         depth: 2,
                         label: &name,

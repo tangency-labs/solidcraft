@@ -8,6 +8,7 @@
 //! the design gives them (`Feature::link_faces`), so a joint on a linked face stays on that face
 //! when the design changes, as it would inside the design, and reports it when the face is gone.
 
+use solidcraft_geom::prelude::*;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -18,6 +19,12 @@ use solidcraft_doc::{DesignLink, Document, FeatureKind, LinkedBodyProperties, Us
 use super::CommandSpec;
 use super::design_link::{absolute, resolve, stored};
 use crate::params::{bad, str_, vec3};
+use crate::schema::component_link::{
+    BreakLinkParams, BreakLinkResult, CopiesParams, CopiesResult, DesignInserted, ExtractParams, ExtractResult, InsertDesignParams,
+    InsertDesignResult, JointDiagnostic, LinkFailure, LinkInfo, LinksParams, LinksResult, RelinkParams, RelinkResult, ReplaceWithLinkParams,
+    ReplaceWithLinkResult, UpdateLinksParams, UpdateLinksResult,
+};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 #[path = "component_extract.rs"]
@@ -28,38 +35,81 @@ mod extract;
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod relink_tests;
 
+const INSERT_DESIGN_CONTRACT: TypedContract<InsertDesignParams> = TypedContract::new();
+const UPDATE_LINKS_CONTRACT: TypedContract<UpdateLinksParams> = TypedContract::new();
+const RELINK_CONTRACT: TypedContract<RelinkParams> = TypedContract::new();
+const BREAK_LINK_CONTRACT: TypedContract<BreakLinkParams> = TypedContract::new();
+const EXTRACT_CONTRACT: TypedContract<ExtractParams> = TypedContract::new();
+const COPIES_CONTRACT: TypedContract<CopiesParams> = TypedContract::new();
+const REPLACE_WITH_LINK_CONTRACT: TypedContract<ReplaceWithLinkParams> = TypedContract::new();
+const LINKS_CONTRACT: TypedContract<LinksParams> = TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("component.insert_design", "Insert Design", insert_design).at("SOLID", "ASSEMBLE").icon("component").params(
+    CommandSpec::new("component.insert_design", "Insert Design", crate::checked!("component.insert_design", insert_design))
+        .at("SOLID", "ASSEMBLE")
+        .icon("component")
+        .contract(&INSERT_DESIGN_CONTRACT)
+        .output(output_schema_for::<InsertDesignResult>)
+        .params(
         "path: a .sc design → a new component linked to it, holding its solid bodies as placed in that design and a copy of its design properties; \
-         name? (default: the design's name); parent?: component id or name (default: the active one); translate?: [x,y,z]; \
+         name? (default: the design's name); parent?: component id or name (default: the active one); \
+         translate?: [x,y,z] in mm from the destination parent's origin (default [0,0,0], also with reuse); \
          reuse?: bool (default false): insert a free occurrence, reusing an existing link to the same file when available",
     ),
-    CommandSpec::new("component.update_links", "Update Links", update_links).icon("update").params(
+    CommandSpec::new("component.update_links", "Update Links", crate::checked!("component.update_links", update_links))
+        .icon("update")
+        .contract(&UPDATE_LINKS_CONTRACT)
+        .output(output_schema_for::<UpdateLinksResult>)
+        .params(
         "component?: id or name (default: every linked component); components?: a list of ids or names, which goes on past a design it \
          cannot read (that one keeps its bodies, is named in failed and gets a warning) — reads the linked designs again and replaces \
          their bodies where they changed, as one undo step; → updated, unchanged, failed ([{component, name, error}]), warnings (also \
          joints whose faces are gone or that no longer solve)",
     ),
-    CommandSpec::new("component.relink", "Relink Source", relink).icon("update").params(
+    CommandSpec::new("component.relink", "Relink Source", crate::checked!("component.relink", relink))
+        .icon("update")
+        .contract(&RELINK_CONTRACT)
+        .output(output_schema_for::<RelinkResult>)
+        .params(
         "component: id or name of a linked component; path: a saved design (.sc or .json) — replaces the source and linked bodies for all its occurrences, preserving identities and placements; returns path, previous_path, warnings, joint_errors and joint_conflicts",
     ),
-    CommandSpec::new("component.break_link", "Break Link", break_link)
+    CommandSpec::new("component.break_link", "Break Link", crate::checked!("component.break_link", break_link))
         .icon("break")
+        .contract(&BREAK_LINK_CONTRACT)
+        .output(output_schema_for::<BreakLinkResult>)
         .params("component: id or name of a linked component — keeps its bodies as they are and forgets the design file"),
-    CommandSpec::new("component.extract", "Extract to File", extract::extract).icon("export").params(
+    CommandSpec::new("component.extract", "Extract to File", crate::checked!("component.extract", extract::extract))
+        .icon("export")
+        .contract(&EXTRACT_CONTRACT)
+        .output(output_schema_for::<ExtractResult>)
+        .params(
         "component: id or name of a component that is not linked; path: the .sc design to write → its history, subcomponents and their joints \
          move to that design, and the component becomes linked to it (as component.insert_design makes it); returns path, file, feature, bodies, \
          notices (what stays behind), warnings and copies (components that build the same bodies: see component.replace_with_link)",
     ),
-    CommandSpec::new("component.copies", "Find Identical Copies", extract::copies).icon("inspect").noundo().params(
+    CommandSpec::new("component.copies", "Find Identical Copies", crate::checked!("component.copies", extract::copies))
+        .icon("inspect")
+        .noundo()
+        .contract(&COPIES_CONTRACT)
+        .output(output_schema_for::<CopiesResult>)
+        .params(
         "component: id or name of a linked component → copies: [{component, name}], the components not linked whose own history builds the same bodies",
     ),
-    CommandSpec::new("component.replace_with_link", "Replace with Link", extract::replace_with_link).icon("chain").params(
+    CommandSpec::new("component.replace_with_link", "Replace with Link", crate::checked!("component.replace_with_link", extract::replace_with_link))
+        .icon("chain")
+        .contract(&REPLACE_WITH_LINK_CONTRACT)
+        .output(output_schema_for::<ReplaceWithLinkResult>)
+        .params(
         "component or components: [ids or names] of components that are not linked; with: a linked component, or path: a .sc design \
          (its link here, else a new linked component) → each component's history goes and its placements become placements of the linked \
          component; refused when its bodies are not the same as the link's; returns component, name, replaced and warnings",
     ),
-    CommandSpec::new("component.links", "List Links", list_links).icon("chain").noundo().params(
+    CommandSpec::new("component.links", "List Links", crate::checked!("component.links", list_links))
+        .icon("chain")
+        .noundo()
+        .contract(&LINKS_CONTRACT)
+        .output(output_schema_for::<LinksResult>)
+        .params(
         "→ linked components: component, name, path, file (resolved), found (null when the file is on a network location not allowed, \
          or names a device: it is not looked for), changed (whether the file is no longer what this design last read: Update Links \
          reads it again; null when not found or the link is older than this record), and then host (the network location) and reason",
@@ -173,11 +223,11 @@ fn read_link(file: &Path, own: Option<&str>) -> Result<Vec<u8>> {
     })
 }
 
-/// The solid bodies of the design at `file`, evaluated, as an Import feature, with the digest of
+/// The solid bodies of the design at `file`, evaluated under `validation`, as an Import feature, with the digest of
 /// the bytes read, which the link keeps ([`DesignLink::file_sha256`], #9739).
-fn linked_bodies_read(file: &Path, own: Option<&str>) -> Result<(Linked, String)> {
+fn linked_bodies_read(file: &Path, own: Option<&str>, validation: solidcraft_kernel::Validation) -> Result<(Linked, String)> {
     let bytes = read_link(file, own)?;
-    Ok((design_bodies(file, &bytes)?, DesignLink::file_digest(&bytes)))
+    Ok((design_bodies(file, &bytes, validation)?, DesignLink::file_digest(&bytes)))
 }
 
 /// Linked files' digests as [`file_sha256`] last worked them out, by file, with the time and
@@ -209,7 +259,7 @@ pub(super) fn file_sha256(file: &Path, own: Option<&str>) -> Option<String> {
 
 /// The solid bodies of `bytes`, the design at `file`, as an Import feature. The model the file
 /// keeps is its evaluation when this build saved it for exactly that design, as when it is opened.
-fn design_bodies(file: &Path, bytes: &[u8]) -> Result<Linked> {
+fn design_bodies(file: &Path, bytes: &[u8], validation: solidcraft_kernel::Validation) -> Result<Linked> {
     #[cfg(test)]
     EVALUATED.with(|n| n.set(n.get() + 1));
     let shown = file.display().to_string();
@@ -221,7 +271,8 @@ fn design_bodies(file: &Path, bytes: &[u8]) -> Result<Linked> {
     } else {
         (solidcraft_io::read_design(bytes).map_err(fail)?, None)
     };
-    let (name, feature, faces, metadata, properties) = session_bodies(&Session::opened_at(doc, saved.as_ref(), Some(&shown)), &shown)?;
+    let (name, feature, faces, metadata, properties) =
+        session_bodies(&Session::opened_at_validating(doc, saved.as_ref(), Some(&shown), validation), &shown)?;
     remember_read(file, digest(bytes), &feature, &faces, &properties);
     Ok((name, feature, faces, metadata, properties))
 }
@@ -232,7 +283,7 @@ fn session_bodies(part: &Session, shown: &str) -> Result<Linked> {
     if let Some(e) = part.model.results.iter().find_map(|r| r.error.clone()) {
         return Err(EngineError::Other(format!("{shown}: the design has a feature that fails ({e}); fix it before linking it")));
     }
-    let world = part.world_state();
+    let world = part.world_state()?;
     let solids: Vec<String> = world.bodies.iter().filter(|b| !b.body.is_mesh()).map(|b| b.name.clone()).collect();
     if solids.is_empty() {
         return Err(EngineError::Other(format!("{shown}: the design has no solid bodies to link")));
@@ -490,11 +541,17 @@ fn component_key(s: &Session, p: &Value, key: &str, cmd: &str) -> Result<u64> {
     s.doc.find_component(&k).ok_or_else(|| bad(cmd, format!("no component `{k}`")))
 }
 
+/// A command's reply as JSON: they build their replies from the types their output schemas
+/// describe, so the two can't drift apart.
+fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
+}
+
 fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.insert_design";
     let given = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "`path` is required"))?;
     let translate = match p.get("translate") {
-        None => solidcraft_geom::Vec3::ZERO,
+        None => solidcore_record::Vec3::ZERO,
         Some(v) => vec3(v).filter(|t| t.is_finite() && t.len() < 1e9).ok_or_else(|| bad(cmd, "`translate` must be [x, y, z] in mm"))?,
     };
     // A network or device path is judged from its text, as given, before anything reads it.
@@ -506,11 +563,16 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
     if p.get("reuse").and_then(Value::as_bool).unwrap_or(false) {
         let existing = s.doc.links.iter().find(|(_, link)| absolute(&resolve(s.path.as_deref(), &link.path)) == file).map(|(id, _)| *id);
         if let Some(component) = existing {
-            let parent = p.get("parent").cloned().unwrap_or_else(|| json!(s.active_component));
-            return super::component::copy_occurrence(s, &json!({"component": component, "parent": parent, "translate": translate}));
+            let parent = if p.get("parent").is_some() { component_key(s, p, "parent", cmd)? } else { s.active_component };
+            // Reuse the definition, not another placement's captured or pending move.
+            // Insert Design places from the parent origin whether the link is new or reused.
+            let mut transform = solidcraft_doc::IDENTITY;
+            transform[3] = [translate.x, translate.y, translate.z, 1.0];
+            let occurrence = s.doc_mut().add_occurrence(component, parent, transform)?;
+            return reply(cmd, InsertDesignResult { inserted: DesignInserted::Reused { occurrence, component }, param_warnings: Vec::new() });
         }
     }
-    let ((design_name, sf, faces, metadata, properties), read) = linked_bodies_read(&file, s.path.as_deref())?;
+    let ((design_name, sf, faces, metadata, properties), read) = linked_bodies_read(&file, s.path.as_deref(), s.validation())?;
     let name = str_(p, "name").filter(|n| !n.trim().is_empty()).map(str::to_string).unwrap_or(design_name);
     let mut create = json!({"name": name, "activate": false});
     // Clipboard insertion uses reuse even for the first paste, which must stay movable.
@@ -547,10 +609,18 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
     inherit_properties(s, comp, &properties)?;
     s.refresh();
     let st = s.model.state();
-    let bodies: Vec<&str> = st.bodies.iter().filter(|b| b.feature == id).map(|b| b.name.as_str()).collect();
-    Ok(
-        json!({"component": comp, "occurrence": occ, "name": name, "feature": id, "path": path, "bodies": bodies, "created_bodies": bodies, "warnings": sf.warnings}),
-    )
+    let bodies: Vec<String> = st.bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect();
+    let inserted = DesignInserted::New {
+        component: comp,
+        occurrence: occ,
+        name,
+        feature: id,
+        path,
+        created_bodies: bodies.clone(),
+        bodies,
+        warnings: sf.warnings,
+    };
+    reply(cmd, InsertDesignResult { inserted, param_warnings: Vec::new() })
 }
 
 fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
@@ -573,7 +643,8 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
     let go_on = p.get("components").is_some();
     let links: Vec<(u64, DesignLink)> =
         s.doc.links.iter().filter(|(c, _)| only.as_ref().is_none_or(|o| o.contains(c))).map(|(c, l)| (*c, l.clone())).collect();
-    let (mut updated, mut unchanged, mut warnings, mut failed) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let (mut updated, mut unchanged, mut warnings): (Vec<String>, Vec<String>, Vec<String>) = (Vec::new(), Vec::new(), Vec::new());
+    let mut failed: Vec<LinkFailure> = Vec::new();
     let count = links.len();
     for (index, (comp, link)) in links.into_iter().enumerate() {
         let cname = s.doc.components.iter().find(|c| c.id == comp).map(|c| c.name.clone());
@@ -587,7 +658,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         let (old, file, bytes) = match read_linked(s, comp, &link) {
             Ok(read) => read,
             Err(e) if go_on => {
-                failed.push(json!({"component": comp, "name": cname, "error": e}));
+                failed.push(LinkFailure { component: comp, name: cname.clone(), error: e.clone() });
                 warnings.push(format!("{cname} keeps its bodies: {e}"));
                 continue;
             }
@@ -619,14 +690,14 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             }
             continue;
         }
-        let (_, sf, faces, _, properties) = match design_bodies(&file, &bytes) {
+        let (_, sf, faces, _, properties) = match design_bodies(&file, &bytes, s.validation()) {
             Ok(read) => read,
             Err(e) if go_on => {
                 // It keeps its bodies, so it has not taken this file in yet.
                 if let Some(kept) = s.doc_mut().links.get_mut(&comp) {
                     kept.file_sha256.clone_from(&link.file_sha256);
                 }
-                failed.push(json!({"component": comp, "name": cname, "error": e.to_string()}));
+                failed.push(LinkFailure { component: comp, name: cname.clone(), error: e.to_string() });
                 warnings.push(format!("{cname} keeps its bodies: {e}"));
                 continue;
             }
@@ -671,8 +742,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
     solidcraft_doc::progress::item(None);
     // None could be read: nothing to take back either.
     if updated.is_empty() && unchanged.is_empty() && !failed.is_empty() {
-        let (name, why) = (failed[0]["name"].as_str().unwrap_or_default(), failed[0]["error"].as_str().unwrap_or_default());
-        return Err(bad(cmd, format!("{name}: {why}")));
+        return Err(bad(cmd, format!("{}: {}", failed[0].name, failed[0].error)));
     }
     s.refresh();
     if let Some(e) = s.doc.links.values().find_map(|l| s.model.result(l.feature).and_then(|r| r.error.clone())) {
@@ -683,7 +753,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         let sol = solidcraft_doc::joints::solve(&s.doc, &s.model.state());
         warnings.extend(sol.errors.iter().chain(&sol.conflicts).map(|(_, name, why)| format!("joint {name}: {why}")));
     }
-    Ok(json!({"updated": updated, "unchanged": unchanged, "warnings": warnings, "failed": failed}))
+    reply(cmd, UpdateLinksResult { updated, unchanged, warnings, failed, param_warnings: Vec::new() })
 }
 
 /// `comp`'s linked design as it was last read (its bodies) and as its file is now, read before
@@ -736,7 +806,7 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // Read/evaluate the candidate before changing anything. Session::execute owns the single
     // undo step and restores both the document and evaluated state on any later failure.
-    let ((_, sf, faces, _, properties), read) = linked_bodies_read(&file, s.path.as_deref()).map_err(|e| bad(cmd, e.to_string()))?;
+    let ((_, sf, faces, _, properties), read) = linked_bodies_read(&file, s.path.as_deref(), s.validation()).map_err(|e| bad(cmd, e.to_string()))?;
     let geometry_changed = match (s.doc.feature(link.feature).map(|f| &f.kind), &sf.kind) {
         (Some(FeatureKind::Import { step: old, .. }), FeatureKind::Import { step, .. }) => old != step,
         _ => true,
@@ -769,25 +839,39 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     // Report the solver's diagnostics. A resolved joint can still describe the wrong
     // connection after a source edit; the reminder above does not depend on solve errors.
     let sol = solidcraft_doc::joints::solve(&s.doc, &s.model.state());
-    let diagnostics =
-        |rows: &[(u64, String, String)]| rows.iter().map(|(id, name, why)| json!({"joint": id, "name": name, "why": why})).collect::<Vec<_>>();
+    let diagnostics = |rows: &[(u64, String, String)]| {
+        rows.iter().map(|(joint, name, why)| JointDiagnostic { joint: *joint, name: name.clone(), why: why.clone() }).collect::<Vec<_>>()
+    };
     for (_, name, why) in sol.errors.iter().chain(&sol.conflicts) {
         warnings.push(format!("joint {name}: {why}"));
     }
     let previous_path = stored(s.path.as_deref(), &resolve(s.path.as_deref(), &link.path));
-    Ok(json!({"component": comp, "feature": link.feature, "path": path, "previous_path": previous_path, "geometry_changed": geometry_changed,
-        "warnings": warnings, "joint_errors": diagnostics(&sol.errors), "joint_conflicts": diagnostics(&sol.conflicts)}))
+    reply(
+        cmd,
+        RelinkResult {
+            component: comp,
+            feature: link.feature,
+            path,
+            previous_path,
+            geometry_changed,
+            warnings,
+            joint_errors: diagnostics(&sol.errors),
+            joint_conflicts: diagnostics(&sol.conflicts),
+            param_warnings: Vec::new(),
+        },
+    )
 }
 
 fn break_link(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.break_link";
     let comp = component_key(s, p, "component", cmd)?;
     let link = s.doc_mut().links.remove(&comp).ok_or_else(|| bad(cmd, "that component is not linked to a design"))?;
-    Ok(json!({"component": comp, "path": stored(s.path.as_deref(), &resolve(s.path.as_deref(), &link.path))}))
+    let path = stored(s.path.as_deref(), &resolve(s.path.as_deref(), &link.path));
+    reply(cmd, BreakLinkResult { component: comp, path, param_warnings: Vec::new() })
 }
 
 fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
-    let links: Vec<Value> = s
+    let links: Vec<LinkInfo> = s
         .doc
         .links
         .iter()
@@ -808,16 +892,24 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
                         .as_ref()
                         .filter(|_| found == Some(true))
                         .and_then(|kept| file_sha256(Path::new(file.as_ref()), s.path.as_deref()).map(|now| now != *kept));
-                    json!({"component": c, "name": name, "path": path, "file": file, "found": found, "changed": changed})
+                    LinkInfo::Looked { component: *c, name, path, file: file.into_owned(), found, changed }
                 }
-                Some(solidcraft_io::vfs::Remote::Network(host)) => json!({"component": c, "name": name, "path": path, "file": file,
-                    "found": null, "host": host, "reason": format!("on the network location \\\\{host}, which is not allowed")}),
-                Some(solidcraft_io::vfs::Remote::Device) => json!({"component": c, "name": name, "path": path, "file": file,
-                    "found": null, "reason": "names a device, not a file"}),
+                Some(solidcraft_io::vfs::Remote::Network(host)) => LinkInfo::Network {
+                    component: *c,
+                    name,
+                    path,
+                    file: file.into_owned(),
+                    found: None,
+                    reason: format!("on the network location \\\\{host}, which is not allowed"),
+                    host,
+                },
+                Some(solidcraft_io::vfs::Remote::Device) => {
+                    LinkInfo::Device { component: *c, name, path, file: file.into_owned(), found: None, reason: "names a device, not a file".into() }
+                }
             }
         })
         .collect();
-    Ok(json!({"links": links}))
+    reply("component.links", LinksResult { links, param_warnings: Vec::new() })
 }
 
 #[cfg(test)]

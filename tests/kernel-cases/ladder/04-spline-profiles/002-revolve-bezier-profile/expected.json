@@ -1,0 +1,10 @@
+{
+ "sources": [],
+ "what": "a profile with a Bezier side (r from 20 to 15 over z 0..30) revolved 360 deg about Z",
+ "source": "analytic",
+ "method": "z(t) = 30 t is linear, so V = pi int r(t)^2 z'(t) dt (exact Gauss) = 34131.160186501; A = disks pi 20^2 + pi 15^2 + 2 pi int r |B'| dt",
+ "body_count": 1,
+ "volume_mm3": 34131.160186501,
+ "area_mm2": 5856.98245447,
+ "faces": 3
+}

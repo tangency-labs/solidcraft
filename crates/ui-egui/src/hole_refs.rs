@@ -11,10 +11,11 @@
 
 use egui::{Color32, Pos2, Stroke, vec2};
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_engine::doc::HoleReference;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::doc::hole_reference::{ReferenceFrame, on_reference_face, reference_frame};
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::{Sel, Session};
 
 use crate::SolveApp;
@@ -34,9 +35,23 @@ pub(crate) const DISTANCES: [&str; 2] = ["Distance 1", "Distance 2"];
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Refs {
     pub distance: [String; 2],
+    /// The model-space text each distance was measured from, while its field still shows the
+    /// rounded form below.
+    exact: [Option<String>; 2],
+    /// The rounded text written into `distance` for that model value.
+    shown: [Option<String>; 2],
     seen: Option<Seen>,
     frame: Option<Framed>,
     focus: Option<usize>,
+}
+
+/// The text that drives the model for reference `k`: the exact measured value while the field
+/// still shows its rounded form, else what the user typed.
+fn model_text(refs: &Refs, k: usize) -> Option<&str> {
+    match (refs.exact.get(k).and_then(Option::as_deref), refs.shown.get(k).and_then(Option::as_deref)) {
+        (Some(exact), Some(shown)) if refs.distance.get(k).is_some_and(|d| d == shown) => Some(exact),
+        _ => refs.distance.get(k).map(String::as_str),
+    }
 }
 
 /// The place, edges and distances the dialog last had in step.
@@ -59,12 +74,12 @@ struct Framed {
 
 /// The reference edge inputs a Single hole's dialog has after its face input.
 pub(crate) fn inputs() -> [SelInput; 2] {
-    REFERENCES.map(|label| SelInput::new(label, EDGES, false))
+    REFERENCES.map(|label| SelInput::new(label, EDGES, false).tip("dialog.reference_edge_tip"))
 }
 
 /// The Cylinder window's inputs: where it stands (a face, or a vertex), then the reference edges.
 pub(crate) fn cylinder_inputs() -> Vec<SelInput> {
-    let mut v = vec![SelInput::new("Face", PLANAR_FACES | FACES | VERTICES, false)];
+    let mut v = vec![SelInput::new("Face", PLANAR_FACES | FACES | VERTICES, false).tip("dialog.cylinder_face_tip")];
     v.extend(inputs());
     v
 }
@@ -154,7 +169,7 @@ fn direction(s: &Session, d: &Dialog, at: Vec3) -> Option<Vec3> {
     if let Kind::Primitive { at: Some((_, normal)), .. } = &d.kind {
         return normal.map(|n| -n);
     }
-    d.extra.get("direction").and_then(vec3).or_else(|| solidcraft_engine::doc::hole_direction_at(&s.world_state(), at))
+    d.extra.get("direction").and_then(vec3).or_else(|| solidcraft_engine::doc::hole_direction_at(&crate::open_meshing::session_world(s), at, &[]))
 }
 
 /// The face's frame at the place for the picked edges (and which reference inputs they are), found
@@ -175,7 +190,7 @@ fn frame(s: &Session, d: &mut Dialog) -> Option<(ReferenceFrame, Vec<usize>)> {
     let picked: Vec<(usize, Vec3)> = edges.iter().enumerate().filter_map(|(k, e)| e.map(|p| (k, p))).collect();
     let found = direction(s, d, at).and_then(|dir| {
         let pts: Vec<(Vec3, Option<&str>)> = picked.iter().map(|(_, p)| (*p, None)).collect();
-        reference_frame(&s.world_state(), at, dir, &pts, true).ok().map(|f| (f, picked.iter().map(|(k, _)| *k).collect()))
+        reference_frame(&crate::open_meshing::session_world(s), at, dir, &pts, true).ok().map(|f| (f, picked.iter().map(|(k, _)| *k).collect()))
     });
     if let Some(refs) = refs_mut(d) {
         refs.frame = Some(Framed { revision: s.revision, place: at, edges, frame: found.clone() });
@@ -186,7 +201,7 @@ fn frame(s: &Session, d: &mut Dialog) -> Option<(ReferenceFrame, Vec<usize>)> {
 /// Keep the distances and the hole's place in step: a new place or a new edge is measured, a
 /// typed distance moves the place there (when it stays on the face). Run before the dialog's
 /// commands are made.
-pub(crate) fn sync(s: &Session, d: &mut Dialog) {
+pub(crate) fn sync(s: &Session, d: &mut Dialog, decimals: u8) {
     if !takes(d) {
         return;
     }
@@ -207,8 +222,10 @@ pub(crate) fn sync(s: &Session, d: &mut Dialog) {
             // Typed: the hole goes to the distances.
             Some(sn) if sn.distance != refs.distance => {
                 let values: Option<Vec<f64>> =
-                    picked.iter().map(|k| refs.distance.get(*k).and_then(|e| s.doc.eval(e, ValueKind::Length).ok())).collect();
-                if let Some(c) = values.and_then(|v| f.place(at, &v).ok()).filter(|c| on_reference_face(&s.world_state(), f, *c)) {
+                    picked.iter().map(|k| model_text(refs, *k).and_then(|e| s.doc.eval(e, ValueKind::Length).ok())).collect();
+                if let Some(c) =
+                    values.and_then(|v| f.place(at, &v).ok()).filter(|c| on_reference_face(&crate::open_meshing::session_world(s), f, *c))
+                {
                     to = c;
                 }
             }
@@ -221,7 +238,13 @@ pub(crate) fn sync(s: &Session, d: &mut Dialog) {
                     if let Some(slot) = refs.distance.get_mut(*k)
                         && (moved || new_edge || slot.trim().is_empty())
                     {
-                        *slot = crate::canvas::format_len(&s.doc, v.max(0.0));
+                        // The field shows the document's length precision; the model keeps the
+                        // measured value until the user edits that field.
+                        let measured = v.max(0.0);
+                        refs.exact[*k] = Some(crate::length_input::model(&s.doc, measured));
+                        let shown = crate::prefs::format_length(measured, &s.doc.units, decimals);
+                        refs.shown[*k] = Some(shown.clone());
+                        *slot = shown;
                     }
                     if new_edge && edges.get(*k).is_some_and(Option::is_some) {
                         refs.focus = Some(*k);
@@ -238,7 +261,7 @@ pub(crate) fn sync(s: &Session, d: &mut Dialog) {
 
 /// The Single hole's (or the Cylinder's) selection rows, each reference edge with its distance on
 /// the row below it once it is picked. Whether Enter was pressed in a distance.
-pub(crate) fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::prefs::OriginPlaneNames) -> bool {
+pub(crate) fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::prefs::OriginPlaneNames, decimals: u8) -> bool {
     let mut enter = false;
     for i in 0..d.inputs.len() {
         crate::dialogs::input_rows_range(d, ui, s, names, i..i + 1);
@@ -250,6 +273,11 @@ pub(crate) fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: 
             && let (Some(label), Some(value)) = (DISTANCES.get(k), refs.distance.get_mut(k))
         {
             enter |= crate::ui_kit::expr_row(ui, label, value);
+            // The field no longer shows the measured value: the user now owns what drives it.
+            if refs.shown[k].as_deref().is_some_and(|shown| shown != value.as_str()) {
+                refs.exact[k] = None;
+                refs.shown[k] = None;
+            }
             // Without value boxes in the view (#9479), a newly picked edge's distance takes the
             // keyboard here, as its box would.
             if refs.focus == Some(k) && !crate::canvas::boxes_shown(ui.ctx()) {
@@ -261,24 +289,31 @@ pub(crate) fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: 
             d.give_keyboard(id);
         }
     }
-    sync(s, d);
+    sync(s, d, decimals);
     enter
 }
 
 /// The `references` OK sends: each picked edge (a point on it) with its distance.
 pub(crate) fn params(d: &Dialog) -> Vec<Value> {
     let Some(refs) = refs(d).filter(|_| takes(d)) else { return Vec::new() };
-    edges(d).iter().zip(&refs.distance).filter_map(|(e, distance)| e.map(|p| json!({"edge": [p.x, p.y, p.z], "distance": distance.trim()}))).collect()
+    edges(d)
+        .iter()
+        .enumerate()
+        .filter_map(|(k, e)| {
+            let distance = model_text(refs, k)?;
+            e.map(|p| json!({"edge": [p.x, p.y, p.z], "distance": distance.trim()}))
+        })
+        .collect()
 }
 
 /// Editing a hole (or a cylinder) with reference edges: the edges picked again where they are
 /// now, their distances, and the place where those distances put it now.
-pub(crate) fn restore(s: &Session, d: &mut Dialog, references: &[HoleReference], names: &[String]) {
+pub(crate) fn restore(s: &Session, d: &mut Dialog, references: &[HoleReference], names: &[String], decimals: u8) {
     if references.is_empty() {
         return;
     }
     let Some(at) = place(d) else { return };
-    let st = s.world_state();
+    let st = crate::open_meshing::session_world(s);
     let edges: Vec<(Vec3, Option<&str>)> = references.iter().enumerate().map(|(k, r)| (r.edge.0, names.get(k).map(String::as_str))).collect();
     let found = direction(s, d, at).and_then(|dir| reference_frame(&st, at, dir, &edges, false).ok());
     let mesh = found.as_ref().and_then(|f| st.body(&f.body)).map(|b| b.mesh());
@@ -298,7 +333,23 @@ pub(crate) fn restore(s: &Session, d: &mut Dialog, references: &[HoleReference],
         if let Some(refs) = refs_mut(d)
             && let Some(slot) = refs.distance.get_mut(k)
         {
-            *slot = r.distance.to_string();
+            // A literal distance shows at the document's precision; its exact value stays for the
+            // model. An expression stays as written, since rounding it would break its parameters.
+            let exact = r.distance.to_string();
+            let literal = if solidcraft_engine::doc::expr::is_literal(&exact) { s.doc.eval(&exact, ValueKind::Length).ok() } else { None };
+            match literal {
+                Some(value) => {
+                    let shown = crate::prefs::format_length(value, &s.doc.units, decimals);
+                    refs.exact[k] = Some(exact);
+                    refs.shown[k] = Some(shown.clone());
+                    *slot = shown;
+                }
+                None => {
+                    *slot = exact;
+                    refs.exact[k] = None;
+                    refs.shown[k] = None;
+                }
+            }
         }
     }
     // The hole where its distances put it now (the part may have changed since it was placed).
@@ -306,7 +357,7 @@ pub(crate) fn restore(s: &Session, d: &mut Dialog, references: &[HoleReference],
     if let Some(f) = &found
         && let Some(refs) = refs(d)
     {
-        let values: Option<Vec<f64>> = refs.distance.iter().take(f.lines.len()).map(|e| s.doc.eval(e, ValueKind::Length).ok()).collect();
+        let values: Option<Vec<f64>> = (0..f.lines.len()).map(|k| model_text(refs, k).and_then(|e| s.doc.eval(e, ValueKind::Length).ok())).collect();
         if let Some(c) = values.and_then(|v| f.place(at, &v).ok()).filter(|c| on_reference_face(&st, f, *c)) {
             to = c;
         }
@@ -322,7 +373,7 @@ pub(crate) fn restore(s: &Session, d: &mut Dialog, references: &[HoleReference],
 /// found as it was made: OK then reports why).
 fn nearest_edge(s: &Session, at: Vec3, p: Vec3) -> Option<Sel> {
     let Some(Sel::Face { body, .. }) = crate::dialogs::face_sel(s, at) else { return None };
-    let st = s.world_state();
+    let st = crate::open_meshing::session_world(s);
     let m = st.body(&body)?.mesh();
     let to = |e: &Vec<Vec3>| e.windows(2).map(|w| p.dist_to_segment(w[0], w[1])).fold(f64::INFINITY, f64::min);
     let index = m.edges.iter().enumerate().map(|(i, e)| (to(e), i)).filter(|(d, _)| d.is_finite()).min_by(|a, b| a.0.total_cmp(&b.0))?.1;
@@ -362,7 +413,7 @@ pub(crate) fn canvas(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter,
         let at = box_beyond(a, b);
         let r = crate::canvas::value_box_in(
             ui,
-            (egui::Id::new(("sc_hole_ref_area", *k)), egui::Id::new(("sc_hole_ref", *k))),
+            (egui::Id::unique(("sc_hole_ref_area", *k)), egui::Id::unique(("sc_hole_ref", *k))),
             label,
             value,
             at,

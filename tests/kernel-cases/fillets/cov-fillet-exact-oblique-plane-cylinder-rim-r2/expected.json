@@ -1,0 +1,33 @@
+{
+ "sources": [],
+ "what": "a cylinder R10 cut by the plane z = 20 + x/2: its elliptical top rim rounded r2",
+ "source": "analytic",
+ "method": "the ball's centre runs on the cylinder R8 and on the plane moved 2 down, so the spine is their ellipse; the contact lines are the ellipse moved along each face's normal, rational, and the round (the circles of the ball between them, rational quadratic arcs whose weights are rational in the ellipse's parameter) is a rational B-spline of degrees (4, 2). V0 = 2000 pi (the plane's tilt cancels round the axis); the round removes 68.775042921067, (1/3) of the flux of the position through the boundary of the material the round removes: the round's surface as the ball's circles about the spine from contact to contact, the strips of the faces between the edge and the contact lines, each written out exactly and integrated by Gauss-Legendre quadrature (24 points a panel). The round's faces, each of those degrees: a closed round is two faces (split at the seam of its closed surface).",
+ "body_count": 1,
+ "volume_mm3": 6214.41026425852,
+ "tolerance": {
+  "rel": 1e-06
+ },
+ "surface_types": [
+  "bspline",
+  "cylinder",
+  "plane"
+ ],
+ "splines": [
+  {
+   "degree": [
+    4,
+    2
+   ]
+  },
+  {
+   "degree": [
+    4,
+    2
+   ]
+  }
+ ],
+ "continuity": {
+  "order": "g1"
+ }
+}

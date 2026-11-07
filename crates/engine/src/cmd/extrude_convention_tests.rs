@@ -123,23 +123,74 @@ fn symmetric_extrude_thin_wall_uses_total_distance_and_to_object_remains_one_sid
     check(&fixture(json!({"to":[0,0,10]})), 0.0, 10.0);
 }
 
+/// The z range of surface body `name`.
+fn sheet_z(s: &Session, name: &str) -> (f64, f64) {
+    assert!(s.model.results.iter().all(|r| r.error.is_none()));
+    let st = s.model.state();
+    let bounds = st.body(name).unwrap().mesh().bounds();
+    (bounds.min.z, bounds.max.z)
+}
+
+fn assert_z(s: &Session, name: &str, lo: f64, hi: f64) {
+    let (z0, z1) = sheet_z(s, name);
+    assert!((z0 - lo).abs() < 1e-7 && (z1 - hi).abs() < 1e-7, "{name}: {z0}..{z1}, want {lo}..{hi}");
+}
+
+/// A symmetric surface extrude reads its distance as a solid one does: the total, split evenly
+/// around the start plane, through a redefine and a save.
 #[test]
-fn surface_extrude_shared_extent_retains_its_existing_per_side_semantics() {
+fn surface_extrude_symmetric_distance_is_the_total_like_solid_extrude() {
     let mut s = fixture(json!({}));
     run(&mut s, "surface.extrude", json!({"sketch":"Square","distance":"10 mm","direction":"symmetric","name":"Sheet","body_name":"Sheet"}));
-    let check_sheet = |s: &Session| {
-        let st = s.model.state();
-        let bounds = st.body("Sheet").unwrap().mesh().bounds();
-        assert!((bounds.min.z + 10.0).abs() < 1e-7 && (bounds.max.z - 10.0).abs() < 1e-7);
-    };
-    check_sheet(&s);
+    assert_z(&s, "Sheet", -5.0, 5.0);
+    let FeatureKind::SurfaceExtrude { extent, .. } = &s.doc.find_feature("Sheet").unwrap().kind else { panic!("surface extrude") };
+    assert_eq!(extent.convention, ExtrudeConvention::TotalDistance);
     run(
         &mut s,
         "timeline.redefine",
         json!({"feature":"Sheet","command":"surface.extrude","params":{"sketch":"Square","distance":"10 mm","direction":"symmetric","body_name":"Sheet"}}),
     );
-    check_sheet(&s);
-    check_sheet(&Session::new(Document::from_json(&s.doc.to_json()).unwrap()));
+    assert_z(&s, "Sheet", -5.0, 5.0);
+    assert_z(&Session::new(Document::from_json(&s.doc.to_json()).unwrap()), "Sheet", -5.0, 5.0);
+    // A one-sided surface extrude made symmetric splits its distance too, as a solid one does.
+    run(&mut s, "surface.extrude", json!({"sketch":"Square","distance":"10 mm","convention":"legacy_per_side","name":"Wall","body_name":"Wall"}));
+    assert_z(&s, "Wall", 0.0, 10.0);
+    run(&mut s, "timeline.edit", json!({"feature":"Wall","set":{"extent":{"direction":"symmetric"}}}));
+    assert_z(&s, "Wall", -5.0, 5.0);
+}
+
+/// Surface extrudes saved before they matched solid ones stored `legacy_per_side` (or, older
+/// still, no marker): they rebuild the distance on each side, and keep it through edits.
+#[test]
+fn older_symmetric_surface_extrudes_keep_the_distance_on_each_side() {
+    let mut s = fixture(json!({}));
+    run(
+        &mut s,
+        "surface.extrude",
+        json!({"sketch":"Square","distance":"10 mm","direction":"symmetric","convention":"legacy_per_side","name":"Sheet","body_name":"Sheet"}),
+    );
+    assert_z(&s, "Sheet", -10.0, 10.0);
+    let marked: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    let mut unmarked = marked.clone();
+    unmarked["format"] = json!("solidcraft/21");
+    unmarked.as_object_mut().unwrap().remove("format_pending");
+    for f in unmarked["features"].as_array_mut().unwrap() {
+        if let Some(extent) = f.get_mut("extent").and_then(Value::as_object_mut) {
+            extent.remove("convention");
+        }
+    }
+    for saved in [marked, unmarked] {
+        let mut s = Session::new(Document::from_json(&saved.to_string()).unwrap());
+        assert_z(&s, "Sheet", -10.0, 10.0);
+        run(&mut s, "timeline.edit", json!({"feature":"Sheet","set":{"extent":{"distance":"12 mm"}}}));
+        assert_z(&s, "Sheet", -12.0, 12.0);
+        run(
+            &mut s,
+            "timeline.redefine",
+            json!({"feature":"Sheet","command":"surface.extrude","params":{"sketch":"Square","distance":"10 mm","direction":"symmetric","body_name":"Sheet"}}),
+        );
+        assert_z(&s, "Sheet", -10.0, 10.0);
+    }
 }
 
 /// A second distance goes the other way from the first side (#2700): along the normal when the
@@ -149,7 +200,10 @@ fn a_second_distance_goes_the_other_way_from_the_first_side() {
     for (settings, lo, hi) in [
         (json!({"direction":"positive","distance":"10 mm","distance2":"4 mm"}), -4.0, 10.0),
         (json!({"direction":"negative","distance":"10 mm","distance2":"4 mm"}), -10.0, 4.0),
-        (json!({"direction":"positive","distance":"-10 mm","distance2":"4 mm"}), -10.0, 4.0),
+        // A sign only turns its own side over: Distance 2 stays where Direction puts it, so a
+        // negative Distance 1 leaves the span between the two ends.
+        (json!({"direction":"positive","distance":"-10 mm","distance2":"4 mm"}), -10.0, -4.0),
+        (json!({"direction":"negative","distance":"-10 mm","distance2":"4 mm"}), 4.0, 10.0),
     ] {
         let s = fixture(settings.clone());
         check(&s, lo, hi);
@@ -197,4 +251,35 @@ fn an_older_reversed_two_sided_extrude_keeps_its_shape() {
     check(&s, -4.0, 10.0);
     let FeatureKind::Extrude { extent, .. } = &s.doc.find_feature("Depth").unwrap().kind else { panic!("extrude") };
     assert_eq!(extent.direction, solidcraft_doc::Direction::Positive);
+}
+
+/// Designs saved before entered distances kept their sides sent Distance 2 to the other side of
+/// a negative first distance. Opening one keeps that, for an expression too and after its
+/// parameter changes, and leaves the distance and its named input as they were.
+#[test]
+fn an_older_two_sided_extrude_with_a_negative_distance_keeps_its_sides() {
+    let mut base = fixture(json!({"direction":"positive","distance":"10 mm","distance2":"10 mm"}));
+    run(&mut base, "parameters.add", json!({"name":"width","expression":"20 mm"}));
+    let mut saved: Value = serde_json::from_str(&base.doc.to_json()).unwrap();
+    // As the last release saved it: the format before this build's pending changes.
+    let version: u32 = saved["format"].as_str().unwrap().trim_start_matches("solidcraft/").parse().unwrap();
+    saved["format"] = json!(format!("solidcraft/{}", version - 1));
+    saved.as_object_mut().unwrap().remove("format_pending");
+    for (distance, lo, hi) in [("-width", -20.0, 10.0), ("-0 mm", -10.0, 0.0), ("-10 mm", -10.0, 10.0)] {
+        let mut file = saved.clone();
+        for f in file["features"].as_array_mut().unwrap() {
+            if f["type"] == "extrude" {
+                f["extent"]["distance"] = json!(distance);
+            }
+        }
+        let mut opened = Session::new(Document::from_json(&file.to_string()).unwrap());
+        check(&opened, lo, hi);
+        let FeatureKind::Extrude { extent, .. } = &opened.doc.find_feature("Depth").unwrap().kind else { panic!("extrude") };
+        assert_eq!(extent.distance, distance);
+        if distance == "-width" {
+            run(&mut opened, "parameters.change", json!({"name":"width","expression":"15 mm"}));
+            check(&opened, -15.0, 10.0);
+        }
+        check(&Session::new(Document::from_json(&opened.doc.to_json()).unwrap()), if distance == "-width" { -15.0 } else { lo }, hi);
+    }
 }

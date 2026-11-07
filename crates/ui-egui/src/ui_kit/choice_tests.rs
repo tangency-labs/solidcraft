@@ -241,7 +241,7 @@ fn stage_chips_reserve_the_selected_weight_for_complete_labels_in_all_five_catal
                 StageBar::row(ui, bounds, false, |ui| StageBar::header(ui, selected, &labels.iter().map(String::as_str).collect::<Vec<_>>(), &[]));
             });
             output.textures_delta.clear();
-            let search = ctx.data(|d| d.get_temp::<egui::Rect>(egui::Id::new("sc_ribbon_search"))).unwrap();
+            let search = ctx.data(|d| d.get_temp::<egui::Rect>(egui::Id::unique("sc_ribbon_search"))).unwrap();
             assert!((search.right() - (bounds.right() - crate::theme::Tokens::get().space_6)).abs() < 1.0);
             for label in &labels {
                 assert!(
@@ -366,6 +366,7 @@ fn output_radio_rows_keep_titles_summaries_and_disabled_choices_in_both_themes()
                         settings_choice_row(
                             ui,
                             &SettingsChoice {
+                                icon: None,
                                 key: "test:output:radio",
                                 title: locale.text("render.size_full_hd"),
                                 summary: "1920 × 1080",
@@ -395,7 +396,7 @@ fn output_radio_rows_keep_titles_summaries_and_disabled_choices_in_both_themes()
                 ui.add_enabled_ui(enabled, |ui| {
                     clicked |= settings_choice_row(
                         ui,
-                        &SettingsChoice { key: "test:output:radio", title: "4K", summary: "3840 × 2160", detail: "Over budget" },
+                        &SettingsChoice { icon: None, key: "test:output:radio", title: "4K", summary: "3840 × 2160", detail: "Over budget" },
                         false,
                     )
                     .clicked();

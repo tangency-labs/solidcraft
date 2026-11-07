@@ -16,7 +16,7 @@ fn field(id: &str, label: &str, value: DetailValue) -> DetailSetting {
     DetailSetting { id: id.into(), label: tr(label), value, enabled: true }
 }
 fn length(app: &SolveApp, value: f64) -> DetailValue {
-    DetailValue::Length { value, units: app.session.doc.units.clone() }
+    DetailValue::Length { value, units: app.session.doc.units.clone(), decimals: app.preferences.length_decimals }
 }
 fn number(value: f64, min: f64, max: f64, suffix: &str) -> DetailValue {
     DetailValue::Number { value, min, max, suffix: suffix.into() }
@@ -26,7 +26,13 @@ fn axis(value: [f64; 3]) -> DetailValue {
     let current = if axes.iter().any(|axis| *axis == value || axis.map(|v| -v) == value) {
         crate::viewport_status::direction(value)
     } else {
-        let [x, y, z] = value;
+        // Rounded as the card's other numbers are: a tilted normal reads (0.707, 0.707, 0).
+        let short = |v: f64| {
+            let s = format!("{v:.3}");
+            let s = s.trim_end_matches('0').trim_end_matches('.');
+            if s == "-0" { "0".to_string() } else { s.to_string() }
+        };
+        let [x, y, z] = value.map(short);
         format!("({x}, {y}, {z})")
     };
     DetailValue::Axis { value, current }
@@ -281,14 +287,16 @@ pub(crate) fn legacy_legends(app: &SolveApp, ui: &mut egui::Ui, viewport: egui::
     }
     if (!app.preferences.viewport_analysis_status || !app.preferences.viewport_status_details) && !app.session.continuity.is_empty() {
         let t = crate::theme::Tokens::get();
-        let key = ["ui.continuity_g2", "ui.continuity_g1", "ui.continuity_g0", "ui.continuity_gap"]
+        // Best to worst: the curvature-continuous orders share a colour, then a gap between faces.
+        let mut classes: Vec<Option<solidcraft_engine::kernel::Continuity>> =
+            solidcraft_engine::kernel::Continuity::ALL.into_iter().rev().map(Some).collect();
+        classes.push(None);
+        let key = classes
             .into_iter()
-            .zip(t.continuity)
-            .enumerate()
-            .map(|(index, (label, colour))| DetailKey {
-                colour,
-                label: tr(label),
-                pattern: index == 3,
+            .map(|order| DetailKey {
+                colour: crate::viewport::continuity_color(&t, order),
+                label: tr(crate::sketch_tools::order_class(order)),
+                pattern: order.is_none(),
                 value: String::new(),
                 numeric: false,
                 pattern_colour: None,
@@ -311,7 +319,7 @@ fn legacy_legend(_app: &SolveApp, ui: &mut egui::Ui, free: egui::Rect, id: &str,
     let t = crate::theme::Tokens::get();
     let container = crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::ViewportStatus);
     let result = container
-        .area(egui::Id::new(id))
+        .area(egui::Id::unique(id))
         .order(egui::Order::Background)
         .movable(false)
         .pivot(egui::Align2::LEFT_BOTTOM)

@@ -5,6 +5,7 @@
 //! with `stand_up:stand`, `stand_up:never` and its close (×), `toast:stand_up:close` (also published
 //! as `stand_up:dismiss`, the Close button's handle, #7971); Preferences picks the dialog or nothing.
 use serde_json::json;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_ui_egui::prefs::StandUpUnknown;
 use solidcraft_ui_egui::scenario::Harness;
 
@@ -56,7 +57,7 @@ fn opened_boxes(size: [f64; 3], corners: &[[f64; 3]], programs: &str, prepare: i
 }
 
 fn height(h: &Harness) -> f64 {
-    let b = solidcraft_engine::view::bounds(&h.app.session);
+    let b = solidcraft_engine::view::bounds(&h.app.session).unwrap();
     b.max.z - b.min.z
 }
 
@@ -156,7 +157,8 @@ fn turn_up_axis_in_the_component_menu_turns_and_undo_restores() {
     let occurrence = h.app.session.doc.occurrences.iter().map(|o| o.id).max().expect("the import's occurrence");
     h.app.run("occurrence.ground", json!({"occurrence": occurrence, "grounded": false})).unwrap();
     let items = solidcraft_ui_egui::context_menu::items(&h.app, &solidcraft_ui_egui::context_menu::Target::Occurrence { path: vec![occurrence] });
-    let turn = items.iter().find(|i| i.id == "ui.turnUpAxis").expect("Turn Up Axis is in the menu");
+    let placement = items.iter().find(|i| i.label == "Placement").expect("the Placement flyout is in the menu");
+    let turn = placement.children.iter().find(|i| i.id == "ui.turnUpAxis").expect("Turn Up Axis is in the Placement flyout");
     let labels: Vec<_> = turn.children.iter().map(|c| c.label.as_str()).collect();
     assert_eq!(labels, ["Y up \u{2192} Z up", "Z up \u{2192} Y up"]);
     let at = egui::pos2(10.0, 10.0);
@@ -177,7 +179,7 @@ fn old_preferences_files_still_load() {
     assert!(empty.offer_stand_up);
 }
 
-type V3 = solidcraft_engine::geom::Vec3;
+type V3 = solidcore_record::Vec3;
 
 /// A stood-up SolidWorks file (its component still the active one), a sketch started by
 /// `start`, a rectangle far from the part at x 200..220, y 0..10 on it, extruded 15 mm: the
@@ -191,15 +193,15 @@ fn sketched_and_extruded(start: impl FnOnce(&mut Harness)) -> (V3, V3, solidcraf
     }
     assert!((height(&h) - 40.0).abs() < 1e-6, "stood up: {}", height(&h));
     assert_ne!(h.app.session.active_component, 0, "the import's component is the one worked in");
-    let before: Vec<String> = h.app.session.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+    let before: Vec<String> = h.app.session.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
     start(&mut h);
     h.frames(2);
     let sketch = h.app.session.active_sketch.expect("a sketch is open");
-    let normal = h.app.session.world_state().sketch(sketch).unwrap().plane.normal();
+    let normal = h.app.session.world_state().unwrap().sketch(sketch).unwrap().plane.normal();
     let back = h.app.cam.back();
     h.app.run("sketch.rectangle.two_point", json!({"p0": [200, 0], "p1": [220, 10]})).unwrap();
     h.app.run("solid.extrude", json!({"distance": 15})).unwrap();
-    let world = h.app.session.world_state();
+    let world = h.app.session.world_state().unwrap();
     let made: Vec<_> = world.bodies.iter().filter(|b| !before.contains(&b.name)).collect();
     assert_eq!(made.len(), 1);
     (normal, back, made[0].mesh().bounds())

@@ -2,7 +2,8 @@
 //! 40 × 30 × 20 box at the origin, a cylinder, a sphere and a torus.
 
 use serde_json::{Value, json};
-use solidcraft_geom::{Plane, Vec3};
+use solidcore_record::{Plane, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::Session;
 use crate::view::{construction_axes, construction_planes, construction_points};
@@ -41,6 +42,55 @@ fn point(s: &Session, name: &str) -> Vec3 {
 
 fn plane(s: &Session, name: &str) -> Plane {
     construction_planes(s).into_iter().find(|p| p.1 == name).map(|p| p.2).unwrap_or_else(|| panic!("no plane {name}"))
+}
+
+#[test]
+fn construction_plane_names_cannot_be_reused_by_new_features() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 5, "body_name": "Block"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 10, "name": "Mid"}));
+    let before = s.doc.clone();
+    for (command, params) in [
+        ("construct.plane.offset", json!({"base": "XY", "offset": 20, "name": "Mid"})),
+        ("construct.plane.offset", json!({"base": "XY", "offset": 20, "name": " Mid "})),
+        ("sketch.create", json!({"plane": "XY", "name": "Mid"})),
+        ("solid.box", json!({"length": 1, "width": 1, "height": 1, "name": "Mid"})),
+        ("construct.plane.offset", json!({"base": "XY", "offset": 20, "name": "Box1"})),
+    ] {
+        let error = s.execute(command, &params).unwrap_err().to_string();
+        assert!(error.contains("another feature is called"), "{command}: {error}");
+        assert_eq!(s.doc, before, "{command}: a refused creation changes nothing");
+    }
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 20, "name": "Upper"}));
+    run(&mut s, "solid.mirror", json!({"bodies": ["Block"], "plane": "Upper"}));
+    let measured = run(&mut s, "inspect.measure", json!({}));
+    let mirrored = measured["bodies"].as_array().unwrap().iter().find(|b| b["name"] == "Block (2)").unwrap();
+    assert_eq!(mirrored["bbox"]["min"][2], 35.0);
+    assert_eq!(mirrored["bbox"]["max"][2], 40.0);
+}
+
+#[test]
+fn redefining_a_construction_plane_keeps_its_existing_name() {
+    let mut s = Session::default();
+    let id = run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 10, "name": "Mid"}))["feature"].as_u64().unwrap();
+    run(&mut s, "sketch.create", json!({"plane": "Mid", "name": "Profile"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": id, "command": "construct.plane.offset", "params": {"base": "XY", "offset": 20, "name": "Mid"}}),
+    );
+    assert_eq!(s.doc.feature(id).unwrap().name, "Mid");
+    assert_eq!(s.doc.features.len(), 2);
+    assert!(near(plane(&s, "Mid").origin, Vec3::new(0.0, 0.0, 20.0)));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(near(plane(&s, "Mid").origin, Vec3::new(0.0, 0.0, 10.0)));
+    run(&mut s, "edit.redo", json!({}));
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    reopened.refresh();
+    assert_eq!(reopened.doc.feature(id).unwrap().name, "Mid");
+    assert!(near(plane(&reopened, "Mid").origin, Vec3::new(0.0, 0.0, 20.0)));
+    assert!(reopened.model.results.iter().all(|r| r.error.is_none()));
 }
 
 #[test]
@@ -295,6 +345,24 @@ fn point_along_a_path() {
     run(&mut s, "construct.point.along_path", json!({"path": {"edge": [20, 0, 0]}, "t": 0.25, "name": "P"}));
     let p = point(&s, "P");
     assert!(near(p, Vec3::new(10.0, 0.0, 0.0)) || near(p, Vec3::new(30.0, 0.0, 0.0)), "{p:?}");
+    // On an arc it is the arc's own point by arc length, to rounding: a third of a quarter turn
+    // of radius 10 is 30° round. A t past either end is refused, not moved onto it.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Round"}));
+    let arc = run(&mut s, "sketch.arc.center_point", json!({"center": [0, 0], "start": [10, 0], "end": [0, 10]}))["created"]["curves"][0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    let path = json!({"sketch": "Round", "curve": arc});
+    run(&mut s, "construct.point.along_path", json!({"path": path, "t": "1/3", "name": "Third"}));
+    let third = point(&s, "Third");
+    let want = Vec3::new(10.0 * (std::f64::consts::PI / 6.0).cos(), 5.0, 0.0);
+    assert!(third.dist(want) < 1e-12, "{third:?} is {:e} off", third.dist(want));
+    for t in [json!(1.5), json!(-0.25), json!("2")] {
+        let e = s.execute("construct.point.along_path", &json!({"path": path, "t": t})).unwrap_err();
+        assert!(e.to_string().contains("0 (its start) to 1 (its end)"), "t {t}: {e}");
+        assert!(s.execute("construct.plane.along_path", &json!({"path": path, "t": t})).is_err(), "plane at t {t}");
+    }
 }
 
 #[test]
@@ -341,6 +409,57 @@ fn plane_tangent_to_a_cylinder() {
     run(&mut s, "construct.plane.tangent", json!({"face": {"face": [0, 0, 65]}, "name": "U"}));
     let u = plane(&s, "U");
     assert!(parallel(u.normal(), Vec3::Z) && on_plane(&u, Vec3::new(3.0, 3.0, 65.0)), "{u:?}");
+}
+
+/// #8822: with a reference plane or planar face, the plane touches where the face turns towards
+/// the reference (parallel to it, on the side of the pick), turned by an angle about the axis,
+/// and follows the reference when it moves.
+#[test]
+fn plane_tangent_lined_up_with_a_reference() {
+    let mut s = part();
+    // Picked 60° round the cylinder (axis Z through (60, 0)); the XZ plane faces ±Y.
+    let pick = json!([62.5, 4.330127, 5]);
+    run(&mut s, "construct.plane.tangent", json!({"face": {"face": pick}, "reference": {"plane": "XZ"}, "name": "T"}));
+    let t = plane(&s, "T");
+    assert!(parallel(t.normal(), Vec3::Y) && on_plane(&t, Vec3::new(60.0, 5.0, 9.0)), "{t:?}");
+    // Turned 30° about the axis: still on the pick's side.
+    run(&mut s, "construct.plane.tangent", json!({"face": {"face": pick}, "reference": {"plane": "XZ"}, "angle": "30 deg", "name": "A"}));
+    let a = plane(&s, "A");
+    let d = Vec3::new(-0.5, 3f64.sqrt() / 2.0, 0.0);
+    assert!(parallel(a.normal(), d) && on_plane(&a, Vec3::new(60.0, 0.0, 2.0) + d * 5.0), "{a:?}");
+    // A planar face of the box (x = 40, facing X) as the reference.
+    run(&mut s, "construct.plane.tangent", json!({"face": {"face": pick}, "reference": {"face": [40, 15, 10]}, "name": "F"}));
+    let f = plane(&s, "F");
+    assert!(parallel(f.normal(), Vec3::X) && on_plane(&f, Vec3::new(65.0, 1.0, 1.0)), "{f:?}");
+    // The torus (axis Z through (0, 60)): on its outer equator.
+    run(&mut s, "construct.plane.tangent", json!({"face": {"face": [0, 72, 0]}, "reference": {"plane": "XZ"}, "name": "R"}));
+    let r = plane(&s, "R");
+    assert!(parallel(r.normal(), Vec3::Y) && on_plane(&r, Vec3::new(3.0, 72.0, 1.0)), "{r:?}");
+    // The sphere (centre (0, 0, 60)), picked below its middle: under it, parallel to XY.
+    run(&mut s, "construct.plane.tangent", json!({"face": {"face": [3, 0, 56]}, "reference": {"plane": "XY"}, "name": "U"}));
+    let u = plane(&s, "U");
+    assert!(parallel(u.normal(), Vec3::Z) && on_plane(&u, Vec3::new(1.0, 1.0, 55.0)), "{u:?}");
+
+    // A reference built on a parameter: the tangent plane follows it.
+    run(&mut s, "parameters.add", json!({"name": "turn", "expression": "0 deg"}));
+    run(&mut s, "construct.plane.at_angle", json!({"base": "XZ", "axis": "Z", "angle": "turn", "name": "Ref"}));
+    run(&mut s, "construct.plane.tangent", json!({"face": {"face": pick}, "reference": {"plane": "Ref"}, "name": "M"}));
+    assert!(on_plane(&plane(&s, "M"), Vec3::new(60.0, 5.0, 1.0)));
+    run(&mut s, "parameters.change", json!({"name": "turn", "expression": "-90 deg"}));
+    let m = plane(&s, "M");
+    assert!(parallel(m.normal(), Vec3::X) && on_plane(&m, Vec3::new(65.0, 2.0, 1.0)), "{m:?}");
+
+    // What has no answer is refused and adds nothing.
+    let count = construction_planes(&s).len();
+    for (p, why) in [
+        (json!({"face": {"face": pick}, "reference": {"plane": "XY"}}), "a reference square to the axis"),
+        (json!({"face": {"face": [3, 0, 56]}, "reference": {"plane": "XY"}, "angle": "10 deg"}), "an angle on a sphere"),
+        (json!({"face": {"face": pick}, "angle": "10 deg"}), "an angle without a reference"),
+        (json!({"face": {"face": pick}, "reference": {"plane": "XZ"}, "angle": "2 mm"}), "a length for the angle"),
+    ] {
+        assert!(s.execute("construct.plane.tangent", &p).is_err(), "{why}");
+    }
+    assert_eq!(construction_planes(&s).len(), count);
 }
 
 #[test]
@@ -588,6 +707,82 @@ fn disambiguated_top_plane_pocket_survives_undo_and_cold_reopen() {
     assert!((measured["total"]["volume_mm3"].as_f64().unwrap() - expected).abs() < 1e-6, "{measured}");
 }
 
+/// Plane at Angle with "use axis direction only": the axis direction is projected onto the base
+/// and the plane turns about a pivot on that plane (#12041).
+#[test]
+fn plane_at_angle_direction_only_projects_the_axis_and_pivots() {
+    let mut s = Session::default();
+    // An axis that does not lie on XY: only its in-plane direction is used, about the origin.
+    run(
+        &mut s,
+        "construct.plane.at_angle",
+        json!({
+            "base": "XY",
+            "axis": {"origin": [10, 0, 5], "dir": [0, 1, 1]},
+            "angle": "90 deg",
+            "direction_only": true,
+            "name": "AboutY"
+        }),
+    );
+    let about_y = plane(&s, "AboutY");
+    assert!(near(about_y.origin, Vec3::ZERO), "{about_y:?}");
+    assert!(parallel(about_y.normal(), Vec3::X), "{about_y:?}");
+    assert!(on_plane(&about_y, Vec3::Y * 10.0), "{about_y:?}");
+
+    // Same skewed axis without the option still turns about the full line (origin moves).
+    run(
+        &mut s,
+        "construct.plane.at_angle",
+        json!({
+            "base": "XY",
+            "axis": {"origin": [10, 0, 5], "dir": [0, 1, 1]},
+            "angle": "90 deg",
+            "name": "AboutLine"
+        }),
+    );
+    let about_line = plane(&s, "AboutLine");
+    assert!(!near(about_line.origin, Vec3::ZERO), "{about_line:?}");
+
+    // An explicit pivot: turn about Y through (5, 0, 0).
+    run(
+        &mut s,
+        "construct.plane.at_angle",
+        json!({
+            "base": "XY",
+            "axis": {"origin": [10, 0, 5], "dir": [0, 1, 1]},
+            "angle": "90 deg",
+            "direction_only": true,
+            "pivot": {"point": [5, 0, 0]},
+            "name": "Pivoted"
+        }),
+    );
+    let pivoted = plane(&s, "Pivoted");
+    assert!(near(pivoted.origin, Vec3::new(5.0, 0.0, 5.0)), "{pivoted:?}");
+    assert!(parallel(pivoted.normal(), Vec3::X), "{pivoted:?}");
+
+    // A direction square to the base has no in-plane component.
+    let before = s.doc.to_json();
+    let error = s
+        .execute("construct.plane.at_angle", &json!({"base": "XY", "axis": "Z", "angle": "30 deg", "direction_only": true}))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("square to the plane") || error.contains("no direction"), "{error}");
+    assert_eq!(s.doc.to_json(), before);
+
+    // A pivot without the option is refused.
+    let error = s
+        .execute("construct.plane.at_angle", &json!({"base": "XY", "axis": "Y", "angle": "10 deg", "pivot": {"point": [1, 0, 0]}}))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("direction_only"), "{error}");
+    assert_eq!(s.doc.to_json(), before);
+
+    // Saved fields reopen and keep the pivot.
+    let saved = s.doc.to_json();
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+    assert!(near(plane(&reopened, "Pivoted").origin, Vec3::new(5.0, 0.0, 5.0)));
+}
+
 /// A construction plane named like an origin plane, as an older saved design can hold.
 fn legacy_plane_name(s: &mut Session, id: u64, name: &str) {
     s.doc_mut().feature_mut(id).unwrap().name = name.to_string();
@@ -688,4 +883,28 @@ fn hiding_an_occurrence_hides_its_construction_geometry() {
     for name in ["Shelf", "Spine", "Pin"] {
         assert!(!s.construction_visible(name), "{name} shows in a hidden placement");
     }
+}
+
+/// #10127: an axis and a point built on a component's cylinder turn with it when Move/Copy
+/// turns the cylinder, as its faces do. One also pinned to a fixed point stays where it is.
+#[test]
+fn construction_on_a_moved_body_moves_with_it() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 20, "body_name": "Pin"}));
+    run(&mut s, "component.create", json!({"name": "Part", "parent": "root", "activate": false}));
+    run(&mut s, "component.move_bodies", json!({"bodies": ["Pin"], "component": "Part"}));
+    run(&mut s, "construct.axis.through_cylinder", json!({"face": {"face": [5, 0, 10]}, "name": "PinAxis"}));
+    run(&mut s, "construct.point.center", json!({"of": {"edge": [5, 0, 20]}, "name": "PinTop"}));
+    run(&mut s, "construct.axis.two_points", json!({"a": {"construct_point": "PinTop"}, "b": {"point": [0, 50, 20]}, "name": "Tether"}));
+    let body = s.model.state().bodies.first().map(|b| b.name.clone()).unwrap();
+    // A quarter turn about Y through the origin, then 10 mm along X: the top centre (0, 0, 20)
+    // goes to (30, 0, 0), and the cylinder's axis lies along X.
+    run(&mut s, "solid.move", json!({"bodies": [body], "translate": [10, 0, 0], "axis": [0, 1, 0], "angle": "90 deg"}));
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    let (o, d) = axis(&s, "PinAxis");
+    assert!(parallel(d, Vec3::X) && on_line(o, d, Vec3::new(30.0, 0.0, 0.0)), "{o:?} {d:?}");
+    assert!(near(point(&s, "PinTop"), Vec3::new(30.0, 0.0, 0.0)), "{:?}", point(&s, "PinTop"));
+    let (o, d) = axis(&s, "Tether");
+    assert!(on_line(o, d, Vec3::new(0.0, 0.0, 20.0)) && on_line(o, d, Vec3::new(0.0, 50.0, 20.0)), "{o:?} {d:?}");
 }

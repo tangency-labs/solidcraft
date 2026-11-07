@@ -101,7 +101,7 @@ fn hostile_native_cad_never_panics() {
 }
 
 /// cadmpeg decodes under its tight `service` caps, with our STEP size limit on the input.
-/// cadmpeg 0.6.3 has no work-unit or collection-item budgets, and its service profile already
+/// cadmpeg (since 0.6.3) has no work-unit or collection-item budgets, and its service profile already
 /// admits the 8 million entities a detailed part needed (#1783).
 #[test]
 fn decoding_is_capped() {

@@ -168,8 +168,10 @@ fn child() {
             }
             assert_eq!(s.doc.features.len(), 1, "the design is unchanged");
         }
+        // A panic inside a solidcore call: caught there, an internal error of the command.
         "kernel" => {
-            assert!(s.execute("diagnostics.crash_test", &json!({"mode": "kernel"})).is_err());
+            let r = s.execute("diagnostics.crash_test", &json!({"mode": "kernel"}));
+            assert!(matches!(&r, Err(crate::EngineError::Internal(id, _)) if id == "diagnostics.crash_test"), "{r:?}");
         }
         // `thread_dies`: the panic ends the app, as one on the window's thread does.
         "thread" | "thread_dies" => {
@@ -633,6 +635,22 @@ fn signatures_ignore_numbers_but_not_places() {
     assert_eq!(signature("a.rs:1", "face 12 of 40"), signature("a.rs:1", "face 7 of 3"));
     assert_ne!(signature("a.rs:1", "face 12"), signature("a.rs:2", "face 12"));
     assert_ne!(signature("a.rs:1", "edge"), signature("a.rs:1", "face"));
+}
+
+/// A graphics device reset met first by a queue write panics inside wgpu-core (#10240, #6528):
+/// that is the device loss, which the app restarts after, not a crash to report. The same words
+/// from anywhere else, and wgpu's other panics, still are.
+#[test]
+fn a_lost_graphics_device_met_inside_wgpu_is_not_a_crash() {
+    let lost = "called `Result::unwrap()` on an `Err` value: Lost";
+    let windows = r"C:\Users\runneradmin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-core-30.0.1\src\device\queue.rs:503";
+    let linux = "/home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wgpu-core-30.0.1/src/device/queue.rs:503";
+    assert!(graphics_device_lost(lost, windows));
+    assert!(graphics_device_lost(lost, linux));
+    assert!(!graphics_device_lost(lost, "crates/gpu/src/view.rs:3189"), "not inside wgpu");
+    assert!(!graphics_device_lost("called `Result::unwrap()` on an `Err` value: OutOfMemory", linux));
+    assert!(!graphics_device_lost("Error in Queue::submit: Validation Error", linux));
+    assert!(!graphics_device_lost(lost, "/home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wgpu-30.0.1/src/api/queue.rs:1"));
 }
 
 #[test]

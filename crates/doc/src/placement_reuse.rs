@@ -63,9 +63,24 @@ fn local_plane(plane: &PlaneRef, depth: usize) -> bool {
         PlaneRef::Origin { name: _ } | PlaneRef::Custom { plane: _ } | PlaneRef::Placed { origin: _, x_dir: _, y_dir: _ } => true,
         PlaneRef::Offset { base, distance: _ }
         | PlaneRef::Flipped { base, about_y: _ }
-        | PlaneRef::AtAngle { base, axis_origin: _, axis_dir: _, angle: _, line: None } => local_plane(base, depth + 1),
+        | PlaneRef::AtAngle { base, axis_origin: _, axis_dir: _, angle: _, line: None, pivot: None, .. } => local_plane(base, depth + 1),
         _ => false,
     }
+}
+
+/// Whether no feature after the mirror `f` can cut, join or otherwise build on bodies: only
+/// features that read none, and further mirrors, which copy them. A boolean depends on how a
+/// copy's revolved faces are turned, so a copy it may reach is made with
+/// [`solidcraft_kernel::transform_matrix`]; one that is only shown needs no search for that. It
+/// depends on the design alone, so a design evaluates the same however it was reached.
+pub(super) fn copies_only_shown(doc: &Document, f: &Feature) -> bool {
+    let mut later = doc.features.iter().skip_while(|g| g.id != f.id).skip(1);
+    let mut components = std::collections::HashMap::with_capacity(doc.features.len());
+    for g in &doc.features {
+        components.entry(g.id).or_insert(g.component);
+    }
+    let copies = |g: &Feature| matches!(&g.kind, FeatureKind::Mirror { features, combine: false, .. } if features.is_empty());
+    later.all(|g| copies(g) || local_geometry(g, &components))
 }
 
 pub(super) fn local_geometry(f: &Feature, components: &std::collections::HashMap<u64, u64>) -> bool {
@@ -91,10 +106,13 @@ pub(super) fn local_geometry(f: &Feature, components: &std::collections::HashMap
                 distance2: _,
                 start_offset: _,
                 through_all,
+                second_follows_first: _,
                 taper: _,
                 to,
                 to_offset: _,
                 from,
+                corner: _,
+                to_body_apart: _,
             } = extent;
             to.is_none() && from.is_none() && !through_all && components.get(&sketch.0) == Some(&f.component)
         }
@@ -106,6 +124,7 @@ pub(super) fn local_geometry(f: &Feature, components: &std::collections::HashMap
 /// Assembly records do not feed any of the feature kinds accepted by `local_geometry`.
 fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
     let Document {
+        newer_file: _,
         render,
         format,
         format_pending,
@@ -194,6 +213,7 @@ fn same_feature(a: &Feature, b: &Feature) -> bool {
         edge_names,
         face_names,
         participants,
+        touching,
         shell_piece_order,
         kernel_piece_order,
         inserted,
@@ -210,6 +230,7 @@ fn same_feature(a: &Feature, b: &Feature) -> bool {
         && *edge_names == b.edge_names
         && *face_names == b.face_names
         && *participants == b.participants
+        && *touching == b.touching
         && *shell_piece_order == b.shell_piece_order
         && *kernel_piece_order == b.kernel_piece_order
         && *inserted == b.inserted
