@@ -1273,6 +1273,9 @@ preference_settings! {
     theme: String = "dark".into(), PAGE_APPEARANCE;
     /// A picture behind the model in place of the view's background; empty for none.
     background_image: String = String::new(), PAGE_APPEARANCE;
+    /// How strong a glass theme's gloss and streaks of light are (`glass::set_gloss`), 0 to 1;
+    /// `None` (the default) keeps the theme's own.
+    glass_gloss: Option<f32> = None, PAGE_APPEARANCE;
     /// Theme used when the operating system is light; unknown ids resolve to Light.
     theme_day: String = "light".into(), PAGE_APPEARANCE;
     /// Theme used when the operating system is dark; unknown ids resolve to Dark.
@@ -2359,6 +2362,7 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     if crate::theme::set_logo_accent(app.preferences.logo_accent) {
         app.styled = false;
     }
+    crate::glass::set_gloss(app.preferences.glass_gloss);
     // egui's end-of-frame shortcuts only change its context; the saved preference would
     // overwrite that change next frame. Consume the desktop shortcuts into the preference.
     if ctx.options(|o| o.zoom_with_keyboard) && !crate::keymap::capturing(app) {
@@ -4188,6 +4192,9 @@ fn prepare_preferences(
     }
     if !accepted::dimension_step_mm(&new) || !accepted::dimension_step_deg(&new) {
         return Err("`dimension_step_mm` must be 0.001…1000 and `dimension_step_deg` 0.001…180".into());
+    }
+    if new.glass_gloss.is_some_and(|g| !(0.0..=1.0).contains(&g)) {
+        return Err("`glass_gloss` must be null (the theme's own) or 0 to 1".into());
     }
     if solidcraft_engine::doc::display_quality::DisplayQuality::parse(&new.display_quality).is_none() {
         return Err("`display_quality` must be coarse, normal, fine or ultra".into());

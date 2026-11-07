@@ -313,12 +313,16 @@ impl ThemeFile {
 /// Strictly bounded strokes shared by file imports and direct preference updates.
 pub(crate) fn parse_borders(values: &BTreeMap<String, Value>) -> Result<crate::theme::Borders, String> {
     use crate::theme::{Bevel, Borders, InsetBorder};
-    if values.len() > 7 {
-        return Err("`borders` has more than seven roles".into());
+    if values.len() > 8 {
+        return Err("`borders` has more than eight roles".into());
     }
     let mut borders = Borders::default();
     for (key, value) in values {
         let obj = value.as_object().ok_or_else(|| format!("`borders.{key}` must be an object"))?;
+        if key == "glass" {
+            borders.glass = Some(crate::glass::parse(obj)?);
+            continue;
+        }
         if key == "bevel" {
             if obj.keys().any(|k| !matches!(k.as_str(), "width" | "highlight" | "light" | "shadow" | "dark_shadow")) {
                 return Err("`borders.bevel` has an unknown setting".into());
@@ -520,7 +524,7 @@ theme_keys! {
 const LEGACY_AXES: [&str; 2] = ["gizmo", "triad"];
 
 /// `#rrggbb` or `#rrggbbaa` (alpha not premultiplied).
-fn parse_color(s: &str) -> Option<Color32> {
+pub(crate) fn parse_color(s: &str) -> Option<Color32> {
     let hex = s.trim().strip_prefix('#')?;
     if !(hex.len() == 6 || hex.len() == 8) || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
         return None;
@@ -530,7 +534,7 @@ fn parse_color(s: &str) -> Option<Color32> {
     Some(Color32::from_rgba_unmultiplied(byte(0)?, byte(2)?, byte(4)?, a))
 }
 
-fn format_color(c: Color32) -> String {
+pub(crate) fn format_color(c: Color32) -> String {
     let [r, g, b, a] = c.to_srgba_unmultiplied();
     if a == 255 { format!("#{r:02x}{g:02x}{b:02x}") } else { format!("#{r:02x}{g:02x}{b:02x}{a:02x}") }
 }
@@ -1281,6 +1285,9 @@ pub fn export(name: &str, base: Base, t: &Tokens) -> Value {
             json!({"width": bevel.width, "highlight": format_color(bevel.highlight),
             "light": format_color(bevel.light), "shadow": shadow, "dark_shadow": format_color(bevel.dark_shadow)}),
         );
+    }
+    if let Some(glass) = t.borders.glass {
+        borders.insert("glass".into(), crate::glass::export(glass));
     }
     let icon_palette = export_icon_palette(t.icon_palette);
     json!({"format": FORMAT, "name": name, "base": base, "colors": colors, "radii": radii, "borders": borders, "icon_palette": icon_palette})
