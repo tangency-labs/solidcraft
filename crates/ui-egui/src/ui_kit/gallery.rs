@@ -1658,6 +1658,11 @@ const ELEMENTS: &[Element] = &[
             field(ui, &mut s.value);
         });
     }),
+    element!("sized_row", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
+        sized_row(ui, "Gallery", row_height() * 2.0, |ui| {
+            text_field(ui, &mut s.value, "Name");
+        });
+    }),
     element!("expr_row", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
         expr_row(ui, "Gallery", &mut s.value);
     }),
@@ -2140,7 +2145,8 @@ fn every_element_has_geometry_and_stays_in_its_allocation_in_both_themes() {
                     );
                 }
                 if published.0.starts_with("dialog:row:") {
-                    assert_eq!(rect.height(), Tokens::get().control_height, "{name}");
+                    let expected_height = if name == "sized_row" { row_height() * 2.0 } else { Tokens::get().control_height };
+                    assert_eq!(rect.height(), expected_height, "{name}");
                 }
                 for shape in output.shapes {
                     // Native icon-only buttons keep an empty text shape. It has no vertices;
