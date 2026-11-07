@@ -2223,7 +2223,7 @@ pub struct Renderer {
     /// Lines behind the model (depth test >).
     line_hidden: wgpu::RenderPipeline,
     overlay: wgpu::RenderPipeline,
-    /// Reference planes and axes: as `trans` and `line`, but not cut by a section.
+    /// Reference planes, axes and the ground shadow: as `trans` and `line`, but not cut by a section.
     guide_trans: wgpu::RenderPipeline,
     guide_line: wgpu::RenderPipeline,
     uniform: wgpu::Buffer,
@@ -4069,9 +4069,10 @@ impl Renderer {
         tris(pass, &res.ghost, &pv.ghost);
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
         tris(pass, &res.ghost, &m.ghost);
-        tris(pass, &res.trans, &m.shadow);
+        // The ground shadow is never cut by a section, like the reference planes (#10708).
+        tris(pass, &res.guide_trans, &m.shadow);
         pass.set_bind_group(0, scene_bind(sk, &res.bind), &[]);
-        tris(pass, &res.trans, &sk.shadow);
+        tris(pass, &res.guide_trans, &sk.shadow);
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
         if phase == Phase::BeforeSeeThrough {
             return;
@@ -5070,6 +5071,28 @@ mod glass_tests {
         }
     }
 
+    /// With Section Analysis on, the ground shadow stays whole: the section plane hides cut bodies,
+    /// not the soft shadow under them, which a cut ended in a hard straight line (#10708).
+    #[test]
+    fn ground_shadow_is_not_cut_by_the_section_plane() {
+        let mut scene = GpuScene::default();
+        let square = [[-5.0, -5.0, -5.0], [5.0, -5.0, -5.0], [5.0, 5.0, -5.0], [-5.0, -5.0, -5.0], [5.0, 5.0, -5.0], [-5.0, 5.0, -5.0]];
+        let shadow_color = scene.color([0, 0, 0, 128]);
+        for p in square {
+            scene.shadow_tri(p, shadow_color);
+        }
+        // Hides everything with x > -1, the middle pixel among it.
+        let cut = [1.0, 0.0, 0.0, -1.0];
+        for view_dependent in [false, true] {
+            let (model, sketch) = if view_dependent { (GpuScene::default(), scene.clone()) } else { (scene.clone(), GpuScene::default()) };
+            let Some(shadow) = middle_pixel_cut(model, sketch, true, 1, cut) else {
+                eprintln!("skipping: no GPU adapter");
+                return;
+            };
+            assert!(shadow[..3].iter().all(|c| (125..=129).contains(c)), "view-dependent={view_dependent} shadow under a section: {shadow:?}");
+        }
+    }
+
     /// A large import's triangles once went into one buffer past the device's limit (524 MB
     /// against 256 MB) and the app crashed (#883): they are split into whole triangles.
     #[test]
@@ -5234,6 +5257,11 @@ mod glass_tests {
     }
 
     fn middle_pixel_in_slots_with_samples(scene: GpuScene, sketch: GpuScene, oit: bool, samples: u32) -> Option<[u8; 4]> {
+        middle_pixel_cut(scene, sketch, oit, samples, [0.0; 4])
+    }
+
+    /// [`middle_pixel_in_slots_with_samples`] with a section cut (`Frame::clip`).
+    fn middle_pixel_cut(scene: GpuScene, sketch: GpuScene, oit: bool, samples: u32, clip: [f32; 4]) -> Option<[u8; 4]> {
         const SIZE: u32 = 64;
         let (_, device, queue) = crate::open_headless().ok()?;
         let depth = crate::depth_format(&device, true);
@@ -5261,7 +5289,7 @@ mod glass_tests {
             view_proj: [[0.1, 0.0, 0.0, 0.0], [0.0, 0.1, 0.0, 0.0], [0.0, 0.0, -0.01, 0.0], [0.0, 0.0, 0.5, 1.0]],
             back: [0.0, 0.0, 1.0],
             size_px: [SIZE as f32; 2],
-            clip: [0.0; 4],
+            clip,
             cap: [0.0; 4],
             images: Vec::new(),
             clouds: Vec::new(),
