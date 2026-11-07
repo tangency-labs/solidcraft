@@ -201,6 +201,7 @@ fn picked_lines_stay_in_the_sketch_they_were_picked_in() {
     assert!(apply_commands(&app, &d).unwrap_err().contains("one sketch"));
 }
 
+/// Preselect two exact support faces as a user would before starting the dialog.
 fn gusset_with_picked_supports() -> SolveApp {
     let mut app = app_with(&[
         ("solid.box", json!({"corner":[-20,-20,0],"length":40,"width":40,"height":300,"body_name":"Post"})),
@@ -220,6 +221,7 @@ fn gusset_with_picked_supports() -> SolveApp {
 }
 
 #[test]
+/// Preselection, preview and Edit Feature preserve the picks and rebuild the changed plate.
 fn gusset_preselection_preview_and_edit_keep_exact_supports() {
     let mut app = gusset_with_picked_supports();
     app.start("frame.gusset");
@@ -248,7 +250,35 @@ fn gusset_preselection_preview_and_edit_keep_exact_supports() {
     assert!((body.mesh().measure().volume - 32000.).abs() < 1e-5);
 }
 
+/// The outline follows the evaluated clip, and editing thickness preserves its expression.
 #[test]
+fn gusset_edit_restores_the_outline_from_the_clip_expression() {
+    let mut app = gusset_with_picked_supports();
+    app.session.execute("parameters.add", &json!({"name":"tip","expression":"0.0 mm"})).unwrap();
+    app.start("frame.gusset");
+    let mut d = app.dialog.clone().unwrap();
+    let Kind::Gusset(g) = &mut d.kind else { panic!("wrong dialog") };
+    g.clip = "tip".into();
+    g.profile = 1;
+    let c = apply_commands(&app, &d).unwrap();
+    run_all(&mut app, c);
+    let fid = app.session.doc.features.last().unwrap().id;
+
+    let mut edit = edit_dialog(&app, fid, None).unwrap();
+    let Kind::Gusset(g) = &mut edit.kind else { panic!("wrong edit dialog") };
+    assert_eq!(g.profile, 0);
+    g.thickness = "8 mm".into();
+    let c = apply_commands(&app, &edit).unwrap();
+    assert_eq!(c[0].1["params"]["clip"], "tip");
+    run_all(&mut app, c);
+    app.session.execute("parameters.change", &json!({"name":"tip","expression":"10 mm"})).unwrap();
+    let edit = edit_dialog(&app, fid, None).unwrap();
+    let Kind::Gusset(g) = &edit.kind else { panic!("wrong edit dialog") };
+    assert_eq!(g.profile, 1);
+}
+
+#[test]
+/// Click each icon and verify both the resulting plate bounds and translated accessible names.
 fn gusset_placement_icons_select_both_sides_and_center_with_exact_bounds() {
     let mut h = crate::scenario::Harness::new();
     h.app = gusset_with_picked_supports();

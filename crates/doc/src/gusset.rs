@@ -34,6 +34,7 @@ fn invalid(s: impl Into<String>) -> DocError {
     DocError::Invalid(s.into())
 }
 
+/// Identify the frame member by its producer and sketch line, even when the body is renamed.
 pub fn member(doc: &Document, st: &ModelState, plane: &PlaneRef) -> Result<Option<Member>> {
     let PlaneRef::Face { anchor: Some(anchor), .. } = plane else { return Err(invalid("gusset supports require direct persistent planar faces")) };
     let source = doc.feature(anchor.target.origin_feature).ok_or_else(|| invalid("gusset support producer no longer exists"))?;
@@ -65,6 +66,7 @@ struct Face {
 const MAX_LOOPS: usize = 4096;
 const MAX_PIECES: usize = 65536;
 
+/// Resolve the certified support and reconstruct its finite material from trimmed face loops.
 fn face(doc: &Document, st: &ModelState, f: &Feature, support: &Support) -> Result<Face> {
     let PlaneRef::Face { anchor: Some(anchor), .. } = &support.plane else { return Err(invalid("gusset support must be an attached face")) };
     if member(doc, st, &support.plane)? != support.member {
@@ -175,6 +177,7 @@ impl Face {
     }
 }
 
+/// Read endpoints in traversal order, including arcs whose sweep is negative.
 fn seg_ends(s: &Seg2) -> (Vec2, Vec2) {
     match s {
         Seg2::Line { a, b } | Seg2::Conic { a, b, .. } => (*a, *b),
@@ -186,6 +189,7 @@ fn seg_ends(s: &Seg2) -> (Vec2, Vec2) {
     }
 }
 
+/// Reverse one segment without changing its locus, to join pieces that run against the loop.
 fn reversed(s: Seg2) -> Seg2 {
     match s {
         Seg2::Line { a, b } => Seg2::Line { a: b, b: a },
@@ -349,10 +353,12 @@ pub(crate) fn loop_signed_area(l: &Loop2) -> Result<f64> {
     l.segs.iter().map(seg_area).sum()
 }
 
+/// Orient a loop for planar region operations without replacing its curved edges.
 pub(crate) fn counter_clockwise(l: Loop2) -> Result<Loop2> {
     Ok(if loop_signed_area(&l)? >= 0. { l } else { Loop2 { segs: l.segs.into_iter().rev().map(reversed).collect() } })
 }
 
+/// Measure the material inside the outer loop with the enclosed holes removed.
 fn region_area(r: &Region2) -> Result<f64> {
     let mut area = loop_signed_area(&r.outer)?.abs();
     for h in &r.holes {
@@ -430,6 +436,7 @@ pub(crate) fn scalar_extent(h: Vec<(f64, f64)>, depth: u32) -> Result<(f64, f64)
     Ok((l1.min(l2), h1.max(h2)))
 }
 
+/// Bound geometry inputs; signed offsets share the size limit but need no positive minimum.
 fn length(v: f64, positive: bool) -> Result<f64> {
     if !v.is_finite() || v.abs() > 1e6 || (positive && v < 0.01) {
         return Err(invalid("gusset sizes must be 0.01…1e6 mm; offsets must be finite and within 1e6 mm"));
@@ -455,6 +462,7 @@ fn contact(face: &Face, origin: Vec3, leg: Vec3, direction: Vec3, from: f64, to:
     Ok(())
 }
 
+/// Validate the two contact strips and extrude one independent plate in the author frame.
 pub(crate) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
     let FeatureKind::FrameGusset { supports, leg1, leg2, thickness, relief, clip, offset, placement } = &f.kind else {
         return Err(invalid("not a gusset"));

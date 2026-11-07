@@ -2849,6 +2849,7 @@ impl FeatureKind {
             "BoundingSolidFeature" => "bounding_solid",
             "PipeFeature" => "pipe",
             "FrameMemberFeature" => "frame_member",
+            "GussetFeature" => "frame_gusset",
             "EmbossFeature" => "emboss",
             "BossFeature" => "boss",
             "LipFeature" | "GrooveFeature" => "lip",

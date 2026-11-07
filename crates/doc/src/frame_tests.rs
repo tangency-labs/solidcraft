@@ -413,6 +413,7 @@ fn a_line_a_hair_off_vertical_is_vertical() {
 }
 
 #[test]
+/// Curved face boundaries contribute their actual area and projected extent to contact checks.
 fn gusset_face_boundaries_are_measured_on_their_exact_curves() {
     use crate::gusset::{conic_share, counter_clockwise, loop_signed_area, scalar_extent, seg_extent};
     use solidcore_record::{Loop2, Seg2, Vec2 as V};

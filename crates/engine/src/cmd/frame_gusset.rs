@@ -13,6 +13,7 @@ pub static COMMANDS:&[CommandSpec]=&[
     .contract(&CONTRACT).output(output_schema_for::<FeatureResult>).at("WELDMENTS","CREATE").icon("gusset").enabled(not_in_sketch)
     .params("supports: exactly two {face:[x,y,z],body,index,path?} planar face picks in world mm; leg1, leg2, thickness: lengths in design units or parameter expressions; relief?: inside-corner setback along each leg (default 0); clip?: equal-distance clipping at both outer tips (default 0: triangle); offset?: signed distance along the joint from the centre of the faces' overlapping span (default 0); placement?: center|positive|negative (default center). Ordered outward support normals define the positive joint/thickness direction by their cross product. Contact strips must fit entirely on both finite faces. Creates a separate body; does not join, drill or add a weld. Common name/body_name fields supported."),
 ];
+/// Capture and certify both picks before adding a feature, with member names pinned to their lines.
 fn gusset(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "frame.gusset";
     let args: GussetParams = serde_json::from_value(p.clone()).map_err(|e| bad(cmd, e.to_string()))?;

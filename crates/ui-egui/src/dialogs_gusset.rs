@@ -36,6 +36,7 @@ impl Default for Gusset {
         }
     }
 }
+/// Start the gusset form with two ordered planar face inputs.
 pub fn start(_: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     (id == "frame.gusset").then(|| {
         (
@@ -44,6 +45,7 @@ pub fn start(_: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         )
     })
 }
+/// Draw the dimensions and side icons; report Enter from the expression fields.
 pub fn rows(app: &SolveApp, ui: &mut egui::Ui, g: &mut Gusset) -> bool {
     choice_row(ui, app.tr("ui.gusset.profile"), "gusset_profile", &mut g.profile, &[app.tr("ui.gusset.triangle"), app.tr("ui.gusset.clipped")]);
     let mut enter = expr_row(ui, app.tr("ui.gusset.leg1"), &mut g.leg1);
@@ -77,6 +79,7 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, g: &mut Gusset) -> bool {
     });
     enter
 }
+/// Send the ordered face picks and displayed expressions through the same command as scripts.
 pub fn commands(app: &SolveApp, g: &Gusset, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
     let mut supports = Vec::new();
     for i in 0..2 {
@@ -89,7 +92,9 @@ pub fn commands(app: &SolveApp, g: &Gusset, inputs: &[SelInput], extra: &Map<Str
         2 => "negative",
         _ => return Err(app.tr("error.gusset_support").into()),
     };
-    let clip = if g.profile == 0 { "0 mm" } else { &g.clip };
+    // Keep a stored zero expression when editing another field; choosing the triangle
+    // otherwise clears the clipping distance.
+    let clip = if g.profile == 0 && !app.session.doc.eval(&g.clip, ValueKind::Length).is_ok_and(|value| value == 0.) { "0 mm" } else { &g.clip };
     let mut args = json!({"supports":supports,"leg1":g.leg1,"leg2":g.leg2,"thickness":g.thickness,"relief":g.relief,"clip":clip,"offset":g.offset,"placement":placement});
     if let Value::Object(args) = &mut args {
         for (k, v) in extra {
@@ -98,6 +103,7 @@ pub fn commands(app: &SolveApp, g: &Gusset, inputs: &[SelInput], extra: &Map<Str
     }
     Ok(vec![("frame.gusset".into(), args)])
 }
+/// Restore the evaluated outline and map both persistent face picks into the editing view.
 pub fn for_feature(
     app: &SolveApp,
     kind: &FeatureKind,
@@ -119,7 +125,7 @@ pub fn for_feature(
             Placement::Positive => 1,
             Placement::Negative => 2,
         },
-        profile: usize::from(clip.as_str() != "0 mm"),
+        profile: usize::from(!app.session.doc.eval(clip, ValueKind::Length).is_ok_and(|value| value == 0.)),
     };
     // The point picked on each face, moved onto the face's exact plane as it is now: it stays on
     // the material when an edit moves the face along its normal. (The anchor plane's origin is

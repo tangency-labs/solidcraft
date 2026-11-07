@@ -640,12 +640,14 @@ fn editing_the_feature_keeps_member_names_until_it_names_them() {
     assert_eq!(boxes(&mut s).into_keys().collect::<Vec<_>>(), names);
 }
 
+/// Make perpendicular finite support faces with room for an 80 × 100 mm plate.
 fn gusset_joint() -> Session {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"corner":[-20,-20,0],"length":40,"width":40,"height":300,"name":"Post feature","body_name":"Post"}));
     run(&mut s, "solid.box", json!({"corner":[20,-20,0],"length":300,"width":40,"height":40,"name":"Rail feature","body_name":"Rail"}));
     s
 }
+/// Find a known definition face by its plane and outward normal for an exact command pick.
 fn gusset_pick(s: &Session, body: &str, point: [f64; 3], normal: [f64; 3]) -> Value {
     let st = s.model.state();
     let b = st.body(body).unwrap();
@@ -656,6 +658,7 @@ fn gusset_pick(s: &Session, body: &str, point: [f64; 3], normal: [f64; 3]) -> Va
         .unwrap();
     json!({"body":body,"index":i,"face":point})
 }
+/// Pick the post side first and rail top second so the joint direction is predictable.
 fn gusset_args(s: &Session) -> Value {
     json!({"supports":[gusset_pick(s,"Post",[20.,0.,100.],[1.,0.,0.]),gusset_pick(s,"Rail",[100.,0.,40.],[0.,0.,1.])],"leg1":80,"leg2":100,"thickness":6,"body_name":"Gusset"})
 }
@@ -664,6 +667,7 @@ fn gusset_volume(s: &Session) -> f64 {
 }
 
 #[test]
+/// Compare each outline with the area of a triangle less its clipped tips and weld relief.
 fn gusset_triangle_and_clipped_relief_have_analytic_volumes() {
     for (r, c) in [(0., 0.), (10., 0.), (0., 10.), (10., 10.)] {
         let mut s = gusset_joint();
@@ -677,6 +681,7 @@ fn gusset_triangle_and_clipped_relief_have_analytic_volumes() {
     }
 }
 #[test]
+/// Check all three placements along the ordered cross product, with a nonzero joint offset.
 fn gusset_thickness_placement_and_offset_have_predictable_bounds() {
     for (placement, lo, hi) in [("center", -8., -2.), ("positive", -11., -5.), ("negative", -5., 1.)] {
         let mut s = gusset_joint();
@@ -690,6 +695,7 @@ fn gusset_thickness_placement_and_offset_have_predictable_bounds() {
     }
 }
 #[test]
+/// Keep exact face identity through a support edit, rename, undo and save/reopen.
 fn gusset_follows_support_edits_and_rename_then_undo_reopen() {
     let mut s = gusset_joint();
     let p = gusset_args(&s);
@@ -710,6 +716,7 @@ fn gusset_follows_support_edits_and_rename_then_undo_reopen() {
     assert!(rel(gusset_volume(&reopened), 24000.) < 1e-7);
 }
 #[test]
+/// A rejected support or dimension leaves no feature or changed member names behind.
 fn gusset_refuses_bad_geometry_atomically() {
     let mut s = gusset_joint();
     let good = gusset_args(&s);
@@ -735,6 +742,7 @@ fn gusset_refuses_bad_geometry_atomically() {
     assert!(s.execute("frame.gusset", &p).is_err());
 }
 #[test]
+/// Contact must cover the whole strip: a cut between valid endpoints still breaks support.
 fn gusset_contact_detects_a_hole_between_its_endpoints() {
     let mut s = gusset_joint();
     run(&mut s, "solid.hole", json!({"position":[70,0,40],"direction":[0,0,-1],"diameter":10,"depth":40,"body":"Rail"}));
@@ -746,6 +754,7 @@ fn gusset_contact_detects_a_hole_between_its_endpoints() {
 }
 
 #[test]
+/// Follow a resized tube while refusing a support whose path-line identity was replaced.
 fn gusset_tracks_frame_member_profile_edits() {
     let mut s = Session::default();
     for (name, points) in [("Post", json!([[0, 0, 0], [0, 0, 300]])), ("Rail", json!([[20, 0, 20], [320, 0, 20]]))] {
@@ -779,6 +788,7 @@ fn gusset_tracks_frame_member_profile_edits() {
     assert!(broken.model.state().body("Gusset").is_none(), "a lost line must not be adopted by proximity");
 }
 #[test]
+/// The triangular area scales by the sine of the angle between the two support legs.
 fn gusset_nonorthogonal_faces_use_the_actual_included_angle() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"corner":[-40,-20,-100],"length":40,"width":40,"height":400,"body_name":"Post"}));
@@ -790,6 +800,7 @@ fn gusset_nonorthogonal_faces_use_the_actual_included_angle() {
     assert!(rel(gusset_volume(&s), 24000. * c) < 1e-7);
 }
 #[test]
+/// Internal anchors move rigidly and remap to the copied part, whose thickness can vary independently.
 fn gusset_component_motion_and_independent_copy_keep_attachments() {
     let mut s = Session::default();
     let part = run(&mut s, "component.create", json!({"name":"Part","grounded":false}))["component"].as_u64().unwrap();
@@ -810,4 +821,80 @@ fn gusset_component_motion_and_independent_copy_keep_attachments() {
     let copy = run(&mut s, "component.properties", json!({"component":copied}))["total"]["volume_mm3"].as_f64().unwrap();
     assert!((original - 984000.).abs() < 1e-4, "{original}");
     assert!((copy - 992000.).abs() < 1e-4, "{copy}");
+}
+
+/// Recorded feature names from timeline.inspect replay with the same support identities.
+#[test]
+fn gusset_recorded_type_name_replays() {
+    let mut source = gusset_joint();
+    let p = gusset_args(&source);
+    let id = run(&mut source, "frame.gusset", p)["feature"].as_u64().unwrap();
+    let inspected = run(&mut source, "timeline.inspect", json!({"feature": id}));
+    assert_eq!(inspected["type_name"], "GussetFeature");
+    let mut script = run(&mut source, "timeline.export_script", json!({}))["script"].clone();
+    let recorded = script["commands"].as_array_mut().unwrap().iter_mut().find(|step| step["params"]["feature"]["id"] == id).unwrap();
+    recorded["params"]["feature"]["type"] = inspected["type_name"].clone();
+
+    let mut replay = Session::default();
+    replay.run_script(&script).unwrap();
+    assert_eq!(replay.doc.feature(id).unwrap().kind, source.doc.feature(id).unwrap().kind);
+    assert!(replay.model.result(id).unwrap().error.is_none());
+    assert!(rel(gusset_volume(&replay), 24000.) < 1e-7);
+}
+
+/// A root gusset follows both independent live occurrences, and cannot survive a lost joint.
+#[test]
+fn gusset_rebuilds_when_either_live_support_moves() {
+    let mut s = Session::default();
+    let post = run(&mut s, "component.create", json!({"name":"Upright","grounded":false}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"corner":[-20,-20,0],"length":40,"width":40,"height":300,"body_name":"Post"}));
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    let rail = run(&mut s, "component.create", json!({"name":"Cross member","grounded":false}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"corner":[20,-20,0],"length":300,"width":40,"height":40,"body_name":"Rail"}));
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    let p = gusset_args(&s);
+    let fid = run(&mut s, "frame.gusset", p)["feature"].as_u64().unwrap();
+    let origin = |s: &Session| {
+        let min = s.model.state().body("Gusset").unwrap().mesh().bounds().min;
+        [min.x, min.y, min.z]
+    };
+    assert!(near3(origin(&s), [20., -3., 40.]));
+    run(&mut s, "occurrence.move", json!({"occurrence":rail,"translate":[0,0,5],"capture":true}));
+    assert!(near3(origin(&s), [20., -3., 45.]));
+    run(&mut s, "occurrence.move", json!({"occurrence":post,"translate":[10,0,0],"capture":true}));
+    assert!(near3(origin(&s), [30., -3., 45.]));
+    run(&mut s, "occurrence.move", json!({"occurrence":rail,"translate":[0,100,0],"capture":true}));
+    assert!(s.model.result(fid).unwrap().error.as_deref().is_some_and(|e| e.contains("no common joint span")));
+    assert!(s.model.state().body("Gusset").is_none());
+    run(&mut s, "edit.undo", json!({}));
+    assert!(near3(origin(&s), [30., -3., 45.]));
+}
+
+/// A part's captured gusset stays rigid; copying it must disclose its external rail support.
+#[test]
+fn gusset_external_support_is_reported_and_refused_across_designs() {
+    let mut source = Session::default();
+    run(&mut source, "solid.box", json!({"corner":[20,-20,0],"length":300,"width":40,"height":40,"body_name":"Rail"}));
+    let part = run(&mut source, "component.create", json!({"name":"Upright","grounded":false}));
+    let occurrence = part["occurrence"].as_u64().unwrap();
+    run(&mut source, "solid.box", json!({"corner":[-20,-20,0],"length":40,"width":40,"height":300,"body_name":"Post"}));
+    let p = gusset_args(&source);
+    run(&mut source, "frame.gusset", p);
+    run(&mut source, "occurrence.move", json!({"occurrence":occurrence,"translate":[0,100,0],"capture":true}));
+    assert!(rel(gusset_volume(&source), 24000.) < 1e-7);
+
+    let mut target = Session {
+        foreign_copy: Some(std::sync::Arc::new(crate::ForeignCopy::of(&source, Vec::new(), vec![vec![occurrence]]).unwrap())),
+        ..Session::default()
+    };
+    let before = target.doc.to_json();
+    let error = target.execute("component.paste_from_design", &json!({})).unwrap_err().to_string();
+    assert!(error.contains("exact face attachment to Rail"), "{error}");
+    assert_eq!(target.doc.to_json(), before);
+
+    let copied = run(&mut source, "component.paste_new", json!({"component":part["component"]}));
+    assert!(
+        copied["notices"].as_array().unwrap().iter().any(|n| n.as_str().is_some_and(|n| n.contains("external exact face attachment to Rail"))),
+        "{copied}"
+    );
 }
