@@ -957,6 +957,8 @@ pub struct SketchInspected {
     /// Its remaining degrees of freedom (0: fully constrained).
     pub dof: usize,
     pub fully_constrained: bool,
+    /// The planar sketch's own degrees of freedom, its drawn 3D curves' left out (#10608).
+    pub planar_dof: usize,
     /// The constraints still violated after a failed solve.
     pub failing: Vec<String>,
     /// The 3D constraints' solve (#10608): `{ok, dof, failing, ...}`, or null for a sketch with

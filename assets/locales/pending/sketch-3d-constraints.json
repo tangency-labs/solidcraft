@@ -4,6 +4,7 @@
   "de": { "cmd.sketch_constraint_along_axis": "Entlang Achse" },
   "he": { "cmd.sketch_constraint_along_axis": "לאורך ציר" },
   "ja": { "cmd.sketch_constraint_along_axis": "軸に沿う" },
+  "ko": { "cmd.sketch_constraint_along_axis": "축을 따라" },
   "vi": { "cmd.sketch_constraint_along_axis": "Dọc theo trục" },
   "zh": { "cmd.sketch_constraint_along_axis": "沿轴" }
 }

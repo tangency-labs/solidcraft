@@ -4498,9 +4498,10 @@ fn solve_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let id = sketch_store::target(s, p, cmd)?;
     let st = s.model.state();
     let ss = st.sketch(id).ok_or_else(|| EngineError::Other("the sketch has not been evaluated".into()))?;
-    let (status, dof, failing, profiles) = (ss.report.status.into(), ss.report.shown_dof(), ss.report.failing.clone(), ss.profiles.len());
+    let (status, dof, planar_dof) = (ss.report.status.into(), ss.report.shown_dof(), ss.report.dof);
+    let (failing, profiles) = (ss.report.failing.clone(), ss.profiles.len());
     let wires_solve = serde_json::to_value(&ss.report.wires).unwrap_or_default();
-    reply(cmd, SolveResult { status, dof, failing, wires_solve, profiles, param_warnings: Vec::new() })
+    reply(cmd, SolveResult { status, dof, planar_dof, failing, wires_solve, profiles, param_warnings: Vec::new() })
 }
 
 #[cfg(test)]

@@ -787,4 +787,37 @@ fn a_motion_trace_curve_takes_no_constraints_and_counts_no_freedoms() {
     // Its fit points are no freedoms to take away: a line drawn beside it adds its own 6 only.
     let r = run(&mut s, "sketch.line3d", json!({"points":[[0,20,0],[10,20,5]]}));
     assert_eq!(r["sketch"]["dof"], 6, "{r}");
+    assert_eq!(r["sketch"]["planar_dof"], 0, "{r}");
+    // A copy that lands on the trace's end is not joined to it either, as a drawn curve is not.
+    let l = r["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.move", json!({"entities": [l], "copy": true, "translate": [0, -20]}));
+    let sk = s.doc.sketch(sketch).unwrap();
+    assert!(!sk.wire_constraints.iter().any(|c| c.kind.wires().iter().any(|w| *w == t)), "{:?}", sk.wire_constraints);
+}
+
+#[test]
+fn a_move_that_breaks_a_constraint_in_a_group_too_large_to_solve_is_refused() {
+    // A path of 521 points along X, each of its 520 lines held along X: more unknowns than one
+    // solve takes, so the group is left as it is. Dragging a point off X is refused.
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d":true}));
+    let sketch = s.active_sketch.unwrap();
+    // In two calls (a call takes at most 500 points), the second joined to the first's end.
+    let mut lines = Vec::new();
+    for (from, to) in [(0, 300), (299, 521)] {
+        let path: Vec<[f64; 3]> = (from..to).map(|x| [f64::from(x), 0.0, 0.0]).collect();
+        let r = run(&mut s, "sketch.line3d", json!({"points": path}));
+        lines.extend(r["curves"].as_array().unwrap().iter().map(|c| c.as_str().unwrap().to_string()));
+    }
+    let mut doc = (*s.doc).clone();
+    let sk = doc.sketch_mut(sketch).unwrap();
+    for line in &lines {
+        sk.add_wire_constraint(solidcraft_sketch::WireConstraintKind::AlongAxis { line: line.clone(), axis: solidcraft_sketch::Axis::X }).unwrap();
+    }
+    s.set_doc(doc);
+    let before = s.doc.sketch(sketch).unwrap().wires.clone();
+    let e = s.execute("sketch.move3d", &json!({"wire": lines[0], "index": 0, "to": [0, 5, 5]})).unwrap_err().to_string();
+    assert!(e.contains("cannot hold"), "{e}");
+    assert_eq!(s.doc.sketch(sketch).unwrap().wires, before, "nothing moved");
 }
