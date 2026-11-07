@@ -1552,3 +1552,27 @@ fn join_that_meets_no_body_keeps_the_piece_and_says_so() {
     let combine = s.execute("solid.combine", &json!({"target": "A", "tools": ["B"], "operation": "join"})).unwrap();
     assert!(combine["warning"].is_null(), "{combine}");
 }
+
+/// #12996: a circular pattern of an untargeted cut made in a component, run with another
+/// component active, cuts the bodies of the cut's own component, as the cut did.
+#[test]
+fn pattern_of_an_untargeted_cut_in_a_component_works_with_root_active() {
+    let mut s = Session::default();
+    let run = |s: &mut Session, command: &str, params: Value| s.execute(command, &params).unwrap();
+    run(&mut s, "component.create", json!({"name": "Main Body"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-50, -50], "p1": [50, 50]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": "20 mm", "operation": "new", "body_name": "Body1"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 20], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+    run(&mut s, "sketch.circle.center", json!({"center": [30, 0], "radius": 4}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": "10 mm", "direction": "negative", "operation": "cut", "name": "Extrude62"}));
+    let one_hole = volume(&s, "Body1");
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Other"}));
+    run(&mut s, "solid.pattern.circular", json!({"features": ["Extrude62"], "axis": "Z", "count": 10}));
+    let hole = 10.0 * 16.0 * std::f64::consts::PI;
+    let got = volume(&s, "Body1");
+    assert!((one_hole - got - 9.0 * hole).abs() < 0.02 * hole, "{one_hole} -> {got}");
+}
