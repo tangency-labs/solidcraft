@@ -67,9 +67,7 @@ material.list
 mesh.convert
 motion.export
 motion.export_animation
-motion.interference
 motion.play
-motion.plot
 motion.trace
 motion.trace.edit
 motion.trace.keep
