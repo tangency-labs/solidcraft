@@ -4734,7 +4734,12 @@ fn parallel_tapped_wall(st: &ModelState, entry: Vec3, inward: Vec3, radius: f64)
 
 /// The cutting tools of a hole feature at every spot, each with its exact geometry when it is a
 /// straight cylinder (see [`hole_tools_and_prisms`]).
-fn hole_feature_tools(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature) -> Result<Vec<(Traced, Option<more::PrimitivePrism>)>> {
+fn hole_feature_tools(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    st: &ModelState,
+    f: &Feature,
+) -> Result<Vec<(Traced, Option<more::PrimitivePrism>)>> {
     let FeatureKind::Hole { diameter, depth, hole, to, .. } = &f.kind else { return Err(DocError::Invalid("not a hole".into())) };
     let (spots, dir) = hole_spots(doc, vals, st, f)?;
     if spots.is_empty() || spots.len() > 10_000 {
