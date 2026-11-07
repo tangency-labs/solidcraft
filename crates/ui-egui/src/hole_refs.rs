@@ -12,15 +12,15 @@
 use egui::{Color32, Pos2, Stroke, vec2};
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
-use solidcraft_engine::doc::HoleReference;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
-use solidcraft_engine::doc::hole_reference::{ReferenceFrame, on_reference_face, reference_frame};
+use solidcraft_engine::doc::hole_reference::{NO_EDGE, RefInput, ReferenceFrame, datum_input, inputs_of, on_reference_face, reference_frame_of};
+use solidcraft_engine::doc::{HoleDatum, HoleReference};
 use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::{Sel, Session};
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
-use crate::selection::{EDGES, FACES, PLANAR_FACES, SelInput, VERTICES};
+use crate::selection::{AXES, EDGES, FACES, PLANAR_FACES, PLANES, SelInput, VERTICES};
 use crate::theme::Tokens;
 use crate::viewport::Proj;
 
@@ -58,7 +58,7 @@ fn model_text(refs: &Refs, k: usize) -> Option<&str> {
 #[derive(Clone, Debug, PartialEq)]
 struct Seen {
     place: Vec3,
-    edges: [Option<Vec3>; 2],
+    edges: [Option<Pick>; 2],
     distance: [String; 2],
 }
 
@@ -68,13 +68,22 @@ struct Seen {
 struct Framed {
     revision: u64,
     place: Vec3,
-    edges: [Option<Vec3>; 2],
+    edges: [Option<Pick>; 2],
     frame: Option<(ReferenceFrame, Vec<usize>)>,
 }
 
-/// The reference edge inputs a Single hole's dialog has after its face input.
+/// What a reference input holds: a point on a straight edge, or the name of a plane or an axis.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Pick {
+    Edge(Vec3),
+    Plane(String),
+    Axis(String),
+}
+
+/// The reference inputs a Single hole's dialog has after its face input: an edge, a plane or an
+/// axis each (#10877).
 pub(crate) fn inputs() -> [SelInput; 2] {
-    REFERENCES.map(|label| SelInput::new(label, EDGES, false).tip("dialog.reference_edge_tip"))
+    REFERENCES.map(|label| SelInput::new(label, EDGES | PLANES | AXES, false).tip("dialog.reference_edge_tip"))
 }
 
 /// The Cylinder window's inputs: where it stands (a face, or a vertex), then the reference edges.
@@ -82,6 +91,12 @@ pub(crate) fn cylinder_inputs() -> Vec<SelInput> {
     let mut v = vec![SelInput::new("Face", PLANAR_FACES | FACES | VERTICES, false).tip("dialog.cylinder_face_tip")];
     v.extend(inputs());
     v
+}
+
+/// Whether a reference input of `d` turns `sel` down: a straight sketch line passes as an axis
+/// but is no reference (its distance would move nothing).
+pub(crate) fn refuses(d: &Dialog, inp: &SelInput, sel: &Sel) -> bool {
+    matches!(sel, Sel::SketchCurve { .. }) && REFERENCES.contains(&inp.label) && takes(d)
 }
 
 /// Does `d` take reference edges: a Single hole's dialog, or a Cylinder's?
@@ -146,11 +161,13 @@ fn set_place(d: &mut Dialog, p: Vec3) {
     }
 }
 
-/// A point on each reference edge picked, by input.
-fn edges(d: &Dialog) -> [Option<Vec3>; 2] {
+/// What each reference input holds, by input: a point on its edge, or its plane or axis.
+fn edges(d: &Dialog) -> [Option<Pick>; 2] {
     REFERENCES.map(|label| {
         d.inputs.iter().find(|i| i.label == label).and_then(|i| i.items.first()).and_then(|x| match x {
-            Sel::Edge { point, .. } => Some(*point),
+            Sel::Edge { point, .. } => Some(Pick::Edge(*point)),
+            Sel::Plane { name } => Some(Pick::Plane(name.clone())),
+            Sel::Axis { name } => Some(Pick::Axis(name.clone())),
             _ => None,
         })
     })
@@ -187,10 +204,18 @@ fn frame(s: &Session, d: &mut Dialog) -> Option<(ReferenceFrame, Vec<usize>)> {
     {
         return f.frame.clone();
     }
-    let picked: Vec<(usize, Vec3)> = edges.iter().enumerate().filter_map(|(k, e)| e.map(|p| (k, p))).collect();
+    let picked: Vec<(usize, &Pick)> = edges.iter().enumerate().filter_map(|(k, e)| e.as_ref().map(|p| (k, p))).collect();
     let found = direction(s, d, at).and_then(|dir| {
-        let pts: Vec<(Vec3, Option<&str>)> = picked.iter().map(|(_, p)| (*p, None)).collect();
-        reference_frame(&crate::open_meshing::session_world(s), at, dir, &pts, true).ok().map(|f| (f, picked.iter().map(|(k, _)| *k).collect()))
+        let st = crate::open_meshing::session_world(s);
+        let pts: Option<Vec<RefInput>> = picked
+            .iter()
+            .map(|(_, p)| match p {
+                Pick::Edge(p) => Some(RefInput::Edge(*p, None)),
+                Pick::Plane(name) => datum_input(&st, &HoleDatum::Plane(name.into())).ok(),
+                Pick::Axis(name) => datum_input(&st, &HoleDatum::Axis(name.into())).ok(),
+            })
+            .collect();
+        reference_frame_of(&st, at, dir, &pts?, true).ok().map(|f| (f, picked.iter().map(|(k, _)| *k).collect()))
     });
     if let Some(refs) = refs_mut(d) {
         refs.frame = Some(Framed { revision: s.revision, place: at, edges, frame: found.clone() });
@@ -293,15 +318,20 @@ pub(crate) fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: 
     enter
 }
 
-/// The `references` OK sends: each picked edge (a point on it) with its distance.
+/// The `references` OK sends: each picked edge (a point on it), plane or axis (its name) with its
+/// distance.
 pub(crate) fn params(d: &Dialog) -> Vec<Value> {
     let Some(refs) = refs(d).filter(|_| takes(d)) else { return Vec::new() };
     edges(d)
         .iter()
         .enumerate()
         .filter_map(|(k, e)| {
-            let distance = model_text(refs, k)?;
-            e.map(|p| json!({"edge": [p.x, p.y, p.z], "distance": distance.trim()}))
+            let distance = model_text(refs, k)?.trim();
+            match e.as_ref()? {
+                Pick::Edge(p) => Some(json!({"edge": [p.x, p.y, p.z], "distance": distance})),
+                Pick::Plane(name) => Some(json!({"plane": name, "distance": distance})),
+                Pick::Axis(name) => Some(json!({"axis": name, "distance": distance})),
+            }
         })
         .collect()
 }
@@ -314,17 +344,21 @@ pub(crate) fn restore(s: &Session, d: &mut Dialog, references: &[HoleReference],
     }
     let Some(at) = place(d) else { return };
     let st = crate::open_meshing::session_world(s);
-    let edges: Vec<(Vec3, Option<&str>)> = references.iter().enumerate().map(|(k, r)| (r.edge.0, names.get(k).map(String::as_str))).collect();
-    let found = direction(s, d, at).and_then(|dir| reference_frame(&st, at, dir, &edges, false).ok());
+    let found = direction(s, d, at).and_then(|dir| reference_frame_of(&st, at, dir, &inputs_of(&st, references, names).ok()?, false).ok());
     let mesh = found.as_ref().and_then(|f| st.body(&f.body)).map(|b| b.mesh());
     for (k, r) in references.iter().enumerate().take(REFERENCES.len()) {
+        // A plane or an axis is picked again by its name.
+        let datum = r.datum.as_ref().map(|d| match d {
+            HoleDatum::Plane(name) => Sel::Plane { name: name.to_string() },
+            HoleDatum::Axis(name) => Sel::Axis { name: name.to_string() },
+        });
         // Where the edge is now, else where it was picked.
-        let sel = found.as_ref().zip(mesh.as_ref()).and_then(|(f, m)| {
-            let index = *f.edges.get(k)?;
+        let sel = found.as_ref().zip(mesh.as_ref()).filter(|_| datum.is_none()).and_then(|(f, m)| {
+            let index = *f.edges.get(k).filter(|i| **i != NO_EDGE)?;
             let point = crate::selection::polyline_mid(m.edges.get(index)?);
             Some(Sel::Edge { body: f.body.clone(), index, point })
         });
-        let sel = sel.or_else(|| nearest_edge(s, at, r.edge.0));
+        let sel = datum.or(sel).or_else(|| nearest_edge(s, at, r.edge.0));
         if let (Some(label), Some(sel)) = (REFERENCES.get(k), sel)
             && let Some(inp) = d.inputs.iter_mut().find(|inp| inp.label == *label)
         {

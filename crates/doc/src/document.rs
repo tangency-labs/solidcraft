@@ -2462,9 +2462,28 @@ pub enum HoleKind {
 /// distance of the hole's centre from that edge's line, in the face's plane.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 pub struct HoleReference {
+    /// The picked point on the edge. With a `datum` it is only where the reference was picked.
     pub edge: Position,
     #[walk(length = "Reference distance")]
     pub distance: Expr,
+    /// A plane or axis the distance is measured from instead of an edge: the line it makes in
+    /// the face's plane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub datum: Option<HoleDatum>,
+    /// With a `datum`: the hole is on the other side of its line than the plane's normal (or, for
+    /// an axis, the face's normal crossed with it) points to. Set where the hole is placed, so the
+    /// hole keeps its side when the plane or axis later moves past it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub opposite: bool,
+}
+
+/// What a hole's reference measures from when it is not an edge, by name: an origin plane or
+/// axis, or a construction plane or axis of the timeline.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, solidcraft_derive::Walk)]
+#[serde(rename_all = "snake_case")]
+pub enum HoleDatum {
+    Plane(FeatureName),
+    Axis(FeatureName),
 }
 
 /// Pattern layouts.
