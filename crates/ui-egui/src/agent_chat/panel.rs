@@ -1223,15 +1223,35 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
 #[cfg(not(target_arch = "wasm32"))]
 const FLATPAK_OVERRIDE: &str = "flatpak override --user io.tangencylabs.solidcraft --filesystem=~/.nvm:ro --filesystem=~/.local/bin:ro --filesystem=~/.local/share/claude:ro --filesystem=~/.claude --filesystem=~/.claude.json --share=network";
 
+/// The strictly confined Snap can neither see nor start the agents installed on the computer, and
+/// no permission the user can grant changes that (#1458).
+#[cfg(not(target_arch = "wasm32"))]
+fn snap() -> bool {
+    crate::update::is_snap(&|k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty()))
+}
+
+/// A sandbox hides the agents installed on the computer, so an empty list says why.
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn sandboxed() -> bool {
+    std::env::var_os("FLATPAK_ID").is_some() || snap()
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) fn no_agents_message() -> String {
-    if std::env::var_os("FLATPAK_ID").is_some() { tr("ui.agent_chat_flatpak_none_found") } else { tr("ui.agent_chat_none_found") }.to_string()
+    if std::env::var_os("FLATPAK_ID").is_some() {
+        tr("ui.agent_chat_flatpak_none_found")
+    } else if snap() {
+        tr("ui.agent_chat_snap_none_found")
+    } else {
+        tr("ui.agent_chat_none_found")
+    }
+    .to_string()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) fn no_agents(ui: &mut egui::Ui) {
     let flatpak = std::env::var_os("FLATPAK_ID").is_some();
-    let style = if flatpak { ui_kit::Text::Report("none", false) } else { ui_kit::Text::Note("none") };
+    let style = if sandboxed() { ui_kit::Text::Report("none", false) } else { ui_kit::Text::Note("none") };
     ui_kit::text(ui, &no_agents_message(), style);
     if flatpak {
         // The Copy button comes before the long command so it shows without scrolling.
@@ -1560,15 +1580,17 @@ fn agent_list(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.agent_chat.agent_id = Some(e.id.clone());
         }
     }
-    // In the Flatpak the hint already says nothing was found, so the install list below is
-    // headed "Not installed" instead of repeating it.
-    let flatpak_hint = all.is_empty() && app.agent_chat.detecting.is_none() && std::env::var_os("FLATPAK_ID").is_some();
-    if flatpak_hint {
+    // In a sandbox the hint already says nothing was found, so the install list below is
+    // headed "Not installed" instead of repeating it. The Snap can't start what the list
+    // installs, so it has no list.
+    let sandbox_hint = all.is_empty() && app.agent_chat.detecting.is_none() && sandboxed();
+    if sandbox_hint {
         no_agents(ui);
     }
-    let missing: Vec<discover::Missing> = app.agent_chat.detection.as_ref().map(|d| d.missing.clone()).unwrap_or_default();
+    let missing: Vec<discover::Missing> =
+        if snap() { Vec::new() } else { app.agent_chat.detection.as_ref().map(|d| d.missing.clone()).unwrap_or_default() };
     if !missing.is_empty() {
-        let heading = if all.is_empty() && !flatpak_hint { tr("ui.agent_chat_none_found") } else { tr("ui.agent_chat_not_installed") };
+        let heading = if all.is_empty() && !sandbox_hint { tr("ui.agent_chat_none_found") } else { tr("ui.agent_chat_not_installed") };
         ui_kit::section(ui, "sc_agent_missing", heading, all.is_empty(), |ui| {
             for m in missing {
                 ui.horizontal(|ui| {
@@ -2349,8 +2371,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn empty_discovery_explains_flatpak_permissions() {
-        const CHILD: &str = "SOLIDCRAFT_TEST_FLATPAK_MESSAGE";
+    fn empty_discovery_explains_the_sandbox() {
+        const CHILD: &str = "SOLIDCRAFT_TEST_SANDBOX_MESSAGE";
         if let Ok(case) = std::env::var(CHILD) {
             let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
             app.agent_chat.detection = Some(discover::Detection::default());
@@ -2381,19 +2403,40 @@ mod tests {
                 }
                 assert!(copied, "Copy preserves the complete override command");
             } else {
-                assert_eq!(message, tr("ui.agent_chat_none_found"));
+                // #1458: the Snap can't start what the install list installs, so it says why instead.
+                let snap = case == "snap";
+                assert_eq!(message, tr(if snap { "ui.agent_chat_snap_none_found" } else { "ui.agent_chat_none_found" }));
+                const INSTALL: &str = "npm install -g @example/agent";
+                let missing = discover::Missing { id: "example", name: "Example agent", install: INSTALL };
+                app.agent_chat.detection = Some(discover::Detection { missing: vec![missing], ..Default::default() });
+                let ctx = crate::fonts::test_context();
+                let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(300.0, 900.0))), ..Default::default() };
+                for _ in 0..2 {
+                    let mut output = ctx.run_ui(input.clone(), |ui| picker(&mut app, ui));
+                    if snap {
+                        assert!(crate::test_support::text_shapes(&output).any(|text| text.galley.text() == message));
+                    }
+                    assert_eq!(crate::test_support::text_shapes(&output).any(|text| text.galley.text() == INSTALL), !snap, "{case}");
+                    output.textures_delta.clear();
+                }
             }
             return;
         }
-        for case in ["flatpak", "native"] {
+        // Another snap's variables (SolidCraft started from a confined editor's terminal) are not the Snap.
+        let cases: [(&str, &[(&str, &str)]); 4] = [
+            ("flatpak", &[("FLATPAK_ID", "io.tangencylabs.solidcraft")]),
+            ("snap", &[("SNAP", "/snap/solidcraft/12"), ("SNAP_NAME", "solidcraft")]),
+            ("another snap", &[("SNAP", "/snap/code/200"), ("SNAP_NAME", "code")]),
+            ("native", &[]),
+        ];
+        for (case, env) in cases {
             let mut child = std::process::Command::new(std::env::current_exe().unwrap());
-            child.args(["--exact", "agent_chat::panel::tests::empty_discovery_explains_flatpak_permissions", "--nocapture"]);
+            child.args(["--exact", "agent_chat::panel::tests::empty_discovery_explains_the_sandbox", "--nocapture"]);
             child.env(CHILD, case);
-            if case == "flatpak" {
-                child.env("FLATPAK_ID", "io.tangencylabs.solidcraft");
-            } else {
-                child.env_remove("FLATPAK_ID");
+            for name in ["FLATPAK_ID", "SNAP", "SNAP_NAME"] {
+                child.env_remove(name);
             }
+            child.envs(env.iter().copied());
             assert!(child.status().unwrap().success(), "{case}");
         }
     }
