@@ -2,6 +2,7 @@
 //! plain 2D geometry in millimetres; the engine turns it into sketch curves.
 
 use solidcore_record::Vec2;
+use solidcraft_geom::bspline::NurbsCurve;
 use solidcraft_geom::prelude::*;
 
 /// One imported 2D entity (millimetres, y up).
@@ -28,6 +29,10 @@ pub enum Geom2 {
         control: bool,
         degree: u8,
     },
+    /// A B-spline with its own knots and, when rational, weights, as a file gives it (z = 0). The
+    /// importer brings it in as the curves a sketch holds: one sketch spline when it is the
+    /// sketch's own, else its exact pieces.
+    Nurbs(NurbsCurve),
     /// Quadratic Bézier / conic.
     Conic {
         a: Vec2,
