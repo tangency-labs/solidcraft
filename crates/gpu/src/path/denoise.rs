@@ -2,7 +2,6 @@
 use super::{Context, Result, SHADER, TIMEOUT, Task, checked, gpu, one_compile_at_a_time, placeholder_bind, scopes, warm_up};
 use solidcraft_render::job::{CancelToken, DenoiseDiagnostics, DenoiseGuideClass, resolve_denoise_class};
 use std::sync::atomic::{AtomicBool, Ordering};
-use wgpu::util::DeviceExt;
 
 pub(super) const GUIDE_BYTES_PER_PIXEL: u64 = 96; // two complete surface guides
 pub(super) const BYTES_PER_PIXEL: u64 = GUIDE_BYTES_PER_PIXEL + 32; // two colour vec4s
