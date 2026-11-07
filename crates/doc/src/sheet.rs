@@ -466,8 +466,14 @@ fn split_loop_at(lp: &mut Loop2, p: Vec2) -> Option<usize> {
                 }
                 let u = d / len;
                 let along = (p - a).dot(u);
-                if (p - (a + u * along)).len() > TOL || along <= TOL || along >= len - TOL {
+                if (p - (a + u * along)).len() > TOL || along < -TOL || along > len + TOL {
                     continue;
+                }
+                // A point already at a segment's end is a vertex of the loop as it stands: there is
+                // nothing to split, and saying so is what lets a cut end on a corner (a stepped far
+                // edge, for one) rather than being refused as "not on the loop".
+                if along <= TOL || along >= len - TOL {
+                    return Some(k);
                 }
                 lp.segs[k] = Seg2::Line { a, b: p };
                 lp.segs.insert(k + 1, Seg2::Line { a: p, b });
@@ -479,8 +485,12 @@ fn split_loop_at(lp: &mut Loop2, p: Vec2) -> Option<usize> {
                 }
                 let turn = ((p - center).angle() - start) * sweep.signum();
                 let share = turn.rem_euclid(std::f64::consts::TAU) / sweep.abs();
-                if share <= TOL || share >= 1.0 - TOL {
+                if share > 1.0 + TOL {
                     continue;
+                }
+                // As for a line: an end point is a vertex of the loop already.
+                if share <= TOL || share >= 1.0 - TOL {
+                    return Some(k);
                 }
                 lp.segs[k] = Seg2::Arc { center, radius, start, sweep: sweep * share };
                 lp.segs.insert(k + 1, Seg2::Arc { center, radius, start: start + sweep * share, sweep: sweep * (1.0 - share) });
