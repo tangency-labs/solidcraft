@@ -147,15 +147,19 @@ def test_pattern_counts_run_from_1_to_1000_and_a_range_rule_does_not_stop_0():
         ])
 
 
-def test_a_fractional_count_rounds_to_the_nearest_whole_number():
-    def copies(n):
+def test_a_fractional_count_is_refused_unless_explicitly_rounded():
+    def copies(n, count="n"):
         return len(execute([
             cmd("parameters.add", name="n", expression=n, unit=""),
             cmd("solid.cylinder", diameter="2 mm", height="2 mm", operation="new", body_name="Pin", name="Pin"),
-            cmd("solid.pattern.rectangular", bodies=["Pin"], dir1=[1, 0, 0], count1="n", spacing1="10 mm"),
+            cmd("solid.pattern.rectangular", bodies=["Pin"], dir1=[1, 0, 0], count1=count, spacing1="10 mm"),
         ])["bodies"])
 
-    assert (copies("6.4"), copies("6.5")) == (6, 7)
+    assert copies("6") == 6
+    for n, rounded in (("6.4", 6), ("6.5", 7)):
+        with pytest.raises(SolidCraftError, match="a count must be a whole number"):
+            copies(n)
+        assert copies(n, "round(n)") == rounded
 
 
 HEXAGON = [
@@ -166,8 +170,8 @@ HEXAGON = [
 ]
 
 
-def test_a_circumscribed_polygon_needs_the_polygon_constraint():
-    assert sketch_dof(HEXAGON) == 1
+def test_a_circumscribed_polygon_is_regular_without_an_extra_polygon_constraint():
+    assert sketch_dof(HEXAGON) == 0
     assert sketch_dof([*HEXAGON, cmd("sketch.constraint.polygon", lines=[f"l{i}" for i in range(1, 7)])]) == 0
 
 
@@ -207,7 +211,7 @@ def test_centre_of_mass_and_bounding_box_measure_within_5e_5_of_the_part_size():
     assert abs(body["center_of_mass"][1] - 4 * radius / (3 * pi)) < 5e-5 * size
 
 
-def test_expressions_have_no_conditionals_and_sign_of_zero_is_one():
+def test_expressions_have_no_conditionals_and_sign_of_zero_is_zero():
     def evaluate(expression):
         done = subprocess.run(
             ["solidcraft-cli", "exec", "expr.evaluate", json.dumps({"expression": expression, "kind": "unitless"})],
@@ -216,8 +220,10 @@ def test_expressions_have_no_conditionals_and_sign_of_zero_is_one():
         return json.loads(done.stdout)
 
     assert not evaluate("if(1 > 0, 1, 2)")["ok"]
-    assert evaluate("sign(0)")["value"] == 1
+    assert evaluate("sign(0)")["value"] == 0
+    assert evaluate("sign(-0)")["value"] == 0
     assert evaluate("sign(-3)")["value"] == -1
+    assert evaluate("sign(3)")["value"] == 1
     assert evaluate("log(100)")["value"] == 2
     with pytest.raises(SolidCraftError, match="got an angle"):
         execute([cmd("parameters.add", name="a", expression="atan(1)", unit="")])
