@@ -282,14 +282,14 @@ impl eframe::App for App {
         let now = std::time::Instant::now();
         if self.prefs_writer.due(ui.input(|i| i.events.iter().any(changes_settings)), now)
             && let Some(storage) = frame.storage_mut()
-            && let Ok(prefs) = self.solve.try_prefs()
+            && let Ok(prefs) = self.prefs_for_storage(storage)
             && let Some(wait) = self.prefs_writer.store(storage, prefs, now)
         {
             ui.ctx().request_repaint_after(wait);
         }
     }
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        let prefs = match self.solve.try_prefs() {
+        let prefs = match self.prefs_for_storage(storage) {
             Ok(prefs) => prefs,
             Err(reason) => {
                 log::warn!("Settings were not written: {reason}");
@@ -368,6 +368,14 @@ struct LostWatch {
 }
 
 impl App {
+    fn prefs_for_storage(&self, storage: &dyn eframe::Storage) -> Result<String, String> {
+        self.solve.try_prefs().or_else(|reason| {
+            log::warn!("Panel layout changes were not saved: {reason}");
+            let previous = solidcraft_ui_egui::prefs::stored(|key| storage.get_string(key));
+            self.solve.prefs_with_stored_panel_layout(previous.as_deref())
+        })
+    }
+
     /// The graphics device was lost (#4172): the window can't draw again, so close, keeping
     /// unsaved changes for recovery as a forced quit does (the window can't ask about them), and
     /// start again once closed ([`device_lost::restart`]).

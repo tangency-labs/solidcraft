@@ -1084,7 +1084,7 @@ impl SolveApp {
     }
 
     /// Preferences as JSON for inspection and compatibility. Storage hosts use
-    /// `try_prefs` so a refused portable layout leaves the previous file intact.
+    /// `try_prefs` and retain the stored panel record if portable conversion refuses.
     pub fn prefs(&self) -> String {
         self.try_prefs().unwrap_or_else(|reason| {
             log::warn!("Preferences export retained recovery data: {reason}");
@@ -1092,11 +1092,26 @@ impl SolveApp {
         })
     }
 
-    /// Portable preferences for storage. On refusal the host keeps its old file.
+    /// Portable preferences for storage. On refusal the host retains its stored panel record.
     pub fn try_prefs(&self) -> Result<String, String> {
         let layout = prefs::held_panel_layout(self).unwrap_or_else(|| panel_runtime::preferences_value(self));
         let portable = panel_runtime::portable_preferences_value(self, layout).map_err(solidcraft_engine::panels::commands::error_text)?;
         Ok(self.prefs_with_panel_layout(portable))
+    }
+
+    /// Save ordinary settings after portable layout conversion refuses, retaining the
+    /// exact previous panel record (including null or absence). Invalid stored JSON
+    /// refuses the whole write rather than replacing recovery data.
+    pub fn prefs_with_stored_panel_layout(&self, previous: Option<&str>) -> Result<String, String> {
+        let panel_layout = match previous {
+            None => None,
+            Some(previous) => {
+                let value: Value = serde_json::from_str(previous).map_err(|reason| format!("stored preferences are invalid: {reason}"))?;
+                let object = value.as_object().ok_or_else(|| "stored preferences must be an object".to_owned())?;
+                object.get(panel_runtime::PREFERENCES_KEY).cloned()
+            }
+        };
+        Ok(self.prefs_with_panel_layout(panel_layout))
     }
 
     fn prefs_with_panel_layout(&self, panel_layout: Option<Value>) -> String {

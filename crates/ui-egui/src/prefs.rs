@@ -9090,6 +9090,74 @@ mod tests {
     }
 
     #[test]
+    fn refused_portable_layout_still_saves_other_settings_without_replacing_stored_recovery() {
+        use solidcraft_engine::panels::{FIXTURE_LAYOUT_V1, MAX_ENVELOPE_BYTES, PanelRegistry, commands::CatalogueState};
+
+        // A maximum-sized original v1 record is readable, but projecting its native
+        // window to portable v2 can exceed the envelope cap. Keep that real source.
+        let mut raw: serde_json::Value = serde_json::from_slice(FIXTURE_LAYOUT_V1).unwrap();
+        let native = json!({"type":"window","host":"legacy.window","origin":{"x":1900.0,"y":900.0},
+            "return_to":{"zone":"left","index":0,"size":{"width":280.0,"height":240.0},"collapsed":false}});
+        raw["layout"]["sections"][0]["location"] = native.clone();
+        raw["layout"]["instances"][0]["memory"]["location"] = native;
+        raw["retained_data"]["padding"] = json!("");
+        let overhead = serde_json::to_vec(&raw).unwrap().len();
+        raw["retained_data"]["padding"] = json!("x".repeat(MAX_ENVELOPE_BYTES - overhead));
+        let envelope = serde_json::to_vec(&raw).unwrap();
+        assert_eq!(envelope.len(), MAX_ENVELOPE_BYTES);
+        fn bytes(out: &mut Vec<u8>, value: &[u8]) {
+            out.extend_from_slice(&u32::try_from(value.len()).unwrap().to_le_bytes());
+            out.extend_from_slice(value);
+        }
+        let mut catalogue = b"SCPCAT01".to_vec();
+        catalogue.extend_from_slice(&1_u32.to_le_bytes()); // One immutable preset.
+        bytes(&mut catalogue, b"Legacy");
+        bytes(&mut catalogue, &envelope);
+        catalogue.push(0); // No rejected envelope.
+        catalogue.extend_from_slice(&0_u32.to_le_bytes()); // No user presets.
+        catalogue.extend_from_slice(&1_u32.to_le_bytes());
+        for text in ["fixture.workspace", "ui.panel", "Legacy"] {
+            bytes(&mut catalogue, text.as_bytes());
+        }
+        catalogue.extend_from_slice(&1_u32.to_le_bytes());
+        bytes(&mut catalogue, b"fixture.workspace");
+        bytes(&mut catalogue, &envelope);
+        catalogue.push(0);
+        CatalogueState::hydrate(&catalogue, &PanelRegistry::default()).unwrap();
+        let refused = json!({"version":1,"selected":"fixture.workspace",
+            "catalogue":solidcraft_engine::doc::canvas::base64_encode(&catalogue)});
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        app.load_prefs(&json!({"panel_layout":refused}).to_string());
+        app.ui.show_grid = false;
+        assert!(app.try_prefs().is_err());
+        let recovery = json!({"version":99,"library":["saved layout"],"rejected":{"source":"exact recovery"}});
+        let previous = json!({"grid":true,"panel_layout":recovery}).to_string();
+        let fallback: serde_json::Value = serde_json::from_str(&app.prefs_with_stored_panel_layout(Some(&previous)).unwrap()).unwrap();
+        assert_eq!(fallback["grid"], false);
+        assert_eq!(fallback["panel_layout"], recovery);
+        assert_eq!(crate::panel_runtime::preferences_value(&app), Some(refused.clone()));
+        control(&mut app, &json!({"open":"Layout"})).unwrap();
+        let held = held_panel_layout(&app);
+        app.prefs_with_stored_panel_layout(Some(&previous)).unwrap();
+        assert_eq!(held_panel_layout(&app), held, "fallback cannot replace the Cancel baseline");
+        assert_eq!(crate::panel_runtime::preferences_value(&app), Some(refused));
+    }
+
+    #[test]
+    fn stored_panel_fallback_preserves_null_absence_and_refuses_malformed_previous_settings() {
+        let app = SolveApp::new(Default::default(), Default::default());
+        for previous in [None, Some("{}"), Some("{\"grid\":false}")] {
+            let saved: serde_json::Value = serde_json::from_str(&app.prefs_with_stored_panel_layout(previous).unwrap()).unwrap();
+            assert!(saved.get("panel_layout").is_none());
+        }
+        let saved: serde_json::Value = serde_json::from_str(&app.prefs_with_stored_panel_layout(Some("{\"panel_layout\":null}")).unwrap()).unwrap();
+        assert_eq!(saved.get("panel_layout"), Some(&serde_json::Value::Null));
+        for previous in ["{", "null", "[]", "42"] {
+            assert!(app.prefs_with_stored_panel_layout(Some(previous)).is_err());
+        }
+    }
+
+    #[test]
     fn deferred_panel_layout_records_follow_preferences_apply_cancel_and_held_writes() {
         let mut app = SolveApp::new(Default::default(), Default::default());
         let original = json!({"version":99,"future":{"layout":"keep these bytes"}});
