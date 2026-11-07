@@ -762,6 +762,27 @@ fn surface_precedence_and_truthful_contrast_fallback_have_wire_contracts() {
     let mut opaque = spec.clone();
     opaque.surface = PanelSurface::Opaque;
     assert_eq!(group_surface(Zone::Left, [&spec, &opaque]), PanelSurface::Opaque);
+    let mut follow = spec.clone();
+    follow.surface = PanelSurface::FollowZone;
+    follow.text_heavy = false;
+    let mut text_heavy = follow.clone();
+    text_heavy.text_heavy = true;
+    for zone in [Zone::Left, Zone::Right, Zone::Floating, Zone::Bottom, Zone::Window] {
+        assert_eq!(group_surface(zone, [&spec, &opaque]), PanelSurface::Opaque);
+        assert_eq!(group_surface(zone, [&opaque, &spec]), PanelSurface::Opaque);
+        assert_eq!(group_surface(zone, [&follow, &text_heavy]), PanelSurface::Opaque);
+        assert_eq!(group_surface(zone, [&text_heavy, &follow]), PanelSurface::Opaque, "inactive metadata cannot depend on tab order");
+        assert_eq!(
+            group_surface(zone, [&text_heavy, &spec]),
+            PanelSurface::Translucent,
+            "explicit translucency overrides both text-heavy and zone defaults"
+        );
+        assert_eq!(group_surface(zone, [&spec, &text_heavy]), PanelSurface::Translucent);
+        assert_eq!(
+            group_surface(zone, [&follow]),
+            if matches!(zone, Zone::Bottom | Zone::Window) { PanelSurface::Opaque } else { PanelSurface::Translucent }
+        );
+    }
     let outcome = ContrastOutcome::RetainReadableFallback { reason: ContrastFailure::UnreadableAtFullOpacity };
     let roundtrip: ContrastOutcome = serde_json::from_value(serde_json::to_value(&outcome).unwrap()).unwrap();
     assert_eq!(roundtrip, outcome);
@@ -1230,6 +1251,178 @@ fn command_ready_backend() -> commands::InMemoryPanelBackend {
         .unwrap();
     backend
 }
+
+fn renamed_arrangement(layout: &Layout) -> Layout {
+    fn location(location: &mut SectionLocation) {
+        if let SectionLocation::Window { return_to, .. } = location {
+            if let Some(id) = &mut return_to.section {
+                id.0 = format!("renamed.{}", id.0);
+            }
+            if let Some(id) = &mut return_to.column {
+                id.0 = format!("renamed.{}", id.0);
+            }
+            if let Some(join) = &mut return_to.join {
+                join.section.0 = format!("renamed.{}", join.section.0);
+            }
+        }
+    }
+    let mut result = layout.clone();
+    for column in &mut result.columns {
+        column.id.0 = format!("renamed.{}", column.id.0);
+    }
+    for section in &mut result.sections {
+        section.id.0 = format!("renamed.{}", section.id.0);
+        if let Some(id) = &mut section.column {
+            id.0 = format!("renamed.{}", id.0);
+        }
+        location(&mut section.location);
+    }
+    for instance in &mut result.instances {
+        instance.memory.section.0 = format!("renamed.{}", instance.memory.section.0);
+        if let Some(id) = &mut instance.memory.column {
+            id.0 = format!("renamed.{}", id.0);
+        }
+        location(&mut instance.memory.location);
+    }
+    for record in &mut result.extent_priority_context.records {
+        match &mut record.target {
+            ExtentPriorityTarget::Section(id) | ExtentPriorityTarget::SectionReturn(id) => id.0 = format!("renamed.{}", id.0),
+            _ => {}
+        }
+        if let Some(id) = &mut record.column {
+            id.0 = format!("renamed.{}", id.0);
+        }
+    }
+    result
+}
+
+#[test]
+fn arrangement_comparison_ignores_generated_names_but_keeps_order_geometry_and_tabs() {
+    let mut backend = command_ready_backend();
+    let layout = backend.service.layout().clone();
+    let renamed = renamed_arrangement(&layout);
+    assert_ne!(layout, renamed, "authoritative Layout equality still includes exact identities");
+    assert!(arrangements_equal(&layout, &renamed));
+    for changed in 0..4 {
+        let mut different = renamed.clone();
+        match changed {
+            0 => different.sections.swap(0, 1),
+            1 => different.columns.first_mut().unwrap().width += 1.0,
+            2 => different.sections.first_mut().unwrap().weight += 1.0,
+            _ => different.sections.first_mut().unwrap().collapsed = true,
+        }
+        assert!(!arrangements_equal(&layout, &different));
+    }
+    backend
+        .execute("panel.move", &serde_json::json!({"target":command_target("two"),"destination":{"type":"join_tab","section":"s-one","index":1}}))
+        .unwrap();
+    let tabs = backend.service.layout().clone();
+    let mut reversed = renamed_arrangement(&tabs);
+    reversed.sections.first_mut().unwrap().tabs.swap(0, 1);
+    assert!(!arrangements_equal(&tabs, &reversed));
+    let mut excessive = layout.clone();
+    excessive.sections = vec![layout.sections.first().unwrap().clone(); MAX_SECTIONS + 1];
+    assert!(!arrangements_equal(&excessive, &excessive));
+}
+
+#[test]
+fn moving_a_panel_away_and_back_matches_its_saved_arrangement_with_new_group_identity() {
+    let mut backend = command_ready_backend();
+    let saved = backend.service.layout().clone();
+    let original = saved.containing(&id("one")).unwrap().clone();
+    backend
+        .execute(
+            "panel.move",
+            &serde_json::json!({
+                "target":command_target("one"),
+                "destination":command_destination("away-generated", 0, "right"),
+            }),
+        )
+        .unwrap();
+    assert!(!arrangements_equal(&saved, backend.service.layout()));
+    assert_eq!(backend.service.layout().containing(&id("one")).unwrap().location.zone(), Zone::Right);
+    backend
+        .execute(
+            "panel.move",
+            &serde_json::json!({
+                "target":command_target("one"),
+                "destination":command_destination("returned-generated", 0, "left"),
+            }),
+        )
+        .unwrap();
+    let returned = backend.service.layout();
+    let group = returned.containing(&id("one")).unwrap();
+    assert_ne!(group.id, original.id, "a real move allocates a new group instead of restoring its old string ID");
+    assert_eq!((group.size, group.weight, group.collapsed, &group.tabs), (original.size, original.weight, original.collapsed, &original.tabs));
+    assert_eq!(returned.columns, saved.columns, "temporary empty columns are pruned rather than left as Custom-only metadata");
+    assert_eq!(
+        returned.instances.iter().map(|instance| (&instance.id, instance.memory.section_index, instance.memory.tab_index)).collect::<Vec<_>>(),
+        saved.instances.iter().map(|instance| (&instance.id, instance.memory.section_index, instance.memory.tab_index)).collect::<Vec<_>>()
+    );
+    assert_ne!(returned, &saved);
+    assert!(arrangements_equal(&saved, returned), "reverting actual placement, sizes, proportions and memories reselects the saved tile");
+}
+
+#[test]
+fn arrangement_comparison_preserves_closed_placement_and_native_return_relationships() {
+    let mut backend = command_ready_backend();
+    backend.execute("panel.close", &serde_json::json!({"target":command_target("two")})).unwrap();
+    let mut layout = backend.service.layout().clone();
+    let live_section = layout.sections.first().unwrap().id.clone();
+    let column = layout.columns.first().unwrap().id.clone();
+    let closed = layout.instances.iter_mut().find(|instance| instance.id == id("two")).unwrap();
+    closed.memory.location = SectionLocation::Window {
+        host: HostId::new("remembered-host").unwrap(),
+        origin: Point { x: 40.0, y: 50.0 },
+        return_to: DockReturn {
+            zone: Zone::Left,
+            index: 0,
+            size: closed.memory.size,
+            collapsed: false,
+            section: Some(live_section.clone()),
+            column: Some(column),
+            column_index: 0,
+            column_width: Some(280.0),
+            weight: 1.0,
+            preferred_extent: None,
+            extent_priority: 0,
+            join: Some(ReturnTab { section: live_section.clone(), index: 0 }),
+        },
+    };
+    closed.memory.column = None;
+    closed.memory.column_width = None;
+    let closed_section = closed.memory.section.clone();
+    layout.extent_priority_context.records = vec![
+        ExtentPriorityRecord {
+            target: ExtentPriorityTarget::Section(closed_section),
+            zone: Zone::Left,
+            column: None,
+            stored_priority: 0,
+            priority: 1,
+        },
+        ExtentPriorityRecord {
+            target: ExtentPriorityTarget::SectionReturn(live_section),
+            zone: Zone::Left,
+            column: None,
+            stored_priority: 0,
+            priority: 2,
+        },
+    ];
+    validate(&layout, backend.service.registry()).unwrap();
+    let mut renamed = renamed_arrangement(&layout);
+    renamed.extent_priority_context.records.reverse();
+    assert!(arrangements_equal(&layout, &renamed));
+    let mut different = renamed.clone();
+    different.instances.iter_mut().find(|instance| instance.id == id("two")).unwrap().memory.section = different.sections.first().unwrap().id.clone();
+    assert!(!arrangements_equal(&layout, &different), "a closed panel remembering a live group is not a renamed separate group");
+    let mut different = renamed;
+    let closed = different.instances.iter_mut().find(|instance| instance.id == id("two")).unwrap();
+    if let SectionLocation::Window { return_to, .. } = &mut closed.memory.location {
+        return_to.join.as_mut().unwrap().section = SectionId::new("other-return-group").unwrap();
+    }
+    assert!(!arrangements_equal(&layout, &different), "native return joins retain the group they refer to");
+}
+
 fn command_inputs() -> Vec<(&'static str, serde_json::Value)> {
     use serde_json::json;
     let selected = json!({"target":command_target("one")});
@@ -1719,6 +1912,7 @@ fn command_storage_native_stale_and_lifecycle_failures_preserve_layout_and_catal
 
 #[test]
 fn command_presets_enforce_unicode_names_overwrite_builtins_and_user_count() {
+    use commands::LayoutCatalogue;
     let mut backend = fixture_command_backend().unwrap();
     for invalid in ["".into(), "   ".into(), "x\n".into(), "x\u{0000}".into(), "🦀".repeat(65), " ".repeat(1025)] {
         assert!(backend.execute("layout.save", &serde_json::json!({"name":invalid})).is_err());
@@ -1732,6 +1926,51 @@ fn command_presets_enforce_unicode_names_overwrite_builtins_and_user_count() {
         backend.execute("layout.save", &serde_json::json!({"name":format!("user-{i}")})).unwrap();
     }
     assert_eq!(backend.execute("layout.save", &serde_json::json!({"name":"overflow"})).unwrap_err().rule, Rule::CollectionLimit);
+    assert_eq!(backend.execute("layout.save", &serde_json::json!({"name":"USER-1","replace":true})).unwrap()["name"], "user-1");
+    assert_eq!(backend.catalogue.state().user_count(), commands::MAX_USER_PRESETS, "replacement at the limit does not consume another slot");
+}
+
+#[test]
+fn saved_layout_names_ignore_case_and_replacement_preserves_the_named_slot() {
+    use commands::LayoutCatalogue;
+    let mut backend = command_ready_backend();
+    backend.execute("layout.save", &serde_json::json!({"name":"  Bench setup  "})).unwrap();
+    let original = backend.service.layout().clone();
+    backend.execute("panel.collapse", &serde_json::json!({"target":command_target("one"),"collapsed":true})).unwrap();
+    let changed = backend.service.layout().clone();
+    let catalogue = backend.catalogue.state().clone();
+    let state = backend.service.inspect();
+    assert_eq!(backend.execute("layout.save", &serde_json::json!({"name":"BENCH SETUP"})).unwrap_err().rule, Rule::DuplicateId);
+    assert_eq!(backend.catalogue.state(), &catalogue);
+    assert_eq!(backend.service.inspect(), state);
+    assert_eq!(backend.execute("layout.save", &serde_json::json!({"name":"bench setup","replace":true})).unwrap()["name"], "Bench setup");
+    assert_eq!(backend.catalogue.state().user_count(), 1);
+    assert_eq!(backend.catalogue.state().preset_kind(" BENCH setup ").unwrap(), Some(commands::PresetKind::User));
+    backend.execute("layout.apply", &serde_json::json!({"name":"bENCH SETUP"})).unwrap();
+    assert_eq!(backend.service.layout(), &changed);
+    assert_ne!(backend.service.layout(), &original);
+    assert_eq!(backend.execute("layout.save", &serde_json::json!({"name":"fIXTURE DEFAULT","replace":true})).unwrap_err().rule, Rule::Capability);
+    assert_eq!(backend.catalogue.state().preset_kind("FIXTURE DEFAULT").unwrap(), Some(commands::PresetKind::BuiltIn));
+    let catalogue = backend.catalogue.state().clone();
+    assert_eq!(
+        backend.execute("layout.save", &serde_json::json!({"name":"Bench setup","replace":false,"overwrite":true})).unwrap_err().rule,
+        Rule::Schema
+    );
+    assert_eq!(backend.catalogue.state(), &catalogue);
+    backend.execute("layout.save", &serde_json::json!({"name":"Ärger"})).unwrap();
+    assert_eq!(backend.execute("layout.save", &serde_json::json!({"name":"ärGER"})).unwrap_err().rule, Rule::DuplicateId);
+    assert_eq!(backend.execute("layout.save", &serde_json::json!({"name":"ärGER","overwrite":true})).unwrap()["name"], "Ärger");
+    backend.execute("layout.save", &serde_json::json!({"name":"ΟΣ"})).unwrap();
+    for same in ["οσ", "ος"] {
+        assert_eq!(backend.execute("layout.save", &serde_json::json!({"name":same})).unwrap_err().rule, Rule::DuplicateId);
+        assert_eq!(backend.catalogue.state().preset_kind(same).unwrap(), Some(commands::PresetKind::User));
+    }
+    backend.execute("layout.save", &serde_json::json!({"name":"Straße"})).unwrap();
+    assert_eq!(backend.execute("layout.save", &serde_json::json!({"name":"STRASSE"})).unwrap_err().rule, Rule::DuplicateId);
+    let snapshot = backend.catalogue.state().export().unwrap();
+    let hydrated = commands::CatalogueState::hydrate(&snapshot, backend.service.registry()).unwrap();
+    assert_eq!(hydrated.preset_kind("ος").unwrap(), Some(commands::PresetKind::User));
+    assert_eq!(hydrated.preset_kind("strasse").unwrap(), Some(commands::PresetKind::User));
 }
 
 #[test]
@@ -1994,6 +2233,61 @@ fn catalogue_batch_stages_all_saves_and_replacements_once_and_rolls_back_failed_
 }
 
 #[test]
+fn saving_an_overflowing_arrangement_only_stages_catalogue_metadata() {
+    use commands::LayoutCatalogue;
+    use std::cell::Cell;
+    struct OverflowSink {
+        service: LayoutService,
+        projections: Cell<usize>,
+        dispatches: usize,
+    }
+    impl ActionSink for OverflowSink {
+        fn inspect(&self) -> LayoutReply {
+            self.service.inspect()
+        }
+        fn project(&self, _action: LayoutAction) -> PanelResult<Layout> {
+            self.projections.set(self.projections.get() + 1);
+            Err(error(Rule::NoSpace, "candidate does not improve existing overflow"))
+        }
+        fn dispatch(&mut self, _action: LayoutAction) -> PanelResult<LayoutReply> {
+            self.dispatches += 1;
+            Err(error(Rule::NoSpace, "candidate does not improve existing overflow"))
+        }
+    }
+    let backend = command_ready_backend();
+    let registry = backend.service.registry().clone();
+    let environment = allocated_pair_environment(&backend.service, 40.0);
+    let geometry = allocate_layout(backend.service.layout(), &registry, &environment).unwrap();
+    assert!(geometry.extent.height > environment.capacity.size.height);
+    let mut sink = OverflowSink { service: backend.service, projections: Cell::new(0), dispatches: 0 };
+    let mut catalogue = backend.catalogue;
+    let before = sink.inspect();
+    let saved = commands::execute(
+        "layout.save",
+        &serde_json::json!({"name":"Narrow window","expected_revision":before.revision}),
+        &mut commands::PanelCommandContext { sink: &mut sink, registry: &registry, catalogue: &mut catalogue, web: false },
+    )
+    .unwrap();
+    assert_eq!(saved["state"]["revision"], before.revision);
+    assert_eq!(sink.inspect(), before, "saving never changes the authoritative layout or its revision");
+    assert_eq!(catalogue.state().preset("Narrow window").unwrap().envelope(&registry, &before.layout.workspace).unwrap().layout, before.layout);
+    let saved_catalogue = catalogue.state().clone();
+    catalogue.fail_stage = true;
+    assert!(
+        commands::execute(
+            "layout.save",
+            &serde_json::json!({"name":"Failed save"}),
+            &mut commands::PanelCommandContext { sink: &mut sink, registry: &registry, catalogue: &mut catalogue, web: false },
+        )
+        .is_err()
+    );
+    assert_eq!(catalogue.state(), &saved_catalogue);
+    assert_eq!(sink.inspect(), before);
+    assert_eq!(sink.projections.get(), 0);
+    assert_eq!(sink.dispatches, 0);
+}
+
+#[test]
 fn catalogue_staging_cannot_publish_a_plan_after_an_external_revision_change() {
     use commands::{CatalogueState, LayoutCatalogue, PreparedCatalogue};
     use std::cell::RefCell;
@@ -2028,22 +2322,26 @@ fn catalogue_staging_cannot_publish_a_plan_after_an_external_revision_change() {
             self.catalogue.publish(prepared);
         }
     }
-    let backend = command_ready_backend();
-    let registry = backend.service.registry().clone();
-    let shared = Rc::new(RefCell::new(backend.service));
-    let mut sink = SharedSink(shared.clone());
-    let mut catalogue = RacingCatalogue { catalogue: backend.catalogue, service: shared, published: false };
-    let before = catalogue.state().clone();
-    let reason = commands::execute(
-        "panel.close",
-        &serde_json::json!({"target":command_target("one")}),
-        &mut commands::PanelCommandContext { sink: &mut sink, registry: &registry, catalogue: &mut catalogue, web: false },
-    )
-    .unwrap_err();
-    assert_eq!(reason.rule, Rule::Revision);
-    assert!(!catalogue.published);
-    assert_eq!(catalogue.state(), &before);
-    assert!(sink.inspect().layout.instance(&id("one")).unwrap().requested_open);
+    for (command, args) in
+        [("panel.close", serde_json::json!({"target":command_target("one")})), ("layout.save", serde_json::json!({"name":"Stale save"}))]
+    {
+        let backend = command_ready_backend();
+        let registry = backend.service.registry().clone();
+        let shared = Rc::new(RefCell::new(backend.service));
+        let mut sink = SharedSink(shared.clone());
+        let mut catalogue = RacingCatalogue { catalogue: backend.catalogue, service: shared, published: false };
+        let before = catalogue.state().clone();
+        let reason = commands::execute(
+            command,
+            &args,
+            &mut commands::PanelCommandContext { sink: &mut sink, registry: &registry, catalogue: &mut catalogue, web: false },
+        )
+        .unwrap_err();
+        assert_eq!(reason.rule, Rule::Revision);
+        assert!(!catalogue.published);
+        assert_eq!(catalogue.state(), &before);
+        assert!(sink.inspect().layout.instance(&id("one")).unwrap().requested_open);
+    }
 }
 
 #[test]
@@ -2716,6 +3014,30 @@ mod catalogue_consumer {
         let restored = saved.envelope(&registry, &envelope.layout.workspace).unwrap();
         assert_eq!(restored.retained_data, envelope.retained_data);
         assert_eq!(state.remembered(&envelope.layout.workspace).unwrap().rejected(), Some([0, 255, 1, 0].as_slice()));
+        let mapped = state
+            .map_envelopes(&registry, |_, mut envelope| {
+                for section in &mut envelope.layout.sections {
+                    section.collapsed = true;
+                }
+                Ok(envelope)
+            })
+            .unwrap();
+        let mapped_user = mapped.preset("user SAVED").unwrap();
+        assert_eq!(mapped_user.rejected(), Some([0, 255, 1, 0].as_slice()));
+        assert_eq!(mapped_user.envelope(&registry, &envelope.layout.workspace).unwrap().retained_data, envelope.retained_data);
+        assert_eq!(state.export().unwrap(), snapshot, "mapping never mutates the source catalogue");
+        let mut visits = 0;
+        assert_eq!(
+            state
+                .map_envelopes(&registry, |_, envelope| {
+                    visits += 1;
+                    if visits == 2 { Err(error(Rule::Capability, "refused portable mapping")) } else { Ok(envelope) }
+                })
+                .unwrap_err()
+                .rule,
+            Rule::Capability
+        );
+        assert_eq!(state.export().unwrap(), snapshot, "a late mapper failure cannot publish a partial catalogue");
         let catalogue = InMemoryCatalogue::from_snapshot(&snapshot, &registry).unwrap();
         assert_eq!(catalogue.state().user_count(), 1);
         let mut reloaded = InMemoryPanelBackend::new(fixture_service(false).unwrap(), catalogue);
@@ -2765,6 +3087,20 @@ mod catalogue_consumer {
     }
 
     #[test]
+    fn catalogue_case_only_collisions_are_refused_instead_of_dropping_records() {
+        let registry = synthetic_registry().unwrap();
+        let envelope = encode(&LayoutEnvelope::new(Layout::empty(WorkspaceId::new("fixture.workspace").unwrap())), &registry).unwrap();
+        for (builtins, users) in [
+            (vec![("Default", envelope.as_slice(), None)], vec![("DEFAULT", envelope.as_slice(), None)]),
+            (vec![("Default", envelope.as_slice(), None), ("default", envelope.as_slice(), None)], vec![]),
+            (vec![("Default", envelope.as_slice(), None)], vec![("Bench", envelope.as_slice(), None), ("bENCH", envelope.as_slice(), None)]),
+        ] {
+            let bytes = snapshot(&builtins, &users, &[("fixture.workspace", "ui.panel", "Default")], &[]);
+            assert_eq!(CatalogueState::hydrate(&bytes, &registry).unwrap_err().rule, Rule::DuplicateId);
+        }
+    }
+
+    #[test]
     fn maximum_original_v1_record_hydrates_and_projects_without_claiming_expanded_encodability() {
         use crate::panels::commands::StoredEnvelope;
         let registry = synthetic_registry().unwrap();
@@ -2807,6 +3143,11 @@ mod catalogue_consumer {
             assert_eq!(with_live_layout(&projected, projected.layout.clone(), current).unwrap_err().rule, Rule::CollectionLimit);
             let catalogue = CatalogueState::hydrate(&source, current).unwrap();
             assert_eq!(catalogue.export().unwrap(), source);
+            assert_eq!(
+                catalogue.map_envelopes(current, |_, envelope| Ok(envelope)).unwrap().export().unwrap(),
+                source,
+                "an unchanged mapper must retain maximum original v1 bytes without expanding them"
+            );
             let stored = catalogue.preset("Legacy").unwrap();
             assert_eq!(stored.bytes(), legacy.as_slice());
             assert_eq!(stored.project_envelope(current, &fallback.workspace).unwrap().retained_v1_bytes(), Some(legacy.as_slice()));

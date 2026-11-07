@@ -418,6 +418,8 @@ fn angled_attachment_tracks_source_plane_and_reopens() {
         axis_dir: Vec3::X,
         angle: "90 deg".into(),
         line: None,
+        direction_only: false,
+        pivot: None,
     };
     s.refresh();
     let height = s.doc.find_feature("BaseFeature").unwrap().param_names[2].clone();

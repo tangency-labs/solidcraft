@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use solidcraft_engine::panels::*;
 
+use super::HostSurfaceStyle;
 use super::interaction::{HostPointerTarget, HostProposalSnapshot, HostResizeEdge};
 
 /// Compatibility constant only; the host never allocates rails.
@@ -568,6 +569,10 @@ pub struct HostSurfaceAlpha {
 #[derive(Clone, Debug)]
 pub struct HostGeometryPolicy {
     pub surface_alpha: Option<HostSurfaceAlpha>,
+    /// Captured renderer state; never written into a layout envelope.
+    pub surfaces: Option<HostSurfaceStyle>,
+    /// Runtime normalized opacity override; None retains authored theme opacity.
+    pub requested_opacity: Option<f32>,
     pub default_opaque: bool,
     pub effective_surfaces: BTreeMap<SectionId, PanelSurface>,
     pub content: Vec<SideContentMeasure>,
@@ -579,7 +584,9 @@ pub struct HostGeometryPolicy {
 
 impl PartialEq for HostGeometryPolicy {
     fn eq(&self, other: &Self) -> bool {
-        self.surface_alpha == other.surface_alpha
+        self.surfaces == other.surfaces
+            && self.requested_opacity.map(f32::to_bits) == other.requested_opacity.map(f32::to_bits)
+            && self.surface_alpha == other.surface_alpha
             && self.default_opaque == other.default_opaque
             && self.effective_surfaces == other.effective_surfaces
             && self.identity_reservations == other.identity_reservations
@@ -598,6 +605,8 @@ impl Default for HostGeometryPolicy {
     fn default() -> Self {
         Self {
             surface_alpha: None,
+            surfaces: None,
+            requested_opacity: None,
             default_opaque: true,
             effective_surfaces: BTreeMap::new(),
             content: Vec::new(),
@@ -625,6 +634,7 @@ pub struct HostTab {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct HostSection {
+    pub contrast: Option<ContrastOutcome>,
     pub paint_alpha: Option<u8>,
     pub section: SectionId,
     pub instance: InstanceId,
@@ -765,6 +775,9 @@ impl HostLayout {
             }
         }
         self.metrics.validate()?;
+        if self.geometry_policy.requested_opacity.is_some_and(|value| !value.is_finite() || !(0.0..=1.0).contains(&value)) {
+            return Err(error(Rule::Bounds, "invalid requested panel opacity"));
+        }
         if self.geometry_policy.effective_surfaces.len() > MAX_SECTIONS {
             return Err(error(Rule::CollectionLimit, "host geometry policy bound"));
         }
@@ -1349,8 +1362,14 @@ fn append_section(
             "ui.panel_host.resize",
         );
     }
-    let paint_alpha = policy.surface_alpha.map(|alpha| if section.location.zone() == Zone::Floating { alpha.floating } else { alpha.docked });
+    let floating = section.location.zone() == Zone::Floating;
+    let appearance = policy.surfaces.as_ref().map(|style| style.appearance(surface, floating));
+    let paint_alpha = appearance
+        .map(|appearance| appearance.fill.a())
+        .or_else(|| policy.surface_alpha.map(|alpha| if floating { alpha.floating } else { alpha.docked }));
+    let contrast = appearance.map(|appearance| appearance.contrast.clone());
     out.sections.push(HostSection {
+        contrast,
         paint_alpha,
         section: section.id.clone(),
         instance: instance.clone(),

@@ -217,6 +217,18 @@ pub fn design_folder_refusal_in(dir: &std::path::Path, home: Option<&std::path::
 }
 
 impl PathScope {
+    /// Actual owned path buffer capacities only. The enclosing owner accounts
+    /// its PathScope/Vec headers once with size_of, without revealing paths.
+    pub fn retained_heap_bytes(&self) -> Result<u64> {
+        let fail = || Error::new(ErrorKind::InvalidData, "path scope byte overflow");
+        let slots = self.roots.capacity().checked_add(self.design_roots.capacity()).ok_or_else(fail)?;
+        let mut bytes = slots.checked_mul(std::mem::size_of::<std::path::PathBuf>()).ok_or_else(fail)?;
+        for path in self.roots.iter().chain(&self.design_roots) {
+            bytes = bytes.checked_add(path.capacity()).ok_or_else(fail)?;
+        }
+        u64::try_from(bytes).map_err(|_| fail())
+    }
+
     /// Confine file access to `roots` (resolved now; folders that don't exist are left out, so an
     /// empty scope refuses every path).
     pub fn new(roots: impl IntoIterator<Item = std::path::PathBuf>) -> PathScope {
@@ -548,14 +560,14 @@ fn design_path_error(path: &str, why: &Remote) -> Error {
     let text = match why {
         Remote::Network(host) => format!(
             "{path}: on the network location \\\\{host}, which designs may not reach until you allow that server \
-             (Update Links or Open Linked Design asks; or Preferences › Design › Network locations)"
+             (Update Links, Open Linked Design or Reload from file asks; or Preferences › Design › Network locations)"
         ),
         Remote::Device => format!("{path}: names a device, not a file"),
     };
     Error::new(ErrorKind::PermissionDenied, text)
 }
 
-/// Check a path a design names (a linked design, a font file) before anything reads it, judged
+/// Check a path a design names (a linked design, a font file, a point cloud's file) before anything reads it, judged
 /// from its text first: a network path whose host isn't allowed, or a device path, is refused
 /// without a filesystem call. An agent's scope ([`check`]) applies on top.
 pub fn check_design_path(path: &str, design: Option<&str>) -> Result<()> {
@@ -1182,5 +1194,26 @@ mod tests {
     fn directories_are_not_files() {
         let dir = std::env::temp_dir().to_string_lossy().to_string();
         assert!(super::read(&dir, 1024).is_err());
+    }
+    #[test]
+    fn retained_scope_heap_counts_actual_path_and_vector_capacities_without_exposing_or_changing_roots() {
+        let mut root = std::path::PathBuf::new();
+        root.reserve(512);
+        root.push("/owned/root");
+        let mut design = std::path::PathBuf::new();
+        design.reserve(256);
+        design.push("/owned/design");
+        let mut roots = Vec::with_capacity(4);
+        roots.push(root);
+        let mut design_roots = Vec::with_capacity(3);
+        design_roots.push(design);
+        let expected = ((roots.capacity() + design_roots.capacity()) * std::mem::size_of::<std::path::PathBuf>()
+            + roots[0].capacity()
+            + design_roots[0].capacity()) as u64;
+        let scope = super::PathScope { roots, design_roots };
+        let before = scope.clone();
+        assert_eq!(scope.retained_heap_bytes().unwrap(), expected);
+        assert_eq!(scope, before);
+        assert_eq!(super::PathScope::default().retained_heap_bytes().unwrap(), 0);
     }
 }

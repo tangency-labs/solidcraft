@@ -146,6 +146,7 @@ pointcloud.delete                 point clouds: points drawn, never a body
 pointcloud.edit                   point clouds: points drawn, never a body
 pointcloud.insert                 point clouds: points drawn, never a body
 pointcloud.list                   point clouds: points drawn, never a body
+pointcloud.reload                 point clouds: points drawn, never a body; tested in crates/engine/src/cmd/point_cloud.rs
 render.aging.describe             rendering: images, cameras, stages
 render.backends                   rendering: images, cameras, stages
 render.batch                      rendering: images, cameras, stages
@@ -153,6 +154,8 @@ render.camera.fit                 rendering: images, cameras, stages
 render.camera.get                 rendering: images, cameras, stages
 render.camera.set                 rendering: images, cameras, stages
 render.cancel                     rendering: images, cameras, stages
+render.coat.bind                  render settings only: crates/engine/src/cmd/render/clear_coat.rs::stable_tests::stable_coats_save_reopen_replace_and_undo_offline_for_cpu_and_gpu_without_changing_sources
+render.coat.unbind                render settings only: crates/engine/src/cmd/render/clear_coat.rs::stable_tests::stable_coats_save_reopen_replace_and_undo_offline_for_cpu_and_gpu_without_changing_sources
 render.compare                    rendering: images, cameras, stages
 render.compare.divider            rendering: images, cameras, stages
 render.effects.describe           rendering: images, cameras, stages
@@ -290,6 +293,7 @@ sketch.offset                     2D sketch only (the sketch solver and engine t
 sketch.offset.break               2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.paste                      2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.pattern.rectangular        2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.point.divide               2D sketch only; crates/engine/src/cmd/sketch_divide_tests.rs: a_line_divided_in_four_keeps_its_quarters_when_it_grows and a_spline_is_divided_into_equal_lengths_along_it
 sketch.point3d                    2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.polygon.edge               2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.rectangle.three_point      2D sketch only (the sketch solver and engine tests); no kernel operation
@@ -345,6 +349,7 @@ view.render_dock                  the view: camera, layout, display
 view.render_focus                 the view: camera, layout, display
 view.render_frame                 the view: camera, layout, display
 view.render_inspector             the view: camera, layout, display
+view.render_live                  live-image pause state only: crates/ui-egui/src/render_workspace_tests.rs::live_edits_coalesce_and_pause_drains_late_capture_without_document_or_result_changes
 view.render_select                the view: camera, layout, display
 view.render_stage                 the view: camera, layout, display
 view.ribbon_tabs_only             the view: camera, layout, display

@@ -94,6 +94,7 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
             "prefs.sketch.ellipse_axes",
             "prefs.sketch.auto_dimensions",
             "prefs.sketch.auto_locate",
+            "ui.first_dimension_scales",
         ];
         let right_labels =
             ["prefs.sketch.shortcut_cycles_modes", "prefs.ribbon_click_ends_tool", "ui.project_face_edges_sketch", "prefs.sketch.project_options"];
@@ -147,6 +148,13 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                         &mut app.preferences.sketch_auto_locate,
                     );
                 });
+                check(
+                    ui,
+                    "first_dimension_scales",
+                    "ui.first_dimension_scales",
+                    Some("ui.first_dimension_scales_tip"),
+                    &mut app.preferences.first_dimension_scales,
+                );
             });
             ui.allocate_ui_with_layout(egui::vec2(right, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
                 check(
@@ -480,6 +488,7 @@ fn targets(key: &str, response: &egui::Response) {
         "sketch_align_points" => "Line up with other sketch points while drawing",
         "sketch_auto_dimensions" => "Dimension new shapes",
         "sketch_auto_locate" => "Also place them from the origin (fully constrained)",
+        "first_dimension_scales" => "The first dimension scales the drawing",
         "center_arc_follows_cursor" => "Center point arc follows the cursor's direction",
         "shortcut_cycles_modes" => "Pressing a tool's shortcut again switches its mode",
         "project_options_dialog" => "Project options dialog",
