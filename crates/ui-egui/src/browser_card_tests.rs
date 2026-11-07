@@ -298,6 +298,28 @@ fn browser_name_rows_rename_on_a_delayed_second_click() {
     assert_eq!(h.app.session.doc.feature(feature).map(|feature| feature.name.as_str()), Some("Renamed feature"));
 }
 
+/// With no dialog open a construction row is selected like any other row, so a delayed second
+/// click renames it.
+#[test]
+fn a_construction_row_renames_on_a_delayed_second_click() {
+    let mut h = Harness::new();
+    h.app.run("construct.plane.offset", json!({"base":"XY","offset":20})).unwrap();
+    h.app.tree.expanded.insert("c0/construction".into());
+    h.settle();
+    let feature = h.app.session.doc.features.last().map(|feature| feature.id).unwrap();
+    let name = h.app.session.doc.feature(feature).map(|feature| feature.name.clone()).unwrap_or_default();
+    let row = format!("row:{name}");
+    h.step(&json!({"click":{"handle":row}})).unwrap();
+    assert!(h.app.menu.rename.is_none(), "the first click only selects the plane");
+    h.frames(30);
+    h.step(&json!({"click":{"handle":row}})).unwrap();
+    assert!(
+        matches!(h.app.menu.rename.as_ref(), Some(crate::context_menu::Rename { inline: true, .. })),
+        "{:?}",
+        h.app.menu.rename.as_ref().map(|r| &r.what)
+    );
+}
+
 #[test]
 fn browser_sketch_rename_stays_inline() {
     let mut h = Harness::new();

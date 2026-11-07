@@ -3250,9 +3250,10 @@ fn entry_row(
         app.edit_sketch_in(id, path.map(|path| (comp, path)));
     }
     // A click a dialog takes as a pick (below) leaves the selection as it was: nothing to rename.
-    let dialog_pick = r.clicked && {
+    // With no dialog open, a construction row is selected like any other and renames.
+    let mut dialog_pick = r.clicked && app.dialog.is_some() && {
         let shift = ui.input(|i| i.modifiers.shift);
-        folder == "construction" || (folder == "bodies" && !shift && app.dialog.is_some())
+        folder == "construction" || (folder == "bodies" && !shift)
     };
     if r.clicked && !(r.double && folder == "sketches") {
         let shift = ui.input(|i| i.modifiers.shift);
@@ -3271,6 +3272,7 @@ fn entry_row(
             && pick_sketch_into_dialog(app, id)
         {
             // Extrude, Revolve or Emboss took all the sketch's profiles (#6106).
+            dialog_pick = true;
         } else {
             click_select(app, ui, e.row_key.clone(), e.sel.clone());
         }
