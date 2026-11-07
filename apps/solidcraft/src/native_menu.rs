@@ -60,11 +60,11 @@ impl NativeMenu {
         add(&file, &format!("{}\u{2026}", app.tr("ui.open")), FileAction::Open, Some(Accelerator::new(Modifiers::META, Code::KeyO)))?;
         file.append(&recent)?;
         file.append(&PredefinedMenuItem::separator())?;
-        for (label, command) in
-            [("Insert STEP\u{2026}", "file.insert_step"), ("Insert Mesh\u{2026}", "file.insert_mesh"), ("Insert Design", "component.insert_design")]
-        {
+        for (label, command) in [("Insert STEP\u{2026}", "file.insert_step"), ("Insert Mesh\u{2026}", "file.insert_mesh")] {
             add(&file, app.tr_label(label), FileAction::Command(command), None)?;
         }
+        add(&file, &format!("{}\u{2026}", app.tr("cmd.pointcloud_insert")), FileAction::Command("pointcloud.insert"), None)?;
+        add(&file, &format!("{}\u{2026}", app.tr_label("Insert Design")), FileAction::Command("component.insert_design"), None)?;
         file.append(&PredefinedMenuItem::separator())?;
         add(&file, app.tr("ui.save"), FileAction::Save, Some(Accelerator::new(Modifiers::META, Code::KeyS)))?;
         add(
@@ -78,6 +78,7 @@ impl NativeMenu {
         for (label, action) in [
             ("Export STL\u{2026}", FileAction::ExportMesh("stl")),
             ("Export 3MF\u{2026}", FileAction::ExportMesh("3mf")),
+            (app.tr("cmd.file_send_to_slicer"), FileAction::Command("file.send_to_slicer")),
             ("Export STEP\u{2026}", FileAction::Export("step")),
             ("Export Current View as DXF\u{2026}", FileAction::Command("file.export_view_dxf")),
             ("Export OBJ\u{2026}", FileAction::Export("obj")),
@@ -87,7 +88,7 @@ impl NativeMenu {
             add(&file, app.tr_label(label), action, None)?;
         }
         file.append(&PredefinedMenuItem::separator())?;
-        add(&file, app.tr_label("Design Properties"), FileAction::Command("document.metadata"), None)?;
+        add(&file, &format!("{}\u{2026}", app.tr_label("Design Properties")), FileAction::Command("document.metadata"), None)?;
         add(&edit, app.tr("ui.undo"), FileAction::Undo, Some(Accelerator::new(Modifiers::META, Code::KeyZ)))?;
         add(&edit, app.tr("ui.redo"), FileAction::Redo, Some(Accelerator::new(Modifiers::META | Modifiers::SHIFT, Code::KeyZ)))?;
         add(&window, app.tr_label("Agent Chat"), FileAction::AgentChat, None)?;

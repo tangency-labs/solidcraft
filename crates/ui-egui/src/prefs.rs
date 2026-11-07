@@ -1285,6 +1285,8 @@ preference_settings! {
     viewport_background: Option<[u8; 3]> = None, PAGE_APPEARANCE;
     /// The application bar's logo in the theme's accent instead of the theme's logo colours.
     logo_accent: bool = false, PAGE_APPEARANCE;
+    /// Keep the in-window File menu alongside the macOS system menu. Other hosts always show it.
+    window_file_menu: bool = false, PAGE_LAYOUT;
     /// Imported theme files (`theme_files`), kept here so they also work in the browser.
     #[serde(deserialize_with = "themes_that_read")]
     custom_themes: Vec<crate::theme_files::ThemeFile> = Vec::new();
@@ -6366,6 +6368,7 @@ mod tests {
             ("viewport_status_summary", json!(false), PAGE_GRAPHICS),
             ("sketch_tab_always", json!(true), PAGE_LAYOUT),
             ("keep_work_on_tab_switch", json!(true), PAGE_LAYOUT),
+            ("window_file_menu", json!(true), PAGE_LAYOUT),
             ("ribbon_reveal", json!(true), PAGE_LAYOUT),
             ("tab_double_click_renames", json!(false), PAGE_LAYOUT),
             ("dialog_buttons", json!("top"), PAGE_LAYOUT),
@@ -10079,6 +10082,32 @@ mod tests {
         assert!(std::sync::Arc::ptr_eq(&doc, &app.session.doc));
         assert!(!app.session.is_dirty());
         assert_eq!(app.session.undo.len(), undo);
+    }
+
+    #[test]
+    fn window_file_menu_preference_uses_layout_and_preserves_apply_cancel_and_reset() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"open":"Layout"}));
+        h.app.prefs_window.filter = "Also show the File menu in the app window".into();
+        h.frames(5);
+        assert!(crate::scenario::handle_at("prefs:window_file_menu").is_none(), "only hosts with a native menu offer the option");
+        h.app.native_file_menu = true;
+        h.frames(5);
+        super::reveal_preference(&mut h, "prefs:window_file_menu");
+        let checkbox = crate::scenario::handle_at("prefs:window_file_menu").unwrap();
+        h.call("ui.click", json!({"x":checkbox.x,"y":checkbox.y}));
+        assert!(h.app.preferences.window_file_menu);
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(!h.app.preferences.window_file_menu);
+        h.call("ui.prefs", json!({"open":"Layout","window_file_menu":true,"button":"apply"}));
+        let mut restored = SolveApp::new(Default::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert!(restored.preferences.window_file_menu, "Apply saves the optional menu");
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(!h.app.preferences.window_file_menu, "Layout defaults restore the native-only menu");
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(h.app.preferences.window_file_menu, "Cancel restores the applied choice");
     }
 
     #[test]
