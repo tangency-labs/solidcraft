@@ -1165,7 +1165,7 @@ pub struct Model {
 
 /// Parameters a feature uses directly (inputs, sketch dimensions and the expressions of a
 /// sketch's texts, the text parameters of their words included), sorted.
-fn param_names(f: &Feature) -> Vec<String> {
+pub(crate) fn param_names(f: &Feature) -> Vec<String> {
     let mut names: Vec<String> = f.kind.expressions().iter().flat_map(|e| expr::references(e)).collect();
     if let FeatureKind::Sketch { sketch, .. } = &f.kind {
         names.extend(sketch.constraints.iter().filter_map(|c| c.param.clone()));
@@ -2049,6 +2049,7 @@ impl Model {
                 adopt_solution(stored, &s.sketch);
             }
         }
+        doc.sync_driven_params();
         // The fingerprints from the first stored sketch on.
         let vals = evaluation_values(doc).0;
         let steps = ImportDigests::of(doc, &self.import_digests);
@@ -2148,8 +2149,11 @@ impl Model {
         self.placement_inputs = None;
         self.fingerprinted = None;
         self.placement_local = true;
-        let (vals, perr) = evaluation_values(doc);
+        let (mut vals, perr) = evaluation_values(doc);
         self.param_errors = perr;
+        // Driven dimensions (#5582): a feature takes what they measure in this evaluation, from
+        // their sketch on; a feature before that sketch can't use them.
+        let driven = doc.driven_index();
         self.frame_bodies.lock().unwrap_or_else(|e| e.into_inner()).next_generation();
         let mut prev_fp = 0u64;
         // The names the design must not use again travel with the state (#4957).
@@ -2182,6 +2186,29 @@ impl Model {
                 && let Some(e) = &r.error
             {
                 failed.insert(r.id, (r.name.clone(), e.clone()));
+            }
+            // The sketch just solved measures its driven dimensions anew: the features after it
+            // read those values (and the parameters that use them).
+            if let (Some(index), Some(r)) = (&driven, out.last())
+                && !r.skipped
+                && r.error.is_none()
+                && let Some(ss) = state.sketch(r.id)
+            {
+                let measured: BTreeMap<String, Value> = ss
+                    .sketch
+                    .constraints
+                    .iter()
+                    .filter(|c| c.driven)
+                    .filter_map(|c| {
+                        let name = c.param.as_ref().filter(|n| index.driven.contains_key(n.as_str()))?;
+                        let v = c.kind.value().filter(|v| v.is_finite())?;
+                        let v = if c.kind.is_angle() { Value::angle(v) } else { Value::length(v) };
+                        vals.get(name).is_none_or(|w| w.v != v.v).then(|| (name.clone(), v))
+                    })
+                    .collect();
+                if !measured.is_empty() {
+                    vals = doc.with_driven_values(&vals, &measured);
+                }
             }
             self.placement_local = self.placement_local && placement_reuse::local_geometry(f, &feature_component);
             let rolled_back = i >= marker;
@@ -2255,6 +2282,9 @@ impl Model {
             } else {
                 f.kind.input_sketches().into_iter().find_map(|id| failed.get(&id)).map(|(name, e)| format!("sketch `{name}` failed: {e}"))
             };
+            // A driven dimension of a sketch after it: never cached either (it depends on where
+            // the sketch is in the timeline).
+            let failed_sketch = failed_sketch.or_else(|| driven.as_ref().and_then(|index| index.order_problem(doc, i)));
             if let Some(e) = failed_sketch {
                 recomputed += 1;
                 reuse = false;

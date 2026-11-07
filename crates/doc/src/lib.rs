@@ -26,6 +26,7 @@ pub mod display_quality;
 pub mod display_units;
 mod document;
 pub mod drawing;
+mod driven;
 mod eval;
 pub mod expr;
 pub mod face_anchor;
@@ -91,6 +92,7 @@ pub use assembly::{
     map_point_expr, map_vector_expr, mat_inverse, mat_mul, rigid,
 };
 pub use document::*;
+pub use driven::{DrivenIndex, DrivenParam, is_driven_problem};
 pub use eval::{
     EdgeRef, FeatureResult, KeptSeparate, Model, ModelBody, ModelState, PlacedBodies, RevolveExtent, SavedModel, SolvedSketch, ThreadInfo,
     blend_target, curve_pick_error, draft_corner_options, edge_names_for, edge_refs, face_point_names, face_point_state, hole_direction_at,

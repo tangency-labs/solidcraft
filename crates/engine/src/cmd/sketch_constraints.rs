@@ -49,7 +49,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("entities: [one or two sketch entity ids]: applies the constraint the geometry nearly has (horizontal/vertical, parallel, perpendicular, collinear, coincident, concentric, equal, tangent)"),
     CommandSpec::new("sketch.toggle_driven", "Toggle Driven Dimension", toggle_driven).icon("dimension")
         .enabled(in_sketch)
-        .params("constraint: dimension id, driven?: bool (default toggles); a driving dimension gets a parameter with its current value"),
+        .params(
+            "constraint: dimension id, driven?: bool (default toggles); the dimension keeps its parameter name either way: a driving dimension's parameter takes its current value, a driven dimension's is read-only (what it measures)",
+        ),
     CommandSpec::new("sketch.toggle_diameter", "Toggle Radius / Diameter", crate::checked!("sketch.toggle_diameter", toggle_diameter))
         .icon("dimension")
         .enabled(in_sketch)
@@ -391,14 +393,27 @@ fn toggle_driven(s: &mut Session, p: &Value) -> Result<Value> {
             return Ok(driven);
         }
         let slot = sk.constraints.iter_mut().find(|c| c.id == cid).ok_or_else(|| bad(cmd, "constraint"))?;
+        let (unit, e) =
+            if c.kind.is_angle() { ("deg".into(), format!("{} deg", (v.to_degrees() * 1e6).round() / 1e6)) } else { doc.design_length(v) };
+        // The name stays (#5582): driven, its parameter reads what it measures; driving again, it
+        // takes the value it measures now. Whatever used the name keeps using it.
+        let kept = c.param.clone().filter(|n| doc.param(n).is_some_and(|p| p.model));
         if driven {
             slot.driven = true;
-            slot.param = None;
+            if kept.is_none() {
+                slot.param = Some(doc.new_model_param(&e, &unit));
+            }
         } else {
-            let (unit, e) =
-                if c.kind.is_angle() { ("deg".into(), format!("{} deg", (v.to_degrees() * 1e6).round() / 1e6)) } else { doc.design_length(v) };
             slot.driven = false;
-            slot.param = Some(doc.new_model_param(&e, &unit));
+            match kept {
+                Some(name) => {
+                    if let Some(p) = doc.params.iter_mut().find(|p| p.name == name) {
+                        p.expr = e;
+                        p.unit = unit;
+                    }
+                }
+                None => slot.param = Some(doc.new_model_param(&e, &unit)),
+            }
             before = None;
         }
         Ok(driven)
@@ -456,15 +471,18 @@ fn toggle_diameter(s: &mut Session, p: &Value) -> Result<Value> {
             if !others.is_empty() {
                 return Err(bad(cmd, format!("`{name}` is also used by {}; switching `{cid}` would change them", others.join(", "))));
             }
-            let e = doc.param(name).map(|p| p.expr.clone()).ok_or_else(|| bad(cmd, format!("no parameter `{name}`")))?;
-            let e = if solidcraft_doc::expr::references(&e).is_empty() {
-                doc.design_length(value).1
-            } else if diameter {
-                format!("2 * ({e})")
-            } else {
-                format!("({e}) / 2")
-            };
-            doc.set_param(name, &e, None, None).map_err(|e| bad(cmd, e.to_string()))?;
+            // A driven dimension's parameter reads what it measures: nothing to set (#5582).
+            if !c.driven {
+                let e = doc.param(name).map(|p| p.expr.clone()).ok_or_else(|| bad(cmd, format!("no parameter `{name}`")))?;
+                let e = if solidcraft_doc::expr::references(&e).is_empty() {
+                    doc.design_length(value).1
+                } else if diameter {
+                    format!("2 * ({e})")
+                } else {
+                    format!("({e}) / 2")
+                };
+                doc.set_param(name, &e, None, None).map_err(|e| bad(cmd, e.to_string()))?;
+            }
         }
         let slot = sk.constraints.iter_mut().find(|c| c.id == cid).ok_or_else(|| bad(cmd, "constraint"))?;
         slot.kind = kind;

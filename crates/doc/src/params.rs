@@ -112,6 +112,10 @@ pub struct ParamRow {
     /// A text parameter's text (its unit is `text`, its value none).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    /// A driven (reference) dimension's parameter: read-only, its value what the dimension
+    /// measures (#5582). Its source is "sketch".
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub driven: bool,
 }
 
 fn unit_of(k: Kind) -> &'static str {
@@ -328,6 +332,7 @@ impl Document {
                 p.text = text;
                 continue;
             }
+            self.refuse_driven(name)?;
             if let Some(p) = next.params.iter_mut().find(|p| p.name == *name) {
                 if p.expr != expression.trim() {
                     changed.insert(name.clone());
@@ -386,11 +391,13 @@ impl Document {
         // `value` is mm / degrees in every row (#10747); the parameter's own unit goes to
         // `display_value`. Both carry the number a person would read, not the float noise.
         let unified = |n: &str| vals.get(n).map(|v| expr::round_reported(expr::reported_value(*v)));
+        let driven = self.driven_params();
         let mut rows = Vec::new();
         for p in &self.params {
+            let measured = driven.get(&p.name).filter(|_| p.model);
             rows.push(ParamRow {
                 name: p.name.clone(),
-                expression: p.expr.clone(),
+                expression: measured.map(|d| self.measured_text(d.value)).unwrap_or_else(|| p.expr.clone()),
                 unit: p.unit.clone(),
                 value: unified(&p.name),
                 display_value: self.param_display_value(&vals, &p.name).map(expr::round_reported),
@@ -403,6 +410,7 @@ impl Document {
                 uses: refs.get(&p.name).cloned().unwrap_or_default(),
                 used_by: used_by(&p.name),
                 text: None,
+                driven: measured.is_some(),
             });
         }
         for f in &self.features {
@@ -426,6 +434,7 @@ impl Document {
                     uses: refs.get(name).cloned().unwrap_or_default(),
                     used_by: used_by(name),
                     text: None,
+                    driven: false,
                 });
             }
         }
@@ -446,6 +455,7 @@ impl Document {
                 uses: Vec::new(),
                 used_by: readers.iter().filter_map(|id| self.feature(*id)).map(|f| format!("Feature:{}", f.name)).collect(),
                 text: Some(p.text.clone()),
+                driven: false,
             });
         }
         rows
@@ -580,6 +590,7 @@ impl Document {
         if unit.map_or(self.text_param(name).is_some(), crate::text_params::is_text_unit) {
             return self.set_text_param(name, expr_s, comment);
         }
+        self.refuse_driven(name)?;
         if let Some(p) = Self::param_name_problem(name) {
             return Err(DocError::Invalid(p));
         }
@@ -672,7 +683,7 @@ impl ParamUser {
 }
 
 /// Length unit of the document in mm (bare numbers of unit-less parameters next to lengths).
-fn doc_len(units: &str) -> f64 {
+pub(crate) fn doc_len(units: &str) -> f64 {
     match expr::unit_info(units) {
         Some((Kind::Length, s)) => s,
         _ => 1.0,
@@ -683,8 +694,16 @@ impl Document {
     /// Every parameter with its unit, for evaluation: stored parameters and named feature
     /// inputs (mm / deg / none by their kind).
     pub fn param_defs(&self) -> Vec<ParamDef> {
-        let mut v: Vec<ParamDef> =
-            self.params.iter().map(|p| ParamDef { name: p.name.clone(), expr: p.expr.clone(), unit: p.unit.clone() }).collect();
+        // A driven dimension's parameter is what the dimension measures (#5582).
+        let driven = if self.params.iter().any(|p| p.model) { self.driven_params() } else { BTreeMap::new() };
+        let mut v: Vec<ParamDef> = self
+            .params
+            .iter()
+            .map(|p| match driven.get(&p.name).filter(|_| p.model) {
+                Some(d) => crate::driven::measured_def(&p.name, d.value),
+                None => ParamDef { name: p.name.clone(), expr: p.expr.clone(), unit: p.unit.clone() },
+            })
+            .collect();
         for f in &self.features {
             for (name, (_, e, k)) in f.param_names.iter().zip(f.kind.inputs()) {
                 if !name.is_empty() {

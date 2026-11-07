@@ -108,6 +108,8 @@ struct Row {
     favorite: bool,
     /// A text parameter's text.
     text: Option<String>,
+    /// A driven dimension's parameter: read-only (#5582).
+    driven: bool,
 }
 
 impl Row {
@@ -159,6 +161,7 @@ fn rows(app: &mut SolveApp) -> Vec<Row> {
                 comment: s(r, "comment"),
                 favorite: r.get("favorite").and_then(Value::as_bool).unwrap_or(false),
                 text: r.get("text").and_then(Value::as_str).map(str::to_string),
+                driven: r.get("driven").and_then(Value::as_bool).unwrap_or(false),
                 source,
                 group,
                 name,
@@ -566,41 +569,50 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&R
                     (Some(Ok(value)), _) => (value.clone(), false),
                     (None, None) => (show_value(r), false),
                 };
-                row.cell(|ui| {
-                    let id = ui.make_persistent_id(("pexpr", salt, &r.name));
-                    let focused = ui.memory(|m| m.has_focus(id) || m.had_focus_last_frame(id));
-                    let response = ui_kit::wide_cell_editor(ui, id, &mut expression, "Expression", invalid, right, (&shown, error));
-                    crate::scenario::publish_target_as(&format!("param:{}", r.name), &format!("param:{}", r.name), response.rect);
-                    if salt == "fav" {
-                        crate::scenario::publish_handle(&format!("param:favorite:{}", r.name), response.rect.center());
-                    }
-                    let completed = complete(ui, &response, &mut expression);
-                    if response.changed() || completed {
-                        d.editing.insert(r.name.clone(), expression.clone());
-                    }
-                    // Held edits (#9279) preview nothing: the preview is a rebuild too.
-                    let apply_live = app.preferences.parameters_apply_live;
-                    if apply_live && response.has_focus() && matches!(live, Some(Ok(_))) {
-                        d.preview = Some((r.name.clone(), expression.clone()));
-                    }
-                    let entered = !completed && enter_for(ui, focused);
-                    if !completed && (response.lost_focus() || entered) {
-                        d.preview = None;
-                        if expression != r.expression && !apply_live {
-                            // Kept in `editing` for Apply or OK, checked now.
-                            d.error = check(app, &expression, &r.unit).err();
-                        } else if expression != r.expression {
-                            d.error = check(app, &expression, &r.unit)
-                                .and_then(|_| app.run("parameters.change", json!({"name":r.name,"expression":expression})))
-                                .err();
-                            if d.error.is_none() {
+                // A driven dimension's parameter is what it measures: read, never typed (#5582).
+                if r.driven {
+                    row.cell(|ui| {
+                        let response =
+                            ui_kit::text(ui, &r.expression, ui_kit::Text::MonoCell).on_hover_text(crate::i18n::tr("parameters.driven_read_only"));
+                        crate::scenario::publish_target_as(&format!("param:{}", r.name), &format!("param:{}", r.name), response.rect);
+                    });
+                } else {
+                    row.cell(|ui| {
+                        let id = ui.make_persistent_id(("pexpr", salt, &r.name));
+                        let focused = ui.memory(|m| m.has_focus(id) || m.had_focus_last_frame(id));
+                        let response = ui_kit::wide_cell_editor(ui, id, &mut expression, "Expression", invalid, right, (&shown, error));
+                        crate::scenario::publish_target_as(&format!("param:{}", r.name), &format!("param:{}", r.name), response.rect);
+                        if salt == "fav" {
+                            crate::scenario::publish_handle(&format!("param:favorite:{}", r.name), response.rect.center());
+                        }
+                        let completed = complete(ui, &response, &mut expression);
+                        if response.changed() || completed {
+                            d.editing.insert(r.name.clone(), expression.clone());
+                        }
+                        // Held edits (#9279) preview nothing: the preview is a rebuild too.
+                        let apply_live = app.preferences.parameters_apply_live;
+                        if apply_live && response.has_focus() && matches!(live, Some(Ok(_))) {
+                            d.preview = Some((r.name.clone(), expression.clone()));
+                        }
+                        let entered = !completed && enter_for(ui, focused);
+                        if !completed && (response.lost_focus() || entered) {
+                            d.preview = None;
+                            if expression != r.expression && !apply_live {
+                                // Kept in `editing` for Apply or OK, checked now.
+                                d.error = check(app, &expression, &r.unit).err();
+                            } else if expression != r.expression {
+                                d.error = check(app, &expression, &r.unit)
+                                    .and_then(|_| app.run("parameters.change", json!({"name":r.name,"expression":expression})))
+                                    .err();
+                                if d.error.is_none() {
+                                    d.editing.remove(&r.name);
+                                }
+                            } else {
                                 d.editing.remove(&r.name);
                             }
-                        } else {
-                            d.editing.remove(&r.name);
                         }
-                    }
-                });
+                    });
+                }
                 row.cell(|ui| {
                     ui_kit::text(ui, &shown, ui_kit::Text::Value(&format!("value:{}", r.name), error)).backing_on_hover_text(&shown);
                 });
