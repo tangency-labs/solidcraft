@@ -489,6 +489,8 @@ fn skill_reference_returns_bundled_text_without_backend_calls() {
         ("solidcraft-mechanisms", "SKILL.md", include_str!("../../../skills/solidcraft-mechanisms/SKILL.md")),
         ("solidcraft-checking", "SKILL.md", include_str!("../../../skills/solidcraft-checking/SKILL.md")),
         ("solidcraft-editing", "SKILL.md", include_str!("../../../skills/solidcraft-editing/SKILL.md")),
+        ("solidcraft-sheetmetal", "SKILL.md", include_str!("../../../skills/solidcraft-sheetmetal/SKILL.md")),
+        ("solidcraft-sheetmetal", "reference.md", include_str!("../../../skills/solidcraft-sheetmetal/reference.md")),
     ];
     for (skill, file, expected) in docs {
         let args = json!({"skill": skill, "file": file});
@@ -505,7 +507,7 @@ fn skill_reference_returns_bundled_text_without_backend_calls() {
 #[test]
 fn skill_reference_refuses_unknown_names_and_paths_with_available_choices() {
     let mut s = server();
-    let skills = ["solidcraft-checking", "solidcraft-editing", "solidcraft-mechanisms", "solidcraft-modeling"];
+    let skills = ["solidcraft-checking", "solidcraft-editing", "solidcraft-mechanisms", "solidcraft-modeling", "solidcraft-sheetmetal"];
     for skill in ["unknown", "../solidcraft-modeling", "/tmp/solidcraft-modeling"] {
         let r = raw_tool(&mut s, "skill_reference", json!({"skill": skill}));
         assert_eq!(r["result"]["isError"], true, "{r}");
@@ -2673,6 +2675,45 @@ fn instructions_recipe_builds_a_parametric_shelled_box() {
     axes(&mut s, 30.0, 20.0);
 }
 
+/// The worked example in `skills/solidcraft-sheetmetal/reference.md` is what agents copy: one
+/// request in words, one flange feature with segments, and the numbers the file states.
+#[test]
+fn sheetmetal_skill_example_builds_as_documented() {
+    let doc = include_str!("../../../skills/solidcraft-sheetmetal/reference.md");
+    let start = doc.find("{\"commands\":[").expect("the reference has a worked example");
+    let end = start + doc[start..].find("```").expect("the example's code block ends");
+    let example: Value = serde_json::from_str(&doc[start..end]).expect("the example is JSON");
+    let mut s = server();
+    tool(&mut s, "batch", example);
+    // AL2 rule (2 mm, K 0.5, R 1 mm); 200x100 base; 150 mm at 90 deg / 20 mm, 50 mm at 45 deg / 15 mm.
+    let setback45 = 3.0 * 22.5f64.to_radians().tan();
+    let want = 2.0 * (200.0 * 100.0 - 150.0 * 3.0 - 50.0 * setback45 + 150.0 * (PI + 17.0) + 50.0 * (PI / 2.0 + 15.0 - setback45));
+    let volume = tool(&mut s, "measure", json!({}))["total"]["volume_mm3"].as_f64().expect("a volume");
+    assert!((volume - want).abs() < 1e-4, "the reference states {want} mm3, the build gives {volume}");
+    let reply = tool(&mut s, "execute", json!({"command":"sheet.export_bend_table","params":{"format":"json"}}));
+    let table: Value = serde_json::from_str(reply["text"].as_str().expect("a JSON bend table")).expect("the bend table is JSON");
+    let bends = table["bends"].as_array().expect("bends");
+    assert_eq!(bends.len(), 2, "{table}");
+    let num = |b: &Value, k: &str, i: usize| b[k][i].as_f64().expect("a coordinate");
+    for (bend, (length, angle, allowance)) in bends.iter().zip([(150.0, 90.0, PI), (50.0, 45.0, PI / 2.0)]) {
+        assert!((bend["length"].as_f64().expect("a length") - length).abs() < 1e-9, "{table}");
+        assert!((bend["angle_deg"].as_f64().expect("an angle") - angle).abs() < 1e-9, "{table}");
+        assert!((bend["allowance"].as_f64().expect("an allowance") - allowance).abs() < 1e-9, "{table}");
+        assert_eq!(bend["direction"], "up", "{table}");
+    }
+    // The two bends' flat centre lines meet and cover the whole 200 mm edge, so the partition
+    // tiles it and the boundary sits where the request put it.
+    let span = |b: &Value| {
+        let xs = [num(b, "start", 0), num(b, "end", 0)];
+        (xs[0].min(xs[1]), xs[0].max(xs[1]), num(b, "start", 1) - num(b, "end", 1))
+    };
+    let (a0, a1, dy0) = span(&bends[0]);
+    let (b0, b1, dy1) = span(&bends[1]);
+    assert!((a1 - b0).abs() < 1e-6, "the bends meet: {table}");
+    assert!((a0.min(b0)).abs() < 1e-6 && (a1.max(b1) - 200.0).abs() < 1e-6, "the bends cover the edge: {table}");
+    assert!(dy0.abs() < 1e-9 && dy1.abs() < 1e-9, "the bend lines run along x: {table}");
+}
+
 /// The skill reference's sketch-plane table: where sketch (10, 20) lands and which way +distance goes.
 #[test]
 fn sketch_plane_axes_match_the_skill_reference() {
@@ -2769,6 +2810,8 @@ fn skills_name_only_real_tools_and_commands() {
         include_str!("../../../skills/solidcraft-mechanisms/reference.md"),
         include_str!("../../../skills/solidcraft-reporting/SKILL.md"),
         include_str!("../../../skills/solidcraft-reporting/reference/report-template.md"),
+        include_str!("../../../skills/solidcraft-sheetmetal/SKILL.md"),
+        include_str!("../../../skills/solidcraft-sheetmetal/reference.md"),
     ];
     let mut s = server();
     let tools: Vec<String> = tool_definitions().iter().filter_map(|t| t["name"].as_str()).map(str::to_owned).collect();

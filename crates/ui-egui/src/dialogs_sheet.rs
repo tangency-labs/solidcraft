@@ -56,6 +56,24 @@ const ANGLE_DISPLAY_LABELS: [&str; 2] = ["Bend", "Included"];
 const BEND_WAY_LABELS: [&str; 2] = ["Same way", "Other way"];
 const FLANGE_RELIEF_LABELS: [&str; 5] = ["Rule", "Notch", "Round", "Rectangular", "Tear"];
 
+/// One stretch of a picked edge in the Flange dialog: `from`…`to` as fractions of the stretch the
+/// sheet still has of the edge, and the stretch's own angle, height and side (text, as typed).
+#[derive(Clone, Debug, Default)]
+pub struct SegmentRow {
+    pub from: String,
+    pub to: String,
+    pub angle: String,
+    pub height: String,
+    /// The stretch's own side where it has one: `Some(true)` turns its bend the other way than the
+    /// sheet's top face (as the feature's `flip` does), `Some(false)` turns it toward that face,
+    /// and `None` follows the feature's `flip`. An explicit `false` under a flipped feature stays
+    /// explicit, as the design wrote it.
+    pub flip: Option<bool>,
+    /// Whether its `from` and `to` are the dialog's own equal stretches rather than the design's:
+    /// adding another stretch redistributes these, and a restored list never does.
+    pub equal: bool,
+}
+
 crate::dialog_descriptor::dialog_descriptors! {
     #[derive(Clone, Debug)]
     pub enum Sm {
@@ -107,6 +125,10 @@ crate::dialog_descriptor::dialog_descriptors! {
                 /// Edge flanges: further bends (angle, height, turns the other way), each a flange on
                 /// the far edge of the one before it (the command's `then`).
                 then: Vec<(String, String, bool)>,
+                /// Edge flanges: the picked edges' segments (the command's per-edge `segments`),
+                /// by the point of the edge each belongs to: one stretch of that edge each, with
+                /// its own fractions, angle, height and side; an edge with none is the whole edge.
+                segments: Vec<(Vec3, Vec<SegmentRow>)>,
             },
             Unfold {
                 refold: bool,
@@ -184,6 +206,7 @@ fn new_flange(app: &SolveApp, ty: usize) -> Sm {
         relief: 0,
         relief_size: String::new(),
         then: Vec::new(),
+        segments: Vec::new(),
     }
 }
 
@@ -248,7 +271,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
     let t = Tokens::get();
     let mut enter = false;
     match k {
-        Sm::Flange { ty, height, angle, radius, position, height_from, flip, distance, reverse, rule, own, relief, relief_size, then } => {
+        Sm::Flange { ty, height, angle, radius, position, height_from, flip, distance, reverse, rule, own, relief, relief_size, then, segments } => {
             *ty = flange_type(inputs);
             form_row(ui, "Type", |ui| {
                 ui.label(FLANGE_TYPES.get(*ty).copied().map(crate::i18n::tr).unwrap_or(""));
@@ -285,6 +308,58 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                     }
                     if let Some(n) = drop {
                         then.remove(n);
+                    }
+                    // The picked edges, each split into its own stretches: `from`…`to` as fractions
+                    // of what the sheet still has of that edge, with each stretch's own angle,
+                    // height and side (the command's per-edge `segments`).
+                    form_row(ui, "Segments", |_ui| {});
+                    for (n, p) in edge_point_list(inputs).iter().enumerate() {
+                        let slot = segments_slot(segments, *p);
+                        let Some((_, list)) = segments.get_mut(slot) else { continue };
+                        // Every picked edge carries the same row labels, and a row's scrub (label
+                        // drag) id is its scope id plus the label: each edge's block needs a scope
+                        // of its own, or dragging one edge's `Segment 1 height` moves every edge's.
+                        ui.scope_builder(egui::UiBuilder::new().id_salt(("sm_edge_segments", n)), |ui| {
+                            form_row(ui, &format!("Edge {}", n + 1), |ui| {
+                                let add = crate::ui_kit::button(ui, "Split Edge", crate::ui_kit::Button::Normal).backing_on_hover_text(
+                                    crate::i18n::tr_label("One more stretch of the picked edge, each with its own angle, height and turns"),
+                                );
+                                if add.clicked() && list.len() < 64 {
+                                    add_segment(list);
+                                }
+                            });
+                            let mut drop = None;
+                            for (m, row) in list.iter_mut().enumerate() {
+                                let part = m + 1;
+                                form_row(ui, &format!("Segment {part}"), |ui| {
+                                    if crate::ui_kit::bin_button(ui, crate::i18n::tr_label("Remove this segment")).clicked() {
+                                        drop = Some(m);
+                                    }
+                                    ui.label(format!("{} … {}", row.from.trim(), row.to.trim()));
+                                });
+                                let (e, changed) = crate::ui_kit::text_row(ui, &format!("Segment {part} from"), &mut row.from, "0");
+                                enter |= e;
+                                row.equal &= !changed;
+                                let (e, changed) = crate::ui_kit::text_row(ui, &format!("Segment {part} to"), &mut row.to, "1");
+                                enter |= e;
+                                row.equal &= !changed;
+                                enter |= expr_row(ui, &format!("Segment {part} angle"), &mut row.angle);
+                                enter |= expr_row(ui, &format!("Segment {part} height"), &mut row.height);
+                                // The stretch's own side: the feature's, or the other one. A side the
+                                // design spelled out (even the feature's) stays as it was until this
+                                // choice is moved off the one it shows.
+                                let mut way = usize::from(matches!(row.flip, Some(f) if f != *flip));
+                                choice_row(ui, &format!("Segment {part} turns"), &format!("sm_segment_way_{n}_{m}"), &mut way, &BEND_WAY_LABELS);
+                                if way == 1 {
+                                    row.flip = Some(!*flip);
+                                } else if row.flip == Some(!*flip) {
+                                    row.flip = None;
+                                }
+                            }
+                            if let Some(m) = drop {
+                                remove_segment(list, m);
+                            }
+                        });
                     }
                     crate::ui_kit::section(ui, "flange_advanced", "Advanced", false, |ui| {
                         enter |= hint_row(ui, "Bend Radius", radius, crate::i18n::tr_label("from the rule"));
@@ -618,35 +693,156 @@ fn own_slot(own: &mut Vec<(Vec3, String, String)>, p: Vec3) -> usize {
     })
 }
 
-/// The edges for `sheet.flange`: a plain point, or `{point, angle?, height?}` for an edge with
-/// an angle and/or a height of its own.
-fn flange_edges(inputs: &[SelInput], own: &[(Vec3, String, String)]) -> Vec<Value> {
-    edge_point_list(inputs)
-        .into_iter()
-        .map(|p| {
-            let (a, h) = own.iter().find(|o| o.0.dist(p) < 1e-9).map(|o| (o.1.trim(), o.2.trim())).unwrap_or(("", ""));
-            if a.is_empty() && h.is_empty() {
-                return pt(p);
-            }
-            let mut e = json!({"point": pt(p)});
-            for (k, v) in [("angle", a), ("height", h)] {
-                if !v.is_empty() {
-                    e[k] = json!(v);
+/// The edges for `sheet.flange`, each with the stretches the dialog holds for that edge (the
+/// command's per-edge `segments`); an edge with none is the whole edge, as before.
+fn flange_edges_segmented(inputs: &[SelInput], own: &[(Vec3, String, String)], segments: &[(Vec3, Vec<SegmentRow>)]) -> Result<Vec<Value>, String> {
+    let mut out = Vec::new();
+    for (n, p) in edge_point_list(inputs).into_iter().enumerate() {
+        let (a, h) = own.iter().find(|o| o.0.dist(p) < 1e-9).map(|o| (o.1.trim(), o.2.trim())).unwrap_or(("", ""));
+        let list = segments.iter().find(|s| s.0.dist(p) < 1e-9).map(|s| s.1.as_slice()).unwrap_or(&[]);
+        // An edge with nothing of its own is the plain point it always was.
+        if a.is_empty() && h.is_empty() && list.is_empty() {
+            out.push(pt(p));
+            continue;
+        }
+        let mut edge = json!({"point": pt(p)});
+        if !a.is_empty() {
+            edge["angle"] = json!(a);
+        }
+        if !h.is_empty() {
+            edge["height"] = json!(h);
+        }
+        if !list.is_empty() {
+            let mut segs = Vec::with_capacity(list.len());
+            for (m, row) in list.iter().enumerate() {
+                let fraction = |k: &str, text: &str| -> Result<f64, String> {
+                    let x =
+                        text.trim().parse::<f64>().map_err(|_| format!("edge {} segment {}: {k} must be a fraction of the edge", n + 1, m + 1))?;
+                    if !(0.0..=1.0).contains(&x) {
+                        return Err(format!("edge {} segment {}: {k} must be a fraction from 0 to 1", n + 1, m + 1));
+                    }
+                    Ok(x)
+                };
+                let mut seg = json!({"from": fraction("from", &row.from)?, "to": fraction("to", &row.to)?});
+                if !row.angle.trim().is_empty() {
+                    seg["angle"] = json!(row.angle.trim());
                 }
+                if !row.height.trim().is_empty() {
+                    seg["height"] = json!(row.height.trim());
+                }
+                if let Some(f) = row.flip {
+                    seg["flip"] = json!(f);
+                }
+                segs.push(seg);
             }
-            e
-        })
-        .collect()
+            edge["segments"] = json!(segs);
+        }
+        out.push(edge);
+    }
+    Ok(out)
+}
+
+/// Where the segments of the edge picked at `p` are kept (an empty entry on first use).
+fn segments_slot(segments: &mut Vec<(Vec3, Vec<SegmentRow>)>, p: Vec3) -> usize {
+    segments.iter().position(|s| s.0.dist(p) < 1e-9).unwrap_or_else(|| {
+        segments.push((p, Vec::new()));
+        segments.len() - 1
+    })
+}
+
+/// Add one stretch to an edge's list: while the list is the dialog's own equal stretches they stay
+/// equal, and a list the design gave keeps its fractions with the new stretch splitting the last
+/// one where it ends.
+fn add_segment(list: &mut Vec<SegmentRow>) {
+    list.push(SegmentRow { equal: true, ..Default::default() });
+    if list.iter().all(|r| r.equal) {
+        let n = list.len();
+        for (i, r) in list.iter_mut().enumerate() {
+            r.from = format!("{}", i as f64 / n as f64);
+            r.to = format!("{}", (i + 1) as f64 / n as f64);
+        }
+        return;
+    }
+    let i = list.len() - 1;
+    let (Some(from), Some(to)) = (list[i - 1].from.trim().parse::<f64>().ok(), list[i - 1].to.trim().parse::<f64>().ok()) else {
+        return;
+    };
+    let mid = from + (to - from) / 2.0;
+    list[i - 1].to = format!("{mid}");
+    list[i].from = format!("{mid}");
+    list[i].to = format!("{to}");
+    list[i].equal = false;
+}
+
+/// Take one stretch out of an edge's list and keep the list a partition of the edge: the gap the
+/// removed stretch leaves is bridged from the stretches beside it, never from the removed row,
+/// whose fields may be mid-edit and empty. The stretch before the removed one reaches to where the
+/// stretch after it starts (or to the edge's end when none follows), the list's first stretch
+/// starts at the edge's start and its last ends at the edge's end, and removing the only stretch
+/// leaves the whole edge. A boundary the user did not touch never moves: a neighbour whose value
+/// doesn't parse is the only reason to fall back to equal stretches. Deleting never leaves a list
+/// the command refuses unless another row's own value was already mid-edit.
+fn remove_segment(list: &mut Vec<SegmentRow>, m: usize) {
+    if m >= list.len() {
+        return;
+    }
+    if list.len() == 1 {
+        list.clear();
+        return;
+    }
+    let fraction = |text: &str| text.trim().parse::<f64>().ok().filter(|x| x.is_finite() && (0.0..=1.0).contains(x));
+    list.remove(m);
+    for row in list.iter_mut() {
+        row.equal = false;
+    }
+    // Where the gap the removed stretch leaves now ends: the stretch after it starts there, and
+    // with none after it, the edge does.
+    let target = match list.get(m) {
+        Some(next) => fraction(&next.from),
+        None => Some(1.0),
+    };
+    // The stretch before the removed one takes the gap. The removed row's `from`/`to` are not read.
+    let bridged = match (target, m.checked_sub(1)) {
+        // The removed stretch was the first: pinning the new first stretch's start covers it.
+        (_, None) => true,
+        (Some(to), Some(i)) => match list.get_mut(i) {
+            Some(prev) => {
+                let ok = fraction(&prev.from).is_some_and(|from| to > from);
+                if ok {
+                    prev.to = format!("{to}");
+                }
+                ok
+            }
+            None => false,
+        },
+        (None, Some(_)) => false,
+    };
+    if !bridged {
+        let n = list.len();
+        for (i, row) in list.iter_mut().enumerate() {
+            row.from = format!("{}", i as f64 / n as f64);
+            row.to = format!("{}", (i + 1) as f64 / n as f64);
+        }
+    }
+    // The stretches cover the whole edge, ends included.
+    if let Some(first) = list.first_mut() {
+        first.from = "0".into();
+    }
+    if let Some(last) = list.last_mut() {
+        last.to = "1".into();
+    }
 }
 
 /// The commands the dialog's OK runs (`extra`: parameters kept from the feature being edited).
 pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
     let s = &app.session;
     let (cmd, mut p): (&str, Value) = match k {
-        Sm::Flange { height, angle, radius, position, height_from, flip, distance, reverse, rule, own, relief, relief_size, then, .. } => {
+        Sm::Flange {
+            height, angle, radius, position, height_from, flip, distance, reverse, rule, own, relief, relief_size, then, segments, ..
+        } => {
             let mut p = match flange_type(inputs) {
                 1 => {
-                    let mut p = json!({"type": "edge", "edges": flange_edges(inputs, own), "height": height, "angle": angle,
+                    let mut p = json!({"type": "edge", "edges": flange_edges_segmented(inputs, own, segments)?, "height": height, "angle": angle,
                         "position": POSITIONS.get(*position).copied().unwrap_or("inside")});
                     put(&mut p, &[("radius", radius)]);
                     if let Some(from) = HEIGHT_FROM.get(*height_from).filter(|_| *height_from > 0) {
@@ -656,7 +852,17 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
                         p["corner_relief_shape"] = json!(shape);
                     }
                     put(&mut p, &[("corner_relief", relief_size)]);
+                    // A split edge takes no `then` in v1: a chain needs one far edge to stand on,
+                    // and the refusal names the edge whose segments took it away.
                     if !then.is_empty() {
+                        let split =
+                            edge_point_list(inputs).iter().position(|p| segments.iter().any(|(q, list)| q.dist(*p) < 1e-9 && !list.is_empty()));
+                        if let Some(n) = split {
+                            return Err(format!(
+                                "edge {} is split into segments: a split edge takes no `then`; bend each segment's far edge in its own feature",
+                                n + 1
+                            ));
+                        }
                         let mut bends = Vec::with_capacity(then.len());
                         for (n, (a, h, other)) in then.iter().enumerate() {
                             if h.trim().is_empty() {
@@ -815,21 +1021,41 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             }
             (f, curves.iter().map(|id| crate::selection::curve_pick(id, sketch.0, app.session.active_sketch)).collect())
         }
-        FeatureKind::SheetFlange { edges, height, angle, radius, position, flip, body, corner_relief_shape, corner_relief, height_from } => {
+        FeatureKind::SheetFlange { edges, height, angle, radius, position, flip, body, corner_relief_shape, corner_relief, height_from, .. } => {
             if let Some(b) = body {
                 extra.insert("body".into(), json!(b));
             }
+            // The edges' segments, by the point of the edge each belongs to: the fractions the
+            // design has (a split edge keeps them; the equal stretches are the dialog's own), each
+            // stretch's own angle, height and side, and an explicit side kept explicit.
+            let mut segments: Vec<(Vec3, Vec<SegmentRow>)> = Vec::new();
             // The edges, and the angle and height some have of their own (kept by the point the
             // edge's selection carries).
             let (mut picked, mut own) = (Vec::new(), Vec::new());
             for e in edges {
                 let Some(sel) = edge_sel(s, e.point.0) else { continue };
-                if let (Sel::Edge { point, .. }, true) = (&sel, e.angle.is_some() || e.height.is_some()) {
+                let Sel::Edge { point, .. } = &sel else { continue };
+                if e.angle.is_some() || e.height.is_some() {
                     own.push((
                         *point,
                         e.angle.as_deref().map(str::to_string).unwrap_or_default(),
                         e.height.as_deref().map(str::to_string).unwrap_or_default(),
                     ));
+                }
+                if !e.segments.is_empty() {
+                    let rows = e
+                        .segments
+                        .iter()
+                        .map(|x| SegmentRow {
+                            from: format!("{}", x.from),
+                            to: format!("{}", x.to),
+                            angle: x.angle.as_deref().map(str::to_string).unwrap_or_default(),
+                            height: x.height.as_deref().map(str::to_string).unwrap_or_default(),
+                            flip: x.flip,
+                            equal: false,
+                        })
+                        .collect();
+                    segments.push((*point, rows));
                 }
                 picked.push(sel);
             }
@@ -854,6 +1080,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                     .map_or(0, |i| i + 1),
                 relief_size: corner_relief.as_deref().map(str::to_string).unwrap_or_default(),
                 then: Vec::new(),
+                segments,
             };
             (f, picked)
         }

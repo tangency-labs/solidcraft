@@ -1,9 +1,9 @@
 # SolidCraft: instructions for agents
 
-SolidCraft is a clean-room, pure-Rust parametric 3D CAD app (sketch solver, feature timeline, B-rep kernel, an egui UI that agents drive). This file is a router: the hard rules, then the skill to read for your task. Humans: CONTRIBUTING.md.
+SolidCraft is a clean-room, pure-Rust parametric 3D CAD app (sketch solver, feature timeline, B-rep kernel, an agent-driven egui UI). This file is a router: the hard rules, then the skill to read for your task. Humans: CONTRIBUTING.md.
 
 ## Start here
-Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelled `help wanted`, `good first issue`, `needs-triage`; architecture in `docs/architecture.md`. Local `plan/` notes are optional.
+Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelled `help wanted`, `good first issue`, `needs-triage`; architecture in `docs/architecture.md`.
 
 ## Hard rules (what enforces each)
 - Independent: never copy another product's code, icons, text or templates; never drive or take data from commercial CAD. `skills/solidcraft-ground-rules/SKILL.md`.
@@ -22,12 +22,12 @@ Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelle
 - A command has input and output schemas (will become required; `schema/unconverted.txt` only shrinks): `skills/solidcraft-commands/SKILL.md`.
 - New UI strings go in `assets/locales/pending/<slug>.json`, ATTRIBUTION rows in `attribution/pending/<slug>.md`: `cargo xtask lists`.
 - A changed default keeps the old behaviour behind a preference and fills the PR's `Changes a default:` line: `pr-checks.yml`.
-- A regression test goes in the area's existing test file, never a per-bug file (#3226).
+- A regression test goes in the area's existing test file, never a per-bug file.
 - Look at open PRs first, claim with a draft PR (lowest number wins), one topic per PR: `skills/solidcraft-contributing/SKILL.md`.
 - A PR's title and first sentence make sense to someone who never saw your chat or the issue: `skills/solidcraft-contributing/SKILL.md`.
 - Code, comments, commit messages and docs are in English, always: `skills/solidcraft-contributing/SKILL.md` ("Working as an agent").
 - Independent work runs in parallel, dependent work stays sequential: `skills/solidcraft-contributing/SKILL.md` ("Working as an agent").
-- Show observable changes with real screenshots or a recording, captured yourself.
+- Show observable changes with real screenshots or a recording.
 - Run `cargo xtask ci` before every commit. `cargo xtask skills` keeps this file and `skills/` honest.
 
 ## Working on X: read the skill first
@@ -46,6 +46,7 @@ Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelle
 | Releases, installers, packages | `skills/solidcraft-packaging/SKILL.md` |
 | Running the app, control channel, MCP tools | `skills/solidcraft-agent-tools/SKILL.md` |
 | Building a part over MCP | `skills/solidcraft-modeling/SKILL.md` |
+| Sheet metal, bends, flat pattern | `skills/solidcraft-sheetmetal/SKILL.md` |
 | Changing an existing design | `skills/solidcraft-editing/SKILL.md` |
 | A bug report, a crash, a wrong result | `skills/solidcraft-reporting/SKILL.md` |
 | Checking, porting, designs in git | `skills/solidcraft-checking/SKILL.md` |

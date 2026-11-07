@@ -1,0 +1,38 @@
+{
+  "en": {
+    "Segments": "Segments",
+    "Split Edge": "Split Edge",
+    "Remove this segment": "Remove this segment",
+    "One more stretch of the picked edge, each with its own angle, height and turns": "One more stretch of the picked edge, each with its own angle, height and turns"
+  },
+  "ar": {
+    "Segments": "المقاطع",
+    "Split Edge": "تقسيم الحافة",
+    "Remove this segment": "إزالة هذا المقطع",
+    "One more stretch of the picked edge, each with its own angle, height and turns": "مقطع آخر من الحافة المختارة، لكل منها زاويتها وارتفاعها ولفّاتها"
+  },
+  "he": {
+    "Segments": "מקטעים",
+    "Split Edge": "פיצול המקצוע",
+    "Remove this segment": "הסרת המקטע הזה",
+    "One more stretch of the picked edge, each with its own angle, height and turns": "מקטע נוסף של המקצוע הנבחר, שלכל אחד זווית, גובה וכיפופים משלו"
+  },
+  "ja": {
+    "Segments": "セグメント",
+    "Split Edge": "エッジを分割",
+    "Remove this segment": "このセグメントを削除",
+    "One more stretch of the picked edge, each with its own angle, height and turns": "選択したエッジのもう一つの区間。それぞれに独自の角度、高さ、曲げ方向があります"
+  },
+  "vi": {
+    "Segments": "Đoạn",
+    "Split Edge": "Chia cạnh",
+    "Remove this segment": "Xóa đoạn này",
+    "One more stretch of the picked edge, each with its own angle, height and turns": "Thêm một đoạn nữa của cạnh đã chọn, mỗi đoạn có góc, chiều cao và hướng uốn riêng"
+  },
+  "zh": {
+    "Segments": "分段",
+    "Split Edge": "分割边",
+    "Remove this segment": "移除此分段",
+    "One more stretch of the picked edge, each with its own angle, height and turns": "所选边的又一段，每段都有自己的角度、高度和折弯方向"
+  }
+}
