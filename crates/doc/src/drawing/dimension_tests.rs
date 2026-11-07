@@ -347,6 +347,61 @@ fn a_chain_saves_its_points_in_order_and_keeps_its_rules() {
     assert!(reading.starts_with("damaged drawing: "), "{reading}");
 }
 
+/// A baseline set saves its origin, its targets in the order given and its direction, and keeps
+/// its rules on reading: 2 to [`MAX_SET_TARGETS`] targets (one is a linear dimension), each with a
+/// point's rules, the origin too, a direction to measure along that isn't zero, no reading (it
+/// reads projected) and no text instead of its members' numbers. Two targets may be one point.
+#[test]
+fn a_baseline_set_saves_its_origin_and_targets_and_keeps_its_rules() {
+    let (mut d, _) = measured();
+    let (view, id) = (d.views[0].id, d.allocate_id(&mut IdSource::seeded(SEED + 1)).unwrap());
+    let hole = |n: u64| {
+        let rim = format!("F{n}:hole|F1:front");
+        ModelPoint { centre: true, ..corner(&[rim.as_str()]) }
+    };
+    let origin = corner(&["F1:front|F1:bottom", "F1:front|F1:left"]);
+    let kind = DimensionKind::Baseline { origin, targets: vec![hole(4), hole(3), hole(5), hole(3)], direction: LinearDirection::Horizontal };
+    let dimension =
+        Dimension { id, view, kind, offset_mm: 8.0, text: TextPlace::Centred, decimals: 1, override_text: None, last_good: None, from_model: None };
+    d.add_dimensions([Arc::new(dimension)]);
+    d.validate().unwrap();
+    let set_id = ids::encode(id);
+    let mut v = file(&d);
+    let first = json!({"body": "Box", "origin_feature": 7, "edges": ["F1:front|F1:bottom", "F1:front|F1:left"]});
+    let centre = |n: u64| json!({"body": "Box", "origin_feature": 7, "edges": [format!("F{n}:hole|F1:front")], "centre": true});
+    let saved = json!({"baseline": {"origin": first, "targets": [centre(4), centre(3), centre(5), centre(3)], "direction": "horizontal"}});
+    assert_eq!(dim(&mut v, &set_id)["kind"], saved);
+    assert_eq!(Drawing::from_json(&v.to_string()).unwrap(), d);
+    assert_eq!(d.to_json().unwrap(), Drawing::from_json(&d.to_json().unwrap()).unwrap().to_json().unwrap(), "the same bytes again");
+    let rule = |rule: &str| format!("damaged drawing: dimension {set_id}: {rule}");
+    let count = |n: usize| {
+        refused(&d, |v| {
+            let targets = &mut dim(v, &set_id)["kind"]["baseline"]["targets"];
+            let one = targets[1].clone();
+            *targets = json!(vec![one; n]);
+        })
+    };
+    let two_to = rule(&format!("a baseline set has 2 to {MAX_SET_TARGETS} targets"));
+    let counts = [count(0), count(1), count(2), count(MAX_SET_TARGETS), count(MAX_SET_TARGETS + 1)];
+    assert_eq!(counts, [two_to.clone(), two_to.clone(), "read".into(), "read".into(), two_to]);
+    let two_edges = refused(&d, |v| dim(v, &set_id)["kind"]["baseline"]["targets"][2]["edges"] = json!(["F3:a", "F3:b"]));
+    assert_eq!(two_edges, rule("a centre is of one named circle or arc"));
+    let no_origin = refused(&d, |v| dim(v, &set_id)["kind"]["baseline"]["origin"]["edges"] = json!(["F1:front|F1:bottom"]));
+    assert_eq!(no_origin, rule(&format!("a corner is where 2 to {MAX_VERTEX_EDGES} named edges meet")));
+    let zero = refused(&d, |v| dim(v, &set_id)["kind"]["baseline"]["direction"] = json!({"along": [0.0, 0.0]}));
+    assert_eq!(zero, rule("the direction to measure along is zero or not finite"));
+    let instead = refused(&d, |v| dim(v, &set_id)["override_text"] = json!("60"));
+    assert_eq!(instead, rule("a set shows each target's number, never a text instead"));
+    for (field, value) in [("reading", json!("projected")), ("points", json!([]))] {
+        let unknown = refused(&d, |v| dim(v, &set_id)["kind"]["baseline"][field] = value);
+        assert!(unknown.starts_with("damaged drawing: "), "{field}: {unknown}");
+    }
+    let unnamed = refused(&d, |v| {
+        dim(v, &set_id)["kind"]["baseline"].as_object_mut().unwrap().remove("origin");
+    });
+    assert!(unnamed.starts_with("damaged drawing: "), "{unnamed}");
+}
+
 /// A cylinder, a sphere or a cone dimension saves its face by name, and the face keeps a reference's rules.
 #[test]
 fn a_cylinder_sphere_or_cone_dimension_saves_its_face() {

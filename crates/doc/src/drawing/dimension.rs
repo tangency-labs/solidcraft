@@ -15,6 +15,8 @@
 //!   on, read exactly from the body.
 //! - **Chain** (W20c): from each of its points to the next along one line, as the view shows them,
 //!   the members adding up to the overall from the first point to the last.
+//! - **Baseline** (W41, #13052): from one origin to each of its targets along one line, as the view
+//!   shows them, each dimension stacked above the last on paper, nearest first.
 //! - **Cylinder** (W20b): a whole cylinder's diameter between its two silhouettes, on a view that
 //!   doesn't look along its axis (a face, [`ModelFace`]).
 //! - **Sphere** (R2b): a sphere's size on any view (a face, [`ModelFace`]): SØ, its diameter, when
@@ -37,7 +39,8 @@
 //! The rules, beside the record's: a dimension is on one of the drawing's views; a reference names
 //! a body and its feature, and 1 to [`MAX_REFERENCE_NAME_BYTES`] bytes in each name, without control
 //! characters; a corner names 2 to [`MAX_VERTEX_EDGES`] edges, a centre one; a chain has 3 to
-//! [`MAX_CHAIN_POINTS`] points and shows its members' numbers, never a text instead; an occurrence
+//! [`MAX_CHAIN_POINTS`] points and a baseline set 2 to [`MAX_SET_TARGETS`] targets, and each shows
+//! its members' numbers, never a text instead; an occurrence
 //! path is at most [`MAX_PLACEMENT_DEPTH`] ids, none 0; a true length is measured aligned; a
 //! direction to measure along isn't zero, and is at most [`MAX_REAL`] each way, as every number a
 //! drawing saves (a whole number past it reads, then saves as one the file's check refuses); the
@@ -126,6 +129,8 @@ pub const MAX_TEXT_BYTES: usize = 1024;
 pub const MAX_CHAIN_POINTS: usize = 64;
 /// The longest constraint id or parameter label a model dimension names, in bytes.
 pub const MAX_MODEL_NAME_BYTES: usize = 256;
+/// The most targets a set of dimensions from one origin measures.
+pub const MAX_SET_TARGETS: usize = 64;
 /// What a diameter's number follows: Ø (U+00D8), as tolerance texts write it. The diameter sign
 /// U+2300 isn't in the bundled fonts, so it would print as a missing glyph.
 const DIAMETER_SIGN: &str = "Ø";
@@ -203,6 +208,9 @@ pub enum DimensionKind {
     },
     /// The distances from each point to the next, in order along one line as the view shows them.
     Chain { points: Vec<ModelPoint>, direction: LinearDirection },
+    /// The distances from `origin` to each of `targets`, in any order, along one line as the view
+    /// shows them: a dimension each, stacked on paper.
+    Baseline { origin: ModelPoint, targets: Vec<ModelPoint>, direction: LinearDirection },
     /// A whole cylinder's diameter between its two silhouettes, on a view that doesn't look along
     /// its axis: the cylinder a face of it lies on.
     Cylinder { face: ModelFace },
@@ -228,6 +236,7 @@ impl DimensionKind {
             DimensionKind::Length { edge, .. } | DimensionKind::Radial { edge, .. } => vec![Reference::Edge(edge)],
             DimensionKind::Angle { a, b, .. } => vec![Reference::Edge(a), Reference::Edge(b)],
             DimensionKind::Chain { points, .. } => points.iter().map(Reference::Point).collect(),
+            DimensionKind::Baseline { origin, targets, .. } => std::iter::once(origin).chain(targets).map(Reference::Point).collect(),
             DimensionKind::Cylinder { face } | DimensionKind::Sphere { face } | DimensionKind::Cone { face } => vec![Reference::Face(face)],
             DimensionKind::Silhouettes { a, b, .. } => vec![Reference::Face(&a.face), Reference::Face(&b.face)],
             DimensionKind::Faces { a, b, .. } => vec![Reference::Face(a), Reference::Face(b)],
@@ -377,6 +386,13 @@ impl Drawing {
                 let instead = || "a chain shows its members' numbers, never a text instead".into();
                 require(d.override_text.is_none(), instead)?;
             }
+            DimensionKind::Baseline { origin, targets, direction } => {
+                check_baseline_targets(targets.len())?;
+                std::iter::once(origin).chain(targets).try_for_each(check_point)?;
+                check_direction(*direction, Reading::Projected)?;
+                let instead = || "a set shows each target's number, never a text instead".into();
+                require(d.override_text.is_none(), instead)?;
+            }
             DimensionKind::Cylinder { face } | DimensionKind::Sphere { face } | DimensionKind::Cone { face } => check_face(face)?,
             DimensionKind::Silhouettes { a, b, direction } => {
                 check_face(&a.face)?;
@@ -416,6 +432,11 @@ impl Drawing {
 /// A chain's number of points: 3 (2 make a linear dimension) to [`MAX_CHAIN_POINTS`].
 pub fn check_chain_length(points: usize) -> Result<()> {
     require((3..=MAX_CHAIN_POINTS).contains(&points), || format!("a chain has 3 to {MAX_CHAIN_POINTS} points"))
+}
+
+/// A baseline set's number of targets: 2 (one makes a linear dimension) to [`MAX_SET_TARGETS`].
+pub fn check_baseline_targets(targets: usize) -> Result<()> {
+    require((2..=MAX_SET_TARGETS).contains(&targets), || format!("a baseline set has 2 to {MAX_SET_TARGETS} targets"))
 }
 
 /// An edge reference's rules (a balloon's edge keeps them too).
@@ -482,15 +503,17 @@ pub struct Resolved {
     /// What its number is, whenever it was measured, a chain's members aside: a sphere's says
     /// whether it is drawn as a diameter or a radius.
     pub label: Option<LabelKind>,
-    /// A chain's members, from its first point to its last, each as it reads and its text: empty
-    /// unless measured, and for other kinds. `measured` is then the chain's overall.
+    /// A chain's members, from its first point to its last, or a set's, one for each target in its
+    /// order, each as it reads and its text: empty unless measured, and for other kinds. `measured`
+    /// is then the chain's overall, or the set's farthest target.
     pub members: Vec<Member>,
     /// Every name it measures was found by exact history, each as one edge.
     pub exact: bool,
     /// What it measures, in the design's frame: a linear dimension's two points, an angle's two
     /// lines (four points, each line from its first to its second), a radial dimension's
     /// centre and its arc's start, middle and end (a sphere's: the arc of its contour on its faces,
-    /// or the whole contour from one point round to it again), a chain's points, or the ends of
+    /// or the whole contour from one point round to it again), a chain's points, a set's origin then
+    /// its targets, or the ends of
     /// each silhouette measured (a cylinder's two, from its faces' one end along its axis to the
     /// other). Empty unless measured.
     pub points: Vec<Vec3>,
@@ -979,6 +1002,17 @@ impl<'a> Lookup<'a> {
                 let points: Vec<Vec3> = found.into_iter().map(|(p, _)| p).collect();
                 let chain = drawing_measure::chain(basis, &points, *direction).map_err(unmeasurable)?;
                 Ok(Found { members: chain.members, ..Found::new(chain.overall, points, exact) })
+            }
+            DimensionKind::Baseline { origin, targets, direction } => {
+                let found = std::iter::once(origin).chain(targets).map(|p| self.corner(p)).collect::<std::result::Result<Vec<_>, _>>()?;
+                let exact = found.iter().all(|(_, exact)| *exact);
+                let points: Vec<Vec3> = found.into_iter().map(|(p, _)| p).collect();
+                let (origin, targets) = points.split_first().ok_or_else(|| Status::Unmeasurable("a set has no origin".into()))?;
+                let set = drawing_measure::from_origin(basis, *origin, targets, *direction).map_err(unmeasurable)?;
+                if set.members.iter().any(|m| m.value <= solidcraft_geom::EPS) {
+                    return Err(Status::Unmeasurable("a target in line with its origin has no distance to dimension".into()));
+                }
+                Ok(Found { members: set.members, ..Found::new(set.farthest, points, exact) })
             }
             DimensionKind::Cylinder { face } => self.cylinder(face, basis),
             DimensionKind::Sphere { face } => self.sphere(face, basis),
@@ -1495,7 +1529,7 @@ fn label_of(kind: &DimensionKind) -> Option<LabelKind> {
         DimensionKind::Angle { .. } | DimensionKind::Cone { .. } => Some(LabelKind::Angle),
         DimensionKind::Radial { diameter: false, .. } => Some(LabelKind::Radius),
         DimensionKind::Radial { diameter: true, .. } | DimensionKind::Cylinder { .. } => Some(LabelKind::Diameter),
-        DimensionKind::Chain { .. } | DimensionKind::Sphere { .. } => None,
+        DimensionKind::Chain { .. } | DimensionKind::Baseline { .. } | DimensionKind::Sphere { .. } => None,
         DimensionKind::Linear { .. } | DimensionKind::Length { .. } | DimensionKind::Silhouettes { .. } | DimensionKind::Faces { .. } => {
             Some(LabelKind::Length)
         }

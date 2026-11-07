@@ -27,8 +27,11 @@ pub(crate) const ARROW: Terminator = Terminator::Arrow { shape: ArrowShape::Fill
 pub(crate) const TEXT_MM: f64 = 3.5;
 /// How close two points of a layout are when they are one point.
 const SAME_POINT_MM: f64 = 1e-6;
+/// How far apart a baseline set's dimension lines stand on paper: room for a 3.5 mm text and its
+/// gaps. Until the drafting profile (#4896, W09d) gives it.
+const STACK_MM: f64 = 7.0;
 
-/// One laid-out piece of a dimension: a chain has one for each of its members.
+/// One laid-out piece of a dimension: a chain and a baseline set have one for each of their members.
 struct Piece {
     frame: DimFrame,
     /// Where the layout puts its text, from the frame's own origin.
@@ -143,6 +146,7 @@ fn pieces(dimension: &Dimension, resolved: &Resolved, on: &[Vec2], set: &impl Fn
             Some(vec![radial(centre, [start, mid, end], *diameter, offset, place, text())?])
         }
         (DimensionKind::Chain { direction, .. }, points) => chain(points, *direction, offset, resolved, set),
+        (DimensionKind::Baseline { direction, .. }, points) => baseline(points, *direction, offset, resolved, set),
         // As a circle's or an arc's, on the arc of its contour it reads on.
         (DimensionKind::Sphere { .. }, &[centre, start, mid, end]) => {
             let diameter = resolved.label == Some(LabelKind::SphericalDiameter);
@@ -188,6 +192,33 @@ fn chain(points: &[Vec2], direction: LinearDirection, offset: f64, resolved: &Re
         linear(*a, *b, dir, line - ((*a + *b) * 0.5).dot(n), &TextPlace::Centred, set(text))
     };
     Some(points.iter().zip(points.iter().skip(1)).enumerate().map(member).collect())
+}
+
+/// A baseline set's members, each a line from the origin (`points`' first) to one target, stacked
+/// [`STACK_MM`] apart, nearest target first, from `offset` past the outermost point on its side, so
+/// every line clears what it measures. Targets that read the same keep their order.
+fn baseline(
+    points: &[Vec2],
+    direction: LinearDirection,
+    offset: f64,
+    resolved: &Resolved,
+    set: &impl Fn(Option<&str>) -> Text,
+) -> Option<Vec<Piece>> {
+    let (origin, targets) = points.split_first()?;
+    let dir = line_direction(direction, *targets.last()? - *origin)?;
+    let n = dir.perp();
+    let side = if offset < 0.0 { -1.0 } else { 1.0 };
+    let outer = side * points.iter().map(|p| side * p.dot(n)).fold(f64::NEG_INFINITY, f64::max);
+    let value = |i: usize| resolved.members.get(i).map_or(0.0, |m| m.measured.value);
+    let mut nearest_first: Vec<usize> = (0..targets.len()).collect();
+    nearest_first.sort_by(|a, b| value(*a).total_cmp(&value(*b)));
+    let member = |(k, i): (usize, usize)| {
+        let target = *targets.get(i)?;
+        let line = outer + offset + side * STACK_MM * k as f64;
+        let text = resolved.members.get(i).map(|m| m.text.as_str());
+        Some(linear(*origin, target, dir, line - ((*origin + target) * 0.5).dot(n), &TextPlace::Centred, set(text)))
+    };
+    nearest_first.into_iter().enumerate().map(member).collect()
 }
 
 /// A line between two silhouettes or faces, each from one end to the other, at the ends on the side `offset`

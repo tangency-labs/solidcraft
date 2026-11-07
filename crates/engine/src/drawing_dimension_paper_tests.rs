@@ -1,5 +1,5 @@
 use solidcore_record::Vec3;
-use solidcraft_doc::drawing::dimension::{Member, ModelEdge, ModelFace, Silhouette, Status};
+use solidcraft_doc::drawing::dimension::{Member, ModelEdge, ModelFace, ModelPoint, Silhouette, Status};
 use solidcraft_geom::Aabb2;
 use solidcraft_geom::drawing_measure::{Measured, Reading, SilhouetteSide};
 use solidcraft_geom::drawing_view::{NamedView, Scale};
@@ -22,6 +22,10 @@ fn dimension(kind: DimensionKind, offset_mm: f64, text: TextPlace) -> Dimension 
 
 fn edge() -> ModelEdge {
     ModelEdge { body: "B".into(), origin_feature: 1, name: "e".into(), path: Vec::new() }
+}
+
+fn corner() -> ModelPoint {
+    ModelPoint { body: "B".into(), origin_feature: 1, edges: vec!["e".into(), "f".into()], centre: false, path: Vec::new() }
 }
 
 fn face() -> ModelFace {
@@ -301,6 +305,50 @@ fn a_chain_is_one_line_with_each_extension_line_once() {
     assert_eq!(upright, 4, "one for each point: {lines:?}");
 }
 
+/// A baseline set from (0, 0) to holes at x = 30, 10 and 60 (y = 15), seen at 1:1 with an offset of
+/// 10: one dimension from the origin to each, nearest first, their lines at y = 15 + 10 (the
+/// outermost point, then the offset), 32 and 39, 7 mm apart, each text a gap above its own line
+/// and centred on its span. The origin's extension lines lie along each other: drawn once, the
+/// longest. Two targets at one distance stack as two members.
+#[test]
+fn a_baseline_set_stacks_its_members_nearest_first() {
+    let kind = DimensionKind::Baseline { origin: corner(), targets: Vec::new(), direction: LinearDirection::Horizontal };
+    let member = |value: f64| Member { measured: Measured { value, foreshortened: false }, text: format!("{value:.2}") };
+    let mut r = read(&[[0.0, 0.0], [30.0, 15.0], [10.0, 15.0], [60.0, 15.0]], "60");
+    r.text = None;
+    r.members = vec![member(30.0), member(10.0), member(60.0)];
+    let group = laid(&dimension(kind.clone(), 10.0, TextPlace::Centred), &r, &view_at("1:1")).unwrap().group;
+    let texts = runs(&group);
+    assert_eq!(texts.iter().map(|run| run.text.as_str()).collect::<Vec<_>>(), ["10.00", "30.00", "60.00"]);
+    for (run, (x, line_y)) in texts.iter().zip([(10.0, 25.0), (30.0, 32.0), (60.0, 39.0)]) {
+        let start = Vec2::new(x * 0.5 - measured(&run.text) * 0.5, line_y + SIZES.gap);
+        assert!(run.origin.dist(start) < 1e-9, "{}: {:?} for {start:?}", run.text, run.origin);
+    }
+    let (lines, tips) = parts(&group);
+    let mut heights: Vec<f64> = tips.iter().map(|t| t.y).collect();
+    heights.sort_by(f64::total_cmp);
+    assert!(heights.iter().zip([25.0, 25.0, 32.0, 32.0, 39.0, 39.0]).all(|(y, at)| close(*y, at)) && heights.len() == 6, "{tips:?}");
+    let upright = |x: f64| lines.iter().filter(|l| l.len() == 2 && close(l[0].x, x) && close(l[1].x, x)).count();
+    assert_eq!([upright(0.0), upright(10.0), upright(30.0), upright(60.0)], [1, 1, 1, 1], "{lines:?}");
+    let origin_line = lines.iter().find(|l| close(l[0].x, 0.0) && close(l[1].x, 0.0)).unwrap();
+    assert!(origin_line.iter().any(|p| p.y > 39.0), "the longest is kept: {origin_line:?}");
+
+    // Below the points: the lines step down from the lowest, the origin.
+    let below = laid(&dimension(kind.clone(), -10.0, TextPlace::Centred), &r, &view_at("1:1")).unwrap().group;
+    let mut heights: Vec<f64> = parts(&below).1.iter().map(|t| t.y).collect();
+    heights.sort_by(f64::total_cmp);
+    assert!(heights.iter().zip([-24.0, -24.0, -17.0, -17.0, -10.0, -10.0]).all(|(y, at)| close(*y, at)), "{heights:?}");
+
+    // Two targets at one distance: two members, 7 mm apart, in their order.
+    let mut twice = read(&[[0.0, 0.0], [30.0, 15.0], [30.0, 5.0]], "30");
+    twice.text = None;
+    twice.members = vec![member(30.0), member(30.0)];
+    let tips = parts(&laid(&dimension(kind, 10.0, TextPlace::Centred), &twice, &view_at("1:1")).unwrap().group).1;
+    let mut heights: Vec<f64> = tips.iter().map(|t| t.y).collect();
+    heights.sort_by(f64::total_cmp);
+    assert!(heights.iter().zip([25.0, 25.0, 32.0, 32.0]).all(|(y, at)| close(*y, at)) && heights.len() == 4, "{tips:?}");
+}
+
 /// A chain as long as a chain goes, with tight spans between its points, stays in one group.
 #[test]
 fn a_chain_of_the_most_points_lays_out() {
@@ -476,6 +524,7 @@ fn hostile_points_and_offsets_never_panic() {
             DimensionKind::Angle { a: edge(), b: edge(), reading: Reading::Projected, other_side: next() % 2 == 0 },
             DimensionKind::Radial { edge: edge(), diameter: next() % 2 == 0 },
             DimensionKind::Chain { points: Vec::new(), direction: LinearDirection::Aligned },
+            DimensionKind::Baseline { origin: corner(), targets: Vec::new(), direction: LinearDirection::Horizontal },
             DimensionKind::Cylinder { face: face() },
             DimensionKind::Sphere { face: face() },
             DimensionKind::Cone { face: face() },
