@@ -381,7 +381,13 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
         .doc
         .params
         .iter()
-        .map(|p| json!({"name": p.name, "expression": p.expr, "unit": p.unit, "value": vals.get(&p.name).map(|v| v.v), "model": p.model, "comment": p.comment, "error": perr.get(&p.name)}))
+        .map(|p| {
+            // `value` is millimetres (degrees for an angle) in every reply, with the
+            // parameter's own unit in `display_value` (#10747).
+            let value = vals.get(&p.name).map(|v| solidcraft_doc::expr::round_reported(solidcraft_doc::expr::reported_value(*v)));
+            let display_value = s.doc.param_display_value(&vals, &p.name).map(solidcraft_doc::expr::round_reported);
+            json!({"name": p.name, "expression": p.expr, "unit": p.unit, "value": value, "display_value": display_value, "model": p.model, "comment": p.comment, "error": perr.get(&p.name)})
+        })
         .collect();
     let marker = s.doc.marker.unwrap_or(s.doc.features.len());
     let timeline: Vec<Value> = s
@@ -772,6 +778,10 @@ pub(super) fn look_json(l: &solidcraft_doc::appearance::Look) -> Value {
 #[cfg(test)]
 #[path = "pbr_appearance_tests.rs"]
 mod pbr_tests;
+
+#[cfg(test)]
+#[path = "inspect_tests.rs"]
+mod inspect_tests;
 
 pub(super) fn attach_pbr(cmd: &str, params: &Value, look: &mut solidcraft_doc::appearance::Look) -> Result<()> {
     if let Some(value) = params.get("pbr") {

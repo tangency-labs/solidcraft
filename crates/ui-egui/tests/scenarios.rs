@@ -60,7 +60,7 @@ fn angle_dimension_both_interactive_workflows() {
         h.run(&json!([
             {"click":{"sketch":[20,8]}},
             {"text":"45"}, {"key":"Enter"},
-            {"expect":{"errors":0,"param":{"d1":std::f64::consts::FRAC_PI_4}}}
+            {"expect":{"errors":0,"param":{"d1":45.0}}}
         ]))
         .unwrap();
         let sk = &h.app.session.model.state().sketches[0].sketch;
