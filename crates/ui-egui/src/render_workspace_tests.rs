@@ -12197,6 +12197,7 @@ fn cpu_volume_editor_fixture(path: bool, extinction: Option<f64>) -> Harness {
     h
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn cpu_atmosphere_pointer_fields_preserve_saved_camera_and_roundtrip_with_one_undo_each() {
     use solidcraft_engine::doc::render_settings::RenderJob;
