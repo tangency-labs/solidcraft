@@ -39,6 +39,8 @@ pub struct ModelBody {
     pub body: Body,
     /// Feature that created it.
     pub feature: u64,
+    /// Sketch line that produced this frame member, independent of its current body name.
+    pub(crate) frame_member_line: Option<Arc<str>>,
     // Timeline snapshots are cloned before meshes are requested. Share the cell itself so
     // meshing any snapshot also warms every unchanged copy of this body.
     mesh: Arc<OnceLock<Arc<Mesh>>>,
@@ -91,6 +93,7 @@ pub struct ModelBody {
 }
 
 impl ModelBody {
+    /// A newly evaluated body with empty caches; a constructor adds its provenance afterward.
     pub fn new(name: String, body: Body, feature: u64) -> Self {
         ModelBody {
             name,
@@ -98,6 +101,7 @@ impl ModelBody {
             source_transform: crate::IDENTITY,
             body,
             feature,
+            frame_member_line: None,
             mesh: Arc::new(OnceLock::new()),
             joint_faces: Arc::new(OnceLock::new()),
             mesh_placement: None,
@@ -793,6 +797,12 @@ impl ModelState {
                 b.component = old.component;
                 b.source_transform = old.source_transform;
             }
+            // An in-place operation can replace the solid while keeping its producer.
+            if b.frame_member_line.is_none()
+                && let Some(old) = olds.iter().find(|old| old.feature == b.feature)
+            {
+                b.frame_member_line = old.frame_member_line.clone();
+            }
             let kept = olds.iter().find(|x| x.body.same(&b.body));
             match kept {
                 Some(x) => {
@@ -1178,12 +1188,17 @@ fn param_names(f: &Feature) -> Vec<String> {
     names
 }
 
+/// Hash a feature definition, its referenced values and the timeline prefix it evaluates against.
 fn fingerprint(doc: &Document, prev: u64, f: &Feature, vals: &BTreeMap<String, Value>, rolled_back: bool, steps: &ImportDigests) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     prev.hash(&mut h);
     rolled_back.hash(&mut h);
     vals.get(DESIGN_LEN).map(|v| v.v.to_bits()).hash(&mut h);
     hash_feature_json(f, steps, &mut h);
+    if matches!(f.kind, FeatureKind::FrameMember { .. }) {
+        // Older cached member bodies do not have line provenance; rebuild them once.
+        "frame-member-line".hash(&mut h);
+    }
     for n in param_names(f) {
         n.hash(&mut h);
         match (vals.get(&n), doc.text_param(&n)) {
@@ -1792,6 +1807,7 @@ fn gusset_placements_digest(doc: &Document, f: &Feature, st: Option<&ModelState>
     h.finish() | 1
 }
 
+/// Hash only the relative placements read by this feature so unrelated moves can reuse its result.
 fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64 {
     if let FeatureKind::FrameGusset { supports, .. } = &f.kind {
         return gusset_placements_digest(doc, f, st, supports);
@@ -7357,6 +7373,7 @@ fn chamfer_with(
     })
 }
 
+/// Evaluate one feature into its scratch state; the caller commits it only after validation.
 fn eval_feature(
     doc: &Document,
     vals: &BTreeMap<String, Value>,

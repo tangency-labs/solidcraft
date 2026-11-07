@@ -1790,6 +1790,7 @@ fn input_keys(kind: &FeatureKind) -> Vec<(String, solidcraft_doc::expr::Kind)> {
     keys
 }
 
+/// Rebuild a feature in its original timeline slot and authoring context before accepting the edit.
 fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.redefine";
     let id = feature_id(s, p.get("feature"), cmd)?;

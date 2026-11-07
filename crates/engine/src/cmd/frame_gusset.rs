@@ -13,7 +13,7 @@ pub static COMMANDS:&[CommandSpec]=&[
     .contract(&CONTRACT).output(output_schema_for::<FeatureResult>).at("WELDMENTS","CREATE").icon("gusset").enabled(not_in_sketch)
     .params("supports: exactly two {face:[x,y,z],body,index,path?} planar face picks in world mm; leg1, leg2, thickness: lengths in design units or parameter expressions; relief?: inside-corner setback along each leg (default 0); clip?: equal-distance clipping at both outer tips (default 0: triangle); offset?: signed distance along the joint from the centre of the faces' overlapping span (default 0); placement?: center|positive|negative (default center). Ordered outward support normals define the positive joint/thickness direction by their cross product. Contact strips must fit entirely on both finite faces. Creates a separate body; does not join, drill or add a weld. Common name/body_name fields supported."),
 ];
-/// Capture and certify both picks before adding a feature, with member names pinned to their lines.
+/// Capture both exact picks and their member identities without changing either producer.
 fn gusset(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "frame.gusset";
     let args: GussetParams = serde_json::from_value(p.clone()).map_err(|e| bad(cmd, e.to_string()))?;
@@ -31,18 +31,6 @@ fn gusset(s: &mut Session, p: &Value) -> Result<Value> {
             value["path"] = json!(path);
         }
         let plane = super::sketch::face::capture(s, &value, cmd)?;
-        if let Some(anchor) = super::sketch::face::anchor(&plane)
-            && let Some(pins) = super::browser::member_pins(s, anchor.target.origin_feature)
-        {
-            let source = s.doc_mut().feature_mut(anchor.target.origin_feature).ok_or_else(|| bad(cmd, "support producer disappeared"))?;
-            if let FeatureKind::FrameMember { names, .. } = &mut source.kind {
-                if names.len().saturating_add(pins.keys().filter(|id| !names.contains_key(*id)).count()) > solidcraft_doc::frame::MAX_MEMBERS {
-                    return Err(bad(cmd, "gusset attachment exceeds member name budget"));
-                }
-                names.extend(pins);
-                source.body_names.clear();
-            }
-        }
         let member = gusset::member(&s.doc, &s.model.state(), &plane).map_err(|e| bad(cmd, e.to_string()))?;
         super::sketch::face::capture_positions(s, &plane)?;
         supports.push(gusset::Support { plane, member });

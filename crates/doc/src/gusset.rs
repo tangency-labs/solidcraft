@@ -38,15 +38,15 @@ fn invalid(s: impl Into<String>) -> DocError {
 pub fn member(doc: &Document, st: &ModelState, plane: &PlaneRef) -> Result<Option<Member>> {
     let PlaneRef::Face { anchor: Some(anchor), .. } = plane else { return Err(invalid("gusset supports require direct persistent planar faces")) };
     let source = doc.feature(anchor.target.origin_feature).ok_or_else(|| invalid("gusset support producer no longer exists"))?;
-    let FeatureKind::FrameMember { names, .. } = &source.kind else { return Ok(None) };
-    let ids = crate::frame::member_line_ids(st, &source.kind)?;
-    let line = if source.body_names.is_empty() {
-        ids.iter().find(|line| names.get(*line).is_some_and(|name| *name == anchor.target.body))
-    } else {
-        source.body_names.iter().position(|name| *name == anchor.target.body).and_then(|i| ids.get(i))
+    if !matches!(source.kind, FeatureKind::FrameMember { .. }) {
+        return Ok(None);
     }
-    .ok_or_else(|| invalid("gusset support is no longer the selected member"))?;
-    Ok(Some(Member { feature: source.id.into(), line: line.clone() }))
+    let line = st
+        .body(&anchor.target.body)
+        .filter(|body| body.feature == source.id)
+        .and_then(|body| body.frame_member_line.as_deref())
+        .ok_or_else(|| invalid("gusset support is no longer the selected member"))?;
+    Ok(Some(Member { feature: source.id.into(), line: line.to_owned() }))
 }
 
 /// A support face as its exact material: the face's own trimmed loops (holes and later cuts

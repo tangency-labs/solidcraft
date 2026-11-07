@@ -1171,7 +1171,7 @@ fn replace_body_name(v: &mut Value, old: &str, new: &str, names_body: bool, dept
 
 /// A frame member feature's bodies by line id, as its own result made them: what pins each
 /// member's name to its line. `None` for any other feature, or when they don't pair up.
-pub(super) fn member_pins(s: &Session, fid: u64) -> Option<BTreeMap<String, String>> {
+fn member_pins(s: &Session, fid: u64) -> Option<BTreeMap<String, String>> {
     let f = s.doc.feature(fid)?;
     let result = s.model.result(fid)?;
     let lines = solidcraft_doc::frame::member_line_ids(&result.state, &f.kind).ok()?;
@@ -1256,6 +1256,7 @@ fn repair_body(s: &mut Session, p: &Value) -> Result<Value> {
     serde_json::to_value(reply).map_err(|e| crate::EngineError::Other(e.to_string()))
 }
 
+/// Rename a body and update the later references that identify it, including exact gusset faces.
 fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "body.rename";
     let given = str_(p, "body").ok_or_else(|| bad(cmd, "`body` must be a body name"))?;

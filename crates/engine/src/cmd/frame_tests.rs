@@ -898,3 +898,46 @@ fn gusset_external_support_is_reported_and_refused_across_designs() {
         "{copied}"
     );
 }
+
+/// An attachment reads the copied member's line without converting its positional names.
+#[test]
+fn gusset_preserves_copied_member_names_and_refuses_a_reused_name() {
+    use solidcraft_doc::{FeatureKind, Model};
+    let mut s = Session::default();
+    let part = run(&mut s, "component.create", json!({"name":"Joint"}))["component"].as_u64().unwrap();
+    run(&mut s, "sketch.create", json!({"plane":"XZ","name":"Posts"}));
+    run(&mut s, "sketch.line", json!({"points":[[0,0],[0,-300]]}));
+    run(&mut s, "sketch.line", json!({"points":[[-80,0],[-80,-300]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "frame.member",
+        json!({"sketch":"Posts","body_name":"Post","profile":{"kind":"rect_tube","width":40,"height":40,"wall":3,"outer_radius":0}}),
+    );
+    run(&mut s, "solid.box", json!({"corner":[20,-20,0],"length":300,"width":40,"height":40,"body_name":"Rail"}));
+    run(&mut s, "component.activate", json!({"component":"root"}));
+    let copy = run(&mut s, "component.paste_new", json!({"component":part}))["component"].as_u64().unwrap();
+    let member = s.doc.features.iter().find(|f| f.component == copy && matches!(f.kind, FeatureKind::FrameMember { .. })).unwrap().clone();
+    let FeatureKind::FrameMember { path_sketch, .. } = &member.kind else { panic!("not a member") };
+    let sketch = s.doc.feature(path_sketch.0).unwrap().name.clone();
+    let first_line = line_at_x(&s, &sketch, 0.);
+    let [first, second] = member.body_names.as_slice() else { panic!("copy must have two positional names") };
+    let rail = s.model.state().bodies.iter().find(|b| b.component == copy && b.feature != member.id).unwrap().name.clone();
+
+    // Opening an already evaluated design must retain the same support provenance.
+    let saved = s.model.saved(&s.doc).unwrap();
+    s.model = Model::adopt(&s.doc, &saved).unwrap();
+    run(&mut s, "component.activate", json!({"component":copy}));
+    let p = json!({"supports":[gusset_pick(&s,first,[20.,0.,100.],[1.,0.,0.]),gusset_pick(&s,&rail,[100.,0.,40.],[0.,0.,1.])],"leg1":80,"leg2":100,"thickness":6,"body_name":"Gusset"});
+    let gusset = run(&mut s, "frame.gusset", p)["feature"].as_u64().unwrap();
+    assert_eq!(s.doc.feature(member.id), Some(&member), "attaching a gusset must not edit its support feature");
+    assert!(rel(gusset_volume(&s), 24000.) < 1e-7);
+
+    delete_line(&mut s, &sketch, &first_line);
+    let state = s.model.state();
+    assert!(state.body(second).is_none(), "the copy still assigns names by position");
+    let surviving = state.body(first).unwrap().mesh().bounds();
+    assert!(near3([surviving.min.x, surviving.min.y, surviving.min.z], [-100., -20., 0.]), "{surviving:?}");
+    assert!(state.body("Gusset").is_none());
+    assert!(s.model.result(gusset).unwrap().error.as_deref().is_some_and(|e| e.contains("member identity changed")));
+}
