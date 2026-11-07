@@ -4392,6 +4392,18 @@ impl Document {
         name
     }
 
+    /// Create a model parameter with a name the caller chose (checked: valid and free).
+    pub fn new_named_model_param(&mut self, name: &str, expr_s: &str, unit: &str) -> Result<String> {
+        if let Some(why) = Self::param_name_problem(name) {
+            return Err(DocError::Invalid(why));
+        }
+        if self.name_taken(name) {
+            return Err(DocError::Invalid(format!("there is already a parameter `{name}`")));
+        }
+        self.params.push(Param { name: name.into(), expr: expr_s.into(), unit: unit.into(), comment: String::new(), model: true });
+        Ok(name.into())
+    }
+
     /// Evaluate an expression against the document's parameters.
     pub fn eval(&self, e: &str, kind: Kind) -> Result<f64> {
         // The parameters are evaluated only when the expression names one: most expressions an

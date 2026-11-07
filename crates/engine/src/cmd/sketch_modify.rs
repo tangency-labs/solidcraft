@@ -3137,6 +3137,14 @@ fn offset(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "`symmetric` offsets both sides, so `side` has no side left to pick: drop one of them"));
     }
     let instances = offset_instances(s, p, cmd)?;
+    let name = str_(p, "param");
+    let name2 = str_(p, "param2");
+    if name2.is_some() && expression2.is_none() {
+        return Err(bad(cmd, "`param2` names the dimension of the second side: give `distance2` too"));
+    }
+    if name.is_some() && name == name2 {
+        return Err(bad(cmd, "`param` and `param2` must be different names"));
+    }
     let ((sides, param, param2), info) = edit(s, p, cmd, true, |sk, doc| {
         sk.refresh_offsets()?;
         let rep = solve_current(sk, doc)?;
@@ -3145,8 +3153,12 @@ fn offset(s: &mut Session, p: &Value) -> Result<Value> {
         }
         sk.refresh_offsets()?;
         let eligible = sk.curves.iter().map(|c| c.id.clone()).collect::<std::collections::HashSet<_>>();
-        let param = doc.new_model_param(&expression, "mm");
-        let param2 = expression2.as_ref().map(|e| doc.new_model_param(e, "mm"));
+        let mut make = |name: Option<&str>, e: &str| match name {
+            Some(name) => doc.new_named_model_param(name, e, "mm").map_err(|error| bad(cmd, format!("param: {error}"))),
+            None => Ok(doc.new_model_param(e, "mm")),
+        };
+        let param = make(name, &expression)?;
+        let param2 = expression2.as_ref().map(|e| make(name2, e)).transpose()?;
         let made: Vec<String> = std::iter::once(param.clone()).chain(param2.clone()).collect();
         let mut pending = ids.clone();
         let mut sides = Vec::new();
@@ -3856,3 +3868,7 @@ mod corner_tests;
 #[cfg(test)]
 #[path = "sketch_trim_path_tests.rs"]
 mod trim_path_tests;
+
+#[cfg(test)]
+#[path = "offset_param_name_tests.rs"]
+mod offset_param_name_tests;
