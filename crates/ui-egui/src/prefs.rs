@@ -1208,6 +1208,9 @@ preference_settings! {
     frame_rate_details: bool = false, PAGE_GRAPHICS;
     /// Draw a wider rim under finished sketch curves to improve contrast on shaded faces.
     sketch_halo: bool = false, PAGE_GRAPHICS => check("Halo under sketch curves");
+    /// With a component active, sketches of other components are drawn greyed out and faint, as
+    /// their bodies are. Off: every sketch is drawn in full colour whatever is active, as before.
+    fade_other_component_sketches: bool = true, PAGE_GRAPHICS => check_id("prefs.fade_other_component_sketches");
     /// Show the view's pitch, yaw and roll and its projection under the orientation gizmo (#6032).
     /// Off by default; View ▸ View angles and `view.angle_readout` turn it on.
     show_view_angles: bool = false, PAGE_GRAPHICS;

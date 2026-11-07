@@ -689,6 +689,8 @@ fn sketch_scene_key(app: &SolveApp, proj: &Proj) -> u64 {
     // Finished sketches are drawn over the bodies when the preference says so.
     app.preferences.reference_geometry_through_bodies.hash(&mut h);
     app.preferences.sketch_halo.hash(&mut h);
+    // Sketches of other components than the active one are greyed out when the preference says so.
+    app.preferences.fade_other_component_sketches.hash(&mut h);
     // The grid previews the plane Create Sketch would take (#6975).
     previewed_sketch_plane(app).map(|p| [p.origin, p.x, p.y].map(|v| [v.x, v.y, v.z].map(f64::to_bits))).hash(&mut h);
     // Conflicting curves in their own colour, or as before (#7244).
@@ -724,6 +726,43 @@ fn sketch_color(t: &Tokens, c: Rgb) -> [u8; 4] {
     } else {
         rgba(c)
     }
+}
+
+/// With a component active, a finished sketch that belongs to another component (one that is not
+/// the active component or inside it) is drawn greyed out and faint, as its bodies are. The sketch
+/// being edited never is. Off with the `fade_other_component_sketches` preference.
+pub(crate) fn sketch_faded(app: &SolveApp, sid: u64) -> bool {
+    let s = &app.session;
+    app.preferences.fade_other_component_sketches
+        && s.active_sketch != Some(sid)
+        && s.active_component != 0
+        && s.doc.feature(sid).is_some_and(|f| !s.doc.component_within(f.component, s.active_component))
+}
+
+/// How faint a sketch of another component is drawn (its colour's share of its alpha).
+const FADED_SKETCH_ALPHA: f64 = 0.4;
+
+/// A sketch colour greyed out for a sketch of another component: its own lightness with no hue,
+/// at [`FADED_SKETCH_ALPHA`] of its alpha. Derived from the theme's colour, so every theme and
+/// colour-vision mode keeps its contrast.
+fn faded_sketch_colour(c: [u8; 4]) -> [u8; 4] {
+    let [r, g, b, a] = c.map(f64::from);
+    let grey = (0.299 * r + 0.587 * g + 0.114 * b).round().clamp(0.0, 255.0) as u8;
+    [grey, grey, grey, (a * FADED_SKETCH_ALPHA).round().clamp(0.0, 255.0) as u8]
+}
+
+/// How strongly a hovered sketch of another component draws its outline (its hover colour's
+/// share of its alpha): softer than its fill's brightening would suggest.
+const FADED_HOVER_EDGE_ALPHA: f32 = 0.5;
+
+/// Hover feedback for a sketch of another component: a light neutral grey in place of the
+/// theme's hover hue, near white, so the hovered area brightens a little instead of lighting up
+/// in colour. Keeps `c`'s alpha times `alpha`, so it is as subtle as the theme's own hover.
+fn faded_hover_colour(c: Color32, alpha: f32) -> Color32 {
+    let [r, g, b, a] = c.to_srgba_unmultiplied().map(f32::from);
+    let lightness = 0.299 * r + 0.587 * g + 0.114 * b;
+    let grey = (255.0 - (255.0 - lightness) / 6.0).round().clamp(0.0, 255.0) as u8;
+    Color32::from_rgba_unmultiplied(grey, grey, grey, (a * alpha).round().clamp(0.0, 255.0) as u8)
 }
 
 pub(crate) type ActiveBodyNames = std::sync::Arc<std::collections::HashSet<String>>;
@@ -2025,6 +2064,9 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
         let active = s.active_sketch == Some(sid);
         let typed = typed.as_ref().filter(|_| active);
         let Some(ss) = typed.unwrap_or(&st).sketch(sid) else { continue };
+        // A sketch of another component than the active one is greyed out and faint, like that
+        // component's bodies, so the active component's own sketches stand out.
+        let faded = sketch_faded(app, sid);
         // Its curves are sampled before its profiles, which share their budget: past it a fill
         // goes missing rather than a curve.
         let mut typed_curves: std::collections::HashMap<usize, Vec<Vec<Vec3>>> = match typed {
@@ -2037,7 +2079,7 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
         // Closed profiles are shaded (lifted off a face they may lie on).
         let lift = ss.plane.normal() * 0.01;
         let profiles = if app.session.visibility.hidden_profiles.contains(&sid) || ss.sketch.view.hide_profile { &[][..] } else { &ss.profiles[..] };
-        let profile_fill = sc.color(c4(tk.profile_fill));
+        let profile_fill = sc.color(if faded { faded_sketch_colour(c4(tk.profile_fill)) } else { c4(tk.profile_fill) });
         for (index, profile) in profiles.iter().enumerate() {
             let (sampled, cached);
             let display = if typed.is_some() {
@@ -2075,8 +2117,9 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
         for (k, (pts, col, cons)) in lines.into_iter().enumerate() {
             let conflicting = owners.get(k).is_some_and(|&curve| conflict.curve(curve));
             let segs = sketch_segments(&pts, sketch_line_mode(col, cons), unit);
-            let haloed = app.preferences.sketch_halo && !active && col != colors::SKETCH_PROJECTED && col != colors::SKETCH_LOST;
+            let haloed = app.preferences.sketch_halo && !active && !faded && col != colors::SKETCH_PROJECTED && col != colors::SKETCH_LOST;
             let colour = if conflicting { c4(tk.sketch_conflict) } else { sketch_color(&tk, col) };
+            let colour = if faded { faded_sketch_colour(colour) } else { colour };
             strokes.push((segs, sc.color(colour), if cons { 1.2 } else { 2.0 }, haloed));
         }
         // Active sketches retain their existing through-body display. Inactive sketches
@@ -3984,6 +4027,8 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
     app.viewport.gpu.is_some_and(|g| g.tess).hash(&mut h);
     app.session.active_component.hash(&mut h);
     app.session.active_occurrence_path.hash(&mut h);
+    // A hovered sketch of another component lights grey when the preference greys it.
+    app.preferences.fade_other_component_sketches.hash(&mut h);
     app.ui.visual_style.hash(&mut h);
     crate::render_workspace::assign::preview_key(app).hash(&mut h);
     app.ui.pick_bodies.hash(&mut h);
@@ -4696,7 +4741,14 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
             if !sel.iter().any(|x| matches!(x, Sel::Profile { sketch: s2, index: i2 } if s2 == sketch && i2 == index))
                 && crate::dim_view::previewed_sketch(app) != Some(*sketch) =>
         {
-            profile_fill(&mut feedback, app, *sketch, *index, t.hover_profile, t.hover_profile_edge);
+            // A sketch of another component only brightens a little: a light neutral fill, no
+            // hover hue.
+            let (fill, edge) = if sketch_faded(app, *sketch) {
+                (faded_hover_colour(t.hover_profile, 1.0), faded_hover_colour(t.hover_profile_edge, FADED_HOVER_EDGE_ALPHA))
+            } else {
+                (t.hover_profile, t.hover_profile_edge)
+            };
+            profile_fill(&mut feedback, app, *sketch, *index, fill, edge);
         }
         _ => {}
     }
@@ -6864,11 +6916,20 @@ fn hover_highlight(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     // the design: a highlight there would trace a curve where none is drawn. Other sketches are
     // drawn where they are.
     let previewed = crate::dim_view::previewed_sketch(app);
-    let col = Tokens::get().hover_profile_edge;
     let st = crate::open_meshing::shown_world(app);
     let hover = app.viewport.hover.as_ref().filter(|h| {
         !matches!(h, Hit::SketchCurve { sketch, .. } | Hit::SketchMidpoint { sketch, .. } | Hit::SketchPoint { sketch, .. } if previewed == Some(*sketch))
     });
+    // A sketch of another component lights a soft grey, not the hover hue, as its fill does.
+    let edge = Tokens::get().hover_profile_edge;
+    let col = match hover {
+        Some(Hit::SketchCurve { sketch, .. } | Hit::SketchMidpoint { sketch, .. } | Hit::SketchPoint { sketch, .. })
+            if sketch_faded(app, *sketch) =>
+        {
+            faded_hover_colour(edge, FADED_HOVER_EDGE_ALPHA)
+        }
+        _ => edge,
+    };
     match hover {
         // Trim shows the piece it would take away instead (`sketch_tools::preview`, #3052).
         Some(Hit::SketchCurve { sketch, id, .. }) if crate::sketch_tools::trim_hover_piece(app, *sketch, id).is_some() => {}
