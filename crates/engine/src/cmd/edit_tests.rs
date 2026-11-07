@@ -1794,3 +1794,94 @@ fn redefining_a_segmented_flange_keeps_a_named_height_on_its_stretch() {
     let relief_index = inputs.iter().position(|(label, _, _)| *label == "Corner relief").unwrap();
     assert_eq!(f.param_names[relief_index], "Relief");
 }
+
+/// A name follows the material it was given to, not the order of the input list: deleting one of two
+/// named stretches keeps the survivor's own name, drops the deleted stretch's, and an expression that
+/// reads the survivor's name still reads its height. A deleted stretch's name never lands on a
+/// stretch whose value came from elsewhere (#5927, #5928).
+#[test]
+fn deleting_a_stretch_keeps_the_surviving_stretches_own_name() {
+    fn param(s: &mut Session, name: &str) -> Value {
+        let list = run(s, "parameters.list", json!({}));
+        list["parameters"].as_array().and_then(|a| a.iter().find(|p| p["name"] == name)).cloned().unwrap_or(Value::Null)
+    }
+    fn has(s: &mut Session, name: &str) -> bool {
+        param(s, name)["value"].as_f64().is_some()
+    }
+    fn input_row(s: &mut Session, feature: &str, input: &str) -> Value {
+        let list = run(s, "parameters.list", json!({}));
+        list["parameters"].as_array().and_then(|a| a.iter().find(|p| p["feature"] == feature && p["input"] == input)).cloned().unwrap_or(Value::Null)
+    }
+    // The name on each "Segment height" input of `Lip`, in the walk's order.
+    fn segment_names(s: &mut Session) -> Vec<(String, String)> {
+        let f = s.doc.find_feature("Lip").unwrap();
+        f.kind
+            .inputs()
+            .iter()
+            .enumerate()
+            .filter(|(_, (label, _, _))| *label == "Segment height")
+            .map(|(i, (_, expression, _))| (f.param_names[i].clone(), expression.clone()))
+            .collect()
+    }
+    // A 200 × 100 base, a two-stretch flange on its y = 0 edge with each height named, and a flange on
+    // the opposite edge whose height reads one of those names.
+    fn built(heights: [&str; 2], spans: [f64; 2], reader: &str) -> Session {
+        let mut s = Session::default();
+        run(&mut s, "sheet.manage_rules", json!({"name":"AL2","thickness":"2 mm","k_factor":0.5,"bend_radius":"1 mm","active":true}));
+        run(&mut s, "sketch.create", json!({"plane":"XY","name":"Base"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[200,100]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sheet.flange", json!({"sketch":"Base"}));
+        run(
+            &mut s,
+            "sheet.flange",
+            json!({"type":"edge","edges":[{"point":[100,0,2],"segments":[
+                {"from":0,"to":spans[0],"height":heights[0]},
+                {"from":spans[0],"to":1,"height":heights[1]}]}],
+                "height":"20 mm","angle":"90 deg","name":"Lip"}),
+        );
+        let names: Vec<String> = segment_names(&mut s).into_iter().map(|(n, _)| n).collect();
+        assert_eq!(names.len(), 2, "{names:?}");
+        run(&mut s, "parameters.rename", json!({"name": names[0], "new_name": "Short"}));
+        run(&mut s, "parameters.rename", json!({"name": names[1], "new_name": "Tall"}));
+        run(&mut s, "sheet.flange", json!({"edges":[[100,100,2]],"height":reader,"angle":"90 deg","name":"Reader"}));
+        s
+    }
+    let redefine = |s: &mut Session, segments: Value| {
+        run(
+            s,
+            "timeline.redefine",
+            json!({"feature":"Lip","command":"sheet.flange","params":{
+                "type":"edge","edges":[{"point":[100,0,2],"segments":segments}],
+                "height":"20 mm","angle":"90 deg"}}),
+        );
+    };
+    // Deleting the first stretch: the survivor is the 15 mm stretch, and keeps its own name.
+    let mut s = built(["20 mm", "15 mm"], [0.5, 1.0], "Tall");
+    assert_eq!(param(&mut s, "Short")["value"].as_f64(), Some(20.0));
+    assert_eq!(param(&mut s, "Tall")["value"].as_f64(), Some(15.0));
+    redefine(&mut s, json!([{"from":0,"to":1,"height":"15 mm"}]));
+    assert_eq!(segment_names(&mut s), [("Tall".to_string(), "15 mm".to_string())], "the survivor keeps its own name");
+    assert!(has(&mut s, "Tall") && !has(&mut s, "Short"), "the deleted stretch's name is gone: {:?}", run(&mut s, "parameters.list", json!({})));
+    let reader = input_row(&mut s, "Reader", "Height");
+    assert_eq!(reader["expression"], "Tall");
+    assert_eq!(reader["value"].as_f64(), Some(15.0), "an expression reading Tall still reads the survivor's height: {reader}");
+    assert!(reader["error"].is_null(), "{reader}");
+    // Deleting the second stretch: the survivor is the 20 mm stretch, and keeps its own name.
+    let mut s = built(["20 mm", "15 mm"], [0.5, 1.0], "Short");
+    redefine(&mut s, json!([{"from":0,"to":1,"height":"20 mm"}]));
+    assert_eq!(segment_names(&mut s), [("Short".to_string(), "20 mm".to_string())], "the survivor keeps its own name");
+    assert!(has(&mut s, "Short") && !has(&mut s, "Tall"), "{:?}", run(&mut s, "parameters.list", json!({})));
+    let reader = input_row(&mut s, "Reader", "Height");
+    assert_eq!(reader["expression"], "Short");
+    assert_eq!(reader["value"].as_f64(), Some(20.0), "an expression reading Short still reads the survivor's height: {reader}");
+    // A merge whose surviving value came from the first stretch: it keeps the first stretch's name
+    // even though the second stretch's span is the larger part of the merged stretch.
+    let mut s = built(["20 mm", "15 mm"], [0.25, 1.0], "Short");
+    redefine(&mut s, json!([{"from":0,"to":1,"height":"20 mm"}]));
+    assert_eq!(segment_names(&mut s), [("Short".to_string(), "20 mm".to_string())], "the merged stretch keeps the name of the value it carries");
+    assert!(has(&mut s, "Short") && !has(&mut s, "Tall"), "{:?}", run(&mut s, "parameters.list", json!({})));
+    let reader = input_row(&mut s, "Reader", "Height");
+    assert_eq!(reader["value"].as_f64(), Some(20.0), "{reader}");
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+}

@@ -738,3 +738,55 @@ fn segments_on_opposite_sides_cut_the_blank_at_the_junction() {
     let regions = same.model.state().sheets[0].flat_regions().unwrap_or_default();
     assert!(!regions.iter().any(|r| cut(&r.outer, from, to) && cut(&r.outer, to, from)), "a same-side junction stays joined");
 }
+
+/// A notch through a junction's far edge takes both ends the junction cut was computed from off the
+/// blank: the far edge at x = 50 is gone, and the bend-line end lies inside the material. The cut is
+/// clipped to the material that remains, from the bend line out to the notch's edge, and written in
+/// the flat loop and the DXF. Dropped, the blank stayed joined where the folded part separates
+/// (FR-7 #5932).
+#[test]
+fn a_notch_through_a_junctions_far_edge_still_parts_the_blank() {
+    let mut s = plate_in(sheet_of_2mm(), &[]);
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[50,0,2],"segments":[
+            {"from":0,"to":0.5,"angle":"90 deg","height":"20 mm","flip":false},
+            {"from":0.5,"to":1,"angle":"90 deg","height":"20 mm","flip":true}]}],
+            "height":"20 mm","angle":"90 deg"}),
+    );
+    // The notch: x 49…51, y -18…-10, in the flat frame. The flange's far edge is at y -17.14, so
+    // the notch takes it and the material between it and y -10 away at the junction.
+    run(&mut s, "sheet.unfold", json!({}));
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Notch"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[49,-18],"p1":[51,-10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch":"Notch","through_all":true,"operation":"cut","direction":"symmetric"}));
+    // The bend line, and where the material left ends outward of it: the notch's edge.
+    let bend = Vec2::new(50.0, 3.0);
+    let left = Vec2::new(50.0, -10.0);
+    let cut = |lp: &solidcore_record::Loop2, a: Vec2, b: Vec2| {
+        lp.segs.iter().any(|s| matches!(s, Seg2::Line { a: p, b: q } if p.dist(a) < 1e-6 && q.dist(b) < 1e-6))
+    };
+    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    assert!(
+        regions.iter().any(|r| cut(&r.outer, bend, left) && cut(&r.outer, left, bend)),
+        "the blank is not cut from the bend line to the notch's edge: {:?}",
+        regions.iter().map(|r| r.outer.segs.len()).collect::<Vec<_>>()
+    );
+    let outline: Vec<(Vec2, Vec2)> = entities(&export(&mut s, json!({})))
+        .iter()
+        .filter(|e| e.0 == "LINE" && e.1.iter().any(|(c, v)| *c == 8 && v == "OUTLINE"))
+        .map(|e| (point(e, 10), point(e, 11)))
+        .collect();
+    let near = |p: Vec2, q: Vec2| p.dist(q) < 1e-6;
+    let both_ways = |lines: &[(Vec2, Vec2)], a: Vec2, b: Vec2| {
+        lines.iter().any(|&(p, q)| near(p, a) && near(q, b)) && lines.iter().any(|&(p, q)| near(p, b) && near(q, a))
+    };
+    assert!(both_ways(&outline, bend, left), "the DXF has no clipped junction cut: {outline:?}");
+    // The cut leaves the part one piece, and refolding then unfolding builds it.
+    run(&mut s, "sheet.refold", json!({}));
+    run(&mut s, "sheet.unfold", json!({}));
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "unfold: {errors:?}");
+}

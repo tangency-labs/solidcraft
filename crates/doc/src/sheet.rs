@@ -452,6 +452,56 @@ fn slit_loop(lp: &mut Loop2, at: Vec2, tip: Vec2) -> bool {
     true
 }
 
+/// Clip a junction cut to the material that remains when the ends it was computed from were cut
+/// away: walk the junction line outward from the bend line and end the cut where that line meets the
+/// outer loop. Returns the two ends to slit between, boundary end first, or None when the line has no
+/// material outward of the bend line: that cut has nothing left to part, an empty stretch of the
+/// line rather than a failed lookup.
+fn clip_junction_slit(lp: &Loop2, at: Vec2, tip: Vec2) -> Option<(Vec2, Vec2)> {
+    let d = tip - at;
+    let len = d.len();
+    if len <= 1e-9 {
+        return None;
+    }
+    let u = d / len;
+    // Where the junction line crosses the boundary, nearest the bend line first. Free-form segments
+    // follow the 0.001 mm chords the planar booleans use; lines keep their exact ends.
+    let mut hits: Vec<(f64, Vec2)> = Vec::new();
+    for seg in &lp.segs {
+        let pts = seg.polyline(1e-3);
+        for w in pts.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            let e = b - a;
+            let den = u.cross(e);
+            if den.abs() <= 1e-12 {
+                continue;
+            }
+            let t = (a - at).cross(e) / den;
+            let s = (at - a).cross(u) / e.cross(u);
+            if t < -1e-9 || !(-1e-9..=1.0 + 1e-9).contains(&s) {
+                continue;
+            }
+            hits.push((t.max(0.0), at + u * t));
+        }
+    }
+    hits.sort_by(|a, b| a.0.total_cmp(&b.0));
+    hits.dedup_by(|a, b| (a.0 - b.0).abs() <= 1e-7);
+    if lp.contains(at) {
+        // The bend line is in material: the cut runs from it out to the nearest boundary crossing.
+        return hits.first().map(|(_, p)| (*p, at));
+    }
+    // The bend line itself was cut away: the cut spans the stretch of material the line still
+    // crosses, both ends on the boundary.
+    let (pairs, _) = hits.as_chunks::<2>();
+    for [enter, leave] in pairs {
+        let mid = at + u * ((enter.0 + leave.0) / 2.0);
+        if lp.contains(mid) {
+            return Some((enter.1, leave.1));
+        }
+    }
+    None
+}
+
 /// Split the loop's segment that runs through `p` into two there, so `p` is a vertex of the loop.
 /// A `p` already at a vertex splits nothing. None when no segment runs through `p`.
 fn split_loop_at(lp: &mut Loop2, p: Vec2) -> Option<usize> {
@@ -2650,8 +2700,23 @@ impl SheetBody {
         // unchanged: the slit is a zero-width line, so it adds no area and no kernel boolean sees
         // a self-touching loop.
         for (at, tip) in self.junction_slits() {
-            for r in &mut regions {
-                if slit_loop(&mut r.outer, at, tip) {
+            if regions.iter_mut().any(|r| slit_loop(&mut r.outer, at, tip)) {
+                continue;
+            }
+            // Neither computed end is a vertex of the material that is left: clip the cut to what
+            // remains, so a required junction cut is never dropped (a notch through the far edge,
+            // for one). A cut with no material outward of the bend line parts nothing, which
+            // `clip_junction_slit` says by returning none: an empty stretch of the line, not a
+            // failed lookup.
+            let holder = regions.iter().position(|r| r.outer.contains(at));
+            let order: Vec<usize> = match holder {
+                Some(h) => std::iter::once(h).chain((0..regions.len()).filter(|&i| i != h)).collect(),
+                None => (0..regions.len()).collect(),
+            };
+            for i in order {
+                if let Some((anchor, inner)) = clip_junction_slit(&regions[i].outer, at, tip)
+                    && slit_loop(&mut regions[i].outer, anchor, inner)
+                {
                     break;
                 }
             }

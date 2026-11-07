@@ -1767,6 +1767,17 @@ fn reorder_features(
     Ok((next, ordered, broken, Some(after)))
 }
 
+/// The edge and stretch (`from`, `to`) a `sheet.flange` segment input's key names:
+/// `sheet.flange.edge<edge>.stretch<from bits>.<to bits>.<field>`.
+fn segment_span(key: &str) -> Option<(usize, f64, f64)> {
+    let rest = key.strip_prefix("sheet.flange.edge")?;
+    let mut parts = rest.split('.');
+    let edge: usize = parts.next()?.parse().ok()?;
+    let from = f64::from_bits(parts.next()?.strip_prefix("stretch")?.parse::<u64>().ok()?);
+    let to = f64::from_bits(parts.next()?.parse::<u64>().ok()?);
+    Some((edge, from, to))
+}
+
 fn input_keys(kind: &FeatureKind) -> Vec<(String, solidcraft_doc::expr::Kind)> {
     let mut keys: Vec<_> = kind.inputs().into_iter().map(|(label, _, unit)| (label.to_string(), unit)).collect();
     if let FeatureKind::Fillet { style, .. } = kind {
@@ -1962,28 +1973,67 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     // old index. Constructor-assigned names for new inputs cannot reuse the old dimensions.
     // A key names the input itself where its label doesn't (a segment's stretch, a fillet's
     // control); it is matched first, so inserting or reordering stretches moves no name onto
-    // another stretch. An input whose key changed (a stretch's fractions edited) still keeps the
-    // name of the input with the same label and kind, as it did before keys were unique.
-    let old_labels: Vec<String> = old.kind.inputs().into_iter().map(|(label, _, _)| label.to_string()).collect();
-    let new_labels: Vec<String> = new.kind.inputs().into_iter().map(|(label, _, _)| label.to_string()).collect();
-    let mut old_inputs: Vec<(String, String, solidcraft_doc::expr::Kind, String)> = input_keys(&old.kind)
+    // another stretch. An input whose key changed (a stretch's fractions edited) is matched to the
+    // material it still is, below: the value it still has first, then the span it still covers.
+    let new_inputs = new.kind.inputs();
+    let new_labels: Vec<String> = new_inputs.iter().map(|(label, _, _)| label.to_string()).collect();
+    let mut old_inputs: Vec<(String, String, solidcraft_doc::expr::Kind, String, String)> = input_keys(&old.kind)
         .into_iter()
-        .zip(old_labels)
+        .zip(old.kind.inputs())
         .zip(&old.param_names)
-        .map(|(((key, kind), label), name)| (key, label, kind, name.clone()))
+        .map(|(((key, kind), (label, expression, _)), name)| (key, label.to_string(), kind, name.clone(), expression))
         .collect();
     let keys = input_keys(&new.kind);
     let mut param_names: Vec<String> = vec![String::new(); keys.len()];
     for (i, (key, kind)) in keys.iter().enumerate() {
-        if let Some(k) = old_inputs.iter().position(|(old_key, _, old_kind, _)| old_key == key && old_kind == kind) {
+        if let Some(k) = old_inputs.iter().position(|(old_key, _, old_kind, _, _)| old_key == key && old_kind == kind) {
             param_names[i] = old_inputs.remove(k).3.clone();
         }
     }
-    for (i, (_, kind)) in keys.iter().enumerate() {
+    // A name follows the material it was given to, not the order of the list. When a segment input's
+    // key misses (a stretch deleted or merged, so the survivor's fractions are new), it is matched to
+    // the old input of the same label and kind that carries the same expression first: the survivor
+    // still has the value it had. Only then does the greatest span overlap on the same edge carry a
+    // name. A deleted stretch's name never lands on a stretch whose value came from elsewhere
+    // (#5927, #5928).
+    for (i, (key, kind)) in keys.iter().enumerate() {
         if !param_names[i].is_empty() {
             continue;
         }
-        if let Some(k) = old_inputs.iter().position(|(_, old_label, old_kind, _)| *old_label == new_labels[i] && old_kind == kind) {
+        if let Some((edge, from, to)) = segment_span(key) {
+            let mut best: Option<(usize, bool, f64)> = None;
+            for (k, (old_key, old_label, old_kind, _, old_expression)) in old_inputs.iter().enumerate() {
+                if *old_label != new_labels[i] || old_kind != kind {
+                    continue;
+                }
+                let Some((old_edge, old_from, old_to)) = segment_span(old_key) else { continue };
+                if old_edge != edge {
+                    continue;
+                }
+                let same_value = *old_expression == new_inputs[i].1;
+                let overlap = (old_to.min(to) - old_from.max(from)).max(0.0);
+                if !same_value && overlap <= 1e-9 {
+                    continue;
+                }
+                let better = match best {
+                    None => true,
+                    Some((_, best_value, best_overlap)) => (same_value && !best_value) || (same_value == best_value && overlap > best_overlap),
+                };
+                if better {
+                    best = Some((k, same_value, overlap));
+                }
+            }
+            if let Some((k, _, _)) = best {
+                param_names[i] = old_inputs.remove(k).3.clone();
+            }
+            // No old input of this edge carries the stretch's value or overlaps it: the
+            // constructor's own name stays, rather than another stretch's.
+            continue;
+        }
+        if let Some(k) = old_inputs
+            .iter()
+            .position(|(old_key, old_label, old_kind, _, _)| *old_label == new_labels[i] && old_kind == kind && segment_span(old_key).is_none())
+        {
             param_names[i] = old_inputs.remove(k).3.clone();
         }
     }
