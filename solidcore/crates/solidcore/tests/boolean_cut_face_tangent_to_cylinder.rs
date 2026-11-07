@@ -96,9 +96,7 @@ fn tool(k: &mut Kernel, xch: f64, y0: f64, length: f64) -> Brep {
     let start = (ARC_Z - h - ARC_Z).atan2(xch - ARC_X).to_degrees();
     let end = (ARC_Z + h - ARC_Z).atan2(xch - ARC_X).to_degrees();
     let chord = Curve::from(create_line_segment(lo, hi).unwrap());
-    let arc = Curve::from(
-        create_arc(Vec3::new(ARC_X, ARC_Z, 0.0), ARC_R, start, end).unwrap(),
-    );
+    let arc = Curve::from(create_arc(Vec3::new(ARC_X, ARC_Z, 0.0), ARC_R, start, end).unwrap());
     let mut curves = [chord, arc];
     for c in &mut curves {
         api_rotate(
@@ -129,7 +127,9 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 fn set_solidcraft_fixes(k: &mut Kernel) {
     let names: Vec<String> = serde_json::from_str(include_str!("kernel_cases/fixes.json")).unwrap();
     for name in &names {
-        *k.fixes.flag_mut(name).unwrap_or_else(|| panic!("unknown fix {name}")) = true;
+        *k.fixes
+            .flag_mut(name)
+            .unwrap_or_else(|| panic!("unknown fix {name}")) = true;
     }
 }
 
@@ -142,14 +142,17 @@ fn cut(xch: f64, y0: f64, length: f64, solidcraft_fixes: bool) -> Result<(), Str
     }
     let part = part(&mut k);
     let tool = tool(&mut k, xch, y0, length);
-    let mut result = boolean_difference(&mut k, part, tool).map_err(|e| format!("difference: {e}"))?;
+    let mut result =
+        boolean_difference(&mut k, part, tool).map_err(|e| format!("difference: {e}"))?;
     result.refresh_cached_topology();
     let n = faces(&result, None).map_err(|e| e.to_string())?.len();
     if n == 0 {
         return Err("the result has no faces".into());
     }
     if !is_manifold_solid(&result).map_err(|e| e.to_string())? {
-        return Err(format!("the result ({n} faces) is not a closed manifold solid"));
+        return Err(format!(
+            "the result ({n} faces) is not a closed manifold solid"
+        ));
     }
     let want = part_volume() - notch_volume(xch);
     let v = volume(&k, &mut result);
