@@ -482,6 +482,7 @@ pub(super) fn same_model_source(app: &SolveApp, document: &std::sync::Weak<solid
         timeline_groups,
         browser_order,
         named_views,
+        plane_extents,
         visibility,
     )
 }
