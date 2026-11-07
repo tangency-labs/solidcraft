@@ -7,7 +7,7 @@ use super::{
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Surface};
 use crate::{scenario, theme::Tokens};
-use egui::{Response, RichText, Ui, vec2};
+use egui::{CursorGrab, CursorIcon, Pos2, Response, RichText, Ui, ViewportCommand, vec2};
 
 /// One alignment policy for every kit text input. Align the galley itself rather than
 /// approximating font metrics with integer margins (Plex Mono and Sans differ).
@@ -186,31 +186,74 @@ fn scrub_text(number: f64, step: f64, literal: &Literal) -> String {
     text + &literal.unit
 }
 
-/// An ongoing label drag: the value and pointer x it is measured from, and the speed in use.
+/// An ongoing label drag: the value, starting screen position, accumulated horizontal drag distance, and speed in use.
 #[derive(Clone)]
 struct Scrub {
     anchor: f64,
-    origin: f32,
+    start_pos: Pos2,
+    accumulated: f32,
     step: f64,
+}
+
+fn end_scrub(ui: &Ui, id: egui::Id, state: &Scrub) {
+    ui.ctx().data_mut(|d| d.remove::<u64>(egui::Id::unique("sc_scrub_drag_frame")));
+    // On Wayland, setting the cursor position while locked sets the compositor hint so the cursor
+    // returns to its starting point when the lock is lifted.
+    ui.ctx().send_viewport_cmd(ViewportCommand::CursorPosition(state.start_pos));
+    ui.ctx().send_viewport_cmd(ViewportCommand::CursorGrab(CursorGrab::None));
+    // Set position again for platforms (X11, Windows, macOS) where warping applies to an unlocked cursor.
+    ui.ctx().send_viewport_cmd(ViewportCommand::CursorPosition(state.start_pos));
+    ui.ctx().send_viewport_cmd(ViewportCommand::CursorVisible(true));
+    ui.ctx().data_mut(|data| data.remove::<Scrub>(id));
+}
+
+/// Whether a numeric value label scrub drag is currently active.
+pub(crate) fn is_scrubbing(ctx: &egui::Context) -> bool {
+    let frame = ctx.cumulative_frame_nr();
+    ctx.data(|d| d.get_temp::<u64>(egui::Id::unique("sc_scrub_drag_frame"))).is_some_and(|at| at >= frame.saturating_sub(1))
+        && ctx.input(|i| i.pointer.any_down())
 }
 
 /// Dragging a row's label sideways changes the literal value in its field: Shift for a tenth of
 /// the speed, Ctrl (Cmd on a Mac) for ten times. The text changes as if typed, so previews
 /// follow, and the dialog's OK still makes the one command (and the one undo step). A field
-/// holding an expression or a parameter is left alone. Returns whether the text changed.
+/// holding an expression or a parameter is left alone. While dragging, the cursor is hidden,
+/// locked, and returned to its starting position on release (#12861). Returns whether the text changed.
 pub(super) fn scrub(ui: &Ui, label: &Response, value: &mut String) -> bool {
     let id = label.id.with("sc_scrub");
+    let base = ui.ctx().data(|data| data.get_temp::<Scrub>(id));
     let Some(now) = literal(value).filter(|_| ui.is_enabled()) else {
-        ui.ctx().data_mut(|data| data.remove::<Scrub>(id));
+        if let Some(state) = base {
+            end_scrub(ui, id, &state);
+        }
         return false;
     };
-    if label.hovered() || label.dragged() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+    if label.hovered() && !label.dragged() {
+        ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
     }
     if !label.dragged() {
-        ui.ctx().data_mut(|data| data.remove::<Scrub>(id));
+        if let Some(state) = base {
+            end_scrub(ui, id, &state);
+        }
         return false;
     }
+
+    let frame = ui.ctx().cumulative_frame_nr();
+    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_scrub_drag_frame"), frame));
+
+    // While dragging, hide and lock the cursor so scrubbing continues infinitely without hitting screen boundaries.
+    ui.ctx().set_cursor_icon(CursorIcon::None);
+    let is_new = base.is_none();
+    let start_pos = if is_new {
+        let pos = ui.input(|i| i.pointer.press_origin().or_else(|| i.pointer.latest_pos())).unwrap_or_else(|| label.rect.center());
+        ui.ctx().send_viewport_cmd(ViewportCommand::CursorVisible(false));
+        ui.ctx().send_viewport_cmd(ViewportCommand::CursorGrab(CursorGrab::Locked));
+        ui.ctx().send_viewport_cmd(ViewportCommand::CursorPosition(pos));
+        pos
+    } else {
+        Pos2::ZERO
+    };
+
     let factor = ui.input(|i| {
         if i.modifiers.shift {
             0.1
@@ -220,19 +263,33 @@ pub(super) fn scrub(ui: &Ui, label: &Response, value: &mut String) -> bool {
             1.0
         }
     });
-    // Measured from where the pointer is, not summed per frame, so no frame's jump is lost or doubled.
-    let (Some(x), Some(pressed)) = ui.input(|i| (i.pointer.latest_pos().map(|p| p.x), i.pointer.press_origin().map(|p| p.x))) else {
-        return false;
-    };
-    let base = ui.ctx().data(|data| data.get_temp::<Scrub>(id));
-    // A new drag starts from where it was pressed; a changed modifier starts over from here.
+
+    let delta_x = ui.input(|i| {
+        let d = i.pointer.delta().x;
+        if d != 0.0 { d } else { i.pointer.motion().map(|m| m.x / i.pixels_per_point()).unwrap_or(0.0) }
+    });
+    let delta_x = if delta_x.is_finite() { delta_x } else { 0.0 };
+
     let state = match base {
-        Some(state) if (state.step - scrub_step(state.anchor) * factor).abs() <= state.step * 1e-9 => state,
-        Some(_) => Scrub { anchor: now.number, origin: x, step: scrub_step(now.number) * factor },
-        None => Scrub { anchor: now.number, origin: pressed, step: scrub_step(now.number) * factor },
+        Some(mut state) => {
+            if (state.step - scrub_step(state.anchor) * factor).abs() <= state.step * 1e-9 {
+                state.accumulated += delta_x;
+                state
+            } else {
+                // A changed modifier starts over accumulating from the current value at the new speed.
+                Scrub { anchor: now.number, start_pos: state.start_pos, accumulated: 0.0, step: scrub_step(now.number) * factor }
+            }
+        }
+        None => Scrub { anchor: now.number, start_pos, accumulated: 0.0, step: scrub_step(now.number) * factor },
     };
-    let points = x - state.origin;
-    let text = scrub_text(scrubbed(state.anchor, if points.is_finite() { points } else { 0.0 }, state.step), state.step, &now);
+
+    if let Some(pos) = ui.input(|i| i.pointer.latest_pos())
+        && (pos - state.start_pos).length() > 4.0
+    {
+        ui.ctx().send_viewport_cmd(ViewportCommand::CursorPosition(state.start_pos));
+    }
+
+    let text = scrub_text(scrubbed(state.anchor, state.accumulated, state.step), state.step, &now);
     ui.ctx().data_mut(|data| data.insert_temp(id, state));
     if text == *value {
         return false;

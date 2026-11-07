@@ -167,6 +167,9 @@ pub trait BackingTooltipExt: Sized {
 }
 
 fn show_backing_tooltip(parent: Id, tip: egui::Tooltip<'_>, body: impl FnOnce(&mut egui::Ui)) {
+    if super::fields::is_scrubbing(tip.popup.ctx()) {
+        return;
+    }
     let slot = tip
         .popup
         .is_open()
