@@ -2522,7 +2522,11 @@ impl SolveApp {
 
     fn prepare_sketch_exit(&mut self) {
         sketch_text_move::cancel_drag(self);
-        if sketch_text::editing(self) || self.dialog.as_ref().is_some_and(|d| matches!(d.kind, dialogs::Kind::TextMove(_))) {
+        // A sketch tool's window has nothing to apply once the sketch is gone. Left open, the
+        // next frame reports that the command needs a sketch, and its distance stays on screen
+        // (#11908). Windows that are not sketch commands, such as Measure, stay.
+        let sketch_tool = self.dialog.as_ref().and_then(|d| d.command()).is_some_and(|id| id.starts_with("sketch."));
+        if sketch_text::editing(self) || sketch_tool {
             dialogs::cancel(self);
         }
         dim_view::cancel();
