@@ -1,36 +1,39 @@
-# Goldens hashes move across platforms: aarch64 darwin vs the CI's x86_64 ubuntu
+# Local goldens failures: one clean-base control, cause not established
 
 Found: 2026-11-07, while re-verifying the #2981 flag-retirement lane locally.
 
 ## What was observed
 
 A full goldens sweep (`cargo run --profile goldens -p goldens -- --all --jobs 4 --goldens`)
-on the current base (7efbd5090) on an aarch64 macOS machine reports 84 of 283 units
-failing; main's own CI run at the same code (the goldens job on
-blacksmith-*-ubuntu-2404, x86_64) is green. The failing units' changed rows are almost
-only **checksum blocks** (`[sum, abs_sum, weighted_sum]` per 256-entry chunk): e.g.
+on the PR head a4e81596c, based on 7efbd5090, reported 84 of 283 units failing
+on aarch64 macOS. This was not a full sweep of the clean base. One inspected
+failure was in a compact integer-array summary
+(`[sum, weighted_sum]` per chunk):
 `topology.brep_constructor`'s `hexagon_prism_separate_stitched`, where only the
-topology-int block checksum moves (`383570` -> `383763`) while the ops hashes, crash
-marker, state, and every measured value are identical. Counts stay the same (`n`).
+topology-int weighted sum moves (`383570` -> `383763`) while its other reported
+fields are unchanged. Its array length stays the same. These summaries represent
+actual topology entries; a difference is not harmless merely because it is compacted.
 
-Reproduced on the clean base: same unit, same case, same single-changed-row shape
-(scratch worktree at 7efbd5090, no lane's changes) — so the divergence is not any one
-lane's code.
+The clean base 7efbd5090 reproduced that unit's one changed case in a scratch
+worktree. This establishes a pre-existing local failure for that case only. It
+does not attribute the other 83 failing units to the baseline or establish a
+cross-platform cause. Missing upstream fixtures, including `Platform.smp`, were
+also reported by the PR-head sweep and need separate investigation.
 
-## What it means for local verification
+## CI evidence and limits
 
-- Value rows (floats) agree across platforms within the 1e-9 basis; the divergences are
-  in integer-ordinate sums (B-rep traversal ordinals) and in hash sums built from them.
-- A unit's PASS locally on aarch64 is strong evidence for its values, but the canonical
-  green is the CI's x86_64 run. When a lane's local sweep fails in units with
-  checksum-only movements and identical value/style states, attribute them to the
-  platform baseline (this record), not to the lane — check them on the clean base first.
-- The 4 units with compare-grade float moves (#2981's lane) still passed locally with
-  within-gate values, and their bless rows carry aarch64 values; the block tolerances
-  (REL_TOL of the block's absolute sum plus the unit's floor) absorb platform noise
-  at 1e-13 scale, which is what aarch64-vs-x86_64 value diffs look like.
+Main's CI run 42399108643 at 8d7a0bf07 completed successfully, but it was a
+`push` run whose `goldens`, `clippy`, and `wasm` jobs were **skipped**. It is not
+evidence of a successful goldens comparison on another platform or on 7efbd5090.
+No same-revision cross-platform comparison has been performed here.
 
-## Precedent living on a related edge
+The PR's four focused units passed locally against their committed expectations.
+That establishes consistency with those expectations, not geometric correctness
+or a successful full sweep. Remaining failures must be compared against a matching
+clean base before being attributed or dismissed; canonical exact-head CI remains
+unverified while its workflow requires approval.
 
-`plan/` also carries attempt-budget divergence on aarch64 Linux/GB10 (#2929, the QP
-scale search). This record covers darwin-aarch64 vs x86_64 goldens_checksums.
+## Related investigation
+
+Issue #2929 concerns a QP attempt-budget difference on aarch64 Linux/GB10. It does
+not establish the cause of these unrelated local goldens failures.

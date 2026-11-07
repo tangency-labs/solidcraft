@@ -2806,7 +2806,6 @@ impl OffsetGeometryCreation {
             // for every sOffAdjEU - try letting trimPoint = OffAdjEu->ExtendedSurface/3DCurve intersection
             let mut last_face: Option<O> = None;
             // (WR-666) each adjacent face's candidates in `solutions`
-            let four_face = true;
             let mut face_solutions: Vec<(usize, usize)> = Vec::new();
             for &off_adj_eu in &off_adj_eus {
                 let f = brep
@@ -2844,9 +2843,7 @@ impl OffsetGeometryCreation {
 
                 // Note that the adjacent surface intersection overrides tangent intersections
                 // Test the solutions to see if they are not nearly tangent.
-                if four_face {
-                    face_solutions.push((solutions.len(), solutions.len()));
-                }
+                face_solutions.push((solutions.len(), solutions.len()));
                 for sol in sols2.as_slice() {
                     // (neither status is checked upstream: a failed evaluation leaves its
                     // output at SmPoint3d's SM_UNDEF_DOUBLE default)
@@ -2872,7 +2869,7 @@ impl OffsetGeometryCreation {
                         .unitize_or_z();
                     let angle_rad = tangent.angle_between(normal)?;
                     let angle_deg = angle_rad * 180.0 / PI;
-                    // `Kernel::fixes.offset_four_face_vertex_split` (WR-666, the fork's
+                    // Four-face vertex splitting (WR-666, the fork's
                     // tangency-labs/smlib@2e1bb8c): a curve that crosses the surface at a
                     // shallow angle crosses it all the same (a trough's floor facets falling
                     // 1 degree, whose offsets cut the offset edges along the walls 0.6
@@ -2882,8 +2879,7 @@ impl OffsetGeometryCreation {
                     // round meets the top face tangentially) crosses it twice within the
                     // tolerance, so it crosses only where it passes through by more than
                     // the tolerance ([`passes_through`]).
-                    let crosses = four_face
-                        && !(angle_deg < 85.0 || angle_deg > 95.0)
+                    let crosses = !(angle_deg < 85.0 || angle_deg > 95.0)
                         && passes_through(
                             k,
                             curve_of(brep, curve_3d)?,
@@ -2968,7 +2964,7 @@ impl OffsetGeometryCreation {
                 }
             }
 
-            // `Kernel::fixes.offset_four_face_vertex_split` (WR-666, the fork's
+            // Four-face vertex splitting (WR-666, the fork's
             // tangency-labs/smlib@2e1bb8c): where more than three faces meet at the vertex,
             // the faces on either side of the edge's ends there are different faces, and
             // their offsets cut the edge's offset at two points: four offset planes do not
@@ -2976,9 +2972,7 @@ impl OffsetGeometryCreation {
             // and where every edge at the vertex is convex (or every one concave) the edge
             // ends at the one of the two cuts its offset reaches first coming from its
             // other end. With a vertex of mixed edges the nearest point stays.
-            // (WR-666, the fork's opt-in is the only path since #2981) the adjacent
-            // faces' `found` extent: when two found, the four-face split applies
-            if four_face && found && face_solutions.len() == 2 {
+            if found && face_solutions.len() == 2 {
                 if let Some(param) = self.first_cut_from_far_end(
                     k,
                     brep,

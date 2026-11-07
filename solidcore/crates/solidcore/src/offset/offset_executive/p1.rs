@@ -336,8 +336,7 @@ impl OffsetExecutive {
     ///
     /// On the default path since #2981: WR-666's split is the only path, so the creator
     /// tolerance is always the fork's.
-    pub fn use_creator_tangency_tol(&mut self, kernel: &Kernel) {
-        let _ = kernel;
+    pub fn use_creator_tangency_tol(&mut self, _kernel: &Kernel) {
         self.tangency_tol_radians = OffsetGeometryCreation::default_tangency_tol_radians();
     }
 
