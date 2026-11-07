@@ -912,27 +912,31 @@ pub struct UpstreamFixes {
     /// `GlobalCurveSolve` searches are returned too, as the fork does (tangency-labs/smlib
     /// c8f6a31; changed by #2009 group C, WR-662). Off by default for pinned compatibility.
     pub planar_path_sweep_statuses: bool,
+    /// No longer read: fillet corners always do this, so the field goes when SolidCraft's set drops it.
     /// Fillet corners fail softly where a status upstream ignores would leave an unset
     /// value, as the fork does (tangency-labs/smlib 66b02de; #483, changed by #2009):
     /// `sm_TestG1Continuity` finds no tangency when an end tangent cannot be evaluated,
     /// and `CheckAndFixDegeneracy` refines a vertex's UV point only with a computed one.
     /// The binormal evaluations, the G1 angle and the Nx1 degeneracy test keep upstream's
-    /// handling, as the fork does. Off by default.
+    /// handling, as the fork does.
     pub fillet_corner_statuses: bool,
+    /// No longer read: `sm_CheckEdgeCurveDomains` always does this, so the field goes when SolidCraft's set drops it.
     /// `sm_CheckEdgeCurveDomains` returns no trimmed curve (the edge's own curve is
     /// used) when the copy cannot be made or trimmed, as the fork does
     /// (tangency-labs/smlib 66b02de; #483, changed by #2009), instead of returning an
-    /// untrimmed copy as the requested domain. Off by default.
+    /// untrimmed copy as the requested domain.
     pub fillet_edge_curve_domain_statuses: bool,
+    /// No longer read: `HaveTangentGaps` always does this, so the field goes when SolidCraft's set drops it.
     /// Offset tangent-gap checks skip a sample they cannot evaluate instead of
     /// measuring an unset point, as the fork does (`HaveTangentGaps`, tangency-labs/smlib
     /// 4803d6d; #483, changed by #2009); `ClosestPoint`'s status stays dropped and a
     /// successful query without a solution keeps its existing meaning.
     pub offset_tangent_gap_statuses: bool,
+    /// No longer read: the alignment always does this, so the field goes when SolidCraft's set drops it.
     /// Surface-intersection singularity alignment aligns nothing when the direction
     /// angle cannot be computed, as the fork does (`ALIGN_DIR_WITH_PREVIOUS_POINT`,
     /// tangency-labs/smlib e7ebc8d; #483, changed by #2009) instead of comparing an angle
-    /// read as zero. Captured when the intersector is built.
+    /// read as zero.
     pub ssi_alignment_statuses: bool,
     /// The B-rep's own edits, its `StitchAndOrient`, the offset and shell stitches and the
     /// Boolean merge, stitch and topology-intersection passes pass on the statuses SMLib

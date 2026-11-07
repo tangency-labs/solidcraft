@@ -81,8 +81,8 @@
 //!   uses, so it returns to its start; it is bounded by the B-rep's edge use count (an
 //!   error past it, which only corrupt topology reaches). There is no recursion.
 //!
-//! The Nx1 selector reads a failed binormal status as a degenerate corner, with or
-//! without `fillet_corner_statuses` (the fork, tangency-labs/smlib 66b02de, keeps it).
+//! The Nx1 selector reads a failed binormal status as a degenerate corner (the fork,
+//! tangency-labs/smlib 66b02de, keeps it).
 //!
 
 use std::collections::BTreeMap;
@@ -2358,8 +2358,7 @@ fn test_g1_continuity(
 fn check_nx1_degeneracy(k: &Kernel, b: &mut Brep, vertex: VertexId, eu: EdgeuseId) -> Result<bool> {
     // the status a failed side binormal evaluation returns through the SmBoolean is
     // nonzero (true); the guards (a null dereference, a dangling id, an unported callee)
-    // stay errors. The fork (tangency-labs/smlib 66b02de) keeps this, so
-    // fillet_corner_statuses no longer changes it (#2009).
+    // stay errors. The fork (tangency-labs/smlib 66b02de) keeps this.
     let status = p1::check_nx1_degeneracy_status(k, b, vertex, eu)?;
     Ok(status.unwrap_or(true))
 }
@@ -2486,7 +2485,7 @@ mod tests {
         use crate::geom::extent1d::Extent1d;
         use crate::topology::{Edgeuse, EdgeuseOwner, Vertexuse, VertexuseOwner};
 
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         let mut b = Brep::new();
         let v = b.add_vertex(Point3::new(0.0, 0.0, 0.0)).unwrap();
         let w = b.add_vertex(Point3::new(0.0, 0.0, 1.0)).unwrap();
@@ -2568,11 +2567,6 @@ mod tests {
 
         // through Create: the evaluator's status selects the degenerate corner
         let (exec, solvers) = one_solver(fil);
-        let c = FilletCorner::create(&k, &mut b, v, &[fil], &exec, &solvers).unwrap();
-        assert_eq!(c.map(|c| c.kind), Some(FilletCornerKind::Degenerate));
-        // the fork (66b02de) keeps this: the flag no longer changes it
-        k.fixes.fillet_corner_statuses = true;
-        assert!(check_nx1_degeneracy(&k, &mut b, v, fil).unwrap());
         let c = FilletCorner::create(&k, &mut b, v, &[fil], &exec, &solvers).unwrap();
         assert_eq!(c.map(|c| c.kind), Some(FilletCornerKind::Degenerate));
     }

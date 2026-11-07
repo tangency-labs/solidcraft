@@ -69,12 +69,11 @@
 //!   `SmVector3d::CCWAngleBetween` (ignored in `sm_GetFilletRadius`) cannot fail there:
 //!   its projected vectors pass a `100 * SM_EFF_ZERO_SQ` length test before
 //!   `AngleBetween`, whose zero test is the smaller `SM_EFF_ZERO_SQ`.
-//! - **Status audit (#483, changed by #2009 to the fork's choice).** With
-//!   `fillet_corner_statuses`, as the fork does (tangency-labs/smlib 66b02de),
-//!   `sm_TestG1Continuity` finds no tangency when an end tangent cannot be evaluated,
-//!   and `CheckAndFixDegeneracy` refines a vertex's UV point only with a computed one.
-//!   The binormal evaluations and the G1 angle keep upstream's ignored status (the fork
-//!   keeps their `SE`). Off by default, the legacy fallbacks above remain.
+//! - **Status audit (#483, the fork's choice since #2009).** As the fork does
+//!   (tangency-labs/smlib 66b02de), `sm_TestG1Continuity` finds no tangency when an end
+//!   tangent cannot be evaluated, and `CheckAndFixDegeneracy` refines a vertex's UV
+//!   point only with a computed one. The binormal evaluations and the G1 angle keep
+//!   upstream's ignored status (the fork keeps their `SE`).
 //! - **Undefined inputs.** Where upstream dereferences null (an edge without a curve or
 //!   edge uses, an edge use without a radial, vertex use or edge) or indexes past the
 //!   curve array of `sm_CreateSrfOfRevolution`, the port returns
@@ -229,18 +228,6 @@ fn evaluate_tangent(k: &Kernel, curve: &Curve, t: f64) -> Result<Option<[Vec3; 2
     })
 }
 
-/// A tangent of [`evaluate_tangent`] in `sm_TestG1Continuity`: upstream ignores a failed
-/// evaluation and compares the unset `SM_UNDEF_DOUBLE` vectors; with
-/// `fillet_corner_statuses` (the fork's change, tangency-labs/smlib 66b02de) a tangent
-/// that cannot be evaluated is no tangency (`None`).
-fn g1_tangent(k: &Kernel, pv: Option<[Vec3; 2]>) -> Option<[Vec3; 2]> {
-    match pv {
-        Some(pv) => Some(pv),
-        None if k.fixes.fillet_corner_statuses => None,
-        None => Some([Vec3::UNDEF, Vec3::UNDEF]),
-    }
-}
-
 /// `pEU->EvaluateBinormal(t, FALSE, pnt, bin, pOptTangent, pOptNormal)` with the
 /// status ignored (`SE`): binormal, tangent and face use normal, `SM_UNDEF_DOUBLE`
 /// vectors when it fails.
@@ -275,8 +262,9 @@ fn edge_of(b: &Brep, eu: EdgeuseId, op: &'static str) -> Result<EdgeId> {
 /// # Errors
 ///
 /// [`SolidError::InvalidInput`] for an edge without a curve (upstream dereferences
-/// null). With `fillet_corner_statuses`, an end tangent that cannot be evaluated gives
-/// `(false, None)` (the fork's change, tangency-labs/smlib 66b02de).
+/// null). An end tangent that cannot be evaluated gives `(false, None)` (the fork's
+/// change, tangency-labs/smlib 66b02de; upstream compared the unset `SM_UNDEF_DOUBLE`
+/// vectors).
 pub fn test_g1_continuity(
     k: &Kernel,
     b: &Brep,
@@ -299,8 +287,8 @@ pub fn test_g1_continuity(
         ivl1.max()
     };
 
-    // get Edge1 tangent at vertex
-    let Some(pv1) = g1_tangent(k, evaluate_tangent(k, crv1, param1)?) else {
+    // get Edge1 tangent at vertex (fork 66b02de: none is no tangency)
+    let Some(pv1) = evaluate_tangent(k, crv1, param1)? else {
         return Ok((false, None));
     };
 
@@ -313,8 +301,8 @@ pub fn test_g1_continuity(
         ivl2.min()
     };
 
-    // get Edge2 tangent at vertex
-    let Some(pv2) = g1_tangent(k, evaluate_tangent(k, crv2, param2)?) else {
+    // get Edge2 tangent at vertex (fork 66b02de: none is no tangency)
+    let Some(pv2) = evaluate_tangent(k, crv2, param2)? else {
         return Ok((false, None));
     };
 
@@ -2175,19 +2163,14 @@ impl FilletCorner {
                 // when filletVertexuse->Rail->Face == origVertexuse->Face
                 let fu = vertexuse::faceuse(target, vu)?.ok_or_else(null)?;
                 if eu1::faceuse_face(target, fu)? == Some(face) {
-                    // refine the filletVertex->TsectPnt->UVpoint position (the
-                    // projection's status is not checked: a failure leaves sUV's
-                    // SM_UNDEF_DOUBLE members; with fillet_corner_statuses, as the fork
-                    // 66b02de, only a computed point refines the position)
+                    // refine the filletVertex->TsectPnt->UVpoint position (upstream
+                    // does not check the projection's status and writes sUV's
+                    // SM_UNDEF_DOUBLE members; as the fork 66b02de, only a computed
+                    // point refines the position)
                     let uv = ignored(
                         vertexuse::compute_uv_point(k, target, vu, true).map(Some),
                         None,
                     )?;
-                    let uv = match uv {
-                        Some(uv) => Some(uv),
-                        None if k.fixes.fillet_corner_statuses => None,
-                        None => Some(Point2::UNDEF),
-                    };
                     let srf = if rail_index == 0 {
                         SrfIndex::First
                     } else {
@@ -3485,10 +3468,11 @@ mod tests {
         assert_eq!(b.vertex(d).unwrap().vertexuses.len(), 2);
         assert_eq!(b.vertex(kv).unwrap().vertexuses.len(), 2);
     }
-    /// `CheckAndFixDegeneracy` does not check `ComputeUVPoint`'s status: a degenerate
-    /// corner whose rail's original face has no surface (the projection fails with
-    /// `SM_ERR_NULL_POINTER`) still merges, keeps the UV position at `SM_UNDEF_DOUBLE`,
-    /// is marked degenerate and returns `TRUE`.
+    /// `CheckAndFixDegeneracy` refines a vertex's UV point only with a computed one, as
+    /// the fork does (tangency-labs/smlib 66b02de) and the default kernel now does: a
+    /// degenerate corner whose rail's original face has no surface (the projection fails
+    /// with `SM_ERR_NULL_POINTER`) still merges, keeps the UV position it had, is marked
+    /// degenerate and returns `TRUE`. Upstream wrote `SM_UNDEF_DOUBLE` there.
     #[test]
     fn degeneracy_fix_ignores_a_failed_uv_projection() {
         use crate::blend::fillet_geom::p1::{
@@ -3498,129 +3482,122 @@ mod tests {
             Edgeuse, EdgeuseOwner, Face, Faceuse, Loopuse, Vertexuse, VertexuseOwner,
         };
 
-        for checked in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.fillet_corner_statuses = checked;
-            let corner_pnt = Point3::new(1.0, 2.0, 3.0);
+        let mut k = Kernel::default();
+        let corner_pnt = Point3::new(1.0, 2.0, 3.0);
 
-            // the filleted B-rep: the corner vertex, used by a loop edge use of a face without
-            // surface
-            let mut target = Brep::default();
-            let shell = target.add_shell().unwrap();
-            let face = target.add_face_record(Face::new(shell)).unwrap();
-            let fu = target
-                .add_faceuse_record(Faceuse {
-                    shell: Some(shell),
-                    face: Some(face),
-                    ..Faceuse::default()
-                })
-                .unwrap();
-            target.face_mut(face).unwrap().faceuse = Some(fu);
-            let lu = target
-                .add_loopuse_record(Loopuse {
-                    faceuse: Some(fu),
-                    ..Loopuse::default()
-                })
-                .unwrap();
-            let cv = target.add_vertex(corner_pnt).unwrap();
-            let teu = target
-                .add_edgeuse_record(Edgeuse {
-                    owner: EdgeuseOwner::Loopuse(Some(lu)),
-                    ..Edgeuse::default()
-                })
-                .unwrap();
-            let tvu = target
-                .add_vertexuse_record(Vertexuse {
-                    vertex: Some(cv),
-                    owner: VertexuseOwner::Edgeuse(Some(teu)),
-                    ..Vertexuse::default()
-                })
-                .unwrap();
-            target.edgeuse_mut(teu).unwrap().vertexuse = Some(tvu);
-            target.vertex_mut(cv).unwrap().vertexuses.push(tvu);
+        // the filleted B-rep: the corner vertex, used by a loop edge use of a face without
+        // surface
+        let mut target = Brep::default();
+        let shell = target.add_shell().unwrap();
+        let face = target.add_face_record(Face::new(shell)).unwrap();
+        let fu = target
+            .add_faceuse_record(Faceuse {
+                shell: Some(shell),
+                face: Some(face),
+                ..Faceuse::default()
+            })
+            .unwrap();
+        target.face_mut(face).unwrap().faceuse = Some(fu);
+        let lu = target
+            .add_loopuse_record(Loopuse {
+                faceuse: Some(fu),
+                ..Loopuse::default()
+            })
+            .unwrap();
+        let cv = target.add_vertex(corner_pnt).unwrap();
+        let teu = target
+            .add_edgeuse_record(Edgeuse {
+                owner: EdgeuseOwner::Loopuse(Some(lu)),
+                ..Edgeuse::default()
+            })
+            .unwrap();
+        let tvu = target
+            .add_vertexuse_record(Vertexuse {
+                vertex: Some(cv),
+                owner: VertexuseOwner::Edgeuse(Some(teu)),
+                ..Vertexuse::default()
+            })
+            .unwrap();
+        target.edgeuse_mut(teu).unwrap().vertexuse = Some(tvu);
+        target.vertex_mut(cv).unwrap().vertexuses.push(tvu);
 
-            // the pseudo B-rep: one processed corner vertex at the corner point, the end of a
-            // rail on that face whose edge use's geometry has the solver
-            let mut fb = FilletBrep::new();
-            let g = {
-                let mut g = FilletGeom::new(&k, None, FilletGeomType::Default).unwrap();
-                g.solver = Some(FilletSolverId(0));
-                fb.add_geom(g)
+        // the pseudo B-rep: one processed corner vertex at the corner point, the end of a
+        // rail on that face whose edge use's geometry has the solver
+        let mut fb = FilletBrep::new();
+        let g = {
+            let mut g = FilletGeom::new(&k, None, FilletGeomType::Default).unwrap();
+            g.solver = Some(FilletSolverId(0));
+            fb.add_geom(g)
+        };
+        let b = fb.brep_mut();
+        let fv0 = b.add_vertex(corner_pnt).unwrap();
+        let far = b.add_vertex(Point3::new(5.0, 0.0, 0.0)).unwrap();
+        let rail = b.add_edge(fv0, far).unwrap();
+        let eu = b
+            .add_edgeuse_record(Edgeuse {
+                edge: Some(rail),
+                ..Edgeuse::default()
+            })
+            .unwrap();
+        let vu = b
+            .add_vertexuse_record(Vertexuse {
+                vertex: Some(fv0),
+                owner: VertexuseOwner::Edgeuse(Some(eu)),
+                ..Vertexuse::default()
+            })
+            .unwrap();
+        b.edgeuse_mut(eu).unwrap().vertexuse = Some(vu);
+        b.edge_mut(rail).unwrap().edgeuses.push(eu);
+        b.vertex_mut(fv0).unwrap().vertexuses.push(vu);
+        let mut fv = FilletVertex::new(&k, None);
+        fv.set_status(FilStatus::Processed);
+        fb.insert_fillet_vertex(fv0, fv);
+        fb.insert_fillet_vertex(far, FilletVertex::new(&k, None));
+        let mut fe = FilletEdge::with_corner(None);
+        fe.set_fillet_edge_type(FilletEdgeType::Rail);
+        fe.orig_face = Some(face);
+        fb.insert_fillet_edge(rail, fe);
+        fb.insert_fillet_edgeuse(
+            eu,
+            FilletEdgeuse {
+                fillet_geom: Some(g),
+            },
+        );
+        fb.insert_fillet_vertexuse(vu, FilletVertexuse::new());
+        let original_uv = Point2::new(4.0, 5.0);
+        *fb.fillet_vertexuse_mut(vu)
+            .unwrap()
+            .tsect_pnt_mut()
+            .uv_pos_mut(SrfIndex::First) = original_uv;
+
+        let solvers = [FilletSolver::new(1e-3, 1e-3, 0.01)];
+        let mut exec = FilletExecutiveData::default();
+        let mut c = FilletCorner::new(FilletCornerKind::NByTwo, Some(cv), None, None, 1e-3, 0.1);
+        c.vertices = vec![fv0];
+        let r = {
+            let mut env = CornerEnv {
+                k: &mut k,
+                target: &mut target,
+                pseudo: &mut fb,
+                exec: &mut exec,
+                corner: None,
+                solvers: &mut [],
+                fillet: None,
             };
-            let b = fb.brep_mut();
-            let fv0 = b.add_vertex(corner_pnt).unwrap();
-            let far = b.add_vertex(Point3::new(5.0, 0.0, 0.0)).unwrap();
-            let rail = b.add_edge(fv0, far).unwrap();
-            let eu = b
-                .add_edgeuse_record(Edgeuse {
-                    edge: Some(rail),
-                    ..Edgeuse::default()
-                })
-                .unwrap();
-            let vu = b
-                .add_vertexuse_record(Vertexuse {
-                    vertex: Some(fv0),
-                    owner: VertexuseOwner::Edgeuse(Some(eu)),
-                    ..Vertexuse::default()
-                })
-                .unwrap();
-            b.edgeuse_mut(eu).unwrap().vertexuse = Some(vu);
-            b.edge_mut(rail).unwrap().edgeuses.push(eu);
-            b.vertex_mut(fv0).unwrap().vertexuses.push(vu);
-            let mut fv = FilletVertex::new(&k, None);
-            fv.set_status(FilStatus::Processed);
-            fb.insert_fillet_vertex(fv0, fv);
-            fb.insert_fillet_vertex(far, FilletVertex::new(&k, None));
-            let mut fe = FilletEdge::with_corner(None);
-            fe.set_fillet_edge_type(FilletEdgeType::Rail);
-            fe.orig_face = Some(face);
-            fb.insert_fillet_edge(rail, fe);
-            fb.insert_fillet_edgeuse(
-                eu,
-                FilletEdgeuse {
-                    fillet_geom: Some(g),
-                },
-            );
-            fb.insert_fillet_vertexuse(vu, FilletVertexuse::new());
-            let original_uv = Point2::new(4.0, 5.0);
-            *fb.fillet_vertexuse_mut(vu)
-                .unwrap()
-                .tsect_pnt_mut()
-                .uv_pos_mut(SrfIndex::First) = original_uv;
-
-            let solvers = [FilletSolver::new(1e-3, 1e-3, 0.01)];
-            let mut exec = FilletExecutiveData::default();
-            let mut c =
-                FilletCorner::new(FilletCornerKind::NByTwo, Some(cv), None, None, 1e-3, 0.1);
-            c.vertices = vec![fv0];
-            let r = {
-                let mut env = CornerEnv {
-                    k: &mut k,
-                    target: &mut target,
-                    pseudo: &mut fb,
-                    exec: &mut exec,
-                    corner: None,
-                    solvers: &mut [],
-                    fillet: None,
-                };
-                c.check_and_fix_degeneracy(&mut env, &solvers)
-            };
-            // fork 66b02de: only a computed UV point refines the position, and the
-            // corner is still degenerate
-            assert!(vertexuse::compute_uv_point(&k, &mut target, tvu, true).is_err());
-            assert!(r.unwrap());
-            assert!(c.degenerate);
-            assert_eq!(c.vertices, vec![fv0]);
-            let tp = fb.fillet_vertexuse(vu).unwrap().tsect_pnt();
-            assert_eq!(
-                tp.uv_pos(SrfIndex::First),
-                if checked { original_uv } else { Point2::UNDEF }
-            );
-            assert_eq!(
-                fb.fillet_vertex(fv0).unwrap().fillet_vertex_type(),
-                FilletVertexType::OnVertex
-            );
-        }
+            c.check_and_fix_degeneracy(&mut env, &solvers)
+        };
+        // fork 66b02de: only a computed UV point refines the position, and the
+        // corner is still degenerate
+        assert!(vertexuse::compute_uv_point(&k, &mut target, tvu, true).is_err());
+        assert!(r.unwrap());
+        assert!(c.degenerate);
+        assert_eq!(c.vertices, vec![fv0]);
+        let tp = fb.fillet_vertexuse(vu).unwrap().tsect_pnt();
+        assert_eq!(tp.uv_pos(SrfIndex::First), original_uv);
+        assert_eq!(
+            fb.fillet_vertex(fv0).unwrap().fillet_vertex_type(),
+            FilletVertexType::OnVertex
+        );
     }
     use crate::error::SM_ERR;
 
@@ -3653,15 +3630,9 @@ mod tests {
         let _evaluation_fails = curve
             .evaluate(&k, b.edge(e).unwrap().interval.min(), 1, true, true)
             .unwrap_err();
-        // upstream tests the unset (SM_UNDEF_DOUBLE, about 1e-61) tangents, which are
-        // shorter than SM_EFF_ZERO, so it too finds no tangency: the fork's change gives
-        // the same outcome by its own reason
-        assert_eq!(
-            test_g1_continuity(&k, &b, Some(v), Some(e), Some(e), 2.0).unwrap(),
-            (false, None)
-        );
-        // fork 66b02de: a tangent that cannot be evaluated is no tangency
-        k.fixes.fillet_corner_statuses = true;
+        // fork 66b02de: a tangent that cannot be evaluated is no tangency (upstream
+        // tested the unset SM_UNDEF_DOUBLE tangents, about 1e-61, shorter than
+        // SM_EFF_ZERO, and found none either)
         assert_eq!(
             test_g1_continuity(&k, &b, Some(v), Some(e), Some(e), 2.0).unwrap(),
             (false, None)

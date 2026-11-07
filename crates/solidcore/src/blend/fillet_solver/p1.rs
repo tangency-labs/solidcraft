@@ -110,10 +110,9 @@
 //! - **Iteration.** No loop here depends on more than the caller's array sizes; there
 //!   is no recursion.
 //!
-//! With `Kernel::fixes.fillet_edge_curve_domain_statuses`, an edge-curve copy that
-//! cannot be trimmed is no trimmed curve, as the fork does (66b02de; #483, #2009). With
-//! `Kernel::fixes.fillet_statuses_pass_on` the statuses tangency-labs/smlib 66b02de
-//! passes on (`SER`) are returned (WR-661).
+//! An edge-curve copy that cannot be trimmed is no trimmed curve, as the fork does
+//! (66b02de; #483, #2009). With `Kernel::fixes.fillet_statuses_pass_on` the statuses
+//! tangency-labs/smlib 66b02de passes on (`SER`) are returned (WR-661).
 //!
 
 use crate::blend::fillet_classification::{FilletClassObject, LegacyClassificationObjects};
@@ -3186,9 +3185,9 @@ pub fn tol_ang_tol_rad(solver: Option<&FilletSolver>) -> f64 {
 ///
 /// [`SolidError::InvalidInput`] for an edge without curve (upstream dereferences
 /// `NULL`). The copy's and the trim's statuses are ignored as upstream
-/// ([`SolidError::Unported`] still propagates); with `fillet_edge_curve_domain_statuses`,
-/// as the fork does (tangency-labs/smlib 66b02de), a copy that cannot be trimmed is no
-/// trimmed curve (`None`).
+/// ([`SolidError::Unported`] still propagates); as the fork does (tangency-labs/smlib
+/// 66b02de), a copy that cannot be trimmed is no trimmed curve (`None`), where upstream
+/// returned the untrimmed copy.
 pub fn check_edge_curve_domains(
     k: &Kernel,
     b: &Brep,
@@ -3215,9 +3214,9 @@ pub fn check_edge_curve_domains(
         if let Some(mut copy) = ignored(curve.copy(k))? {
             let mut trim_ivl = Extent1d::from_min_max(t0, t1);
             let trimmed = ignored(copy.trim(k, &mut trim_ivl, TrimMode::Notify))?;
-            // with fillet_edge_curve_domain_statuses, as the fork's change (66b02de): a
-            // copy that could not be trimmed is no trimmed curve
-            if trimmed.is_some() || !k.fixes.fillet_edge_curve_domain_statuses {
+            // as the fork's change (66b02de): a copy that could not be trimmed is no
+            // trimmed curve
+            if trimmed.is_some() {
                 return Ok(Some(copy));
             }
         }
@@ -3532,7 +3531,7 @@ mod tests {
 
     #[test]
     fn audit_483_edge_domain_is_no_trimmed_curve_after_a_failed_trim() {
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         let mut b = Brep::new();
         let first = b.add_vertex(Vec3::ZERO).unwrap();
         let last = b.add_vertex(Vec3::X).unwrap();
@@ -3544,12 +3543,8 @@ mod tests {
         let mut failing = curve.copy(&k).unwrap();
         let mut trim_ivl = ivl;
         assert!(failing.trim(&k, &mut trim_ivl, TrimMode::Notify).is_err());
-        // upstream: the untrimmed copy is returned as the trimmed curve
-        assert!(check_edge_curve_domains(&k, &b, edge, false, false)
-            .unwrap()
-            .is_some());
-        // fork 66b02de: a copy that could not be trimmed is no trimmed curve
-        k.fixes.fillet_edge_curve_domain_statuses = true;
+        // fork 66b02de, and the default kernel: a copy that could not be trimmed is no
+        // trimmed curve (upstream returned the untrimmed copy as the trimmed curve)
         assert!(check_edge_curve_domains(&k, &b, edge, false, false)
             .unwrap()
             .is_none());

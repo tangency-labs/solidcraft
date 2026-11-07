@@ -275,11 +275,7 @@ fn enable_audited_fixes(k: &mut Kernel) {
     k.fixes.primitive_path_curve_statuses = true;
     k.fixes.planar_path_profile_placement_statuses = true;
     k.fixes.planar_path_sweep_statuses = true;
-    k.fixes.fillet_corner_statuses = true;
-    k.fixes.fillet_edge_curve_domain_statuses = true;
     k.fixes.fillet_trim_status = true;
-    k.fixes.offset_tangent_gap_statuses = true;
-    k.fixes.ssi_alignment_statuses = true;
 }
 #[test]
 fn audit_483_planar_straight_sweep_keeps_valid_result_with_all_flags() {

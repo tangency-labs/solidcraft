@@ -119,10 +119,10 @@
 //!   (`CreateTrimmedPlaneFromRuled`'s reading of an arc, `MakeCurvesCompatible`, the
 //!   knots and extension of a UV curve) see the B-spline part.
 //! - **Code behind stubs** is ported as upstream runs it, unchecked statuses included:
-//!   `HaveTangentGaps` ignores `NormalizedEvaluate`'s and `ClosestPoint`'s statuses (a
-//!   failed evaluation leaves the point at `SmPoint3d`'s `SM_UNDEF_DOUBLE` default, a
-//!   failed closest point counts as `bSuccess == FALSE`), `TrimExtendedEdge` ignores the
-//!   `Evaluate` / `EvaluateNormal` of a solution the same way, and `ExtendTrimEdges` keeps
+//!   `HaveTangentGaps` ignores `ClosestPoint`'s status (a failed closest point counts as
+//!   `bSuccess == FALSE`; a sample it cannot evaluate is skipped, as the fork does, see
+//!   below), `TrimExtendedEdge` ignores the `Evaluate` / `EvaluateNormal` of a solution
+//!   the same way, and `ExtendTrimEdges` keeps
 //!   `pOtherUVCurve` as the edge use's or radial's own UV trim curve when there is no
 //!   other extended surface (`cpp:1452`, `1458`), passes it to `TrimExtendedEdge` and trims
 //!   it in place (`cpp:1694`). The unchecked `Copy` calls of `ExtendTrimEdges` and
@@ -160,10 +160,10 @@
 //!   upstream's stay on the surfaces between curve replacements.
 //! - **Recursion.** None.
 //!
-//! With `offset_tangent_gap_statuses` (#483; the fork's behaviour since #2009, fork
-//! 4803d6d), `HaveTangentGaps` skips a sample it cannot evaluate (it measured an unset
-//! point); `ClosestPoint`'s status stays dropped, its success flag decides. A successful
-//! query without a solution retains its existing meaning.
+//! As the fork does (#483; fork 4803d6d, since #2009), `HaveTangentGaps` skips a sample
+//! it cannot evaluate (upstream measured an unset point); `ClosestPoint`'s status stays
+//! dropped, its success flag decides. A successful query without a solution retains its
+//! existing meaning.
 //!
 
 use crate::blend::fillet_standard_solver::p1::CircularCrossSectionFsg;
@@ -366,12 +366,9 @@ fn tangent_gap_samples<B>(
 ) -> Result<bool> {
     for i in 0..=num_samples {
         let param = (i as f64 * 1.0) / (num_samples as f64 * 1.0);
-        let evaluation = ignore_soft(evaluate(k, brep, param))?;
-        let pnt = match evaluation {
-            Some(pnt) => pnt,
-            // fork 4803d6d: a sample that cannot be evaluated shows no gap
-            None if k.fixes.offset_tangent_gap_statuses => continue,
-            None => Vec3::new(UNDEF_DOUBLE, UNDEF_DOUBLE, UNDEF_DOUBLE),
+        // fork 4803d6d: a sample that cannot be evaluated shows no gap
+        let Some(pnt) = ignore_soft(evaluate(k, brep, param))? else {
+            continue;
         };
         // `ClosestPoint`'s status is dropped (the fork keeps it so: its `bSuccess`
         // says whether a closest point was found)
@@ -4184,10 +4181,9 @@ impl OffsetGeometryCreation {
     ///
     /// # Errors
     ///
-    /// Evaluation and closest-point statuses are ignored (`Unported` aside); with
-    /// `offset_tangent_gap_statuses` a sample that cannot be evaluated is skipped
-    /// (fork 4803d6d). A successful closest-point query without a solution does not
-    /// establish a gap.
+    /// Evaluation and closest-point statuses are ignored (`Unported` aside); a sample
+    /// that cannot be evaluated is skipped (fork 4803d6d). A successful closest-point
+    /// query without a solution does not establish a gap.
     /// [`SolidError::InvalidInput`] for an edge use without edge.
     pub fn have_tangent_gaps<O: ClassObject + SolutionObject>(
         &self,
@@ -5227,98 +5223,93 @@ mod tests {
 
     #[test]
     fn audit_483_tangent_gaps_preserve_errors_and_no_solution() {
-        let mut k = Kernel::default();
+        let k = Kernel::default();
         let error = SolidError::sm_err("injected tangent-gap service");
-        for checked in [false, true] {
-            k.fixes.offset_tangent_gap_statuses = checked;
-            for fail_evaluation in [false, true] {
-                let mut calls = Vec::new();
-                let result = tangent_gap_samples(
-                    &k,
-                    &mut calls,
-                    2,
-                    1e-6,
-                    |_, calls, _| {
-                        calls.push("evaluate");
-                        if fail_evaluation {
-                            Err(error.clone())
-                        } else {
-                            Ok(Vec3::ZERO)
-                        }
-                    },
-                    |_, calls, _| {
-                        calls.push("closest");
+        for fail_evaluation in [false, true] {
+            let mut calls = Vec::new();
+            let result = tangent_gap_samples(
+                &k,
+                &mut calls,
+                2,
+                1e-6,
+                |_, calls, _| {
+                    calls.push("evaluate");
+                    if fail_evaluation {
                         Err(error.clone())
-                    },
-                );
-                if checked {
-                    // fork 4803d6d: a failed sample is skipped; ClosestPoint's status
-                    // stays dropped
-                    assert!(!result.unwrap());
-                    assert_eq!(
-                        calls,
-                        if fail_evaluation {
-                            vec!["evaluate"; 3]
-                        } else {
-                            ["evaluate", "closest"].repeat(3)
-                        }
-                    );
-                } else {
-                    assert!(!result.unwrap());
-                    assert_eq!(calls.len(), 6);
-                }
-            }
-            let mut samples = Vec::new();
-            assert!(!tangent_gap_samples(
-                &k,
-                &mut samples,
-                2,
-                1e-6,
-                |_, calls, t| {
-                    calls.push(t);
-                    Ok(Vec3::X * t)
-                },
-                |_, _, _| Ok(None)
-            )
-            .unwrap());
-            assert_eq!(samples, vec![0.0, 0.5, 1.0]);
-            assert!(tangent_gap_samples(
-                &k,
-                &mut (),
-                2,
-                1e-6,
-                |_, (), _| Ok(Vec3::X),
-                |_, (), _| Ok(Some(2e-6))
-            )
-            .unwrap());
-        }
-    }
-
-    /// fork 4803d6d (`SmOffsetGeometryCreation::HaveTangentGaps`): a sample that
-    /// cannot be evaluated shows no gap. Upstream measures the unset point instead, and
-    /// a closest point far from it reads as a gap.
-    #[test]
-    fn tangent_gaps_skip_a_sample_that_cannot_be_evaluated() {
-        for skip in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.offset_tangent_gap_statuses = skip;
-            let gap = tangent_gap_samples(
-                &k,
-                &mut (),
-                2,
-                1e-6,
-                |_, (), t| {
-                    if t == 0.5 {
-                        Err(SolidError::sm_err("injected evaluation failure"))
                     } else {
-                        Ok(Vec3::X * t)
+                        Ok(Vec3::ZERO)
                     }
                 },
-                |_, (), p| Ok(Some(if p.x == UNDEF_DOUBLE { 1.0 } else { 0.0 })),
-            )
-            .unwrap();
-            assert_eq!(gap, !skip);
+                |_, calls, _| {
+                    calls.push("closest");
+                    Err(error.clone())
+                },
+            );
+            // fork 4803d6d: a failed sample is skipped; ClosestPoint's status stays
+            // dropped
+            assert!(!result.unwrap());
+            assert_eq!(
+                calls,
+                if fail_evaluation {
+                    vec!["evaluate"; 3]
+                } else {
+                    ["evaluate", "closest"].repeat(3)
+                }
+            );
         }
+        let mut samples = Vec::new();
+        assert!(!tangent_gap_samples(
+            &k,
+            &mut samples,
+            2,
+            1e-6,
+            |_, calls, t| {
+                calls.push(t);
+                Ok(Vec3::X * t)
+            },
+            |_, _, _| Ok(None)
+        )
+        .unwrap());
+        assert_eq!(samples, vec![0.0, 0.5, 1.0]);
+        assert!(tangent_gap_samples(
+            &k,
+            &mut (),
+            2,
+            1e-6,
+            |_, (), _| Ok(Vec3::X),
+            |_, (), _| Ok(Some(2e-6))
+        )
+        .unwrap());
+    }
+
+    /// fork 4803d6d (`SmOffsetGeometryCreation::HaveTangentGaps`), and the default
+    /// kernel: a sample that cannot be evaluated shows no gap and is not measured.
+    /// Upstream measured the unset point instead, and a closest point far from it read
+    /// as a gap.
+    #[test]
+    fn tangent_gaps_skip_a_sample_that_cannot_be_evaluated() {
+        let k = Kernel::default();
+        let mut measured = Vec::new();
+        let gap = tangent_gap_samples(
+            &k,
+            &mut measured,
+            2,
+            1e-6,
+            |_, _, t| {
+                if t == 0.5 {
+                    Err(SolidError::sm_err("injected evaluation failure"))
+                } else {
+                    Ok(Vec3::X * t)
+                }
+            },
+            |_, measured, p| {
+                measured.push(p.x);
+                Ok(Some(if p.x == UNDEF_DOUBLE { 1.0 } else { 0.0 }))
+            },
+        )
+        .unwrap();
+        assert!(!gap);
+        assert_eq!(measured, vec![0.0, 1.0]);
     }
 
     /// A quadratic in the plane y = 0 over the plane z = 0, from x = -1 to 1 (t = 0 to 1):
