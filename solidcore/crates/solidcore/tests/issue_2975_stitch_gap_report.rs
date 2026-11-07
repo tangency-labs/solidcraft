@@ -90,13 +90,18 @@ fn a_known_gap_reports_its_bound_and_the_growth_its_closure_applied() {
 fn an_exact_match_reports_no_growth() {
     let mut k = Kernel::default();
     let mut b = new_brep(&mut k, USE_DEFAULT, USE_DEFAULT).unwrap();
-    add_square(&mut k, &mut b, 0.0, 0.0);
+    add_square(&mut k, &mut b, 1.0, 0.0);
     add_square(&mut k, &mut b, 0.0, 0.0);
 
     let gaps = stitch_and_orient_reported(&mut k, &mut b, &StitchAndOrientOptions::default())
         .expect("the stitch runs");
+    assert_eq!(
+        gaps.len(),
+        3,
+        "two endpoint glues and their shared edge: {gaps:?}"
+    );
     for gap in gaps {
-        assert!(gap.gap.is_finite(), "gap {gap:?}");
+        assert_eq!(gap.gap, 0.0, "exact shared boundary: {gap:?}");
         assert!(
             gap.growth == 0.0,
             "the exact match's closure applied no growth: {gap:?}"
