@@ -604,3 +604,137 @@ fn obstacles_stand_where_they_are_and_parts_keep_clear() {
     assert_eq!(r.placed.len(), 20, "{r:?}");
     assert!((r.fill - 0.8).abs() < 1e-9, "{r:?}");
 }
+
+fn polar(r: f64, deg: f64) -> Vec2 {
+    let t = deg.to_radians();
+    v(r * t.cos(), r * t.sin())
+}
+
+fn pairs(r: &[Vec2]) -> Vec<(f64, f64)> {
+    r.iter().map(|p| (p.x, p.y)).collect()
+}
+
+/// Every corner and edge sample of `fine` lies inside or on `coarse`.
+fn covers(coarse: &Shape2, fine: &Shape2) -> bool {
+    let c = vec![pairs(&coarse.outer)];
+    let f = vec![pairs(&fine.outer)];
+    edge_samples(&f, false)
+        .into_iter()
+        .chain(f[0].iter().copied())
+        .all(|p| in_poly(p, &c) || ring_edges(&c[0]).iter().any(|(a, b)| point_seg(p, *a, *b) < 1e-6))
+}
+
+/// A gear of `teeth` teeth `depth` deep on a wheel of radius `r`, each flank finely chorded.
+fn gear(teeth: usize, r: f64, depth: f64) -> Shape2 {
+    let pitch = 360.0 / teeth as f64;
+    let mut pts = Vec::new();
+    for t in 0..teeth {
+        let a = pitch * t as f64;
+        for k in 0..=8 {
+            let f = k as f64 / 8.0;
+            pts.push(polar(r - depth + depth * f, a + 0.15 * pitch * f));
+        }
+        for k in 1..8 {
+            pts.push(polar(r, a + 0.15 * pitch + 0.2 * pitch * k as f64 / 8.0));
+        }
+        for k in 0..=8 {
+            let f = k as f64 / 8.0;
+            pts.push(polar(r - depth * f, a + 0.35 * pitch + 0.15 * pitch * f));
+        }
+        for k in 1..8 {
+            pts.push(polar(r - depth, a + 0.5 * pitch + 0.5 * pitch * k as f64 / 8.0));
+        }
+    }
+    Shape2 { outer: pts, holes: Vec::new() }
+}
+
+#[test]
+fn coarsening_fills_dents_the_spacing_shuts_and_keeps_the_rest() {
+    // 40 teeth 4 mm deep on a 50 mm wheel, the gaps 4 to 6 mm wide: a part kept 4 mm away can't
+    // get into them.
+    let g = gear(40, 50.0, 4.0);
+    let c = coarsen(&g, 4.0, COARSEN_BUDGET);
+    assert!(covers(&c, &g), "the coarse gear covers the gear");
+    assert!(c.outer.len() * 4 <= g.outer.len(), "{} of {} corners", c.outer.len(), g.outer.len());
+    // With no spacing nothing is shut: only the budget's worth of area goes.
+    let few = gear(6, 50.0, 4.0);
+    let open = coarsen(&few, 0.0, COARSEN_BUDGET);
+    assert!(covers(&open, &few));
+    let grown = signed_area(&pairs(&open.outer)) - signed_area(&pairs(&few.outer));
+    assert!(grown <= COARSEN_BUDGET * signed_area(&pairs(&few.outer)) + 1e-9, "grew by {grown}");
+    assert!(open.outer.len() < few.outer.len() && open.outer.len() >= 6 * 4, "{} corners", open.outer.len());
+    // An arc-shaped part, three quarters of a ring 20 mm wide, finely chorded: a part fits in its
+    // inside, so it stays an arc, its middle open, with its corners spread round it.
+    let mut arc: Vec<Vec2> = (0..=270).map(|k| polar(50.0, k as f64)).collect();
+    arc.extend((0..=270).rev().map(|k| polar(30.0, k as f64)));
+    let arc = Shape2 { outer: arc, holes: Vec::new() };
+    let c = coarsen(&arc, 3.0, COARSEN_BUDGET);
+    assert!(covers(&c, &arc));
+    let (a0, a1) = (signed_area(&pairs(&arc.outer)), signed_area(&pairs(&c.outer)));
+    assert!(a1 <= a0 * (1.0 + 2.0 * COARSEN_BUDGET), "{a1} vs {a0}");
+    assert!(!in_poly((0.0, 0.0), &[pairs(&c.outer)]) && !in_poly((25.0, -25.0), &[pairs(&c.outer)]));
+    assert!(c.outer.len() < arc.outer.len() / 3, "{} corners", c.outer.len());
+    let angles: Vec<f64> = c.outer.iter().filter(|p| p.x.hypot(p.y) > 40.0).map(|p| p.y.atan2(p.x).to_degrees().rem_euclid(360.0)).collect();
+    for from in (0..270).step_by(45) {
+        assert!(angles.iter().any(|a| (*a - from as f64 - 22.5).abs() <= 22.5), "the outer arc keeps corners near {from}..{} deg", from + 45);
+    }
+    // Clockwise rings come back clockwise; a square, a short ring and hostile input as they are.
+    let mut cw = g.clone();
+    cw.outer.reverse();
+    let c = coarsen(&cw, 3.0, COARSEN_BUDGET);
+    assert!(signed_area(&pairs(&c.outer)) < 0.0 && covers(&c, &cw));
+    let square = poly(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]);
+    assert_eq!(coarsen(&square, 3.0, COARSEN_BUDGET), square);
+    // A panel keeps a notch a part fits in: wider than the spacing, more than the budget.
+    let notched =
+        poly(&[(0.0, 0.0), (1000.0, 0.0), (1000.0, 1000.0), (550.0, 1000.0), (550.0, 900.0), (450.0, 900.0), (450.0, 1000.0), (0.0, 1000.0)]);
+    assert_eq!(coarsen(&notched, 3.0, COARSEN_BUDGET), notched);
+    // A notch the spacing keeps every part out of is filled, whatever its area: it holds nothing.
+    let shut = poly(&[(0.0, 0.0), (1000.0, 0.0), (1000.0, 1000.0), (515.0, 1000.0), (515.0, 970.0), (485.0, 970.0), (485.0, 1000.0), (0.0, 1000.0)]);
+    assert_eq!(coarsen(&shut, 30.0, COARSEN_BUDGET), Shape2::rectangle(1000.0, 1000.0));
+    for bad in [poly(&[(f64::NAN, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (0.5, 0.5)]), poly(&[(0.0, 0.0); 6]), poly(&[(0.0, 0.0), (1.0, 1.0)])] {
+        assert_eq!(format!("{:?}", coarsen(&bad, 3.0, COARSEN_BUDGET)), format!("{bad:?}"), "comes back as it is");
+    }
+    for (reach, budget) in [(f64::NAN, 1.0), (f64::INFINITY, f64::INFINITY), (-1.0, -1.0), (1e300, 1e300)] {
+        assert!(covers(&coarsen(&g, reach, budget), &g));
+    }
+}
+
+#[test]
+fn a_fine_ring_is_coarsened_within_its_budget_and_never_past_it() {
+    // A circle of 2000 chords: most corners go for a sliver of area each.
+    let fine = ngon(2000, 40.0);
+    let c = coarsen(&fine, 0.0, COARSEN_BUDGET);
+    let (a0, a1) = (signed_area(&pairs(&fine.outer)), signed_area(&pairs(&c.outer)));
+    assert!(covers(&c, &fine) && a1 - a0 <= COARSEN_BUDGET * a0 + 1e-9, "{a1} vs {a0}");
+    assert!(c.outer.len() * 4 < fine.outer.len(), "{} corners", c.outer.len());
+    // No budget: only straight corners could go, and a circle has none.
+    assert_eq!(coarsen(&fine, 0.0, 0.0), fine);
+    // Nothing comes out wider than the true outline's box.
+    let (lo, hi) = c.outer.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), p| (lo.min(p.x).min(p.y), hi.max(p.x).max(p.y)));
+    assert!(lo >= -40.0 - 1e-6 && hi <= 40.0 + 1e-6, "{lo} {hi}");
+}
+
+#[test]
+fn quick_rejection_discs_lie_inside_the_material() {
+    // A gear, a ring with its hole, an L and a long thin bar.
+    let ring = Shape2 { outer: ngon(64, 50.0).outer, holes: vec![ngon(64, 30.0).outer.into_iter().rev().collect()] };
+    let ell = poly(&[(0.0, 0.0), (80.0, 0.0), (80.0, 10.0), (10.0, 10.0), (10.0, 60.0), (0.0, 60.0)]);
+    for shape in [gear(40, 50.0, 4.0), ring, ell, Shape2::rectangle(300.0, 2.0)] {
+        let region = Region::new(&shape, "a part").unwrap_or_else(|e| panic!("{e}"));
+        let discs = poles(&region.shape);
+        assert!(!discs.is_empty() && discs.len() <= POLES, "{} discs for {:?}", discs.len(), region.shape.bbox);
+        for d in &discs {
+            assert!(d.r > 0.0 && in_material(d.c, &region.shape.rings), "{d:?}");
+            let near = region.shape.rings.iter().flat_map(|r| edges(&r.pts)).map(|(a, b)| seg_dist(d.c, a, b)).fold(f64::INFINITY, f64::min);
+            assert!(near >= d.r, "{d:?} is {near} from an edge");
+        }
+        for (i, a) in discs.iter().enumerate() {
+            for b in discs.iter().skip(i + 1) {
+                assert!(a.c.sub(b.c).len() >= a.r + b.r - 1e-9, "{a:?} and {b:?} overlap");
+            }
+        }
+    }
+    // A shape with no area has none.
+    assert!(poles(&Shape::new(vec![vec![P::new(0.0, 0.0), P::new(0.0, 0.0), P::new(0.0, 0.0)]])).is_empty());
+}

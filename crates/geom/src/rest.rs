@@ -254,6 +254,47 @@ pub fn level_face_at(body: &Brep, at: Vec3, tol: f64) -> Option<LevelFace> {
     None
 }
 
+/// A planar face of any tilt, in its own frame: `e1`, `e2` along it and `normal` out of the
+/// material (right-handed, unit). Its rings are in `(e1 · p, e2 · p)` and it lies at
+/// `normal · p = height`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FlatFace {
+    pub shape: Shape2,
+    pub e1: Vec3,
+    pub e2: Vec3,
+    pub normal: Vec3,
+    pub height: f64,
+    /// How far the flattened rings may stray from the true boundary, mm.
+    pub error: f64,
+}
+
+/// The planar face of `body` that `at` lies on, at any tilt: within `tol` of its plane, inside
+/// its outer ring and outside its holes. Its frame is squared to the world as far as it can be:
+/// `e1` level when the face is not, and X when it is.
+pub fn flat_face_at(body: &Brep, at: Vec3, tol: f64) -> Option<FlatFace> {
+    let forward = face_senses(body);
+    for (i, face) in body.faces.iter().enumerate() {
+        let Some((o, u, v)) = plane_of(&face.surface) else { continue };
+        let Some(axis) = u.cross(v).normalized() else { continue };
+        if axis.dot(at - o).abs() > tol {
+            continue;
+        }
+        let Some(signed) = face_area(body, i, axis) else { continue };
+        let natural = if signed > 0.0 { axis } else { axis * -1.0 };
+        let normal = if forward.get(i).copied().unwrap_or(true) { natural } else { natural * -1.0 };
+        let level = Vec3::new(0.0, 0.0, 1.0).cross(normal);
+        let e1 = level.normalized().unwrap_or(Vec3::new(1.0, 0.0, 0.0));
+        let Some(e2) = normal.cross(e1).normalized() else { continue };
+        let height = normal.dot(o);
+        // From the plane's foot on the normal through the origin, flat coordinates are e1 · p, e2 · p.
+        let Some(rings) = face_rings(body, i, normal * height, e1, e2) else { continue };
+        if inside(&rings.shape, Vec2::new(at.dot(e1), at.dot(e2))) {
+            return Some(FlatFace { shape: rings.shape, e1, e2, normal, height, error: rings.error });
+        }
+    }
+    None
+}
+
 /// How far a flattened curve may stray from the true one, mm, before it is cut finer.
 pub const CHORD: f64 = 0.01;
 

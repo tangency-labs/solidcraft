@@ -26,7 +26,8 @@
 //! layout keeps the true curves apart too.
 //!
 //! The same input always gives the same layout on one platform: the order search draws from a
-//! seeded generator and stops after a set number of tries, never on the clock. (Turns that are not
+//! seeded generator and stops after a set number of tries, never on the clock. Only a caller's
+//! time budget ([`arrange_hurried`]) can change a layout, and only once it says to hurry. (Turns that are not
 //! multiples of 90° use the platform's sine and cosine, which may differ in the last bit between
 //! platforms.)
 
@@ -124,6 +125,24 @@ pub struct ArrangeResult {
     pub used: Aabb2,
     /// Placed parts' area over the sheet's area.
     pub fill: f64,
+    /// The most the caller's budget made the layout hurry ([`Hurry::No`] when it never did).
+    pub hurried: Hurry,
+}
+
+/// How far behind its time budget a layout is, as the caller of [`arrange_hurried`] judges it:
+/// what is given up to keep up. Each step also does what the ones before it do.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Hurry {
+    /// The full search.
+    #[default]
+    No,
+    /// No starts from corners meeting placed parts' corners, and the first spot that fits wins;
+    /// no other orders are tried.
+    Quick,
+    /// Each part still to place goes by its box at its turn.
+    Boxes,
+    /// No more parts are placed: those left count as unplaced.
+    Stop,
 }
 
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
@@ -179,6 +198,20 @@ pub fn arrange_around(
     options: &ArrangeOptions,
     cancel: &dyn Fn() -> bool,
 ) -> Result<ArrangeResult, ArrangeError> {
+    arrange_hurried(items, sheet, obstacles, options, cancel, &|| Hurry::No)
+}
+
+/// [`arrange_around`], asking `hurry` before each part how far behind a time budget it is and
+/// giving up layout quality to match ([`Hurry`]): a caller's clock bounds the work, which on its
+/// own grows with the parts, their corners and their turns.
+pub fn arrange_hurried(
+    items: &[ArrangeItem],
+    sheet: &Shape2,
+    obstacles: &[Shape2],
+    options: &ArrangeOptions,
+    cancel: &dyn Fn() -> bool,
+    hurry: &dyn Fn() -> Hurry,
+) -> Result<ArrangeResult, ArrangeError> {
     if obstacles.len() > MAX_OBSTACLES {
         return Err(ArrangeError::TooMuchWork);
     }
@@ -196,6 +229,7 @@ pub fn arrange_around(
     let mut copies = 0usize;
     let mut corners = 0usize;
     let mut kinds = Vec::with_capacity(items.len());
+    let mut boxes = Vec::with_capacity(items.len());
     for (i, item) in items.iter().enumerate() {
         if item.rotations_deg.len() > MAX_ROTATIONS {
             return Err(ArrangeError::TooManyRotations { item: i });
@@ -215,6 +249,12 @@ pub fn arrange_around(
             return Err(ArrangeError::TooMuchWork);
         }
         kinds.push(kind);
+        // The same turns by their boxes, for when time runs short.
+        boxes.push(if item.quantity == 0 {
+            Kind { poses: Vec::new(), area: region.area }
+        } else {
+            Kind::new(&region, &item.rotations_deg, ArrangeMethod::Rectangular)
+        });
     }
     let size = sheet.shape.bbox.diag();
     // Obstacles off the sheet's box (grown by the spacing) can never be in the way.
@@ -228,7 +268,8 @@ pub fn arrange_around(
         }
         let shape = region.shape.moved(region.min.sub(sheet.min));
         if shape.bbox.hits(&reach) {
-            fixed.push(Laid { kind: usize::MAX, pose: 0, at: P::new(0.0, 0.0), shape });
+            let poles = poles(&shape);
+            fixed.push(Laid { kind: usize::MAX, pose: 0, at: P::new(0.0, 0.0), shape, poles });
         }
     }
     let ctx = Ctx {
@@ -240,6 +281,9 @@ pub fn arrange_around(
         part_in_part: options.part_in_part && options.method == ArrangeMethod::TrueShape,
         tol: 1e-9 * size,
         cancel,
+        boxes: &boxes,
+        hurry,
+        hurried: std::cell::Cell::new(Hurry::No),
     };
 
     // Largest first; ties keep the caller's order. Each part may take any of its turns.
@@ -253,6 +297,9 @@ pub fn arrange_around(
     let mut best = ctx.lay(&order, None)?;
     let mut rng = Rng(options.seed ^ 0x9E37_79B9_7F4A_7C15);
     for _ in 0..options.improve {
+        if hurry() > Hurry::No {
+            break;
+        }
         let poses = |k: usize| kinds.get(k).map_or(0, |kind| kind.poses.len());
         let Some((next, from)) = rng.reorder(&order, poses) else { break };
         let layout = ctx.lay(&next, Some((&best, from)))?;
@@ -280,7 +327,7 @@ pub fn arrange_around(
         area += kind.area;
     }
     let unplaced = items.iter().zip(&done).map(|(item, n)| item.quantity.saturating_sub(*n)).collect();
-    Ok(ArrangeResult { placed, unplaced, used, fill: area / sheet_area })
+    Ok(ArrangeResult { placed, unplaced, used, fill: area / sheet_area, hurried: ctx.hurried.get() })
 }
 
 fn kinds_area(kinds: &[Kind], i: usize) -> f64 {
@@ -677,6 +724,16 @@ impl Region {
     }
 }
 
+/// Whether `a` and `b`, where they stand, keep at least `clear` apart: the material of neither
+/// meets the other's, and no corner of one comes nearer than `clear` to an edge of the other. A
+/// shape [`arrange`] would not take is never apart.
+pub fn apart(a: &Shape2, b: &Shape2, clear: f64) -> bool {
+    let (Ok(ra), Ok(rb)) = (Region::new(a, "a shape"), Region::new(b, "a shape")) else { return false };
+    let (sa, sb) = (ra.shape.moved(ra.min), rb.shape.moved(rb.min));
+    let tol = 1e-9 * sa.bbox.union(sb.bbox).diag();
+    !conflict(&sa.rings, &sb.rings, false, tol) && !conflict(&sb.rings, &sa.rings, false, tol) && clear_of(&sa, &sb, clear.max(0.0), tol)
+}
+
 /// Whether `ring` is a region outline [`arrange`] takes: at least three corners, an area, and no
 /// edge meeting another but at the corners neighbours share.
 pub(crate) fn is_simple(ring: &[Vec2]) -> bool {
@@ -989,6 +1046,104 @@ struct Pose {
     base: P,
     size: P,
     shape: Shape,
+    /// Discs inside the outline, where its box starts at (0, 0) (see [`poles`]).
+    poles: Vec<Disc>,
+}
+
+/// A disc inside a part's material: centre and radius.
+#[derive(Clone, Copy, Debug)]
+struct Disc {
+    c: P,
+    r: f64,
+}
+
+/// Most discs a part gets for [`Ctx::fits`]'s quick rejection.
+const POLES: usize = 8;
+
+/// Most spots tried while looking for one disc: they only speed up a check, so a rough one does.
+const MAX_POLE_TRIES: usize = 256;
+
+/// Discs well inside `shape`'s material, largest first, each the largest that fits clear of the
+/// edges and of the discs before it (to within a hundredth of the shape's size, or a twentieth of
+/// its width when it is thin), until one would
+/// be under a sixth of the first. Two parts whose discs come closer than their radii plus the
+/// spacing surely come too close, so most spots that don't fit are told apart without looking at
+/// a single edge.
+fn poles(shape: &Shape) -> Vec<Disc> {
+    let b = shape.bbox;
+    let s = b.size();
+    let size = s.x.max(s.y);
+    if !(size.is_finite() && size > 0.0) {
+        return Vec::new();
+    }
+    // Fine enough for a thin part to get its discs too.
+    let prec = (size * 1e-2).min(s.x.min(s.y) * 0.05);
+    let mut out: Vec<Disc> = Vec::new();
+    // How far `q` is from leaving the material or entering a disc found already (negative
+    // outside).
+    let room = |q: P, out: &[Disc]| -> f64 {
+        let mut d = f64::INFINITY;
+        for r in &shape.rings {
+            for (a, e) in edges(&r.pts) {
+                d = d.min(seg_dist(q, a, e));
+            }
+        }
+        for o in out {
+            d = d.min(q.sub(o.c).len() - o.r);
+        }
+        if in_material(q, &shape.rings) { d } else { -d }
+    };
+    // A cell: its centre's room and how much more any point in it could have.
+    #[derive(PartialEq)]
+    struct Cell(f64, f64, P, f64);
+    impl Eq for Cell {}
+    impl PartialOrd for Cell {
+        fn partial_cmp(&self, o: &Self) -> Option<std::cmp::Ordering> {
+            Some(self.cmp(o))
+        }
+    }
+    impl Ord for Cell {
+        fn cmp(&self, o: &Self) -> std::cmp::Ordering {
+            (self.0 + self.1).total_cmp(&(o.0 + o.1))
+        }
+    }
+    for _ in 0..POLES {
+        // Cells no wider than the thin side (at most 64 along the long one), centred on the box so
+        // a thin part's middle line is among the first centres looked at.
+        let h = (s.x.min(s.y) / 2.0).max(size / 128.0);
+        let (nx, ny) = ((s.x / (2.0 * h)).ceil().max(1.0) as usize, (s.y / (2.0 * h)).ceil().max(1.0) as usize);
+        let mid = b.min.add(s.scale(0.5));
+        let mut heap = std::collections::BinaryHeap::new();
+        let mut best = Disc { c: mid, r: f64::NEG_INFINITY };
+        for i in 0..nx {
+            for j in 0..ny {
+                let c = P::new(mid.x + (2.0 * i as f64 - (nx - 1) as f64) * h, mid.y + (2.0 * j as f64 - (ny - 1) as f64) * h);
+                heap.push(Cell(room(c, &out), h * std::f64::consts::SQRT_2, c, h));
+            }
+        }
+        let mut evals = 0usize;
+        while let Some(Cell(d, up, c, h)) = heap.pop() {
+            if d > best.r {
+                best = Disc { c, r: d };
+            }
+            if d + up <= best.r + prec || evals > MAX_POLE_TRIES {
+                break;
+            }
+            let h = h / 2.0;
+            for (dx, dy) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+                let q = c.add(P::new(dx * h, dy * h));
+                heap.push(Cell(room(q, &out), h * std::f64::consts::SQRT_2, q, h));
+                evals += 1;
+            }
+        }
+        // A hair inside, so rounding never puts a disc's edge outside the material.
+        let r = best.r - prec;
+        if !(r.is_finite() && r > 0.0) || out.first().is_some_and(|f| r < f.r / 6.0) {
+            break;
+        }
+        out.push(Disc { c: best.c, r });
+    }
+    out
 }
 
 struct Kind {
@@ -1015,6 +1170,7 @@ impl Kind {
         }
         angles.sort_by(f64::total_cmp);
         angles.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+        let discs = poles(&region.shape);
         let poses = angles
             .into_iter()
             .map(|deg| {
@@ -1030,7 +1186,8 @@ impl Kind {
                     }
                 };
                 // A point p of the caller's shape is rot(p - min) - b.min + at.
-                Pose { angle: deg.to_radians(), base: rot(region.min).add(b.min).scale(-1.0), size: b.size(), shape: Shape::new(rings) }
+                let poles = discs.iter().map(|d| Disc { c: rot(d.c).sub(b.min), r: d.r }).collect();
+                Pose { angle: deg.to_radians(), base: rot(region.min).add(b.min).scale(-1.0), size: b.size(), shape: Shape::new(rings), poles }
             })
             .collect();
         Kind { poses, area: region.area }
@@ -1111,6 +1268,11 @@ struct Ctx<'a> {
     part_in_part: bool,
     tol: f64,
     cancel: &'a dyn Fn() -> bool,
+    /// Each kind's turns by their boxes, taken when [`Hurry::Boxes`].
+    boxes: &'a [Kind],
+    hurry: &'a dyn Fn() -> Hurry,
+    /// The most `hurry` has said so far.
+    hurried: std::cell::Cell<Hurry>,
 }
 
 /// A part on the sheet.
@@ -1120,6 +1282,8 @@ struct Laid {
     pose: usize,
     at: P,
     shape: Shape,
+    /// Its discs where it stands.
+    poles: Vec<Disc>,
 }
 
 struct Layout {
@@ -1192,11 +1356,19 @@ impl Ctx<'_> {
         }
         for &Gene { kind: k, pose: lock } in order.iter().skip(from) {
             self.cancelled()?;
+            let hurry = (self.hurry)();
+            self.hurried.set(self.hurried.get().max(hurry));
+            if hurry >= Hurry::Stop {
+                after.push(laid.len());
+                failed.push(true);
+                continue;
+            }
             let mut fail = false;
-            if let (Some(kind), Some(full)) = (self.kinds.get(k), no_room.get_mut(k))
+            let kinds = if hurry >= Hurry::Boxes { self.boxes } else { self.kinds };
+            if let (Some(kind), Some(full)) = (kinds.get(k), no_room.get_mut(k))
                 && !*full
             {
-                match self.best_spot(k, kind, lock, &laid, &grid)? {
+                match self.best_spot(k, kind, lock, &laid, &grid, hurry >= Hurry::Quick)? {
                     Some(l) => {
                         area += kind.area;
                         grid.insert(laid.len(), &l.shape.bbox);
@@ -1218,7 +1390,22 @@ impl Ctx<'_> {
     }
 
     /// The best spot for a part of kind `k`, at any of its turns or only at `lock`.
-    fn best_spot(&self, k: usize, kind: &Kind, lock: Option<usize>, laid: &[Laid], grid: &Grid) -> Result<Option<Laid>, ArrangeError> {
+    /// `quick`: no corner-contact starts beside placed parts, and the first spot that settles wins.
+    fn best_spot(
+        &self,
+        k: usize,
+        kind: &Kind,
+        lock: Option<usize>,
+        laid: &[Laid],
+        grid: &Grid,
+        mut quick: bool,
+    ) -> Result<Option<Laid>, ArrangeError> {
+        // The budget is asked as the search goes too, so one detailed part can't overrun it.
+        let behind = || {
+            let h = (self.hurry)();
+            self.hurried.set(self.hurried.get().max(h));
+            h
+        };
         // Every start of every rotation, best first by where its box would end (lowest top, then
         // leftmost). Settling only moves a part down or left, so the first few that fit hold the
         // best spots; later ones only get looked at when those fail.
@@ -1226,7 +1413,10 @@ impl Ctx<'_> {
         let order = |a: &(f64, f64, usize, P), b: &(f64, f64, usize, P)| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)).then(a.2.cmp(&b.2));
         for (pi, pose) in kind.poses.iter().enumerate().filter(|(pi, _)| lock.is_none_or(|l| l == *pi)) {
             self.cancelled()?;
-            cands.extend(self.starts(pose, laid).into_iter().map(|at| (at.y + pose.size.y, at.x + pose.size.x, pi, at)));
+            if behind() >= Hurry::Stop {
+                return Ok(None);
+            }
+            cands.extend(self.starts(pose, laid, !quick).into_iter().map(|at| (at.y + pose.size.y, at.x + pose.size.x, pi, at)));
             if cands.len() > 2 * MAX_STARTS {
                 cands.select_nth_unstable_by(MAX_STARTS, order);
                 cands.truncate(MAX_STARTS);
@@ -1239,8 +1429,13 @@ impl Ctx<'_> {
         for (ci, &(top, right, pi, start)) in cands.iter().enumerate() {
             if ci % 64 == 0 {
                 self.cancelled()?;
+                match behind() {
+                    Hurry::Stop => break,
+                    Hurry::No => {}
+                    _ => quick = true,
+                }
             }
-            if found >= SETTLE_TRIES {
+            if found >= if quick { 1 } else { SETTLE_TRIES } {
                 break;
             }
             // Nothing further down the list can beat a settled spot below its start.
@@ -1276,7 +1471,16 @@ impl Ctx<'_> {
                 best = Some((at, pi, b));
             }
         }
-        Ok(best.and_then(|(at, pi, _)| Some(Laid { kind: k, pose: pi, at, shape: kind.poses.get(pi)?.shape.moved(at) })))
+        Ok(best.and_then(|(at, pi, _)| {
+            let pose = kind.poses.get(pi)?;
+            Some(Laid {
+                kind: k,
+                pose: pi,
+                at,
+                shape: pose.shape.moved(at),
+                poles: pose.poles.iter().map(|d| Disc { c: d.c.add(at), r: d.r }).collect(),
+            })
+        }))
     }
 
     /// Positions where a corner of `pose`'s outline sits on a corner of `ring` (pushed out from it
@@ -1312,7 +1516,9 @@ impl Ctx<'_> {
     /// Start positions for the box corner of `pose`: along the sheet's top and its corners; above,
     /// beside and on top of placed parts near the top of the pile; beside every placed part, in
     /// their holes; and a coarse grid for sheets that are not upright rectangles.
-    fn starts(&self, pose: &Pose, laid: &[Laid]) -> Vec<P> {
+    /// Without `contacts`, no starts where its corners meet placed parts' corners: they are the
+    /// most numerous.
+    fn starts(&self, pose: &Pose, laid: &[Laid], contacts: bool) -> Vec<P> {
         let sb = self.sheet.bbox;
         let (m, s, w, h) = (self.margin, self.spacing, pose.size.x, pose.size.y);
         let (lo, hi) = (P::new(sb.min.x + m, sb.min.y + m), P::new(sb.max.x - m - w, sb.max.y - m - h));
@@ -1340,11 +1546,11 @@ impl Ctx<'_> {
             // buried (and in holes).
             if b.max.y >= pile_top - 2.0 * h - s {
                 out.extend([P::new(b.max.x + s, top), P::new(b.min.x, top), P::new(b.min.x - s - w, top)]);
-                for r in l.shape.outer() {
+                for r in l.shape.outer().iter().filter(|_| contacts) {
                     self.contacts(pose, r, r.side, s, &mut out);
                 }
             }
-            if self.part_in_part {
+            if self.part_in_part && contacts {
                 for r in l.shape.rings.iter().skip(1) {
                     if r.bbox.size().x >= w && r.bbox.size().y >= h {
                         self.contacts(pose, r, r.side, s, &mut out);
@@ -1400,15 +1606,28 @@ impl Ctx<'_> {
         if b.min.x < sb.min.x + m - tol || b.min.y < sb.min.y + m - tol || b.max.x > sb.max.x - m + tol || b.max.y > sb.max.y - m + tol {
             return false;
         }
+        let near: Vec<&Laid> = grid
+            .query(&b.grow(self.spacing + tol))
+            .into_iter()
+            .filter_map(|i| laid.get(i))
+            .filter(|l| b.grow(self.spacing + tol).hits(&l.shape.bbox))
+            .collect();
+        // Discs inside both coming too close: surely too close, with no edge looked at.
+        for l in &near {
+            for d in &pose.poles {
+                let c = d.c.add(at);
+                if l.poles.iter().any(|e| c.sub(e.c).len() + tol < d.r + e.r + self.spacing) {
+                    return false;
+                }
+            }
+        }
         let part = pose.shape.moved(at);
-        if conflict(&part.rings, &self.sheet.rings, true, tol) || !clear_of(&part, self.sheet, m, tol) {
+        // On a plain rectangle the box check above is the whole check.
+        let plain = matches!(self.sheet.rings.as_slice(), [r] if r.pts.len() == 4 && r.pts.iter().all(|p| (p.x == sb.min.x || p.x == sb.max.x) && (p.y == sb.min.y || p.y == sb.max.y)));
+        if !plain && (conflict(&part.rings, &self.sheet.rings, true, tol) || !clear_of(&part, self.sheet, m, tol)) {
             return false;
         }
-        for i in grid.query(&b.grow(self.spacing + tol)) {
-            let Some(l) = laid.get(i) else { continue };
-            if !b.grow(self.spacing + tol).hits(&l.shape.bbox) {
-                continue;
-            }
+        for l in near {
             if conflict(&part.rings, &l.shape.rings, false, tol) || !clear_of(&part, &l.shape, self.spacing, tol) {
                 return false;
             }
@@ -1524,6 +1743,10 @@ impl Rng {
         None
     }
 }
+
+#[path = "arrange_coarsen.rs"]
+mod coarsen;
+pub use coarsen::{COARSEN_BUDGET, coarsen};
 
 #[cfg(test)]
 #[path = "arrange_tests.rs"]

@@ -1,9 +1,9 @@
 //! Footprints: the outline a body covers when it is seen straight down (along -Z), for laying
 //! bodies out on a sheet or a build plate ([`crate::arrange`]).
 //!
-//! The outline comes from the body's exact edges and face silhouettes, projected by the exact
-//! hidden-line code ([`crate::hlr`]); the display mesh plays no part. Every projected piece is
-//! kept whether it is seen or hidden, so the outline does not rest on visibility. The pieces are
+//! The outline comes from the body's exact edges and face silhouettes, projected from their exact
+//! curves ([`crate::hlr::projected_curves`]); the display mesh plays no part. Visibility is not
+//! worked out at all: every projected curve is kept, seen or hidden. The pieces are
 //! flattened into chords with a known error, welded where they meet, split where they cross or
 //! where one ends on another, and the outer boundary of that drawing is walked keeping the
 //! outside on the right. What is inside the outline is covered, so a hole through the body is
@@ -24,7 +24,10 @@ use solidcore_record::{Seg2, Vec2, Vec3};
 use crate::arrange::{MAX_CORNERS, Shape2};
 use crate::hlr::{self, HlrError, Options, Placement, View};
 use crate::profile::Seg2Geom;
-use crate::section::CurveAccuracy;
+
+/// How closely curves are chorded before the outline is walked, relative to the body's size: a
+/// fifth of the outline's own chord ([`outline_of`]).
+const CURVE_TOLERANCE: f64 = 1e-4;
 
 /// Most pieces of drawing an outline is walked from; past it the body is too detailed.
 pub const MAX_PIECES: usize = 200_000;
@@ -53,42 +56,38 @@ pub enum FootprintError {
 }
 
 /// The footprint of `body` turned by `rotation` (its columns: where the body's X, Y and Z axes
-/// go), seen along -Z. Faces the hidden-line code does not support are retried as freeform.
+/// go), seen along -Z.
 pub fn footprint(body: &Brep, rotation: [Vec3; 3], cancel: &dyn Fn() -> bool) -> Result<Footprint, FootprintError> {
-    let view = View::new(Vec3::new(0.0, 0.0, -1.0), Vec3::new(0.0, 1.0, 0.0))?;
-    let placed = Placement { body: 0, rotation, translation: Vec3::ZERO };
-    let mut opts = Options::default();
-    let mut drawing = None;
-    for freeform in [false, true] {
-        opts.freeform = freeform;
-        let def = hlr::prepare_cancellable(body, &opts, cancel)?;
-        let d = hlr::hidden_lines(std::slice::from_ref(&def), &[placed], &view, &opts, cancel)?;
-        let done = d.unsupported.is_empty();
-        drawing = Some(d);
-        if done {
-            break;
+    Shadow::new(body, cancel)?.footprint(rotation, cancel)
+}
+
+/// A body made ready for its footprints: the costly part, done once however it is turned.
+pub struct Shadow {
+    def: hlr::Prepared,
+}
+
+impl Shadow {
+    pub fn new(body: &Brep, cancel: &dyn Fn() -> bool) -> Result<Self, FootprintError> {
+        // Whether a piece would be seen does not matter to a shadow: the curves are projected
+        // with no hidden-line work, freeform faces included.
+        let opts = Options { freeform: true, ..Options::default() };
+        Ok(Self { def: hlr::prepare_cancellable(body, &opts, cancel)? })
+    }
+
+    /// The footprint of the body turned by `rotation`, as [`footprint`] finds it.
+    pub fn footprint(&self, rotation: [Vec3; 3], cancel: &dyn Fn() -> bool) -> Result<Footprint, FootprintError> {
+        let view = View::new(Vec3::new(0.0, 0.0, -1.0), Vec3::new(0.0, 1.0, 0.0))?;
+        let placed = Placement { body: 0, rotation, translation: Vec3::ZERO };
+        let (curves, sag) = hlr::projected_curves(&self.def, &placed, &view, CURVE_TOLERANCE, cancel)?;
+        if cancel() {
+            return Err(FootprintError::Cancelled);
         }
-    }
-    let drawing = drawing.ok_or(FootprintError::Empty)?;
-    let mut curves = Vec::new();
-    let mut sag: f64 = 0.0;
-    for piece in drawing.lines.iter().flat_map(|l| &l.pieces) {
-        if piece.covered {
-            continue;
+        let mut fp = outline_of(&curves)?;
+        if sag.is_finite() {
+            fp.error += sag;
         }
-        sag = sag.max(match piece.accuracy {
-            CurveAccuracy::Analytic => 0.0,
-            CurveAccuracy::Bounded { max_deviation_mm } => max_deviation_mm,
-            CurveAccuracy::Sampled { max_sample_deviation_mm } => max_sample_deviation_mm,
-        });
-        curves.extend(piece.geometry.iter().copied());
+        Ok(fp)
     }
-    if cancel() {
-        return Err(FootprintError::Cancelled);
-    }
-    let mut fp = outline_of(&curves)?;
-    fp.error += if sag.is_finite() { sag } else { 0.0 };
-    Ok(fp)
 }
 
 /// The outer outline of a drawing made of `curves`, with the error of its flattening.
