@@ -40,7 +40,7 @@ if that happens; recording is cancelled if the app loses focus.
 | O | Offset | J | Joint |
 | T | Trim | I | Measure |
 | P | Project | A | Appearance |
-| Ctrl+Z | Undo | Ctrl+Y | Redo |
+| Ctrl+Z | Undo | Ctrl+Y, Ctrl+Shift+Z | Redo |
 | Ctrl+N | New Design | Ctrl+O | Open |
 | Ctrl+S | Save | Delete | Delete the selection |
 | Ctrl+Shift+S | Save As | | |
