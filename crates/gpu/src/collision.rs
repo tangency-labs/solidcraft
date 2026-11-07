@@ -1055,7 +1055,7 @@ pub fn triangle_aabbs_from_mesh(mesh: &Mesh) -> Vec<GpuAabb> {
 /// Maximum iterative traversal stack capacity in the WGSL LBVH query kernel (`collision.wgsl`).
 pub const LBVH_STACK_CAP: usize = 64;
 
-/// Returns `true` if `nodes` forms a valid, acyclic LBVH whose worst-case traversal stack depth
+/// Returns `true` if `nodes` forms a valid, acyclic LBVH whose worst-case traversal stack usage
 /// cannot exceed [`LBVH_STACK_CAP`].
 pub fn lbvh_fits_traversal_stack(nodes: &[GpuLbvhNode]) -> bool {
     if nodes.is_empty() {
@@ -1063,8 +1063,8 @@ pub fn lbvh_fits_traversal_stack(nodes: &[GpuLbvhNode]) -> bool {
     }
     let mut visited = vec![false; nodes.len()];
     let mut stack = Vec::with_capacity(LBVH_STACK_CAP);
-    stack.push((0usize, 1usize));
-    while let Some((idx, depth)) = stack.pop() {
+    stack.push(0usize);
+    while let Some(idx) = stack.pop() {
         let Some(node) = nodes.get(idx) else {
             return false;
         };
@@ -1074,7 +1074,7 @@ pub fn lbvh_fits_traversal_stack(nodes: &[GpuLbvhNode]) -> bool {
         visited[idx] = true;
         let is_leaf = (node.right_or_flag & 0x8000_0000) != 0;
         if !is_leaf {
-            if depth + 1 > LBVH_STACK_CAP {
+            if stack.len() + 2 > LBVH_STACK_CAP {
                 return false;
             }
             let left = node.left_or_prim as usize;
@@ -1082,8 +1082,8 @@ pub fn lbvh_fits_traversal_stack(nodes: &[GpuLbvhNode]) -> bool {
             if left >= nodes.len() || right >= nodes.len() {
                 return false;
             }
-            stack.push((right, depth + 1));
-            stack.push((left, depth + 1));
+            stack.push(right);
+            stack.push(left);
         }
     }
     true

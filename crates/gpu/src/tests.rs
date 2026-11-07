@@ -1628,6 +1628,37 @@ fn collision_lbvh_morton_and_ssi_edge_cases() {
         assert!(!crate::collision::lbvh_fits_traversal_stack(&left_comb));
         assert!(vk.collision().lbvh_query(&[box_a], &left_comb, 0.0).is_none());
 
+        // Whereas a 65-leaf right-comb LBVH (left child is always a leaf, right child is internal)
+        // keeps at most 2 pending nodes on the shader stack and must succeed with all 65 pairs:
+        let mut right_comb = Vec::with_capacity(129);
+        for d in 0..64u32 {
+            right_comb.push(crate::collision::GpuLbvhNode {
+                min_x: 0.0,
+                min_y: 0.0,
+                min_z: 0.0,
+                left_or_prim: 64 + d,
+                max_x: 1.0,
+                max_y: 1.0,
+                max_z: 1.0,
+                right_or_flag: if d < 63 { d + 1 } else { 128 },
+            });
+        }
+        for leaf_id in 0..65u32 {
+            right_comb.push(crate::collision::GpuLbvhNode {
+                min_x: 0.0,
+                min_y: 0.0,
+                min_z: 0.0,
+                left_or_prim: leaf_id,
+                max_x: 1.0,
+                max_y: 1.0,
+                max_z: 1.0,
+                right_or_flag: 0x8000_0000,
+            });
+        }
+        assert!(crate::collision::lbvh_fits_traversal_stack(&right_comb));
+        let right_res = vk.collision().lbvh_query(&[box_a], &right_comb, 0.0).expect("vk lbvh right_comb");
+        assert_eq!(right_res.pairs.len(), 65);
+
         // 6. SSI surface residual evaluation: disjoint surfaces vs intersecting surfaces & grid_res clamping:
         let c1 = ok(solidcraft_kernel::cylinder(Vec3::ZERO, Vec3::Z, 2.0, 5.0));
         let c2_disjoint = ok(solidcraft_kernel::cylinder(Vec3::new(20.0, 0.0, 0.0), Vec3::Z, 2.0, 5.0));
