@@ -793,6 +793,9 @@ pub(crate) fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row<'_>) -> RowRes
     out
 }
 
+/// A second click on the same name later than this is a new gesture, not a rename.
+const SLOW_RENAME_WINDOW: f64 = 3.0;
+
 fn slow_rename_click(ui: &egui::Ui, row: egui::Id, clicked: bool, is_name: bool) -> bool {
     if !clicked {
         return false;
@@ -808,7 +811,11 @@ fn slow_rename_click(ui: &egui::Ui, row: egui::Id, clicked: bool, is_name: bool)
     is_name
         && now.is_finite()
         && previous.is_some_and(|(previous_row, previous_time, previous_was_name)| {
-            previous_row == row && previous_was_name && previous_time.is_finite() && now - previous_time > delay
+            previous_row == row
+                && previous_was_name
+                && previous_time.is_finite()
+                && now - previous_time > delay
+                && now - previous_time <= SLOW_RENAME_WINDOW
         })
 }
 
@@ -1798,7 +1805,9 @@ fn component_rows_inner(
             app.session.visibility.hidden_bodies.retain(|b| !bodies.contains(b));
         }
     }
-    if r.clicked && !r.double && !r.slow_rename {
+    // With a dialog open a second click picks again: the dialog takes the component's bodies.
+    let rename_here = r.slow_rename && app.dialog.is_none();
+    if r.clicked && !r.double && !rename_here {
         let names = bodies_of_component(app, id);
         if !offer_bodies(app, &names, Take::Toggle) {
             let ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
@@ -1813,7 +1822,7 @@ fn component_rows_inner(
             }
         }
     }
-    if r.slow_rename {
+    if rename_here {
         start_inline_rename(app, crate::context_menu::RenameWhat::Component(id), &r);
     } else if r.double {
         if app.session.doc.parts.contains_key(&id) {
@@ -1995,18 +2004,19 @@ fn occurrence_rows_inner(
     if r.double && !takes_components && app.session.doc.parts.contains_key(&placement.component) {
         crate::dialogs_part_size::open(app, placement.component);
     }
+    let rename_here = r.slow_rename && app.dialog.is_none();
     if r.clicked && (takes_components || crate::dialogs_move::picks_components(app)) {
         if let Some(mut d) = app.dialog.take() {
             d.pick(&app.session, Sel::Occurrence { path: path.to_vec() });
             app.dialog = Some(d);
         }
-    } else if r.clicked && !r.double && !r.slow_rename {
+    } else if r.clicked && !r.double && !rename_here {
         let names = app.session.occurrence_bodies(path, true).unwrap_or_default();
         if !offer_bodies(app, &names, Take::Toggle) {
             click_select(app, ui, key.clone(), Some(Sel::Occurrence { path: path.to_vec() }));
         }
     }
-    if r.slow_rename {
+    if rename_here {
         start_inline_rename(app, crate::context_menu::RenameWhat::Component(placement.component), &r);
     }
     inline_rename(app, ui, &r, &placement.label);
