@@ -47,13 +47,7 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         .actions(ok, cancel, None)
         .show(ctx, true, |ui| {
             if picks {
-                let hint = match (straighten, m.next) {
-                    (true, 0) => "browser.straighten_click_a",
-                    (true, _) => "browser.straighten_click_b",
-                    (false, 0) => "browser.calibrate_click_a",
-                    (false, _) => "browser.calibrate_click_b",
-                };
-                ui_kit::text(ui, crate::i18n::tr(hint), ui_kit::Text::Note("calibrate_hint"));
+                ui_kit::text(ui, crate::i18n::tr(hint(&m)), ui_kit::Text::Note("calibrate_hint"));
                 for (label, p) in [("Point A", &mut m.a), ("Point B", &mut m.b)] {
                     ui_kit::row(ui, crate::i18n::tr_label(label), |ui| {
                         let [x, y] = p;
@@ -126,6 +120,17 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
     app.tree.canvas_panel = if closed || action == ui_kit::Action::Cancel { None } else { Some(m) };
 }
 
+/// The message id of the card's hint (and the status line) for what the user does next.
+pub(crate) fn hint(panel: &crate::browser::CanvasPanel) -> &'static str {
+    match (panel.straighten, panel.next, panel.picked_both) {
+        (true, 0, true) => "browser.straighten_choose",
+        (true, 0, false) => "browser.straighten_click_a",
+        (true, _, _) => "browser.straighten_click_b",
+        (false, 0, _) => "browser.calibrate_click_a",
+        (false, _, _) => "browser.calibrate_click_b",
+    }
+}
+
 /// A viewport click while Calibrate is open: set Point A or B on the image (#9108).
 pub(crate) fn click(app: &mut SolveApp, proj: &Proj, screen: Pos2) -> bool {
     let Some(mut panel) = app.tree.canvas_panel.clone() else {
@@ -151,20 +156,16 @@ pub(crate) fn click(app: &mut SolveApp, proj: &Proj, screen: Pos2) -> bool {
         return false;
     }
     let point = [local.x, local.y];
-    let (hint_a, hint_b) = if panel.straighten {
-        ("browser.straighten_click_a", "browser.straighten_click_b")
-    } else {
-        ("browser.calibrate_click_a", "browser.calibrate_click_b")
-    };
     if panel.next == 0 {
         panel.a = point;
         panel.next = 1;
-        app.set_status(crate::i18n::tr(hint_b), false);
+        panel.picked_both = false;
     } else {
         panel.b = point;
         panel.next = 0;
-        app.set_status(crate::i18n::tr(hint_a), false);
+        panel.picked_both = true;
     }
+    app.set_status(crate::i18n::tr(hint(&panel)), false);
     app.tree.canvas_panel = Some(panel);
     true
 }
@@ -303,8 +304,14 @@ mod tests {
         let (vals, _) = h.app.session.doc.param_values();
         let plane = h.app.session.doc.canvas_plane(&vals, &c).unwrap();
         let screen = |x: f64, y: f64| proj.to_screen(plane.to_world(solidcore_record::Vec2::new(x, y))).expect("on screen");
+        let status = |h: &crate::scenario::Harness| h.app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default();
         assert!(super::click(&mut h.app, &proj, screen(c.center.x - 15.0, c.center.y - 5.0)));
+        assert_eq!(super::hint(h.app.tree.canvas_panel.as_ref().unwrap()), "browser.straighten_click_b");
+        assert_eq!(status(&h), crate::i18n::tr_diagnostic(crate::i18n::tr("browser.straighten_click_b")));
         assert!(super::click(&mut h.app, &proj, screen(c.center.x + 15.0, c.center.y + 5.0)));
+        // With both points picked, the card and the status line ask for the direction, not Point A.
+        assert_eq!(super::hint(h.app.tree.canvas_panel.as_ref().unwrap()), "browser.straighten_choose");
+        assert_eq!(status(&h), crate::i18n::tr_diagnostic(crate::i18n::tr("browser.straighten_choose")));
         let picked = h.app.tree.canvas_panel.clone().unwrap();
         let rise = (picked.b[1] - picked.a[1]).atan2(picked.b[0] - picked.a[0]).to_degrees();
         assert!((rise - 18.43).abs() < 1.0, "{picked:?}");

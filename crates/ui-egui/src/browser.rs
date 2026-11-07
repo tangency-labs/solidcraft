@@ -2488,6 +2488,9 @@ pub struct CanvasPanel {
     pub angle: f64,
     /// Next viewport click sets Point A (`0`) or Point B (`1`) (#9108).
     pub next: u8,
+    /// A click on the image has set Point B: Straighten's hint then asks for the direction and
+    /// the Straighten button rather than for Point A again (#11989).
+    pub picked_both: bool,
 }
 
 impl CanvasPanel {
@@ -2501,7 +2504,19 @@ impl CanvasPanel {
             .find(|c| c.id == canvas)
             .map(|c| ([c.center.x - c.width / 2.0, c.center.y], [c.center.x + c.width / 2.0, c.center.y], c.width))
             .unwrap_or(([0.0, 0.0], [100.0, 0.0], 100.0));
-        CanvasPanel { canvas, calibrate, straighten: false, depth: app.session.undo.len(), a, b, distance: d, direction: 0, angle: 0.0, next: 0 }
+        CanvasPanel {
+            canvas,
+            calibrate,
+            straighten: false,
+            depth: app.session.undo.len(),
+            a,
+            b,
+            distance: d,
+            direction: 0,
+            angle: 0.0,
+            next: 0,
+            picked_both: false,
+        }
     }
 
     /// The Straighten card: pick two points along an edge of the image, then the direction.
