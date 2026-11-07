@@ -975,11 +975,15 @@ pub enum Regularity {
     Regular,
     /// The offset folds (a point with `(1 - k1 d)(1 - k2 d) < 0` was found) or is not
     /// certified regular within the budget; `largest` is the largest distance on that
-    /// side that works (the smallest radius of curvature on the displaced side).
+    /// side that works (the smallest radius of curvature on the displaced side), finite.
     Folds {
         /// The largest offset distance (magnitude) whose offset does not fold.
         largest: f64,
     },
+    /// Not certified, and the sizing found no curvature towards that side, so no distance
+    /// is named: `Q` stays non-negative but will not separate from zero, where the
+    /// reduced normal vanishes, or the budget ran out.
+    NotCertified,
 }
 
 /// The patches of `s` over the parameter box `[u0, u1] x [v0, v1]` (clipped to the
@@ -1046,8 +1050,11 @@ pub fn certify_regular(
     if !folds {
         return Ok(Regularity::Regular);
     }
-    Ok(Regularity::Folds {
-        largest: largest_wall(&region, d.signum())?,
+    let largest = largest_wall(&region, d.signum())?;
+    Ok(if largest.is_finite() {
+        Regularity::Folds { largest }
+    } else {
+        Regularity::NotCertified
     })
 }
 
@@ -1089,7 +1096,7 @@ pub fn proved_singular(
     if region.is_empty() || !positive(d.abs()) {
         return Ok(None);
     }
-    let radius = least_radius(&region, d.signum(), f64::INFINITY)?;
+    let radius = largest_wall(&region, d.signum())?;
     let reach = d.abs();
     if radius - reach > resolution {
         return Ok(None);
@@ -1146,9 +1153,8 @@ fn principal_curvatures(patch: &Patch, s: f64, t: f64) -> Option<(f64, f64)> {
 }
 
 /// The radius `1 / k` of the largest curvature `k` on the side `side` (the sign of the
-/// distance) of the patch at `(s, t)`; infinite where it bends away, `degenerate` where
-/// the normal vanishes.
-fn wall_or(patch: &Patch, side: f64, s: f64, t: f64, degenerate: f64) -> f64 {
+/// distance) of the patch at `(s, t)`; infinite where it bends away or the normal vanishes.
+fn wall(patch: &Patch, side: f64, s: f64, t: f64) -> f64 {
     match principal_curvatures(patch, s, t) {
         Some((k1, k2)) => {
             let k = (k1 * side).max(k2 * side);
@@ -1158,25 +1164,20 @@ fn wall_or(patch: &Patch, side: f64, s: f64, t: f64, degenerate: f64) -> f64 {
                 f64::INFINITY
             }
         }
-        None => degenerate,
+        None => f64::INFINITY,
     }
 }
 
 /// The smallest radius of curvature on the side `side` over `region`: a 9 x 9 sample
-/// grid per patch, then a pattern search about the smallest sample.
+/// grid per patch, then a pattern search about the smallest sample. A point where the
+/// normal vanishes says nothing of the curvature; infinite where no sample bends that way.
 fn largest_wall(region: &[Patch], side: f64) -> Result<f64> {
-    least_radius(region, side, 0.0)
-}
-
-/// [`largest_wall`] with `degenerate` taken where a sample's normal vanishes: the radius at
-/// the sample it ends on, so a radius the surface attains (at least the true least).
-fn least_radius(region: &[Patch], side: f64, degenerate: f64) -> Result<f64> {
     let mut best = (f64::INFINITY, 0usize, 0.5, 0.5);
     for (i, patch) in region.iter().enumerate() {
         for a in 0..=8 {
             for c in 0..=8 {
                 let (s, t) = (f64::from(a) / 8.0, f64::from(c) / 8.0);
-                let r = wall_or(patch, side, s, t, degenerate);
+                let r = wall(patch, side, s, t);
                 if r < best.0 {
                     best = (r, i, s, t);
                 }
@@ -1190,7 +1191,7 @@ fn least_radius(region: &[Patch], side: f64, degenerate: f64) -> Result<f64> {
         let mut moved = false;
         for (ds, dt) in [(step, 0.0), (-step, 0.0), (0.0, step), (0.0, -step)] {
             let (s2, t2) = ((s + ds).clamp(0.0, 1.0), (t + dt).clamp(0.0, 1.0));
-            let r2 = wall_or(patch, side, s2, t2, degenerate);
+            let r2 = wall(patch, side, s2, t2);
             if r2 < r {
                 (r, s, t, moved) = (r2, s2, t2, true);
             }
@@ -1438,6 +1439,39 @@ mod tests {
                 panic!("t11 towards the centre folds");
             };
             assert!((largest - 10.0).abs() < 1e-9, "{largest}");
+        }
+    }
+
+    /// A flat patch (z = 0) whose top row leaves its corner along its side, so the normal
+    /// vanishes there: no curvature to size a wall by, whichever side, and no proof.
+    #[test]
+    fn a_flat_patch_tangent_at_a_corner_names_no_wall() {
+        let pts = [
+            [(0.0, 0.0), (0.0, 10.0)],
+            [(5.0, 0.0), (0.0, 15.0)],
+            [(10.0, 0.0), (5.0, 15.0)],
+        ];
+        let net = pts
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|&(x, y)| CPoint::new(x, y, 0.0, NOW))
+                    .collect()
+            })
+            .collect();
+        let s = Nurb::new(
+            net,
+            2,
+            1,
+            vec![0., 0., 0., 1., 1., 1.],
+            vec![0., 0., 1., 1.],
+        )
+        .unwrap();
+        for d in [1.0, -1.0] {
+            assert_eq!(
+                certify_regular(&Kernel::default(), &s, d, None).unwrap(),
+                Regularity::NotCertified
+            );
         }
     }
 

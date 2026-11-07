@@ -307,6 +307,14 @@ fn refuse_folding_offset(
             },
         )
         .into_error()),
+        Regularity::NotCertified => Err(Failure::new(
+            operation,
+            OffsetFailure::NotCertified {
+                face,
+                distance: offset.offset_distance(),
+            },
+        )
+        .into_error()),
     }
 }
 

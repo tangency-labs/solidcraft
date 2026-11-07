@@ -37,6 +37,16 @@ pub enum OffsetFailure {
         /// The largest wall that works.
         largest: f64,
     },
+    /// The offset of `face` by `distance` is not proved regular, and no wall size would help:
+    /// the face does not bend towards that side anywhere the sizing looked, so no radius of
+    /// curvature limits the wall. The proof ran out where the face's normal vanishes (a flat
+    /// patch whose boundary curves leave a corner tangent to each other) or out of patches.
+    NotCertified {
+        /// The face whose offset is not certified.
+        face: FaceId,
+        /// The offset distance asked for (signed, as the operation takes it).
+        distance: f64,
+    },
     /// The offset of `face` by `distance` collapses onto a line or point: the face has a
     /// radius of curvature `radius` on the displaced side that the distance reaches, within
     /// the B-rep's tolerance (a round inset by its radius). The offset is no surface there,
@@ -137,7 +147,9 @@ impl OffsetFailure {
     #[must_use]
     pub fn entity(&self) -> Option<EntityRef> {
         match *self {
-            Self::Folds { face, .. } | Self::Collapses { face, .. } => Some(EntityRef::Face(face)),
+            Self::Folds { face, .. }
+            | Self::NotCertified { face, .. }
+            | Self::Collapses { face, .. } => Some(EntityRef::Face(face)),
             Self::WallsTouch { face, .. } | Self::LoopsCross { face, .. } => {
                 face.map(EntityRef::Face)
             }
@@ -151,7 +163,7 @@ impl OffsetFailure {
     /// The status the C++ reports for the refusal (difftest's comparison detail).
     pub(crate) const fn comparison_status(&self) -> i32 {
         match self {
-            Self::Folds { .. } | Self::Collapses { .. } => SM_ERR,
+            Self::Folds { .. } | Self::NotCertified { .. } | Self::Collapses { .. } => SM_ERR,
             Self::WallsTouch { .. } => SM_ERR_OFFSET_WALLS_TOUCH,
             Self::LoopsCross { .. } => SM_ERR_BAD_INTERSECTIONS,
             Self::EdgeVanishes { .. } => SM_ERR_OFFSET_EDGE_VANISHES,
@@ -165,7 +177,7 @@ impl OffsetFailure {
     #[must_use]
     pub const fn kind(&self) -> ErrorKind {
         match self {
-            Self::Folds { .. } => ErrorKind::OffsetFolds,
+            Self::Folds { .. } | Self::NotCertified { .. } => ErrorKind::OffsetFolds,
             Self::Collapses { .. } => ErrorKind::OffsetCollapses,
             Self::WallsTouch { .. } => ErrorKind::OffsetWallsTouch,
             Self::LoopsCross { .. } => ErrorKind::OffsetLoopsCross,
@@ -227,6 +239,13 @@ impl core::fmt::Display for OffsetFailure {
                 "the offset of face {} by {distance} folds: the wall is thicker than a \
                  radius of curvature of the face on that side (the largest wall that works \
                  is {largest})",
+                face.index()
+            ),
+            Self::NotCertified { face, distance } => write!(
+                f,
+                "the offset of face {} by {distance} is not proved regular: its parametrisation \
+                 defeats the proof, and no radius of curvature limits the wall, so no size is \
+                 named",
                 face.index()
             ),
             Self::Collapses {
