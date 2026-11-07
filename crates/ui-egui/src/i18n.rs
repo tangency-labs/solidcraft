@@ -82,6 +82,7 @@ static NORWEGIAN: Catalog = Catalog::new("nb", "Norsk bokmål", include_str!(con
 static DUTCH: Catalog = Catalog::new("nl", "Nederlands", include_str!(concat!(env!("OUT_DIR"), "/locales/nl.json")));
 static POLISH: Catalog = Catalog::new("pl", "Polski", include_str!(concat!(env!("OUT_DIR"), "/locales/pl.json")));
 static PORTUGUESE_BR: Catalog = Catalog::new("pt-BR", "Português (Brasil)", include_str!(concat!(env!("OUT_DIR"), "/locales/pt-BR.json")));
+static PORTUGUESE_PT: Catalog = Catalog::new("pt-PT", "Português (Portugal)", include_str!(concat!(env!("OUT_DIR"), "/locales/pt-PT.json")));
 static ROMANIAN: Catalog = Catalog::new("ro", "Română", include_str!(concat!(env!("OUT_DIR"), "/locales/ro.json")));
 static RUSSIAN: Catalog = Catalog::new("ru", "Русский", include_str!(concat!(env!("OUT_DIR"), "/locales/ru.json")));
 static SERBIAN: Catalog = Catalog::new("sr", "Српски", include_str!(concat!(env!("OUT_DIR"), "/locales/sr.json")));
@@ -121,6 +122,7 @@ pub const LOCALES: &[&Catalog] = &[
     &DUTCH,
     &POLISH,
     &PORTUGUESE_BR,
+    &PORTUGUESE_PT,
     &ROMANIAN,
     &RUSSIAN,
     &SERBIAN,
@@ -480,7 +482,8 @@ mod tests {
         assert_eq!(super::match_system_tags(&tags(&["zh_CN"])), "zh", "underscores normalize");
         assert_eq!(super::match_system_tags(&tags(&["FR"])), "fr", "case-insensitive");
         assert_eq!(super::match_system_tags(&tags(&["nl"])), "nl", "bare base tag");
-        assert_eq!(super::match_system_tags(&tags(&["pt-PT"])), "en", "pt has no catalog: English");
+        assert_eq!(super::match_system_tags(&tags(&["pt-PT"])), "pt-PT", "exact tag");
+        assert_eq!(super::match_system_tags(&tags(&["pt"])), "en", "a bare pt has no catalog: English");
         assert_eq!(super::match_system_tags(&tags(&["xx-YY"])), "en", "unknown: English");
         assert_eq!(super::match_system_tags(&tags(&[])), "en", "nothing: English");
         assert_eq!(super::match_system_tags(&tags(&["xx-YY", "de-DE"])), "de", "the first tag that matches wins");
@@ -1325,6 +1328,19 @@ mod tests {
         assert!(is_supported("pt-BR"));
         assert_eq!(pt.text("ui.preferences"), "Preferências");
         assert_eq!(pt.format("document.save_changes", &[("name", "My {design}")]), "Salvar as alterações em My {design}?");
+        assert_eq!(pt.format("dialog.selected_count", &[("count", "2")]), "↖ 2 selecionados");
+        assert_eq!(pt.label("NonExistentKey"), "NonExistentKey");
+    }
+
+    #[test]
+    fn european_portuguese_catalog_is_registered_and_translates_keys() {
+        let pt = Locale::for_language("pt-PT");
+        assert_eq!(pt.name(), "Português (Portugal)");
+        assert!(is_supported("pt-PT"));
+        assert_eq!(pt.text("ui.preferences"), "Preferências");
+        assert_eq!(pt.text("ui.save"), "Guardar");
+        assert_eq!(pt.text("ui.file"), "Ficheiro");
+        assert_eq!(pt.format("document.save_changes", &[("name", "My {design}")]), "Guardar as alterações em My {design}?");
         assert_eq!(pt.format("dialog.selected_count", &[("count", "2")]), "↖ 2 selecionados");
         assert_eq!(pt.label("NonExistentKey"), "NonExistentKey");
     }
