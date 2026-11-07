@@ -96,9 +96,12 @@ pub struct NavPreset {
     pub reverse_zoom: bool,
     /// Dragging down zooms in instead of out (independent of the wheel preference).
     pub reverse_drag_zoom: bool,
-    /// Choosing the preset sets what a middle double-click does (`None` leaves it as it is).
+    /// Choosing the preset sets what a middle double-click does. `None` leaves a choice the user
+    /// made; leaving a preset that set one, while it is still that value, returns to Home.
     pub middle_double_click: Option<&'static str>,
-    /// Choosing the preset sets "Right drag orbits" (`None` leaves it as it is).
+    /// Choosing the preset sets "Right drag orbits". `None` leaves a choice the user made;
+    /// leaving a preset that turned it off turns it back on when this preset's plain right drag
+    /// orbits (#12927).
     pub right_drag_orbits: Option<bool>,
     pub bindings: &'static [NavBinding],
 }
@@ -311,17 +314,32 @@ pub fn nav_preset(id: &str) -> &'static NavPreset {
     NAV_PRESETS.iter().find(|p| p.id == id).unwrap_or(&NAV_PRESETS[0])
 }
 
-/// Picks `preset` the way the Preferences page does: its bindings, wheel direction and, when the
-/// preset names them, middle double-click and "Right drag orbits".
+/// Picks `preset` the way the Preferences page does: its bindings and wheel direction, and, when
+/// the preset names them, middle double-click and "Right drag orbits". Leaving a preset that
+/// forced one of those, for a preset that does not, puts it back when the user has not changed
+/// it since: double-click returns to Home, and right-drag orbit comes back on for a preset whose
+/// plain right drag orbits (#12927).
 pub fn choose_nav_preset(prefs: &mut Prefs, preset: &NavPreset) {
+    let previous = nav_preset(&prefs.nav);
+    let stuck_double = previous.middle_double_click.is_some_and(|mode| prefs.middle_double_click == mode);
+    let stuck_orbit = previous.right_drag_orbits == Some(false) && !prefs.right_drag_orbits;
     prefs.nav = preset.id.into();
     prefs.zoom_reverse = preset.reverse_zoom;
     if let Some(double_click) = preset.middle_double_click {
         prefs.middle_double_click = double_click.into();
+    } else if stuck_double {
+        prefs.middle_double_click = "home".into();
     }
     if let Some(orbits) = preset.right_drag_orbits {
         prefs.right_drag_orbits = orbits;
+    } else if stuck_orbit && plain_right_orbit(preset) {
+        prefs.right_drag_orbits = true;
     }
+}
+
+/// The preset's right button orbits with no modifier held, so "Right drag orbits" applies to it.
+fn plain_right_orbit(preset: &NavPreset) -> bool {
+    preset.bindings.iter().any(|b| b.button == NavButton::Right && b.mode == NavMode::Orbit && b.keys == NavKeys::NONE)
 }
 /// Stable control-channel names; presentation labels may be shorter.
 pub const PAGES: &[&str] =
@@ -10568,6 +10586,37 @@ mod tests {
         assert_eq!(nav_mode(&app, NavButton::Right, none), Some(NavMode::Pan), "only an orbiting right drag is affected");
         set(&mut app, &json!({"right_drag_orbits": true, "nav": "solidworks"})).unwrap();
         assert_eq!(nav_mode(&app, NavButton::Right, none), Some(NavMode::Orbit), "turned back on, the right drag orbits again");
+    }
+
+    /// #12927: SolidWorks turns right-drag orbit off. Choosing a preset whose plain right drag
+    /// orbits turns it back on, and a double-click still sitting on Fit returns to Home. A value
+    /// the user changed is kept, including across a restart.
+    #[test]
+    fn leaving_solidworks_restores_the_orbit_the_next_preset_describes() {
+        let none = Modifiers::default();
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        choose_nav_preset(&mut app.preferences, nav_preset("solidworks"));
+        assert!(!app.preferences.right_drag_orbits && app.preferences.middle_double_click == "fit");
+        choose_nav_preset(&mut app.preferences, nav_preset("fusion"));
+        assert!(app.preferences.right_drag_orbits && app.preferences.middle_double_click == "home");
+        assert_eq!(nav_mode(&app, NavButton::Right, none), Some(NavMode::Orbit));
+        assert_eq!(nav_mode(&app, NavButton::Middle, none), Some(NavMode::Pan));
+        let mut restarted = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restarted.load_prefs(&app.prefs());
+        assert!(restarted.preferences.right_drag_orbits);
+        assert_eq!(nav_mode(&restarted, NavButton::Right, none), Some(NavMode::Orbit));
+
+        choose_nav_preset(&mut app.preferences, nav_preset("solidworks"));
+        app.preferences.right_drag_orbits = true;
+        app.preferences.middle_double_click = "off".into();
+        choose_nav_preset(&mut app.preferences, nav_preset("inventor"));
+        assert!(app.preferences.right_drag_orbits && app.preferences.middle_double_click == "off");
+
+        app.preferences.right_drag_orbits = false;
+        choose_nav_preset(&mut app.preferences, nav_preset("alias"));
+        assert!(!app.preferences.right_drag_orbits, "turned off on a preset that does not force it, it stays off");
+        choose_nav_preset(&mut app.preferences, nav_preset("blender"));
+        assert!(!app.preferences.right_drag_orbits, "a preset with no right-drag orbit leaves the checkbox");
     }
 
     #[test]
