@@ -20,7 +20,8 @@ use crate::shape::{Shape, intersections_within};
 use crate::union_find::{find, union};
 
 const MERGE_TOL: f64 = 1e-6;
-const ENDPOINT_JOIN_TOL: f64 = MERGE_TOL * 100.0;
+/// Curve ends this close (mm) join into one corner of a profile.
+pub const ENDPOINT_JOIN_TOL: f64 = MERGE_TOL * 100.0;
 const MAX_EDGES: usize = 50_000;
 
 /// A closed region usable by features, with the ids of the curves bounding it.

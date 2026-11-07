@@ -1786,11 +1786,13 @@ fn section_segments(plane: &Plane, m: &Mesh, face: Option<u32>) -> (Vec<(Vec2, V
 
 /// Re-fit each circle and arc of a fitted section through the exact section points near it.
 /// The outline stays closed: a line meeting an arc's end moves with it. Where the arc meets
-/// another curve, the refit stands only if that end stays put; else the arc keeps its fit,
-/// since moving the other curve's end would take it off its circle.
+/// another curve, the refit stands only if that end moves less than a profile joins ends
+/// across; else the arc keeps its fit, since moving the other curve's end would take it off
+/// its circle.
 fn refine_rounds(mut v: Vec<LinkGeom>, exact: &[Vec2], size: f64) -> Vec<LinkGeom> {
     // Ends this close meet: the fit joins crossings this close into one point.
     let meet = size * 1e-7;
+    let fitted = v.clone();
     for i in 0..v.len() {
         let Some(g) = v.get(i).cloned() else { continue };
         let LinkGeom::Arc { a: a0, b: b0, .. } = g else {
@@ -1799,14 +1801,19 @@ fn refine_rounds(mut v: Vec<LinkGeom>, exact: &[Vec2], size: f64) -> Vec<LinkGeo
             }
             continue;
         };
-        let touches = |h: &LinkGeom, e: Vec2| match *h {
-            LinkGeom::Line(s, t) | LinkGeom::Arc { a: s, b: t, .. } => s.dist(e) <= meet || t.dist(e) <= meet,
-            _ => false,
-        };
         let refined = refine_round(g, exact, size * 2e-3);
         let LinkGeom::Arc { a: a1, b: b1, .. } = refined else { continue };
+        // Another curve's end that met this end as fitted, where that curve ends now (it may
+        // have been refitted already).
+        let ends = |h: &LinkGeom| match *h {
+            LinkGeom::Line(s, t) | LinkGeom::Arc { a: s, b: t, .. } => Some([s, t]),
+            _ => None,
+        };
         let tears = |e0: Vec2, e1: Vec2| {
-            e1.dist(e0) > meet && v.iter().enumerate().any(|(j, h)| j != i && !matches!(h, LinkGeom::Line(..)) && touches(h, e0))
+            fitted.iter().zip(&v).enumerate().filter(|(j, (h, _))| *j != i && !matches!(h, LinkGeom::Line(..))).any(|(_, (h, now))| {
+                let (Some(was), Some(now)) = (ends(h), ends(now)) else { return false };
+                was.iter().zip(now).any(|(w, n)| w.dist(e0) <= meet && n.dist(e1) > solidcraft_sketch::ENDPOINT_JOIN_TOL)
+            })
         };
         if tears(a0, a1) || tears(b0, b1) {
             continue;
