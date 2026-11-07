@@ -31,6 +31,10 @@
     "nav.upright_orbit_unrolls.help": "ビューが回転して傾いているとき（傾いた平面上のスケッチに正対、またはビューキューブの回転矢印）、オービットするとドラッグ中にビューが正立に戻り、モデルはポインタの方向に回ります。オフ：傾いたビューはオービット中も傾きを保ち、上下逆のビューは上下逆のままです。",
     "nav.upright_orbit_unrolls.label": "オービットで傾いたビューを正立に戻す"
   },
+  "ko": {
+    "nav.upright_orbit_unrolls.help": "보기가 시선 축을 중심으로 기울어져 있을 때(기울어진 평면의 스케치 정면 보기, 또는 뷰 큐브의 회전 화살표), 궤도 회전을 하면 드래그하는 동안 보기가 다시 똑바로 서고 모델은 포인터가 가는 방향으로 돕니다. 끄기: 기울어진 보기는 궤도 회전 중에도 기울기를 유지하므로 뒤집힌 보기는 뒤집힌 채로 남습니다.",
+    "nav.upright_orbit_unrolls.label": "궤도 회전으로 기울어진 보기를 똑바로 세우기"
+  },
   "vi": {
     "nav.upright_orbit_unrolls.help": "Khi khung nhìn bị xoay nghiêng (Nhìn thẳng vào phác thảo trên mặt phẳng nghiêng, hoặc các mũi tên xoay của khối hướng nhìn), quay quanh sẽ dựng khung nhìn thẳng lại khi bạn kéo, và mô hình xoay theo hướng con trỏ. Tắt: khung nhìn nghiêng giữ độ nghiêng khi quay quanh, nên khung nhìn lộn ngược vẫn lộn ngược.",
     "nav.upright_orbit_unrolls.label": "Quay quanh dựng thẳng khung nhìn bị nghiêng"
