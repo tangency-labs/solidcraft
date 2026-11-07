@@ -377,6 +377,7 @@ pub(crate) fn refresh(s: &mut Session) {
     }
     if changed {
         s.model.evaluate(&s.doc);
+        s.evaluations = s.evaluations.saturating_add(1);
         s.revision += 1;
     }
     for t in &traces {

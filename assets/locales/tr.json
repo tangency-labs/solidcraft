@@ -1621,7 +1621,7 @@
   "help.sketch.insert_svg": "Bir SVG çiziminin yollarını, belirlediğiniz ölçekte, açıda ve konumda bir eskize okur. Bir logoyu veya vektör dış hattını ekstrüzyon yapabileceğiniz eğrilere dönüştürmek için kullanın.",
   "help.sketch.inspect": "Açık eskiz için bir rapor açar: kaç serbestlik derecesi kaldığını ve tam kısıtlı olup olmadığını. Eskizi bitirmeden önce nelerin hâlâ hareket ettiğini öğrenmek için kullanın.",
   "help.sketch.intersect": "Gövdelerin, yüzlerin, kenarların veya diğer eskizlerin eskiz düzlemini kestiği eğrileri ya da noktaları ekler. Bağlı kalır ve model değiştiğinde onu izler.",
-  "help.sketch.intersection_curve": "İki gövdenin veya yüzün buluştuğu yerde, onlara bağlı 3B eğriler oluşturur. Bunları modeli izleyen yollar veya kılavuz raylar olarak kullanın.",
+  "help.sketch.intersection_curve": "İki gövdenin, yüzün veya diğer eskizlerin eğrilerinin buluştuğu yerde, onlara bağlı 3B eğriler oluşturur. Bunları modeli izleyen yollar veya kılavuz raylar olarak kullanın.",
   "help.sketch.isoparametric_curve": "Bir yüzün U veya V yönü boyunca, seçtiğiniz bir noktadan geçen ve yüze bağlı bir 3B eğri oluşturur. Yüzeyi izleyen bir yol veya bölme çizgisi olarak kullanın.",
   "help.sketch.line": "Bağlantılı çizgileri nokta nokta, açık bir zincir veya kapalı bir dış hat olarak çizer. Çoğu profil için temel araçtır.",
   "help.sketch.line.midpoint": "Bir çizgiyi orta noktasından bir uca doğru çizer; diğer uç yansıtılır. Bir nokta etrafında ortalanmış çizgiler, örneğin simetrik bir kenar için kullanın.",

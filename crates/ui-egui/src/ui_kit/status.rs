@@ -57,7 +57,7 @@ pub(crate) fn progress(ui: &mut egui::Ui, key: &str, fraction: f32) -> egui::Res
     if fraction > 0.0 {
         ui.painter().rect_filled(egui::Rect::from_min_size(bar.min, vec2(bar.width() * fraction, bar.height())), t.space_3, t.form_primary);
     }
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ProgressIndicator, ui.is_enabled(), format!("{:.0}%", fraction * 100.0)));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ProgressIndicator, ui.is_enabled(), format!("{:.0}%", fraction * 100.0)));
     crate::scenario::publish_rect(&format!("dialog:progress:{key}"), bar);
     response
 }
@@ -131,7 +131,7 @@ pub(crate) fn steps(ui: &mut egui::Ui, key: &str, labels: &[&str], current: usiz
             std::cmp::Ordering::Equal => "current",
             std::cmp::Ordering::Greater => "next",
         };
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), *label));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), *label));
         crate::scenario::publish_rect(&format!("dialog:step:{key}:{i}:{state}"), row);
         crate::scenario::publish_rect(&format!("dialog:step_mark:{key}:{i}"), slot);
     }
@@ -161,7 +161,7 @@ pub(crate) fn completion_text(ui: &mut egui::Ui, label: &str, complete: bool) ->
         if complete { t.form_ink } else { t.form_dim },
         false,
     );
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), label));
     response
 }
 

@@ -210,11 +210,14 @@ fn map_plane_ref(m: &Mat, p: &mut PlaneRef) {
             map_plane_ref(m, base);
             map_geo_ref(m, point);
         }
-        PlaneRef::AtAngle { base, axis_origin, axis_dir, line, .. } => {
+        PlaneRef::AtAngle { base, axis_origin, axis_dir, line, pivot, .. } => {
             map_plane_ref(m, base);
             *axis_origin = apply_point(m, *axis_origin);
             *axis_dir = apply_vector(m, *axis_dir);
             if let Some(g) = line {
+                map_geo_ref(m, g);
+            }
+            if let Some(g) = pivot {
                 map_geo_ref(m, g);
             }
         }
@@ -353,25 +356,7 @@ impl Document {
     /// Every placement of each component: (component, occurrence path ids, world transform).
     /// A branch stops past [`MAX_PLACEMENT_DEPTH`] levels, the walk past [`MAX_PLACEMENTS`] placements.
     pub fn placements(&self) -> Vec<(u64, Vec<u64>, Mat)> {
-        let mut out = vec![(0, Vec::new(), IDENTITY)];
-        let mut stack: Vec<(u64, Vec<u64>, Mat)> = vec![(0, Vec::new(), IDENTITY)];
-        while let Some((comp, path, m)) = stack.pop() {
-            if out.len() > MAX_PLACEMENTS {
-                break;
-            }
-            // Only this branch stops past the depth limit; the others are still walked.
-            if path.len() > MAX_PLACEMENT_DEPTH {
-                continue;
-            }
-            for o in self.occurrences.iter().filter(|o| o.parent == comp) {
-                let mut p = path.clone();
-                p.push(o.id);
-                let w = mat_mul(&m, &o.transform);
-                out.push((o.component, p.clone(), w));
-                stack.push((o.component, p, w));
-            }
-        }
-        out
+        crate::occurrence_tree::OccurrenceTree::new(self).placements_with(|o| o.transform)
     }
 
     /// Every body as the world shows it: its world name ("Body1", or "Body1 (Occ:2)" for a
@@ -461,13 +446,14 @@ impl Document {
         if self.component_within(parent, component) {
             return true;
         }
+        let tree = crate::occurrence_tree::OccurrenceTree::new(self);
         let mut stack = vec![component];
         let mut seen = std::collections::BTreeSet::new();
         while let Some(c) = stack.pop() {
             if !seen.insert(c) || seen.len() > MAX_PLACEMENTS {
                 continue;
             }
-            for o in self.occurrences.iter().filter(|o| o.parent == c) {
+            for o in tree.children(c) {
                 if o.component == parent {
                     return true;
                 }

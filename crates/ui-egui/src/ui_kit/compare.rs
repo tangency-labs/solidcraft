@@ -12,7 +12,7 @@ pub(crate) fn comparison_divider(ui: &mut Ui, canvas: Rect, position: &mut f32, 
     *position = comparison_position(*position);
     let x = canvas.left() + canvas.width() * *position;
     let rail = Rect::from_center_size(pos2(x, canvas.center().y), vec2(t.space_16, canvas.height()));
-    let mut response = ui.interact(rail, ui.id().with("comparison_divider"), Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+    let mut response = ui.interact(rail, ui.scope_id().with("comparison_divider"), Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
     if response.dragged()
         && let Some(pointer) = response.interact_pointer_pos()
     {
@@ -20,7 +20,7 @@ pub(crate) fn comparison_divider(ui: &mut Ui, canvas: Rect, position: &mut f32, 
         response.mark_changed();
     }
     comparison_divider_chrome(ui, canvas, *position);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Slider, ui.is_enabled(), label));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Slider, ui.is_enabled(), label));
     scenario::publish_target("render:compare:divider", rail);
     response
 }

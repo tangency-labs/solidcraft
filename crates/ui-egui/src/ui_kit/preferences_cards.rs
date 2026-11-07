@@ -185,7 +185,7 @@ fn paint_card(ui: &mut Ui, card: &Card, width: f32, tile: bool) -> Response {
             crate::icons::paint_ink(p, dot, "settings", dim(t.on_accent));
         }
     }
-    let kind = if tile { egui::WidgetType::Checkbox } else { egui::WidgetType::RadioButton };
+    let kind = if tile { egui::Role::CheckBox } else { egui::Role::RadioButton };
     response.widget_info(|| egui::WidgetInfo::selected(kind, enabled, card.selected, card.label));
     scenario::publish_target(&format!("prefs:card:{}", card.label), rect);
     let response = response.backing_on_hover_text(card.label);
@@ -372,7 +372,7 @@ pub(crate) fn preset_card(
         p.circle_filled(centre, t.space_8 + 1.0, dim(t.form_primary));
         tick(p, Rect::from_center_size(centre, vec2(t.space_12, t.space_12)), dim(t.on_accent));
     }
-    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, enabled, selected, name));
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::RadioButton, enabled, selected, name));
     scenario::publish_target(&format!("prefs:preset:{name}"), rect);
     if enabled { response.on_hover_cursor(egui::CursorIcon::PointingHand) } else { response }
 }
@@ -387,82 +387,9 @@ pub(crate) fn help_icon(ui: &mut Ui, text: &str) -> Response {
     p.circle_stroke(rect.center(), size * 0.5 - 0.5, Stroke::new(1.0, ink));
     p.circle_filled(pos2(rect.center().x, rect.top() + size * 0.3), 0.9, ink);
     p.line_segment([pos2(rect.center().x, rect.top() + size * 0.46), pos2(rect.center().x, rect.bottom() - size * 0.24)], Stroke::new(1.2, ink));
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), text));
     scenario::publish_target("prefs:help_icon", rect);
     response.backing_on_hover_text(text)
-}
-
-/// Which items of a carousel are shown: the first one and how many fit between the two arrows.
-pub(super) fn carousel_window(count: usize, offset: usize, available: f32, item_width: f32, gap: f32, arrow: f32) -> (usize, usize) {
-    if count == 0 {
-        return (0, 0);
-    }
-    let room = dimension(available) - 2.0 * (arrow + gap);
-    let unit = dimension(item_width).max(1.0) + gap.max(0.0);
-    let visible = (((room + gap) / unit).floor() as usize).clamp(1, count);
-    (offset.min(count - visible), visible)
-}
-
-/// A row of items with a previous and a next arrow; an arrow is dimmed and inert at its end.
-/// An arrow moves by the items that fit (#11434); the last page ends on the last item.
-/// `item` paints the item at an index into a column `item_width` wide and `item_height` high.
-pub(crate) fn carousel(
-    ui: &mut Ui,
-    id: impl std::hash::Hash + std::fmt::Debug,
-    count: usize,
-    item_width: f32,
-    item_height: f32,
-    mut item: impl FnMut(&mut Ui, usize),
-) -> (usize, usize) {
-    let t = Tokens::get();
-    let key = ui.make_persistent_id(id);
-    let gap = t.space_8;
-    let arrow = t.space_24 + 2.0;
-    let offset = ui.data(|d| d.get_temp::<usize>(key)).unwrap_or(0);
-    let (first, visible) = carousel_window(count, offset, ui.available_width(), item_width, gap, arrow);
-    let height = dimension(item_height);
-    let mut next_offset = first;
-    ui.horizontal_top(|ui| {
-        ui.spacing_mut().item_spacing.x = gap;
-        let can_back = first > 0;
-        if carousel_arrow(ui, vec2(arrow, height), -1.0, can_back, crate::i18n::tr("prefs.carousel_previous")).clicked() {
-            next_offset = first.saturating_sub(visible);
-        }
-        for index in first..first + visible {
-            ui.allocate_ui_with_layout(vec2(dimension(item_width), height), egui::Layout::top_down(egui::Align::Min), |ui| {
-                ui.set_width(dimension(item_width));
-                item(ui, index);
-            });
-        }
-        let can_forward = first + visible < count;
-        if carousel_arrow(ui, vec2(arrow, height), 1.0, can_forward, crate::i18n::tr("prefs.carousel_next")).clicked() {
-            next_offset = (first + visible).min(count.saturating_sub(visible));
-        }
-    });
-    ui.data_mut(|d| d.insert_temp(key, next_offset));
-    (first, visible)
-}
-
-fn carousel_arrow(ui: &mut Ui, size: egui::Vec2, direction: f32, enabled: bool, label: &str) -> Response {
-    let t = Tokens::get();
-    let (rect, response) = ui.allocate_exact_size(size, if enabled { Sense::click() } else { Sense::hover() });
-    let alpha = if enabled { 1.0 } else { 0.35 };
-    let p = ui.painter();
-    let fill = if enabled && response.hovered() { t.hover } else { t.control_fill };
-    p.rect(rect, f32::from(t.radius_lg), fill.gamma_multiply(alpha), Stroke::new(1.0, t.dialog_border.gamma_multiply(alpha)), StrokeKind::Inside);
-    let icon = Rect::from_center_size(rect.center(), vec2(t.space_16, t.space_16));
-    let ink = t.form_ink.gamma_multiply(alpha);
-    if direction < 0.0 {
-        crate::icons::paint_ink_mirrored(p, icon, "chevron_right", ink);
-    } else {
-        crate::icons::paint_ink(p, icon, "chevron_right", ink);
-    }
-    if enabled && response.has_focus() {
-        p.rect_stroke(rect.expand(t.space_2), f32::from(t.radius_lg) + t.space_2, Stroke::new(t.space_2, t.form_primary), StrokeKind::Outside);
-    }
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
-    scenario::publish_target(&format!("prefs:carousel:{label}"), rect);
-    if enabled { response.on_hover_cursor(egui::CursorIcon::PointingHand) } else { response }
 }
 
 /// Installed add-on row: 12 pt padding, 36 pt mark and centred, unframed folder action.
@@ -534,7 +461,7 @@ pub(crate) fn settings_plugin_card(
         let icon = Rect::from_center_size(pos2(folder_rect.left() + t.space_8 + t.space_14 / 2.0, center_y), vec2(t.space_14, t.space_14));
         crate::icons::paint_ink(ui.painter(), icon, "folder", t.form_dim);
         ui.painter().galley(pos2(icon.right() + t.space_6, center_y - folder_galley.size().y / 2.0), folder_galley, t.form_dim);
-        folder.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), folder_label));
+        folder.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), folder_label));
         if folder.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }

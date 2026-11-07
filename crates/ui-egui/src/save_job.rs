@@ -67,6 +67,11 @@ pub fn tick(app: &mut SolveApp, wait: bool) {
         None => Err(format!("{command}: the save stopped")),
     };
     app.finish_command(command, &r);
+    // Saving a newer SolidCraft's file keeps what this version can't read, unless it was changed
+    // around: then the save says what went.
+    if let Some(first) = r.as_ref().ok().and_then(|v| v["warnings"].as_array()).and_then(|w| w.first()).and_then(serde_json::Value::as_str) {
+        app.set_status(first, true);
+    }
     crate::documents::saved_for_close(app);
 }
 

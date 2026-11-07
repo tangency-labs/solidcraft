@@ -88,7 +88,7 @@ pub fn start(app: &mut SolveApp, offer: Offer) {
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(steps) = app.install_steps else { return };
     let (lines, after) = steps.messages();
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_install_steps"), "web", crate::i18n::tr("install.title"))
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_install_steps"), "web", crate::i18n::tr("install.title"))
         .actions("", crate::i18n::tr("install.done"), None)
         .show(ctx, true, |ui| {
             ui_kit::text(ui, crate::i18n::tr("install.steps_intro"), ui_kit::Text::Report("intro", false));
@@ -121,7 +121,7 @@ mod tests {
 
     /// Open the File menu and look for Install app….
     fn file_menu_item(h: &mut Harness) -> bool {
-        h.ctx.data_mut(|d| d.insert_temp(egui::Id::new("sc_file_menu"), true));
+        h.ctx.data_mut(|d| d.insert_temp(egui::Id::unique("sc_file_menu"), true));
         h.frames(2);
         h.widget(crate::i18n::tr(ITEM)).is_some()
     }

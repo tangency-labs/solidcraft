@@ -398,6 +398,11 @@ pub fn toolbar_items(app: &SolveApp) -> Vec<Item> {
             v.push(if on { item.key("current") } else { item });
         }
         // With every tab hidden there is no tab to customise.
+        v.push(Item::sep());
+        // Fold the ribbon to its tab row, or show it whole again (#10112).
+        let on = app.preferences.ribbon_tabs_only;
+        let item = crate::context_menu::cmd(app, "view.ribbon_tabs_only", "Ribbon Tabs Only").with(json!({ "on": !on }));
+        v.push(if on { item.key("current") } else { item });
         if !crate::workspace::visible_tabs(app).contains(&app.ui.tab.as_str()) {
             return v;
         }
@@ -482,7 +487,7 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
     // published positions instead of shifting them after egui measures the taller content.
     let origin =
         egui::pos2((ctx.content_rect().center().x - t.form_card_width).max(ctx.content_rect().left()), ctx.content_rect().top() + t.space_24 * 2.0);
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_toolbar_customize"), "settings", crate::i18n::tr_label("Customize Toolbar"))
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_toolbar_customize"), "settings", crate::i18n::tr_label("Customize Toolbar"))
         .placed(egui::Align2::LEFT_TOP, origin)
         .cards(2.0)
         .actions("", "Close", None)
