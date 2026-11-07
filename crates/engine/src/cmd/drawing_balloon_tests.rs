@@ -462,7 +462,8 @@ fn ballooned(s: &mut Session) -> Vec<(String, Vec<(String, u64)>)> {
 
 /// Each row of a parts list counts the balloons that read it, 0 included, in the list's order: a
 /// balloon reading another list, or none while two are on the sheet, counts for none, as does one
-/// whose part is gone. Worked out on each read and never saved.
+/// whose part is gone. Worked out on each read and never saved, and the same in the rows the sheet
+/// draws.
 #[test]
 fn a_parts_list_counts_the_balloons_on_each_row() {
     let (mut s, view, [component, occurrence]) = placed();
@@ -487,6 +488,10 @@ fn a_parts_list_counts_the_balloons_on_each_row() {
     assert_eq!(ballooned(&mut s), rows([2, 0]), "two on one row");
     run(&mut s, ADD, json!({"view": ids::encode(view), "edge": {"point": [105, 0, 0], "path": [pin]}, "at": [-60, 40]}));
     assert_eq!(ballooned(&mut s), rows([2, 1]));
+    // The rows the sheet draws hold the same counts, in the editor's column.
+    let shown = s.execute("drawing.table.inspect", &json!({"table": first})).unwrap();
+    let counts: Vec<u64> = shown["rows"].as_array().unwrap().iter().map(|row| row["balloons"].as_u64().unwrap()).collect();
+    assert_eq!(counts, [2, 1], "{shown}");
 
     let second = list(&mut s, json!({}));
     let two = ballooned(&mut s);

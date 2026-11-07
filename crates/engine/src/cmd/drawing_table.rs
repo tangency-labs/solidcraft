@@ -17,6 +17,7 @@ use solidcraft_doc::drawing::{Drawing, OnSheet, SheetComponent};
 use solidcraft_doc::ids;
 use solidcraft_geom::Aabb2;
 use solidcraft_geom::cell::Warning;
+use solidcraft_geom::table::BALLOONED;
 use solidcraft_sketch::PaperFonts;
 
 use super::CommandSpec;
@@ -81,7 +82,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<InspectResult>)
         .params(
             "table: its id → {table, sheet, status: ok|failed, why?, outline_mm?: [x0, y0, x1, y1] on the sheet, rows?: [{key, \
-             rect_mm}] those it shows, listed: how many before its filter, overrides?: [{row, column, text, replaced}], warnings?: \
+             rect_mm, balloons?: how many point at it}] those it shows, listed: how many before its filter, overrides?: [{row, column, text, replaced}], warnings?: \
              [{row?, column, warning: width|height|chars}]}, laid out in the drawing's font as the sheet draws it. Read-only; a parts \
              list showing a mass weighs the design.",
         ),
@@ -174,7 +175,9 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
                     }
                 }
                 if let Some(key) = &row.key {
-                    reply.rows.push(InspectRow { key: key.clone(), rect_mm: corners(row.rect) });
+                    let read = placed.rows.iter().find(|one| one.key == *key);
+                    let balloons = read.and_then(|one| one.fields.get(BALLOONED)).and_then(|count| count.parse().ok());
+                    reply.rows.push(InspectRow { key: key.clone(), rect_mm: corners(row.rect), balloons });
                 }
             }
         }

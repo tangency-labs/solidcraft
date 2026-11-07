@@ -9,7 +9,8 @@
 //!   pending: it is read again until the search answers, as the title block is.
 //! - A word no font can set is left off and its table says why; the table still draws.
 //! - A parts list reads the design open, as `drawing.inspect` does, weighed only when a column shows
-//!   a mass.
+//!   a mass. Each row's ballooned field ([`BALLOONED`]) holds how many balloons point at it
+//!   ([`balloons_by_row`]), so the editor's column and `drawing.inspect` read one count.
 //! - A table that can't be read or laid out says why, and the rest of the sheet still draws.
 //!
 //! **Cost:** a weighed list costs about 135 ms on a bolted bracket, unweighed 0.2 ms. The sheet scene
@@ -21,13 +22,14 @@ use std::collections::HashMap;
 
 use solidcore_record::Vec2;
 use solidcraft_doc::bom::{self, Tree};
+use solidcraft_doc::drawing::balloon::balloons_by_row;
 use solidcraft_doc::drawing::table::{Corner, Kind, Place, SheetTable};
 use solidcraft_doc::drawing::{Drawing, Sheet};
 use solidcraft_geom::Aabb2;
 use solidcraft_geom::cell::{HAlign, Part};
 use solidcraft_geom::paper::text::Font;
 use solidcraft_geom::paper::{Group, Item, ObjectKind};
-use solidcraft_geom::table::{Heading, Row, Table, TableLayout};
+use solidcraft_geom::table::{BALLOONED, Heading, Row, Table, TableLayout};
 use solidcraft_sketch::{Outcome, PaperFonts, PaperLines, TextStyle};
 
 use crate::Session;
@@ -202,7 +204,7 @@ fn corner_of(place: Place, heading: Heading, size: Vec2, space: Aabb2) -> Vec2 {
 }
 
 /// `record`'s rows: a revision table's from the drawing's revisions; a parts list's from the design
-/// open, or why it can't be listed.
+/// open, each with how many balloons point at it, or why it can't be listed.
 fn rows_of(s: &Session, d: &Drawing, record: &SheetTable) -> std::result::Result<Vec<Row>, String> {
     let list = match &record.kind {
         Kind::Revision => return Ok(d.revisions.table_rows(d.revisions.per_sheet.then_some(record.sheet))),
@@ -211,8 +213,16 @@ fn rows_of(s: &Session, d: &Drawing, record: &SheetTable) -> std::result::Result
     let state = s.model.state();
     let mut tree = Tree::new(&s.doc, &state);
     let request = bom::Request { mass: shows_mass(&record.table), ..list.request() };
-    let listed = bom::list(&mut tree, &request).map_err(|e| e.to_string())?;
-    Ok(list.rows(&listed, s.doc.drawing_units(d)))
+    // With its members, so each balloon finds its row.
+    let listed = bom::list_with(&mut tree, &request, true).map_err(|e| e.to_string())?;
+    let reading = d.balloons_by_list();
+    let counts: HashMap<String, usize> = balloons_by_row(reading.get(&record.id).map_or(&[], Vec::as_slice), &listed, &tree).into_iter().collect();
+    let mut rows = list.rows(&listed, s.doc.drawing_units(d));
+    for row in &mut rows {
+        let count = row.fields.get("item").and_then(|item| counts.get(item)).copied().unwrap_or(0);
+        row.fields.insert(BALLOONED.to_string(), count.to_string());
+    }
+    Ok(rows)
 }
 
 /// Whether a column shows a row's mass, which is what makes a list weigh its parts.

@@ -169,6 +169,9 @@ pub struct InspectRow {
     pub key: String,
     /// `[x0, y0, x1, y1]` on the sheet.
     pub rect_mm: [f64; 4],
+    /// How many balloons point at it: a parts list's only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub balloons: Option<usize>,
 }
 
 /// One cell an override shows in place of its value.
