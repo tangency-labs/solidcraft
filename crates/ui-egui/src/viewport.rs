@@ -6923,7 +6923,9 @@ fn hover_highlight(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     // A sketch of another component lights a soft grey, not the hover hue, as its fill does.
     let edge = Tokens::get().hover_profile_edge;
     let col = match hover {
-        Some(Hit::SketchCurve { sketch, .. } | Hit::SketchMidpoint { sketch, .. } | Hit::SketchPoint { sketch, .. }) if sketch_faded(app, *sketch) => {
+        Some(Hit::SketchCurve { sketch, .. } | Hit::SketchMidpoint { sketch, .. } | Hit::SketchPoint { sketch, .. })
+            if sketch_faded(app, *sketch) =>
+        {
             faded_hover_colour(edge, FADED_HOVER_EDGE_ALPHA)
         }
         _ => edge,
