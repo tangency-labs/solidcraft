@@ -106,9 +106,11 @@ without moving anything in the world:
   are not captured, for a linked component, and for a standard part (resizing rebuilds it).
 - `keep_world: false` moves the placements only, so the contents go with the origin.
 
-In the app, the Move panel of a placement (the Browser's **Move**) has **Move origin only**.
-With it ticked, the distances, angles and triad move the origin instead of the part, and the
-part stays where it is. OK puts the origin where the triad is.
+In the app, the Move panel of a placement (**Move** on a part's menu) has **Pick Origin**.
+Click it, then click a point of the model: a corner, an edge (a round edge stands for its
+centre) or a point on a face. The triad jumps there and the part stays where it is. From then
+on the distances and angles move the new origin from that point and turn its axes, and
+**Move Origin** puts the component's origin where the triad is.
 
 ## Floating joint chains
 

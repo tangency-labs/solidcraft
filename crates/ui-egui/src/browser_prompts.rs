@@ -36,7 +36,7 @@ pub(crate) fn occurrence_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
         };
     }
     let name = app.session.doc.occurrences.iter().find(|o| o.id == m.occurrence).map(|o| o.name.clone()).unwrap_or_default();
-    let before = (m.translate, m.angles, m.origin_only);
+    let before = (m.translate, m.angles);
     let shared = !m.path.is_empty() && app.session.occurrence_scope_count(&m.path).is_ok_and(|n| n > 1);
     let title = crate::i18n::format("browser.move_title", &[("name", &name)]);
     let at = panel_pos(app);
@@ -67,18 +67,21 @@ pub(crate) fn occurrence_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     crate::scenario::publish_handle(&format!("occurrence-move:angle:{k}"), response.rect.center());
                 }
             }
-            // Move Origin (#13136): the values move the component's origin; the part stays.
-            if ui_kit::checkbox_row(ui, "move_origin", crate::i18n::tr("browser.move_origin"), m.origin_only) {
-                m.origin_only = !m.origin_only;
+            // Pick Origin (#13136): the next click on the model puts the triad there, and the
+            // values then move the component's origin from it; the part stays.
+            let style = if m.picking { ui_kit::Button::SmallSelected } else { ui_kit::Button::Normal };
+            let pick = ui_kit::button(ui, crate::i18n::tr("browser.pick_origin"), style);
+            crate::scenario::publish_target("occurrence-move:pick_origin", pick.rect);
+            if pick.clicked() {
+                m.picking = !m.picking;
             }
-            if m.origin_only {
+            if m.picking {
+                ui_kit::text(ui, crate::i18n::tr("browser.pick_origin_note"), ui_kit::Text::Note("pick_origin"));
+            } else if m.origin_only {
                 ui_kit::text(ui, crate::i18n::tr("browser.move_origin_note"), ui_kit::Text::Note("move_origin"));
             }
         });
-    if m.origin_only != before.2 {
-        // The part goes back to where it was (moving the origin), or follows the values again.
-        if m.origin_only { revert_occurrence_dialog(app, &m) } else { apply_occurrence_move(app, &m) }
-    } else if (m.translate, m.angles) != (before.0, before.1) && !m.origin_only {
+    if (m.translate, m.angles) != before && !m.origin_only {
         apply_occurrence_move(app, &m);
     }
     match action {

@@ -1,50 +1,58 @@
 {
   "en": {
-    "browser.move_origin": "Move origin only",
     "browser.move_origin_note": "The origin goes where the triad is; the part stays where it is.",
     "browser.move_origin_ok": "Move Origin",
+    "browser.pick_origin": "Pick Origin",
+    "browser.pick_origin_note": "Click a corner, an edge or a face of the model: the origin goes there.",
     "cmd.component.set_origin": "Move Component Origin"
   },
   "ar": {
-    "browser.move_origin": "نقل نقطة الأصل فقط",
     "browser.move_origin_note": "تنتقل نقطة الأصل إلى موضع المحاور الثلاثة، ويبقى الجزء في مكانه.",
     "browser.move_origin_ok": "نقل نقطة الأصل",
+    "browser.pick_origin": "اختيار نقطة الأصل",
+    "browser.pick_origin_note": "انقر زاوية أو حافة أو وجهًا من النموذج: تنتقل نقطة الأصل إليها.",
     "cmd.component.set_origin": "نقل نقطة أصل المكوّن"
   },
   "de": {
-    "browser.move_origin": "Nur Ursprung verschieben",
     "browser.move_origin_note": "Der Ursprung wandert zum Achsenkreuz; das Teil bleibt, wo es ist.",
     "browser.move_origin_ok": "Ursprung verschieben",
+    "browser.pick_origin": "Ursprung wählen",
+    "browser.pick_origin_note": "Klicken Sie auf eine Ecke, eine Kante oder eine Fläche des Modells: Der Ursprung wandert dorthin.",
     "cmd.component.set_origin": "Komponentenursprung verschieben"
   },
   "he": {
-    "browser.move_origin": "הזזת נקודת הראשית בלבד",
     "browser.move_origin_note": "נקודת הראשית עוברת למקום מערכת הצירים; החלק נשאר במקומו.",
     "browser.move_origin_ok": "הזזת נקודת הראשית",
+    "browser.pick_origin": "בחירת נקודת ראשית",
+    "browser.pick_origin_note": "לחצו על פינה, קצה או פאה של המודל: נקודת הראשית עוברת לשם.",
     "cmd.component.set_origin": "הזזת נקודת הראשית של הרכיב"
   },
   "ja": {
-    "browser.move_origin": "原点のみ移動",
     "browser.move_origin_note": "原点が三軸の位置に移動し、部品はその場に残ります。",
     "browser.move_origin_ok": "原点を移動",
+    "browser.pick_origin": "原点を選択",
+    "browser.pick_origin_note": "モデルの頂点、エッジ、または面をクリックすると、原点がそこへ移動します。",
     "cmd.component.set_origin": "コンポーネントの原点を移動"
   },
   "ko": {
-    "browser.move_origin": "원점만 이동",
     "browser.move_origin_note": "원점이 삼축 위치로 이동하고 부품은 제자리에 남습니다.",
     "browser.move_origin_ok": "원점 이동",
+    "browser.pick_origin": "원점 선택",
+    "browser.pick_origin_note": "모델의 꼭짓점, 모서리 또는 면을 클릭하면 원점이 그곳으로 이동합니다.",
     "cmd.component.set_origin": "구성요소 원점 이동"
   },
   "vi": {
-    "browser.move_origin": "Chỉ di chuyển gốc tọa độ",
     "browser.move_origin_note": "Gốc tọa độ chuyển đến vị trí bộ ba trục; chi tiết vẫn giữ nguyên vị trí.",
     "browser.move_origin_ok": "Di chuyển gốc tọa độ",
+    "browser.pick_origin": "Chọn gốc tọa độ",
+    "browser.pick_origin_note": "Nhấp vào một góc, một cạnh hoặc một mặt của mô hình: gốc tọa độ sẽ chuyển đến đó.",
     "cmd.component.set_origin": "Di chuyển gốc tọa độ của thành phần"
   },
   "zh": {
-    "browser.move_origin": "仅移动原点",
     "browser.move_origin_note": "原点移到三轴所在位置；零件保持原位。",
     "browser.move_origin_ok": "移动原点",
+    "browser.pick_origin": "选取原点",
+    "browser.pick_origin_note": "单击模型的角点、边或面：原点将移到该处。",
     "cmd.component.set_origin": "移动组件原点"
   }
 }

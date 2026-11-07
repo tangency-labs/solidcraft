@@ -678,11 +678,15 @@ fn sketches_folder_moves_its_sketches_to_the_part_they_are_on() {
     assert!(context_menu::items(&h.app, &Target::Sketch { id: on_xy }).iter().any(|i| i.id == "component.move_sketches.to_parts"));
 }
 
-/// Move Origin in the Move panel (#13136): the values move the triad, not the part, until OK,
-/// which puts the component's origin there and leaves every body where it is.
+/// Pick Origin in the Move panel (#13136): a click on the model while it is armed puts the triad
+/// there without moving the part, and OK puts the component's origin at that point, moved and
+/// turned by the panel's values, in every placement, leaving every body where it is.
 #[test]
-fn move_origin_moves_the_triad_and_not_the_part() {
-    let (mut h, component, first, second) = fixture();
+fn pick_origin_puts_the_origin_on_the_picked_point_and_not_the_part() {
+    use crate::viewport::Hit;
+    use solidcore_record::Vec3;
+    use solidcraft_engine::geom::prelude::*;
+    let (mut h, _, first, second) = fixture();
     let bounds = |h: &Harness| {
         let mut b: Vec<[i64; 6]> = h
             .app
@@ -702,25 +706,43 @@ fn move_origin_moves_the_triad_and_not_the_part() {
     let before = bounds(&h);
     let mut m = crate::browser::OccMove::new(first);
     m.pivot = crate::browser::occurrence_origin(&h.app, first);
-    m.origin_only = true;
-    m.translate = [3.0, 4.0, 5.0];
-    m.angles = [0.0, 0.0, 90.0];
-    let start = m.pivot.unwrap();
-    // While the box is ticked the triad shows where the origin goes; the part has not moved.
+    h.app.tree.occurrence_move = Some(m);
+    // Not armed: a click on the model is an ordinary pick.
+    assert!(!crate::browser::picking_origin(&h.app));
+    h.app.tree.occurrence_move.as_mut().unwrap().picking = true;
+    // A click on empty space leaves it armed.
+    crate::browser::pick_origin(&mut h.app, &[]);
+    assert!(crate::browser::picking_origin(&h.app));
+    // A vertex under the pointer wins over the face it sits on.
+    let corner = Vec3::new(10.0, 10.0, 10.0);
+    let hits = [Hit::Face { body: "Body1".into(), index: 0, point: Vec3::new(5.0, 5.0, 10.0) }, Hit::Vertex { body: "Body1".into(), point: corner }];
+    crate::browser::pick_origin(&mut h.app, &hits);
+    let m = h.app.tree.occurrence_move.clone().unwrap();
+    assert!(!m.picking && m.origin_only);
+    assert_eq!(m.pivot, Some(corner));
     let triad = crate::browser::occurrence_triad_model_for(&m).unwrap();
-    assert!((triad.center.x - start.x - 3.0).abs() < 1e-9 && (triad.center.z - start.z - 5.0).abs() < 1e-9);
-    assert!(h.app.session.pending_moves.is_empty());
+    assert!((triad.center - corner).len() < 1e-9);
+    assert!(h.app.session.pending_moves.is_empty(), "the part has not moved");
+    // Up 5 from the corner, turned a quarter about Z.
+    let mut m = m;
+    m.translate = [0.0, 0.0, 5.0];
+    m.angles = [0.0, 0.0, 90.0];
     crate::browser::move_origin(&mut h.app, &m).unwrap();
     h.frames(2);
     assert_eq!(bounds(&h), before);
-    for (occurrence, offset) in [(first, 0.0), (second, 50.0)] {
+    for (occurrence, x) in [(first, 10.0), (second, 60.0)] {
         let at = crate::browser::occurrence_origin(&h.app, occurrence).unwrap();
-        assert!((at.x - start.x - 3.0 - offset).abs() < 1e-6 && (at.y - start.y - 4.0).abs() < 1e-6 && (at.z - start.z - 5.0).abs() < 1e-6, "{at:?}");
+        assert!((at - Vec3::new(x, 10.0, 15.0)).len() < 1e-6, "{at:?}");
     }
-    // Turned a quarter about Z: the component's X now runs along the world's Y.
+    // The component's X now runs along the world's Y.
     let t = h.app.session.doc.occurrences.iter().find(|o| o.id == first).unwrap().transform;
     assert!((t[0][1] - 1.0).abs() < 1e-9, "{t:?}");
-    assert_eq!(h.app.session.doc.components.iter().filter(|c| c.id == component).count(), 1);
+    // A face alone picks the point clicked on it.
+    let mut again = crate::browser::OccMove::new(first);
+    again.picking = true;
+    h.app.tree.occurrence_move = Some(again);
+    crate::browser::pick_origin(&mut h.app, &hits[..1]);
+    assert_eq!(h.app.tree.occurrence_move.as_ref().unwrap().pivot, Some(Vec3::new(5.0, 5.0, 10.0)));
     h.app.run("edit.undo", json!({})).unwrap();
-    assert!((crate::browser::occurrence_origin(&h.app, first).unwrap().x - start.x).abs() < 1e-9);
+    assert!(crate::browser::occurrence_origin(&h.app, first).unwrap().len() < 1e-9);
 }

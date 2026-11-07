@@ -373,8 +373,10 @@ pub struct OccMove {
     /// The values when the current triad drag began.
     drag0: Option<([f64; 3], [f64; 3])>,
     /// Move Origin (#13136): the values move the component's origin, not the part; OK runs
-    /// `component.set_origin` and nothing moves until then.
+    /// `component.set_origin` and nothing moves until then. Set by picking a point.
     pub origin_only: bool,
+    /// Pick Origin is armed: the next click on the model picks the point the origin goes to.
+    pub picking: bool,
 }
 
 impl OccMove {
@@ -389,6 +391,7 @@ impl OccMove {
             pivot: None,
             drag0: None,
             origin_only: false,
+            picking: false,
         }
     }
 }
@@ -3586,9 +3589,57 @@ pub fn apply_occurrence_move(app: &mut SolveApp, m: &OccMove) {
     );
 }
 
-/// Move Origin (#13136): put the component's origin (and its axes) where the panel's values move
-/// it to, turned about the starting origin and then moved, as a move of the part would; the part
-/// stays where it is.
+/// Whether a placement's Move panel is waiting for a point on the model (Pick Origin, #13136).
+pub(crate) fn picking_origin(app: &SolveApp) -> bool {
+    app.tree.occurrence_move.as_ref().is_some_and(|m| m.picking)
+}
+
+/// Pick Origin (#13136): the point a click on the model picks, from what is under the pointer: a
+/// vertex first, then an edge (a round edge stands for its centre, as for Move's points), then a
+/// face, where it was clicked. The triad goes there and the panel's values then move the origin,
+/// not the part, from that point. A click on nothing of the model leaves the pick armed.
+pub(crate) fn pick_origin(app: &mut SolveApp, hits: &[crate::viewport::Hit]) {
+    use crate::viewport::Hit;
+    let Some(mut m) = app.tree.occurrence_move.clone() else { return };
+    let point = hits
+        .iter()
+        .find_map(|h| match h {
+            Hit::Vertex { point, .. } => Some(*point),
+            _ => None,
+        })
+        .or_else(|| {
+            hits.iter().find_map(|h| match h {
+                Hit::Edge { body, index, point, .. } => {
+                    Some(crate::dialogs::edge_circle(&app.session, body, *index).map_or(*point, |(centre, ..)| centre))
+                }
+                _ => None,
+            })
+        })
+        .or_else(|| {
+            hits.iter().find_map(|h| match h {
+                Hit::Face { point, .. } => Some(*point),
+                _ => None,
+            })
+        });
+    let Some(point) = point else {
+        app.set_status(crate::i18n::tr("browser.pick_origin_note").to_string(), false);
+        return;
+    };
+    // A move of the part shown so far is dropped: from here the values move the origin.
+    if !m.origin_only {
+        revert_occurrence_dialog(app, &m);
+    }
+    m.pivot = Some(point);
+    m.translate = [0.0; 3];
+    m.angles = [0.0; 3];
+    m.origin_only = true;
+    m.picking = false;
+    m.drag0 = None;
+    app.tree.occurrence_move = Some(m);
+}
+
+/// Move Origin (#13136): put the component's origin at the picked point moved by the panel's
+/// distances, its axes turned by the panel's angles; the part stays where it is.
 pub(crate) fn move_origin(app: &mut SolveApp, m: &OccMove) -> Result<(), String> {
     use crate::gizmo;
     use solidcore_record::Vec3;
@@ -3606,8 +3657,9 @@ pub(crate) fn move_origin(app: &mut SolveApp, m: &OccMove) -> Result<(), String>
     let r = gizmo::mul(&gizmo::mul(&gizmo::rotation(Vec3::Z, a[2]), &gizmo::rotation(Vec3::Y, a[1])), &gizmo::rotation(Vec3::X, a[0]));
     let (axis, angle) = gizmo::axis_angle(&r);
     let pivot = m.pivot.unwrap_or_else(|| apply_point(&world, Vec3::ZERO));
-    let moved = mat_mul(&rigid(Vec3::new(m.translate[0], m.translate[1], m.translate[2]), pivot, axis, angle), &world);
-    let (at, x, z) = (apply_point(&moved, Vec3::ZERO), apply_vector(&moved, Vec3::X), apply_vector(&moved, Vec3::Z));
+    let turned = mat_mul(&rigid(Vec3::ZERO, Vec3::ZERO, axis, angle), &world);
+    let at = pivot + Vec3::new(m.translate[0], m.translate[1], m.translate[2]);
+    let (x, z) = (apply_vector(&turned, Vec3::X), apply_vector(&turned, Vec3::Z));
     app.run(
         "component.set_origin",
         json!({"component": o.component, "path": path, "frame": {"origin": [at.x, at.y, at.z], "x": [x.x, x.y, x.z], "z": [z.x, z.y, z.z]}}),
