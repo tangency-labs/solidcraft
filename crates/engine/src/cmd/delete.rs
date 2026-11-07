@@ -10,11 +10,19 @@ use solidcraft_doc::FeatureKind;
 
 use super::{CommandSpec, sketch_store};
 use crate::params::{bad, bool_};
+use crate::schema::delete::{SelectionDeleteParams, SelectionDeleteResult};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Sel, Session};
 
-pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("selection.delete", "Delete", delete).icon("delete").params(
-    "items?: [selection items]; components?, occurrences?, canvases?, point_clouds?, joints?: [ids or names]; dry_run?: bool → deleted, deleted_joints, would_fail, skipped (one undo step)",
-)];
+const DELETE_CONTRACT: TypedContract<SelectionDeleteParams> = TypedContract::new();
+
+pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("selection.delete", "Delete", crate::checked!("selection.delete", delete))
+    .icon("delete")
+    .contract(&DELETE_CONTRACT)
+    .output(output_schema_for::<SelectionDeleteResult>)
+    .params(
+        "items?: [selection items]; components?, occurrences?, canvases?, point_clouds?, joints?: [ids or names]; dry_run?: bool → deleted, deleted_joints, would_fail, skipped (one undo step)",
+    )];
 
 /// Run another command's body inside this one (so the whole delete is one undo step).
 fn sub(s: &mut Session, id: &str, p: Value) -> Result<Value> {
@@ -227,11 +235,12 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, skipped.first().cloned().unwrap_or_else(|| "nothing to delete".into())));
     }
     s.refresh();
-    let deleted: Vec<&String> = features_before.iter().filter(|(id, _)| s.doc.feature(*id).is_none()).map(|(_, n)| n).collect();
+    let deleted: Vec<String> = features_before.iter().filter(|(id, _)| s.doc.feature(*id).is_none()).map(|(_, n)| n.clone()).collect();
     // Features after a rolled-back marker count too (#3471).
     let would_fail: Vec<String> =
         super::edit::newly_broken_in_history(&before_doc, &before, &s.doc, &s.model).into_iter().map(|(name, _)| name).collect();
-    Ok(json!({ "deleted": deleted, "deleted_joints": joints, "bodies": bodies, "would_fail": would_fail, "skipped": skipped }))
+    let reply = SelectionDeleteResult { deleted, deleted_joints: joints, bodies, would_fail, skipped, param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
 #[cfg(test)]

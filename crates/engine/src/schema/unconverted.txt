@@ -106,7 +106,6 @@ render.start
 render.status
 select.clear
 select.set
-selection.delete
 sheet.export_bend_table
 sheet.export_dxf
 sheet.flat_pattern
