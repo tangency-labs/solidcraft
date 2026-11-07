@@ -205,6 +205,7 @@ fn the_grid_never_draws_two_levels_that_do_not_nest_at_once() {
 /// No colour here is one of [`colors`] or an appearance below, and each field has its own.
 const MARK: Palette = Palette {
     background: (Rgb(1, 2, 3), Rgb(4, 5, 6)),
+    background_middle: None,
     grid: Rgb(7, 8, 9),
     grid_major: Rgb(10, 11, 12),
     edge: Rgb(13, 14, 15),

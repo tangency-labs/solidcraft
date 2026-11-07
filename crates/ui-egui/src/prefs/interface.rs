@@ -17,10 +17,16 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         ui_kit::settings_section(ui, "viewport_logo", app.tr("prefs.appearance.viewport_logo"), |ui| {
             // The 3D view in the theme's colours, or the Light or Dark theme's (#4146).
             ui_kit::settings_form(ui, t.space_24 * 6.0 + t.space_6, |ui| {
-                // The view's background: the theme's gradient, or one colour of the user's (#7688).
+                // The view's background: the theme's gradient, one colour of the user's (#7688), or a
+                // gradient of the user's, top colour then bottom, with an optional colour halfway (#9230).
                 let label = app.tr("prefs.viewport_background");
-                let labels = [crate::i18n::tr("prefs.viewport_background_theme"), crate::i18n::tr("prefs.viewport_background_colour")];
-                let segments_width = (labels.iter().map(|label| ui_kit::ContentWidth::name(ui, label)).fold(0.0, f32::max) + t.space_16) * 2.0;
+                let labels = [
+                    crate::i18n::tr("prefs.viewport_background_theme"),
+                    crate::i18n::tr("prefs.viewport_background_colour"),
+                    crate::i18n::tr("prefs.viewport_background_gradient"),
+                ];
+                let segments_width =
+                    (labels.iter().map(|label| ui_kit::ContentWidth::name(ui, label)).fold(0.0, f32::max) + t.space_16) * labels.len() as f32;
                 let label_width = (t.space_24 * 6.0 + t.space_6).min(ui.available_width() * 0.6);
                 let available = (ui.available_width() - label_width - t.space_14).max(0.0);
                 let narrow = available < segments_width + t.control_height + t.space_6 + t.space_24 * 4.0 + ui.spacing().item_spacing.x * 2.0;
@@ -56,18 +62,46 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                     ui.data_mut(|data| data.insert_temp(key, (app.preferences.viewport_background, hex)));
                 };
                 let shown = ui_kit::row(ui, label, |ui| {
-                    let mut selected = usize::from(app.preferences.viewport_background.is_some());
+                    let prefs = &mut app.preferences;
+                    let mut selected = match (prefs.viewport_background, prefs.viewport_background_bottom) {
+                        (None, _) => 0,
+                        (Some(_), None) => 1,
+                        (Some(_), Some(_)) => 2,
+                    };
                     if ui_kit::settings_segments(ui, label, &mut selected, &labels) {
-                        app.preferences.viewport_background = (selected == 1).then_some([255, 255, 255]);
+                        let top = prefs.viewport_background.unwrap_or([255, 255, 255]);
+                        prefs.viewport_background = (selected > 0).then_some(top);
+                        prefs.viewport_background_bottom = (selected == 2).then(|| prefs.viewport_background_bottom.unwrap_or(top));
                     }
-                    if !narrow {
+                    if !narrow && app.preferences.viewport_background_bottom.is_none() {
                         colour_controls(ui, app);
                     }
                     ui.is_visible()
                 });
-                if narrow && shown {
+                if narrow && shown && app.preferences.viewport_background_bottom.is_none() {
                     ui_kit::below_row_control(ui, label, ui.available_width(), |ui| {
                         ui.horizontal_wrapped(|ui| colour_controls(ui, app));
+                    });
+                }
+                // The gradient's colours on a line of their own, top to bottom: next to the segments
+                // they would not fit. Under the control column, wrapping onto more lines when the
+                // dialog is narrow, so the bottom colour and the middle option stay in reach.
+                let prefs = &mut app.preferences;
+                if let (Some(top), Some(bottom)) = (&mut prefs.viewport_background, &mut prefs.viewport_background_bottom) {
+                    ui_kit::below_row_control(ui, label, ui.available_width(), |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            ui_kit::color_field(ui, top);
+                            // The middle colour starts halfway between the two.
+                            let mut middle = prefs.viewport_background_middle.is_some();
+                            if ui_kit::checkbox(ui, crate::i18n::tr("prefs.viewport_background_middle"), &mut middle).changed() {
+                                let halfway = std::array::from_fn(|k| ((u16::from(top[k]) + u16::from(bottom[k])) / 2) as u8);
+                                prefs.viewport_background_middle = middle.then_some(halfway);
+                            }
+                            if let Some(middle) = &mut prefs.viewport_background_middle {
+                                ui_kit::color_field(ui, middle);
+                            }
+                            ui_kit::color_field(ui, bottom);
+                        })
                     });
                 }
                 let label = app.tr("prefs.appearance.viewport_colours");
