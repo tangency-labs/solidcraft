@@ -55,17 +55,21 @@ pub struct Resolved {
 static CACHE: std::sync::Mutex<Vec<(String, Resolved)>> = std::sync::Mutex::new(Vec::new());
 const CACHE_SIZE: usize = 64;
 
+fn is_sketch_curve(src: &LinkSource) -> bool {
+    matches!(src, LinkSource::SketchCurve { .. })
+}
+
 fn cache_key(st: &ModelState, plane: &Plane, kind: LinkKind, src: &LinkSource) -> Option<String> {
+    // An intersection with a sketch curve (#11048) changes with that sketch, not with the meshes.
     let body_based = matches!(
         src,
         LinkSource::Edge { .. }
             | LinkSource::Face { .. }
             | LinkSource::Body { .. }
             | LinkSource::Vertex { .. }
-            | LinkSource::Intersection { .. }
             | LinkSource::Iso { .. }
             | LinkSource::Spun { .. }
-    );
+    ) || matches!(src, LinkSource::Intersection { a, b } if !is_sketch_curve(a) && !is_sketch_curve(b));
     if !body_based {
         return None;
     }
@@ -225,16 +229,12 @@ fn resolve_uncached(
             Vec::new()
         }
         LinkSource::Intersection { a, b } => {
-            // Where the bodies (or faces) meet, as the edges SMLib's imprint of one by the other
-            // makes: each its exact record curve, its points at the display tolerance.
-            let (ba, fa) = crate::project3d::part_of(st, a).ok_or_else(|| lost(&a.describe()))?;
-            let (bb, fb) = crate::project3d::part_of(st, b).ok_or_else(|| lost(&b.describe()))?;
-            let chord = (ba.body.size().max(bb.body.size()) * 1e-3).max(1e-3);
-            for e in
-                crate::kernel::meeting_edges(&ba.body, fa.as_ref().map(std::slice::from_ref), &bb.body, fb.as_ref().map(std::slice::from_ref), chord)?
-            {
-                wires.push(e.points);
-                exact.push(vec![WireCurve { curve: e.curve, interval: e.interval }]);
+            // Where the bodies, faces or other sketches' curves meet, as the edges SMLib's imprint
+            // of one by the other makes: each its exact record curve, its points at the display
+            // tolerance.
+            for (pts, curves) in crate::project3d::meeting(st, a, b)? {
+                wires.push(pts);
+                exact.push(curves);
             }
             Vec::new()
         }

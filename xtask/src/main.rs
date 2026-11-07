@@ -18,6 +18,7 @@ mod layers;
 mod licences;
 mod lists;
 mod mesh_decisions;
+mod params;
 mod pending;
 mod render_assets;
 mod skills;

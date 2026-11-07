@@ -1,18 +1,26 @@
 //! Plastic (enclosure) features: Boss, Lip / Groove, Snap Fit and Rest, and plastic rules.
 
-use serde_json::{Value, json};
+use serde_json::Value;
 use solidcore_record::Vec3;
 use solidcraft_doc::BodyName;
 use solidcraft_doc::FeatureKind;
 use solidcraft_doc::expr::Kind;
 use solidcraft_doc::plastic::PlasticRule;
-use solidcraft_doc::{Dir, FacePick, Position};
+use solidcraft_doc::{Dir, FacePick};
 use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
 use super::features::{add_feature, check_expr};
 use crate::params::{bad, bool_, expr, req_expr, str_, string_list, vec3};
+use crate::schema::plastic::{
+    AssignRuleParams, AssignRuleResult, ManageRulesParams, ManageRulesResult, RuleExpressions, RuleInfo, RuleValuesOrError, RulesParams, RulesResult,
+};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
+
+const MANAGE_RULES_CONTRACT: TypedContract<ManageRulesParams> = TypedContract::new();
+const ASSIGN_RULE_CONTRACT: TypedContract<AssignRuleParams> = TypedContract::new();
+const RULES_CONTRACT: TypedContract<RulesParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("plastic.boss", "Boss", boss).at("PLASTIC", "CREATE").icon("boss").params(
@@ -30,30 +38,48 @@ pub static COMMANDS: &[CommandSpec] = &[
         "position: [x,y,z] on a face (the rest's centre); direction? (default: out of the face); width (round: the diameter); length? (a rectangle, along `along`); along?: [x,y,z]; \
          height; draft? (angle; default: the body's plastic rule); thickness? (wall of a hollow rest); body?",
     ),
-    CommandSpec::new("plastic.manage_rules", "Manage Plastic Rules", manage_rules).at("PLASTIC", "SETUP").icon("plastic_rule").params(
+    CommandSpec::new("plastic.manage_rules", "Manage Plastic Rules", crate::checked!("plastic.manage_rules", manage_rules))
+        .at("PLASTIC", "SETUP")
+        .icon("plastic_rule")
+        .contract(&MANAGE_RULES_CONTRACT)
+        .output(output_schema_for::<ManageRulesResult>)
+        .params(
         "name (library or new rule; a new one starts from `from`, default ABS (1.5mm)); from?; material?; thickness?, nominal_radius?, clearance?, knife_edge?, \
          reveal_height?, thickness_variation?, draft?, max_thickness?, min_thickness?, min_draft? (expressions; `Thickness` is the rule's); active?: bool (rule for bodies without one); \
          delete?: bool (a design rule; a library rule goes back to the library values)",
     ),
-    CommandSpec::new("plastic.assign_rule", "Assign Plastic Rule", assign_rule).at("PLASTIC", "SETUP").icon("plastic_assign").params(
+    CommandSpec::new("plastic.assign_rule", "Assign Plastic Rule", crate::checked!("plastic.assign_rule", assign_rule))
+        .at("PLASTIC", "SETUP")
+        .icon("plastic_assign")
+        .contract(&ASSIGN_RULE_CONTRACT)
+        .output(output_schema_for::<AssignRuleResult>)
+        .params(
         "bodies: [names]; rule: name (empty: no rule) — plastic features on these bodies take its draft and clearance as defaults",
     ),
-    CommandSpec::new("plastic.rules", "List Plastic Rules", list_rules).icon("plastic_rule").noundo().params("→ rules with their expressions and values, the active rule and the rules assigned to bodies"),
+    CommandSpec::new("plastic.rules", "List Plastic Rules", crate::checked!("plastic.rules", list_rules))
+        .icon("plastic_rule")
+        .noundo()
+        .contract(&RULES_CONTRACT)
+        .output(output_schema_for::<RulesResult>)
+        .params("→ rules with their expressions and values, the active rule and the rules assigned to bodies"),
 ];
 
-fn rule_json(s: &Session, r: &PlasticRule) -> Value {
+/// A rule as the rule commands give it back: its expressions, and its values evaluated against
+/// the design's parameters (or why they don't evaluate).
+fn rule_info(s: &Session, r: &PlasticRule) -> RuleInfo {
     let (vals, _) = s.doc.param_values();
-    let values = s.doc.plastic_values(&vals, r).map(|v| {
-        json!({"thickness": v.thickness, "nominal_radius": v.nominal_radius, "clearance": v.clearance, "knife_edge": v.knife_edge,
-            "reveal_height": v.reveal_height, "thickness_variation": v.thickness_variation, "draft_deg": v.draft.to_degrees(),
-            "max_thickness": v.max_thickness, "min_thickness": v.min_thickness, "min_draft_deg": v.min_draft.to_degrees()})
-    });
+    let values = match s.doc.plastic_values(&vals, r) {
+        Ok(v) => RuleValuesOrError::Values(v.into()),
+        Err(e) => RuleValuesOrError::Error { error: e.to_string() },
+    };
     let library = PlasticRule::library().iter().any(|l| l.name == r.name);
-    json!({
-        "name": r.name, "material": r.material, "library": library,
-        "expressions": r.fields().iter().map(|(k, e, _)| (k.to_string(), json!(e))).collect::<serde_json::Map<_, _>>(),
-        "values": values.unwrap_or_else(|e| json!({"error": e.to_string()})),
-    })
+    RuleInfo { name: r.name.clone(), material: r.material.clone(), library, expressions: RuleExpressions::from(r), values }
+}
+
+/// A reply built from its output schema's type (`schema::plastic`), so the two can't drift
+/// apart.
+fn typed_reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
 fn manage_rules(s: &mut Session, p: &Value) -> Result<Value> {
@@ -72,7 +98,7 @@ fn manage_rules(s: &mut Session, p: &Value) -> Result<Value> {
             }
             doc.plastic.assigned.retain(|_, r| *r != name);
         }
-        return Ok(json!({"deleted": name}));
+        return typed_reply(cmd, ManageRulesResult::Deleted { deleted: name, param_warnings: Vec::new() });
     }
     let mut rule = match s.doc.plastic_rule(&name) {
         Some(r) => r,
@@ -116,7 +142,8 @@ fn manage_rules(s: &mut Session, p: &Value) -> Result<Value> {
         _ => {}
     }
     s.refresh();
-    Ok(json!({"rule": rule_json(s, &rule), "active": s.doc.plastic.active}))
+    let reply = ManageRulesResult::Changed { rule: Box::new(rule_info(s, &rule)), active: s.doc.plastic.active.clone(), param_warnings: Vec::new() };
+    typed_reply(cmd, reply)
 }
 
 fn assign_rule(s: &mut Session, p: &Value) -> Result<Value> {
@@ -142,12 +169,13 @@ fn assign_rule(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     s.refresh();
-    Ok(json!({"bodies": bodies, "rule": if rule.is_empty() { Value::Null } else { json!(rule) }}))
+    typed_reply(cmd, AssignRuleResult { bodies, rule: (!rule.is_empty()).then_some(rule), param_warnings: Vec::new() })
 }
 
 fn list_rules(s: &mut Session, _p: &Value) -> Result<Value> {
-    let rules: Vec<Value> = s.doc.plastic_rules().iter().map(|r| rule_json(s, r)).collect();
-    Ok(json!({"rules": rules, "active": s.doc.plastic.active, "assigned": s.doc.plastic.assigned}))
+    let rules = s.doc.plastic_rules().iter().map(|r| rule_info(s, r)).collect();
+    let reply = RulesResult { rules, active: s.doc.plastic.active.clone(), assigned: s.doc.plastic.assigned.clone(), param_warnings: Vec::new() };
+    typed_reply("plastic.rules", reply)
 }
 
 fn rest(s: &mut Session, p: &Value) -> Result<Value> {
@@ -237,7 +265,7 @@ fn lip(s: &mut Session, p: &Value) -> Result<Value> {
         Some(o) => return Err(bad(cmd, format!("unknown side `{o}` (inside or outside)"))),
     };
     let kind = FeatureKind::Lip {
-        face: Position(face),
+        face: FacePick(face),
         width: required(s, p, "width", Kind::Length, cmd)?,
         height: required(s, p, "height", Kind::Length, cmd)?,
         groove,
@@ -341,6 +369,27 @@ mod tests {
         // Outside band along the outer edge (80 x 50): 80·50 − 78·48 = 256, 2 deep.
         assert!(rel(v0 - volume(&mut g), 256.0 * 2.0) < 1e-6, "{}", v0 - volume(&mut g));
         assert!(g.execute("plastic.lip", &json!({"face": [40, 25, 0], "width": 1, "height": 2})).is_err(), "a face without an inner edge");
+    }
+
+    /// A lip follows its rim face when a parameter moves it (#11209): it was kept by a point
+    /// only, so a taller box left the point below the rim and the lip failed.
+    #[test]
+    fn a_lip_and_a_groove_follow_their_rim_when_a_parameter_moves_it() {
+        for groove in [false, true] {
+            let mut s = Session::default();
+            run(&mut s, "parameters.add", json!({"name": "h", "expression": "30 mm"}));
+            run(&mut s, "solid.box", json!({"length": 80, "width": 50, "height": "h"}));
+            run(&mut s, "solid.shell", json!({"faces": [[40, 25, 30]], "thickness": 2}));
+            let kind = if groove { "groove" } else { "lip" };
+            run(&mut s, "plastic.lip", json!({"face": [1, 25, 30], "width": 1, "height": 2, "type": kind}));
+            let before = volume(&mut s);
+            run(&mut s, "parameters.change", json!({"name": "h", "expression": "40 mm"}));
+            let failing: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+            assert!(failing.is_empty(), "{kind}: {failing:?}");
+            // 10 mm more of the shell's walls: (80·50 − 76·46) · 10, and the same band on top.
+            let walls = (80.0 * 50.0 - 76.0 * 46.0) * 10.0;
+            assert!(rel(volume(&mut s) - before, walls) < 1e-6, "{kind}: {} {walls}", volume(&mut s) - before);
+        }
     }
 
     #[test]

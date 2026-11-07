@@ -216,7 +216,7 @@ fn axes(app: &mut SolveApp, ui: &mut egui::Ui) {
         let enabled = app.preferences.space_mouse_enabled;
         let raw: [i16; 6] = app.space_mouse.raw.into();
         // Frames come on input, so a reading that moved since the last one gets a frame to show it.
-        let seen = ui.id().with("space_mouse_meter_raw");
+        let seen = ui.scope_id().with("space_mouse_meter_raw");
         let before = ui.data_mut(|data| data.get_temp::<[i16; 6]>(seen));
         ui.data_mut(|data| data.insert_temp(seen, raw));
         if before.is_some_and(|before| before != raw) {

@@ -450,7 +450,7 @@ fn comb_options_card(app: &mut SolveApp, ctx: &egui::Context, proj: &Proj) {
     let mut options = comb_options();
     let (length_tip, teeth_tip) = (app.tr("ui.comb_length_tip").to_string(), app.tr("ui.comb_teeth_tip").to_string());
     let shown = crate::ui_kit::Container::new(ctx, crate::ui_kit::Surface::Canvas)
-        .area(egui::Id::new("sc_comb_options"))
+        .area(egui::Id::unique("sc_comb_options"))
         .fixed_pos(available.left_top() + egui::vec2(tk.space_16, tk.space_16))
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {
@@ -948,7 +948,7 @@ pub fn hint(id: &str) -> Option<String> {
             "sketch.constraint.polygon" => "Polygon: click the lines of a closed chain; right-click to apply",
             "sketch.centerline" => "Centerline: click lines",
             "sketch.project_to_surface" => "Project to surface: click curves of other sketches, right-click, then click the face",
-            "sketch.intersection_curve" => "Intersection curve: click two faces",
+            "sketch.intersection_curve" => "Intersection curve: click two faces or curves of other sketches",
             "sketch.spun_profile" => "Spun profile: click the body, then the axis line",
             _ => return None,
         }
@@ -1306,13 +1306,19 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
         }
         Mode::Steps => match cmd {
             "sketch.intersection_curve" => {
-                if let Some(r) = hits.iter().find_map(|h| model_ref(app, h)).filter(|r| r.get("face").is_some()) {
+                // Either side is a face or a curve of another sketch (#11048).
+                if let Some(r) = hits.iter().find_map(|h| model_ref(app, h)).filter(|r| r.get("face").is_some() || r.get("curve").is_some()) {
                     tool.picks.push(r.to_string());
                     if tool.picks.len() >= 2 {
                         let a: Value = serde_json::from_str(&tool.picks[0]).unwrap_or(Value::Null);
                         let b: Value = serde_json::from_str(&tool.picks[1]).unwrap_or(Value::Null);
-                        let _ = app.run(cmd, json!({"a": a, "b": b}));
+                        // Done: the hint asks for the next pair again (a failure keeps its error).
+                        if app.run(cmd, json!({"a": a, "b": b})).is_ok() {
+                            app.set_status(crate::tools::hint(cmd), false);
+                        }
                         tool.picks.clear();
+                    } else {
+                        app.set_status(app.tr("ui.intersection_curve_second_pick").to_string(), false);
                     }
                 }
             }
@@ -1480,6 +1486,12 @@ pub fn finish(app: &mut SolveApp, tool: &mut Tool) -> bool {
             run_entities(app, tool);
             tool.picks.clear();
             tool.pts.clear();
+            true
+        }
+        // Intersection Curve: the right-click starts the picks over (#11048).
+        Mode::Steps if tool.cmd == "sketch.intersection_curve" && !tool.picks.is_empty() => {
+            tool.picks.clear();
+            app.set_status(crate::tools::hint(tool.cmd), false);
             true
         }
         Mode::Steps if !tool.picks.is_empty() && tool.picks.last().is_some_and(|x| x != "|") => {
@@ -1937,7 +1949,7 @@ fn constraint_entities(k: &solidcraft_engine::sketch::ConstraintKind) -> (Vec<us
         PatternRadius { a, b } => (vec![a, b], vec![]),
         Fix { p } => (vec![], vec![p]),
         Midpoint { p, l } => (vec![l], vec![p]),
-        PointOnCurve { p, c } => (vec![c], vec![p]),
+        PointOnCurve { p, c } | PointAlong { p, c, .. } => (vec![c], vec![p]),
         Symmetric { p, q, l } => (vec![l], vec![p, q]),
         Horizontal { l } | Vertical { l } => (vec![l], vec![]),
         Parallel { a, b }
@@ -1971,7 +1983,7 @@ fn glyph_anchors(sk: &solidcraft_engine::sketch::Sketch, k: &solidcraft_engine::
     };
     let pt = |p: usize| sk.point(p).map(|q| (q, None));
     match *k {
-        Coincident { p, .. } | Fix { p } | Midpoint { p, .. } | PointOnCurve { p, .. } => pt(p).into_iter().collect(),
+        Coincident { p, .. } | Fix { p } | Midpoint { p, .. } | PointOnCurve { p, .. } | PointAlong { p, .. } => pt(p).into_iter().collect(),
         PatternPoint { p, center, .. } => pt(center.unwrap_or(p)).into_iter().collect(),
         PatternRadius { .. } => Vec::new(),
         HorizontalPoints { p, q } | VerticalPoints { p, q } | Symmetric { p, q, .. } => {
@@ -2062,6 +2074,28 @@ mod glyph_zoom_tests {
     fn glyphs_stay_while_a_large_sketch_fills_the_view() {
         assert!(constraint_glyphs_visible_at_scale(1.5, true, || 500.0 * 1.5));
         assert!(constraint_glyphs_visible_at_scale(0.05, true, || MIN_GLYPH_SPAN_PX));
+    }
+
+    /// A Divide Curve point's constraint has a glyph on its point, an icon, and lights its point
+    /// and curve, as a point-on-curve constraint does (#8969).
+    #[test]
+    fn a_point_along_constraint_has_a_glyph_on_its_point() {
+        use solidcraft_engine::sketch::{ConstraintKind, CurveKind, Sketch};
+        let mut sk = Sketch::new();
+        let (Ok(a), Ok(b), Ok(q)) = (
+            sk.add_point(super::Vec2::new(0.0, 0.0), None),
+            sk.add_point(super::Vec2::new(10.0, 0.0), None),
+            sk.add_point(super::Vec2::new(2.5, 0.0), None),
+        ) else {
+            panic!("points");
+        };
+        let Ok(l) = sk.add_curve(CurveKind::Line { a, b }, None) else { panic!("line") };
+        let k = ConstraintKind::PointAlong { p: q, c: l, at: 0.25 };
+        assert_eq!(super::constraint_entities(&k), (vec![l], vec![q]));
+        let anchors = super::glyph_anchors(&sk, &k);
+        assert_eq!(anchors.len(), 1);
+        assert!(anchors.first().is_some_and(|(at, dir)| (at.x - 2.5).abs() < 1e-9 && at.y.abs() < 1e-9 && dir.is_none()));
+        assert_eq!(crate::icons::markers::glyph_icon(k.name()), Some("c_midpoint"));
     }
 }
 

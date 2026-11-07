@@ -11,7 +11,7 @@
 use egui::{Event, Key, Modifiers, MouseWheelUnit};
 
 fn enabled_id() -> egui::Id {
-    egui::Id::new("value_step_enabled")
+    egui::Id::unique("value_step_enabled")
 }
 
 /// Turn stepping on or off for this frame, from the preference (the app calls this every frame).

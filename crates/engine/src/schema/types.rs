@@ -42,7 +42,7 @@ pub(crate) const WHITESPACE: [(char, char); 10] = [
 ];
 
 /// [`WHITESPACE`] as the inside of a regex character class.
-fn whitespace_class() -> String {
+pub(crate) fn whitespace_class() -> String {
     let u = |c: char| format!("\\u{:04x}", c as u32);
     WHITESPACE.iter().map(|&(a, b)| if a == b { u(a) } else { format!("{}-{}", u(a), u(b)) }).collect()
 }
