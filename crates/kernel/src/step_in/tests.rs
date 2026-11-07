@@ -541,6 +541,32 @@ fn offset_surface_cube_import_is_closed_and_editable() {
     assert!(rel(measure(&result).unwrap().volume, 1000.0 - 40.0 * std::f64::consts::PI) < 1e-3);
 }
 
+/// The unit cube whose top face has a second bound: one edge along the face run out and back (a
+/// slit of no area), written `.F.` then `.T.` or the other way round. The face is still the whole
+/// top: the solid is closed, six faces, one cubic millimetre.
+#[test]
+fn a_planar_face_with_a_slit_for_an_inner_bound_keeps_the_solid_closed() {
+    for (what, first, second) in [("out then back", ".F.", ".T."), ("back then out", ".T.", ".F.")] {
+        let mut entities = cube_entities();
+        // The top face is #431: its outer bound #426 on the plane #430. The slit lies on it at z = 1.
+        entities = entities.replace("#431=ADVANCED_FACE('',(#426),#430,.T.);", "#431=ADVANCED_FACE('',(#426,#2005),#430,.T.);");
+        entities += "#2000=CARTESIAN_POINT('',(0.3,0.5,1.));\n#2001=VERTEX_POINT('',#2000);\n#2002=CARTESIAN_POINT('',(0.7,0.5,1.));\n#2003=VERTEX_POINT('',#2002);\n";
+        entities += "#2010=DIRECTION('',(1.,0.,0.));\n#2011=VECTOR('',#2010,1.);\n#2012=LINE('',#2000,#2011);\n#2013=EDGE_CURVE('',#2001,#2003,#2012,.T.);\n";
+        entities += &format!(
+            "#2020=ORIENTED_EDGE('',*,*,#2013,{first});\n#2021=ORIENTED_EDGE('',*,*,#2013,{second});\n#2004=EDGE_LOOP('',(#2020,#2021));\n#2005=FACE_BOUND('',#2004,.T.);\n"
+        );
+        entities += &context(10, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+        entities += "#9=ADVANCED_BREP_SHAPE_REPRESENTATION('Slit',(#101),#10);\n";
+        let import = step_import(&format!("{HEAD}{entities}{TAIL}")).unwrap_or_else(|e| panic!("{what}: {e}"));
+        assert_eq!(import.bodies.len(), 1, "{what}: {:?}", import.warnings);
+        assert!(import.bodies[0].closed, "{what}: {:?}", import.warnings);
+        assert_eq!(import.bodies[0].file_faces, 6, "{what}");
+        let m = measure(&import.bodies[0].body).unwrap();
+        assert!(rel(m.volume, 1.0) < 1e-6, "{what}: volume {}", m.volume);
+        assert!(rel(m.area, 6.0) < 1e-6, "{what}: area {}", m.area);
+    }
+}
+
 /// A hand-written unit cube brep (`#100`…) in a representation with the given unit and items.
 fn cube_entities() -> String {
     let mut s = String::new();
