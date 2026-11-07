@@ -4051,15 +4051,16 @@ dependencies = [
 [[package]]
 name = "solidcore"
 version = "1.0.1"
-source = "git+https://github.com/tangency-labs/solidcore?rev=8ddce901671f1cebd9214a31d21895d725e886c8#8ddce901671f1cebd9214a31d21895d725e886c8"
+source = "git+https://github.com/tangency-labs/solidcore?rev=99ed57c4d4f4cd77d942ac6cd2e4d09f612acb20#99ed57c4d4f4cd77d942ac6cd2e4d09f612acb20"
 dependencies = [
+ "serde",
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "solidcore-record"
 version = "0.1.0"
-source = "git+https://github.com/tangency-labs/solidcore?rev=f5e8e9a29e0c9b7cf6c4040a5bc8878382b3c62f#f5e8e9a29e0c9b7cf6c4040a5bc8878382b3c62f"
+source = "git+https://github.com/tangency-labs/solidcore?rev=99ed57c4d4f4cd77d942ac6cd2e4d09f612acb20#99ed57c4d4f4cd77d942ac6cd2e4d09f612acb20"
 dependencies = [
  "serde",
  "serde_json",

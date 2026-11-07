@@ -36,10 +36,10 @@ solidcraft-3dx-client = { path = "crates/threedx-client" }
 # move the rev on its own commit. For a
 # local checkout, add `[patch."https://github.com/tangency-labs/solidcore"] solidcore = { path =
 # "../solidcore/crates/solidcore" }` to a `.cargo/config.toml` outside the repository.
-solidcore = { git = "https://github.com/tangency-labs/solidcore", rev = "8ddce901671f1cebd9214a31d21895d725e886c8" }
+solidcore = { git = "https://github.com/tangency-labs/solidcore", rev = "99ed57c4d4f4cd77d942ac6cd2e4d09f612acb20" }
 # Geometry as data (solidcore's layers §1, "Record"): the B-rep record, its structural validation
 # and the native body file. Pinned like solidcore; for a local checkout, patch it as above.
-solidcore-record = { git = "https://github.com/tangency-labs/solidcore", rev = "f5e8e9a29e0c9b7cf6c4040a5bc8878382b3c62f" }
+solidcore-record = { git = "https://github.com/tangency-labs/solidcore", rev = "99ed57c4d4f4cd77d942ac6cd2e4d09f612acb20" }
 # test tooling: a dev-dependency only (xtask/src/layers.rs)
 solidcraft-testkit = { path = "crates/testkit" }
 
