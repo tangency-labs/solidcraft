@@ -272,6 +272,7 @@
   "ui.layout_floating": "Floating",
   "ui.material_review.claims": "Sources and licences are unverified claims. Missing values remain unknown.",
   "ui.organize": "Organise",
+  "ui.panel_layout.workspace.modelling": "Modelling",
   "ui.point_cloud_color_by": "Colour By",
   "ui.point_cloud_file_colors": "File Colours",
   "ui.point_cloud_no_file_colors": "The file has no colours",
