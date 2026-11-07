@@ -23,7 +23,7 @@ not a VectorCraft schematic. [Evaluator export](diagnostics/iso_continuity_nativ
 For a tensor B-spline, fixing u combines the control rows at u0 and leaves a
 B-spline in v, with the V knot vector. Fixing v leaves the corresponding U curve.
 This is the parametric-line construction in Patrikalakis, Maekawa and Cho,
-[Shape Interrogation for Computer Aided Design and Manufacturing, ง1.4.4](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node19.html).
+[Shape Interrogation for Computer Aided Design and Manufacturing, ยง1.4.4](https://web.mit.edu/hyperbook/Patrikalakis-Maekawa-Cho/node19.html).
 Equivalently, `d S(u0,t)/dt = S_v(u0,t)` and `d S(t,v0)/dt = S_u(t,v0)`.
 
 The fix shares one varying-direction selection between `knots` and
@@ -119,4 +119,44 @@ python plan/findings/diagnostics/iso_continuity_check.py --native native-replay.
 
 Both checks report `120 continuity records verified; 99 corrected, 21 unchanged`.
 This is an independent expected-delta audit, not a replacement for the full 2,874
-case golden runner. No expected golden record has been edited at this checkpoint.
+case golden runner. At that historical checkpoint no expected golden record had
+been edited; the full-run migration below supersedes that pending state.
+
+## Full native runner and golden migration
+
+Readiness validation merges main `7a593124c9` into the published branch as
+`87e2d87e6`, without rewriting published history. The full native runner at that
+revision reports exactly 99 changed records among 2,874 cases, with no added,
+removed, broken or known-failing cases. A separate capture of every actual runner
+output agrees with all 120 frozen continuity records above: 99 corrections and
+21 unchanged controls. The other 2,754 cases are structurally identical to the
+baseline, giving 2,775 unchanged records overall. Status, error, deferral and
+topology fields are unchanged throughout.
+
+The 99 corrections comprise 77 generated cases and 22 fixture cases. In 92 the
+continuity-list length changes; the other seven change the inherited labels or
+minimum continuity without changing the length. Every changed value is the
+varying-coordinate degree/multiplicity result independently checked above. The
+frozen records retain each exact old and new array; no geometry, tolerance or
+solver-accuracy expectation is changed.
+
+Only those 99 expected records are migrated. The subsequent full-unit check is:
+
+```text
+PASS curve.iso_curve cases=2874 changed=0 added=0 removed=0 broken=0 known_failing=0
+goldens: 1 unit(s), 1 passed, 0 failed
+```
+
+The checker also accepts `--baseline BEFORE.jsonl --goldens ACTUAL.jsonl` to
+verify the full-unit delta, requiring exactly the 99 independently justified
+changes and exact preservation of every other record. `BEFORE.jsonl` can be
+obtained from main `7a593124c9`'s expected file; `ACTUAL.jsonl` is a fresh runner
+capture. This gate proves the dispatcher correction and unchanged other outputs;
+it does not certify the separate generic projected solver's near-corner answer.
+
+Linux validation on the integrated `87e2d87e6` kernel also passes full workspace
+formatting, all three public IsoCurve continuity regressions, all eight private
+IsoCurve tests, the `wasm32-unknown-unknown` kernel check, and strict workspace
+Clippy with all targets (`-D warnings`). The golden migration and checker update
+change no kernel bytes from that validated revision. Hosted CI and maintainer
+review remain separate gates.

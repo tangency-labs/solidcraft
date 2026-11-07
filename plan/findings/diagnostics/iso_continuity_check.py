@@ -13,6 +13,8 @@ from pathlib import Path
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--records", type=Path, default=Path(__file__).with_name("iso_continuity_native_records.jsonl"))
 parser.add_argument("--native", type=Path)
+parser.add_argument("--goldens", type=Path, help="fresh full-unit golden capture")
+parser.add_argument("--baseline", type=Path, help="unchanged pre-fix golden file")
 args = parser.parse_args()
 records = [json.loads(line) for line in args.records.read_text(encoding="utf-8-sig").splitlines()]
 replay = None
@@ -43,3 +45,29 @@ for row in records:
     changed += row["before"] != row["after"]
 assert len(records) == 120 and changed == 99
 print(f"{len(records)} continuity records verified; {changed} corrected, {len(records)-changed} unchanged")
+
+if args.goldens or args.baseline:
+    assert args.goldens and args.baseline, "--goldens and --baseline must be supplied together"
+
+    def golden_rows(path):
+        rows = list(map(json.loads, path.read_text(encoding="utf-8-sig").splitlines()))
+        assert rows[0] == {"format": 1, "unit": "curve.iso_curve"}
+        result = {row["case"]: row for row in rows[1:]}
+        assert len(result) == len(rows) - 1 == 2874
+        return result
+
+    before = golden_rows(args.baseline)
+    after = golden_rows(args.goldens)
+    assert before.keys() == after.keys()
+    expected = {row["case"] for row in records if row["before"] != row["after"]}
+    actual = {name for name in before if before[name] != after[name]}
+    assert actual == expected, (actual - expected, expected - actual)
+    for row in records:
+        name = row["case"]
+        assert before[name]["values"] == {"out": row["before"]}, name
+        assert after[name]["values"] == {"out": row["after"]}, name
+        old_metadata = {k: v for k, v in before[name].items() if k != "values"}
+        new_metadata = {k: v for k, v in after[name].items() if k != "values"}
+        assert old_metadata == new_metadata, name
+    print("2874 runner records verified; 99 justified continuity changes, "
+          "2775 identical records, no status/error/topology changes")
