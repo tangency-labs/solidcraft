@@ -6070,6 +6070,9 @@ pub(crate) fn path_segments_at(ps: &SolvedSketch, ids: &[String], start: Vec3, p
     let reversed = |c: Vec<solidcore_record::Seg2>| c.into_iter().rev().map(|s| s.reversed()).collect::<Vec<_>>();
     // Where two curves meet: one tolerance for telling which ends touch and for the joint.
     const JOINT: f64 = 1e-5;
+    // Curves listed out of chain order are one chain all the same (#12199): when the list is
+    // not already end to end, put each next curve where one of its ends meets the chain's end.
+    curves = chain_order(curves, JOINT);
     // Orient the first curve: it runs toward the second where it meets it at one end only;
     // otherwise (one curve, or a second meeting it at both ends) from the end nearest `start`
     // (no start given, a pipe: as drawn).
@@ -6102,6 +6105,50 @@ pub(crate) fn path_segments_at(ps: &SolvedSketch, ids: &[String], start: Vec3, p
         segs = from_profile_on_closed_path(segs, &ps.plane, profile, start);
     }
     Ok(segs.iter().map(|s| kernel::PathSeg::of_sketch(&ps.plane, s)).collect())
+}
+
+/// `curves` (each a run of segments) put into one chain, when they are not end to end as listed.
+/// The chain starts at the first listed curve with an end that touches no other curve (the first
+/// curve when they close into a ring) and goes on with the first listed unused curve that meets
+/// its end. Curves that meet nothing keep their listed order after the chain, so a real gap is
+/// still reported by the caller.
+fn chain_order(curves: Vec<Vec<solidcore_record::Seg2>>, joint: f64) -> Vec<Vec<solidcore_record::Seg2>> {
+    let ends: Vec<Option<(Vec2, Vec2)>> =
+        curves.iter().map(|c| c.first().zip(c.last()).map(|(f, l)| (f.start(), l.end()))).collect();
+    let meets = |p: Vec2, q: Vec2| p.dist(q) <= joint;
+    // Already end to end as listed: nothing to do.
+    let connected = ends.windows(2).all(|w| match (w[0], w[1]) {
+        (Some((a, b)), Some((c, d))) => meets(a, c) || meets(a, d) || meets(b, c) || meets(b, d),
+        _ => true,
+    });
+    if curves.len() < 3 || connected {
+        return curves;
+    }
+    let n = curves.len();
+    // Whether end `p` of curve `i` meets an end of any other curve.
+    let shared = |i: usize, p: Vec2| (0..n).any(|j| j != i && ends[j].is_some_and(|(a, b)| meets(a, p) || meets(b, p)));
+    let head = (0..n)
+        .find(|&i| ends[i].is_some_and(|(a, b)| !shared(i, a) || !shared(i, b)))
+        .or_else(|| (0..n).find(|&i| ends[i].is_some()));
+    let Some(head) = head else { return curves };
+    let mut used = vec![false; n];
+    let mut order = vec![head];
+    used[head] = true;
+    // The head's open end is where the chain begins; it runs toward the other.
+    let mut tail = match ends[head] {
+        Some((a, b)) if !shared(head, a) => b,
+        Some((a, _)) => a,
+        None => return curves,
+    };
+    while let Some(next) = (0..n).find(|&j| !used[j] && ends[j].is_some_and(|(a, b)| meets(a, tail) || meets(b, tail))) {
+        let Some((a, b)) = ends[next] else { break };
+        tail = if meets(a, tail) { b } else { a };
+        used[next] = true;
+        order.push(next);
+    }
+    order.extend((0..n).filter(|&j| !used[j]));
+    let mut slots: Vec<Option<Vec<solidcore_record::Seg2>>> = curves.into_iter().map(Some).collect();
+    order.into_iter().filter_map(|i| slots.get_mut(i).and_then(Option::take)).collect()
 }
 
 /// A closed chain `segs` (in the plane `path`) begun where `profile`'s plane crosses it nearest
