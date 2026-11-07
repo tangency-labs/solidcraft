@@ -1712,16 +1712,18 @@ impl Dialog {
         self.restore_value_focus = true;
     }
 
-    /// A sketch clicked in the Browser or the History while Extrude, Revolve or Emboss is open
-    /// (#6106): Profiles takes every profile of the sketch, as when the sketch is selected before
-    /// the command starts. The island inside another profile's hole is left out, or it would fill
-    /// the hole. False when the click is not one of those (the caller selects it as usual).
+    /// A sketch clicked in the Browser or the History while a profile command is open (#6106,
+    /// #7381): its profile field takes every profile of the sketch, as when the sketch is selected
+    /// before the command starts. Sweep, Extrude, Revolve and Emboss replace that list. Loft adds
+    /// the sketch and keeps the sections already picked. The island inside another profile's hole
+    /// is left out, or it would fill the hole. False when the click is not one of those (the
+    /// caller selects it as usual), including when another field, such as Sweep's path, is active.
     pub fn pick_sketch(&mut self, s: &Session, id: u64) -> bool {
         if self.refuse_sketch(s, id) {
             return true;
         }
         if self.active != 0
-            || !matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. })
+            || !self.takes_a_whole_sketch()
             || !self.inputs.first().is_some_and(|i| i.accept & PROFILES != 0)
             || !s.doc.feature(id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. }))
         {
@@ -1735,12 +1737,38 @@ impl Dialog {
         if profiles.is_empty() {
             return false;
         }
-        input.items = profiles;
+        if matches!(self.kind, Kind::Loft { .. } | Kind::Surface(crate::dialogs_surface::Surf::Loft { .. })) {
+            for profile in profiles {
+                if !input.items.iter().any(|item| selection::same_item(item, &profile)) {
+                    input.items.push(profile);
+                }
+            }
+        } else {
+            input.items = profiles;
+        }
         self.profile_selection_changed = true;
         self.focus = true;
         self.error = None;
         self.sync_thread(s);
         true
+    }
+
+    /// Commands whose first field is a profile list a whole sketch can fill (#6106, #7381).
+    fn takes_a_whole_sketch(&self) -> bool {
+        matches!(
+            self.kind,
+            Kind::Extrude { .. }
+                | Kind::Revolve { .. }
+                | Kind::Emboss { .. }
+                | Kind::Sweep { .. }
+                | Kind::Loft { .. }
+                | Kind::Surface(
+                    crate::dialogs_surface::Surf::Extrude { .. }
+                        | crate::dialogs_surface::Surf::Revolve { .. }
+                        | crate::dialogs_surface::Surf::Sweep(_)
+                        | crate::dialogs_surface::Surf::Loft { .. }
+                )
+        )
     }
 
     /// A sketch clicked (in the view, the Browser or the History) while a pattern or Mirror waits

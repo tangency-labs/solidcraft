@@ -1109,7 +1109,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                     } else if modifiers.command || modifiers.ctrl {
                         toggle_feature(app, *id);
                     } else if !modifiers.any() && crate::browser::pick_sketch_into_dialog(app, *id) {
-                        // Extrude, Revolve or Emboss took every profile of the sketch (#6106).
+                        // A profile command took every profile of the sketch (#6106, #7381).
                     } else {
                         select_one(app, *id);
                     }
