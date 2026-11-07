@@ -453,3 +453,72 @@ mod native_tests {
         }
     }
 }
+
+/// `mapped`: SMLib's UV trim moved onto the edge record's parameter (solidcraft#12365).
+mod mapped_tests {
+    use super::*;
+    use solidcore_record::brep::{check_curve2, Budget};
+    use solidcraft_geom::brep::pcurve::eval;
+
+    /// A cubic trim on [3, 5]: clamped, one interior knot.
+    fn base() -> b::Curve2 {
+        b::Curve2::Spline {
+            knots: vec![3.0, 3.0, 3.0, 3.0, 4.0, 5.0, 5.0, 5.0, 5.0],
+            points: vec![[0.0, 0.0], [1.0, 2.0], [2.0, -1.0], [3.5, 1.0], [5.0, 0.5]],
+        }
+    }
+
+    fn same_curve_on(a: &b::Curve2, want: &b::Curve2, [t0, t1]: [f64; 2]) {
+        for i in 0..=8 {
+            let t = t0 + (t1 - t0) * f64::from(i) / 8.0;
+            let (p, q) = (eval(a, t).unwrap(), eval(want, t).unwrap());
+            assert!((p[0] - q[0]).abs() < 1e-9 && (p[1] - q[1]).abs() < 1e-9, "at {t}: {p:?} vs {q:?}");
+        }
+    }
+
+    /// The trim SMLib hands over can end a rounding past the edge record's interval with a dead
+    /// span there (its last span 3e-11 long after the edge's end, knots `5 x4, 5.00000000003 x4`:
+    /// the slot of a sloped bar, solidcraft#12365). Moving its end knots onto the edge's end
+    /// used to leave a run of 8 at 5, which the record refuses as "knot multiplicity", and the
+    /// body was lost. The remap drops the dead span: the record is valid and the curve on the
+    /// edge is unchanged.
+    #[test]
+    fn a_trim_ending_a_dead_span_past_the_edges_end_is_cut_to_the_edge() {
+        let e = 3e-11;
+        let trim = b::Curve2::Spline {
+            knots: vec![3.0, 3.0, 3.0, 3.0, 4.0, 5.0, 5.0, 5.0, 5.0, 5.0 + e, 5.0 + e, 5.0 + e, 5.0 + e],
+            points: vec![[0.0, 0.0], [1.0, 2.0], [2.0, -1.0], [3.5, 1.0], [5.0, 0.5], [5.0, 0.5], [5.0, 0.5], [5.0, 0.5], [5.0, 0.5]],
+        };
+        let out = mapped(&trim, true, [1.0, 0.0], [3.0, 5.0]).unwrap();
+        check_curve2(&out, &mut Budget::input()).unwrap();
+        assert_eq!(out.interval(), Some([3.0, 5.0]));
+        same_curve_on(&out, &base(), [3.0, 5.0]);
+    }
+
+    /// The other form seen in solidcraft#12365: the last interior knot run a rounding past the
+    /// end knots (`3.0000000000000004 x3, 3 x4`), an unordered knot vector by one ulp. Knots past
+    /// an end by rounding are that end, and the dead span they leave is dropped.
+    #[test]
+    fn a_trims_interior_knots_a_rounding_past_its_end_are_the_end() {
+        let u = 3.0 + 4e-16;
+        let trim = b::Curve2::Spline {
+            knots: vec![1.0, 1.0, 1.0, 1.0, 2.0, u, u, u, 3.0, 3.0, 3.0, 3.0],
+            points: vec![[0.0, 0.0], [1.0, 2.0], [2.0, -1.0], [3.5, 1.0], [5.0, 0.5], [5.0, 0.5], [5.0, 0.5], [5.0, 0.5]],
+        };
+        let want = b::Curve2::Spline {
+            knots: vec![1.0, 1.0, 1.0, 1.0, 2.0, 3.0, 3.0, 3.0, 3.0],
+            points: vec![[0.0, 0.0], [1.0, 2.0], [2.0, -1.0], [3.5, 1.0], [5.0, 0.5]],
+        };
+        let out = mapped(&trim, true, [1.0, 0.0], [1.0, 3.0]).unwrap();
+        check_curve2(&out, &mut Budget::input()).unwrap();
+        assert_eq!(out.interval(), Some([1.0, 3.0]));
+        same_curve_on(&out, &want, [1.0, 3.0]);
+    }
+
+    /// A trim already on its edge is left as it is.
+    #[test]
+    fn a_trim_on_its_edge_is_unchanged() {
+        let out = mapped(&base(), true, [1.0, 0.0], [3.0, 5.0]).unwrap();
+        assert_eq!(out, base());
+    }
+}
