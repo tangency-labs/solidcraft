@@ -1,0 +1,1 @@
+| assets/styles/ui/themes/solid-glass.json | SolidCraft contributors | original SolidCraft theme file (Solid Glass, dark): translucent frosted panels with a green accent and green tool icons | MIT OR Apache-2.0 |
