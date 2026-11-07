@@ -40,8 +40,8 @@
 //! | `offset_vertex_image` (private)                             | not upstream: a vertex's image on its face's offset (WR-736; opt-in) |
 //!
 //! Deviations:
-//! - **Four faces at a vertex (WR-666, opt-in).** With `Kernel::fixes.offset_four_face_vertex_split`
-//!   and `offset_closes_loop_gaps`, the fork's tangency-labs/smlib@2e1bb8c: the tangency
+//! - **Four faces at a vertex (WR-666, the only path).** The fork's
+//!   tangency-labs/smlib@2e1bb8c: the tangency
 //!   tolerance is half a degree, `trim_extended_edge` keeps a near-tangent trim point where
 //!   the curve passes through the surface by more than the tolerance, and at an all-convex or all-concave vertex takes the cut
 //!   reached first from the edge's other end. That choice also skips, on an open edge's
@@ -1558,14 +1558,6 @@ fn is_arc(k: &Kernel, c: &BSplineCurve, num_samples: u64, tol: f64) -> Result<Op
 
 // ---- the geometry creation --------------------------------------------------------------------
 
-/// Whether WR-666's opt-in is in effect: `Kernel::fixes.offset_four_face_vertex_split`
-/// together with `offset_closes_loop_gaps` (the fork's `CloseLoopGaps`, which closes the
-/// loop gaps the split vertex leaves on the faces round it; without it the flag has no
-/// effect, as the split alone leaves those faces' loops open).
-pub(crate) fn four_face_vertex_split(fixes: &crate::kernel::UpstreamFixes) -> bool {
-    fixes.offset_four_face_vertex_split && fixes.offset_closes_loop_gaps
-}
-
 /// Whether `curve` at `t` passes through `surface` at `uv` (where they meet) by more than
 /// `tol`. To second order in arc length s the curve's height over the surface is
 /// `g1 s + g2 s^2 / 2`, `g1` the sine of the angle between them and `g2` the curve's
@@ -1635,17 +1627,12 @@ impl OffsetGeometryCreation {
         }
     }
 
-    /// The constructor's angular tolerance (`m_dTangencyTolRadians`): `2.0 * PI / 180.0`;
-    /// with `Kernel::fixes.offset_four_face_vertex_split` and `offset_closes_loop_gaps`
-    /// (WR-666), half a degree,
-    /// `0.5 * PI / 180.0`, as the fork's tangency-labs/smlib@2e1bb8c.
+    /// The constructor's angular tolerance (`m_dTangencyTolRadians`): half a degree,
+    /// `0.5 * PI / 180.0` (WR-666, the fork's tangency-labs/smlib@2e1bb8c), not upstream's
+    /// two degrees, on the default path since #2981.
     #[must_use]
-    pub fn default_tangency_tol_radians(fixes: &crate::kernel::UpstreamFixes) -> f64 {
-        if four_face_vertex_split(fixes) {
-            0.5 * PI / 180.0
-        } else {
-            2.0 * PI / 180.0
-        }
+    pub fn default_tangency_tol_radians() -> f64 {
+        0.5 * PI / 180.0
     }
 
     /// The same creator with the angular tolerance `tangency_tol_radians`, which an
@@ -2818,8 +2805,8 @@ impl OffsetGeometryCreation {
 
             // for every sOffAdjEU - try letting trimPoint = OffAdjEu->ExtendedSurface/3DCurve intersection
             let mut last_face: Option<O> = None;
-            // (WR-666, opt-in) each adjacent face's candidates in `solutions`
-            let four_face = four_face_vertex_split(&k.fixes);
+            // (WR-666) each adjacent face's candidates in `solutions`
+            let four_face = true;
             let mut face_solutions: Vec<(usize, usize)> = Vec::new();
             for &off_adj_eu in &off_adj_eus {
                 let f = brep
@@ -2989,6 +2976,8 @@ impl OffsetGeometryCreation {
             // and where every edge at the vertex is convex (or every one concave) the edge
             // ends at the one of the two cuts its offset reaches first coming from its
             // other end. With a vertex of mixed edges the nearest point stays.
+            // (WR-666, the fork's opt-in is the only path since #2981) the adjacent
+            // faces' `found` extent: when two found, the four-face split applies
             if four_face && found && face_solutions.len() == 2 {
                 if let Some(param) = self.first_cut_from_far_end(
                     k,
@@ -3067,9 +3056,9 @@ impl OffsetGeometryCreation {
         }
     }
 
-    /// `TrimExtendedEdge`'s choice at a vertex of more than three faces under
-    /// `Kernel::fixes.offset_four_face_vertex_split` (WR-666, the fork's
-    /// tangency-labs/smlib@2e1bb8c): when every edge at `base_vertex` is convex (or every
+    /// `TrimExtendedEdge`'s choice at a vertex of more than three faces under WR-666
+    /// (the fork's tangency-labs/smlib@2e1bb8c; the split is the only path since
+    /// #2981): when every edge at `base_vertex` is convex (or every
     /// one concave; a lamina, tangent or shell-less edge counts as neither) and each of
     /// the two adjacent faces (`face_solutions`, ranges of `solutions`) has a cut nearest
     /// the vertex (not the start already chosen, nor, on an open edge's second end, the

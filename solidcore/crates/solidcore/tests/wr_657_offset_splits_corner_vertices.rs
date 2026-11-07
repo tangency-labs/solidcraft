@@ -2,8 +2,8 @@
 //! four plane faces whose offset planes no longer meet in one point. The offset of each
 //! edge there ends at the same pair of the planes' meeting points whichever way the
 //! corner splits, so an inset, or a shell open at one of the four faces, gets loop gaps
-//! and no volume (or the merge refuses it). With `offset_closes_loop_gaps` and
-//! `offset_splits_corner_vertices` the corner becomes the edge the offset needs.
+//! and no volume (or the merge refuses it). The corner becomes the edge the offset
+//! needs (the default path since #2981).
 //!
 //! A 30 x 20 x 10 box with edges 0 (the top's edge at x = 30) and 9 (the top's edge at
 //! y = 0) chamfered 2 (`SmApiFilletEdges`, a linear section), with edge 8 (the upright
@@ -32,11 +32,8 @@ use solidcore::{Brep, FaceId, Kernel, Point3};
 /// Relative tolerance of the volumes (the port lands within 1e-12 of each).
 const REL: f64 = 1e-9;
 
-fn kernel(fixed: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.offset_closes_loop_gaps = fixed;
-    k.fixes.offset_splits_corner_vertices = fixed;
-    k
+fn kernel(_fixed: bool) -> Kernel {
+    Kernel::default()
 }
 
 /// The box with `edges` (indices into its edge list; `None`: every edge) chamfered 2.
@@ -335,23 +332,19 @@ fn wr_657_unmerged_offset_is_not_refused() {
 }
 
 /// #2092: a sphere of radius 10 offset by -10 (convex edges not extended) leaves nothing.
-/// With both flags on, the empty body comes back as with either off: a result with no
-/// faces is not refused as a broken solid.
+/// The splits are the only path since #2981: an empty body still comes back as itself, no
+/// broken-solid refusal on a result with no faces.
 #[test]
 fn issue_2092_sphere_offset_to_its_centre_is_empty() {
-    for flags in [(false, false), (true, false), (false, true), (true, true)] {
-        let mut k = Kernel::default();
-        k.fixes.offset_closes_loop_gaps = flags.0;
-        k.fixes.offset_splits_corner_vertices = flags.1;
-        let mut ball = create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0).unwrap();
-        let mut n = Notifications::new(&mut ball);
-        let options = OffsetOptions {
-            distance: -10.0,
-            extend_convex_edges: false,
-            merge_results: true,
-        };
-        let out = api_offset_brep_full(&mut k, Some(&mut ball), options, &mut n.context())
-            .unwrap_or_else(|e| panic!("flags {flags:?}: {e:?}"));
-        assert!(out.face_list().is_empty(), "flags {flags:?}: no faces");
-    }
+    let mut k = Kernel::default();
+    let mut ball = create_sphere(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0).unwrap();
+    let mut n = Notifications::new(&mut ball);
+    let options = OffsetOptions {
+        distance: -10.0,
+        extend_convex_edges: false,
+        merge_results: true,
+    };
+    let out = api_offset_brep_full(&mut k, Some(&mut ball), options, &mut n.context())
+        .unwrap_or_else(|e| panic!("{e:?}"));
+    assert!(out.face_list().is_empty(), "no faces");
 }

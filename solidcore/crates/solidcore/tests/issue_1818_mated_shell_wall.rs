@@ -222,16 +222,16 @@ fn mated_offsets_alone_shell_the_square_to_circle_loft() {
     );
 }
 
-/// With WR-578's loop-gap closing too, the offset is still refused, now by WR-578's guard
+/// With WR-578's loop-gap closing too (the default path since #2981), the offset is
+/// still refused, by WR-578's guard
 /// (an offset of a solid that is no closed solid) and no longer by the gap closing itself:
 /// at each top corner the side faces close their rim arcs' gaps to the lateral edge's
 /// vertex, while the open top's face closes the same corner by a chord between the two
 /// arcs' ends, so the closing edges are not shared. That inconsistency is the gap
-/// closing's own (an opt-in path); the flag alone builds the sound shell above.
+/// closing's own; the default path builds the sound shell above.
 #[test]
 fn mated_offsets_with_loop_gaps_still_refuse() {
-    let mut fixes = mated();
-    fixes.offset_closes_loop_gaps = true;
+    let fixes = mated();
     let (_, result) = shell(&fixes, true);
     assert_sm_err(
         result.result,

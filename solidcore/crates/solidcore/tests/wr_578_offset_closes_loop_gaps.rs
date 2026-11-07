@@ -1,7 +1,7 @@
 //! Regression test for WR-578 (the fork's tangency-labs/smlib 7ff0a94 and 34318f4): a
 //! solid offset leaves a face loop's vertex behind where two consecutive edges' offsets
-//! run parallel and never meet, and the merge refuses the shell (1001). With
-//! `offset_closes_loop_gaps` the gap is closed by the straight edge between the two ends.
+//! run parallel and never meet, and the merge refuses the shell (1001). The gap is
+//! closed by the straight edge between the two ends (the default path since #2981).
 //!
 //! SolidCraft rig case shell/1494, rebuilt: a 47.5 x 45 x 30 box joined with an r7.5
 //! cylinder along x from its side x = 47.5 to 77.5, the axis in the front face's plane
@@ -39,10 +39,8 @@ use solidcore::{Brep, Kernel};
 
 const SHELL_1494: f64 = 8864.598272772;
 
-fn kernel(fixed: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.offset_closes_loop_gaps = fixed;
-    k
+fn kernel(_fixed: bool) -> Kernel {
+    Kernel::default()
 }
 
 /// The box joined with the cylinder, its seam `seam_deg` from +y towards +z.
