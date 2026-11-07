@@ -749,3 +749,77 @@ fn selected_components_are_copied_when_create_copy_is_ticked_after_them() {
     let p = crate::dialogs_move::params(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
     assert_eq!(p["occurrences"], json!([[first], [second]]));
 }
+
+/// The Move dialog on the 20 × 30 × 10 box with the triad drawn, and the screen point of a handle.
+fn move_triad_fixture() -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 20, "width": 30, "height": 10})).unwrap();
+    h.app.start("solid.move");
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    h.frames(3);
+    h
+}
+
+fn pointer_button(p: [f64; 2], pressed: bool) -> egui::Event {
+    egui::Event::PointerButton {
+        pos: egui::pos2(p[0] as f32, p[1] as f32),
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Default::default(),
+    }
+}
+
+fn pointer_at(p: [f64; 2]) -> egui::Event {
+    egui::Event::PointerMoved(egui::pos2(p[0] as f32, p[1] as f32))
+}
+
+fn box_label(h: &mut crate::scenario::Harness) -> Option<&'static str> {
+    h.app.dialog.as_mut().and_then(|d| d.primary()).map(|p| p.0)
+}
+
+/// A press and release on an arrow, with no drag between, puts the canvas box on that arrow's value,
+/// and moves nothing.
+#[test]
+fn a_click_on_an_arrow_puts_the_box_on_its_axis() {
+    for (handle, label) in [("y", "Y"), ("z", "Z"), ("x", "X")] {
+        let mut h = move_triad_fixture();
+        assert_eq!(box_label(&mut h), Some("X"), "the box starts on X");
+        let at = h.at(&json!({"gizmo": handle})).unwrap();
+        h.frame_with(vec![pointer_at(at)]);
+        h.frame_with(vec![pointer_button(at, true)]);
+        h.frame_with(vec![pointer_button(at, false)]);
+        h.frames(2);
+        assert_eq!(box_label(&mut h), Some(label), "a click on the {label} arrow");
+        let Kind::Move { x, y, z, .. } = &h.app.dialog.as_ref().unwrap().kind else { panic!("not a move") };
+        assert_eq!((x.as_str(), y.as_str(), z.as_str()), ("0 mm", "0 mm", "0 mm"), "a click moves nothing");
+    }
+}
+
+/// The box holds the total from where the bodies started: dragging along X by 5 and then by 3
+/// reads 8, and typing 10 puts the bodies 10 from the start.
+#[test]
+fn the_box_reads_the_total_from_the_start() {
+    let mut h = move_triad_fixture();
+    let grip = h.at(&json!({"gizmo": "x"})).unwrap();
+    let mut drag_by = |h: &mut crate::scenario::Harness, mm: f64| {
+        let from = h.at(&json!({"gizmo": "x"})).unwrap();
+        let to = h.at(&json!({"gizmo": "x", "by": [mm, 0.0, 0.0]})).unwrap();
+        h.frame_with(vec![pointer_at(from)]);
+        h.frame_with(vec![pointer_button(from, true)]);
+        h.frame_with(vec![pointer_at(to)]);
+        h.frame_with(vec![pointer_button(to, false)]);
+        h.frames(2);
+    };
+    let _ = grip;
+    let x = |h: &crate::scenario::Harness| match &h.app.dialog.as_ref().unwrap().kind {
+        Kind::Move { x, .. } => x.clone(),
+        other => panic!("not a move: {other:?}"),
+    };
+    drag_by(&mut h, 5.0);
+    assert_eq!(x(&h), "5 mm");
+    drag_by(&mut h, 3.0);
+    assert_eq!(x(&h), "8 mm", "the second drag adds to the first");
+    let d = h.app.dialog.as_mut().unwrap();
+    *d.primary().unwrap().2 = "10 mm".into();
+    assert_eq!(x(&h), "10 mm", "typing sets the total from the start");
+}
