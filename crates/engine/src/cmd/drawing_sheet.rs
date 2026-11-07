@@ -217,7 +217,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     s.edit_drawing(cmd, |d| {
         let after = if p.get("after").is_some() { sheet_at(cmd, d, p, "after")? } else { d.sheets.len().saturating_sub(1) };
         let model = d.sheets.get(after).ok_or_else(|| bad(cmd, "the drawing has no sheet to follow"))?;
-        let free = (d.sheets.len() + 1..).map(|n| format!("Sheet {n}")).find(|name| d.sheets.iter().all(|s| s.name != *name)).unwrap_or_default();
+        let free = d.free_sheet_name();
         let mut sheet =
             Sheet { id, name: free, documents: None, excluded: Excluded::default(), title_block_overrides: BTreeMap::new(), ..(**model).clone() };
         apply(cmd, &mut sheet, p)?;

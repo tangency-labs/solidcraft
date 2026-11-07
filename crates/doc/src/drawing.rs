@@ -632,6 +632,12 @@ impl Drawing {
         id_source.next(&self.ids().collect())
     }
 
+    /// The name a new sheet gets: the first `Sheet N` no sheet has, counting from one past the
+    /// number of sheets.
+    pub fn free_sheet_name(&self) -> String {
+        (self.sheets.len() + 1..).map(|n| format!("Sheet {n}")).find(|name| self.sheets.iter().all(|s| s.name != *name)).unwrap_or_default()
+    }
+
     /// The position of the sheet `named` names: by id, else by a name only one sheet has.
     pub fn sheet_index(&self, named: &str) -> Result<usize> {
         if let Some(i) = ids::decode(named).and_then(|id| self.sheets.iter().position(|s| s.id == id)) {
