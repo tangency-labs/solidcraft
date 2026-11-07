@@ -485,6 +485,31 @@ fn row_height_and_label_column_are_fixed_for_long_labels_and_expressions() {
     assert_eq!(value, "width / 2 + 10 mm");
 }
 
+/// A read-only value too long for one line wraps and its row grows to hold every line, instead
+/// of the fixed 28 pt row clipping the lines below the first (Redefine Sketch Plane's "Current
+/// plane"); a short value keeps the ordinary row height.
+#[test]
+fn value_row_wraps_a_long_value_and_grows_to_hold_it() {
+    let ctx = crate::fonts::test_context();
+    let long = "A construction plane with a long name, offset from the XY plane and seen from its other side";
+    for _ in 0..3 {
+        frame(&ctx, vec![], |ui| {
+            value_row(ui, "Current plane", long);
+            value_row(ui, "Short", "XY");
+        });
+    }
+    let t = Tokens::get();
+    let grown = scenario::rect_of("dialog:row:Current plane").unwrap();
+    let control = scenario::rect_of("dialog:control:Current plane").unwrap();
+    let short = scenario::rect_of("dialog:row:Short").unwrap();
+    assert_eq!(short.height(), t.control_height);
+    assert!(grown.height() > t.control_height, "the long value's row grows: {grown:?}");
+    let lines = ctx.fonts_mut(|f| f.layout(long.to_owned(), egui::FontId::proportional(t.font_label), t.form_ink, control.width())).size().y;
+    assert!(lines > t.font_label * 1.5, "the value takes several lines: {lines}");
+    assert!(control.height() >= lines, "every line fits the control column: {control:?}, {lines}");
+    assert!(short.top() >= grown.bottom(), "the next row starts below the grown one: {grown:?}, {short:?}");
+}
+
 #[test]
 fn section_toggles_persist_per_dialog() {
     let ctx = crate::fonts::test_context();
