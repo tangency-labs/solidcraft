@@ -749,7 +749,7 @@ fn add_joint(s: &mut Session, mut j: Joint, p: &Value) -> Result<Value> {
     q.resize(j.kind.dofs().len(), 0.0);
     joints::clamp(&j, &mut q);
     let round = |v: &Value| v.as_f64().map(|x| (x * 1e6).round() / 1e6).unwrap_or(f64::NAN);
-    let warnings: Vec<String> = named_values(&j, &q)
+    let mut warnings: Vec<String> = named_values(&j, &q)
         .iter()
         .zip(named_values(&j, &j.values))
         .filter(|(now, was)| now["value"] != was["value"])
@@ -769,12 +769,18 @@ fn add_joint(s: &mut Session, mut j: Joint, p: &Value) -> Result<Value> {
     j.values = q;
     let id = j.id;
     let name = j.name.clone();
+    let sides = [j.a.occurrence, j.b.occurrence];
     // A new joint starts shown, even if a stale visibility entry came from an older design.
     s.visibility.hidden_joints.retain(|h| *h != id);
     s.doc_mut().assembly.joints.push(j);
     let mut sol = resolve(s);
     if sol.conflicts.iter().any(|(c, ..)| *c == id) && close_by_half_turn(s, id, &sol) {
         sol = resolve(s);
+    }
+    if sides.iter().all(|o| sol.fixed.contains(o))
+        && let Some((.., why)) = sol.conflicts.iter().find(|(c, ..)| *c == id)
+    {
+        warnings.push(format!("{name}: {why}"));
     }
     let mut out = sol_json(&sol, p);
     out["joint"] = json!(id);
@@ -1673,7 +1679,9 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     if placed && sol.conflicts.iter().any(|(c, ..)| *c == id) && close_by_half_turn(s, id, &sol) {
         sol = resolve(s);
     }
-    Ok(sol_json(&sol, p))
+    let mut out = sol_json(&sol, p);
+    out["joint"] = json!(id);
+    Ok(out)
 }
 
 /// Shared mutation for individual joints and timeline folders; the caller resolves once.

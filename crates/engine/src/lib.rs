@@ -1331,11 +1331,17 @@ impl Session {
         let settled = self.joints_settled.as_ref().is_some_and(|(doc, model)| {
             std::sync::Weak::as_ptr(model) == Arc::as_ptr(&state) && (Arc::ptr_eq(doc, &self.doc) || same_but_features(doc, &self.doc))
         });
-        if settled {
-            return;
+        if !settled {
+            self.place_joints();
         }
-        cmd::joints::place(self);
+    }
+
+    /// Solve the joints and record the design and model the solve left, so the refresh after a
+    /// command that solved them already skips its own solve.
+    pub(crate) fn place_joints(&mut self) -> solidcraft_doc::joints::Solution {
+        let sol = cmd::joints::place(self);
         self.joints_settled = Some((self.doc.clone(), Arc::downgrade(&self.model.state())));
+        sol
     }
 
     /// [`Session::refresh`] after the design changed from `previous`; a change that only renamed

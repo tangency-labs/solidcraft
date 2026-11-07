@@ -1,0 +1,26 @@
+{
+  "en": {
+    "joint.skips_part": "{joint} doesn't place {part}: {why}"
+  },
+  "ar": {
+    "joint.skips_part": "لا يضع {joint} الجزء {part} في مكانه: {why}"
+  },
+  "de": {
+    "joint.skips_part": "{joint} platziert {part} nicht: {why}"
+  },
+  "he": {
+    "joint.skips_part": "{joint} לא ממקם את {part}: {why}"
+  },
+  "ja": {
+    "joint.skips_part": "{joint} は {part} を配置しません: {why}"
+  },
+  "ko": {
+    "joint.skips_part": "{joint}이(가) {part}을(를) 배치하지 않습니다: {why}"
+  },
+  "vi": {
+    "joint.skips_part": "{joint} không đặt {part} vào vị trí: {why}"
+  },
+  "zh": {
+    "joint.skips_part": "{joint} 无法放置 {part}：{why}"
+  }
+}

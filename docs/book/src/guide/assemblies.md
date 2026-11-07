@@ -294,6 +294,24 @@ row, `motion.play` lists such joints under `unmoved`, and `joint.list` names eve
 `floating`. Ground a part of the chain, or join it to a grounded part (a rigid as-built joint keeps
 it where it is), and it moves.
 
+A joint between two grounded parts moves neither of them. `joint.create` keeps it, lists it under
+`conflicts` with the reason ("both its parts are grounded (Base:1, Cover:1), so it can move
+neither") and repeats that under `warnings`. The Joint dialog says the same under the picks and
+offers **Unground** for the second part, which the joint then places. After OK, Messages shows the
+reason as an error for any joint the dialog made or edited that conflicts. A joint from a body
+outside every component to a grounded part says "it joins the design's base to Cover:1, which is
+grounded, so it can move neither"; the base never moves, so the dialog offers no button there. An
+as-built joint between two grounded parts holds them where they are and says nothing.
+
+Ungrounding a part solves its joints at once, and the part goes where they hold it.
+`occurrence.ground` answers the occurrences that moved (`moved`), where the part is now
+(`transform`), the joints that disagree (`conflicts`) and the joints the solve skips (`skipped`),
+such as one whose origin's face no longer exists. `skipped` covers every joint that joins the part,
+directly or through other parts that aren't grounded, to what holds it. When a skipped joint leaves
+an ungrounded part where it was, the reply adds a `warning` and the status line names the joint and
+why ("Stack doesn't place B:1: joint origin: the face ... no longer exists (edit the joint to pick
+again)").
+
 `joint.drive` answers the joint's values as `joint.list` gives them, in degrees and millimetres
 with their units and limits, and `moved` says whether any part moved. A joint's origins are mated
 by default: B's z axis is turned against A's, as two faces meet. `flip: true` lines them up

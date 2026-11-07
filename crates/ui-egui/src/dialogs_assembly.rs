@@ -768,6 +768,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
     let t = Tokens::get();
     let mut enter = false;
     let problem = joint_problem(app, k, inputs);
+    let grounded = both_grounded(app, k, inputs);
     match k {
         Asm::FromBodies => {
             ui.add(egui::Label::new(app.tr("ui.components_from_bodies_hint")).wrap());
@@ -799,6 +800,15 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                     {
                         // A refusal shows on the status line; the picks stay either way.
                         let _ = app.run("component.from_bodies", json!({ "bodies": bodies }));
+                    }
+                });
+            }
+            if let Some((why, occurrence, part)) = grounded {
+                ui.vertical(|ui| {
+                    crate::ui_kit::status_line(ui, &why, crate::ui_kit::StatusTone::Warning);
+                    if crate::ui_kit::button(ui, crate::i18n::format("joint.unground", &[("part", &part)]), crate::ui_kit::Button::Normal).clicked() {
+                        // A refusal shows on the status line; the picks stay either way.
+                        let _ = app.run("occurrence.ground", json!({ "occurrence": occurrence, "grounded": false }));
                     }
                 });
             }
@@ -983,7 +993,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             }
             // The preview drove the joint: where it stopped short, and why (a closed loop or a
             // contact set), so the values asked for are not taken for where it is.
-            if let Some(why) = app.preview.stopped.as_ref().and_then(drive_stop) {
+            if let Some(why) = app.preview.reply.as_ref().and_then(drive_stop) {
                 ui.vertical(|ui| {
                     ui.label(RichText::new(why).color(t.warning));
                 });
@@ -1442,6 +1452,60 @@ fn joint_problem(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Option<(String
     commands(app, k, inputs).err().map(|e| (e, Vec::new()))
 }
 
+/// A new joint between two grounded parts moves neither: what the dialog says, the occurrence to
+/// unground (the second pick's) and its name. Read from the preview's reply, so an as-built
+/// joint that holds them where they are says nothing.
+fn both_grounded(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Option<(String, u64, String)> {
+    let Asm::Joint(f) = k else { return None };
+    if f.editing.is_some() {
+        return None;
+    }
+    let cmd = if f.as_built { "joint.as_built" } else { "joint.create" };
+    let (joint, _) = own_conflict(cmd, app.preview.reply.as_ref()?)?;
+    let (_, p) = commands(app, k, inputs).ok()?.into_iter().next()?;
+    let side = |key: &str| if f.as_built { p.get(key)?.as_u64() } else { p.get(key)?.get("occurrence")?.as_u64() };
+    let (a, b) = (side("a")?, side("b")?);
+    let (na, nb) = (grounded_name(&app.session, a)?, grounded_name(&app.session, b)?);
+    Some((crate::i18n::format("joint.both_grounded", &[("joint", joint), ("a", na), ("b", nb)]), b, nb.to_string()))
+}
+
+fn grounded_name(s: &Session, occurrence: u64) -> Option<&str> {
+    s.doc.occurrences.iter().find(|o| o.id == occurrence && o.grounded).map(|o| o.name.as_str())
+}
+
+/// The commands that place a joint and name it in their reply.
+const PLACES_JOINT: [&str; 3] = ["joint.as_built", "joint.create", "joint.edit"];
+
+/// The name and why of the conflict a joint command's reply lists for its own joint (`None`: it
+/// holds, or `cmd` places no joint).
+fn own_conflict<'a>(cmd: &str, reply: &'a Value) -> Option<(&'a str, &'a str)> {
+    if !PLACES_JOINT.contains(&cmd) {
+        return None;
+    }
+    let id = reply.get("joint")?.as_u64()?;
+    let c = reply.get("conflicts")?.as_array()?.iter().find(|c| c.get("joint").and_then(Value::as_u64) == Some(id))?;
+    let text = |key: &str| c.get(key).and_then(Value::as_str).unwrap_or_default();
+    Some((text("name"), text("why")))
+}
+
+/// Why a joint a dialog placed doesn't hold, said as an error once it is made: both its parts
+/// grounded, or the solve's reason (`None`: it holds, or `cmd` places no joint).
+fn joint_conflict(s: &Session, cmd: &str, reply: &Value) -> Option<String> {
+    let (name, why) = own_conflict(cmd, reply)?;
+    let id = reply.get("joint").and_then(Value::as_u64);
+    let grounded = s
+        .doc
+        .assembly
+        .joints
+        .iter()
+        .find(|j| Some(j.id) == id)
+        .and_then(|j| Some((grounded_name(s, j.a.occurrence)?, grounded_name(s, j.b.occurrence)?)));
+    Some(match grounded {
+        Some((a, b)) => crate::i18n::format("joint.both_grounded", &[("joint", name), ("a", a), ("b", b)]),
+        None => crate::i18n::format("joint.conflicts", &[("joint", name), ("why", why)]),
+    })
+}
+
 /// The occurrences of picked bodies (deduplicated, in pick order).
 fn occurrences(s: &Session, items: &[Sel]) -> Vec<u64> {
     let mut out = Vec::new();
@@ -1657,11 +1721,12 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
         Ok(preview) => preview,
         Err(error) => return Some(Err(error.to_string())),
     };
-    let stopped = cmds
+    let reply = cmds
         .iter()
         .zip(&preview.replies)
         .find(|((c, _), r)| {
-            c == "joint.drive" && (r["stopped_by_loop"].is_object() || r["stopped_by_contact"].is_object() || r["unconnected"].is_string())
+            (c == "joint.drive" && (r["stopped_by_loop"].is_object() || r["stopped_by_contact"].is_object() || r["unconnected"].is_string()))
+                || own_conflict(c, r).is_some()
         })
         .map(|(_, r)| r.clone());
     let (before, after) = (preview.before, preview.after);
@@ -1674,11 +1739,36 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
                 b.scene.ghost.clear();
             }
             b.bounds = after.bodies.iter().fold(Aabb3::EMPTY, |acc, x| acc.union(&x.mesh().bounds()));
-            b.stopped = stopped;
+            b.reply = reply;
             Ok(b)
         }
         Err(_) => Err("the preview failed".into()),
     })
+}
+
+/// What a dialog says once one of its commands is done, and whether it is an error: where and why
+/// a drive stopped short ([`drive_stop`]), or why a joint it placed conflicts.
+pub fn command_note(s: &Session, cmd: &str, reply: &Value) -> Option<(String, bool)> {
+    if cmd == "joint.drive" {
+        return drive_stop(reply).map(|why| (why, false));
+    }
+    joint_conflict(s, cmd, reply).map(|why| (why, true))
+}
+
+/// Why ungrounding left a part where it was: each joint holding it that the solve skips, and why
+/// (`None`: the reply of `occurrence.ground` warns of none).
+pub fn ground_note(s: &Session, reply: &Value) -> Option<String> {
+    reply.get("warning")?;
+    let id = reply.get("occurrence").and_then(Value::as_u64);
+    let part = s.doc.occurrences.iter().find(|o| Some(o.id) == id).map(|o| o.name.as_str()).unwrap_or_default();
+    let text = |j: &Value, key: &str| j.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
+    let said: Vec<String> = reply
+        .get("skipped")?
+        .as_array()?
+        .iter()
+        .map(|j| crate::i18n::format("joint.skips_part", &[("joint", &text(j, "name")), ("part", part), ("why", &text(j, "why"))]))
+        .collect();
+    (!said.is_empty()).then(|| said.join("; "))
 }
 
 /// What a drive that stopped short of the asked values says: where the joint got to and why
