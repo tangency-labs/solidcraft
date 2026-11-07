@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Mounting plate with four bolt holes</title>
+  <path d="M6 30L32 45.01L32 49.01L6 34Z" fill="#b8c3cf"/>
+  <path d="M58 30L32 45.01L32 49.01L58 34Z" fill="#8e9faf"/>
+  <path d="M32 14.99L58 30L32 45.01L6 30Z" fill="#e2e8ef"/>
+  <path d="M32 14.99L58 30L58 34L32 49.01L6 34L6 30Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M6 30L32 45.01L58 30" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 45.01L32 49.01" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 14.99L58 30L32 45.01L6 30Z" fill="#b9ddf8" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M28.94 21.99A3.06 1.77 0 1 0 35.06 21.99A3.06 1.77 0 1 0 28.94 21.99Z" fill="#236ead" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M42.8 30A3.06 1.77 0 1 0 48.93 30A3.06 1.77 0 1 0 42.8 30Z" fill="#236ead" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M28.94 38A3.06 1.77 0 1 0 35.06 38A3.06 1.77 0 1 0 28.94 38Z" fill="#236ead" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M15.07 30A3.06 1.77 0 1 0 21.2 30A3.06 1.77 0 1 0 15.07 30Z" fill="#236ead" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

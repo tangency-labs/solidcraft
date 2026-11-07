@@ -2,7 +2,8 @@
 
 Frames and weldments (#4003) are structural members (tube, angle, channel, beam, an aluminium
 extrusion of your own) laid along the lines of a frame sketch. This page covers what has landed:
-members and their profiles. Corners, trims, end caps, gussets, welds and the cut list follow.
+members, their profiles, mounting plates and bolted end plates. Corners, trims, end caps,
+gussets, welds and the cut list follow.
 
 ## The workflow
 
@@ -24,9 +25,9 @@ members and their profiles. Corners, trims, end caps, gussets, welds and the cut
 Members are ordinary bodies: mirror, pattern, move, drill and combine them with the usual
 commands. Where members meet they overlap until corner treatments land.
 
-The **Weldments** ribbon tab gathers the frame commands: New Sketch, Frame Member and
-Parameters. Like Sheet Metal it is always there, and it selects itself when a frame member is
-the selected body (or the last body of the active component).
+The **Weldments** ribbon tab gathers the frame commands: New Sketch, Frame Member, Mounting
+Plate and Parameters. Like Sheet Metal it is always there, and it selects itself when a frame
+member or mounting plate is the selected body (or the last body of the active component).
 
 ## The Frame Member dialog
 
@@ -41,6 +42,19 @@ the selected body (or the last body of the active component).
   the feature's values; the members keep their names through the edit, and a new **Name**
   renames them all. A member made with a whole profile sketch keeps it (the **Section** row shows
   the sketch; untick it for a built-in profile).
+
+## Mounting plates and bolted end plates
+
+In **Weldments > Create > Mounting Plate**, select a planar member end, including the
+ring at a hollow tube's opening. Choose a rectangular or round plate, its dimensions,
+thickness, offsets and rotation, and optional four-hole rectangular or bolt-circle patterns.
+The plate is a separate body; its holes do not drill the member. Preselection, live preview
+and Edit Feature work as for a frame member.
+
+The plate centres on the current face's area centroid and follows its persistent identity.
+A lost support produces an error rather than attaching to a nearby member. See the
+[Mounting Plate command guide](book/command-guides/frame.plate.md) for `frame.plate`,
+placement axes, expressions and hole-pattern limits.
 
 ## frame.member
 
