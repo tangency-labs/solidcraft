@@ -40,6 +40,7 @@
 //! - `ui.prefs {...}`: the preferences (default_units, nav, zoom_reverse, orbit_around, msaa,
 //!   length_decimals, angle_decimals); returns them all
 //! - `ui.capture {action?: capture|revert|cancel}`: the Capture Position question
+//! - `ui.recover {action?: recover|discard|later, id?}`: the "Recover unsaved design?" prompt
 //! - `ui.agent_cursor {show?, speed?: 1–5 (times) | "instant", follow_camera?}`: the agent cursor
 //!   (#35); while it is shown, `engine.execute` first glides to the command's button and picks
 //!   and replies once the command has run (`"animate": false` skips that one call)
@@ -200,7 +201,8 @@ const SKETCHES_FOLDER: &str = "c0/sketches";
 /// The open dialog as `ui.inspect`, `ui.start` and `ui.editFeature` report it: its command, its
 /// picks and what OK runs, in the commands' own terms rather than the form's internals (#9087).
 fn dialog_state(app: &SolveApp) -> Value {
-    let Some(d) = app.dialog.as_ref() else { return Value::Null };
+    // No feature dialog: the "Recover unsaved design?" prompt, if it is up (answer it with ui.recover).
+    let Some(d) = app.dialog.as_ref() else { return crate::recovery_ui::describe(app).unwrap_or(Value::Null) };
     let runs = crate::dialogs::apply_commands(app, d);
     json!({
         "command": d.command(),
@@ -1427,6 +1429,14 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             },
             None => ok(json!({"question": app.tree.capture_prompt, "pending_moves": app.session.pending_moves.len()})),
         },
+        "ui.recover" => match s("action") {
+            Some(_) if p.get("id").is_some_and(|v| !v.is_string()) => err("`id` must be a string (a design's `id` from `ui.inspect`'s `dialog`)"),
+            Some(a) => match crate::recovery_ui::answer(app, a, s("id")) {
+                Ok(()) => ok(json!({"dialog": crate::recovery_ui::describe(app), "file_busy": app.file_load.busy()})),
+                Err(e) => err(e),
+            },
+            None => ok(json!({"dialog": crate::recovery_ui::describe(app)})),
+        },
         "ui.prefs" => wrap(crate::prefs::control(app, p)),
         "ui.agent_chat" => wrap(crate::agent_chat::control(app, ctx, p)),
         "ui.help" => match s("item") {
@@ -2309,6 +2319,70 @@ mod tests {
         assert!(now().is_some_and(|(other, _)| other != id), "{:?}", now());
         drop(counted);
         assert!(!WATCH.subscribed());
+    }
+
+    /// #3750: the "Recover unsaved design?" prompt is `ui.inspect`'s `dialog`, and `ui.recover`
+    /// answers it without clicking: Discard deletes the autosave and closes the prompt.
+    #[test]
+    fn inspect_reports_the_recovery_prompt_and_ui_recover_discards() {
+        use solidcraft_engine::recovery::{Autosaver, orphans};
+        let dir = std::env::temp_dir().join(format!("solidcraft-recover-prompt-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // An app that crashed with an unsaved box: its autosave is left unlocked.
+        let mut crashed = Session::default();
+        crashed.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let mut a = Autosaver::new(&dir, std::time::Duration::from_secs(3600)).unwrap();
+        assert!(a.save(&crashed).unwrap());
+        drop(a);
+        let mut h = crate::scenario::Harness::new();
+        crate::recovery_ui::start(&mut h.app, &dir, std::time::Duration::from_secs(3600));
+        h.frames(2);
+        let d = &h.call("ui.inspect", json!({}))["result"]["dialog"];
+        assert_eq!(d["kind"], "recover_unsaved", "{d}");
+        assert_eq!(d["actions"], json!(["recover", "discard", "later"]));
+        assert_eq!(d["designs"][0]["features"], 1, "{d}");
+        let id = d["designs"][0]["id"].as_str().unwrap().to_string();
+        let r = h.call("ui.recover", json!({"action": "discard", "id": id}));
+        assert_eq!(r["ok"], true, "{r}");
+        assert!(h.call("ui.inspect", json!({}))["result"]["dialog"].is_null());
+        assert!(orphans(&dir).iter().all(|e| e.id != id), "the autosave is deleted");
+        drop(h);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A non-string `id` is refused (it is not "the first one"), and a recover the open-design
+    /// limit refuses keeps its entry offered.
+    #[test]
+    fn ui_recover_refuses_a_non_string_id_and_keeps_an_entry_the_limit_refuses() {
+        use solidcraft_engine::recovery::{Autosaver, orphans};
+        let dir = std::env::temp_dir().join(format!("solidcraft-recover-refuse-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut crashed = Session::default();
+        crashed.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let mut a = Autosaver::new(&dir, std::time::Duration::from_secs(3600)).unwrap();
+        assert!(a.save(&crashed).unwrap());
+        drop(a);
+        let mut h = crate::scenario::Harness::new();
+        crate::recovery_ui::start(&mut h.app, &dir, std::time::Duration::from_secs(3600));
+        h.frames(2);
+        let id = h.app.recoverable[0].id.clone();
+        let r = h.call("ui.recover", json!({"action": "discard", "id": 0}));
+        assert_eq!(r["ok"], false, "{r}");
+        assert!(r["error"].as_str().is_some_and(|e| e.contains("string")), "{r}");
+        assert_eq!(h.app.recoverable.len(), 1, "nothing was discarded");
+        assert!(orphans(&dir).iter().any(|e| e.id == id));
+        // Full: 32 designs open and the active one is not blank.
+        for _ in 1..crate::documents::MAX_OPEN {
+            crate::documents::new_tab(&mut h.app);
+        }
+        h.app.session.path = Some("occupied.sc".into());
+        let r = h.call("ui.recover", json!({"action": "recover", "id": id}));
+        assert_eq!(r["ok"], false, "{r}");
+        assert!(r["error"].as_str().is_some_and(|e| e.contains("too many open designs")), "{r}");
+        assert_eq!(h.app.recoverable.len(), 1, "the entry is still offered");
+        assert!(h.call("ui.inspect", json!({}))["result"]["dialog"]["designs"][0]["id"] == id.as_str());
+        drop(h);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn render(app: &mut SolveApp, path: &std::path::Path) -> Vec<u8> {
