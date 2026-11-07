@@ -1,6 +1,6 @@
 //! Bounded universal workspace chrome. Placement and transactions are owned by
 //! panel_runtime; every outer surface here uses the common Container policy.
-use super::{Container, Surface};
+use super::{BackingTooltipExt as _, Container, Surface};
 use crate::theme::Tokens;
 
 pub(crate) struct HostChrome<'a> {
@@ -194,7 +194,7 @@ pub(crate) fn panel_host_control_label_opacity(
     if chrome.enabled && response.hovered() {
         ui.ctx().set_cursor_icon(if chrome.drag { egui::CursorIcon::Grab } else { egui::CursorIcon::PointingHand });
     }
-    response.on_hover_text(chrome.label)
+    response.backing_on_hover_text(chrome.label)
 }
 
 /// The same full-header affordance collapses and restores with one click.
@@ -251,7 +251,7 @@ pub(crate) fn panel_host_sash(ui: &mut egui::Ui, id: egui::Id, bounds: egui::Rec
             egui::CursorIcon::ResizeHorizontal
         });
     }
-    response.on_hover_text(name)
+    response.backing_on_hover_text(name)
 }
 
 /// A scrollbar owns only its narrow track. The surrounding canvas has no
@@ -314,7 +314,7 @@ pub(crate) fn panel_host_scrollbar(
             next = Some((offset + delta * t.control_height).clamp(0.0, maximum));
         }
     }
-    (response.on_hover_text(name), next)
+    (response.backing_on_hover_text(name), next)
 }
 
 pub(crate) fn panel_host_preview(ui: &egui::Ui, bounds: egui::Rect, valid: bool, reason: Option<&str>, opacity: f32) {

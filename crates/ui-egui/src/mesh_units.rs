@@ -13,6 +13,7 @@
 use serde_json::json;
 use solidcraft_engine::doc::point_cloud::UNITS;
 
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{SolveApp, file_load, ui_kit};
 
 /// A file waiting for its unit.
@@ -79,7 +80,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             ui_kit::text(ui, &file, ui_kit::Text::Report("file", false));
             ui_kit::choice_row(ui, crate::i18n::tr("ui.units"), "mesh_units", &mut ask.choice, &names);
             let origin = ui_kit::checkbox(ui, crate::i18n::tr("ui.mesh_import_origin"), &mut ask.origin)
-                .on_hover_text(crate::i18n::tr("ui.mesh_import_origin_tip"));
+                .backing_on_hover_text(crate::i18n::tr("ui.mesh_import_origin_tip"));
             // Named like the dialog's buttons: outside a labelled row the checkbox's own handle
             // is a bare `dialog:`, which scripts can't tell apart.
             crate::scenario::publish_handle("mesh_units:origin", origin.rect.center());

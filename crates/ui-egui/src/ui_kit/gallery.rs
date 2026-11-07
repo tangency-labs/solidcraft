@@ -1487,10 +1487,10 @@ const ELEMENTS: &[Element] = &[
                     state.selected = index;
                     ui.close();
                 }
-                response.on_hover_text(*label);
+                response.backing_on_hover_text(*label);
             }
         });
-        response.on_hover_text(choices[selected]);
+        response.backing_on_hover_text(choices[selected]);
     }),
     element!("dropdown_menu_with_close_behavior", |ui, s| {
         dropdown_menu_with_close_behavior(ui, "gallery_editable_menu", "Preset", egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {

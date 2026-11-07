@@ -231,7 +231,7 @@ fn browse_button(app: &mut SolveApp, ui: &mut egui::Ui, kind: &str, key: &str) {
 fn all_shots_button(app: &mut SolveApp, ui: &mut egui::Ui, label: &str, target: &str) -> Option<String> {
     let ready = super::ribbon::action_ready(app, "render.batch");
     let button = ui_kit::button(ui, label, ui_kit::Button::Enabled(ready.is_ok()));
-    let button = if let Err(reason) = &ready { button.on_disabled_hover_text(reason) } else { button };
+    let button = if let Err(reason) = &ready { button.backing_on_disabled_hover_text(reason) } else { button };
     crate::scenario::publish_target(target, button.rect);
     if button.clicked()
         && let Err(error) = super::ribbon::perform_job(app, "render.batch")
@@ -1095,7 +1095,7 @@ pub(super) fn quality_choices(app: &mut SolveApp, ui: &mut egui::Ui) {
     });
     let help = quality_hover(app);
     if !help.is_empty() {
-        choice.response.on_hover_text(help);
+        choice.response.backing_on_hover_text(help);
     }
     if choice.inner
         && let Err(error) = choose_quality(app, quality)

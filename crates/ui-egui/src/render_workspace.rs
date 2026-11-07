@@ -1467,7 +1467,7 @@ fn method_dropdown(app: &mut SolveApp, ui: &mut egui::Ui) -> egui::Response {
                 ],
             );
             let short = app.tr(if volume_path { "render.cpu_volume_method_adopt" } else { "render.cpu_celestial_adopt_label" }).to_string();
-            let action = crate::ui_kit::list_picker(ui, "render:method-cpu-indirect", &short, false).on_hover_text(detail);
+            let action = crate::ui_kit::list_picker(ui, "render:method-cpu-indirect", &short, false).backing_on_hover_text(detail);
             crate::scenario::publish_handle("render:method-cpu-indirect", action.rect.center());
             if volume_path {
                 crate::scenario::publish_handle("render:method-cpu-volume", action.rect.center());
@@ -2200,10 +2200,10 @@ fn result_action_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
                     chosen = Some(index);
                     ui.close();
                 }
-                response.on_hover_text(item_label);
+                response.backing_on_hover_text(item_label);
             }
         });
-        let picker = picker.on_hover_text(&label);
+        let picker = picker.backing_on_hover_text(&label);
         crate::scenario::publish_target("render:results", picker.rect);
         if let Some(index) = chosen {
             let _ = app.run("render.result.select", json!({"index":index}));
@@ -2271,10 +2271,10 @@ fn classic_result_actions(app: &mut SolveApp, ui: &mut egui::Ui) {
                         chosen = Some(index);
                         ui.close();
                     }
-                    response.on_hover_text(label);
+                    response.backing_on_hover_text(label);
                 }
             });
-            let picker = picker.on_hover_text(&label);
+            let picker = picker.backing_on_hover_text(&label);
             crate::scenario::publish_target("render:results", picker.rect);
             if let Some(index) = chosen {
                 let _ = app.run("render.result.select", json!({"index":index}));

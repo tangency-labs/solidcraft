@@ -761,7 +761,7 @@ pub(super) fn add_menu(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let enabled = count < cap;
                 let response = ui.add_enabled_ui(enabled, |ui| ui_kit::list_picker(ui, kind, app.tr(key), false)).inner;
                 crate::scenario::publish_target(&format!("render:lighting:add:{kind}"), response.rect);
-                if response.on_hover_text(app.tr("render.lighting_budget_help")).clicked() {
+                if response.backing_on_hover_text(app.tr("render.lighting_budget_help")).clicked() {
                     dispatch(app, "render.lights.add", None, Some(json!({"kind":kind})));
                     ui.close();
                 }
