@@ -247,6 +247,38 @@ fn a_balloon_reads_the_list_it_names_else_the_only_one() {
     assert_eq!(read(&d).unwrap_err(), vec![1 << 42, 1 << 43]);
 }
 
+/// A list counts the balloons that read it, not another list's; one that shows only what its sheet's
+/// balloons read counts only those on its sheet.
+#[test]
+fn a_list_counts_only_the_balloons_that_read_it() {
+    use solidcraft_geom::table::Ballooned;
+    let (mut d, [one, two]) = ballooned();
+    let sheet = d.sheets[0].id;
+    let other = 1 << 40;
+    d.sheets.push(Arc::new(Sheet { id: other, name: "Other".into(), ..(*d.sheets[0]).clone() }));
+    let lists = [1 << 41, 1 << 42];
+    for (balloon, list) in [one, two].into_iter().zip(lists) {
+        add_list(&mut d, sheet, list);
+        let at = d.balloons.index_of(balloon).unwrap();
+        Arc::make_mut(&mut d.balloons[at]).parts_list = Some(list);
+    }
+    let counted = |d: &Drawing, list: u64| -> Vec<u64> { d.balloons_by_list().get(&list).map_or(Vec::new(), |b| b.iter().map(|b| b.id).collect()) };
+    assert_eq!(lists.map(|list| counted(&d, list)), [vec![one], vec![two]]);
+    let scoped = |d: &mut Drawing, on: u64, scope: Option<Ballooned>| {
+        let at = d.tables.index_of(lists[0]).unwrap();
+        let table = Arc::make_mut(&mut d.tables[at]);
+        table.sheet = on;
+        table.table.filter.ballooned = scope;
+    };
+    scoped(&mut d, other, Some(Ballooned::Sheet));
+    assert!(counted(&d, lists[0]).is_empty(), "its balloon is on another sheet");
+    scoped(&mut d, other, Some(Ballooned::Drawing));
+    assert_eq!(counted(&d, lists[0]), [one]);
+    scoped(&mut d, sheet, Some(Ballooned::Sheet));
+    assert_eq!(counted(&d, lists[0]), [one]);
+    d.validate().unwrap();
+}
+
 /// A link names one of the drawing's parts lists.
 #[test]
 fn a_balloons_link_is_to_a_parts_list() {

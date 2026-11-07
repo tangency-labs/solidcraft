@@ -63,7 +63,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "table: its id; set: {sheet?, list?: {component?, levels?, group_by?, group_children?, show_purchased_contents?, mass?: \
              {unit: g|kg|lb, decimals}}, columns?, heading?: top|bottom, row_height_mm?, cap_mm?, filter?, overrides?, place?: \
-             {anchor: {corner, offset_mm?}} or {at: [x, y]}}, columns, filter and overrides as a drawing saves them → as \
+             {anchor: {corner, offset_mm?}} or {at: [x, y]}}, columns, filter ({only?, ballooned?: sheet|drawing: only the rows \
+             a balloon there reads, text?}) and overrides as a drawing saves them → as \
              drawing.table.add. One undo step, none when nothing changes.",
         ),
     CommandSpec::new(DELETE, "Delete Table", crate::checked!("drawing.table.delete", delete))

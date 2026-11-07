@@ -28,6 +28,7 @@ use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
 use solidcraft_geom::drawing_view::is_paper_coordinate;
 use solidcraft_geom::paper::MAX_SIDE_MM;
+use solidcraft_geom::table::Ballooned;
 
 use super::by_id::Record;
 use super::dimension::{Lookup, ModelEdge, Status, check_edge};
@@ -93,12 +94,16 @@ impl Drawing {
         }
     }
 
-    /// The balloons that read each parts list ([`Self::parts_list_for`]), by the list's id: each
-    /// balloon's list worked out once. A balloon with no list to go by reads none.
+    /// The balloons each parts list counts ([`Self::parts_list_for`]), by the list's id: each balloon's
+    /// list worked out once. A list whose filter shows only what its sheet's balloons read
+    /// ([`Ballooned::Sheet`]) counts only the balloons on its sheet. A balloon with no list to go by
+    /// reads none.
     pub fn balloons_by_list(&self) -> HashMap<u64, Vec<&Balloon>> {
         let mut by_list: HashMap<u64, Vec<&Balloon>> = HashMap::new();
         for b in &self.balloons {
-            if let Ok((list, _)) = self.parts_list_for(b) {
+            let Ok((list, _)) = self.parts_list_for(b) else { continue };
+            let sheet_only = self.tables.by_id(list).filter(|t| t.table.filter.ballooned == Some(Ballooned::Sheet)).map(|t| t.sheet);
+            if sheet_only.is_none_or(|sheet| self.view(b.view).is_some_and(|v| v.sheet == sheet)) {
                 by_list.entry(list).or_default().push(b);
             }
         }
