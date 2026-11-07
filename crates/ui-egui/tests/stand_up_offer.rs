@@ -51,8 +51,8 @@ fn opened_boxes(size: [f64; 3], corners: &[[f64; 3]], programs: &str, prepare: i
     std::fs::write(&path, text.replace("'SolidCraft','SolidCraft'", programs)).unwrap();
     let mut h = Harness::new();
     prepare(&mut h);
-    h.app.open_path(&path);
-    h.frames(3);
+    h.app.open_path_async(&path);
+    h.settle();
     h
 }
 

@@ -13,25 +13,42 @@ use super::features::{
     add_feature, axis_dir_param, check_expr, feature_sketch, length_operands, plane_param, point_param, profiles, typed_length_unit,
 };
 use crate::params::{bad, bool_, expr, req_expr, str_, string_list, vec3};
+use crate::schema::features::FeatureResult;
+use crate::schema::features_more::{BoundaryFillParams, RemoveParams, RibParams};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
+/// Rib and Web take the same keys.
+const RIB_CONTRACT: TypedContract<RibParams> = TypedContract::new();
+const REMOVE_CONTRACT: TypedContract<RemoveParams> = TypedContract::new();
+const BOUNDARY_FILL_CONTRACT: TypedContract<BoundaryFillParams> = TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("solid.boundary_fill", "Boundary Fill", boundary_fill).at("SOLID", "CREATE").icon("boundary_fill").params(
-        "tools: [bodies]; cells: [[x,y,z] a point inside each cell to fill (a cell: inside some tools, outside the rest)]; operation?: new|join|cut|intersect; remove_tools?: bool",
-    ),
+    CommandSpec::new("solid.boundary_fill", "Boundary Fill", crate::checked!("solid.boundary_fill", boundary_fill))
+        .at("SOLID", "CREATE")
+        .icon("boundary_fill")
+        .contract(&BOUNDARY_FILL_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params(
+            "tools: [bodies]; cells: [[x,y,z] a point inside each cell to fill (a cell: inside some tools, outside the rest)]; operation?: new|join|cut|intersect; remove_tools?: bool",
+        ),
     CommandSpec::new("solid.coil", "Coil", coil).at("SOLID", "CREATE").icon("coil").params(
         "diameter; two of revolutions (or turns), height, pitch; section_size; section?: circular|square; section_position?: inside|center|outside; \
          base?: [x,y,z] (numbers in mm or length expressions; default: the origin); axis?: X|Y|Z|[x,y,z] (default Z); start_angle?; clockwise?: bool; \
          sketch? (a sketch; its plane is the section plane, so its placement sets the radius and start phase), profiles? (default: all; one closed profile without holes); \
          operation?, targets?, name?, body_name?",
     ),
-    CommandSpec::new("solid.rib", "Rib", rib)
+    CommandSpec::new("solid.rib", "Rib", crate::checked!("solid.rib", rib))
         .at("SOLID", "CREATE")
         .icon("rib")
+        .contract(&RIB_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("sketch, curves: [open curve ids, in order]; thickness (across the sketch plane, or across the curves when normal); depth? (default: to the next face); flip?: bool (fill to the other side); direction?: in_plane|normal (grow across the sketch plane, the default, or along its normal)"),
-    CommandSpec::new("solid.web", "Web", web)
+    CommandSpec::new("solid.web", "Web", crate::checked!("solid.web", web))
         .at("SOLID", "CREATE")
         .icon("web")
+        .contract(&RIB_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("sketch, curves: [open curve ids] (one wall each); thickness; depth? (default: to the next face); flip?: bool; direction?: in_plane|normal"),
     CommandSpec::new("solid.emboss", "Emboss", emboss)
         .at("SOLID", "CREATE")
@@ -45,7 +62,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "MODIFY")
         .icon("align")
         .params("bodies: [names]; from: [x,y,z] | \"origin\" | {snap: vertex|edge_mid|face_center|circle_center, at: [x,y,z]} | from_face: [x,y,z] | from_plane: XY|XZ|YZ|construction or offset plane name or id|{origin, normal}; to: (the same) | to_face: [x,y,z] | to_plane: (a plane as from_plane; the point or face goes onto it along its normal, and the plane may move later: the bodies follow); from_frame / to_frame: a frame found again whenever the design changes, so the bodies follow it, in place of that side's point, face or plane: a joint origin as joint.create takes one ({face|circle|edge|point: [x,y,z]}, a face's name, a named joint origin) or {sketch, point|curve} (a sketch point, or a circle's, arc's or ellipse's centre, z along the sketch's normal), on the bodies' own component; faces, planes and frames also turn to meet; flip?: bool; axes?: [x, y, z] (point-to-point only: which world axes the offset moves along; default all three, at least one true); angle?: expr (a turn about the target's direction after the move)"),
-    CommandSpec::new("solid.remove", "Remove", remove).at("SOLID", "MODIFY").icon("delete").params("bodies: [names] (removed from here on in the timeline)"),
+    CommandSpec::new("solid.remove", "Remove", crate::checked!("solid.remove", remove))
+        .at("SOLID", "MODIFY")
+        .icon("delete")
+        .contract(&REMOVE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params("bodies: [names] (removed from here on in the timeline)"),
 ];
 
 fn coil(s: &mut Session, p: &Value) -> Result<Value> {

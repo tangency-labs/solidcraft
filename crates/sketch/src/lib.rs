@@ -68,8 +68,8 @@ pub use offset_topology::{OffsetCreated, OffsetRole, OffsetRoleFlags, OffsetRole
 pub use pattern::{PatternAlignment, PatternInstance, SketchPattern, SketchPatternKind};
 pub use periodic::periodic_beziers;
 pub use profiles::{
-    CurvePick, MAX_PROFILE_EDGES, Profile, ProfileSearch, distinct_curves, find_drawn_profiles, find_profiles, find_profiles_checked, merge_regions,
-    profile_at_point, profile_by_curves, without_text_counters,
+    CurvePick, ENDPOINT_JOIN_TOL, MAX_PROFILE_EDGES, Profile, ProfileSearch, distinct_curves, find_drawn_profiles, find_profiles,
+    find_profiles_checked, merge_regions, profile_at_point, profile_by_curves, without_text_counters,
 };
 pub use shape::{Shape, intersections, intersections_within, nearest_crossing, nearest_curve_intersection};
 pub use solver::solve_after_edit_with_analysis;

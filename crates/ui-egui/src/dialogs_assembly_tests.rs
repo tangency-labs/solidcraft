@@ -466,6 +466,67 @@ fn a_hole_side_shows_its_wall_not_the_plate_beside_it() {
     assert_eq!(snap.kind, SnapKind::CircleCenter, "the pre-fill is the plate's face, not the hole's wall: {item:?}");
 }
 
+/// The Joint dialog's frames (glyphs, OK's check, preview, rows) reuse each pick's snap: once
+/// measured, they mesh nothing until the world changes, and then the snap follows it.
+#[test]
+fn a_picked_snap_is_measured_once_not_every_frame() {
+    let mut s = Session::default();
+    s.execute("component.create", &json!({"name": "Plate"})).unwrap();
+    s.execute("solid.box", &json!({"length": 40, "width": 40, "height": 10, "corner": [0, 0, 0]})).unwrap();
+    s.execute("solid.cylinder", &json!({"diameter": 10, "height": 20, "base": [20, 20, -5], "operation": "cut"})).unwrap();
+    s.execute("component.create", &json!({"name": "Peg"})).unwrap();
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [60, 0, 0]})).unwrap();
+    s.execute("component.activate", &json!({"component": "root"})).unwrap();
+    let mut h = crate::scenario::Harness::new();
+    h.app = SolveApp::new(s, Services::default());
+    let (plate, peg) = (occ(&h.app, "Plate"), occ(&h.app, "Peg"));
+    h.app.run("occurrence.ground", json!({"occurrence": plate, "grounded": true})).unwrap();
+    h.app.start("joint.create");
+    let mut d = h.app.dialog.clone().unwrap();
+    let wall = face_sel(&h.app.session, Vec3::new(25.0, 20.0, 5.0)).unwrap();
+    let bottom = face_sel(&h.app.session, Vec3::new(65.0, 5.0, 0.0)).unwrap();
+    d.pick(&h.app.session, wall.clone());
+    d.pick(&h.app.session, bottom.clone());
+    h.app.dialog = Some(d);
+    let settle = |h: &mut crate::scenario::Harness| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        h.frames(2);
+        while h.app.preview.busy {
+            assert!(std::time::Instant::now() < deadline, "the joint preview did not finish");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            h.frame();
+        }
+        h.frames(2);
+    };
+    settle(&mut h);
+    assert!(h.app.preview.active && h.app.preview.error.is_none(), "{:?}", h.app.preview.error);
+    let hole = snap_of(&h.app.session, &wall).unwrap();
+    assert_eq!(hole.kind, SnapKind::CircleCenter);
+    assert!(Vec3::new(hole.at.x, hole.at.y, 0.0).dist(Vec3::new(20.0, 20.0, 0.0)) < 1e-6, "{hole:?}");
+    let face = snap_of(&h.app.session, &bottom).unwrap();
+    assert!(face.at.dist(Vec3::new(65.0, 5.0, 0.0)) < 1e-9 && face.z.dist(-Vec3::Z) < 1e-9, "{face:?}");
+    let cmds = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    let ((), work) = solidcraft_engine::kernel::profile::capture(|| {
+        for _ in 0..3 {
+            h.frame();
+            apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+            preview_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        }
+    });
+    assert_eq!(work.tessellate_ms, 0.0, "the frames after the picks measured them again: {work:?}");
+    assert_eq!(apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap(), cmds);
+    for (sel, fresh) in [(&wall, &hole), (&bottom, &face)] {
+        let kept = picked_snap(&h.app, sel).unwrap();
+        assert!(kept.at.dist(fresh.at) < 1e-9 && kept.z.dist(fresh.z) < 1e-9 && kept.param == fresh.param, "{kept:?} {fresh:?}");
+    }
+    // A moved Peg is a new world: its face is measured again where it went.
+    h.app.run("occurrence.move", json!({"occurrence": peg, "translate": [0, 30, 0], "capture": false})).unwrap();
+    settle(&mut h);
+    let moved = picked_snap(&h.app, &bottom).unwrap();
+    assert!(moved.at.dist(Vec3::new(65.0, 35.0, 0.0)) < 1e-9, "{moved:?}");
+    assert!(picked_snap(&h.app, &wall).unwrap().at.dist(hole.at) < 1e-9, "the grounded Plate stays");
+}
+
 #[test]
 fn as_built_animation_drives_the_new_shared_id_and_handles_exhaustion() {
     let mut app = two_boxes();
