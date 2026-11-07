@@ -593,7 +593,8 @@ The natural scrolling body height is published as `dialog:body:content_height`,
 so geometry tests distinguish content size from the viewport cap.
 After a successful parameter add, a fresh empty draft retains Name focus for
 continuous keyboard entry; leaving that empty row drops it.
-Parameter draft fields retain `param:new:name/unit/expression/comment`.
+Parameter draft fields retain `param:new:name/unit/expression/comment`, and the draft's
+bin button publishes `param:new:delete`.
 Configuration drafts publish `config:new:name`; existing `config:cell:ROW:COLUMN`,
 activation, rule and preview handles remain. The header plus retains
 `dialog:menu:Add Column`, including the existing menu nesting. The old separate
