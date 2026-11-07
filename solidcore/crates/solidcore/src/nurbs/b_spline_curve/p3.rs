@@ -1415,9 +1415,10 @@ impl BSplineCurve {
     }
 
     /// [`BSplineCurve::assert_valid`] of a UV trim on `trim_surface`, its face's
-    /// surface: with `Kernel::fixes.uv_trim_checks_on_surface` (WR-560) the radius of
-    /// curvature (13) and coincident control point (15) tests measure the trim on that
-    /// surface; otherwise the same as [`BSplineCurve::assert_valid`].
+    /// surface: with `Kernel::fixes.uv_trim_checks_on_surface` (WR-560) the coincident
+    /// control point test (15) measures the trim on that surface and the radius of
+    /// curvature tests (13/14) are the edge's 3D curve's, not the trim's (#2785);
+    /// otherwise the same as [`BSplineCurve::assert_valid`].
     ///
     /// # Errors
     ///
@@ -1823,38 +1824,31 @@ impl BSplineCurve {
                 }
             }
 
-            // Not upstream (fork tangency-labs/smlib b4f8c57, WR-560, opt-in): a radius of
-            // curvature is a length, and a UV trim's lengths are those of its face's
-            // surface. The trim is tested mapped by the surface's first fundamental form
-            // at its middle, with the mapped trim's tolerance and solution spacing; a
-            // mapped trim that cannot be sized fails test 13 and is not analysed.
-            let mut mapped: Option<BSplineCurve> = None;
-            let (mut radius_sized, mut radius_tol, mut radius_sep) = (sized, tol, min_sep);
-            if sized && k.fixes.uv_trim_checks_on_surface {
-                if let Some(l) = trim_metric(k, self, bounded, ovr.trim_surface, &domain)? {
-                    mapped = mapped_trim(self, l);
-                    let mapped_box = match mapped.as_ref() {
-                        Some(m) => ignored(m.calculate_bounding_box(
-                            &domain,
-                            BoundingBoxRequest {
-                                normal: true,
-                                pseudo: false,
-                                polar: false,
-                            },
-                        ))?
-                        .and_then(|b| b.normal),
-                        None => None,
-                    };
-                    radius_sized = mapped_box.is_some();
-                    rtn &= bool_report(&mut list, key, 13, radius_sized)?;
-                    if let Some(mapped_box) = mapped_box {
-                        let mapped_size = mapped_box.size().length();
-                        radius_tol = (mapped_size / size_t) / 10000.0;
-                        radius_sep = mapped_size / max2(20., size_t);
-                    }
-                }
-            }
-            let copy_curve = mapped.as_ref().unwrap_or(self);
+            // Not upstream (tangency-labs/solidcore#2785): the tolerance above is a speed,
+            // `size_xyz / size_t`, which tests 11/12 compare with `|C'|`; a radius of
+            // curvature is a length, so tests 13/14 compare it with a length of its own --
+            // the same 1/10000 fraction of the curve's extent. Divided by `size_t` the
+            // tolerance was an average speed, so stretching a curve's knot vector moved the
+            // kink verdict while the curve in space did not change (#2785: a cubic Bezier of
+            // radius 5.8e-6 was reported up to T = 20 and accepted from T = 50 on).
+            let radius_tol = if ovr.bounded {
+                size_xyz / 10000.0
+            } else {
+                1e-03
+            };
+            let radius_sep = min_sep;
+
+            // Not upstream (fork tangency-labs/smlib b4f8c57, WR-560; revised by #2785):
+            // tests 13/14 do not run on a UV trim. A trim is a parameter-space
+            // representation of its edge's 3D curve, and only that curve is the model's
+            // geometry -- the edge's own check runs this test on it (14). Measured on
+            // #2785: a pcurve crossing a loft's v knot lines bends in (u, v) to cancel the
+            // surface's jump in `|S_v|`, so its image has a sub-nanometre S-bend of radius
+            // 8.5e-4 there while the 3D curve is G1 and its radius is far above the
+            // tolerance; the trim's own curve says nothing the 3D curve does not.
+            let radius_sized =
+                sized && !(k.fixes.uv_trim_checks_on_surface && ovr.trim_surface.is_some());
+            let copy_curve = self;
 
             // Another type of kink check: vanishing radius of curvature.
             let mut radii = false;
@@ -1865,11 +1859,7 @@ impl BSplineCurve {
             // not run
             let radius_clear = shortcut
                 && (!k.fixes.bspline_check_min_radius
-                    || match mapped.as_ref() {
-                        None => bounds,
-                        Some(m) => m.nurb.as_ref().and_then(curve_bounds),
-                    }
-                    .is_some_and(|b| b.radius_clears(radius_tol)));
+                    || bounds.is_some_and(|b| b.radius_clears(radius_tol)));
             let solutions = if radius_sized && radius_clear {
                 radii = true;
                 Vec::new()
@@ -2506,24 +2496,168 @@ mod tests {
             .collect()
     }
 
-    /// WR-560 (fork tangency-labs/smlib b4f8c57, #891 item 2): the exact trim of a r 1
-    /// circle on a plane spanning 600 x 3 is an ellipse 200 times as long as it is wide
-    /// in (u, v), of radius 8.3e-6 at its ends against a tolerance of about 6.7e-5; on
-    /// the plane it is the circle of radius 1. Test 13 needs `bspline_check_min_radius`
-    /// to fire at all (WR-382).
+    /// #2785 (revising WR-560's test-13 half): tests 13/14 do not run on a UV trim. A trim
+    /// is a parameter-space representation of its edge's 3D curve -- the curve the radius
+    /// of curvature belongs to, which the edge's own check runs this test on (14) -- and
+    /// the trim's image carries its pcurve's own bends (measured on #2785's rig case: a
+    /// sub-nanometre S-bend of radius 8.5e-4 at a loft's section knots, where the 3D curve
+    /// is G1 and clears the tolerance).
+    ///
+    /// The trim here is the cubic `(0,0) (h,0) (h,h) (1,1)`, `h = 1e-4`, in a 1 x 1 plane's
+    /// parameters: its image on the plane has the bend of radius 5.8e-6 the issue's curve
+    /// has, so measured in (u, v) it reports test 13, and on its surface -- the regime
+    /// `uv_trim_checks_on_surface` selects -- the radius test is not its subject and it is
+    /// accepted. A curve that is no face's trim is tested as it is.
     #[test]
-    fn issue_891_uv_trim_radius_is_measured_on_its_surface() {
+    fn issue_2785_a_uv_trim_is_not_radius_tested() {
         let mut k = Kernel::default();
         k.fixes.bspline_check_min_radius = true;
-        let (trim, plane) = circle_trim_on_plane((300.0, 1.5, 1.0), (600.0, 3.0));
+        let (_, plane) = circle_trim_on_plane((0.5, 0.5, 0.4), (1.0, 1.0));
+        let h = 1e-4;
+        let trim = trim_in_uv(&[
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(h, 0.0, 0.0),
+            Vec3::new(h, h, 0.0),
+            Vec3::new(1.0, 1.0, 0.0),
+        ]);
+        // in its own (u, v) the trim's bend is reported
         let idx = failed_tests(&k, &trim, Some(&plane));
         assert!(idx.contains(&13), "{idx:?}");
+        // on its surface the radius test is the edge's 3D curve's, not the trim's
         k.fixes.uv_trim_checks_on_surface = true;
         let idx = failed_tests(&k, &trim, Some(&plane));
         assert!(!idx.contains(&13), "{idx:?}");
         // a curve that is no face's trim is tested as it is
         let idx = failed_tests(&k, &trim, None);
         assert!(idx.contains(&13), "{idx:?}");
+    }
+
+    /// The cubic `(0,0) (h,0) (h,h) (1,1)` of #2785, as a 2D curve of a face's
+    /// parameter space (`dim` 2, one span, no weights).
+    fn trim_in_uv(pts: &[Vec3]) -> BSplineCurve {
+        use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
+        BSplineCurve::create_canonical(&CanonicalData {
+            dim: 2,
+            degree: 3,
+            control_points: pts,
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: &[4, 4],
+            knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: None,
+            trim: None,
+        })
+        .unwrap()
+    }
+
+    /// tangency-labs/solidcore#2785: tests 13/14 compared a radius of curvature, a length,
+    /// with `tol`, the curve's average speed (`size_xyz / size_t / 10000`), so the two
+    /// sides had different units and the verdict moved when the curve was reparametrised
+    /// although no geometry changed.
+    ///
+    /// The curve is the cubic Bezier `(0,0) (h,0) (h,h) (1,1)` with `h = 1e-4`: one sharp
+    /// bend near its start, of radius 5.815568702310391e-6 everywhere (the search's own
+    /// first solution is 5.8155015634573e-6, #2637). Its knot vector is stretched to
+    /// `[0,0,0,0,T,T,T,T]`, so the curve in space is the same for every `T` and only the
+    /// parametrisation differs. The old speed tolerance is `sqrt(2) / T / 10000`, which
+    /// passes below the true radius between `T = 20` and `T = 50`: the bend was reported at
+    /// `T` up to 20 and silently accepted from 50 on.
+    #[test]
+    fn issue_2785_radius_tolerance_is_a_length_not_a_speed() {
+        let mut k = Kernel::default();
+        k.fixes.bspline_check_min_radius = true;
+        let h = 1e-4;
+        // the search's first solution, the same at every T (#2637, #2785)
+        let radius = 5.8155015634573e-6;
+        let mut tol: Option<f64> = None;
+        let mut value: Option<f64> = None;
+        for t in [1.0, 10.0, 20.0, 50.0, 1e2, 1e3, 1e4] {
+            let c = curve(
+                3,
+                &[[0.0, 0.0, 0.0], [h, 0.0, 0.0], [h, h, 0.0], [1.0, 1.0, 0.0]],
+                &[0.0, 0.0, 0.0, 0.0, t, t, t, t],
+            );
+            let mut list = AssertArray::new();
+            let ok = c
+                .assert_valid(&k, Some(&mut list), true, ObjectKey(9))
+                .unwrap();
+            let reports: Vec<_> = list
+                .reports()
+                .iter()
+                .filter(|r| r.test_index == 14)
+                .collect();
+            assert_eq!(reports.len(), 1, "T = {t}: {list:?}");
+            assert!(!ok, "T = {t}");
+            let report = reports[0];
+            // the same bend, at the same radius, for every parametrisation
+            assert!(
+                (report.value - radius).abs() <= 1e-9 * radius,
+                "T = {t}: {} against {radius}",
+                report.value
+            );
+            match value {
+                None => value = Some(report.value),
+                // the search's own value moves by a rounding or two, not with T
+                Some(first) => {
+                    assert!((first - report.value).abs() <= 1e-12 * first, "T = {t}");
+                }
+            }
+            // and the same tolerance, which is a length at part scale
+            match tol {
+                None => tol = Some(report.tol3d),
+                Some(first) => assert_eq!(first, report.tol3d, "T = {t}"),
+            }
+        }
+        // the box diagonal is sqrt 2 whatever the parametrisation, so the length
+        // tolerance is size_xyz / 10000 rather than the old speed sqrt(2) / T / 10000
+        let expected = 2f64.sqrt() / 10000.0;
+        assert!((tol.unwrap() - expected).abs() <= 1e-12, "{tol:?}");
+
+        // With the default fixes the radius is never read (WR-382), so no test 13/14
+        // report depends on the tolerance at all: the difftest, which runs the default,
+        // sees the same reports before and after this fix.
+        for t in [1.0, 20.0, 1e2, 1e4] {
+            let c = curve(
+                3,
+                &[[0.0, 0.0, 0.0], [h, 0.0, 0.0], [h, h, 0.0], [1.0, 1.0, 0.0]],
+                &[0.0, 0.0, 0.0, 0.0, t, t, t, t],
+            );
+            let mut list = AssertArray::new();
+            assert!(
+                c.assert_valid(&Kernel::default(), Some(&mut list), true, ObjectKey(9))
+                    .unwrap(),
+                "T = {t}: {list:?}"
+            );
+            assert!(list.is_empty(), "T = {t}: {list:?}");
+        }
+    }
+
+    /// The other side of #2785: a bend that is not a kink is accepted at every
+    /// parametrisation. The same cubic with `h = 0.25` has a radius of about 0.13, far
+    /// above the length tolerance `sqrt(2) / 10000 = 1.4e-4`, so no `T` may report it.
+    #[test]
+    fn issue_2785_a_regular_bend_is_accepted_at_every_parametrisation() {
+        let mut k = Kernel::default();
+        k.fixes.bspline_check_min_radius = true;
+        for t in [1.0, 20.0, 1e2, 1e4] {
+            let c = curve(
+                3,
+                &[
+                    [0.0, 0.0, 0.0],
+                    [0.25, 0.0, 0.0],
+                    [0.25, 0.25, 0.0],
+                    [1.0, 1.0, 0.0],
+                ],
+                &[0.0, 0.0, 0.0, 0.0, t, t, t, t],
+            );
+            let mut list = AssertArray::new();
+            assert!(
+                c.assert_valid(&k, Some(&mut list), true, ObjectKey(9))
+                    .unwrap(),
+                "T = {t}: {list:?}"
+            );
+            assert!(list.is_empty(), "T = {t}: {list:?}");
+        }
     }
 
     /// WR-560 (fork tangency-labs/smlib 54ca3e0, #1524): the trim of a r 0.003 hole on a
