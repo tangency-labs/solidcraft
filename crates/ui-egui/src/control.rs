@@ -324,6 +324,7 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
             | "timeline.play"
             | "browser.expand_all"
             | "browser.collapse_all"
+            | "select.mode"
     ) && !fit_id.starts_with("settings.");
     // History changes and session swaps can return to the first-body fitting window.
     let history_may_fit = app.session.undo.len() <= 2
@@ -957,12 +958,20 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             let mut cur = serde_json::to_value(&app.ui).unwrap_or(json!({}));
             let mut vis = serde_json::to_value(&app.session.visibility).unwrap_or(json!({}));
             let mut sketches = None;
+            let mut wrong_flag = None;
             if let (Some(o), Some(vo), Some(src)) = (cur.as_object_mut(), vis.as_object_mut(), p.as_object()) {
                 for (k, v) in src {
                     let shown = |v: &Value| v.as_bool().map(|b| json!(!b)).unwrap_or_else(|| v.clone());
                     match (VIS.iter().find(|(camel, _)| camel == k), k.as_str()) {
                         (Some((_, snake)), _) => vo.insert(snake.to_string(), v.clone()),
                         (None, "showOrigin") => vo.insert("origin_hidden".into(), shown(v)),
+                        // The older flags, read below: true or false, as the fields they were.
+                        (None, "pickBodies" | "pickComponents") => {
+                            if !v.is_boolean() {
+                                wrong_flag = Some(format!("`{k}` must be true or false"));
+                            }
+                            None
+                        }
                         (None, "showSketches") => {
                             sketches = Some(v.as_bool().ok_or_else(|| "`showSketches` must be true or false".to_string()));
                             None
@@ -970,6 +979,25 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                         _ => o.insert(k.clone(), v.clone()),
                     };
                 }
+                // The older flags are each about one mode (#4255): true picks it, components before bodies, and
+                // false goes back to Faces & edges from its own mode. A `pickMode` beside them wins.
+                if !src.contains_key("pickMode") {
+                    let flag = |name: &str| src.get(name).and_then(Value::as_bool);
+                    let now = o.get("pickMode").and_then(Value::as_str).unwrap_or_default();
+                    let mode = match (flag("pickComponents"), flag("pickBodies")) {
+                        (Some(true), _) => Some("parts"),
+                        (_, Some(true)) => Some("bodies"),
+                        (Some(false), _) if now == "parts" => Some("faces"),
+                        (_, Some(false)) if now == "bodies" => Some("faces"),
+                        _ => None,
+                    };
+                    if let Some(mode) = mode {
+                        o.insert("pickMode".into(), json!(mode));
+                    }
+                }
+            }
+            if let Some(e) = wrong_flag {
+                return err(e);
             }
             let sketches = match sketches.transpose() {
                 Ok(s) => s,

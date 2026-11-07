@@ -294,7 +294,11 @@ pub(in crate::render_workspace) fn controls(app: &mut SolveApp, ui: &mut egui::U
         return true;
     }
     let mut view = std::mem::take(&mut app.render_workspace.view.inspector.selection_appearance);
-    let pick_mode = if app.ui.pick_components { 2 } else { usize::from(!app.ui.pick_bodies) };
+    let pick_mode = match crate::selection_mode::render_filter(app.ui.pick_mode) {
+        "component" => 2,
+        "body" => 0,
+        _ => 1,
+    };
     if view.selection == app.session.selection && view.pick_mode != pick_mode {
         view.mode = pick_mode;
         view.inspected = None;
@@ -305,7 +309,9 @@ pub(in crate::render_workspace) fn controls(app: &mut SolveApp, ui: &mut egui::U
     view.pick_mode = pick_mode;
     if view.selection != app.session.selection {
         view.selection = app.session.selection.clone();
-        view.mode = if app.ui.pick_components || view.selection.iter().any(|s| matches!(s, Sel::Occurrence { .. })) {
+        view.mode = if crate::selection_mode::render_filter(app.ui.pick_mode) == "component"
+            || view.selection.iter().any(|s| matches!(s, Sel::Occurrence { .. }))
+        {
             2
         } else if view.selection.iter().any(|s| matches!(s, Sel::Face { .. })) {
             1
