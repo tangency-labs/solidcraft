@@ -1365,6 +1365,8 @@ preference_settings! {
     /// Compact history: the browser lists each component's features in history order with the
     /// marker, and neither timeline is shown.
     history_in_browser: bool = false, PAGE_LAYOUT;
+    /// Dragging ordinary Browser feature rows changes their chronological order.
+    browser_feature_drag: bool = true, PAGE_LAYOUT;
     /// Fold the shared-column history to its header.
     timeline_collapsed: bool = false, PAGE_LAYOUT;
     /// The browser's share of the column's height when History sits under it, which the user

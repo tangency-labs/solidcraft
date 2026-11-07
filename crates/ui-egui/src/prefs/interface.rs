@@ -365,6 +365,13 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     },
                 );
             });
+            layout_check(
+                ui,
+                app.tr("prefs.browser_feature_drag"),
+                app.tr("prefs.browser_feature_drag_note"),
+                &mut app.preferences.browser_feature_drag,
+                "browser_feature_drag",
+            );
             ui_kit::settings_form(ui, t.form_label_width + t.space_24 * 3.0, |ui| {
                 ui_kit::settings_row_help(ui, app.tr("prefs.history_sketches"), app.tr("prefs.history_sketches_note"), |ui| {
                     ui.add_enabled_ui(app.preferences.timeline_left || app.preferences.history_in_browser, |ui| {
