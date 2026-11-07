@@ -15,6 +15,22 @@ fn error(h: &mut Harness, id: &str, params: Value) -> String {
 }
 
 #[test]
+fn panel_arrow_bindings_and_cleared_defaults_survive_profile_export_import_and_apply() {
+    let mut h = Harness::new();
+    crate::keymap::bind(&mut h.app, "panel.sash.left", "Ctrl+Left", false).unwrap();
+    crate::keymap::bind(&mut h.app, "panel.sash.right", "", false).unwrap();
+    run(&mut h, "settings.profile.save", json!({"name":"Panels"}));
+    let profile = run(&mut h, "settings.profile.export", json!({"name":"Panels"}))["profile"].clone();
+    assert_eq!(profile["shortcuts"]["panel.sash.left"], "Ctrl+Left");
+    assert_eq!(profile["shortcuts"]["panel.sash.right"], "");
+    crate::keymap::reset(&mut h.app, None);
+    run(&mut h, "settings.profile.import", json!({"profile":profile,"name":"Imported panels"}));
+    run(&mut h, "settings.profile.apply", json!({"name":"Imported panels"}));
+    assert_eq!(crate::keymap::keys(&h.app, "panel.sash.left"), ["Ctrl+Left"]);
+    assert!(crate::keymap::keys(&h.app, "panel.sash.right").is_empty());
+}
+
+#[test]
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
     assert_eq!(keys.len(), 103, "Appearance includes its two system-theme slots");

@@ -1430,7 +1430,7 @@ fn command_inputs() -> Vec<(&'static str, serde_json::Value)> {
     floating["location"] = json!({"type":"floating","origin":{"x":20,"y":30}});
     let mut native = floating.clone();
     native["location"] = json!({"type":"window","host":"native","origin":{"x":20,"y":30},"return_to":{"zone":"left","index":0,"size":{"width":280,"height":240},"collapsed":false}});
-    vec![
+    let mut inputs = vec![
         ("layout.apply", json!({"name":"Fixture default"})),
         ("layout.get", json!({})),
         ("layout.reset", json!({})),
@@ -1458,7 +1458,9 @@ fn command_inputs() -> Vec<(&'static str, serde_json::Value)> {
             "panel.resize_pair",
             json!({"first":"s-one","second":"s-two","first_size":{"width":280,"height":260},"second_size":{"width":280,"height":220}}),
         ),
-    ]
+    ];
+    inputs.extend(ContextualPanelAction::ALL.into_iter().map(|action| (action.command_id(), json!({}))));
+    inputs
 }
 
 #[test]
@@ -1510,6 +1512,10 @@ fn panel_command_success_replies_describe_committed_state_for_every_executable_o
             backend.execute("panel.collapse", &serde_json::json!({"target":command_target("one"),"collapsed":true})).unwrap();
         }
         let result = backend.execute(id, &input);
+        if ContextualPanelAction::from_command_id(id).is_some() {
+            assert_eq!(result.unwrap_err().rule, Rule::Availability, "headless cannot infer shared-control focus");
+            continue;
+        }
         if id == "panel.action" {
             assert_eq!(result.unwrap_err().rule, Rule::Capability, "headless cannot invoke an unbound controller");
             continue;
@@ -2062,6 +2068,73 @@ fn command_sidecar_collisions_and_aggregate_catalogue_growth_are_rejected_atomic
         }
     }
     assert!(rejected, "aggregate bytes reject before count cap");
+}
+
+#[test]
+fn contextual_panel_commands_resolve_once_and_commit_through_the_registered_sink() {
+    use commands::LayoutCatalogue;
+    struct FocusSink {
+        service: LayoutService,
+        resolutions: std::cell::Cell<usize>,
+    }
+    impl ActionSink for FocusSink {
+        fn resolve_contextual(&self, action: ContextualPanelAction) -> PanelResult<LayoutAction> {
+            assert_eq!(action, ContextualPanelAction::FocusNext);
+            self.resolutions.set(self.resolutions.get() + 1);
+            Ok(LayoutAction::Apply {
+                expected_revision: Some(self.service.inspect().revision),
+                mutations: vec![Mutation::Focus { instance: InstanceId::new("two").unwrap() }],
+            })
+        }
+        fn inspect(&self) -> LayoutReply {
+            self.service.inspect()
+        }
+        fn project(&self, action: LayoutAction) -> PanelResult<Layout> {
+            self.service.project(action)
+        }
+        fn dispatch(&mut self, action: LayoutAction) -> PanelResult<LayoutReply> {
+            self.service.dispatch(action)
+        }
+    }
+    let backend = command_ready_backend();
+    let mut sink = FocusSink { service: backend.service, resolutions: std::cell::Cell::new(0) };
+    let mut catalogue = backend.catalogue;
+    let registry = sink.service.registry().clone();
+    let before = sink.inspect();
+    let original_catalogue = catalogue.state().clone();
+    let mut context = commands::PanelCommandContext { sink: &mut sink, registry: &registry, catalogue: &mut catalogue, web: false };
+    assert_eq!(
+        commands::execute("panel.focus.next", &serde_json::json!({"expected_revision":u64::MAX}), &mut context).unwrap_err().rule,
+        Rule::Revision
+    );
+    assert_eq!(context.sink.inspect(), before);
+    let result = commands::execute("panel.focus.next", &serde_json::json!({"expected_revision":before.revision}), &mut context).unwrap();
+    let reply: LayoutReply = serde_json::from_value(result).unwrap();
+    assert_eq!(reply.layout, context.sink.inspect().layout);
+    assert_eq!(reply.revision, context.sink.inspect().revision);
+    assert_eq!(reply.interaction, context.sink.inspect().interaction);
+    assert_eq!(reply.interaction.focused, Some(InstanceId::new("two").unwrap()));
+    assert_eq!(sink.resolutions.get(), 1, "revision rejection precedes live focus resolution");
+    assert_eq!(catalogue.state(), &original_catalogue, "focus does not change the saved arrangement");
+}
+
+#[test]
+fn contextual_panel_commands_without_live_focus_refuse_without_effects_including_batches() {
+    use commands::LayoutCatalogue;
+    for action in ContextualPanelAction::ALL {
+        let mut backend = command_ready_backend();
+        let before = backend.service.inspect();
+        let catalogue = backend.catalogue.state().clone();
+        let reason = backend.execute(action.command_id(), &serde_json::json!({})).unwrap_err();
+        assert_eq!(reason.rule, Rule::Availability);
+        assert!(reason.detail.contains("live panel host keyboard context"));
+        let reason = backend.batch(&[serde_json::json!({"command":action.command_id()})]).unwrap_err();
+        assert_eq!(reason.rule, Rule::Availability);
+        let reason = backend.batch(&[serde_json::json!({"command":action.command_id()}), serde_json::json!({"command":"layout.get"})]).unwrap_err();
+        assert_eq!(reason.rule, Rule::Capability);
+        assert_eq!(backend.service.inspect(), before);
+        assert_eq!(backend.catalogue.state(), &catalogue);
+    }
 }
 
 #[test]

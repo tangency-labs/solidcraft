@@ -310,8 +310,39 @@ The renderer resolves surface intent through the shared Container, raising its
 fill alpha when canonical text needs more contrast. Captured `paint_alpha` and
 `contrast` report the effective paint and any readable fallback separately from
 declarative intent. Input and occlusion remain reserved regardless of alpha.
-Comprehensive accessibility/keyboard bindings, production workspace rollout and
-real content adapters remain their named peers' work.
+Production workspace rollout and real content adapters remain their named peers' work.
+
+### Keyboard, accessibility and motion
+
+The shared host exposes disclosure state, selected tabs and tab lists, action
+toggle state, menu items and oriented splitters to accessibility. Disabled actions
+retain their reason. Keyboard menu navigation returns focus to its opener on
+Escape, and panel focus traversal reveals headers inside bounded scroll extents.
+
+Nine contextual commands use the existing command registry and keymap for panel
+focus, collapse, moving to the next permitted zone and sash resize/reset. They
+resolve the actual owned host context, then use the existing typed admission and
+dispatch path. They do not infer focus from a model or headless session. Automatic
+shortcuts defer to focused text editors and foreign or modal UI. Explicit command
+calls can resolve an owned editor's panel without borrowing its caret keys.
+
+Controller and egui identities retain editor state. Focus restoration is scoped
+to the controller owner, document and viewport; it must not steal deliberate
+focus from another control. Hidden bodies are never rendered to restore focus.
+Adapters report freshly rendered focusable responses through
+`PanelLocalServices::register_focus_response`. The host accepts only eligible
+responses from the current content slot, rather than relying on egui's
+previous-pass widget lookup. Without a current response, an explicit panel focus
+request uses the visible header and leaves retained editor memory intact.
+Bookmarks retain a focused text editor's cursor range because egui collapses a
+selection during an unfocused render. Eligible restoration replaces only that
+range in the existing editor state; undo, IME and scroll state stay in egui.
+
+The native host follows the effective locale's logical direction, including
+Arabic and Hebrew, through the existing edge mapping. Saved layout coordinates
+and physical floating/native window positions remain unchanged. Theme motion
+uses a 120–160 ms cubic-out paint transition. Reduced motion or disabled theme
+animation completes immediately; layout, semantics and focus never wait for it.
 
 ## Specimens and verification boundary
 
@@ -327,6 +358,9 @@ specimen with `remember:true`; loading preferences alone never starts it. Saved
 restoration waits for valid host dimensions and uses normal runtime admission.
 Fixture workspace/preset registrations remain synthetic evidence, not shipping
 production registrations.
+The optional `reduced_motion` boolean updates the enabled specimen in place.
+It changes no saved preference, controller identity, draft or layout and refuses
+without a specimen owner. This review seam adds no operating-system motion service.
 
 ### Surface review specimen
 

@@ -373,7 +373,16 @@ fn universal_chrome_controls_have_real_accessible_widgets_and_stable_ids_at_both
                         .map(|(_, node)| node)
                         .unwrap_or_else(|| panic!("exported control needs its own actual widget: {control:?}"));
                     assert_eq!(node.label(), Some(control.accessible_name.as_str()), "actual widget/metadata name parity: {control:?}");
-                    assert!(matches!(node.role(), egui::accesskit::Role::Button | egui::accesskit::Role::SpinButton | egui::accesskit::Role::Slider));
+                    let expected_role = match &control.target {
+                        HostControlTarget::Pointer(HostPointerTarget::Tab { .. }) => egui::accesskit::Role::Tab,
+                        HostControlTarget::Pointer(HostPointerTarget::Sash { .. } | HostPointerTarget::Resize { .. }) => {
+                            egui::accesskit::Role::Splitter
+                        }
+                        HostControlTarget::Scroll { .. } => egui::accesskit::Role::ScrollBar,
+                        HostControlTarget::PanelMenu { .. } | HostControlTarget::Shared { .. } => egui::accesskit::Role::MenuItem,
+                        HostControlTarget::Pointer(_) | HostControlTarget::Content { .. } => egui::accesskit::Role::Button,
+                    };
+                    assert_eq!(node.role(), expected_role, "the actual widget role follows its typed target: {control:?}");
                     if matches!(&control.target, HostControlTarget::Pointer(HostPointerTarget::Menu { .. })) {
                         assert_eq!(control.accessible_name, crate::i18n::tr("ui.panel_host.menu"));
                     }
@@ -440,6 +449,44 @@ fn universal_host_slots_and_menu_button_stay_bounded_at_minimum_and_small_window
 }
 
 #[test]
+fn panel_disclosure_blends_only_ink_and_reduced_motion_finishes_immediately() {
+    for scale in [1.0, 2.0] {
+        let ctx = crate::fonts::test_context();
+        ctx.set_pixels_per_point(scale);
+        ctx.enable_accesskit();
+        ctx.global_style_mut(|style| style.animation_time = 0.14);
+        let id = egui::Id::unique("disclosure-transition");
+        let bounds = egui::Rect::from_min_size(egui::pos2(20.0, 30.0), egui::vec2(28.0, 28.0));
+        let frame = |time, collapsed, reduced| {
+            let output = crate::test_support::frame(&ctx, egui::RawInput { time: Some(time), ..Default::default() }, |ui| {
+                let response = crate::ui_kit::panel_host::panel_host_disclosure(ui, id, bounds, "Toggle panel", true, collapsed, reduced);
+                assert_eq!(response.rect, bounds);
+            });
+            let node =
+                &output.platform_output.accesskit_update.as_ref().unwrap().nodes.iter().find(|(node_id, _)| *node_id == id.accesskit_id()).unwrap().1;
+            assert_eq!(node.is_expanded(), Some(!collapsed), "semantics commit before the paint transition");
+            assert!(output.shapes.iter().all(|shape| shape.clip_rect.contains_rect(bounds)), "paint keeps the inherited clip");
+            output.shapes.iter().filter(|shape| matches!(shape.shape, egui::Shape::Mesh(_))).count()
+        };
+        assert_eq!(frame(0.0, true, false), 1);
+        frame(1.0 / 60.0, false, false);
+        assert_eq!(frame(2.0 / 60.0, false, false), 2, "only the existing down/up glyphs crossfade");
+        for tick in 3..14 {
+            frame(f64::from(tick) / 60.0, false, false);
+        }
+        assert_eq!(frame(14.0 / 60.0, false, false), 1);
+        assert_eq!(frame(15.0 / 60.0, true, false), 2, "collapse also transitions without delaying expanded state");
+        for tick in 16..28 {
+            frame(f64::from(tick) / 60.0, true, false);
+        }
+        assert_eq!(frame(28.0 / 60.0, true, false), 1);
+        assert_eq!(frame(29.0 / 60.0, false, true), 1, "reduced motion paints the committed endpoint immediately");
+        ctx.global_style_mut(|style| style.animation_time = 0.0);
+        assert_eq!(frame(30.0 / 60.0, true, false), 1, "disabled animation also paints the endpoint");
+    }
+}
+
+#[test]
 fn universal_kit_chrome_uses_one_container_and_preserves_parent_clipping_and_focus_semantics() {
     use crate::ui_kit::panel_host::{HostChrome, panel_host_control, panel_host_sash, panel_host_surface};
     let mut t = Tokens::get();
@@ -500,6 +547,10 @@ fn universal_kit_chrome_uses_one_container_and_preserves_parent_clipping_and_foc
     for label in ["Synthetic long localized panel title", "Resize synthetic neighbours"] {
         assert!(tree.nodes.iter().any(|(_, node)| node.label() == Some(label)), "actual focusable widget: {label}");
     }
+    let separator = &tree.nodes.iter().find(|(_, node)| node.label() == Some("Resize synthetic neighbours")).unwrap().1;
+    assert_eq!(separator.role(), egui::accesskit::Role::Splitter);
+    assert_eq!(separator.orientation(), Some(egui::accesskit::Orientation::Horizontal));
+    assert!(separator.numeric_value().is_some());
     let (mut bevel_edges, mut inset_borders) = (0, 0);
     for shape in &output.shapes {
         assert!(clip.contains_rect(shape.clip_rect), "chrome paint must not escape its inherited clip");

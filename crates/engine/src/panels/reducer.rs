@@ -180,8 +180,55 @@ pub struct LayoutReply {
     pub availability: AvailabilityMap,
 }
 
+/// Keyboard actions whose target belongs to the live panel host, never the document.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContextualPanelAction {
+    FocusNext,
+    FocusPrevious,
+    Toggle,
+    MoveNextZone,
+    ResizeLeft,
+    ResizeRight,
+    ResizeUp,
+    ResizeDown,
+    ResetSash,
+}
+impl ContextualPanelAction {
+    pub const ALL: [Self; 9] = [
+        Self::FocusNext,
+        Self::FocusPrevious,
+        Self::Toggle,
+        Self::MoveNextZone,
+        Self::ResizeLeft,
+        Self::ResizeRight,
+        Self::ResizeUp,
+        Self::ResizeDown,
+        Self::ResetSash,
+    ];
+    pub const fn command_id(self) -> &'static str {
+        match self {
+            Self::FocusNext => "panel.focus.next",
+            Self::FocusPrevious => "panel.focus.previous",
+            Self::Toggle => "panel.toggle",
+            Self::MoveNextZone => "panel.move.next_zone",
+            Self::ResizeLeft => "panel.sash.left",
+            Self::ResizeRight => "panel.sash.right",
+            Self::ResizeUp => "panel.sash.up",
+            Self::ResizeDown => "panel.sash.down",
+            Self::ResetSash => "panel.sash.reset",
+        }
+    }
+    pub fn from_command_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|action| action.command_id() == id)
+    }
+}
+
 /// Same boundary for GUI and programmatic callers. No mutable Session reference.
 pub trait ActionSink {
+    /// Optional live-host target resolution. Headless sinks cannot infer UI focus.
+    fn resolve_contextual(&self, _action: ContextualPanelAction) -> PanelResult<LayoutAction> {
+        Err(error(Rule::Availability, "live panel host keyboard context is unavailable"))
+    }
     fn dispatch(&mut self, action: LayoutAction) -> PanelResult<LayoutReply>;
     fn inspect(&self) -> LayoutReply;
     /// Pure projection on the authoritative service. Adapters stage bounded

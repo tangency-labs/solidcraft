@@ -1224,6 +1224,55 @@ fn begin_gesture(service: &LayoutService, layout: &HostLayout, target: &HostPoin
     }
 }
 
+/// Keyboard resizing uses the same pure candidate geometry as a pointer preview.
+/// It neither captures a pointer nor publishes a second allocation.
+pub(crate) fn keyboard_resize_action(
+    service: &LayoutService,
+    layout: &HostLayout,
+    target: &HostPointerTarget,
+    action: ContextualPanelAction,
+) -> PanelResult<LayoutAction> {
+    use ContextualPanelAction::*;
+    if action == ResetSash {
+        return match target {
+            HostPointerTarget::Sash { first, second } => {
+                Ok(self::action(layout.revision, vec![Mutation::ResetPair { first: first.clone(), second: second.clone() }]))
+            }
+            _ => Err(error(Rule::Availability, "focused control has no neighbour split")),
+        };
+    }
+    let step = crate::theme::Tokens::get().space_8.max(HOST_DRAG_THRESHOLD);
+    let (dx, dy) = match action {
+        ResizeLeft => (-step, 0.0),
+        ResizeRight => (step, 0.0),
+        ResizeUp => (0.0, -step),
+        ResizeDown => (0.0, step),
+        _ => return Err(error(Rule::Availability, "action is not a resize")),
+    };
+    let preview = match begin_gesture(service, layout, target)? {
+        Some(GestureKind::Resize { section, edge, size, outer }) => {
+            let horizontal = matches!(edge, HostResizeEdge::Left | HostResizeEdge::Right);
+            if edge != HostResizeEdge::BottomRight && ((horizontal && dx == 0.0) || (!horizontal && dy == 0.0)) {
+                return Err(error(Rule::Availability, "resize key is perpendicular to focused edge"));
+            }
+            resize_preview(service, layout, &section, edge, size, outer, dx, dy)
+        }
+        Some(GestureKind::Pair { first, second, first_size, second_size, zone, outer }) => {
+            if (zone == Zone::Bottom && dx == 0.0) || (zone != Zone::Bottom && dy == 0.0) {
+                return Err(error(Rule::Availability, "resize key is perpendicular to focused split"));
+            }
+            let delta = if zone == Zone::Bottom { dx * if layout.direction == Direction::Rtl { -1.0 } else { 1.0 } } else { dy };
+            pair_preview(service, layout, &first, &second, first_size, second_size, zone, outer, delta)
+        }
+        _ => return Err(error(Rule::Availability, "focused control is not a resize target")),
+    };
+    if let Some(reason) = preview.rejection {
+        return Err(reason);
+    }
+    // A clamped split still owns the key, without manufacturing pointer input.
+    preview.action.ok_or_else(|| error(Rule::Bounds, "focused resize has reached its bound"))
+}
+
 fn preview_gesture(capture: &Gesture, service: &LayoutService, layout: &HostLayout, at: Point) -> (HostPreview, Option<PreparedHostLayout>) {
     let mut preview = match &capture.kind {
         GestureKind::Move { instance, section, targets, .. } => move_preview(service, layout, instance, section, at, targets),

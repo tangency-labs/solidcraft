@@ -44,6 +44,47 @@ impl AppPanelRuntime {
             preferences: None,
         })
     }
+    /// Native composition supplies preferences; standalone runtimes keep their explicit direction.
+    fn sync_native_direction(&mut self, direction: Direction) -> PanelResult<()> {
+        if self.runtime.environment().direction == direction {
+            return Ok(());
+        }
+        let mut environment = self.runtime.environment().clone();
+        environment.direction = direction;
+        self.with_adapters(|runtime, _native, services| runtime.set_environment(environment, services.local))?;
+        if let Some(host) = &mut self.host {
+            host.invalidate_geometry();
+            host.reconcile_scope(&self.runtime);
+        }
+        Ok(())
+    }
+
+    pub(super) fn set_motion(&mut self, motion: Motion) -> PanelResult<()> {
+        let mut environment = self.runtime.environment().clone();
+        environment.motion = motion;
+        self.with_adapters(|runtime, _native, services| runtime.set_environment(environment, services.local))
+    }
+
+    pub(crate) fn set_keyboard_shortcuts(&mut self, shortcuts: Vec<(ContextualPanelAction, egui::KeyboardShortcut)>) {
+        if let Some(host) = &mut self.host {
+            host.set_keyboard_shortcuts(shortcuts);
+        }
+    }
+
+    fn contextual_availability(&self, session: &Session, action: ContextualPanelAction) -> PanelResult<()> {
+        self.runtime.require_live()?;
+        if self.preferences.as_ref().is_some_and(|state| state.pending.is_some())
+            || self.runtime.environment().document.as_ref().map(|document| document.0.as_str()) != Some(session.document_id.as_str())
+        {
+            return Err(error(Rule::Availability, "panel command context is not reconciled"));
+        }
+        self.host
+            .as_ref()
+            .ok_or_else(|| error(Rule::Availability, "shared panel host unavailable"))?
+            .contextual_action(&self.runtime, action)
+            .map(|_| ())
+    }
+
     pub fn last_error(&self) -> Option<&PanelError> {
         self.last_error.as_ref()
     }
@@ -736,6 +777,9 @@ impl AdmittedActionSink<'_, '_, '_> {
     }
 }
 impl ActionSink for AdmittedActionSink<'_, '_, '_> {
+    fn resolve_contextual(&self, action: ContextualPanelAction) -> PanelResult<LayoutAction> {
+        self.host.as_ref().ok_or_else(|| error(Rule::Availability, "shared panel host unavailable"))?.contextual_action(self.live.runtime, action)
+    }
     fn project(&self, action: LayoutAction) -> PanelResult<Layout> {
         self.project_owned(action, None)
     }
@@ -753,6 +797,9 @@ impl ActionSink for AdmittedActionSink<'_, '_, '_> {
     }
 }
 impl ActionSink for CommandActionSink<'_> {
+    fn resolve_contextual(&self, action: ContextualPanelAction) -> PanelResult<LayoutAction> {
+        self.live.resolve_contextual(action)
+    }
     fn project_in_context(&self, action: LayoutAction, context: &LayoutPreparationContext) -> PanelResult<Layout> {
         self.live.project_in_context(action, context)
     }
@@ -775,6 +822,18 @@ impl ActionSink for CommandActionSink<'_> {
 }
 
 impl crate::SolveApp {
+    /// Read-only command metadata uses the exact host eligibility used at execution.
+    pub(crate) fn panel_contextual_disabled_reason(&self, action: ContextualPanelAction) -> Option<String> {
+        let eligibility = self
+            .panel_runtime
+            .as_ref()
+            .ok_or_else(|| error(Rule::Availability, "shared panel host unavailable"))
+            .and_then(|integration| integration.contextual_availability(&self.session, action));
+        eligibility
+            .err()
+            .map(|reason| crate::i18n::Locale::for_language(&self.preferences.language).text(super::workspace::rule_key(reason.rule)).to_owned())
+    }
+
     pub fn run_panel_command(&mut self, id: &str, params: &serde_json::Value) -> PanelResult<serde_json::Value> {
         // Parse even without a runtime: hostile/unknown fields never become a
         // misleading capability success or reach the document command path.
@@ -859,6 +918,7 @@ impl crate::SolveApp {
 }
 
 pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
+    let direction = crate::i18n::panel_direction(&app.preferences.language);
     if let Some(integration) = &mut app.panel_runtime {
         let frame = ctx.cumulative_frame_nr();
         if integration.last_tick_frame == Some(frame) {
@@ -866,7 +926,7 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
         }
         integration.last_tick_frame = Some(frame);
         // Errors remain inspectable without inventing untranslated production UI.
-        let result = integration.tick(&app.session);
+        let result = integration.sync_native_direction(direction).and_then(|()| integration.tick(&app.session));
         if result.is_err() || !integration.preferences.as_ref().is_some_and(|state| state.failed) {
             integration.last_error = result.err();
         }
@@ -1011,9 +1071,13 @@ impl crate::SolveApp {
             .map(logical_rect)
             .collect();
         let force_opaque = self.services.reduce_transparency.as_ref().and_then(|read| read(true)) == Some(true);
+        let direction = crate::i18n::panel_direction(&self.preferences.language);
+        let shortcuts = crate::keymap::panel_shortcuts(self);
         let prepared = match &mut self.panel_runtime {
             Some(integration) => {
                 let result = (|| {
+                    integration.sync_native_direction(direction)?;
+                    integration.set_keyboard_shortcuts(shortcuts);
                     if let Some(host) = &mut integration.host {
                         host.note_egui_context(ui.ctx(), force_opaque);
                         host.set_gap(gap)?;

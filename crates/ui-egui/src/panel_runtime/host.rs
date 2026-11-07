@@ -145,6 +145,13 @@ pub trait PanelLocalServices {
     fn request_overlay_layer(&mut self, scope: &LocalScope, instance: &InstanceId, region: InputRegion, _layer: egui::LayerId) -> PanelResult<()> {
         self.request(scope, LocalRequest::Overlay { instance: instance.clone(), region })
     }
+    /// Report a response just created by the current content render. The host
+    /// uses this optional provenance to retain/restore focus; reporting never
+    /// requests focus or stores editor state. Hidden or disabled controls are
+    /// ineligible, and absence of a report must never fall back to an old widget.
+    fn register_focus_response(&mut self, _scope: &LocalScope, _instance: &InstanceId, _response: &egui::Response) -> PanelResult<()> {
+        Ok(())
+    }
     fn release(&mut self, scope: &LocalScope, instance: &InstanceId);
 }
 
@@ -154,6 +161,8 @@ pub struct RuntimeAction {
     pub label: String,
     pub enabled: bool,
     pub disabled_reason: Option<String>,
+    /// Toggle state, when the action represents a persistent on/off choice.
+    pub pressed: Option<bool>,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PanelPresentation {
@@ -316,6 +325,9 @@ impl PanelHost for EguiPanelHost<'_> {
                                                     .inner
                                                 })
                                                 .inner;
+                                            if let Some(pressed) = action.pressed {
+                                                ui.ctx().accesskit_node_builder(response.id, |node| node.set_toggled(pressed.into()));
+                                            }
                                             let clicked = response.clicked();
                                             if let Some(reason) = &action.disabled_reason {
                                                 response.backing_on_disabled_hover_text(reason);
