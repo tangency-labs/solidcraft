@@ -9,7 +9,7 @@ use solidcore_record::{Plane, Vec2};
 use solidcraft_doc::ProfileSel;
 use solidcraft_sketch::{ConstraintKind, Curve, CurveKind, Shape, Sketch, Wire, WireSpace, intersections, intersections_within};
 
-use super::sketch::{add_c, coincident_points, dof_now, edit, ids_of, line_or_axis_ref, solve_current};
+use super::sketch::{add_c, angle_from_shared_end, coincident_points, dof_now, edit, ids_of, line_ends, line_or_axis_ref, solve_current};
 use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, bool_, expr, num, req_expr, req_vec2, str_, string_list, vec2, vec2_list};
@@ -30,17 +30,17 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "MODIFY")
         .icon("sketch_chamfer")
         .enabled(in_sketch)
-        .params(concat!("point | points: [corners] (every corner cut alike; a corner is a point reference or {a, b}) | a, b: a corner of two lines (two that share no end are first brought to where they meet, as in sketch.fillet); distance", created_doc!())),
+        .params(concat!("point | points: [corners] (every corner cut alike; a corner is a point reference or {a, b}) | a, b: a corner of two lines (two that share no end are first brought to where they meet, as in sketch.fillet); distance. Each corner stays as a virtual sharp corner and the cut becomes two dimensions from it (`created.dimensions`), so the chamfer leaves the sketch as constrained as it found it", created_doc!())),
     CommandSpec::new("sketch.chamfer.distance_angle", "Distance and Angle Chamfer", chamfer_dist_angle)
         .at("SKETCH", "MODIFY")
         .icon("sketch_chamfer_angle")
         .enabled(in_sketch)
-        .params(concat!("point | points: [corners] (every corner cut alike; a corner is a point reference or {a, b}, and a point's `a` is the first of its two lines in curve order) | a, b: a corner of two lines (two that share no end are first brought to where they meet, as in sketch.fillet); distance: along a, angle: deg from a", created_doc!())),
+        .params(concat!("point | points: [corners] (every corner cut alike; a corner is a point reference or {a, b}, and a point's `a` is the first of its two lines in curve order) | a, b: a corner of two lines (two that share no end are first brought to where they meet, as in sketch.fillet); distance: along a, angle: deg from a. Each corner stays as a virtual sharp corner, and the cut becomes a distance and an angle dimension from it (`created.dimensions`), so the chamfer leaves the sketch as constrained as it found it", created_doc!())),
     CommandSpec::new("sketch.chamfer.two_distance", "Two Distance Chamfer", chamfer_two)
         .at("SKETCH", "MODIFY")
         .icon("sketch_chamfer_two_distances")
         .enabled(in_sketch)
-        .params(concat!("point | points: [corners] (every corner cut alike; a corner is a point reference or {a, b}, and a point's `a` is the first of its two lines in curve order) | a, b: a corner of two lines (two that share no end are first brought to where they meet, as in sketch.fillet); distance: along a, distance2: along b", created_doc!())),
+        .params(concat!("point | points: [corners] (every corner cut alike; a corner is a point reference or {a, b}, and a point's `a` is the first of its two lines in curve order) | a, b: a corner of two lines (two that share no end are first brought to where they meet, as in sketch.fillet); distance: along a, distance2: along b. Each corner stays as a virtual sharp corner and the cut becomes two dimensions from it (`created.dimensions`), so the chamfer leaves the sketch as constrained as it found it", created_doc!())),
     CommandSpec::new("sketch.offset", "Offset", offset)
         .at("SKETCH", "MODIFY")
         .icon("offset")
@@ -2045,7 +2045,9 @@ struct CornerKept {
 /// curve. It stays as a virtual sharp corner, held on both curves' extensions (their
 /// intersection), and the line lengths become distances from the far end to it, so the part
 /// keeps its size. Otherwise None: the caller removes the point.
-fn keep_corner(sk: &mut Sketch, c: usize, [(ca, na), (cb, nb)]: [(usize, usize); 2]) -> Result<Option<CornerKept>> {
+/// `force` keeps the corner even when nothing measures to it yet: a chamfer then has somewhere
+/// to put its dimensions (#10865).
+fn keep_corner(sk: &mut Sketch, c: usize, [(ca, na), (cb, nb)]: [(usize, usize); 2], force: bool) -> Result<Option<CornerKept>> {
     let used = sk.curves.iter().any(|x| uses(x, c));
     let mut moved: Vec<String> = sk.constraints.iter().filter(|k| k.kind.refers_to_point(c)).map(|k| k.id.clone()).collect();
     for k in sk.constraints.iter_mut() {
@@ -2063,7 +2065,7 @@ fn keep_corner(sk: &mut Sketch, c: usize, [(ca, na), (cb, nb)]: [(usize, usize);
         moved.push(k.id.clone());
     }
     let positioned = sk.points.get(c).is_some_and(|pt| pt.fixed || pt.exprs.is_some());
-    if moved.is_empty() && !used && c != 0 && !positioned {
+    if moved.is_empty() && !used && c != 0 && !positioned && !force {
         return Ok(None);
     }
     for cu in [ca, cb] {
@@ -2096,6 +2098,7 @@ fn cut_corner(
     da: f64,
     db: f64,
     cmd: &str,
+    keep_unused_corner: bool,
 ) -> Result<(usize, usize, Vec2, CornerKept)> {
     let (pc, pa, pb) = (sk.point(c).unwrap_or_default(), sk.point(fa).unwrap_or_default(), sk.point(fb).unwrap_or_default());
     if !(da > 1e-9 && db > 1e-9 && da < pc.dist(pa) - 1e-9 && db < pc.dist(pb) - 1e-9) {
@@ -2109,7 +2112,7 @@ fn cut_corner(
     moved.extend(keep_side_relations(sk, lb)?);
     reattach(sk, la, c, ta);
     reattach(sk, lb, c, tb);
-    let mut kept = keep_corner(sk, c, [(la, ta), (lb, tb)])?;
+    let mut kept = keep_corner(sk, c, [(la, ta), (lb, tb)], keep_unused_corner)?;
     if let Some(k) = &mut kept {
         k.moved.extend(moved);
     }
@@ -2217,7 +2220,7 @@ fn fillet_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<(usize
     let bis = (u + v).normalized().ok_or_else(|| bad(cmd, "the lines are parallel"))?;
     let center = pc + bis * (r / half.sin());
     let (da, db) = (if spent_a { short(len_a) } else { d }, if spent_b { short(len_b) } else { d });
-    let (ta, tb, _, kept) = cut_corner(sk, la, lb, c, fa, fb, da, db, cmd)?;
+    let (ta, tb, _, kept) = cut_corner(sk, la, lb, c, fa, fb, da, db, cmd, false)?;
     let (qa, qb) = (sk.point(ta).unwrap_or_default(), sk.point(tb).unwrap_or_default());
     let ccw = (qa - center).cross(qb - center) > 0.0;
     let arc = if ccw {
@@ -2346,7 +2349,7 @@ fn round_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<Option<
     let arc =
         if ccw { sk.add_arc(cen, ta, tb, [None, Some(na), Some(nb)], None)? } else { sk.add_arc(cen, tb, ta, [None, Some(nb), Some(na)], None)? };
     let cons = vec![add_c(sk, ConstraintKind::Tangent { a: ca, b: arc })?, add_c(sk, ConstraintKind::Tangent { a: cb, b: arc })?];
-    match keep_corner(sk, q, [(ca, na), (cb, nb)])? {
+    match keep_corner(sk, q, [(ca, na), (cb, nb)], false)? {
         Some(kept) => Ok(Some((arc, cons, kept))),
         None => {
             let arc_id = sk.curves.get(arc).map(|c| c.id.clone()).unwrap_or_default();
@@ -2357,7 +2360,36 @@ fn round_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<Option<
     }
 }
 
-fn chamfer(s: &mut Session, p: &Value, cmd: &str, dists: impl Fn(f64) -> Result<(f64, f64)>) -> Result<Value> {
+/// How a chamfer's two cut-backs are given, so that they can become dimensions (#10865).
+#[derive(Clone, Copy)]
+enum Chamfer {
+    /// The same distance along both lines.
+    Equal(f64),
+    /// One distance along the first line, another along the second.
+    Two(f64, f64),
+    /// A distance along the first line, and the angle between the chamfer and it (radians).
+    Angle(f64, f64),
+}
+
+impl Chamfer {
+    /// How far back along each line to cut, from the corner's angle.
+    fn cut_back(self, corner_angle: f64, cmd: &str) -> Result<(f64, f64)> {
+        match self {
+            Chamfer::Equal(d) => Ok((d, d)),
+            Chamfer::Two(d, d2) => Ok((d, d2)),
+            Chamfer::Angle(d, a) => {
+                // Triangle corner–Ta–Tb: angle phi at the corner, `a` at Ta.
+                let opp = std::f64::consts::PI - a - corner_angle;
+                if !(a > 1e-6 && opp > 1e-6) {
+                    return Err(bad(cmd, "that angle does not meet the other line"));
+                }
+                Ok((d, d * a.sin() / opp.sin()))
+            }
+        }
+    }
+}
+
+fn chamfer(s: &mut Session, p: &Value, cmd: &str, spec: Chamfer) -> Result<Value> {
     let corners = corner_list(p, cmd)?;
     let (out, info) = edit(s, p, cmd, false, |sk, _| {
         // Every corner is cut alike, in one edit: a corner that can't be cut refuses them all.
@@ -2375,7 +2407,7 @@ fn chamfer(s: &mut Session, p: &Value, cmd: &str, dists: impl Fn(f64) -> Result<
         }
         let (mut lines, mut kept) = (Vec::new(), Vec::new());
         for q in &corners {
-            let (l, k) = chamfer_corner(sk, q, cmd, &dists)?;
+            let (l, k) = chamfer_corner(sk, q, cmd, spec)?;
             lines.push(l);
             kept.push(k);
         }
@@ -2385,9 +2417,11 @@ fn chamfer(s: &mut Session, p: &Value, cmd: &str, dists: impl Fn(f64) -> Result<
     Ok(json!({"curves": curves, "virtual_corners": vc, "moved_to_virtual_corner": moved, "sketch": info}))
 }
 
-/// Cut one corner (`point` or `a`, `b`) of two lines with a straight line, `dists` giving how
-/// far back along each line from the corner's angle: the new line and what became of the corner.
-fn chamfer_corner(sk: &mut Sketch, p: &Value, cmd: &str, dists: &impl Fn(f64) -> Result<(f64, f64)>) -> Result<(usize, CornerKept)> {
+/// Cut one corner (`point` or `a`, `b`) of two lines with a straight line, `spec` giving how far
+/// back along each line: the new line and what became of the corner. The corner stays as a
+/// virtual sharp corner that the window's values then measure from, so the chamfer takes no
+/// freedom away from the sketch (#10865).
+fn chamfer_corner(sk: &mut Sketch, p: &Value, cmd: &str, spec: Chamfer) -> Result<(usize, CornerKept)> {
     prepare_corner(sk, p, cmd)?;
     let (la, lb, c, fa, fb) = corner(sk, p, cmd)?;
     let (pc, pa, pb) = (sk.point(c).unwrap_or_default(), sk.point(fa).unwrap_or_default(), sk.point(fb).unwrap_or_default());
@@ -2399,9 +2433,34 @@ fn chamfer_corner(sk: &mut Sketch, p: &Value, cmd: &str, dists: &impl Fn(f64) ->
     if !(2e-6..=std::f64::consts::PI - 2e-9).contains(&corner_angle) {
         return Err(bad(cmd, "the lines are parallel"));
     }
-    let (da, db) = dists(corner_angle)?;
-    let (ta, tb, _, kept) = cut_corner(sk, la, lb, c, fa, fb, da, db, cmd)?;
-    Ok((sk.add_line_pts(ta, tb, None)?, kept))
+    let (da, db) = spec.cut_back(corner_angle, cmd)?;
+    let (ta, tb, _, kept) = cut_corner(sk, la, lb, c, fa, fb, da, db, cmd, true)?;
+    let line = sk.add_line_pts(ta, tb, None)?;
+    chamfer_dimensions(sk, spec, c, (ta, tb), line, la, da, db)?;
+    Ok((line, kept))
+}
+
+/// The window's values as dimensions from the virtual corner `c`: the cut back along each line,
+/// or, for a distance and angle chamfer, the cut along the first line and the angle between the
+/// chamfer and that line. When that angle cannot be measured, the second cut holds the corner
+/// instead.
+fn chamfer_dimensions(sk: &mut Sketch, spec: Chamfer, c: usize, (ta, tb): (usize, usize), line: usize, la: usize, da: f64, db: f64) -> Result<()> {
+    add_c(sk, ConstraintKind::Distance { p: c, q: ta, value: da })?;
+    if matches!(spec, Chamfer::Angle(..)) {
+        let ends = |l: usize| {
+            let (a, b) = line_ends(sk, l);
+            (sk.point(a).unwrap_or_default(), sk.point(b).unwrap_or_default())
+        };
+        // Both `angle_from_shared_end` constraints describe the same two lines; the first measures
+        // the rays away from the cut point, which is the supplement of the window's angle, and the
+        // second is the angle the user typed, so the dimension reads that back.
+        if let Some((_, (constraint, _))) = angle_from_shared_end(line, la, ends(line), ends(la)) {
+            add_c(sk, constraint)?;
+            return Ok(());
+        }
+    }
+    add_c(sk, ConstraintKind::Distance { p: c, q: tb, value: db })?;
+    Ok(())
 }
 
 /// The checks and joins before a chamfer cuts a corner. Running them again on a corner already
@@ -2417,28 +2476,21 @@ fn prepare_corner(sk: &mut Sketch, p: &Value, cmd: &str) -> Result<()> {
 fn chamfer_equal(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.chamfer.equal_distance";
     let d = num(p, "distance").ok_or_else(|| bad(cmd, "`distance` must be a number"))?;
-    chamfer(s, p, cmd, |_| Ok((d, d)))
+    chamfer(s, p, cmd, Chamfer::Equal(d))
 }
 
 fn chamfer_two(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.chamfer.two_distance";
     let d = num(p, "distance").ok_or_else(|| bad(cmd, "`distance` must be a number"))?;
     let d2 = num(p, "distance2").ok_or_else(|| bad(cmd, "`distance2` must be a number"))?;
-    chamfer(s, p, cmd, |_| Ok((d, d2)))
+    chamfer(s, p, cmd, Chamfer::Two(d, d2))
 }
 
 fn chamfer_dist_angle(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.chamfer.distance_angle";
     let d = num(p, "distance").ok_or_else(|| bad(cmd, "`distance` must be a number"))?;
     let a = num(p, "angle").ok_or_else(|| bad(cmd, "`angle` must be a number (degrees)"))?.to_radians();
-    chamfer(s, p, cmd, |phi| {
-        // Triangle corner–Ta–Tb: angle phi at the corner, `a` at Ta.
-        let opp = std::f64::consts::PI - a - phi;
-        if !(a > 1e-6 && opp > 1e-6) {
-            return Err(bad(cmd, "that angle does not meet the other line"));
-        }
-        Ok((d, d * a.sin() / opp.sin()))
-    })
+    chamfer(s, p, cmd, Chamfer::Angle(d, a))
 }
 
 // ---------------------------------------------------------------------------------------------

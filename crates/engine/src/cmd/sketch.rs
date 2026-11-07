@@ -3574,7 +3574,7 @@ fn angle_by_sector(a: usize, b: usize, (a0, a1): (Vec2, Vec2), (b0, b1): (Vec2, 
 /// The angle dimension between two lines that run from one shared end, measured from that end
 /// towards their other ends (#2724), and its supplement; None when they share no end or are
 /// collinear.
-fn angle_from_shared_end(
+pub(super) fn angle_from_shared_end(
     a: usize,
     b: usize,
     (a0, a1): (Vec2, Vec2),
@@ -3608,7 +3608,7 @@ pub(super) fn round6(x: f64) -> f64 {
     (x * 1e6).round() / 1e6
 }
 
-fn line_ends(sk: &Sketch, l: usize) -> (usize, usize) {
+pub(super) fn line_ends(sk: &Sketch, l: usize) -> (usize, usize) {
     match sk.curves.get(l).map(|c| &c.kind) {
         Some(CurveKind::Line { a, b }) => (*a, *b),
         _ => (0, 0),
