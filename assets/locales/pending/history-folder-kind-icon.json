@@ -26,5 +26,9 @@
   "zh": {
     "prefs.history_folder_kind_icon": "文件夹使用其中特征的图标",
     "prefs.history_folder_kind_icon_note": "历史中特征全部属于同一类型的文件夹显示该类型的图标。"
+  },
+  "ko": {
+    "prefs.history_folder_kind_icon": "폴더 아이콘을 안의 피처에서 가져오기",
+    "prefs.history_folder_kind_icon_note": "피처가 모두 같은 종류인 기록 폴더는 그 피처의 아이콘을 표시합니다."
   }
 }

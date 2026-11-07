@@ -410,13 +410,6 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     &mut app.preferences.history_play_button,
                     "history_play_button",
                 );
-                layout_check(
-                    ui,
-                    app.tr("prefs.history_folder_kind_icon"),
-                    app.tr("prefs.history_folder_kind_icon_note"),
-                    &mut app.preferences.history_folder_kind_icon,
-                    "history_folder_kind_icon",
-                );
                 // A design's joints as one button in the History, from the second joint (#8884).
                 layout_check(
                     ui,
@@ -463,6 +456,18 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     app.tr("prefs.browser_eye_left_note"),
                     &mut app.preferences.browser_eye_left,
                     "browser_eye_left",
+                );
+            });
+            // A folder's icon from its features (#12514), in a row of its own: one more box in the
+            // row above widens it past the page at narrow windows.
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(t.space_16, t.space_6);
+                layout_check(
+                    ui,
+                    app.tr("prefs.history_folder_kind_icon"),
+                    app.tr("prefs.history_folder_kind_icon_note"),
+                    &mut app.preferences.history_folder_kind_icon,
+                    "history_folder_kind_icon",
                 );
             });
         });
