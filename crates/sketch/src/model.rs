@@ -1892,6 +1892,44 @@ impl Sketch {
         Ok(())
     }
 
+    /// The fit splines whose tangent handles all still lie where a fresh spline through their fit
+    /// points puts them: nobody has turned one, so the curve is the natural interpolant.
+    pub fn natural_handle_splines(&self) -> Vec<usize> {
+        (0..self.curves.len())
+            .filter(|&curve| {
+                self.natural_handles(curve).is_some_and(|(ids, natural)| {
+                    ids.iter().zip(&natural).all(|(id, b)| self.point(*id).is_some_and(|a| a.dist(*b) <= 1e-6 * (1.0 + b.len())))
+                })
+            })
+            .collect()
+    }
+
+    /// Put the handles of `curves` back where their fit points now put them, so that moving a fit
+    /// point of a spline whose handles nobody turned keeps it the natural interpolant (#6502).
+    pub fn renew_natural_handles(&mut self, curves: &[usize]) {
+        for &curve in curves {
+            let Some((ids, natural)) = self.natural_handles(curve) else { continue };
+            for (id, at) in ids.iter().zip(natural) {
+                if let Some(point) = self.points.get_mut(*id).filter(|point| !point.fixed) {
+                    point.pos = at;
+                }
+            }
+        }
+    }
+
+    /// A fit spline's handle points, and where its fit points would put them.
+    fn natural_handles(&self, curve: usize) -> Option<(Vec<usize>, Vec<Vec2>)> {
+        let CurveKind::Spline { pts, control: false, periodic, handles, .. } = &self.curves.get(curve)?.kind else {
+            return None;
+        };
+        if handles.is_empty() {
+            return None;
+        }
+        let fit: Vec<Vec2> = pts.iter().map(|i| self.point(*i)).collect::<Option<_>>()?;
+        let natural = crate::curves::fit_tangent_handles(&fit, *periodic).ok()?;
+        (natural.len() == handles.len()).then(|| (handles.clone(), natural))
+    }
+
     /// Add tangent handles to every fit spline that does not have them yet.
     pub fn add_missing_spline_handles(&mut self) -> Result<()> {
         let missing: Vec<usize> = self
