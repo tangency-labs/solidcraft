@@ -1,0 +1,86 @@
+{
+  "en": {
+    "prefs.tab_icons": "Icons follow their tab's colour"
+  },
+  "ar": {
+    "prefs.tab_icons": "تتبع الأيقونات لون علامة التبويب"
+  },
+  "cs": {
+    "prefs.tab_icons": "Ikony mají barvu své karty"
+  },
+  "da": {
+    "prefs.tab_icons": "Ikoner følger fanens farve"
+  },
+  "de": {
+    "prefs.tab_icons": "Symbole übernehmen die Farbe ihres Tabs"
+  },
+  "en-GB": {
+    "prefs.tab_icons": "Icons follow their tab's colour"
+  },
+  "es": {
+    "prefs.tab_icons": "Los iconos siguen el color de su pestaña"
+  },
+  "fr": {
+    "prefs.tab_icons": "Les icônes suivent la couleur de leur onglet"
+  },
+  "gl": {
+    "prefs.tab_icons": "As iconas seguen a cor da súa lapela"
+  },
+  "he": {
+    "prefs.tab_icons": "הסמלים מקבלים את צבע הכרטיסייה"
+  },
+  "hu": {
+    "prefs.tab_icons": "Az ikonok a lapjuk színét követik"
+  },
+  "id": {
+    "prefs.tab_icons": "Ikon mengikuti warna tabnya"
+  },
+  "it": {
+    "prefs.tab_icons": "Le icone seguono il colore della loro scheda"
+  },
+  "ja": {
+    "prefs.tab_icons": "アイコンをタブの色にする"
+  },
+  "ko": {
+    "prefs.tab_icons": "아이콘이 탭 색상을 따름"
+  },
+  "ms": {
+    "prefs.tab_icons": "Ikon mengikut warna tabnya"
+  },
+  "nb": {
+    "prefs.tab_icons": "Ikoner følger fanens farge"
+  },
+  "nl": {
+    "prefs.tab_icons": "Pictogrammen volgen de kleur van hun tabblad"
+  },
+  "pl": {
+    "prefs.tab_icons": "Ikony mają kolor swojej karty"
+  },
+  "pt-BR": {
+    "prefs.tab_icons": "Os ícones seguem a cor da sua aba"
+  },
+  "ro": {
+    "prefs.tab_icons": "Pictogramele urmează culoarea filei lor"
+  },
+  "ru": {
+    "prefs.tab_icons": "Значки окрашиваются в цвет вкладки"
+  },
+  "sv": {
+    "prefs.tab_icons": "Ikoner följer flikens färg"
+  },
+  "tr": {
+    "prefs.tab_icons": "Simgeler sekmelerinin rengini alır"
+  },
+  "uk": {
+    "prefs.tab_icons": "Значки набувають кольору вкладки"
+  },
+  "vi": {
+    "prefs.tab_icons": "Biểu tượng theo màu của thẻ"
+  },
+  "zh": {
+    "prefs.tab_icons": "图标跟随其选项卡的颜色"
+  },
+  "zh-TW": {
+    "prefs.tab_icons": "圖示跟隨其分頁的顏色"
+  }
+}

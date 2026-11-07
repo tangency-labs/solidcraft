@@ -1915,7 +1915,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                 }
                 if let Some(c) = shown.first().or(cmds.first()) {
                     let info = c.info(&app.session);
-                    icons::paint_icon(
+                    icons::paint_on_tab(
                         &painter,
                         Rect::from_center_size(br.center() - vec2(0.0, 3.0), vec2(26.0, 26.0)),
                         info.icon,
@@ -2013,7 +2013,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                 let side = if finish { 30.0 } else { 26.0 };
                 let icon_rect =
                     Rect::from_center_size(pos2(br.center().x, whole.top() + if labels { 16.0 } else { button_height / 2.0 }), vec2(side, side));
-                icons::paint_icon(&painter, icon_rect, icon, if info.enabled { 1.0 } else { 0.35 });
+                icons::paint_on_tab(&painter, icon_rect, icon, if info.enabled { 1.0 } else { 0.35 });
                 let tr_label = app.tr_label(info.label).to_string();
                 if !persistent {
                     resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled() && info.enabled, &tr_label));
@@ -2123,7 +2123,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                             reveal_tooltip(app, ui, cell, c, egui::RectAlign::BOTTOM_START);
                         }
                     }
-                    icons::paint_icon(
+                    icons::paint_on_tab(
                         &painter,
                         Rect::from_center_size(cell.center(), vec2(15.0, 15.0)),
                         info.icon,
@@ -2882,6 +2882,7 @@ fn dropdown_row(
     crate::scenario::publish_handle(&format!("dropdown:{}", c.id), rect.center());
     let hot = info.enabled && (pointer_on || resp.has_focus());
     let mut row = crate::ui_kit::MenuItem::new(c.id, &label, info.icon);
+    row.on_tab = true;
     row.enabled = info.enabled;
     row.checked = checked;
     row.highlighted = hot || revealed.is_some();
