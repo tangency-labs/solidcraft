@@ -60,6 +60,7 @@ pub const DOCUMENTED: &[&str] = &[
     "edit.restore_checkpoint",
     "explode.create",
     "face.delete",
+    "file.insert_gerber",
     "file.insert_mesh",
     "file.insert_step",
     "file.save_mesh",

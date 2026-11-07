@@ -137,7 +137,7 @@ pub(super) fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> 
 }
 
 /// The box around a drawing's geometry (arcs, circles and curves by their extent).
-fn bounds_of(geom: &[Geom2]) -> Option<(Vec2, Vec2)> {
+pub(super) fn bounds_of(geom: &[Geom2]) -> Option<(Vec2, Vec2)> {
     let mut pts: Vec<Vec2> = Vec::new();
     for g in geom {
         match g {
