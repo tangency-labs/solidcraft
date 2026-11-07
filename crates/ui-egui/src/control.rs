@@ -884,6 +884,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             "windows": open_windows(app),
             "status": app.status.as_ref().map(|(text, _, error)| json!({"text": text, "error": error})),
             "hover": app.viewport.hover,
+            "snap_points": crate::snap_wake::inspect(app),
             "renderer": if app.viewport.gpu.is_some() { "gpu" } else { "cpu" },
             "frame_ms": app.frame_ms,
             "draw": app.viewport.draw_stats.as_ref().and_then(|s| s.lock().ok().map(|d| json!({
