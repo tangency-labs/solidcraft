@@ -31,10 +31,14 @@ pub(crate) fn panel_host_surface<R>(
     id: egui::Id,
     bounds: egui::Rect,
     floating: bool,
+    fill: egui::Color32,
+    palette: Option<&Tokens>,
     body: impl FnOnce(&mut egui::Ui, egui::Rect) -> R,
 ) -> R {
+    let _tokens = palette.map(|tokens| crate::theme::scoped_panel_tokens(*tokens));
     let container = panel_host_container(ui.ctx(), floating);
-    let frame = panel_host_frame(ui.ctx(), floating);
+    let mut frame = panel_host_frame(ui.ctx(), floating);
+    frame.fill = fill;
     let clip = ui.clip_rect().intersect(bounds);
     // egui clips to rectangles. This inscribed rectangle keeps arbitrary content
     // fills inside the rounded frame without changing any header hit target.
@@ -46,6 +50,15 @@ pub(crate) fn panel_host_surface<R>(
         let mut child = ui.new_child(egui::UiBuilder::new().id_salt(id).max_rect(bounds));
         child.set_clip_rect(clip);
         container.paint_background(child.painter(), frame, bounds - frame.total_margin());
+        if let Some(tokens) = palette {
+            let visuals = child.visuals_mut();
+            visuals.override_text_color = Some(tokens.text);
+            visuals.weak_text_color = Some(tokens.form_dim);
+            visuals.widgets.noninteractive.fg_stroke.color = tokens.text;
+            for state in [&mut visuals.widgets.inactive, &mut visuals.widgets.hovered, &mut visuals.widgets.active, &mut visuals.widgets.open] {
+                state.fg_stroke.color = tokens.form_ink;
+            }
+        }
         let result = body(&mut child, content_clip);
         Container::paint_inset_clipped(child.painter(), bounds, frame, clip);
         result

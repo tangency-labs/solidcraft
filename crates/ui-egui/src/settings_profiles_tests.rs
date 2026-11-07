@@ -65,6 +65,38 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
 }
 
 #[test]
+fn profile_panel_layout_is_checked_separately_from_ordinary_preferences() {
+    use solidcraft_engine::panels::{Layout, LayoutEnvelope, PanelRegistry, WorkspaceId, encode};
+
+    let h = Harness::new();
+    let mut doc = capture(&h.app, "Layout");
+    assert!(doc.get("panel_layout").is_none(), "Classic does not acquire an opt-in layout through profile capture");
+    let envelope = LayoutEnvelope::new(Layout::empty(WorkspaceId::new("fixture.workspace").unwrap()));
+    let bytes = encode(&envelope, &PanelRegistry::default()).unwrap();
+    let layout = json!({"version":1,"envelope":String::from_utf8(bytes).unwrap()});
+    doc["panel_layout"] = layout.clone();
+    assert_eq!(sanitize(&doc).unwrap()["panel_layout"], layout, "the current layout travels by value");
+    let workspaces = json!({"version":2,"selected":"fixture.workspace","workspaces":{"fixture.workspace":layout["envelope"]}});
+    doc["panel_layout"] = workspaces.clone();
+    assert_eq!(sanitize(&doc).unwrap()["panel_layout"], workspaces, "workspace arrangements and selection travel together");
+
+    for invalid in [
+        Value::Null,
+        json!([]),
+        json!({"version":99,"envelope":"future"}),
+        json!({"version":1,"envelope":"not a layout"}),
+        json!({"version":1,"envelope":"x".repeat(256 * 1024 + 1)}),
+        json!({"version":1,"catalogue":[1,2,3]}),
+        json!({"version":2,"selected":"fixture.workspace","workspaces":{}}),
+        json!({"version":2,"selected":"missing","workspaces":{"fixture.workspace":layout["envelope"]}}),
+        json!({"version":2,"selected":"different","workspaces":{"different":layout["envelope"]}}),
+    ] {
+        doc["panel_layout"] = invalid;
+        assert!(sanitize(&doc).is_err(), "an explicit invalid layout must not become a profile that silently omits it");
+    }
+}
+
+#[test]
 fn switching_profiles_applies_every_setting_at_once() {
     let mut h = Harness::new();
     h.app.preferences.ui_scale = 1.0;

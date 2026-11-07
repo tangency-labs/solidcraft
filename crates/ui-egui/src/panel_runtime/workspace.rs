@@ -243,7 +243,26 @@ pub struct WorkspacePanelHost {
     last_chrome: Vec<LogicalRect>,
 }
 
+fn validate_requested_opacity(opacity: Option<f32>) -> PanelResult<()> {
+    if opacity.is_some_and(|value| !value.is_finite() || !(0.0..=1.0).contains(&value)) {
+        return Err(error(Rule::Bounds, "invalid requested panel opacity"));
+    }
+    Ok(())
+}
+
 impl WorkspacePanelHost {
+    /// Override host paint opacity for this runtime only, without changing saved layout.
+    pub fn set_requested_opacity(&mut self, opacity: Option<f32>) -> PanelResult<()> {
+        validate_requested_opacity(opacity)?;
+        if self.options.geometry.requested_opacity != opacity {
+            self.invalidate_geometry();
+            self.options.geometry.requested_opacity = opacity;
+            self.options.geometry.surfaces = None;
+            self.options.geometry.surface_alpha = None;
+        }
+        Ok(())
+    }
+
     pub(crate) fn set_gap(&mut self, gap: f32) -> PanelResult<()> {
         let metrics = HostMetrics { gap, ..self.options.metrics };
         metrics.validate()?;
@@ -265,12 +284,7 @@ impl WorkspacePanelHost {
         for section in options.geometry.effective_surfaces.keys() {
             valid_id(&section.0)?;
         }
-        // Declarative transparency/contrast policy belongs to the surface peer.
-        // Appearance follows the existing adaptive Container, including its fill
-        // alpha; this guard does not force an opaque paint override.
-        if !options.geometry.default_opaque || options.geometry.effective_surfaces.values().any(|surface| *surface == PanelSurface::Translucent) {
-            return Err(error(Rule::Capability, "translucent host requires the surface renderer"));
-        }
+        validate_requested_opacity(options.geometry.requested_opacity)?;
         Ok(Self {
             options,
             native_capabilities: HostCapabilities::default(),
@@ -461,12 +475,16 @@ impl WorkspacePanelHost {
         self.prepare_in_domain(runtime, capacity, capacity, &[])
     }
 
-    pub(crate) fn note_egui_context(&mut self, ctx: &egui::Context) {
+    pub(crate) fn note_egui_context(&mut self, ctx: &egui::Context, force_opaque: bool) {
         self.egui_context = Some(ctx.clone());
-        let surface_alpha =
-            Some(HostSurfaceAlpha { docked: ui_kit::panel_host_frame(ctx, false).fill.a(), floating: ui_kit::panel_host_frame(ctx, true).fill.a() });
-        if self.options.geometry.surface_alpha != surface_alpha {
+        let surfaces = HostSurfaceStyle::capture(ctx, force_opaque, self.options.geometry.requested_opacity, self.options.geometry.surfaces.as_ref());
+        let surface_alpha = Some(HostSurfaceAlpha {
+            docked: surfaces.appearance(PanelSurface::FollowZone, false).fill.a(),
+            floating: surfaces.appearance(PanelSurface::FollowZone, true).fill.a(),
+        });
+        if self.options.geometry.surfaces.as_ref() != Some(&surfaces) || self.options.geometry.surface_alpha != surface_alpha {
             self.invalidate_geometry();
+            self.options.geometry.surfaces = Some(surfaces);
             self.options.geometry.surface_alpha = surface_alpha;
         }
     }
@@ -1845,11 +1863,21 @@ impl PanelHost for WorkspaceContentHost<'_> {
         let surface_target = HostControlTarget::Pointer(HostPointerTarget::Surface { instance: geometry.instance.clone() });
         let surface_id = scoped_id(self.scope, self.window, Some(&context.owner), &surface_target);
         let mut failure = None;
+        let fallback;
+        let style = if let Some(style) = self.layout.geometry_policy.surfaces.as_ref() {
+            style
+        } else {
+            fallback = HostSurfaceStyle::capture(self.ui.ctx(), false, self.layout.geometry_policy.requested_opacity, None);
+            &fallback
+        };
+        let appearance = style.appearance(section.surface, section.peek || section.zone == Zone::Floating);
         ui_kit::panel_host_surface(
             self.ui,
             section_surface_id(self.scope, self.window, &section.section),
             egui_rect(section.outer),
             section.peek || section.zone == Zone::Floating,
+            appearance.fill,
+            matches!(appearance.contrast, ContrastOutcome::RetainReadableFallback { .. }).then(|| style.palette(appearance)),
             |ui, content_clip| {
                 if (section.peek || section.zone == Zone::Floating) && (!ui.is_visible() || ui.is_sizing_pass()) {
                     self.unpainted.push((ui.layer_id(), section.outer));
