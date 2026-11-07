@@ -638,12 +638,22 @@ fn expand_and_collapse_all_open_the_browser_tree_from_the_design_menu() {
     let occ = created["occurrence"].as_u64().unwrap();
     let child = app.run("component.create", json!({"name": "Inner", "parent_path": [occ]})).unwrap()["occurrence"].as_u64().unwrap();
     let path = vec![occ];
-    act(&mut app, &Target::Occurrence { path: path.clone() }, "Collapse All");
+    act(&mut app, &Target::Occurrence { path: path.clone() }, "Collapse Below");
     assert!(app.tree.collapsed.contains(&format!("o:{occ}/{child}")), "its children fold: {:?}", app.tree.collapsed);
     assert!(!app.tree.collapsed.contains(&format!("o:{occ}")), "the clicked row stays open: {:?}", app.tree.collapsed);
     assert!(!app.tree.collapsed.contains("c0/bodies"), "a placement's collapse leaves the rest of the tree: {:?}", app.tree.collapsed);
-    act(&mut app, &Target::Occurrence { path }, "Expand All");
+    act(&mut app, &Target::Occurrence { path: path.clone() }, "Expand Below");
     assert!(!app.tree.collapsed.contains(&format!("o:{occ}/{child}")), "{:?}", app.tree.collapsed);
+
+    // #11866: Collapse All on a nested placement rolls up the whole tree, every placement at every
+    // level, as it does from the design row; the design row stays open.
+    act(&mut app, &root, "Expand All");
+    act(&mut app, &Target::Occurrence { path: vec![occ, child] }, "Collapse All");
+    for key in ["c0/bodies".to_string(), format!("o:{occ}"), format!("o:{occ}/{child}")] {
+        assert!(app.tree.collapsed.contains(&key), "{key} folds: {:?}", app.tree.collapsed);
+    }
+    assert!(!app.tree.collapsed.contains("c0"), "the design row stays open: {:?}", app.tree.collapsed);
+    assert!(!app.tree.expanded.contains("origin"), "{:?}", app.tree.expanded);
 }
 
 #[test]

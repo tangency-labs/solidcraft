@@ -1007,7 +1007,11 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
             item.params = Some(json!({"path": path}));
         }
         "ui.export" | "ui.saveMesh" | "ui.sendToSlicer" => item.params = Some(json!({"bodies": bodies})),
-        "browser.expand_all" | "browser.collapse_all" => item.params = Some(json!({"path": path})),
+        // Expand Below and Collapse Below fold this placement's branch; Collapse All keeps the
+        // whole tree.
+        "browser.expand_all" | "browser.collapse_all" if item.params.as_ref().is_some_and(|p| p.get("component").is_some()) => {
+            item.params = Some(json!({"path": path}))
+        }
         _ => {}
     });
     entries
@@ -1180,8 +1184,16 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
         );
     }
     organize.push(Item::sep());
-    organize.push(cmd(app, "browser.expand_all", "Expand All").with(json!({ "component": id })));
-    organize.push(cmd(app, "browser.collapse_all", "Collapse All").with(json!({ "component": id })));
+    if id == 0 {
+        organize.push(cmd(app, "browser.expand_all", "Expand All").with(json!({ "component": id })));
+        organize.push(cmd(app, "browser.collapse_all", "Collapse All").with(json!({ "component": id })));
+    } else {
+        // A component folds its own branch; Collapse All still rolls up the whole tree, every
+        // placement at every level, as it does from the design row (#11866).
+        organize.push(cmd(app, "browser.expand_all", "Expand Below").with(json!({ "component": id })));
+        organize.push(cmd(app, "browser.collapse_all", "Collapse Below").with(json!({ "component": id })));
+        organize.push(cmd(app, "browser.collapse_all", "Collapse All").with(json!({})));
+    }
     v.push(group("Organize", "folder", organize));
     v
 }
