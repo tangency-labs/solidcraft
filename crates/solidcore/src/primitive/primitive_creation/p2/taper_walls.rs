@@ -2299,4 +2299,11 @@ mod tests {
         // parallel lines do not cross
         assert_eq!(crossing(&a, &a, 1.0, n, b.start), None);
     }
+
+    #[test]
+    fn has_corner_empty_composite_does_not_panic() {
+        let k = Kernel::default();
+        let empty = CompositeCurve::new(3);
+        assert!(!has_corner(&k, &empty, Vec3::Z));
+    }
 }

@@ -869,4 +869,25 @@ mod tests {
         assert!(create_regular_polygon(c, 1 << 47, 5.0).is_err());
         assert!(create_regular_polygon(c, u64::MAX, 5.0).is_err());
     }
+
+    #[test]
+    fn create_curve_and_segments_degenerate_inputs_do_not_panic() {
+        assert!(matches!(
+            create_curve(&[]),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        assert!(matches!(
+            create_curve(&[p(0.0, 0.0, 0.0)]),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        assert!(matches!(
+            create_curve(&[p(0.0, 0.0, 0.0), p(1.0, 0.0, 0.0), p(2.0, 0.0, 0.0)]),
+            Err(SolidError::InvalidInput { .. })
+        ));
+
+        assert_eq!(segments(&[], "test_op").unwrap().len(), 0);
+
+        assert!(create_rectangle(p(0.0, 0.0, 0.0), 0.0, 10.0).is_err());
+        assert!(create_rectangle(p(0.0, 0.0, 0.0), f64::NAN, 10.0).is_err());
+    }
 }

@@ -971,4 +971,40 @@ mod tests {
             &[main_face]
         );
     }
+
+    #[test]
+    fn unlock_mark_with_nonexistent_or_multiple_locks() {
+        let mut kernel = Kernel::default();
+        let brep = crate::primitive::api_primitives::create_box(
+            &mut kernel,
+            Point3::new(0.0, 0.0, 0.0),
+            1.0,
+            2.0,
+            3.0,
+        )
+        .unwrap();
+        let mut model = PrimitiveModel::new(&mut kernel, brep);
+
+        assert!(model
+            .unlock_mark(PrimitiveModel::MAIN, MarkType::Mark)
+            .is_ok());
+
+        let m1 = model
+            .lock_mark(PrimitiveModel::MAIN, MarkType::Mark.code())
+            .unwrap();
+        let m2 = model
+            .lock_mark(PrimitiveModel::MAIN, MarkType::Mark2.code())
+            .unwrap();
+        assert_ne!(m1, m2);
+        assert!(model.k.context.is_mark_locked(m1));
+        assert!(model.k.context.is_mark_locked(m2));
+
+        assert!(model.unlock_mark(PrimitiveModel::MAIN, m1).is_ok());
+        assert!(!model.k.context.is_mark_locked(m1));
+        assert!(model.k.context.is_mark_locked(m2));
+
+        assert!(model.unlock_mark(PrimitiveModel::MAIN, m2).is_ok());
+        assert!(!model.k.context.is_mark_locked(m2));
+        assert!(model.unlock_mark(PrimitiveModel::MAIN, m2).is_ok());
+    }
 }
