@@ -923,8 +923,9 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
                 vec![
                     sheet_sels(app, sketch.0, profiles.as_ref(), curves),
                     // The path is a chain of a body's edges or the curves of a sketch (#2216).
+                    // A body's edge is looked for on the body the path was picked on (#2216).
                     match path_body {
-                        Some(_) => path_edges.iter().filter_map(|p| crate::dialogs::edge_sel(s, p.0)).collect(),
+                        Some(body) => path_edges.iter().filter_map(|p| crate::dialogs::edge_sel_on(s, Some(body.0.as_str()), p.0)).collect(),
                         None => path.iter().map(|id| crate::selection::curve_pick(id, path_sketch.0, s.active_sketch)).collect(),
                     },
                     direction.into_iter().collect(),
