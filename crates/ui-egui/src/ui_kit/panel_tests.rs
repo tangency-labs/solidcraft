@@ -2628,18 +2628,23 @@ fn host_surface_fallback_paints_readable_plain_labels_without_changing_body_layo
             let failed = matches!(appearance.contrast, ContrastOutcome::RetainReadableFallback { .. });
             assert_eq!(failed, fallback, "exercise both authored paint and deliberately unreadable fallback");
             let palette = failed.then(|| style.palette(appearance));
+            let font = egui::FontId::monospace(19.0);
+            // Floating Areas create a fresh Ui from the context style; they do
+            // not inherit a caller's local Ui overrides. Set the common baseline
+            // before the sizing pass so both existing host paths inherit it.
+            ctx.global_style_mut(|style| {
+                style.override_font_id = Some(font.clone());
+                style.spacing.item_spacing = egui::vec2(13.0, 17.0);
+                style.wrap_mode = Some(egui::TextWrapMode::Wrap);
+                style.visuals.override_text_color = Some(authored.panel);
+            });
             if floating {
                 crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
                     panel_host_surface(ui, egui::Id::unique("captured-fill"), bounds, floating, appearance.fill, palette, |_, _| {});
                 });
             }
-            let font = egui::FontId::monospace(19.0);
             let mut expected_ink = egui::Color32::TRANSPARENT;
             let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
-                ui.style_mut().override_font_id = Some(font.clone());
-                ui.spacing_mut().item_spacing = egui::vec2(13.0, 17.0);
-                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
-                ui.visuals_mut().override_text_color = Some(authored.panel);
                 let parent_visuals = ui.visuals().clone();
                 let parent_spacing = ui.spacing().item_spacing;
                 let parent_fonts = ui.style().text_styles.clone();

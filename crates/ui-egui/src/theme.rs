@@ -632,6 +632,93 @@ pub(crate) fn composite(fill: Color32, background: Color32) -> Color32 {
     Color32::from_rgb(channel(0), channel(1), channel(2))
 }
 
+pub(crate) fn panel_fallback_tokens(mut authored: Tokens) -> Tokens {
+    // Bypass custom/published themes. These existing built-in pairs have their own
+    // contrast tests. Copy only surface/ink roles to retain captured layout metrics.
+    let known = if is_dark() { Tokens::dark() } else { Tokens::light() };
+    authored.panel = known.file_background.to_opaque();
+    authored.panel_header = authored.panel;
+    authored.text = known.file_primary_ink;
+    authored.form_ink = known.file_primary_ink;
+    authored.dialog_label = known.file_primary_ink;
+    authored.text_dim = known.file_dim;
+    authored.form_dim = known.file_dim;
+    authored
+}
+
+/// Raise a captured panel fill to the first quantized alpha that protects all
+/// canonical inks. None reports an authored pair that fails at full opacity.
+pub(crate) fn panel_surface_fill(fill: Color32, tokens: &Tokens, requested: f32) -> Option<Color32> {
+    let [r, g, b, _] = fill.to_srgba_unmultiplied();
+    if !requested.is_finite() || !(0.0..=1.0).contains(&requested) || !panel_surface_readable(Color32::from_rgb(r, g, b), tokens) {
+        return None;
+    }
+    // Each candidate is the renderer's exact quantized fill. Round upward so
+    // effective alpha never undercuts the caller's requested opacity.
+    for alpha in (requested * 255.0).ceil() as u8..=255 {
+        let candidate = Color32::from_rgba_unmultiplied(r, g, b, alpha);
+        if panel_surface_readable(candidate, tokens) {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+fn panel_luminance(color: Color32) -> f64 {
+    let decode = solidcraft_engine::geom::srgb::decode8;
+    0.2126 * decode(color.r()) + 0.7152 * decode(color.g()) + 0.0722 * decode(color.b())
+}
+
+pub(crate) fn panel_surface_readable(fill: Color32, tokens: &Tokens) -> bool {
+    let (low, _) = panel_composite_bounds(fill, Color32::BLACK);
+    let (_, high) = panel_composite_bounds(fill, Color32::WHITE);
+    let (background_low, background_high) = (panel_luminance(low), panel_luminance(high));
+    [tokens.text, tokens.text_dim, tokens.form_ink, tokens.form_dim, tokens.dialog_label].into_iter().all(|ink| {
+        // RGBA inks remain authored. Conservative intervals include every possible
+        // composited text luminance, including an interior contrast minimum.
+        let ink_low = panel_luminance(panel_composite_bounds(ink, low).0);
+        let ink_high = panel_luminance(panel_composite_bounds(ink, high).1);
+        if ink_low <= background_high && ink_high >= background_low {
+            false
+        } else if ink_low > background_high {
+            (ink_low + 0.05) / (background_high + 0.05) >= 4.5
+        } else {
+            (background_low + 0.05) / (ink_high + 0.05) >= 4.5
+        }
+    })
+}
+
+/// Enclose the actual stored-premultiplied source-over, without unpremultiplying
+/// and rounding the source again. egui-wgpu's renderer uses One/OneMinusSrcAlpha;
+/// its two WGSL entry points blend gamma codes or decoded premultiplied codes.
+/// Include both framebuffer formats and the shader's <half-byte source dither,
+/// then round outward to cover framebuffer quantization. This intentionally
+/// overestimates uncertainty instead of promising threshold contrast falsely.
+pub(crate) fn panel_composite_bounds(source: Color32, background: Color32) -> (Color32, Color32) {
+    use solidcraft_engine::geom::srgb::{decode, encode};
+    if source.a() == 255 {
+        // Flat opaque integer colours survive the shader's <0.5-byte dither and
+        // final nearest-byte conversion unchanged on either framebuffer format.
+        return (source, source);
+    }
+    let remain = 1.0 - f64::from(source.a()) / 255.0;
+    let channel = |source: u8, background: u8| {
+        let source = f64::from(source);
+        let background = f64::from(background);
+        let low_source = (source - 0.5).max(0.0);
+        let high_source = (source + 0.5).min(255.0);
+        let gamma_low = low_source + background * remain;
+        let gamma_high = high_source + background * remain;
+        let linear_low = encode(decode(low_source / 255.0) + decode(background / 255.0) * remain) * 255.0;
+        let linear_high = encode(decode(high_source / 255.0) + decode(background / 255.0) * remain) * 255.0;
+        (gamma_low.min(linear_low).floor().clamp(0.0, 255.0) as u8, gamma_high.max(linear_high).ceil().clamp(0.0, 255.0) as u8)
+    };
+    let (r0, r1) = channel(source.r(), background.r());
+    let (g0, g1) = channel(source.g(), background.g());
+    let (b0, b1) = channel(source.b(), background.b());
+    (Color32::from_rgb(r0, g0, b0), Color32::from_rgb(r1, g1, b1))
+}
+
 fn readable_fill(fill: Color32, inks: &[Color32], scale: f32) -> Color32 {
     let readable = |candidate| {
         [Color32::BLACK, Color32::WHITE].iter().all(|background| {
