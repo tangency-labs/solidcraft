@@ -1012,7 +1012,7 @@ fn visible_order(
         let open = group_id.is_none_or(|group_id| group_is_open(app, groups, group_id));
         if open {
             order.push(TimelineItem::Feature(*id));
-            if !row.listed.is_empty() && crate::browser::is_open(app, &sketches_key(*id), false) {
+            if !row.listed.is_empty() && crate::browser::fold_open(app, &sketches_key(*id), false) {
                 order.extend(row.listed.iter().filter(|listed| !listed.reference).map(|listed| TimelineItem::Feature(listed.sketch)));
             }
         }
@@ -1462,7 +1462,7 @@ fn feature_row(app: &mut SolveApp, ui: &mut egui::Ui, rows: &mut Rows, index: us
         Some(_) => Some((sketches_key(id), false)),
         None => has_patterns.then(|| (format!("timeline/sketch/{id}/patterns"), true)),
     };
-    let fold_open = fold.as_ref().is_some_and(|(key, default)| crate::browser::is_open(app, key, *default));
+    let fold_open = fold.as_ref().is_some_and(|(key, default)| crate::browser::fold_open(app, key, *default));
     let style = if names { crate::ui_kit::HistoryStyle::Names } else { crate::ui_kit::HistoryStyle::Icons };
     // `allocate_exact_size` in two steps, so a row outside the view takes its place and no more.
     let size = vec2(ui.available_width(), style.height());
@@ -1648,7 +1648,7 @@ fn feature_row_body(
     });
     if response.clicked() && on_fold {
         if let Some((key, default)) = fold {
-            crate::browser::toggle(app, key, *default);
+            crate::browser::toggle_fold(app, key, *default);
         }
     } else if response.clicked() && !crate::timeline::pick_feature_into_dialog(app, id, ui.input(|i| i.modifiers)) {
         select_item(app, ui, TimelineItem::Feature(id), order);

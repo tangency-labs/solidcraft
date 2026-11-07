@@ -1888,7 +1888,8 @@ fn grouped(app: &SolveApp, count: usize) -> bool {
 fn joints_open(app: &SolveApp, count: usize, run: JointRun) -> bool {
     !grouped(app, count)
         || match run {
-            JointRun::Loose => crate::browser::is_open(app, &run.key(), false),
+            // The History's own fold: a Browser search filters the Browser's rows, not these.
+            JointRun::Loose => crate::browser::fold_open(app, &run.key(), false),
             // Folder ids are numbered in each design: its choice stays with the design, as the
             // folder's own fold does.
             JointRun::Folder { .. } => crate::history_folds::is_open(app, &run.key(), false),
@@ -1897,7 +1898,7 @@ fn joints_open(app: &SolveApp, count: usize, run: JointRun) -> bool {
 
 fn toggle_joints(app: &mut SolveApp, run: JointRun) {
     match run {
-        JointRun::Loose => crate::browser::toggle(app, &run.key(), false),
+        JointRun::Loose => crate::browser::toggle_fold(app, &run.key(), false),
         JointRun::Folder { .. } => {
             let open = crate::history_folds::is_open(app, &run.key(), false);
             crate::history_folds::set_open(app, &run.key(), !open);
@@ -2111,9 +2112,14 @@ pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Op
 /// edits, drives, suppresses or deletes).
 pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
     use crate::browser::{Row, draw_row, is_open, toggle};
-    let joints: Vec<(u64, String, JointKind, bool)> =
+    let mut joints: Vec<(u64, String, JointKind, bool)> =
         app.session.doc.assembly.joints.iter().map(|j| (j.id, j.name.clone(), j.kind, j.suppressed)).collect();
     app.tree.picked_joints.retain(|p| joints.iter().any(|j| j.0 == *p));
+    // A search keeps the joints that match (the folder's eye stays the folder's own).
+    let searching = app.tree.search.on();
+    if let Some(hits) = app.tree.search.hits() {
+        joints.retain(|j| hits.joint(j.0));
+    }
     if joints.is_empty() {
         return;
     }
@@ -2127,7 +2133,15 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
     let r = draw_row(
         ui,
         ui.scope_id().with(key),
-        &Row { depth, fold: Some(open), eye: Some(folder_shown), icon: "folder", label: "Joints", dim: !folder_shown, ..Default::default() },
+        &Row {
+            depth,
+            fold: Some(open),
+            eye: Some(folder_shown),
+            icon: "folder",
+            label: "Joints",
+            dim: !folder_shown || searching,
+            ..Default::default()
+        },
     );
     if r.eye {
         crate::browser::toggle_folder(app, key);
@@ -2209,6 +2223,10 @@ pub fn pick_joint(app: &mut SolveApp, id: u64, add: bool) {
 /// glyph); it isn't drawn for a placement no joint attaches. `key` is the placement's row key.
 pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key: &str, depth: usize) {
     use crate::browser::{Row, draw_row, is_open, toggle};
+    // A search lists the joints it finds in the root folder.
+    if app.tree.search.on() {
+        return;
+    }
     let joints = placement_joints(&app.session.doc, path);
     if joints.is_empty() {
         return;

@@ -1507,9 +1507,8 @@ fn joint_dialog_applies_custom_name_or_falls_back_to_type_default() {
 /// An imported assembly makes a joint per placed part: with "Group joints in the History" on, from
 /// the second joint the timeline shows them as one grouped button with their count, and clicking
 /// it shows (and hides) each one.
-#[test]
-fn many_joints_start_grouped_in_the_timeline() {
-    let mut h = crate::scenario::Harness::new();
+/// Two parts, A and B, held by one rigid joint, "Held", with "Group joints in the History" on.
+fn one_held_joint(h: &mut crate::scenario::Harness) {
     assert_eq!(h.call("ui.prefs", json!({"history_group_joints": true}))["ok"], true);
     for (name, x) in [("A", 0), ("B", 30)] {
         h.app.run("component.activate", json!({"component": "root"})).unwrap();
@@ -1520,7 +1519,10 @@ fn many_joints_start_grouped_in_the_timeline() {
     let at = |o: &str| json!({"occurrence": o, "point": [30, 10, 5], "z": [1, 0, 0]});
     h.app.run("joint.create", json!({"type": "rigid", "a": at("A"), "b": at("B"), "name": "Held"})).unwrap();
     h.frames(2);
-    assert!(crate::scenario::handle_at("timeline:joints").is_none(), "one joint shows on its own");
+}
+
+/// Copies of the first joint, enough for the History to group them.
+fn joints_enough_to_group(h: &mut crate::scenario::Harness) {
     let first = h.app.session.doc.assembly.joints[0].clone();
     for i in 1..=JOINT_GROUP_MIN as u64 {
         let mut copy = first.clone();
@@ -1529,6 +1531,14 @@ fn many_joints_start_grouped_in_the_timeline() {
         h.app.session.doc_mut().assembly.joints.push(copy);
     }
     h.frames(2);
+}
+
+#[test]
+fn many_joints_start_grouped_in_the_timeline() {
+    let mut h = crate::scenario::Harness::new();
+    one_held_joint(&mut h);
+    assert!(crate::scenario::handle_at("timeline:joints").is_none(), "one joint shows on its own");
+    joints_enough_to_group(&mut h);
     assert_eq!(h.app.session.doc.assembly.joints.len(), 2);
     assert!(!joints_open(&h.app, JOINT_GROUP_MIN + 1, JointRun::Loose), "a second joint starts them grouped");
     let group = crate::scenario::handle_at("timeline:joints").expect("the grouped joints button");
@@ -1537,6 +1547,27 @@ fn many_joints_start_grouped_in_the_timeline() {
     let group = crate::scenario::handle_at("timeline:joints").expect("the grouped joints button");
     assert_eq!(h.call("ui.click", json!({"x": group.x, "y": group.y}))["ok"], true);
     assert!(!joints_open(&h.app, JOINT_GROUP_MIN + 1, JointRun::Loose), "clicking it again groups them");
+}
+
+/// A Browser search filters the Browser's rows, not the History's: grouped joints stay grouped
+/// while it runs, and a click on the group opens them in the History's own fold, which is still
+/// open once the search ends.
+#[test]
+fn grouped_joints_keep_their_fold_while_the_browser_searches() {
+    let mut h = crate::scenario::Harness::new();
+    one_held_joint(&mut h);
+    joints_enough_to_group(&mut h);
+    h.app.tree.search.show();
+    h.app.tree.search.text = "Held".to_string();
+    h.frames(2);
+    assert!(h.app.tree.search.on());
+    assert!(!joints_open(&h.app, JOINT_GROUP_MIN + 1, JointRun::Loose), "a search leaves the group as it was");
+    let group = crate::scenario::handle_at("timeline:joints").expect("the grouped joints button");
+    assert_eq!(h.call("ui.click", json!({"x": group.x, "y": group.y}))["ok"], true);
+    assert!(joints_open(&h.app, JOINT_GROUP_MIN + 1, JointRun::Loose), "the click opens the History's own fold");
+    h.app.tree.search.clear();
+    h.frames(2);
+    assert!(joints_open(&h.app, JOINT_GROUP_MIN + 1, JointRun::Loose), "and it is still open after the search");
 }
 
 /// With "Group joints in the History" off, as it is by default, the History shows each joint as it

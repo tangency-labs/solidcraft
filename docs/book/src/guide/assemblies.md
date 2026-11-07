@@ -561,3 +561,17 @@ quoted; children follow their row) or a `.json` file. The window lists the same 
 between the levels and groupings and shows children under their part, edits a picked row's part
 number, description and revision, and exports them. Changing part properties changes no
 geometry, so it doesn't evaluate the model or re-seat joints again.
+
+## Finding things in the browser
+
+The magnifier in the browser's header row (or Ctrl+F with the pointer over the browser, unless you gave Ctrl+F to a command) opens a
+field over that row, which keeps its height. It finds components, bodies, sketches, construction planes and joints by name. It finds the text anywhere in a name,
+ignoring case. With `*` (any text) or `?` (any one character) in it, the whole name must match:
+`*:1` finds every first instance. Each placement of a component is found on its own, so a bolt
+placed six times is listed six times, each under the components that hold it.
+
+Only the matches and their parents stay in the tree, opened for the search; closing a row there
+leaves the tree's own folds as they were. The list beside the field narrows the search to one kind,
+or with nothing typed lists everything of that kind. **Select all** selects what was found, and
+**Hide others** hides every body it didn't find. Esc or **×** ends the search and gives the row back to the title. Scripts and agents
+search the same way with `browser.find`.
