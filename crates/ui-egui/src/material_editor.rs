@@ -183,6 +183,37 @@ impl CardDraft {
             add_kind: 0,
         }
     }
+    /// Add an empty property of `kind`, unless the card has one. A Density property starts at the
+    /// material's assigned density (`density_g_cm3`, as typed) in kg/m³. A card with no source gets
+    /// a User supplied one for it, which every property must name (#12219); it can be edited or
+    /// replaced like any other.
+    pub(crate) fn add_property(&mut self, kind: &'static str, density_g_cm3: &str) {
+        if self.properties.iter().any(|p| p.kind == kind) {
+            return;
+        }
+        if self.sources.is_empty() {
+            self.sources.push(Source {
+                id: "source-1".into(),
+                title: tr("material.editor.user_supplied").to_string(),
+                kind: SourceKind::UserSupplied,
+                license: None,
+                reference: None,
+            });
+        }
+        let mut property = PropertyDraft::empty(kind, self.sources.first().map(|s| s.id.clone()).unwrap_or_default());
+        if kind == "density"
+            && let Ok(g_cm3) = number(density_g_cm3, "density_g_cm3")
+            && solidcraft_engine::doc::valid_density(g_cm3)
+            && let Some(value) = property.values.first_mut()
+        {
+            // 7.85 g/cm³ is 7850 kg/m³, not 7849.999999999999; a density too small for six
+            // decimals keeps its unrounded value rather than becoming 0, which no card accepts.
+            let kg_m3 = g_cm3 * 1000.0;
+            let rounded = (kg_m3 * 1e6).round() / 1e6;
+            *value = if rounded > 0.0 { rounded } else { kg_m3 }.to_string();
+        }
+        self.properties.push(property);
+    }
     pub(crate) fn build(&self) -> Result<MaterialCard, String> {
         let card = MaterialCard {
             schema_version: 1,
@@ -372,7 +403,7 @@ fn property_rows(ui: &mut egui::Ui, property: &mut PropertyDraft, sources: &[Sou
     });
 }
 
-fn card_rows(ui: &mut egui::Ui, card: &mut CardDraft) {
+fn card_rows(ui: &mut egui::Ui, card: &mut CardDraft, density_g_cm3: &str) {
     field(ui, tr("material.editor.designation"), "designation", &mut card.designation, "");
     let mut family = FAMILIES.iter().position(|v| v == &card.family).unwrap_or(0);
     let labels =
@@ -430,7 +461,7 @@ fn card_rows(ui: &mut egui::Ui, card: &mut CardDraft) {
     ui_kit::choice_row(ui, tr("material.editor.add_property"), "physical:add_kind", &mut card.add_kind, &refs);
     let kind = KINDS.get(card.add_kind).copied().unwrap_or("density");
     if ui_kit::button(ui, tr("Add"), ui_kit::Button::Enabled(card.properties.iter().all(|p| p.kind != kind))).clicked() {
-        card.properties.push(PropertyDraft::empty(kind, card.sources.first().map(|s| s.id.clone()).unwrap_or_default()));
+        card.add_property(kind, density_g_cm3);
     }
 }
 
@@ -494,7 +525,7 @@ pub(crate) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, index: &mut usize, edi
             draft.card.designation = draft.name.clone();
         }
         if draft.card_enabled {
-            card_rows(ui, &mut draft.card);
+            card_rows(ui, &mut draft.card, &draft.density);
             ui_kit::text(ui, tr("ui.material_review.claims"), ui_kit::Text::Note("physical_claims"));
         } else {
             ui_kit::text(ui, tr("material.editor.unknown_card"), ui_kit::Text::Note("unknown_card"));
