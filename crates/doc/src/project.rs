@@ -1857,11 +1857,13 @@ fn refine_rounds(mut v: Vec<LinkGeom>, exact: &[Vec2], size: f64) -> Vec<LinkGeo
                     *slot = refined.clone();
                 }
             }
-            _ => {
+            LinkGeom::Circle(..) => {
                 if let Some(slot) = v.get_mut(i) {
                     *slot = refine_round(g.clone(), exact, size * 2e-3);
                 }
             }
+            // Lines have moved with the arcs they meet; nothing else is refitted.
+            _ => {}
         }
     }
     v
