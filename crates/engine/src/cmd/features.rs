@@ -1588,7 +1588,7 @@ fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
                         // meeting) can't be blended either: nobody means it by a pick.
                         Ok(m) => Some((
                             size,
-                            m.edges.clone(),
+                            Vec::new(),
                             m.seams
                                 .iter()
                                 .zip(&m.smooth_edges)
@@ -1610,7 +1610,9 @@ fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
         // of opposite counts as carrying on (edges at a real corner are far from opposite).
         let mut nearest = f64::INFINITY;
         let mut near = Vec::new();
-        for (size, edges, seams, mesh) in bodies.iter() {
+        for (size, listed, seams, mesh) in bodies.iter() {
+            // The display mesh's polylines, else the body's own edge list.
+            let edges = mesh.as_ref().map_or(listed, |m| &m.edges);
             for (i, points) in edges.iter().enumerate() {
                 let d = points.windows(2).filter_map(|w| Some(pt.dist_to_segment(*w.first()?, *w.get(1)?))).fold(f64::INFINITY, f64::min);
                 nearest = nearest.min(d);

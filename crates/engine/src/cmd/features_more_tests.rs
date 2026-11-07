@@ -2731,8 +2731,7 @@ fn chamfer_picked_where_a_line_meets_a_tangent_arc_takes_the_whole_rim() {
     assert!((removed - want).abs() < 0.02 * want, "removed {removed} vs {want}");
 }
 
-/// A real corner of the stadium block's rim is not a tangent join: a pick at the box's corner
-/// still says several edges meet (#5173).
+/// A box corner is not a tangent join: a pick there still says several edges meet (#5173).
 #[test]
 fn chamfer_picked_at_a_box_corner_is_still_refused() {
     let mut s = Session::default();
