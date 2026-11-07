@@ -208,15 +208,7 @@ surface.untrim
 timeline.add
 timeline.copy
 timeline.export_script
-timeline.group
-timeline.move_many
-timeline.move_to_group
 timeline.paste
-timeline.redefine
-timeline.rename_group
-timeline.reorder
-timeline.reorder_many
-timeline.ungroup
 view.apply
 view.delete
 view.list
