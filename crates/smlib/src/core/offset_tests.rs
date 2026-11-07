@@ -643,7 +643,7 @@ fn an_l_sheet_thickens() {
 /// solidcore#2350's parabolic sheet: the quadratic Bézier (-10, 0), (0, 10), (10, 0) lofted 20
 /// along z, a B-spline face whose radius of curvature at its apex is 10. Thickened 11 towards
 /// its centre of curvature its offset folds there: solidcore's one construction refuses it
-/// naming 10, the largest wall that works (`fixes.shell_one_construction`); 2 builds.
+/// naming 10, the largest wall that works; 2 builds.
 #[test]
 fn a_wall_thicker_than_its_face_curves_is_refused_naming_the_largest() {
     use crate::sweeps::Curve;
