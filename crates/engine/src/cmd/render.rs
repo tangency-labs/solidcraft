@@ -140,7 +140,9 @@ CommandSpec::new("render.library.preview", "Inspect Original Surface Map", crate
     .contract(&library::PREVIEW_CONTRACT)
     .output(crate::schema::output_schema_for::<crate::schema::render_library::LibraryPreview>)
     .params("id: SURF-*. Returns bounded hash-verified original base-color PNG bytes and source-map fidelity label, not a rendered material thumbnail. No external paths, rendering or document edits."),
-CommandSpec::new("render.library.physical.prepare", "Prepare Physical Reference", physical_library::prepare).icon("inspect").noundo().doc_only()
+CommandSpec::new("render.library.physical.prepare", "Prepare Physical Reference", crate::checked!("render.library.physical.prepare", physical_library::prepare)).icon("inspect").noundo().doc_only()
+    .contract(&physical_library::PREPARE_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_library::PhysicalPlan>)
     .params("id: named built-in physical profile, name: proposed new material label, acknowledge_reference:true. Read-only loss-aware creation plan using native ValidatedCard admission and one point density; returns source receipts, extended fields and omissions. Does not execute material.create, assign bodies or infer effective-part physics."),
 CommandSpec::new("render.stage.ground", "Save Render Ground", crate::checked!("render.stage.ground", staging::ground)).icon("render_scene")
     .contract(&staging::GROUND_CONTRACT)
@@ -176,15 +178,25 @@ CommandSpec::new("render.library.describe", "Inspect Render Library Resource", c
     .contract(&library::DESCRIBE_CONTRACT)
     .output(crate::schema::output_schema_for::<crate::schema::render_library::LibraryDescription>)
     .params("kind, id: exact authored resource. Returns original specification, runtime projection variants and explicit omissions. A concept is not an executable preset."),
-CommandSpec::new("render.library.appearance.apply", "Apply Library Opaque Appearance", library::apply_appearance).icon("appearance")
+CommandSpec::new("render.library.appearance.apply", "Apply Library Opaque Appearance", crate::checked!("render.library.appearance.apply", library::apply_appearance)).icon("appearance")
+    .contract(&library::APPEARANCE_APPLY_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_library::AppearanceApplied>)
     .params("id: SURF-* or SELENE-AP-*; variant: uniform_opaque (required); bodies: 1..256 exact body names. Applies the original scalar baseline through ordinary appearance assignment in one undo, preserving physical properties. Spatial maps and advanced target effects are explicitly excluded."),
-CommandSpec::new("render.library.environment.apply", "Apply Built-in HDR Environment", library::apply_environment).icon("settings").doc_only()
+CommandSpec::new("render.library.environment.apply", "Apply Built-in HDR Environment", crate::checked!("render.library.environment.apply", library::apply_environment)).icon("settings").doc_only()
+    .contract(&library::ENVIRONMENT_APPLY_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_library::EnvironmentApplied>)
     .params("id: HDR-*; name: saved setup; set?: typed CPU/GPU setup patch; rotation_rad?: authored rotation (native origin offset is explicit in the reply); intensity?:1; samples?:16 for CPU; replace_environment?:false. Hash-verifies and embeds original bytes, saves one atomic undo without external files or a render device. An HDR-owned sun cannot duplicate an analytic sun."),
-CommandSpec::new("render.library.surface.prepare", "Prepare Authored Surface Maps", library::prepare_surface).icon("appearance").noundo()
+CommandSpec::new("render.library.surface.prepare", "Prepare Authored Surface Maps", crate::checked!("render.library.surface.prepare", library::prepare_surface)).icon("appearance").noundo()
+    .contract(&library::SURFACE_PREPARE_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_library::SurfacePrepared>)
     .params("id: SURF-*; body_index and body_name from render.scene; origin?:[0,0,0]; plane?:xy/yz/zx; scale?:1; rotation_rad?:0 (positive around the plane normal). Returns an explicit GPU temporary planar binding and a source usable by saved CPU/GPU surface.bind, with source hashes, original millimetre scale, image-up normal orientation and absolute base-color semantics. No document change; height/displacement and true anisotropy are not included."),
-CommandSpec::new("render.library.studio.prepare", "Prepare Authored Studio Lights", library::prepare_studio).icon("inspect").noundo().doc_only()
+CommandSpec::new("render.library.studio.prepare", "Prepare Authored Studio Lights", crate::checked!("render.library.studio.prepare", library::prepare_studio)).icon("inspect").noundo().doc_only()
+    .contract(&library::STUDIO_PREPARE_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_library::StudioPrepared>)
     .params("id: RIG-*; variant: complete for emitter-only rigs, emitters_only for rigs with passive cards; center_mm and subject_extent_mm required. Converts exact rectangular half-edges and solar direction/radius. Optional name and typed CPU set return the complete CPU projection and explicit indirect-lighting adoption plan; authored radiance beyond CPU intensity64 refuses without scaling. Blocked calibration and external-sun rigs refuse. Returns a geometry-clearance review requirement; does not create cards or modify the scene."),
-CommandSpec::new("render.library.studio.apply", "Apply Authored Studio Lights", library::apply_studio).icon("settings")
+CommandSpec::new("render.library.studio.apply", "Apply Authored Studio Lights", crate::checked!("render.library.studio.apply", library::apply_studio)).icon("settings")
+    .contract(&library::STUDIO_APPLY_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::render_library::StudioApplied>)
     .params("rig: id, variant, center_mm and subject_extent_mm; name; set?: typed CPU/GPU setup patch; expected_revision?:u64; enable_indirect?:false (explicit CPU Sun adoption after review); replace_lighting_and_environment:true required. Saves the explicit rig projection in one undo, removing prior lighting/environment only with that confirmation. Subject clearance still needs review; passive cards are never silently omitted."),
 CommandSpec::new("render.hdr.inspect", "Inspect HDR Source", crate::checked!("render.hdr.inspect", resources::inspect)).icon("inspect").noundo().doc_only()
     .contract(&resources::INSPECT_CONTRACT)
