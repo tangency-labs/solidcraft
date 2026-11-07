@@ -835,3 +835,15 @@ fn two_sides_read_the_older_way_keeps_it_through_the_editor_and_by_preference() 
         assert_eq!(d.extra.get("second_follows_first").and_then(Value::as_bool).unwrap_or(false), pref);
     }
 }
+
+/// With the preference on, a saved extrude that reads Two Sides the current way keeps it through
+/// Edit Extrude and OK.
+#[test]
+fn two_sides_the_preference_does_not_rewrite_a_saved_extrude() {
+    let mut h = make(json!({"distance":"-20 mm","distance2":"10 mm"}));
+    h.app.preferences.extrude_second_follows_first = true;
+    open(&mut h);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    h.frames(2);
+    assert!(!extent(&h).second_follows_first, "editing kept the saved rule");
+}

@@ -1689,3 +1689,18 @@ fn dialog_sketch_selection_labels_translate_and_keep_identifiers() {
     let missing = Sel::Profile { sketch: 999, index: 0 };
     assert_eq!(selection_label(&h.app.session, h.app.preferences.origin_plane_names, &d, &d.inputs[0], &missing), "Sketch999 · profile 1");
 }
+
+/// A remembered extrude does not outvote the preference for how a new one reads Two Sides.
+#[test]
+fn remembered_extrude_follows_the_current_two_sides_preference() {
+    for (was, now) in [(false, true), (true, false)] {
+        let mut h = Harness::new();
+        h.app.preferences.remember_dialog_values = true;
+        h.app.preferences.extrude_second_follows_first = was;
+        let first = Dialog::for_command(&h.app, "solid.extrude").unwrap();
+        remember(&mut h.app, &first);
+        h.app.preferences.extrude_second_follows_first = now;
+        let next = Dialog::for_command(&h.app, "solid.extrude").unwrap();
+        assert_eq!(next.extra.get("second_follows_first").and_then(Value::as_bool).unwrap_or(false), now);
+    }
+}
