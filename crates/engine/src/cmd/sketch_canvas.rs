@@ -311,7 +311,7 @@ mod tests {
         // Two points 20 apart on the image are really 50 apart.
         let calibrated = s.execute("canvas.calibrate", &json!({"canvas": id, "a": [0, 0], "b": [20, 0], "distance": 50})).unwrap();
         assert!((s.doc.canvases[0].width - 200.0).abs() < 1e-9);
-        assert!((calibrated["scale"].as_f64().unwrap() - 2.5).abs() < 1e-12);
+        assert!((calibrated["width"].as_f64().unwrap() / c.width - 2.5).abs() < 1e-12);
         // Point A is the calibration anchor: its position on the canvas does not move.
         assert!((s.doc.canvases[0].center.x - c.center.x * 2.5).abs() < 1e-9);
         assert!((s.doc.canvases[0].center.y - c.center.y * 2.5).abs() < 1e-9);

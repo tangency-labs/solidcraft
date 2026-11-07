@@ -4976,7 +4976,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let navigating_from_press = mode.is_some() || app.viewport.primary_nav.is_some() || joint_handle_pointer || canvas_handle_pointer;
     let held = crate::select_other::track_hold(app, ui.ctx(), &proj, inside, primary_pressed, primary_down, hover, navigating_from_press);
     crate::select_other::hover_override(app);
-    let canvas_dragging = crate::browser_canvas::drag(app, &proj, hover.filter(|_| inside), primary_pressed, primary_down);
+    let (canv_pressed, canv_down) = if app.viewport.primary_nav.is_none() && mode.is_none() { (primary_pressed, primary_down) } else { (false, false) };
+    let canvas_dragging = crate::browser_canvas::drag(app, &proj, hover.filter(|_| inside), canv_pressed, canv_down);
     list_hover(app);
     let painter = ui.painter_at(rect);
     crate::gpu::paint_background(&painter, rect, &t);
@@ -5392,7 +5393,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
     }
     // Dragging a sketch point of the active sketch moves it; the solver keeps the constraints.
-    if app.tool.is_none() && app.dialog.is_none() && primary_nav.is_none() && mode.is_none() && app.session.active_sketch.is_some() && !held {
+    if app.tool.is_none() && app.dialog.is_none() && primary_nav.is_none() && mode.is_none() && app.session.active_sketch.is_some() && !held && !canvas_dragging {
         let on_plane = |app: &SolveApp, p: Pos2| {
             let ss = app.session.active_sketch.and_then(|sid| crate::open_meshing::shown_world(app).sketch(sid).cloned())?;
             let (o, d) = proj.ray(p);
