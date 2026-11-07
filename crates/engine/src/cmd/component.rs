@@ -13,12 +13,23 @@ use solidcraft_doc::{Feature, FeatureKind, Mat, Occurrence};
 use super::CommandSpec;
 use crate::params::{bad, bool_, str_, string_list, vec3};
 use crate::schema::component::{
-    EditInPlaceParams, EditInPlaceResult, FinishEditParams, FinishEditResult, MoveFeaturesParams, MoveFeaturesResult, MoveSketchesToPartsParams,
-    MoveSketchesToPartsResult, OccurrenceAlignParams, OccurrenceAlignResult, ReparentItemsParams, ReparentItemsResult,
+    ActivateParams, ActivateResult, ChildEntry, CompactPlacement, ComponentNode, CreateParams, CreateResult, DeleteParams, DeleteResult,
+    EditInPlaceParams, EditInPlaceResult, FinishEditParams, FinishEditResult, FromBodiesParams, FromBodiesResult, ListParams, ListResult,
+    MoveFeaturesParams, MoveFeaturesResult, MoveSketchesToPartsParams, MoveSketchesToPartsResult, NamesOrCount, OccurrenceAlignParams,
+    OccurrenceAlignResult, PlacementEntry, PlacementInfo, PropertiesParams, PropertiesResult, RenameParams, RenameResult, ReparentItemsParams,
+    ReparentItemsResult, UnlockParams, UnlockResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
+const ACTIVATE_CONTRACT: TypedContract<ActivateParams> = TypedContract::new();
+const CREATE_CONTRACT: TypedContract<CreateParams> = TypedContract::new();
+const DELETE_CONTRACT: TypedContract<DeleteParams> = TypedContract::new();
+const FROM_BODIES_CONTRACT: TypedContract<FromBodiesParams> = TypedContract::new();
+const LIST_CONTRACT: TypedContract<ListParams> = TypedContract::new();
+const PROPERTIES_CONTRACT: TypedContract<PropertiesParams> = TypedContract::new();
+const RENAME_CONTRACT: TypedContract<RenameParams> = TypedContract::new();
+const UNLOCK_CONTRACT: TypedContract<UnlockParams> = TypedContract::new();
 const EDIT_IN_PLACE_CONTRACT: TypedContract<EditInPlaceParams> = TypedContract::new();
 const FINISH_EDIT_CONTRACT: TypedContract<FinishEditParams> = TypedContract::new();
 const MOVE_FEATURES_CONTRACT: TypedContract<MoveFeaturesParams> = TypedContract::new();
@@ -67,14 +78,23 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.show_history", "Show Component History", show_history)
         .icon("eye").doc_only()
         .params("component: id or name; puts a component's features back in the History bar after Hide Component History (#10393)"),
-    CommandSpec::new("component.create", "New Component", new_component)
+    CommandSpec::new("component.create", "New Component", crate::checked!("component.create", new_component))
         .at("SOLID", "ASSEMBLE")
         .icon("component")
+        .contract(&CREATE_CONTRACT)
+        .output(output_schema_for::<CreateResult>)
         .params("name?, parent?: component id or name (default: the active one); parent_path?: exact parent placement; activate?: bool (default true); grounded?: bool (default: true for the design's first part, false otherwise)"),
-    CommandSpec::new("component.from_bodies", "Create Components from Bodies", from_bodies)
+    CommandSpec::new("component.from_bodies", "Create Components from Bodies", crate::checked!("component.from_bodies", from_bodies))
         .icon("component")
+        .contract(&FROM_BODIES_CONTRACT)
+        .output(output_schema_for::<FromBodiesResult>)
         .params("bodies: [names] → one new component per body, named after it"),
-    CommandSpec::new("component.activate", "Activate Component", activate).icon("activate").noundo().params("component: id or name (0 or \"root\" for the design); occurrence?, path?: exact placement used to author shared geometry"),
+    CommandSpec::new("component.activate", "Activate Component", crate::checked!("component.activate", activate))
+        .icon("activate")
+        .noundo()
+        .contract(&ACTIVATE_CONTRACT)
+        .output(output_schema_for::<ActivateResult>)
+        .params("component: id or name (0 or \"root\" for the design); occurrence?, path?: exact placement used to author shared geometry"),
     CommandSpec::new("component.edit_in_place", "Edit in Place", crate::checked!("component.edit_in_place", edit_in_place))
         .icon("edit")
         .noundo()
@@ -99,22 +119,41 @@ pub static COMMANDS: &[CommandSpec] = &[
              fails while the design has unsaved changes (run file.save first) or something is open in it; asked during the agent's \
              turn it finishes once the turn ends (queued: true); elsewhere nothing changes",
         ),
-    CommandSpec::new("component.list", "List Components", list).icon("list").noundo().params(
-        "compact?: bool (counts of bodies, features, sketches and construction planes instead of their names; occurrences leave out \
-         identity transforms; children as occurrence ids); bodies?: bool (with compact: body names, not their count)",
-    ),
-    CommandSpec::new("component.properties", "Component Physical Properties", properties::component)
+    CommandSpec::new("component.list", "List Components", crate::checked!("component.list", list))
+        .icon("list")
+        .noundo()
+        .contract(&LIST_CONTRACT)
+        .output(output_schema_for::<ListResult>)
+        .params(
+            "compact?: bool (counts of bodies, features, sketches and construction planes instead of their names; occurrences leave out \
+             identity transforms; children as occurrence ids); bodies?: bool (with compact: body names, not their count)",
+        ),
+    CommandSpec::new("component.properties", "Component Physical Properties", crate::checked!("component.properties", properties::component))
         .icon("measure").noundo()
+        .contract(&PROPERTIES_CONTRACT)
+        .output(output_schema_for::<PropertiesResult>)
         .params("component?: id or name (default active); descendants?: bool (default true); about?: [x, y, z] (mm). Measures the first placement, or all placements for root, including pending moves; material-aware mass and center of mass in world coordinates; volume, density, mass, center of mass and inertia_g_mm2 (the inertia tensor about the body's center of mass, world axes, from its tessellation) only for closed, consistently oriented bodies; total.open_bodies_skipped counts open bodies excluded from volume/mass totals; total.first_moment_g_mm (mass × center of mass), inertia_g_mm2 about the total center of mass, principal_moments_g_mm2 (smallest first) and principal_axes (unit, right-handed); with about, total.inertia_about {point, inertia_g_mm2}"),
     CommandSpec::new("occurrence.properties", "Occurrence Physical Properties", properties::occurrence)
         .icon("measure").noundo()
         .params("occurrence: id or name; path?: [occurrence ids] (required if nested under multiple instances); descendants?: bool (default true); about?: [x, y, z] (mm). Physical properties of this placement in world coordinates, including pending moves; volume, density, mass, center of mass and inertia_g_mm2 only for closed, consistently oriented bodies; total.open_bodies_skipped counts open bodies excluded from volume/mass totals; total inertia as in component.properties"),
-    CommandSpec::new("component.rename", "Rename Component", rename).icon("rename").params("component, name"),
-    CommandSpec::new("component.delete", "Delete Component", delete).icon("delete").params("component: deletes it, its subcomponents, occurrences and features"),
-    CommandSpec::new("component.unlock", "Unlock Contents", unlock).icon("rigid_group").params(
-        "component: removes the rigid joints that hold its contents together (an imported assembly's rigid group), so its parts \
-         move and take joints one by one → joints (the ids removed)",
-    ),
+    CommandSpec::new("component.rename", "Rename Component", crate::checked!("component.rename", rename))
+        .icon("rename")
+        .contract(&RENAME_CONTRACT)
+        .output(output_schema_for::<RenameResult>)
+        .params("component, name"),
+    CommandSpec::new("component.delete", "Delete Component", crate::checked!("component.delete", delete))
+        .icon("delete")
+        .contract(&DELETE_CONTRACT)
+        .output(output_schema_for::<DeleteResult>)
+        .params("component: deletes it, its subcomponents, occurrences and features"),
+    CommandSpec::new("component.unlock", "Unlock Contents", crate::checked!("component.unlock", unlock))
+        .icon("rigid_group")
+        .contract(&UNLOCK_CONTRACT)
+        .output(output_schema_for::<UnlockResult>)
+        .params(
+            "component: removes the rigid joints that hold its contents together (an imported assembly's rigid group), so its parts \
+             move and take joints one by one → joints (the ids removed)",
+        ),
     CommandSpec::new("component.move_bodies", "Move Bodies to Component", move_bodies).icon("move").params(
         "bodies: [names], component; component_path?: its placement to place them by (default: its only one, else the active \
          one; a component placed more than once gets them in every instance); from_path?: the placement of their component they \
@@ -203,6 +242,11 @@ pub static COMMANDS: &[CommandSpec] = &[
 
 const ALIGN_CONTRACT: TypedContract<OccurrenceAlignParams> = TypedContract::new();
 
+/// A typed reply as the JSON a handler returns.
+pub(super) fn reply<T: serde::Serialize>(value: T) -> Result<Value> {
+    serde_json::to_value(value).map_err(|e| crate::EngineError::Other(e.to_string()))
+}
+
 fn key(v: Option<&Value>) -> Option<String> {
     match v {
         Some(Value::Number(n)) => Some(n.to_string()),
@@ -288,7 +332,14 @@ pub(super) fn new_component(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let name = s.doc.components.iter().find(|c| c.id == id).map(|c| c.name.clone()).unwrap_or_default();
     let occ = s.doc.occurrence_of(id);
-    Ok(json!({"component": id, "name": name, "parent": parent, "occurrence": occ.map(|o| o.id), "grounded": occ.is_some_and(|o| o.grounded)}))
+    reply(CreateResult {
+        component: id,
+        name,
+        parent,
+        occurrence: occ.map(|o| o.id),
+        grounded: occ.is_some_and(|o| o.grounded),
+        param_warnings: Vec::new(),
+    })
 }
 
 fn from_bodies(s: &mut Session, p: &Value) -> Result<Value> {
@@ -334,7 +385,7 @@ fn activate(s: &mut Session, p: &Value) -> Result<Value> {
     s.active_component = id;
     s.active_occurrence_path = path;
     s.revision += 1;
-    Ok(json!({ "active": id }))
+    reply(ActivateResult { active: id, param_warnings: Vec::new() })
 }
 
 fn list(s: &mut Session, p: &Value) -> Result<Value> {
@@ -342,17 +393,20 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
     let doc = &s.doc;
     // Compact: what a large assembly needs to be found around in, without every name and matrix.
     let compact = bool_(p, "compact").unwrap_or(false);
-    let names = |v: Vec<&str>| if compact { json!(v.len()) } else { json!(v) };
+    let names = |v: Vec<&str>| if compact { NamesOrCount::Count(v.len()) } else { NamesOrCount::Names(v.into_iter().map(str::to_string).collect()) };
     let body_names = !compact || bool_(p, "bodies").unwrap_or(false);
     let placement = |o: &Occurrence| {
         if !compact {
-            return json!(o);
+            return PlacementEntry::Full(PlacementInfo::from(o));
         }
-        let mut v = json!({"id": o.id, "name": o.name, "parent": o.parent, "grounded": o.grounded});
-        if o.transform.iter().flatten().zip(solidcraft_doc::IDENTITY.iter().flatten()).any(|(a, b)| (a - b).abs() > 1e-12) {
-            v["transform"] = json!(o.transform);
-        }
-        v
+        let moved = o.transform.iter().flatten().zip(solidcraft_doc::IDENTITY.iter().flatten()).any(|(a, b)| (a - b).abs() > 1e-12);
+        PlacementEntry::Compact(CompactPlacement {
+            id: o.id,
+            name: o.name.clone(),
+            parent: o.parent,
+            grounded: o.grounded,
+            transform: moved.then_some(o.transform),
+        })
     };
     // Each component's bodies, features, occurrences and children, grouped once rather than
     // searched for every component (thousands of each in a design with many components).
@@ -376,17 +430,37 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
         let sketches = named(|k| matches!(k, FeatureKind::Sketch { .. }));
         let construction = named(|k| matches!(k, FeatureKind::ConstructionPlane { .. }));
         let features = named(|k| !matches!(k, FeatureKind::Sketch { .. } | FeatureKind::ConstructionPlane { .. }));
-        let occurrences: Vec<Value> = occurrences_of.get(&id).into_iter().flatten().map(|o| placement(o)).collect();
-        let children: Vec<Value> = children_of.get(&id).into_iter().flatten().map(|o| if compact { json!(o.id) } else { json!(o) }).collect();
-        let bodies = if body_names { json!(bodies) } else { json!(bodies.len()) };
-        json!({"id": id, "name": name, "parent": parent, "bodies": bodies, "features": names(features), "sketches": names(sketches),
-            "construction": names(construction), "occurrences": occurrences, "children": children})
+        let occurrences: Vec<PlacementEntry> = occurrences_of.get(&id).into_iter().flatten().map(|o| placement(o)).collect();
+        let children: Vec<ChildEntry> = children_of
+            .get(&id)
+            .into_iter()
+            .flatten()
+            .map(|o| if compact { ChildEntry::Id(o.id) } else { ChildEntry::Full(PlacementInfo::from(*o)) })
+            .collect();
+        let bodies =
+            if body_names { NamesOrCount::Names(bodies.into_iter().map(str::to_string).collect()) } else { NamesOrCount::Count(bodies.len()) };
+        ComponentNode {
+            id,
+            name: name.to_string(),
+            parent,
+            bodies,
+            features: names(features),
+            sketches: names(sketches),
+            construction: names(construction),
+            occurrences,
+            children,
+        }
     };
     let mut out = vec![node(0, &doc.name, None)];
     for c in &doc.components {
         out.push(node(c.id, &c.name, Some(c.parent)));
     }
-    Ok(json!({"active": s.active_component, "components": out, "pending_moves": s.pending_moves.keys().collect::<Vec<_>>()}))
+    reply(ListResult {
+        active: s.active_component,
+        components: out,
+        pending_moves: s.pending_moves.keys().copied().collect(),
+        param_warnings: Vec::new(),
+    })
 }
 
 fn rename(s: &mut Session, p: &Value) -> Result<Value> {
@@ -411,7 +485,7 @@ fn rename(s: &mut Session, p: &Value) -> Result<Value> {
         // A sketch projecting a body of one of those placements keeps it.
         super::sketch_project::follow_placed_renames(d, &st, &placed, None);
     }
-    Ok(json!({"component": id, "name": name}))
+    reply(RenameResult { component: id, name: name.to_string(), param_warnings: Vec::new() })
 }
 
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {
@@ -428,7 +502,7 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     if gone.contains(&s.active_component) {
         s.active_component = 0;
     }
-    Ok(json!({"deleted": gone, "features": removed.features}))
+    reply(DeleteResult { deleted: gone, features: removed.features, param_warnings: Vec::new() })
 }
 
 fn unlock(s: &mut Session, p: &Value) -> Result<Value> {
@@ -448,7 +522,7 @@ fn unlock(s: &mut Session, p: &Value) -> Result<Value> {
     }
     doc.assembly.links.retain(|l| !gone.contains(&l.a) && !gone.contains(&l.b));
     s.visibility.hidden_joints.retain(|h| !gone.contains(h));
-    Ok(json!({"component": id, "joints": gone}))
+    reply(UnlockResult { component: id, joints: gone, param_warnings: Vec::new() })
 }
 
 fn move_bodies(s: &mut Session, p: &Value) -> Result<Value> {

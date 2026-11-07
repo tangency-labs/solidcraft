@@ -212,6 +212,36 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
     }
 }
 
+/// The icon a History folder takes from its features when Preferences says so: theirs, when every
+/// feature in it (and in the folders inside it) has the same icon and it holds no joints.
+pub(crate) fn folder_kind_icon(app: &SolveApp, id: u64) -> Option<&'static str> {
+    if !app.preferences.history_folder_kind_icon {
+        return None;
+    }
+    let doc = &app.session.doc;
+    let mut pending = vec![id];
+    let mut seen = std::collections::BTreeSet::new();
+    let mut icon = None;
+    while let Some(id) = pending.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        let group = doc.timeline_groups.iter().find(|group| group.id == id)?;
+        if !group.joints.is_empty() {
+            return None;
+        }
+        for feature in &group.features {
+            let this = icon_of(&doc.feature(*feature)?.kind);
+            if icon.is_some_and(|icon| icon != this) {
+                return None;
+            }
+            icon = Some(this);
+        }
+        pending.extend(doc.timeline_groups.iter().filter(|child| child.parent == Some(id)).map(|child| child.id));
+    }
+    icon
+}
+
 fn construction_plane_icon(plane: &PlaneRef) -> &'static str {
     match plane {
         PlaneRef::AtAngle { .. } => "plane_angle",
@@ -849,6 +879,19 @@ pub(crate) fn floating_rect(available: Rect) -> Rect {
     Container::floating_card(Surface::Panel).bottom_strip_rect(available, 40.0)
 }
 
+/// A folder's Edit Holes item, when it holds holes only: one Hole dialog for all of them.
+pub(crate) fn edit_holes_item(app: &mut SolveApp, ui: &mut egui::Ui, folder: u64) {
+    if crate::hole_folder::holes(app, folder).is_none() {
+        return;
+    }
+    if crate::context_menu::button(ui, "Edit Holes", "hole").clicked() {
+        if let Err(why) = crate::hole_folder::open(app, folder) {
+            app.set_status(why, true);
+        }
+        ui.close();
+    }
+}
+
 fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
     let t = Tokens::get();
     let accent = crate::theme::TabAccent::for_tab(&t, &app.ui.tab);
@@ -1248,6 +1291,38 @@ mod tests {
     use solidcraft_engine::doc::{FeatureKind, PlaneRef};
 
     use crate::scenario::Harness;
+
+    #[test]
+    fn a_folder_of_one_kind_of_feature_takes_its_icon_when_preferences_say_so() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20, "name": "Block"})).unwrap();
+        for x in [8, 16, 24, 32] {
+            h.app.run("solid.hole", json!({"position": [x, 10, 20], "diameter": 4, "name": format!("H{x}")})).unwrap();
+        }
+        let group = |h: &mut Harness, p: serde_json::Value| h.app.run("timeline.group", p).unwrap()["group"].as_u64().unwrap();
+        let inner = group(&mut h, json!({"name": "Inner", "features": ["H8", "H16"]}));
+        // Holes, and a folder of holes inside: all one kind.
+        let holes = group(&mut h, json!({"name": "Holes", "features": ["H24"], "groups": [inner]}));
+        let mixed = group(&mut h, json!({"name": "Mixed", "features": ["Block"]}));
+        let hole = super::icon_of(&h.app.session.doc.find_feature("H8").unwrap().kind);
+        // Off (the default): every folder keeps the folder icon.
+        assert!(!h.app.preferences.history_folder_kind_icon);
+        assert_eq!(super::folder_kind_icon(&h.app, holes), None);
+        crate::prefs::set(&mut h.app, &json!({"history_folder_kind_icon": true})).unwrap();
+        assert_eq!(super::folder_kind_icon(&h.app, holes), Some(hole));
+        assert_eq!(super::folder_kind_icon(&h.app, inner), Some(hole));
+        assert_eq!(super::folder_kind_icon(&h.app, mixed), Some(super::icon_of(&h.app.session.doc.find_feature("Block").unwrap().kind)));
+        // A box among the holes: back to the folder icon.
+        h.app.run("timeline.group", json!({"name": "Both", "groups": [holes, mixed]})).unwrap();
+        let both = h.app.session.doc.timeline_groups.iter().find(|g| g.name == "Both").unwrap().id;
+        assert_eq!(super::folder_kind_icon(&h.app, both), None);
+        // Both Histories draw it without trouble.
+        for left in [false, true] {
+            h.app.preferences.timeline_left = left;
+            h.frames(3);
+        }
+    }
 
     #[test]
     fn joint_folder_hides_fifty_joint_tiles_in_both_history_layouts() {
