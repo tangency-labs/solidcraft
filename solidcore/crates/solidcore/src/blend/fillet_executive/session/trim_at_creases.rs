@@ -749,9 +749,7 @@ impl FilletSession<'_> {
         // Not the fork's (#2404): the strip a blend leaves on an edge of the body, thinner than
         // the part resolves, has no topology to build
         if self.strip_below_resolution(k, &sheet, blended_edges, tol)? {
-            if k.fixes.fillet_gn_section_generator {
-                self.note_fit_of_the_strip(solvers, blended_edges)?;
-            }
+            self.note_fit_of_the_strip(solvers, blended_edges)?;
             return refuse(
                 note,
                 refusal(

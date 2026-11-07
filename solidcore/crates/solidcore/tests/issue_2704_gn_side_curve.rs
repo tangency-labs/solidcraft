@@ -1,4 +1,5 @@
-//! #2704: with `fillet_gn_section_generator` alone, a variable box round failed at one end
+//! #2704: with the G^n section's touch circles alone (the default kernel since its flag,
+//! `fillet_gn_section_generator`, was retired), a variable box round failed at one end
 //! ("failure to calculate intersection of fillet surface with side face", 1001) for laws such
 //! as 4 to 0, 2 to 0, 4 to 2, 0.5 to 4 and 8 to 4, and not for 4 to 3 or 0 to 4. The touch
 //! circle's section leaves the end face's plane at an end, so the side curve must come from
@@ -43,7 +44,6 @@ fn pick(k: &Kernel, b: &Brep, q: Point3) -> EdgeId {
 /// to `to` at (10, 20, 30): the volume it removes.
 fn removed(from: f64, to: f64) -> f64 {
     let mut k = Kernel::default();
-    k.fixes.fillet_gn_section_generator = true;
     let mut b = create_box(&mut k, Point3::ZERO, 10.0, 20.0, 30.0).unwrap();
     let e = pick(&k, &b, Point3::new(10.0, 10.0, 30.0));
     let ivl = edge::interval(&b, e).unwrap();
