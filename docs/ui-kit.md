@@ -914,6 +914,20 @@ border settings safely fall back to legacy styling. The optional field requires 
 version change. There is no general border editor in Preferences; theme file import/export
 and the existing preference/control workflow own this extension.
 
+Optional `borders.plate` gives a mechanical, heads-up-display look (`crate::plate`). It accepts
+`cut` (finite 0–16 points, required) and `floating` (`true`/`false`, default false). Ribbon,
+title bar and navigation bar buttons become plates (`Tokens::plate_button`) with some corners
+cut back at 45 degrees, in one of four shapes chosen from where each button sits, so neighbours
+mostly differ and a button keeps its shape. A plate is a light outline in the accent at rest (on
+the title bar, the accent mixed toward the bar's text) and lights up under the pointer or
+pressed, adding an inner line and hatching; `floating` adds a detached strip under it and lifts
+its cut corner off as its own piece. `Tokens::paint_highlight`, which menus, trees, tables and
+the history use for hover and selection fills, paints a lit bar with cut corners and an accent
+bar down its left. Every frame that paints its inset companion (`Container::paint_inset`) has
+its rounded corners cut the same way at the end of the frame; corners joined to a dock edge or a
+neighbour (radius 0) stay square, and larger panes get a short accent bar along their top.
+Without `borders.plate` everything paints as before.
+
 ## Theme icon and tab colours
 
 Theme files optionally supply `icon_palette` SVG roles and semantic ramps. The

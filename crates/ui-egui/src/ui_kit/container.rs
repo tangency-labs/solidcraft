@@ -806,6 +806,8 @@ impl Container {
     pub(crate) fn paint_inset_clipped(painter: &egui::Painter, widget: egui::Rect, frame: Frame, outer_clip: egui::Rect) {
         let mut painter = painter.clone();
         painter.set_clip_rect(widget.intersect(painter.ctx().content_rect()).intersect(outer_clip));
+        // A plated theme cuts the frame's corners once it is drawn.
+        crate::plate::pane(&painter, widget);
         let t = Tokens::get();
         if let Some(bevel) = t.borders.bevel {
             bevel.paint(&painter, widget, frame.corner_radius, false, true);
