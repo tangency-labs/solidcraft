@@ -664,6 +664,10 @@ pub struct ModelState {
     /// picks its pieces were named by (by feature id, see [`crate::lineage::order_legacy_lumps`]):
     /// the state stands for the feature only while those picks are the same.
     legacy_picks: BTreeMap<u64, u64>,
+    /// Each extrude that cut or intersected a sheet made from surfaces, as drawn (by feature id):
+    /// its sketch plane and the interval along the plane's normal it ran over. A pocket it leaves
+    /// is as deep as the extrude ran from the panel's face (see `sheet_surface_cuts`).
+    cut_extents: BTreeMap<u64, (Plane, (f64, f64))>,
 }
 
 /// How a piece a join split off into a body of its own (`Touching::Separate`) touched the
@@ -2970,7 +2974,8 @@ fn absorb_sheet_cuts(
     };
     // What isn't a cut is always weighed: material the sheet doesn't show (a join into a bend)
     // is caught there.
-    for (i, absorbed) in crate::sheet_surface_cuts::absorb(before, after, f, weigh || !cuts)? {
+    let drawn = after.cut_extents.get(&f.id).copied();
+    for (i, absorbed) in crate::sheet_surface_cuts::absorb(before, after, f, weigh || !cuts, drawn.as_ref())? {
         let (mut sk, built) = match absorbed {
             crate::sheet_surface_cuts::Absorbed::Read(sk, built) => (*sk, built),
             crate::sheet_surface_cuts::Absorbed::Refused(why) if cuts => return Err(DocError::Invalid(why)),
@@ -7606,6 +7611,14 @@ fn eval_feature(
             let mut constructor = None;
             let mut to_body = None;
             let tools = feature_tools_with_constructor(doc, vals, f, st, &mut constructor, &mut to_body, warning)?;
+            // An extrude that cuts a sheet made from surfaces leaves pockets as deep as it was drawn.
+            if matches!(operation, Operation::Cut | Operation::Intersect)
+                && matches!(f.kind, FeatureKind::Extrude { .. })
+                && !st.surface_sheets.is_empty()
+                && let Some(c) = &constructor
+            {
+                st.cut_extents.insert(f.id, (c.plane, c.interval));
+            }
             // Cuts through sheet metal become cut-outs of its flat pattern.
             if matches!(operation, Operation::Cut | Operation::Intersect) && matches!(f.kind, FeatureKind::Extrude { .. }) && !st.sheets.is_empty() {
                 let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();
