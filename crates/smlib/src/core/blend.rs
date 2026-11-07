@@ -25,15 +25,14 @@ use std::sync::PoisonError;
 use solidcore::EntityRef;
 use solidcore::SolidError;
 use solidcore::blend::blend_corner::BlendCornerEvent;
+use solidcore::blend::chamfer_side::faces_along;
 use solidcore::blend::fillet_corner::p3::MIXED_CORNER_RAILS_CROSS;
 use solidcore::blend::fillet_executive::p1::{FilletLaw, FilletLawKind};
 use solidcore::blend::fillet_executive::p3::{ErrorInfo, FitKind, NoRoomReason};
 use solidcore::blend::fillet_executive::session::{FilletObject, FilletSession};
 use solidcore::blend::fillet_geom::p1::{FilletCornerType, FilletErrorType};
 use solidcore::blend::fillet_section::section::GN_THUMBWEIGHT_EQUAL_AREA;
-use solidcore::blend::chamfer_side::faces_along;
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
-use solidcore::surface::procedural_blend::chamfer::ChamferSize;
 use solidcore::geom::attribute::{Attribute, AttributeHandlers, Behavior, ids as attribute_ids};
 use solidcore::geom::vector3d::{Point3, Vec3};
 use solidcore::kernel::Kernel;
@@ -42,6 +41,7 @@ use solidcore::nurbs::b_spline_curve::p1::{BSplineCurve, BSplineCurveForm, Canon
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::query::api_queries::edge_closest_point;
 use solidcore::query::brep::evaluate_surface_normal;
+use solidcore::surface::procedural_blend::chamfer::ChamferSize;
 use solidcore::topology::brep::p1 as brep_p1;
 use solidcore::topology::brep::p2 as brep_p2;
 use solidcore::topology::brep::p2::ArenaNotifyState;
@@ -238,7 +238,10 @@ enum Section<'a> {
     /// A chamfer of the sizes asked: one for all the edges or one per edge, and for each edge
     /// the face its first size is along (empty: the blend edge use's). The kernel makes their
     /// offsets, one pair for a tangent chain of one size.
-    Chamfer { sizes: &'a [ChamferSize], along: &'a [FaceId] },
+    Chamfer {
+        sizes: &'a [ChamferSize],
+        along: &'a [FaceId],
+    },
 }
 
 /// The faces of `b`, for `made_faces`: a face whose id is new after the operation was made by
@@ -358,7 +361,14 @@ fn blend_failure_unsized(info: &ErrorInfo<FilletObject>, e: SolidError, corner: 
 /// edge of an equal chamfer, the two). Where the edge or its point can't be read the size stays
 /// as it is, with no point (a chamfer's size then is not a distance, so it is left a plain
 /// refusal).
-fn sized_on(k: &Kernel, b: &mut Brep, edge: Option<EdgeId>, section: Section<'_>, chamfered: &[(EdgeId, f64, f64)], e: Error) -> solidcore::Result<Error> {
+fn sized_on(
+    k: &Kernel,
+    b: &mut Brep,
+    edge: Option<EdgeId>,
+    section: Section<'_>,
+    chamfered: &[(EdgeId, f64, f64)],
+    e: Error,
+) -> solidcore::Result<Error> {
     let Error::TooLarge { size, kind, why, .. } = e else { return Ok(e) };
     let chamfer = matches!(section, Section::Chamfer { .. }) && kind == crate::FitKind::Radius;
     let Some(edge) = edge else {
