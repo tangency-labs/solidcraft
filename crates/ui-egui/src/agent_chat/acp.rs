@@ -183,16 +183,22 @@ pub struct McpBridge {
     pub port: u16,
 }
 
+fn absolute_path(path: std::path::PathBuf) -> Option<std::path::PathBuf> {
+    if path.is_absolute() { Some(path) } else { std::env::current_dir().ok().map(|cwd| cwd.join(path)) }
+}
+
 impl McpBridge {
     pub fn to_json(&self) -> Value {
+        let control_dir = solidcraft_engine::control_auth::token_path(self.port)
+            .and_then(|path| path.parent().map(std::path::Path::to_path_buf))
+            .and_then(absolute_path);
         json!({
             "name": BRIDGE_NAME,
             "command": self.cli.to_string_lossy(),
             "args": ["mcp", "--connect", format!("127.0.0.1:{}", self.port)],
-            "env": [],
+            "env": bridge_env(std::env::var_os("XDG_DATA_HOME"), control_dir),
         })
     }
-
     /// The same bridge for an agent inside WSL: the CLI as WSL sees it. It still runs on the
     /// Windows side (WSL starts Windows programs itself), so the port is the same.
     pub fn in_wsl(&self) -> McpBridge {
@@ -224,8 +230,23 @@ pub fn wsl_path(path: &std::path::Path) -> std::path::PathBuf {
     }
 }
 
+/// Pass the app's effective token folder directly to its MCP child. XDG_DATA_HOME is also
+/// forwarded for other SolidCraft data lookups, but SOLIDCRAFT_CONTROL_DIR takes precedence in
+/// control_auth and therefore keeps authentication aligned with the exact token_path for this port.
+fn bridge_env(xdg_data_home: Option<std::ffi::OsString>, control_dir: Option<std::path::PathBuf>) -> Value {
+    let mut env = Vec::with_capacity(2);
+    if let Some(value) = xdg_data_home.as_deref().and_then(|value| value.to_str()) {
+        env.push(json!({"name": "XDG_DATA_HOME", "value": value}));
+    }
+    if let Some(value) = control_dir.as_deref().and_then(|value| value.to_str()) {
+        env.push(json!({"name": "SOLIDCRAFT_CONTROL_DIR", "value": value}));
+    }
+    Value::Array(env)
+}
+
 /// What every session is told about where it is. An agent with no route for it in
 /// [`session_new_params`] doesn't get it.
+
 pub const SYSTEM_NOTE: &str = "You are running inside SolidCraft, a parametric 3D CAD application, as the user's assistant. \
 The open design is reachable through the `solidcraft-app` MCP server: use its tools (list_commands, batch, execute, inspect_design, \
 measure, screenshot, set_parameter, undo, skill_reference) to read and change the design the user is looking at, and verify with \
@@ -790,8 +811,9 @@ mod tests {
         let s = &p["mcpServers"][0];
         assert_eq!(s["name"], BRIDGE_NAME);
         assert_eq!(s["args"], json!(["mcp", "--connect", "127.0.0.1:41234"]));
-        let text = p.to_string();
-        assert!(!text.contains("allow-any-path") && !text.contains("TOKEN") && !text.contains("token"), "{text}");
+        assert!(s.get("token").is_none(), "{s}");
+        assert!(s.get("path").is_none(), "{s}");
+        assert!(s.get("allow-any-path").is_none(), "{s}");
         assert!(p["_meta"]["claudeCode"]["options"]["disallowedTools"].as_array().is_some_and(|t| t.iter().any(|x| x == "Bash")));
         assert_eq!(session_new_params(std::path::Path::new("/tmp"), None, &json!({}), SYSTEM_NOTE)["mcpServers"], json!([]));
     }
@@ -871,6 +893,56 @@ mod tests {
     }
 
     #[test]
+    fn absolute_path_preserves_absolute_paths() {
+        let path = std::path::PathBuf::from("/tmp/solidcraft/control");
+        assert_eq!(absolute_path(path.clone()), Some(path));
+    }
+
+    #[test]
+    fn absolute_path_resolves_relative_paths() {
+        let path = std::path::PathBuf::from("solidcraft/control");
+        let result = absolute_path(path).unwrap();
+
+        assert!(result.is_absolute());
+        assert!(result.ends_with("solidcraft/control"));
+    }
+
+    #[test]
+    fn bridge_environment_passes_data_root_and_effective_control_folder_without_secrets() {
+        let env = bridge_env(
+            Some(std::ffi::OsString::from("/flatpak/data")),
+            Some(std::path::PathBuf::from("/flatpak/data/solidcraft/control")),
+        );
+        assert_eq!(
+            env,
+            json!([
+                {"name": "XDG_DATA_HOME", "value": "/flatpak/data"},
+                {"name": "SOLIDCRAFT_CONTROL_DIR", "value": "/flatpak/data/solidcraft/control"},
+            ])
+        );
+        assert_eq!(bridge_env(None, None), json!([]));
+        assert!(env.to_string().find("token").is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bridge_environment_omits_non_utf8_paths_and_preserves_valid_entries() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let invalid = std::ffi::OsString::from_vec(vec![b'/', 0xff]);
+
+        assert_eq!(
+            bridge_env(Some(invalid.clone()), Some("/valid/control".into())),
+            json!([{"name": "SOLIDCRAFT_CONTROL_DIR", "value": "/valid/control"}])
+        );
+
+        assert_eq!(
+            bridge_env(Some("/valid/data".into()), Some(invalid.into())),
+            json!([{"name": "XDG_DATA_HOME", "value": "/valid/data"}])
+        );
+    }
+
+    #[test]
     fn vibe_terminal_setup_uses_the_configured_acp_launcher() {
         let mut init = json!({
             "agentInfo": {"name": "@mistralai/mistral-vibe"},
@@ -888,6 +960,7 @@ mod tests {
         let AuthKind::Terminal { args, command } = &methods[0].kind else { panic!("terminal method expected") };
         assert_eq!(args, &[r"C:\Program Files\Vibe\vibe-acp", "--setup"]);
         assert!(command.is_some());
+    }
     }
 
     #[test]

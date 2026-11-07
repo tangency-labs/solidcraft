@@ -22,6 +22,12 @@ The server is `solidcraft-cli mcp` (`crates/mcp/src/`, `docs/mcp.md`). Tools are
 - Replies stay small: `verbose: false`, no unfiltered command catalogue or topology dumps.
 - The control channel is a local-only interface with a token. A new method needs an entry in `docs/control-protocol.md`; long work follows `skills/solidcraft-performance/SKILL.md`.
 
+## ACP bridge authentication
+- Before changing ACP/MCP authentication, trace both the control server's token writer and the CLI's token lookup, including `control_auth::token_path(port)`, `SOLIDCRAFT_CONTROL_DIR` and `XDG_DATA_HOME`.
+- Keep the bridge's explicit port tied to its token path; do not use `current.port` to identify the originating instance.
+- Pass the effective control directory and any required data-root environment through the ACP server's `env` entries. Never send the token itself to the agent, in MCP arguments or logs.
+- Validate authentication with a real read-only MCP tool call in a new ACP session and inspect its result. `initialize` and `tools/list` alone do not validate control-channel authentication.
+
 ## Bundled agent skills
 The modelling skills (`skills/solidcraft-modeling`, `-editing`, `-checking`, `-mechanisms`) are built into the MCP server for its `skill_reference` tool (`crates/mcp/src/skill_reference.rs`). The contributor skills are not.
 - When a command, parameter name or behaviour those skills describe changes, update them in the same PR. `skills_name_only_real_tools_and_commands` in `crates/mcp/src/tests.rs` fails when a skill names a tool or command that is gone.
