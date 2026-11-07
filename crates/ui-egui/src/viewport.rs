@@ -3737,8 +3737,10 @@ pub(crate) fn dialog_pick(app: &mut SolveApp, hit: &Hit, sel: Sel) {
     }
     let sel = crate::dialogs_move::from_shown(app, sel);
     let Some(mut d) = app.dialog.take() else { return };
-    // With holes moving by clicking (Preferences), a Single hole picked again on its face moves there.
-    if app.preferences.hole_moves && crate::hole_place::pick_moves(&mut d, &app.session, &sel) {
+    // With several holes on a face (Preferences), a Single hole's pick adds a hole or takes one
+    // out; with holes moving by clicking, a Single hole picked again on its face moves there.
+    if crate::hole_place::pick_several(app, &mut d, &sel) || (app.preferences.hole_moves && crate::hole_place::pick_moves(&mut d, &app.session, &sel))
+    {
         d.focus = true;
         d.awaiting_pick = false;
         d.pick_refused = None;
