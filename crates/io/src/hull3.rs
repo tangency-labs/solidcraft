@@ -1,7 +1,7 @@
 //! Simple shapes around a mesh's points for robot collision (URDF export): a convex hull and
 //! fitted primitives.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use solidcore_record::Vec3;
 use solidcraft_geom::inertia::principal;
@@ -17,30 +17,36 @@ const EQUAL_MOMENTS: f64 = 1e-3;
 struct Face {
     v: [usize; 3],
     normal: Vec3,
+    /// The face across edge `k` (`v[k]` to `v[k + 1]`).
+    next: [usize; 3],
     /// Points outside this face, each held by one face.
     outside: Vec<usize>,
+    alive: bool,
 }
 
 impl Face {
-    /// Made so that its normal points away from `inside`.
-    fn new(points: &[Vec3], mut v: [usize; 3], inside: Vec3) -> Option<Face> {
+    /// Its normal follows the order of `v` (counter-clockwise seen from outside).
+    fn new(points: &[Vec3], v: [usize; 3]) -> Option<Face> {
         let at = |i: usize| points.get(i).copied();
         let (a, b, c) = (at(v[0])?, at(v[1])?, at(v[2])?);
-        let mut normal = (b - a).cross(c - a).normalized()?;
-        if normal.dot(inside - a) > 0.0 {
-            v.swap(1, 2);
-            normal = normal * -1.0;
-        }
-        Some(Face { v, normal, outside: Vec::new() })
+        let normal = (b - a).cross(c - a).normalized()?;
+        Some(Face { v, normal, next: [usize::MAX; 3], outside: Vec::new(), alive: true })
     }
 
     fn distance(&self, points: &[Vec3], p: Vec3) -> f64 {
         points.get(self.v[0]).map_or(f64::NEG_INFINITY, |a| self.normal.dot(p - *a))
     }
+
+    /// Which of its edges runs from `p` to `q`.
+    fn edge(&self, p: usize, q: usize) -> Option<usize> {
+        (0..3).find(|&k| self.v.get(k) == Some(&p) && self.v.get((k + 1) % 3) == Some(&q))
+    }
 }
 
 /// The convex hull of `points` as a closed mesh, outward faces counter-clockwise (quickhull).
-/// `None` for non-finite input, too many points, or points that don't span a volume.
+/// `None` for non-finite input, too many points, or points that don't span a volume. Each round
+/// looks only at the faces the new point sees, found by walking from face to face, so a dense
+/// mesh is quick.
 pub fn convex_hull(points: &[Vec3]) -> Option<Mesh> {
     if points.len() < 4 || points.len() > MAX_HULL_POINTS || !points.iter().all(|p| finite(*p)) {
         return None;
@@ -54,50 +60,100 @@ pub fn convex_hull(points: &[Vec3]) -> Option<Mesh> {
     let [a, b, c, e] = first_tetrahedron(points, eps)?;
     let at = |i: usize| points.get(i).copied();
     let inside = (at(a)? + at(b)? + at(c)? + at(e)?) * 0.25;
-    let mut faces: Vec<Option<Face>> = Vec::new();
+    let mut faces: Vec<Face> = Vec::new();
     for v in [[a, b, c], [a, b, e], [a, c, e], [b, c, e]] {
-        faces.push(Some(Face::new(points, v, inside)?));
+        let mut f = Face::new(points, v)?;
+        if f.distance(points, inside) > 0.0 {
+            f = Face::new(points, [v[0], v[2], v[1]])?;
+        }
+        faces.push(f);
     }
-    assign(points, &mut faces, 0..points.len(), eps);
+    // Link the four faces: the face across p→q is the one with q→p.
+    let edges: BTreeMap<(usize, usize), usize> =
+        faces.iter().enumerate().flat_map(|(i, f)| (0..3).map(move |k| ((f.v[k], f.v[(k + 1) % 3]), i))).collect();
+    for f in &mut faces {
+        for k in 0..3 {
+            f.next[k] = *edges.get(&(f.v[(k + 1) % 3], f.v[k]))?;
+        }
+    }
+    assign(points, &mut faces, 0..4, 0..points.len(), eps);
+    // Ordered, so the same points always give the same faces and the same file.
+    let mut waiting: BTreeSet<usize> = (0..4).filter(|&i| faces.get(i).is_some_and(|f| !f.outside.is_empty())).collect();
     // Each round adds a point to the hull for good, so it can't take more rounds than points.
     for _ in 0..points.len() {
-        let Some(from) = faces.iter().position(|f| f.as_ref().is_some_and(|f| !f.outside.is_empty())) else { break };
-        let face = faces.get(from)?.as_ref()?;
+        let Some(from) = waiting.pop_first() else { break };
+        let face = faces.get(from)?;
+        if !face.alive || face.outside.is_empty() {
+            continue;
+        }
         let top = *face.outside.iter().max_by(|x, y| {
             let dist = |i: usize| points.get(i).map_or(f64::NEG_INFINITY, |p| face.distance(points, *p));
             dist(**x).total_cmp(&dist(**y))
         })?;
         let apex = at(top)?;
-        // Ordered, so the same points always give the same faces and the same file.
-        let mut edges: BTreeSet<(usize, usize)> = BTreeSet::new();
-        let mut orphans = Vec::new();
-        for slot in &mut faces {
-            if slot.as_ref().is_some_and(|f| f.distance(points, apex) > eps) {
-                let f = slot.take()?;
-                for (p, q) in [(f.v[0], f.v[1]), (f.v[1], f.v[2]), (f.v[2], f.v[0])] {
-                    // An edge two seen faces share is inside what is being replaced.
-                    if !edges.remove(&(q, p)) {
-                        edges.insert((p, q));
-                    }
+        // The faces the apex sees, walking out from the first one.
+        let mut seen = BTreeSet::from([from]);
+        let mut walk = vec![from];
+        let mut horizon = Vec::new();
+        while let Some(i) = walk.pop() {
+            let f = faces.get(i)?;
+            for k in 0..3 {
+                let n = f.next[k];
+                if seen.contains(&n) {
+                    continue;
                 }
-                orphans.extend(f.outside);
+                if faces.get(n)?.distance(points, apex) > eps {
+                    seen.insert(n);
+                    walk.push(n);
+                } else {
+                    horizon.push((f.v[k], f.v[(k + 1) % 3], n));
+                }
             }
         }
-        if edges.is_empty() {
+        // The horizon around the seen faces must be one loop, or the faces don't close.
+        horizon.sort_unstable();
+        horizon.dedup();
+        if horizon.is_empty() {
             return None;
         }
-        for (p, q) in edges {
-            faces.push(Some(Face::new(points, [p, q, top], inside)?));
+        let mut orphans = Vec::new();
+        for &i in &seen {
+            let f = faces.get_mut(i)?;
+            f.alive = false;
+            orphans.append(&mut f.outside);
+            waiting.remove(&i);
+        }
+        let first = faces.len();
+        let (mut starts, mut ends) = (BTreeMap::new(), BTreeMap::new());
+        for (j, &(p, q, n)) in horizon.iter().enumerate() {
+            let id = first + j;
+            let mut f = Face::new(points, [p, q, top])?;
+            f.next[0] = n;
+            let across = faces.get_mut(n)?;
+            let k = across.edge(q, p)?;
+            *across.next.get_mut(k)? = id;
+            if starts.insert(p, id).is_some() || ends.insert(q, id).is_some() {
+                return None;
+            }
+            faces.push(f);
+        }
+        for f in faces.get_mut(first..)? {
+            // q→apex meets the face that starts at q; apex→p the face that ends at p.
+            f.next[1] = *starts.get(&f.v[1])?;
+            f.next[2] = *ends.get(&f.v[0])?;
         }
         orphans.retain(|i| *i != top);
-        assign(points, &mut faces, orphans, eps);
+        orphans.sort_unstable();
+        let last = faces.len();
+        assign(points, &mut faces, first..last, orphans, eps);
+        waiting.extend((first..last).filter(|&i| faces.get(i).is_some_and(|f| !f.outside.is_empty())));
     }
-    if faces.iter().flatten().any(|f| !f.outside.is_empty()) {
+    if faces.iter().any(|f| f.alive && !f.outside.is_empty()) {
         return None;
     }
     let mut index = vec![None; points.len()];
     let mut mesh = Mesh::default();
-    for f in faces.iter().flatten() {
+    for f in faces.iter().filter(|f| f.alive) {
         let mut triangle = [0u32; 3];
         for (out, v) in triangle.iter_mut().zip(f.v) {
             let slot = index.get_mut(v)?;
@@ -116,11 +172,12 @@ pub fn convex_hull(points: &[Vec3]) -> Option<Mesh> {
     Some(mesh)
 }
 
-/// Give each point to the first face it is outside of, if any.
-fn assign(points: &[Vec3], faces: &mut [Option<Face>], which: impl IntoIterator<Item = usize>, eps: f64) {
+/// Give each point to the first of the faces `among` it is outside of, if any.
+fn assign(points: &[Vec3], faces: &mut [Face], among: std::ops::Range<usize>, which: impl IntoIterator<Item = usize>, eps: f64) {
+    let Some(candidates) = faces.get_mut(among) else { return };
     for i in which {
         let Some(p) = points.get(i).copied() else { continue };
-        if let Some(f) = faces.iter_mut().flatten().find(|f| f.distance(points, p) > eps) {
+        if let Some(f) = candidates.iter_mut().find(|f| f.distance(points, p) > eps) {
             f.outside.push(i);
         }
     }
