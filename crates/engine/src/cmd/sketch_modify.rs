@@ -3161,6 +3161,10 @@ fn offset_ladder(
     Ok((sides, sources))
 }
 
+/// What the offset reply says when a distance names a parameter that drives nothing (#12294).
+const UNLINKED_OFFSET: &str =
+    "the offset is trimmed and not linked to its source, so its distance expression does not drive it: changing the parameter will not move it";
+
 fn offset(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.offset";
     let ids = string_list(cmd, p, "curves")?;
@@ -3243,8 +3247,7 @@ fn offset(s: &mut Session, p: &Value) -> Result<Value> {
     // A trimmed offset (a spline with another curve) is not linked to its source, so a distance
     // that names a parameter drives nothing: say so instead of leaving `param` null unexplained (#12294).
     let ignored = |expression: &str, param: &Option<String>| param.is_none() && !solidcraft_doc::expr::references(expression).is_empty();
-    let warning = (ignored(&expression, &param) || expression2.as_deref().is_some_and(|e| ignored(e, &param2)))
-        .then(|| "the offset is trimmed and not linked to its source, so its distance expression does not drive it: changing the parameter will not move it".to_string());
+    let warning = (ignored(&expression, &param) || expression2.as_deref().is_some_and(|e| ignored(e, &param2))).then(|| UNLINKED_OFFSET.to_string());
     reply(
         cmd,
         OffsetResult { curves, constraints, sketch: info, sides: each, param, instances, param2, association, warning, param_warnings: Vec::new() },
