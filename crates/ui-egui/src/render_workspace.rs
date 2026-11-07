@@ -1311,6 +1311,9 @@ fn switch_celestial_method(app: &mut SolveApp, method: ImageMethod, enable_indir
             if next.studio.volume.is_some_and(|volume| volume.active()) {
                 return Err(app.tr("render.cpu_volume_path_required").into());
             }
+            if next.studio.caustics.is_some() {
+                return Err(app.tr("render.caustics_path_required").into());
+            }
             if celestial_switch_active(app) {
                 return Err(app.tr("render.cpu_celestial_switch").into());
             }
@@ -1384,7 +1387,7 @@ fn select_image_method(app: &mut SolveApp, method: ImageMethod) {
     if method != app.render_workspace.view.method
         && method != ImageMethod::Raster
         && app.render_workspace.view.method != ImageMethod::Raster
-        && (celestial_switch_active(app) || app.render_workspace.view.studio.volume.is_some())
+        && (celestial_switch_active(app) || app.render_workspace.view.studio.volume.is_some() || app.render_workspace.view.studio.caustics.is_some())
     {
         let result = if app.render_workspace.view.studio.volume.is_some() {
             switch_volume_method(app, method, false)
@@ -1428,7 +1431,8 @@ fn method_selector(app: &mut SolveApp, ui: &mut egui::Ui) {
 fn method_dropdown(app: &mut SolveApp, ui: &mut egui::Ui) -> egui::Response {
     let current = app.render_workspace.view.method;
     let label = app.tr(current.label()).to_string();
-    let bounded = celestial_switch_active(app) || app.render_workspace.view.studio.volume.is_some();
+    let bounded =
+        celestial_switch_active(app) || app.render_workspace.view.studio.volume.is_some() || app.render_workspace.view.studio.caustics.is_some();
     let width = ui.available_width().min(crate::theme::Tokens::get().form_card_width);
     let choices = |ui: &mut egui::Ui| {
         for (method, handle) in [
@@ -1449,7 +1453,10 @@ fn method_dropdown(app: &mut SolveApp, ui: &mut egui::Ui) -> egui::Response {
             }
         }
         let volume_path = app.render_workspace.view.studio.volume.is_some_and(|volume| volume.active());
-        if current == ImageMethod::GpuRaytrace && (celestial_switch_active(app) || volume_path) && app.render_workspace.view.raytrace.path.is_none() {
+        if current == ImageMethod::GpuRaytrace
+            && (celestial_switch_active(app) || volume_path || app.render_workspace.view.studio.caustics.is_some())
+            && app.render_workspace.view.raytrace.path.is_none()
+        {
             let sampling = app.render_workspace.view.raytrace.progressive.unwrap_or_default();
             let detail = crate::i18n::format(
                 if volume_path { "render.cpu_volume_enable_path_plan" } else { "render.cpu_celestial_adopt" },
@@ -3396,6 +3403,38 @@ pub(crate) fn apply_command(app: &mut SolveApp, id: &str, reply: &serde_json::Va
     Ok(())
 }
 
+/// GPU setup has no driver progress fraction. Keep its temporary window separate
+/// from the render progress row and retire it as soon as preparation ends.
+pub(crate) fn show_shader_preparation(app: &mut SolveApp, ctx: &egui::Context) -> bool {
+    use solidcraft_engine::render::job::Phase;
+
+    let Some(handle) = app.render_workspace.view.job.and_then(|job| app.session.render_job_handle(job).ok()) else {
+        return false;
+    };
+    let Ok(status) = handle.status() else { return false };
+    if status.progress.phase != Phase::Preparing || status.resolved.executor.as_str() != "gpu-path" {
+        return false;
+    }
+    let mut cancel = false;
+    crate::ui_kit::Window::new(egui::Id::unique("render_shader_preparation"), "", app.tr("render.image_preparing")).show_passive_body(ctx, |ui| {
+        let warning = ui.label(app.tr("render.gpu_job_shader_wait"));
+        crate::scenario::publish_rect("render:shader-preparation:warning", warning.rect);
+        ui.horizontal(|ui| {
+            let spinner = ui.spinner();
+            crate::scenario::publish_rect("render:shader-preparation:spinner", spinner.rect);
+            ui.label(mmss(handle.elapsed()));
+        });
+        let button = crate::ui_kit::button(ui, app.tr("cmd.render_cancel"), crate::ui_kit::Button::Normal);
+        crate::scenario::publish_target("render:shader-preparation:cancel", button.rect);
+        cancel = button.clicked();
+    });
+    if cancel && let Err(error) = app.run("render.cancel", json!({"job": handle.id()})) {
+        app.set_status(error, true);
+    }
+    ctx.request_repaint_after(std::time::Duration::from_millis(100));
+    true
+}
+
 /// `key` names the row's scenario handles (`ui_kit::progress_action`).
 pub(crate) fn progress_pill(app: &mut SolveApp, ui: &mut egui::Ui, key: &str) -> bool {
     if prepare::progress(app, ui) {
@@ -3428,8 +3467,8 @@ pub(crate) fn progress_pill(app: &mut SolveApp, ui: &mut egui::Ui, key: &str) ->
     let fraction = (done as f64 / total as f64).clamp(0.0, 1.0) as f32;
     let phase_key = format!("render.image_{phase}");
     let name = app.render_workspace.view.job_shot.as_ref().unwrap_or(&app.render_workspace.view.name).clone();
-    let status = format!("· {} · {:.0}%", app.tr(&phase_key), fraction * 100.0);
-    let cancel = crate::ui_kit::progress_action(ui, key, &name, &status, fraction, app.tr_label("Cancel"));
+    let message = format!("· {} · {:.0}%", app.tr(&phase_key), fraction * 100.0);
+    let cancel = crate::ui_kit::progress_action(ui, key, &name, &message, fraction, app.tr_label("Cancel"));
     crate::scenario::publish_target("render:progress-cancel", cancel.rect);
     if cancel.clicked() {
         app.start("render.cancel");

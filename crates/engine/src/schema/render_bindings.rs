@@ -88,6 +88,39 @@ fn optics_schema(_: &mut SchemaGenerator) -> Schema {
             "boundary": {"description": "How the body's surface bounds the medium: `thin_sheet` (a sheet of `thickness_mm`), `closed_box` or `closed_mesh` (the thickness comes from the geometry). Default: closed_mesh.", "type": "string", "enum": ["thin_sheet", "closed_box", "closed_mesh"]},
             "thickness_mm": {"description": "A thin sheet's thickness (mm); 0 for a closed boundary. Default: 0.", "type": "number", "minimum": 0},
             "shadow_transmission": {"description": "Let light through for shadows too. Default: false.", "type": "boolean"},
+            "model": {
+                "description": "Advanced Glass interface. Default: null (no model). A model requires the interface IOR to stay in [1, 3], including the full 380 to 780 nm range when dispersion is enabled.",
+                "type": ["object", "null"],
+                "default": null,
+                "properties": {
+                    "roughness": {
+                        "description": "Isotropic roughness, from 0 (smooth) to 1. Very small positive values can exceed transport precision. Default: 0.",
+                        "type": "number", "minimum": 0, "maximum": 1, "default": 0
+                    },
+                    "dispersion": {
+                        "description": "Three-band chromatic dispersion. Default: null (no dispersion).",
+                        "type": ["object", "null"],
+                        "default": null,
+                        "properties": {
+                            "abbe_number": {"description": "Abbe number, from 5 to 200.", "type": "number", "minimum": 5, "maximum": 200}
+                        },
+                        "required": ["abbe_number"],
+                        "additionalProperties": false
+                    },
+                    "thin_film": {
+                        "description": "One lossless film. Default: null (no film).",
+                        "type": ["object", "null"],
+                        "default": null,
+                        "properties": {
+                            "ior": {"description": "Film refractive index, from 1 to 3.", "type": "number", "minimum": 1, "maximum": 3},
+                            "thickness_nm": {"description": "Film thickness in nm, from 0 to 100000. Zero has no film effect.", "type": "number", "minimum": 0, "maximum": 100000}
+                        },
+                        "required": ["ior", "thickness_nm"],
+                        "additionalProperties": false
+                    }
+                },
+                "additionalProperties": false
+            },
             "subsurface": {
                 "description": "Light scattering inside the body, as in wax or skin; `null` for none. Default: none.",
                 "anyOf": [

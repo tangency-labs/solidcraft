@@ -1073,6 +1073,15 @@ impl<'a> Window<'a> {
         self.fields().actions("", "", None).show(ctx, true, body).0
     }
 
+    /// Show a temporary status window with no header dismissal or dialog shortcuts.
+    pub(crate) fn show_passive_body(mut self, ctx: &egui::Context, body: impl FnOnce(&mut Ui)) {
+        self.closeable = false;
+        // No footer handles either key, so leave both in the shared input queue.
+        self.enter_submits = true;
+        self.escape_closes = true;
+        self.actions("", "", None).show(ctx, true, body);
+    }
+
     /// Draw shared header, content and optional footer, retaining the caller's IDs.
     pub(crate) fn show(self, ctx: &egui::Context, valid: bool, body: impl FnOnce(&mut Ui)) -> (bool, super::Action) {
         self.surface(ctx, false, |ui| self.content(ui, valid, body, |_| {}))

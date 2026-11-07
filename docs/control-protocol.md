@@ -131,8 +131,11 @@ retained data or recovery intent reject atomically. Restoration uses the foundat
 decoder and reappearance logic. Storage preparation finishes before live dispatch;
 catalogue publication is infallible after successful native/controller guards.
 Revision changes during staging reject the staged catalogue. No fallible storage
-write after live commit is treated as an atomic success. The shipped catalogue is
-in-memory; production preference durability and migrations remain peer work.
+write after live commit is treated as an atomic success. The default catalogue is
+in-memory. An explicitly enabled application preference adapter stores its
+existing bounded snapshot under `panel_layout` in `SolveApp::prefs`; native and
+web use their existing writers for the same value. This does not enable the
+production panel migration or change Classic defaults.
 
 Atomic layout batches contain 1..64 commands, using the same parser/executor and
 one final guarded Apply or Replace plus one catalogue publication. Queries and
@@ -181,6 +184,18 @@ Every count/string/record is bounded before allocation, and hydration rejects
 duplicate names across users/built-ins, duplicate workspace keys, corrupt framing,
 trailing data, invalid envelope identities and all existing aggregate/node/depth
 limits before a candidate can be published. This seam performs no disk storage.
+
+With application panel preferences enabled, the existing Layout preferences page
+uses these commands for workspace selection, named layout save/apply and reset.
+Reset changes only the current workspace and keeps the named layout library.
+Preferences Cancel restores the layout and catalogue through runtime admission;
+if restoration is refused, the dialog and its saved baseline stay open. Periodic
+preference writes retain that baseline until Apply. Settings profiles carry the
+selected layout workspace and each workspace's current arrangement, excluding
+the named library and machine-specific native window geometry. Page defaults
+preserve all arrangements and the library. None of these operations changes the
+design or camera. Names compare case-insensitively; `layout.save {name,replace:true}`
+explicitly replaces a user layout. The legacy `overwrite` flag remains accepted.
 
 Reading a retained envelope does not consume quarantine merely because the registry
 has grown. `decode_retained_record` validates an already-retained record exactly;
@@ -248,22 +263,26 @@ actual current Session without another service tick. Runtime inspection remains
 read-only. The shared host adds no production command registration beyond the
 application-layout commands above.
 
-For native host evidence, `ui.panel_fixture {enabled?, preset?}` installs bounded
+For native host evidence, `ui.panel_fixture {enabled?, preset?, remember?, translucency_percent?}` installs bounded
 synthetic content in the real `SolveApp` workspace host. The normal connection
-authentication applies. It is off by default; no environment switch, preference,
-design change, production content registration or native panel window is added.
+authentication applies. It is off by default and ephemeral unless explicitly
+enabled with `remember:true`. It adds no design change, production content
+registration or native panel window.
 
 | Request | Effect |
 | --- | --- |
 | `{}` | Read current host/probe/Session observations without ticking services or dispatching actions. |
 | `{"enabled":true}` | Enable the `docks` specimen if no runtime exists. |
 | `{"preset":"tabs"}` | Enable the named specimen if no runtime exists. |
+| `{"preset":"tabs","remember":true}` | Enable the specimen and its application preference catalogue. Restore a saved record after valid host dimensions are available. |
+| `{"preset":"surfaces","translucency_percent":50}` | Enable declared surface-policy specimens with a runtime-only translucency request (finite 0–100 percent). Readability may raise effective opacity. |
+| `{"translucency_percent":100}` | Change the enabled specimen's request without replacing controllers, drafts or layout. Refuse if no specimen owns the host. |
 | `{"enabled":false}` | Preflight and tear down only the specimen runtime; refusal leaves it intact. |
 
 Presets are `docks` (Left/Right/Bottom, with two Left sections), `tabs` (two groups
 of two), `collapsed` (four full-width collapsed headers), `floating` (four in-app floating
 sections), `overflow` (24 instances), and `pinned` (an outer pinned Right section
-plus ordinary docks), `columns` (three independent Left columns), `stack_tabs`, `content_fill` (sole Content versus Fill), and `inline` (one editable total row). The retired `rails` preset is rejected. Original synthetic content retains editable drafts and
+plus ordinary docks), `columns` (three independent Left columns), `stack_tabs`, `content_fill` (sole Content versus Fill), `inline` (one editable total row), and `surfaces` (mixed tab and explicit surface policies). Only `surfaces` opts out of compatibility opaque presentation. Requested opacity is `1 - translucency_percent / 100`; the override never changes saved preferences. The retired `rails` preset is rejected. Original synthetic content retains editable drafts and
 controller state across hiding and moves. Services keep ticking while content is
 hidden. Apply/Finish/Cancel are synthetic actions; the Session is never passed to
 their command sink. The editor's cancellation guard checkbox can refuse explicit
@@ -274,6 +293,14 @@ To change preset, disable successfully first, then enable the next preset. Enabl
 stages the runtime, first tick and host before publishing any of them; teardown
 preflights every retained controller. Wrong types, unknown parameters/presets and
 `enabled:false` combined with `preset` fail before mutation.
+
+`remember` is an opt-in enable parameter, not a switch on an existing runtime.
+To review restart persistence, save through the normal application preference
+writer, restart with the same isolated settings, then explicitly enable the same
+specimen with `remember:true`. Loading settings alone never starts specimen
+content. A failed restore retains the saved record and reports a recovery notice.
+Any Modelling, Sketch, Render, Review or Classic arrangements registered by this
+fixture are synthetic demonstrations, not production workspace presets.
 
 Replies include `enabled`, `runtime` when the specimen runtime exists, `host`
 (null before its first rendered frame), and `session`. `runtime` contains the
@@ -554,8 +581,10 @@ contracts at that level, whatever the app's own (which is `off`), as a headless 
 `param_warnings` to its result; `strict` refuses it (a batch before its first step), and the
 design is left as it was. Every reply to such a request says the level it was checked at as
 `param_check`, beside `ok`. A command that switches to another design (`component.edit_in_place`,
-`component.finish_edit`, `view.next_tab`, `view.previous_tab`) has its parameters checked at
-that level before it runs, and then runs at the app's own level, as each design keeps its own.
+`component.finish_edit`, `view.next_tab`, `view.previous_tab`), or one that goes to the file
+loader (`doc.open`, `file.insert_step`, `file.insert_mesh`, `file.export_view_dxf`,
+`pointcloud.insert`, `pointcloud.reload`), has its parameters checked at that level before it
+runs, and then runs at the app's own level, as each design keeps its own.
 Any other word is refused; other methods ignore the field. An app older than this ignores the field and its reply has no
 `param_check`, so a client that needs the check asks `control.capabilities` first and treats a
 reply without `param_check` as unchecked. The bridged MCP server asks once per connection
@@ -567,7 +596,7 @@ reply without `param_check` as unchecked. The bridged MCP server asks once per c
 |---|---|---|
 | `engine.execute` | `command`: command id, `params`: JSON object | the command's result |
 | `engine.script` | `commands`: `[{command, params}, …]` | results, stops at the first error |
-| `engine.batch` | `commands`: `[{command, params}, …]` (at most 10 000), `rollback?`: bool (default true), `timings?`, `profile?`, `coalesce_parameters?`: bool (default false) | `{completed, results, undone}`, plus `failed: {index, command, error}` when a step fails, and with `timings` `timings: [{index, command, ms}]` (the failing step included) and `total_ms`; `profile` adds each step's `profile: {boolean_ms, tessellate_ms, other_ms}`. Runs the steps in one request, so within one frame, each as `engine.execute` runs it. The first failure stops the batch, and with `rollback` the design goes back to how it was before it (`undone`: the steps taken back, `rolled_back`: whether the design is back as it was, `false` only when the checkpoint could not restore it). Refused before anything runs, with an error starting `engine.batch unavailable`, while the agent cursor is shown, when a step loads a file (`doc.open`, `file.insert_step`, `file.insert_mesh`) or when it goes to another design's tab (`component.edit_in_place`, `component.finish_edit`, which `engine.script` refuses too). Send such steps one by one. A step the batch would certainly refuse at its turn is found before the first step runs (#5853): a step without a command, an unknown command id (with the closest ids) or, with strict parameter checking, a call that breaks its command's contract. The reply is then that step's failure with `completed: 0`, `undone: 0`, `not_run` listing every step and a `note`; nothing has run. With `coalesce_parameters`, each run of consecutive plain parameter edits (`parameters.change` with only a name and an expression, or with `changes`) is set as one `parameters.change {changes}`, so the design rebuilds once for the run. Every step still gets its own result (with `coalesced`: the run's length), and the run is one undo step. The run skips the states between its edits: an edit that would be refused on its own, but not once the run's later edits are in, goes through. A run whose combined edit is refused (a new parameter, a bad expression) runs step by step, so the refused step is named. Answered when done, for up to 3600 s |
+| `engine.batch` | `commands`: `[{command, params}, …]` (at most 10 000), `rollback?`: bool (default true), `timings?`, `profile?`, `coalesce_parameters?`: bool (default false) | `{completed, results, undone}`, plus `failed: {index, command, error}` when a step fails, and with `timings` `timings: [{index, command, ms}]` (the failing step included) and `total_ms`; `profile` adds each step's `profile: {boolean_ms, tessellate_ms, other_ms}`. Runs the steps in one request, so within one frame, each as `engine.execute` runs it. The first failure stops the batch, and with `rollback` the design goes back to how it was before it (`undone`: the steps taken back, `rolled_back`: whether the design is back as it was, `false` only when the checkpoint could not restore it). Refused before anything runs, with an error starting `engine.batch unavailable`, when a step loads a file (`doc.open`, `file.insert_step`, `file.insert_mesh`, `pointcloud.insert`, `pointcloud.reload`) or when it goes to another design's tab (`component.edit_in_place`, `component.finish_edit`, which `engine.script` refuses too). Send such steps one by one. A step the batch would certainly refuse at its turn is found before the first step runs (#5853): a step without a command, an unknown command id (with the closest ids) or, with strict parameter checking, a call that breaks its command's contract. The reply is then that step's failure with `completed: 0`, `undone: 0`, `not_run` listing every step and a `note`; nothing has run. With `coalesce_parameters`, each run of consecutive plain parameter edits (`parameters.change` with only a name and an expression, or with `changes`) is set as one `parameters.change {changes}`, so the design rebuilds once for the run. Every step still gets its own result (with `coalesced`: the run's length), and the run is one undo step. The run skips the states between its edits: an edit that would be refused on its own, but not once the run's later edits are in, goes through. A run whose combined edit is refused (a new parameter, a bad expression) runs step by step, so the refused step is named. Answered when done, for up to 3600 s |
 | `engine.commands` | — | every command: id, label, tab, panel, icon, shortcut (the user's current first key, or null when cleared), params doc, enabled |
 | `document.revision` | — | `{document_id, revision}`: the active design's id and a number that moves whenever the design changes, for programs that follow it ([Following the design](#following-the-design)) |
 | `control.subscribe` | — | `{document_id, revision}`, as `document.revision`; the connection is then sent a `design.changed` line whenever they change ([Following the design](#following-the-design)) |
@@ -857,6 +886,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `dimension_input` (`view` (default): a sketch dimension's value is typed in a box on the dimension; `window`: placing a dimension with the Dimension tool, or double-clicking one, opens a small window at it with the value field (handle `dimwin:value`), arrows that step the value (`dimwin:up`, `dimwin:down`), a check (`dimwin:ok`, also Enter) and a cross (`dimwin:cancel`, also Esc), #7246)
 - `dimension_step_deg` (default 1, 0.001…180: what the dimension window's arrows, Up/Down and the wheel over its field add to an angle, in degrees)
 - `dimension_step_mm` (default 1, 0.001…1000: what the window's arrows, Up/Down and the wheel over its field add to a length, in millimetres, written in the unit the value is written in)
+- `escape_twice_finishes_sketch` (default true: in a sketch, two quick presses of Esc (0.4 s apart or less) with no tool or dialog left to cancel finish it, as before; false: Esc only cancels the tool, dialog or selection and the sketch stays open until Finish Sketch, #12069)
 - `extrude_arrow_face_stops` (default true: dragging Extrude's distance arrow stops at flat faces parallel to the profile that lie over it, takes their exact distance and outlines them, #2398; false: the drag moves in round steps only, as before)
 - `extrude_auto_to_object` (default true: in the Extrude dialog, with a profile picked, a face, vertex or parallel plane picked off its plane switches the extent to To Object, unless the Profiles box was clicked into; it applies to Extrude dialogs opened afterwards)
 - `frame_rate_details` (default false: with the frame rate, a frame-time graph of the frames drawn with the triangles over it, a frame-time histogram and what the GPU drew; clicking the readout switches it)
@@ -893,6 +923,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `navigator_texture` (`themed` (default): the custom view navigator in the cube's colours; `modeled`: in its body's own appearance and edge colour)
 - `offer_stand_up`
 - `orbit_around` (`view_centre` (default: what Pan moves and Fit frames), `origin` (the world origin stays still on screen), `cursor` (the model point under the pointer when the drag began); the older `orbit_cursor` boolean still sets `cursor` when true)
+- `orbit_cursor_wrap` (default true: an orbit drag that reaches the edge of the view moves the cursor to the opposite edge and keeps turning)
 - `orbit_reverse` (default false: Shift with two-finger scrolling orbits the other way)
 - `origin_plane_names` (`xyz` (default) or `top_front_right`: the browser, dialogs and lists call the origin planes Top, Front and Right; their ids, commands and saved designs keep XY, XZ and YZ)
 - `pan_reverse_x` (default false: horizontal scrolling pans the other way)

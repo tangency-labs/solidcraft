@@ -287,7 +287,7 @@ pub(crate) fn continuity_tip(allowed: &[Continuity]) -> String {
 }
 
 /// Internal form geometry for controls which need several lines (e.g. text areas).
-pub(super) fn sized_row<R>(ui: &mut Ui, text: &str, height: f32, control: impl FnOnce(&mut Ui) -> R) -> R {
+pub(crate) fn sized_row<R>(ui: &mut Ui, text: &str, height: f32, control: impl FnOnce(&mut Ui) -> R) -> R {
     row_with(ui, text, height, false, |ui, _| control(ui))
 }
 

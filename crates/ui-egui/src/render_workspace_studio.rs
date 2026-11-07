@@ -16,6 +16,7 @@ pub(super) enum Environment {
 
 #[derive(Clone, Debug)]
 pub(super) struct View {
+    pub caustics: Option<solidcraft_engine::render::job::CausticOptions>,
     pub aging: solidcraft_engine::doc::render_aging::SavedAgingStack,
     pub nested_media: bool,
     pub volume: Option<solidcraft_engine::render::job::volume::HomogeneousVolume>,
@@ -48,6 +49,7 @@ pub(super) struct View {
 impl Default for View {
     fn default() -> Self {
         Self {
+            caustics: None,
             aging: Default::default(),
             nested_media: false,
             volume: None,
@@ -100,6 +102,7 @@ pub(super) fn params(app: &SolveApp, params: &mut Value) -> Result<(), String> {
     params["linear_exr"] = json!(view.linear_exr);
     params["aging"] = json!(view.aging);
     params["nested_media"] = json!(view.nested_media);
+    params["caustics"] = json!(view.caustics);
     params["volume"] = json!(view.volume);
     params["adaptive"] = json!(view.adaptive);
     params["transmission_samples"] = json!(view.transmission_samples);

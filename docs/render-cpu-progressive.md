@@ -15,8 +15,9 @@ optical transport. Explicit [opaque path lighting](render-cpu-path.md) adds boun
 diffuse/specular continuation. Guided noise reduction is a separate saved option
 applied to completed passes. Independent-pilot adaptive sampling, selected-medium
 subsurface transport and general Glass are available under their explicit Path
-and compatibility contracts. Caustics and certified convergence remain unsupported;
-an adaptive sample allocation is not a convergence guarantee.
+and compatibility contracts. Optional [Glass models and photon caustics](render-glass-material-models.md)
+extend that explicit Path route. Certified convergence remains unsupported; an
+adaptive sample allocation or finite-radius photon estimate is not a convergence guarantee.
 
 ## Request and saved intent
 

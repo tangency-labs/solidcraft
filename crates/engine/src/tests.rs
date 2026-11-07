@@ -2717,6 +2717,34 @@ fn split_body_by_a_sketch_line() {
     assert_eq!((split["sketch"].as_u64(), split["line"].as_str()), (Some(sk), Some("cut")), "{split}");
 }
 
+/// Split Body of a body of two separate pieces joined into one (#6738): a plane through both
+/// pieces splits it, and each half keeps the half of both pieces. The reporter's flow: one
+/// sketch with two squares 20 mm across and 30 mm apart, both extruded 10 mm as New Body, then
+/// Combine (join). The split used to stop with "the tool does not split the body".
+#[test]
+fn split_body_of_a_body_of_two_pieces_splits_both() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Sketch1"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 20]}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [50, 0], "p1": [70, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Sketch1", "distance": 10, "operation": "new"}));
+    run(&mut s, "solid.combine", json!({"target": "Body1", "tools": ["Body2"], "operation": "join"}));
+    // One body of two pieces before the split.
+    let st = s.world_state().unwrap();
+    assert_eq!(st.bodies.len(), 1, "{:?}", st.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    assert_eq!(st.bodies[0].body.lumps().unwrap().len(), 2);
+    // A plane through the middle of both squares (the extrusion is 10 mm tall).
+    run(&mut s, "solid.split_body", json!({"body": "Body1", "plane": {"origin": [0, 0, 5], "normal": [0, 0, 1]}}));
+    let st = s.world_state().unwrap();
+    assert_eq!(st.bodies.len(), 2, "{:?}", st.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    for b in &st.bodies {
+        // Each half holds the half of both squares: two pieces, half the body each.
+        assert!(rel(solidcraft_kernel::measure(&b.body).unwrap().volume, 4000.0) < 1e-6, "{}", b.name);
+        assert_eq!(b.body.lumps().unwrap().len(), 2, "{}", b.name);
+    }
+}
+
 /// Fillet types: chord length (radius from the face angle) and a radius varying along the
 /// edge; volumes from the removed material.
 #[test]

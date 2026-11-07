@@ -173,6 +173,35 @@ pub fn is_open(open: Option<&str>, wanted: &str) -> bool {
     open == Some(wanted)
 }
 
+/// What follows once a design restored from a kept copy, or recovered, is open: it opens in
+/// stages, a few features a frame with progress and Cancel (#10198), so this waits for the answer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AfterOpen {
+    /// A kept copy (#10220): it is its own design again (saving goes to `path`, it is named
+    /// `name`), with its changes unsaved; then the copy `id` goes when `drop` says so.
+    KeptCopy { opened: String, id: String, path: Option<String>, name: String, drop: bool },
+    /// The saved design offered beside a kept copy: the copy `id` goes when `drop` says so.
+    KeptSaved { opened: String, id: String, drop: bool },
+    /// Unsaved work from the page's last visit: it belongs to `path` again, named `name`, unsaved.
+    Recovery { opened: String, path: Option<String>, name: String },
+}
+
+impl AfterOpen {
+    /// The file the open reads.
+    pub fn opened(&self) -> &str {
+        match self {
+            AfterOpen::KeptCopy { opened, .. } | AfterOpen::KeptSaved { opened, .. } | AfterOpen::Recovery { opened, .. } => opened,
+        }
+    }
+}
+
+/// Whether the open of `wanted` answered with `reply` put it in: the answer says so, and it is
+/// the design now open (`open`: the open design's path). A refusal, a Cancel or another file
+/// leaves the copy or the recovered work offered.
+pub fn opened(reply: &Value, open: Option<&str>, wanted: &str) -> bool {
+    reply["ok"].as_bool() == Some(true) && is_open(open, wanted)
+}
+
 /// Whether leaving the page asks through the browser's "leave site?" box: there is unsaved work,
 /// and either the user still wants to be asked or it isn't all kept in the browser yet (with the
 /// keep preference off it never is, so there the box always stays).
@@ -223,6 +252,20 @@ pub fn answers(entry: &Entry, saved_exists: bool) -> Vec<Answer> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A restored or recovered design opens in stages (#10198): only an answer that it is in, for
+    /// the file asked for, counts; a refusal, a Cancel or another design open leaves it offered.
+    #[test]
+    fn a_staged_restore_counts_only_when_its_file_is_in() {
+        let copy = "/opfs/.kept/a.sc";
+        assert!(opened(&json!({"ok": true}), Some(copy), copy));
+        assert!(!opened(&json!({"ok": false, "error": "cancelled"}), Some(copy), copy));
+        assert!(!opened(&json!({"ok": false, "error": "not a design"}), None, copy));
+        assert!(!opened(&json!({"ok": true}), Some("/opfs/other.sc"), copy));
+        assert!(!opened(&json!({}), Some(copy), copy));
+        let after = AfterOpen::KeptCopy { opened: copy.into(), id: "a".into(), path: None, name: "Bracket".into(), drop: true };
+        assert_eq!(after.opened(), copy);
+    }
 
     fn entry(id: &str, changed_at: f64, path: Option<&str>) -> Entry {
         Entry { id: id.into(), name: "Bracket".into(), path: path.map(str::to_string), changed_at }
