@@ -115,6 +115,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                 follow_row(app, ui);
             });
         });
+        ui_kit::settings_section(ui, "tab_colours", app.tr("prefs.tab_colours"), |ui| tab_colours(app, ui, t));
         ui_kit::settings_section(ui, "scale", app.tr("prefs.scale_text"), |ui| {
             ui_kit::settings_pair(
                 ui,
@@ -655,6 +656,36 @@ fn browser_visibility(app: &mut SolveApp, ui: &mut egui::Ui) {
                     crate::scenario::publish_target("prefs:browser_show", rect);
                 }
                 ui_kit::help_icon(ui, app.tr("prefs.browser_show_note"));
+            });
+        });
+    });
+}
+
+/// Each ribbon tab's colour (its pill, line, soft selections and accented icons): the theme's,
+/// or one of the user's; Theme's own gives all of them back.
+fn tab_colours(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
+    ui_kit::settings_form(ui, t.space_24 * 6.0 + t.space_6, |ui| {
+        ui_kit::row(ui, "", |ui| {
+            let response = ui_kit::checkbox(ui, app.tr("prefs.tab_colours_individual"), &mut app.preferences.tab_colours_individual);
+            crate::scenario::publish_target("prefs:tab_colours_individual", response.rect);
+        });
+        let tokens = Tokens::get();
+        for (id, name) in crate::theme::COLOURED_TABS {
+            ui_kit::row(ui, crate::i18n::tr_label(name), |ui| {
+                let shown = crate::theme::TabAccent::for_tab(&tokens, id).color;
+                let mut rgb = [shown.r(), shown.g(), shown.b()];
+                let response = ui_kit::color_field(ui, &mut rgb);
+                crate::scenario::publish_target(&format!("prefs:tab_color:{id}"), response.rect);
+                if response.changed() {
+                    app.preferences.tab_colors.insert(id.to_string(), crate::dialogs_appearance::hex(rgb));
+                }
+            });
+        }
+        ui_kit::row(ui, "", |ui| {
+            ui.add_enabled_ui(!app.preferences.tab_colors.is_empty(), |ui| {
+                if ui_kit::button(ui, app.tr("prefs.appearance.theme_own"), ui_kit::Button::Ghost).clicked() {
+                    app.preferences.tab_colors.clear();
+                }
             });
         });
     });

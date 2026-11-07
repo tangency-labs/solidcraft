@@ -586,6 +586,73 @@ pub(crate) struct TabAccent {
     pub soft: Color32,
 }
 
+/// Every ribbon tab that can be given a colour of its own (Preferences › Appearance › Tab
+/// colours), as the ribbon names it: its pill, its line, its soft selections and its accented
+/// icons take it. The application's own accent (title bar, workspace buttons) never changes.
+pub const COLOURED_TABS: &[(&str, &str)] = &[
+    ("MODEL", "Model"),
+    ("SURFACE", "Surface"),
+    ("ASSEMBLE", "Assemble"),
+    ("INSERT", "Insert"),
+    ("INSPECT", "Inspect"),
+    ("MANAGE", "Manage"),
+    ("VIEW", "View"),
+    ("SHEET METAL", "Sheet Metal"),
+    ("WELDMENTS", "Weldments"),
+    ("SKETCH", "Sketch"),
+    ("MESH", "Mesh"),
+    ("FORM", "Form"),
+    ("RENDER", "Render"),
+];
+
+thread_local! {
+    /// The user's own tab colours (`set_tab_colors`), per thread like the theme.
+    static TAB_COLORS: Cell<Option<std::rc::Rc<BTreeMap<String, Color32>>>> = const { Cell::new(None) };
+    /// Whether each tab has a colour of its own (`set_individual_tabs`).
+    static INDIVIDUAL_TABS: Cell<bool> = const { Cell::new(false) };
+}
+
+/// The standard colour of each tab that otherwise shares the theme's accent, while each tab has a
+/// colour of its own (Preferences › Appearance › Tab colours): one hue per tab, strong enough
+/// for a pill and a line on light and dark themes alike. Model keeps the accent, and the tabs
+/// with colours of their own (Sketch, Surface, Mesh, Form, Sheet Metal, Render) keep theirs.
+pub const STANDARD_TAB_COLOURS: &[(&str, [u8; 3])] = &[
+    ("ASSEMBLE", [122, 92, 214]),
+    ("INSERT", [47, 163, 154]),
+    ("INSPECT", [224, 97, 58]),
+    ("MANAGE", [107, 138, 47]),
+    ("VIEW", [63, 160, 200]),
+    ("WELDMENTS", [160, 82, 45]),
+];
+
+/// Give each tab a colour of its own (`STANDARD_TAB_COLOURS`) or not (`prefs::apply`, every
+/// frame). Returns whether that changed anything.
+pub fn set_individual_tabs(on: bool) -> bool {
+    INDIVIDUAL_TABS.replace(on) != on
+}
+
+/// Use the user's own tab colours (`prefs::apply`, every frame; empty: the theme's). Returns
+/// whether that changed anything.
+pub fn set_tab_colors(colors: BTreeMap<String, Color32>) -> bool {
+    let held = TAB_COLORS.take();
+    let same = held.as_deref().map_or(colors.is_empty(), |old| *old == colors);
+    TAB_COLORS.set(if same { held } else { (!colors.is_empty()).then(|| std::rc::Rc::new(colors)) });
+    !same
+}
+
+/// A tab's own colour, if it has one over the theme's: the user's (the Render workspace's tabs
+/// share one), else its standard colour while each tab has its own.
+fn user_tab_color(tab: &str) -> Option<Color32> {
+    let key = if tab.starts_with("RENDER") { "RENDER" } else { tab };
+    let held = TAB_COLORS.take();
+    let color = held.as_ref().and_then(|colors| colors.get(key).copied());
+    TAB_COLORS.set(held);
+    color.or_else(|| {
+        let standard = INDIVIDUAL_TABS.get().then(|| STANDARD_TAB_COLOURS.iter().find(|(id, _)| *id == key)).flatten();
+        standard.map(|(_, [r, g, b])| Color32::from_rgb(*r, *g, *b))
+    })
+}
+
 /// Palette ramp for icons on a surface explicitly accented by its active tab.
 pub(crate) fn icon_accent_for_tab(tab: &str) -> Option<&'static str> {
     match tab {
@@ -642,15 +709,24 @@ fn readable_fill(fill: Color32, inks: &[Color32], scale: f32) -> Color32 {
 
 impl TabAccent {
     pub fn for_tab(t: &Tokens, tab: &str) -> Self {
-        let (color, ink, soft) = match tab {
-            "SKETCH" => (t.sketch_accent, t.sketch_ink, t.sketch_soft),
-            "SURFACE" => (t.surface_fill, t.surface_ink, t.surface_soft),
-            "MESH" => (t.mesh_fill, t.mesh_ink, t.mesh_soft),
-            "FORM" => (t.form_fill, t.form_tab_ink, t.form_soft),
-            "SHEET METAL" => (t.sheet_fill, t.sheet_ink, t.sheet_soft),
-            "RENDER" | "RENDER APPEARANCE" | "RENDER SCENE" | "RENDER CAMERA" => (t.render_fill, t.render_ink, t.render_soft),
-            // Model and shared utility tabs retain their existing selection exactly.
-            _ => (t.accent, t.selected_ink, t.accent_soft),
+        // The user's own colour for the tab: its soft selection a pale mix of it over the panel.
+        let user = user_tab_color(tab).map(|color| {
+            let [r, g, b, _] = t.panel.to_srgba_unmultiplied();
+            (color, color, Color32::from_rgb(r, g, b).lerp_to_gamma(color, 0.2))
+        });
+        let (color, ink, soft) = if let Some(user) = user {
+            user
+        } else {
+            match tab {
+                "SKETCH" => (t.sketch_accent, t.sketch_ink, t.sketch_soft),
+                "SURFACE" => (t.surface_fill, t.surface_ink, t.surface_soft),
+                "MESH" => (t.mesh_fill, t.mesh_ink, t.mesh_soft),
+                "FORM" => (t.form_fill, t.form_tab_ink, t.form_soft),
+                "SHEET METAL" => (t.sheet_fill, t.sheet_ink, t.sheet_soft),
+                "RENDER" | "RENDER APPEARANCE" | "RENDER SCENE" | "RENDER CAMERA" => (t.render_fill, t.render_ink, t.render_soft),
+                // Model and shared utility tabs retain their existing selection exactly.
+                _ => (t.accent, t.selected_ink, t.accent_soft),
+            }
         };
         let ink = if contrast_ratio(ink, soft) >= 4.5 {
             ink
@@ -692,6 +768,8 @@ impl TabAccent {
         let (published, accent, fading, style_surfaces) = ctx.data_mut(|data| {
             let state = data.get_temp_mut_or_default::<TabThemeState>(egui::Id::unique(TAB_STATE));
             let (published, accent, fading) = state.publish(&app.ui.tab, now);
+            // A colour of the user's for the tab wins over the cached one.
+            let accent = if user_tab_color(&app.ui.tab).is_some() { Self::for_tab(&published.tokens, &app.ui.tab) } else { accent };
             let style_surfaces = published.tab_surfaces || state.styled_surfaces;
             state.styled_surfaces = published.tab_surfaces;
             (published, accent, fading, style_surfaces)
