@@ -3797,6 +3797,27 @@ fn shell_lists_the_faces_its_chip_counts() {
     assert!(h.widget("1 selected").is_some());
 }
 
+/// A selected point and circle go to Coincident from the toolbar at once, as before the quick
+/// menu (#5501): the point is put on the circle.
+#[test]
+fn coincident_takes_a_point_with_a_circle() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.point", json!({"point": [30, 0], "id": "q"})).unwrap();
+    let c1 = h.app.run("sketch.circle.center", json!({"center": [0, 0], "radius": 10})).unwrap()["curves"][0].as_str().unwrap().to_string();
+    h.app.session.selection = vec![Sel::SketchPoint { id: "q".into() }, Sel::SketchCurve { id: c1.clone(), sketch: None }];
+    h.app.start("sketch.constraint.coincident");
+    let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+    let (q, c) = (sk.point_index("q").unwrap(), sk.curve_index(&c1).unwrap());
+    assert!(
+        sk.constraints.iter().any(|k| matches!(k.kind, solidcraft_engine::sketch::ConstraintKind::PointOnCurve { p, c: on } if p == q && on == c)),
+        "the point is put on the circle: {:?} ({:?})",
+        sk.constraints,
+        h.app.status
+    );
+    assert!(h.app.tool.is_none(), "no pick tool is left waiting");
+}
+
 /// #11663: Fix started with only points selected (no curve to fix them through) gives each of
 /// them its own Fix constraint, so a selection of loose points is not silently dropped.
 #[test]

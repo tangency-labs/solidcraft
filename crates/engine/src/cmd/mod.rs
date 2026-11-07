@@ -79,6 +79,7 @@ mod measure_sel;
 mod measure_shape;
 mod mesh;
 mod metadata;
+mod model_selection;
 pub(crate) mod motion;
 mod parts;
 mod point_cloud;
@@ -126,6 +127,7 @@ mod sketch_import;
 mod sketch_inspect;
 mod sketch_modify;
 mod sketch_project;
+pub mod sketch_selection;
 mod sketch_store;
 mod surface;
 mod surface_analysis;
@@ -146,6 +148,9 @@ pub type Run = fn(&mut Session, &Value) -> Result<Value>;
 pub type LiveRun = fn(&mut Session, &Value) -> Result<(Value, Option<crate::LiveEdit>)>;
 pub type Enabled = fn(&Session) -> std::result::Result<(), String>;
 pub type SchemaFn = fn() -> schemars::Schema;
+/// The parameters that apply a command to the session's selection, or `None` when the
+/// selection is not exactly what it takes.
+pub type FromSelection = fn(&Session) -> Option<Value>;
 
 pub struct CommandSpec {
     pub id: &'static str,
@@ -175,6 +180,9 @@ pub struct CommandSpec {
     pub contract: Option<&'static dyn crate::schema::Contract>,
     /// The JSON Schema of a successful result; `None` until described.
     pub output: Option<SchemaFn>,
+    /// The parameters the current selection gives the command, when the selection is exactly
+    /// what the command takes (see [`CommandSpec::for_selection`]); `None`: no such form.
+    pub selection: Option<FromSelection>,
 }
 
 impl CommandSpec {
@@ -195,6 +203,7 @@ impl CommandSpec {
             planned: None,
             contract: None,
             output: None,
+            selection: None,
         }
     }
     /// Not built yet; `issue` tracks building it.
@@ -235,6 +244,11 @@ impl CommandSpec {
         self.output = Some(f);
         self
     }
+    /// How the command takes the current selection (see [`CommandSpec::for_selection`]).
+    pub const fn from_selection(mut self, f: FromSelection) -> Self {
+        self.selection = Some(f);
+        self
+    }
     pub const fn params(mut self, p: &'static str) -> Self {
         self.params = p;
         self
@@ -263,6 +277,15 @@ impl CommandSpec {
     /// the message can tell it from a failure of the command itself.
     pub fn disabled_refusal(&self, s: &Session) -> Option<String> {
         (self.enabled)(s).err().map(|why| crate::EngineError::Disabled(self.id.to_string(), why).to_string())
+    }
+    /// The parameters the session's selection gives this command, when it is enabled and the
+    /// selection is complete and unambiguous for it; menus offer the command for the selection
+    /// only then. A sketch constraint's are complete, so a toolbar start runs it straight away;
+    /// a command with a dialog gets what the selection fills in, and its dialog asks for the rest.
+    pub fn for_selection(&self, s: &Session) -> Option<Value> {
+        let take = self.selection?;
+        (self.enabled)(s).ok()?;
+        take(s)
     }
     pub fn info(&self, s: &Session) -> CommandInfo {
         let e = (self.enabled)(s);

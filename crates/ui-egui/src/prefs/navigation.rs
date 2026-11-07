@@ -115,6 +115,7 @@ fn mouse(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         let wrap = setting::orbit_cursor_wrap(app, ui).backing_on_hover_text(crate::i18n::tr("nav.orbit_cursor_wrap.help"));
         crate::scenario::publish_target("prefs:orbit_cursor_wrap", wrap.rect);
         setting::radial_context_menu(app, ui).backing_on_hover_text(crate::i18n::tr("prefs.navigation.radial_help"));
+        setting::quick_menu_after_selection(app, ui);
         let label = app.tr("Middle double-click");
         let width = ui_kit::ContentWidth::label(ui, label);
         ui_kit::settings_form(ui, width, |ui| {

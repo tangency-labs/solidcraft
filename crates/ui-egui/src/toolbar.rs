@@ -3737,6 +3737,11 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
             Key::S if !mods.shift && !mods.alt => {
                 app.start("ui.palette");
             }
+            // The quick menu at the cursor (#5501), unless the person bound the key to a command.
+            Key::S if mods.shift && !mods.alt && crate::keymap::commands_for(app, crate::quick_menu::KEY).is_empty() => {
+                let at = ctx.input(|i| i.pointer.latest_pos()).unwrap_or(ctx.content_rect().center());
+                crate::quick_menu::open(app, at);
+            }
             // With a menu open, V runs that menu's Show/Hide on what the menu is for.
             Key::V => {
                 if !crate::context_menu::press_shortcut(app, "V") {
