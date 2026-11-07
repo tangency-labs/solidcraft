@@ -8,6 +8,7 @@ mod layout;
 mod preferences;
 mod runtime;
 mod specimen;
+mod surfaces;
 mod workspace;
 
 pub use app::*;
@@ -19,6 +20,7 @@ pub use preferences::*;
 pub(crate) use preferences::{PanelLayoutSnapshot, panel_layout_matches, panel_layout_snapshot};
 pub use runtime::*;
 pub use specimen::*;
+pub use surfaces::*;
 pub use workspace::*;
 
 #[cfg(test)]
