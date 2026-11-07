@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use solidcraft_doc::render_resources::HdrId;
 
+use super::render_settings::{SETUP_FIELDS, setup_patch_schema};
+
 fn one() -> f64 {
     1.0
 }
@@ -24,42 +26,14 @@ fn digest_schema(_: &mut SchemaGenerator) -> Schema {
     })
 }
 
-/// The fields of a render setup, as `render.settings.get` gives them. A `set` patch may give up
-/// to 13 of them; `patched_settings` reads the patched setup as a `RenderSetup`, which refuses any
-/// other key.
-const SETUP_FIELDS: &[&str] = &[
-    "backend",
-    "mode",
-    "camera",
-    "width",
-    "height",
-    "format",
-    "exposure_ev",
-    "environment_rotation",
-    "environment_intensity",
-    "background",
-    "job",
-    "surfaces",
-    "optics",
-    "stage",
-];
-
-/// Each setup field, without its own schema: `patched_settings` checks the values.
-fn setup_properties() -> serde_json::Map<String, Value> {
-    SETUP_FIELDS.iter().map(|field| (field.to_string(), Value::Object(serde_json::Map::new()))).collect()
-}
-
 /// `set`: changes to the setup, as `render.settings.set` takes them. `patched_settings` in
-/// `cmd/render.rs` refuses anything but an object of at most 13 setup fields, with its own
-/// message.
+/// `cmd/render.rs` refuses anything but an object of at most [`SETUP_FIELDS`] setup fields, with
+/// its own message; the list is shared with Save Render Settings' schema, so the two can't drift.
 fn set_schema(_: &mut SchemaGenerator) -> Schema {
-    json_schema!({
-        "description": "Changes to the setup the HDR is saved into, as `render.settings.set` takes them: at most 13 of the setup's fields. The setup they make (a saved one keeps the fields left out) must have a `job` with method `cpu_raytrace` or `gpu_path`, without an `hdr` or an `environment`.",
-        "type": "object",
-        "properties": setup_properties(),
-        "additionalProperties": false,
-        "maxProperties": 13
-    })
+    setup_patch_schema(&format!(
+        "Changes to the setup the HDR is saved into, as `render.settings.set` takes them: at most {} of the setup's fields. The setup they make (a saved one keeps the fields left out) must have a `job` with method `cpu_raytrace` or `gpu_path`, without an `hdr` or an `environment`.",
+        SETUP_FIELDS.len()
+    ))
 }
 
 /// Read an HDR file and check it: its size in pixels, its byte count, its SHA-256 and the colour

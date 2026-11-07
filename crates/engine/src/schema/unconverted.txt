@@ -87,8 +87,6 @@ render.preflight
 render.result.pin
 render.result.regrade
 render.scene
-render.settings.get
-render.settings.set
 render.start
 render.status
 select.clear

@@ -9,6 +9,7 @@ use solidcraft_doc::render_settings::{RenderSettings, RenderSetup};
 use super::CommandSpec;
 use crate::params::bad;
 use crate::schema::render_camera::{CameraApplied, CameraFitted, CameraInfo, CameraSet, RenderCamera};
+use crate::schema::render_settings::{RenderSettingsGot, RenderSettingsInfo, RenderSettingsSaved, SETUP_FIELDS, SetupFields, set_message};
 use crate::{Result, Session};
 
 mod clear_coat;
@@ -222,9 +223,13 @@ CommandSpec::new("render.backends", "Render Backends", backends).icon("list")
     .noundo()
     .doc_only()
     .params("No parameters. Returns {schema_version: 1, default_backend: builtin, backends: [{id, label, availability, executors: [{id, availability, profiles, limits, scratch}]}]}. Metadata only; does not start rendering or probe a GPU. See docs/render-backends.md"),
-CommandSpec::new("render.settings.get", "Render Settings", get_settings).icon("settings").noundo().doc_only()
+CommandSpec::new("render.settings.get", "Render Settings", crate::checked!("render.settings.get", get_settings)).icon("settings").noundo().doc_only()
+    .contract(&crate::schema::TypedContract::<crate::schema::render_settings::GetParams>::new())
+    .output(crate::schema::output_schema_for::<RenderSettingsGot>)
     .params("name?: saved setup. Without name returns {setups, defaults}; with name returns {name, setup}. Does not evaluate the model or apply a camera. See docs/render-settings.md"),
-CommandSpec::new("render.settings.set", "Save Render Settings", set_settings).icon("settings").doc_only()
+CommandSpec::new("render.settings.set", "Save Render Settings", crate::checked!("render.settings.set", set_settings)).icon("settings").doc_only()
+    .contract(&crate::schema::TypedContract::<crate::schema::render_settings::SetParams>::new())
+    .output(crate::schema::output_schema_for::<RenderSettingsSaved>)
     .params("name: setup name, set: object of fields to replace (backend, mode, camera, width, height, format, exposure_ev, environment_rotation, environment_intensity, background, job, surfaces, optics, coats, stage). job?: typed active raster/cpu_raytrace/gpu_path configuration with optional validated embedded HDR reference; omitted preserves, null clears, object replaces the complete job. Creates from defaults and saves without a host, validates atomically, one undo step; identical edits are no-ops. See docs/render-settings.md"),
 CommandSpec::new("render.scene", "Inspect Render Scene", scene).noundo().at("RENDER", "SCENE").icon("render_scene")
     .params("No parameters. Authoritative product-scene metadata, without modelling overlays or mesh payloads. Explicitly settles stale geometry; does not render an image. See docs/render-workspace.md"),
@@ -329,13 +334,25 @@ struct GetSettings {
 fn get_settings(s: &mut Session, params: &Value) -> Result<Value> {
     let cmd = "render.settings.get";
     let request: GetSettings = serde_json::from_value(params.clone()).map_err(|e| bad(cmd, e.to_string()))?;
-    match request.name {
-        None => Ok(json!({"setups": s.doc.render.setups, "defaults": RenderSetup::default()})),
+    let info = match request.name {
+        None => {
+            let setups = s.doc.render.setups.iter().map(|(name, setup)| Ok((name.clone(), setup_fields(cmd, setup)?))).collect::<Result<_>>()?;
+            RenderSettingsInfo::All { setups, defaults: setup_fields(cmd, &RenderSetup::default())? }
+        }
         Some(name) => {
             RenderSettings::validate_name(&name).map_err(|e| bad(cmd, e.to_string()))?;
             let setup = s.doc.render.setups.get(&name).ok_or_else(|| bad(cmd, "no saved render setup with that name"))?;
-            Ok(json!({"name": name, "setup": setup}))
+            RenderSettingsInfo::One { setup: setup_fields(cmd, setup)?, name }
         }
+    };
+    typed_reply(cmd, RenderSettingsGot { info, param_warnings: Vec::new() })
+}
+
+/// A render setup's fields, as it saves them, for a reply.
+fn setup_fields(cmd: &str, setup: &RenderSetup) -> Result<SetupFields> {
+    match serde_json::to_value(setup).map_err(|e| bad(cmd, e.to_string()))? {
+        Value::Object(fields) => Ok(fields),
+        _ => Err(bad(cmd, "invalid render setup")),
     }
 }
 
@@ -350,23 +367,23 @@ fn set_settings(s: &mut Session, params: &Value) -> Result<Value> {
     let cmd = "render.settings.set";
     let request: SetSettings = serde_json::from_value(params.clone()).map_err(|e| bad(cmd, e.to_string()))?;
     let setup = patched_settings(s, &request.name, &request.set, cmd)?;
-    let reply = json!({"name": request.name, "setup": setup});
+    let reply = RenderSettingsSaved { name: request.name.clone(), setup: setup_fields(cmd, &setup)?, param_warnings: Vec::new() };
     if s.doc.render.setups.get(&request.name) == Some(&setup) {
-        return Ok(reply);
+        return typed_reply(cmd, reply);
     }
     let mut settings = (*s.doc.render).clone();
     settings.setups.insert(request.name, setup);
     settings.validate().map_err(|e| bad(cmd, e.to_string()))?;
     s.doc_mut().render = Arc::new(settings);
-    Ok(reply)
+    typed_reply(cmd, reply)
 }
 
 fn patched_settings(s: &Session, name: &str, set: &Value, cmd: &str) -> Result<RenderSetup> {
     RenderSettings::validate_name(name).map_err(|e| bad(cmd, e.to_string()))?;
-    // A full RenderSetup has 15 known fields, including maps, optics, coats and
-    // stage. Bound the patch by that schema; decoding below still rejects any
+    // A RenderSetup has `SETUP_FIELDS`, including surfaces, optics, coats and stage; the published
+    // schemas list the same fields. Bound the patch by them; decoding below still rejects any
     // unknown field instead of silently dropping saved intent.
-    let patch = set.as_object().filter(|p| p.len() <= 15).ok_or_else(|| bad(cmd, "`set` must be an object with at most 15 fields"))?;
+    let patch = set.as_object().filter(|p| p.len() <= SETUP_FIELDS.len()).ok_or_else(|| bad(cmd, set_message()))?;
     let current = s.doc.render.setups.get(name).cloned().unwrap_or_default();
     let mut value = serde_json::to_value(&current).map_err(|e| bad(cmd, e.to_string()))?;
     let object = value.as_object_mut().ok_or_else(|| bad(cmd, "invalid render setup"))?;
