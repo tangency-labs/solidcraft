@@ -57,6 +57,16 @@ pub enum RoundRefusal {
         /// A radius whose band is proved to fit there (the room's certified lower bound).
         largest: f64,
     },
+    /// A variable round's radius law, continued past the end of its curve to a station of
+    /// the edge's run-on, gives a radius or slope there that is not finite (#2706): a law
+    /// is continued as the polynomial of its end span, which can overflow.
+    LawRadiusUnusable {
+        /// The station: the fraction of the way along the edge's interval from its start,
+        /// below 0 before it and above 1 past it.
+        at: f64,
+        /// The radius the continued law gives there.
+        radius: f64,
+    },
 }
 
 /// [`SolidError::RoundRefused`] of `refusal`, by `operation`.

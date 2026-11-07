@@ -75,18 +75,6 @@ fn smos_min(a: f64, b: f64) -> f64 {
     }
 }
 
-/// The `SmStatus` upstream's `SER` returns for a failed callee (a `double` function's
-/// status as its value, as `SmVariableRadiusFS::GetFilletRadius` returns it).
-fn status_of(e: &SolidError) -> i32 {
-    match e {
-        SolidError::Upstream { code, .. } => *code,
-        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => {
-            crate::error::SM_ERR_INVALID_INPUT
-        }
-        _ => crate::error::SM_ERR,
-    }
-}
-
 impl FilletSession<'_> {
     /// `GetFilletErrorInfo()->NoteError(code, comment)` of a [`Refusal`].
     pub(super) fn note_refusal(&mut self, refusal: Refusal) {
@@ -234,13 +222,12 @@ impl FilletSession<'_> {
                 continue;
             }
             let pnt = curve.evaluate_point(k, t)?;
-            // SmVariableRadiusFS::GetFilletRadius: SER inside a `double` function
-            let radius = match law.evaluate(t, &vr.law_interval, vr.law_orientation) {
-                Ok(values) => values.first().copied().unwrap_or(0.0),
-                Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                Err(e) => f64::from(status_of(&e)),
-            }
-            .abs();
+            // SmVariableRadiusFS::GetFilletRadius: SER inside a `double` function, but a law
+            // continued past its curve to an unusable radius stays refused (a corner may
+            // have narrowed the law to its setback, putting this station past its curve)
+            let radius = law
+                .fillet_radius(t, &vr.law_interval, vr.law_orientation)?
+                .abs();
             // The section's middle: along the wedge's bisector, r (1 / sin(a/2) - 1) off the
             // edge. The planes' normals are both outward (or inward), the bisector along
             // their sum and the angle pi less theirs, or one of each, the bisector along

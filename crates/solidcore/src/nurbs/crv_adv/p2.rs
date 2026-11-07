@@ -12,7 +12,7 @@
 //! | [`Curve::extend_by_dist`]                    | `N_CrvExtendByDist`                 |
 //! | [`Curve::extend_by_param_dist`]              | `N_CrvExtendByParamDist`            |
 //! | [`Curve::offset_max_2nd_deriv`]              | `N_CrvOffsetGetMax2ndDeriv`         |
-//! | [`Curve::eval_unbounded_pts_and_derivs`], [`UnboundedEval`] | `N_CrvEvalUnboundedPtsAndDerivs` |
+//! | [`Curve::eval_unbounded_pts_and_derivs`], [`UnboundedEval`], [`Closure`] | `N_CrvEvalUnboundedPtsAndDerivs` |
 //! | [`Curve::remove_knots_deriv_constraints`], [`ConstrainedEnds`] | `N_CrvRemoveKnotsDerivConstraints` |
 //! | [`Curve::refine_to_knot_vector`]             | `N_CrvRefineToKnotVector`           |
 //! | [`Curve::sum_diff`], [`SumDiff`]             | `N_CrvSumDiffCrv`                   |
@@ -53,6 +53,8 @@
 //!   the port keeps the last complete extension. The periodic parameter adjustment of a
 //!   G1-closed curve loops forever upstream when adding the parameter range no longer
 //!   changes the parameter; the port fails with [`SolidError::NotConverged`] there.
+//!   [`UnboundedEval::closure`] [`Closure::Open`] (solidcore's, #2706) skips the G1
+//!   closure test for a curve that is a function of its parameter, which is extended.
 //! - `N_LinearMultiplyCrv` ignores the error of `N_CrvGetGrevilleAbscissa` (degree 0,
 //!   where it then reads an uninitialised value); the port propagates it.
 //! - `N_CrvRefineToKnotVector` writes the new control points into a caller array
@@ -178,9 +180,24 @@ impl SumDiff {
     }
 }
 
+/// Whether [`Curve::eval_unbounded_pts_and_derivs`] tests the curve for G1 closure the
+/// first time it leaves the curve's range.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Closure {
+    /// Tested, as upstream: a G1-closed curve is evaluated periodically, any other curve
+    /// is extended.
+    #[default]
+    Tested,
+    /// Never closed: the curve is a function of its parameter (a radius law, #2706), which
+    /// does not wrap round, so it is always extended. The closure test is not made; it has
+    /// no answer where an end's derivative vanishes (a curve that is one point).
+    Open,
+}
+
 /// State of [`Curve::eval_unbounded_pts_and_derivs`] across calls with one curve
 /// (upstream's caller-held `ecur` and `gflg`). Start from [`UnboundedEval::default`]
-/// (upstream: `N_CrvInitArrays(&ecur)`) and keep it unchanged between the calls.
+/// (upstream: `N_CrvInitArrays(&ecur)`), with `closure` [`Closure::Open`] for a curve that
+/// is a function of its parameter, and keep it unchanged between the calls.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct UnboundedEval {
     /// The extended (or copied, for a G1-closed curve) curve once a parameter outside
@@ -188,6 +205,8 @@ pub struct UnboundedEval {
     pub ext: Option<Curve>,
     /// Whether the curve is G1 closed (upstream `gflg`); set when `ext` is created.
     pub g1_closed: bool,
+    /// Whether the curve is tested for G1 closure when `ext` is created.
+    pub closure: Closure,
 }
 
 impl Curve {
@@ -264,7 +283,8 @@ impl Curve {
     /// parameter range (`N_CrvEvalUnboundedPtsAndDerivs`, left-sided).
     ///
     /// The first time `u` is out of range, the curve is copied into `state.ext` and
-    /// tested for G1 closedness ([`MODEL_TOL`], [`G1_ANGLE_TOL`]). A G1-closed curve is
+    /// tested for G1 closedness ([`MODEL_TOL`], [`G1_ANGLE_TOL`]; not tested, and taken
+    /// open, for [`Closure::Open`], solidcore's). A G1-closed curve is
     /// evaluated periodically (`u` shifted by whole parameter ranges); any other curve
     /// is extended with continuity `cont` ([`Curve::extend_by_param_dist`]) in steps of
     /// at most `0.9` times the current parameter range until it covers `u`. Later
@@ -305,8 +325,13 @@ impl Curve {
             // Must extend or adjust periodic parameter.
             if state.ext.is_none() {
                 self.copy_into(&mut state.ext)?;
-                let tols = [MODEL_TOL, G1_ANGLE_TOL];
-                state.g1_closed = self.is_closed_continuity(1, &tols)?;
+                state.g1_closed = match state.closure {
+                    Closure::Tested => {
+                        let tols = [MODEL_TOL, G1_ANGLE_TOL];
+                        self.is_closed_continuity(1, &tols)?
+                    }
+                    Closure::Open => false,
+                };
                 g1_flag = state.g1_closed;
             }
             let ext = state.ext.as_mut().ok_or_else(|| oob(OP))?;

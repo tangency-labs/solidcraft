@@ -14,12 +14,15 @@
 //! Deviations: the variable-radius cast (`SM_CAST_PTR(SmVariableRadiusFS, pFS)`) is a
 //! match on the session's concrete solver. A failed law evaluation in
 //! `SmVariableRadiusFS::GetFilletRadius` yields its status code as the radius, as the
-//! fork's `SER` inside that `double` function does (an `Unported` callee propagates).
+//! fork's `SER` inside that `double` function does (an `Unported` callee propagates),
+//! except a station where the law's continuation gives no usable radius
+//! (`RoundRefusal::LawRadiusUnusable`, solidcore's, #2706), which sets no reach.
 //! A failed `GetOrCreateUVTrimCurve` skips that surface's across test, as the fork
 //! does, but an `Unported` one propagates. There is no recursion and no unbounded
 //! loop (7 and 65 fixed samples).
 
 use crate::blend::fillet_executive::session::SolverObject;
+use crate::blend::round_room::RoundRefusal;
 use crate::error::{Result, SolidError, SM_ERR, SM_ERR_INVALID_INPUT};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -145,6 +148,12 @@ pub(crate) fn extend_trace_to_its_rails(
             let r = match vr.law.evaluate(t, &law_ivl, vr.law_orientation) {
                 Ok(values) => values.first().copied().unwrap_or(0.0),
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                // a station past the law's ends where its continuation gives no usable
+                // radius (#2706): the trace does not run there, so it sets no reach
+                Err(SolidError::RoundRefused {
+                    refusal: RoundRefusal::LawRadiusUnusable { .. },
+                    ..
+                }) => continue,
                 Err(e) => f64::from(status_of(&e)),
             };
             radius = smos_max(radius, r.abs());

@@ -16,6 +16,7 @@
 //! | [`BSplineCurve::create_helix_segment`], [`HelixSpec`]  | `SmBSplineCurve::CreateHelixSegment`           |
 //! | [`BSplineCurve::create_extended_curve`]                | `SmBSplineCurve::CreateExtendedCurve` (parameter) |
 //! | [`BSplineCurve::create_extended_curve_by_distance`]    | `SmBSplineCurve::CreateExtendedCurve` (distance) |
+//! | [`BSplineCurve::create_continued_curve`]               | (solidcore's: `CreateExtendedCurve`, C-infinity, never closed) |
 //! | [`BSplineCurve::create_interpolating_curve`]           | `SmBSplineCurve::CreateInterpolatingCurve`     |
 //! | [`BSplineCurve::create_interpolating_curve_with_params`] | `SmBSplineCurve::CreateInterpolatingCurve` (fork `cpOptParams`) |
 //! | [`BSplineCurve::create_approximating_curve`]           | `SmBSplineCurve::CreateApproximatingCurve` (unit `nlib.crv_fit_p4`) |
@@ -141,7 +142,7 @@ use crate::math::{min2, EFF_ZERO};
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm};
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::crv_adv::p1::{Continuity, CurveEnd, BARE_FLAG_REASON};
-use crate::nurbs::crv_adv::p2::{ConstrainedEnds, UnboundedEval};
+use crate::nurbs::crv_adv::p2::{Closure, ConstrainedEnds, UnboundedEval};
 use crate::nurbs::crv_approx::{
     approx_circ_arc_with_crv_data, approx_nurbs_with_non_rat_crv, calc_num_cpts_to_approx_arc,
     CircArcData,
@@ -173,6 +174,7 @@ const OP_ARC: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::approximate_arc
 const OP_RAT: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::approximate_rational_curve";
 const OP_HELIX: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::create_helix_segment";
 const OP_EXT: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::create_extended_curve";
+const OP_CONTINUE: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::create_continued_curve";
 const OP_EXT_DIST: &str =
     "nurbs::b_spline_curve_n_lib::BSplineCurve::create_extended_curve_by_distance";
 const OP_INTERP_CRV: &str = "nurbs::b_spline_curve_n_lib::BSplineCurve::create_interpolating_curve";
@@ -677,6 +679,42 @@ impl BSplineCurve {
         continuity: ContinuityType,
         precise: bool,
     ) -> Result<Option<Self>> {
+        self.extend_to(parameter, continuity, precise, Closure::Tested, OP_EXT)
+    }
+
+    /// The curve continued to the parameter `parameter` as the polynomials of its end spans
+    /// (`C-infinity`), for a curve read as a function of its parameter, such as a radius law
+    /// (solidcore's, #2706). It is [`BSplineCurve::create_extended_curve`] with
+    /// [`ContinuityType::CInfinity`] and a precise extension, the same path, except that the
+    /// curve is never taken as closed ([`Closure::Open`]): a function of its parameter does
+    /// not wrap round, so its ends are not tested for G1 closure, a test that has no answer
+    /// where an end's derivative vanishes (a curve that is one point). `None` when the
+    /// parameter is inside the interval (nothing to extend).
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` without a NURB, or when the extension fails.
+    pub fn create_continued_curve(&self, parameter: f64) -> Result<Option<Self>> {
+        self.extend_to(
+            parameter,
+            ContinuityType::CInfinity,
+            true,
+            Closure::Open,
+            OP_CONTINUE,
+        )
+    }
+
+    /// `CreateExtendedCurve`'s body, the one extension of [`BSplineCurve::create_extended_curve`]
+    /// and [`BSplineCurve::create_continued_curve`]: `closure` says whether the curve is
+    /// tested for G1 closure, `op` names the caller in its errors.
+    fn extend_to(
+        &self,
+        parameter: f64,
+        continuity: ContinuityType,
+        precise: bool,
+        closure: Closure,
+        op: &'static str,
+    ) -> Result<Option<Self>> {
         // get curve interval
         let ivl = self.natural_interval();
         let mut parameter = parameter;
@@ -690,16 +728,19 @@ impl BSplineCurve {
             }
         }
 
-        let cur = nurb_of(self, OP_EXT)?;
+        let cur = nurb_of(self, op)?;
         let t = parameter;
         let ndr = 0;
-        let gflg = extension_continuity(continuity, OP_EXT)?;
+        let gflg = extension_continuity(continuity, op)?;
 
         // NLIB eval curve at t,
         // side effect: create extended curve in ecur when t is outside curve interval
-        let mut state = UnboundedEval::default();
+        let mut state = UnboundedEval {
+            closure,
+            ..UnboundedEval::default()
+        };
         cur.eval_unbounded_pts_and_derivs(t, ndr, gflg, &mut state)
-            .map_err(SolidError::nl_ser(OP_EXT))?;
+            .map_err(SolidError::nl_ser(op))?;
 
         // build output: new SMBSplineCurve object from ecur
         Ok(state.ext.map(|ecur| Self::from_gw_nurb(self.dim, &ecur)))

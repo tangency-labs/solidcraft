@@ -1,7 +1,7 @@
 {"format":1,"unit":"blend.fillet_executive_p1"}
 {"case":"base_law_evaluate_is_error","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,0.0,16039.0,1001.0,0.0,1.0,0.0,0.0,1.0,0.0],"status":[0.0]}}
 {"case":"bspline_apex_zero_tangent_replaced","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[16038.749999999996,16063.250000000011,64144.99999999995]],"n":26},"status":[0.0]}}
-{"case":"bspline_constant_radius_zero_tangent","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[17052.0,17052.0,81305.0]],"n":23},"status":[0.0]}}
+{"case":"bspline_constant_radius_zero_tangent","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[["-inf","inf","-inf"]],"n":53},"status":[0.0]}}
 {"case":"bspline_cubic_apex_zero_tangent_replaced","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[16037.875,16062.625000000007,64151.50000000003]],"n":22},"status":[0.0]}}
 {"case":"bspline_cubic_bezier_inside_domain","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[[16059.166499999998,16059.385499999999,64339.985]],"n":30},"status":[0.0]}}
 {"case":"bspline_cubic_bezier_outside_domain_closed_law_copied","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":{"blocks":[["-inf","inf","-inf"]],"n":45},"status":[0.0]}}

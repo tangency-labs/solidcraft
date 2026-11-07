@@ -11,9 +11,9 @@
 //! Deviations: the solver is the caller's concrete solver object instead of a
 //! `GetSolverType` cast. A failed variable-radius law evaluation yields its status
 //! code as the radius, as upstream's `SER` inside the `double`
-//! `SmVariableRadiusFS::GetFilletRadius` does (an `Unported` callee still
-//! propagates). The gap checks of a multi-neighbour end face (vertex and side-edge
-//! geometry, extended-surface coincidence), the last statements of
+//! `SmVariableRadiusFS::GetFilletRadius` does (an `Unported` callee and a law refused
+//! past its curve, #2706, still propagate). The gap checks of a multi-neighbour end
+//! face (vertex and side-edge geometry, extended-surface coincidence), the last statements of
 //! `MakeCornerTopology`, are returned as an [`Nx1GapCheck`] for the caller, which
 //! holds the corner table and solver store they need, to run before anything else.
 //! The end face at a tangent side is extended `CInfinity` and that side's cap edge is
@@ -28,7 +28,7 @@ use crate::blend::fillet_geom::p1::{
     FilletBrep, FilletCornerId, FilletEdgeType, FilletGeomId, FilletVertex, FilletVertexType,
 };
 use crate::blend::fillet_standard_solver::p1::VariableRadiusFs;
-use crate::error::{EntityRef, Result, SolidError, SM_ERR, SM_ERR_INVALID_INPUT};
+use crate::error::{EntityRef, Result, SolidError};
 use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
 use crate::math::{Point3, EFF_ZERO};
@@ -42,15 +42,6 @@ const OP: &str = "blend::fillet_corner::topology::make_nx1_corner_topology";
 
 fn invalid(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
-}
-
-/// The `SmStatus` upstream's `SER` returns for a failed callee.
-fn status_of(e: &SolidError) -> i32 {
-    match e {
-        SolidError::Upstream { code, .. } => *code,
-        SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => SM_ERR_INVALID_INPUT,
-        _ => SM_ERR,
-    }
 }
 
 fn need<T>(value: Option<T>, reason: &'static str) -> Result<T> {
@@ -100,14 +91,17 @@ pub fn find_surface_extension_dist_at_corner(
 }
 
 /// `SmVariableRadiusFS::GetFilletRadius` at the corner end of `fillet_edgeuse`: the law's
-/// radius at the end of the filleted edge that lies on `corner_vertex`.
-/// `SmVariableRadiusFS::GetFilletRadius` is a `double` function whose
-/// `SER(m_rLaw->Evaluate(..))` returns the failed `SmStatus` itself, so a failed law
-/// evaluation yields the status code as the radius.
+/// radius at the end of the filleted edge that lies on `corner_vertex`, by
+/// [`FilletLaw::fillet_radius`](crate::blend::fillet_executive::p1::FilletLaw): a failed
+/// law evaluation yields its status code as the radius.
 ///
 /// # Errors
 /// [`SolidError::InvalidInput`] for an edge use without vertex use or edge (upstream
-/// dereferences them); [`SolidError::Unported`] from the law evaluation.
+/// dereferences them); those [`FilletLaw::fillet_radius`] propagates: an unported callee,
+/// and the refusal of a law continued past its curve to an unusable radius (the corner may
+/// have narrowed the law to its setback, so the edge's end can be past the law's curve).
+///
+/// [`FilletLaw::fillet_radius`]: crate::blend::fillet_executive::p1::FilletLaw::fillet_radius
 pub fn variable_radius_at_vertex(
     target: &Brep,
     fillet_edgeuse: EdgeuseId,
@@ -129,16 +123,11 @@ pub fn variable_radius_at_vertex(
     } else {
         ivl.min()
     };
-    let interval = vr.law_interval;
-    let orientation = vr.law_orientation;
     // a copy: the evaluation may build the law's extension (`m_pExtendedLaw`), the solver's
     // own law keeps building it when it evaluates
-    let mut law = vr.law.clone();
-    Ok(match law.evaluate(parameter, &interval, orientation) {
-        Ok(values) => values[0],
-        Err(e) if e.is_unported_or_cancelled() => return Err(e),
-        Err(e) => f64::from(status_of(&e)),
-    })
+    vr.law
+        .clone()
+        .fillet_radius(parameter, &vr.law_interval, vr.law_orientation)
 }
 
 /// The live objects of the end of `SmFilletNx1Corner::MakeCornerTopology`.
