@@ -240,7 +240,9 @@ The saved CPU/GPU job can independently enable the following bounded prepass:
     "photons": 16384,
     "radius_mm": 1,
     "max_depth": 16,
-    "seed": 81
+    "seed": 81,
+    "area_lights": false,
+    "environment": false
   }
 }
 ```
@@ -250,12 +252,25 @@ them in the progressive job options. The Render workspace saves them with the
 setup. Enabling caustics does not change existing Glass materials or renderer
 quality defaults.
 
-`photons` is 1–65536, `radius_mm` is finite in [0.000001, 1000000], and light-path
-depth is 1–16 events. The photon seed is independent of the camera sampler.
+`photons` is 1–1,048,576, `radius_mm` is finite in [0.000001, 1000000], and light-path
+depth is 1–64 events. The photon seed is independent of the camera sampler.
 Sources are hard directional lights, point lights and spot lights, including the
 existing three implicit studio directions when that lighting mode is active.
 Directional emission covers the captured scene bounds; point and spot emission
 uses the corresponding bounded source conventions.
+
+With `area_lights: true`, the CPU and GPU also launch photons from one-sided
+rectangular lights. A launch draws a uniform point on the rectangle and a
+cosine-weighted direction from its emitting side. Its unnormalized flux is
+emitted radiance times π times rectangle area. The photon estimate divides by
+source-selection probability and total launches.
+
+Rectangle photons cover paths from the emitter through one or more smooth
+closed glass events to the first opaque receiver. The camera estimator omits
+the reverse suffix only when it belongs to this same family and fits the
+photon depth. The gather checks the camera depth, reserving an event slot for
+the emitter hit. Direct illumination and paths through rough glass, sheets
+or scattering events remain with the camera estimator for rectangle lights.
 
 The prepass follows actual reflected and refracted optical paths, including rough
 interfaces, wavelength-dependent IOR, coatings and supported selected-medium HG
@@ -303,8 +318,14 @@ to the eye path's first actually sampled continuous event. Subsequent continuous
 continuations do not also add the same photon-represented source paths. A coated
 index-matched delta transmission is not a continuous event. Opaque direct lighting
 and gathering remain enabled: light prepasses stop at their first opaque visit.
-Finite-area lights and the environment remain under camera-path estimators and
-are never emitted into this hard-source map.
+With `environment: true`, supported environment sources use the same smooth
+closed glass path family. The photon launcher samples the environment's
+directional distribution and a uniform point on the scene's bounding disk
+perpendicular to that direction. Each launch carries radiance times the disk
+area, divided by the directional density, source probability and total
+launches. The camera estimator omits only the environment term of an owned
+path. Finite sun contributions and paths outside the opt-in family retain
+their camera estimates.
 
 **This is a finite-radius density estimate.** It is biased at finite radius and
 has finite-photon variance. Radius controls blur and geometric leakage; photon

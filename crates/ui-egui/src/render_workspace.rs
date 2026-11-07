@@ -264,9 +264,9 @@ impl PathHost {
     }
 }
 
-/// The samples slider's top end: 2^12 = 4096 samples per pixel.
+/// The samples slider's top end: 2^16 = 65536 samples per pixel.
 #[cfg(test)]
-const MAX_SAMPLES_EXPONENT: u32 = 12;
+const MAX_SAMPLES_EXPONENT: u32 = 16;
 
 /// Setup times kept per adapter, at most.
 const MAX_SETUP_TIMES: usize = 16;
@@ -1631,7 +1631,7 @@ fn image_edit_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     if app.render_workspace.view.method == ImageMethod::GpuRaytrace {
         ui.label(app.tr("render.image_samples"));
-        // Powers of two from 1 to 4096; requests from elsewhere keep any count.
+        // Powers of two from 1 to 65536; requests from elsewhere keep any count.
         let samples = &mut app.render_workspace.view.samples;
         let mut exponent = (*samples).max(1).ilog2().min(MAX_SAMPLES_EXPONENT);
         let slider = crate::ui_kit::Slider { integer: true, format: |e| format!("{}", 1u32 << (e as u32).min(31)), ..Default::default() };
@@ -1641,7 +1641,13 @@ fn image_edit_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         let title = app.tr("render.image_advanced").to_string();
         crate::ui_kit::section(ui, "render_gpu_advanced", &title, false, |ui| {
             ui.label(app.tr("render.gpu_depth"));
-            crate::ui_kit::number_field(ui, &mut app.render_workspace.view.max_depth, 1..=16, 1.0, "");
+            crate::ui_kit::number_field(
+                ui,
+                &mut app.render_workspace.view.max_depth,
+                1..=u32::from(solidcraft_engine::render::job::MAX_PATH_DEPTH),
+                1.0,
+                "",
+            );
             ui.label(app.tr("render.gpu_seed"));
             crate::ui_kit::number_field(ui, &mut app.render_workspace.view.seed, 0..=u32::MAX, 1.0, "");
             ui.label(app.tr("render.image_exposure"));

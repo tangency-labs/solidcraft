@@ -1,6 +1,7 @@
-// Bounded light tracing for delta-source caustics. Finite sources already have
-// camera-path estimators and are deliberately absent from this source mixture.
-// Header16 words, hash heads, then16-word immutable photon records.
+// Bounded light tracing for delta sources and opt-in area and environment
+// sources. The latter two own only paths that encounter one or more smooth
+// closed-glass events before the first opaque receiver.
+// Header 16 words, hash heads, then 16-word immutable photon records.
 @group(0) @binding(7) var<storage,read_write> photon_data:array<atomic<u32>>;
 fn photon_word(index:u32)->u32 {return atomicLoad(&photon_data[index]);}
 fn photon_float(index:u32)->f32 {return bitcast<f32>(photon_word(index));}
@@ -19,13 +20,14 @@ fn photon_hash(cell:vec3<i32>)->u32 {
 }
 fn photon_record(index:u32)->u32 {return 16u+photon_word(1u)+index*16u;}
 fn photon_bad_medium() {atomicOr(&failures[7],4u);}
-fn photon_deposit(index:u32,position:vec3<f32>,incoming:vec3<f32>,flux:vec3<f32>,normal:vec3<f32>,receiver:u32,kind:u32,side:i32,source:u32) {
+fn photon_deposit(index:u32,position:vec3<f32>,incoming:vec3<f32>,flux:vec3<f32>,normal:vec3<f32>,receiver:u32,kind:u32,side:i32,source:u32,smooth_events:u32) {
     let record=photon_record(index);
     photon_store_vector(record,position);photon_store_vector(record+4u,incoming);
     photon_store_vector(record+8u,flux);photon_store_vector(record+12u,normal);
     atomicStore(&photon_data[record+7u],receiver);atomicStore(&photon_data[record+11u],kind);
     let side_code=select(select(0u,1u,side>0),2u,side<0);
-    atomicStore(&photon_data[record+15u],side_code|(source<<2u));
+    // Two side bits, four hard source bits, then up to 63 smooth closed-glass events.
+    atomicStore(&photon_data[record+15u],side_code|(source<<2u)|(smooth_events<<6u));
     let previous=atomicExchange(&photon_data[16u+photon_hash(photon_cell(position))],index);
     atomicStore(&photon_data[record+3u],previous);
 }
@@ -34,7 +36,7 @@ fn photon_deposit(index:u32,position:vec3<f32>,incoming:vec3<f32>,flux:vec3<f32>
 // allocating photons*depth records. The separate RNG never changes transport.
 struct PhotonReservoir {
     visits:u32,rng:u32,position:vec3<f32>,incoming:vec3<f32>,flux:vec3<f32>,normal:vec3<f32>,receiver:u32,kind:u32,side:i32,
-    source:vec3<f32>,source_low:vec3<f32>,minimum:f32,source_index:u32,
+    source:vec3<f32>,source_low:vec3<f32>,minimum:f32,source_index:u32,smooth_events:u32,
 };
 fn photon_offer(reservoir:ptr<function,PhotonReservoir>,point:PrecisePoint,incoming:vec3<f32>,flux:vec3<f32>,normal:vec3<f32>,receiver:u32,kind:u32,side:i32) {
     if (*reservoir).minimum>0.0 && length(precise_point_delta(point.hi,point.lo,(*reservoir).source,(*reservoir).source_low))<(*reservoir).minimum {punctual_count(0u);return;}
@@ -66,6 +68,18 @@ fn photon_unit_sphere(rng:ptr<function,u32>)->vec3<f32> {
     let z=1.0-2.0*random(rng);let phi=2.0*PI*random(rng);let r=sqrt(max(0.0,1.0-z*z));
     return vec3<f32>(r*cos(phi),r*sin(phi),z);
 }
+// Project a parallel light bundle onto the disk enclosing the captured scene.
+// w is its area, or zero if the captured bounds have no positive radius.
+fn photon_project(direction:vec3<f32>,rng:ptr<function,u32>)->vec4<f32> {
+    let center=(photon_vector(6u)+photon_vector(9u))*0.5;
+    let radius=length(photon_vector(9u)-photon_vector(6u))*0.5;
+    if !(radius>0.0) {return vec4<f32>(0.0);}
+    let axis=select(vec3<f32>(0.0,0.0,1.0),vec3<f32>(0.0,1.0,0.0),abs(direction.z)>0.9);
+    let x=unit(cross(axis,direction));let y=cross(direction,x);
+    let r=radius*sqrt(random(rng));let phi=2.0*PI*random(rng);
+    let origin=center-direction*(radius+max(u.lighting.x*2.0,radius*0.000001))+r*(cos(phi)*x+sin(phi)*y);
+    return vec4<f32>(origin,PI*radius*radius);
+}
 @compute @workgroup_size(32)
 fn photon_emit(@builtin(global_invocation_id) invocation:vec3<u32>) {
     if invocation.x>=u.sampling.z {return;}
@@ -77,7 +91,7 @@ fn photon_emit(@builtin(global_invocation_id) invocation:vec3<u32>) {
     if reservoir.visits>0u {
         let flux=reservoir.flux*f32(reservoir.visits);
         if !all(flux>=vec3<f32>(0.0)) || !all(flux<=vec3<f32>(3.4e38)) {atomicOr(&failures[7],1u);return;}
-        photon_deposit(index,reservoir.position,reservoir.incoming,flux,reservoir.normal,reservoir.receiver,reservoir.kind,reservoir.side,reservoir.source_index);
+        photon_deposit(index,reservoir.position,reservoir.incoming,flux,reservoir.normal,reservoir.receiver,reservoir.kind,reservoir.side,reservoir.source_index,reservoir.smooth_events);
     }
 }
 fn photon_trace(index:u32,reservoir:ptr<function,PhotonReservoir>) {
@@ -86,10 +100,18 @@ fn photon_trace(index:u32,reservoir:ptr<function,PhotonReservoir>) {
     let studio=u.environment.w>0.0;
     let directions=select(3u,u32(u.light_count.x),studio);
     let punctual=select(0u,u32(u.light_count.y),studio);
-    let sources=directions+punctual;
+    let hard_sources=directions+punctual;
+    let maximum=photon_word(3u);
+    let area_count=select(0u,u32(u.light_count.w),photon_word(12u)>0u && maximum>1u);
+    let lit_environment=select(any(u.environment.xyz>vec3<f32>(0.0)),u.environment_map.z>0.0,u.environment_map.w>0.0);
+    let environment_count=select(0u,1u,studio && lit_environment && photon_word(13u)>0u && maximum>1u);
+    let sources=hard_sources+area_count+environment_count;
     if sources==0u {return;}
     let selected=min(sources-1u,u32(random(&rng)*f32(sources)));
-    (*reservoir).source_index=select(0u,selected-directions+1u,selected>=directions);
+    let area=selected>=hard_sources && selected<hard_sources+area_count;
+    let continuous=selected>=hard_sources;
+    let area_index=select(0xffffffffu,selected-hard_sources,area);
+    (*reservoir).source_index=select(0u,selected-directions+1u,selected>=directions && !continuous);
     var origin=vec3<f32>(0.0);var origin_low=vec3<f32>(0.0);
     var direction=vec3<f32>(0.0,0.0,-1.0);var flux=vec3<f32>(0.0);
     var source_minimum=0.0;
@@ -98,15 +120,11 @@ fn photon_trace(index:u32,reservoir:ptr<function,PhotonReservoir>) {
         var irradiance=vec3<f32>(FIXED_LIGHTS[min(selected,2u)].w*u.lighting.z*u.studio_weights[min(selected,2u)]);
         if studio {let light=u.directional_lights[min(selected,7u)];toward=light.direction.xyz;irradiance=light.color.xyz*light.direction.w;}
         direction=-toward;
-        let center=(photon_vector(6u)+photon_vector(9u))*0.5;
-        let radius=length(photon_vector(9u)-photon_vector(6u))*0.5;
-        if !(radius>0.0) {return;}
-        let axis=select(vec3<f32>(0.0,0.0,1.0),vec3<f32>(0.0,1.0,0.0),abs(direction.z)>0.9);
-        let x=unit(cross(axis,direction));let y=cross(direction,x);
-        let r=radius*sqrt(random(&rng));let phi=2.0*PI*random(&rng);
-        origin=center-direction*(radius+max(u.lighting.x*2.0,radius*0.000001))+r*(cos(phi)*x+sin(phi)*y);
-        flux=irradiance*(PI*radius*radius*f32(sources)/f32(count));
-    } else {
+        let projected=photon_project(direction,&rng);
+        if projected.w<=0.0 {return;}
+        origin=projected.xyz;
+        flux=irradiance*(projected.w*f32(sources)/f32(count));
+    } else if !continuous {
         let light=u.punctual_lights[min(selected-min(selected,directions),7u)];
         origin=light.position.xyz;origin_low=light.position_low.xyz;source_minimum=light.position_low.w;
         var density=1.0/(4.0*PI);var cone=1.0;
@@ -119,6 +137,27 @@ fn photon_trace(index:u32,reservoir:ptr<function,PhotonReservoir>) {
             cone=blend*blend*(3.0-2.0*blend);
         } else {direction=photon_unit_sphere(&rng);}
         flux=light.color.xyz*(light.color.w*light.position.w*light.position.w*cone*f32(sources)/(density*f32(count)));
+    } else if area {
+        let light=u.area_lights[min(area_index,3u)];
+        origin=light.center.xyz;
+        origin_low=(2.0*random(&rng)-1.0)*light.u.xyz+(2.0*random(&rng)-1.0)*light.v.xyz;
+        let normal=unit(cross(light.u.xyz,light.v.xyz));
+        let radius_squared=random(&rng);let phi=2.0*PI*random(&rng);
+        let radius=sqrt(radius_squared);
+        direction=from_local(vec3<f32>(radius*cos(phi),radius*sin(phi),sqrt(1.0-radius_squared)),normal);
+        // Uniform area and cosine solid-angle sampling cancel the emitted cosine.
+        flux=light.radiance.xyz*(PI*light.center.w*f32(sources)/f32(count));
+    } else {
+        let sample=env_sample(&rng);
+        if !(sample.pdf>0.0) || !any(sample.radiance>vec3<f32>(0.0)) {return;}
+        direction=-sample.direction;
+        let projected=photon_project(direction,&rng);
+        if projected.w<=0.0 {return;}
+        origin=projected.xyz;
+        // The disk encloses scene geometry. Analytic rectangles can lie farther
+        // toward the sampled sky, so test that part of the same line separately.
+        if emitter_hit_precise(origin,origin_low,-direction,0.0).index!=0xffffffffu {return;}
+        flux=sample.radiance*(projected.w*f32(sources)/(sample.pdf*f32(count)));
     }
     if !any(flux>vec3<f32>(0.0)) {return;}
     var wavelength=0.0;
@@ -134,13 +173,13 @@ fn photon_trace(index:u32,reservoir:ptr<function,PhotonReservoir>) {
     if !first.valid {photon_bad_medium();return;}
     if first.hit.triangle!=0xffffffffu && !initialize_media_spectral(first.hit.triangle,direction,&media,&medium_count,wavelength) {photon_bad_medium();return;}
     var previous=origin;var previous_low=origin_low;var excluded=0xffffffffu;var minimum=0.0;var optical=false;
-    let maximum=photon_word(3u);
     for(var depth=0u;depth<maximum;depth+=1u) {
         let hit=trace_precise(origin,origin_low,direction,false,excluded,minimum,medium_count>0u);
-        let emitter=emitter_hit_precise(origin,origin_low,direction,minimum);
+        let emitter=emitter_hit_precise_except(origin,origin_low,direction,minimum,select(0xffffffffu,area_index,depth==0u));
         if medium_count>0u && media[medium_count-1u].scatter.x>0.0 {
             let current=media[medium_count-1u];let flight=-log(1.0-random(&rng))/current.scatter.x;
             if flight<min(hit.distance,emitter.distance) {
+                if continuous {return;}
                 let point=origin+origin_low+direction*flight;
                 flux*=exp(-current.sigma*length(precise_point_delta(point,vec3<f32>(0.0),previous,previous_low)));
                 if optical {photon_offer(reservoir,PrecisePoint(point,vec3<f32>(0.0)),-direction,flux,vec3<f32>(0.0),bitcast<u32>(current.id),3u,0);}
@@ -165,9 +204,13 @@ fn photon_trace(index:u32,reservoir:ptr<function,PhotonReservoir>) {
         if !all(flux>=vec3<f32>(0.0)) || !all(flux<=vec3<f32>(3.4e38)) {atomicOr(&failures[7],1u);return;}
         if !any(flux>vec3<f32>(0.0)) {return;}
         if t.base.w<=0.0 {
-            if optical {photon_offer(reservoir,point,-direction,flux,geometric,hit.triangle,1u,0);}
+            if optical {
+                if continuous {(*reservoir).smooth_events=depth;}
+                photon_offer(reservoir,point,-direction,flux,geometric,hit.triangle,1u,0);
+            }
             return;
         }
+        if continuous && (t.parameters.w>=0.0 || t.glass.x>0.0) {return;}
         var normal=unit(t.n0.xyz*hit.bary.x+t.n1.xyz*hit.bary.y+t.n2.xyz*hit.bary.z);
         if dot(normal,geometric)<0.0 {normal=-normal;}
         if dot(normal,-direction)<=0.0 {normal=geometric;}
@@ -236,7 +279,7 @@ fn photon_trace(index:u32,reservoir:ptr<function,PhotonReservoir>) {
         previous=point.hi;previous_low=point.lo;
     }
 }
-fn photon_gather(t:Triangle,position:vec3<f32>,normal:vec3<f32>,geometric:vec3<f32>,view:vec3<f32>) -> vec3<f32> {
+fn photon_gather(t:Triangle,position:vec3<f32>,normal:vec3<f32>,geometric:vec3<f32>,view:vec3<f32>,remaining:u32) -> vec3<f32> {
     let count=photon_word(0u);if count==0u || t.base.w>0.0 {return vec3<f32>(0.0);}
     let radius=photon_float(2u);let center=photon_cell(position);var result=vec3<f32>(0.0);
     for(var z=-1;z<=1;z+=1) {for(var y=-1;y<=1;y+=1) {for(var x=-1;x<=1;x+=1) {
@@ -244,7 +287,9 @@ fn photon_gather(t:Triangle,position:vec3<f32>,normal:vec3<f32>,geometric:vec3<f
         loop {
             if index==0xffffffffu || index>=count || visited>=count {break;}visited+=1u;
             let record=photon_record(index);let point=photon_vector(record);let delta=point-position;
-            if photon_word(record+11u)==1u && photon_receiver_allowed(record,position) && all(photon_cell(point)==cell) && dot(delta,delta)<=radius*radius && abs(dot(delta,geometric))<=radius*0.1 && dot(photon_vector(record+12u),geometric)>0.0 && triangle(min(photon_word(record+7u),max(geometry[0],1u)-1u)).optics.w==t.optics.w {
+            let smooth_events=photon_word(record+15u)>>6u;
+            // The camera needs one loop slot beyond the glass chain to see the emitter.
+            if photon_word(record+11u)==1u && (smooth_events==0u || smooth_events<remaining) && photon_receiver_allowed(record,position) && all(photon_cell(point)==cell) && dot(delta,delta)<=radius*radius && abs(dot(delta,geometric))<=radius*0.1 && dot(photon_vector(record+12u),geometric)>0.0 && triangle(min(photon_word(record+7u),max(geometry[0],1u)-1u)).optics.w==t.optics.w {
                 let incoming=photon_vector(record+4u);
                 if dot(incoming,normal)>0.0 && dot(incoming,geometric)>0.0 {result+=brdf(t,normal,view,incoming)*photon_vector(record+8u)*(dot(incoming,normal)/dot(incoming,geometric));}
             }
@@ -254,8 +299,11 @@ fn photon_gather(t:Triangle,position:vec3<f32>,normal:vec3<f32>,geometric:vec3<f
     return result/(PI*radius*radius);
 }
 fn photon_enabled()->bool {return photon_word(0u)>0u;}
+fn photon_owns_smooth_tail(events:u32,environment:bool)->bool {
+    return events>1u && photon_word(select(12u,13u,environment))>0u && events<=photon_word(3u);
+}
 fn photon_receiver_allowed(record:u32,position:vec3<f32>)->bool {
-    let source=photon_word(record+15u)>>2u;
+    let source=(photon_word(record+15u)>>2u)&15u;
     if source==0u {return true;}
     if source>u32(u.light_count.y) {return false;}
     let light=u.punctual_lights[min(max(source,1u)-1u,7u)];

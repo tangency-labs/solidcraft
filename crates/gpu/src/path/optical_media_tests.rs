@@ -636,3 +636,125 @@ fn gpu_boundary_origins_refuse_through_existing_diagnostics_and_non_nested_outsi
     assert!(legacy.iter().all(|p| p[0] > 0.0 && p[3] == 1.0));
     assert_eq!(legacy, render(true), "the extra opt-in query consumes no RNG and leaves an already supported outside path byte-identical");
 }
+
+#[test]
+fn opus_128_disjoint_optics_are_independent_of_the_16_layer_medium_stack() {
+    let mut source = ProductScene { meshes: Vec::new(), bounds: Aabb3::EMPTY };
+    for index in 0..solidcraft_render::job::MAX_OPTICAL_TARGETS {
+        source.meshes.push(slab_body(&format!("OPUS {index}"), Vec3::new(1.0, 1.0, 0.25), Vec3::new(index as f64 * 30.0, 0.0, 0.0), 1.0, Vec3::ZERO));
+    }
+    source.bounds = source.meshes.iter().fold(Aabb3::EMPTY, |bounds, body| bounds.union(&body.mesh.bounds()));
+    assert!(scene::flatten(&source, Vec3::ZERO, &CancelToken::default()).is_ok());
+    source.meshes.push(slab_body("one target too many", Vec3::new(1.0, 1.0, 0.25), Vec3::new(128.0 * 30.0, 0.0, 0.0), 1.0, Vec3::ZERO));
+    assert!(scene::flatten(&source, Vec3::ZERO, &CancelToken::default()).err().unwrap().message.contains("128"));
+}
+
+#[test]
+fn opus_thirty_gpu_optics_cross_60_interfaces_with_the_new_depth_budget() {
+    let Some(executor) = executor() else { return };
+    let mut source = ProductScene { meshes: Vec::new(), bounds: Aabb3::EMPTY };
+    for index in 0..30 {
+        source.meshes.push(slab_body(
+            &format!("OPUS {index}"),
+            Vec3::new(1.0, 1.0, 0.25),
+            Vec3::new(0.0, 0.0, f64::from(index)),
+            1.0,
+            Vec3::new(0.1, 0.2, 0.0),
+        ));
+    }
+    source.bounds = source.meshes.iter().fold(Aabb3::EMPTY, |bounds, body| bounds.union(&body.mesh.bounds()));
+    let mut req = request(1);
+    req.camera.distance = 50.0;
+    req.camera.fov = 0.00000001;
+    let options = JobOptions { samples: 1, max_depth: u32::from(solidcraft_render::job::MAX_PATH_DEPTH), seed: 9, ..Default::default() };
+    let mut task = Task::new(executor.context, source, req, options, CancelToken::default()).unwrap();
+    task.environment = 1.0;
+    task.environment_bottom_only = true;
+    task.studio = 0.0;
+    task.dispatch().unwrap();
+    let actual = task.read_linear().unwrap()[0];
+    for (actual, expected) in actual.into_iter().zip([(-0.75_f64).exp(), (-1.5_f64).exp(), 1.0, 1.0]) {
+        assert!((f64::from(actual) - expected).abs() < 2e-5, "60-interface Beer {actual} vs {expected}");
+    }
+}
+
+fn opus_concave_boundary() -> Mesh {
+    let polygon = [(0.0, 0.0), (3.0, 0.0), (3.0, 1.0), (1.0, 1.0), (1.0, 3.0), (0.0, 3.0)];
+    let mut mesh = Mesh::default();
+    for z in [0.0, 1.0] {
+        for (x, y) in polygon {
+            mesh.positions.push(Vec3::new(x, y, z));
+            mesh.normals.push(Vec3::Z);
+        }
+    }
+    for [a, b, c] in [[0, 1, 2], [0, 2, 3], [0, 3, 5], [3, 4, 5]] {
+        mesh.triangles.extend([[a, c, b], [a + 6, b + 6, c + 6]]);
+    }
+    for i in 0..6 {
+        let j = (i + 1) % 6;
+        mesh.triangles.extend([[i, j, j + 6], [i, j + 6, i + 6]]);
+    }
+    mesh.tri_face.resize(mesh.triangles.len(), 0);
+    mesh
+}
+
+#[test]
+fn nonconvex_optical_surfaces_admit_disjoint_overlapping_bounds_and_certify_true_containment() {
+    let cancel = CancelToken::default();
+    for contained in [false, true] {
+        let mut outer = slab_body("concave parent", Vec3::new(1.0, 1.0, 1.0), Vec3::ZERO, 1.5, Vec3::ZERO);
+        outer.mesh = Arc::new(opus_concave_boundary());
+        let mut inner = slab_body("notch or arm", Vec3::new(1.0, 1.0, 1.0), Vec3::ZERO, 1.5, Vec3::ZERO);
+        let bounds = inner.mesh.bounds();
+        let span = bounds.max - bounds.min;
+        for p in &mut Arc::make_mut(&mut inner.mesh).positions {
+            p.x = (p.x - bounds.min.x) / span.x * 0.6 + if contained { 0.2 } else { 1.5 };
+            p.y = (p.y - bounds.min.y) / span.y * 0.6 + if contained { 0.2 } else { 1.5 };
+            p.z = (p.z - bounds.min.z) / span.z * 0.6 + 0.2;
+        }
+        let mut source = ProductScene { bounds: outer.mesh.bounds(), meshes: vec![outer, inner] };
+        for reverse in [false, true] {
+            if reverse {
+                source.meshes.reverse();
+            }
+            assert!(scene::flatten_with_media(&source, Vec3::ZERO, &cancel, true).is_ok(), "contained={contained} reverse={reverse}");
+            assert_eq!(scene::flatten_with_media(&source, Vec3::ZERO, &cancel, false).is_ok(), !contained);
+        }
+    }
+}
+
+#[test]
+fn opus_final_gpu_profile_completes_on_the_same_physical_executor() {
+    let Some(executor) = executor() else { return };
+    let host = ImageHost::with_executor(Arc::new(executor)).unwrap();
+    let options =
+        JobOptions { samples: 2, max_depth: u32::from(solidcraft_render::job::MAX_PATH_DEPTH), linear_exr: true, seed: 81, ..Default::default() };
+    let mut submission = host.prepare_submission(sphere(white()), request(1), options, None, CancelToken::default()).unwrap();
+    submission.select_image_mode(RenderMode::Final).unwrap();
+    let job = host.submit_prepared(solidcraft_render::job::JobId { session: 982, serial: 1, generation: 1 }, 1, submission).unwrap();
+    let status = job.wait_timeout(Duration::from_secs(30)).unwrap();
+    assert_eq!(status.progress.phase, Phase::Completed, "{:?}", status.error);
+    assert_eq!(status.resolved.profile.mode, RenderMode::Final);
+    assert_eq!(status.resolved.executor.as_str(), "gpu-path");
+    assert_eq!((status.options.samples, status.options.max_depth), (2, 64));
+    assert!(job.frame().unwrap().unwrap().linear_master_info().is_some());
+}
+
+#[test]
+fn opus_gpu_preparation_rejects_actual_optical_crossings_before_a_job_exists_and_releases_its_lease() {
+    let Some(executor) = executor() else { return };
+    let host = ImageHost::with_executor(Arc::new(executor)).unwrap();
+    let mut source = nested();
+    for point in &mut Arc::make_mut(&mut source.meshes[1].mesh).positions {
+        point.x += 5.0;
+    }
+    let options = JobOptions { nested_media: true, samples: 1, ..Default::default() };
+    let failure = host.prepare_submission(source, request(1), options, None, CancelToken::default()).err().unwrap();
+    assert_eq!(failure.code, ErrorCode::InvalidScene);
+    assert!(failure.message.contains("Outer") && failure.message.contains("Inner"), "{}", failure.message);
+    assert_eq!(host.admitted_bytes(), 0, "failed Check releases all captured work without creating a job");
+    let cancel = CancelToken::default();
+    cancel.cancel();
+    assert_eq!(host.prepare_submission(nested(), request(1), options, None, cancel).err().unwrap().code, ErrorCode::Cancelled);
+    assert_eq!(host.admitted_bytes(), 0);
+}

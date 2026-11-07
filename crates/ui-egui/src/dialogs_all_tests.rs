@@ -1115,6 +1115,7 @@ fn draft_uses_the_picked_solid_beside_a_hidden_overlapping_mesh() {
                 positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
                 triangles: mesh.triangles.iter().flatten().copied().collect(),
                 color: None,
+                corner_normals: Default::default(),
             }],
         },
         Some("Imported mesh"),

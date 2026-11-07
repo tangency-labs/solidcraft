@@ -69,12 +69,24 @@ pub const GPU_PATH_LIMITS: crate::RenderLimits =
     crate::RenderLimits { max_dimension: 8192, max_pixels: 16_777_216, max_scratch_bytes: 8 * 1024 * 1024 * 1024 };
 pub const MAX_GPU_PATH_TRIANGLES: u64 = 8_000_000;
 pub const MAX_GPU_PATH_BODIES: usize = 65_536;
-pub const MAX_GPU_DIELECTRICS: usize = 32;
+/// Optical target count is independent of simultaneous containment and ray depth.
+pub const MAX_OPTICAL_TARGETS: usize = 128;
+pub const MAX_GPU_DIELECTRICS: usize = MAX_OPTICAL_TARGETS;
+pub const MAX_NESTED_MEDIA: usize = 16;
+pub const MAX_PATH_DEPTH: u8 = 64;
+pub const MAX_SAMPLES_PER_PIXEL: u32 = 65_536;
+pub const MAX_CAUSTIC_PHOTONS: u32 = 1_048_576;
 
 /// Runtime sampling intent, separate from saved documents and device resources.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct JobOptions {
+    /// Explicit ray-footprint mip and bounded anisotropic texture filtering.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub texture_filtering: bool,
+    /// Approximate the missing microfacet bounces of rough isotropic conductors.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub metal_energy_compensation: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caustics: Option<CausticOptions>,
     #[serde(skip_serializing_if = "aging::AgingStack::is_empty")]
@@ -107,6 +119,8 @@ pub struct JobOptions {
 impl Default for JobOptions {
     fn default() -> Self {
         Self {
+            texture_filtering: false,
+            metal_energy_compensation: false,
             caustics: None,
             aging: Default::default(),
             nested_media: false,
@@ -205,12 +219,12 @@ impl JobOptions {
         if let Some(lens) = self.lens {
             lens.validate()?;
         }
-        if !(1..=4096).contains(&self.samples)
-            || !(1..=16).contains(&self.max_depth)
+        if !(1..=MAX_SAMPLES_PER_PIXEL).contains(&self.samples)
+            || !(1..=u32::from(MAX_PATH_DEPTH)).contains(&self.max_depth)
             || !self.exposure_ev.is_finite()
             || !(-32.0..=32.0).contains(&self.exposure_ev)
         {
-            return Err(JobError::new(ErrorCode::InvalidRequest, "samples must be 1..4096, depth 1..16 and exposure -32..32 EV"));
+            return Err(JobError::new(ErrorCode::InvalidRequest, "samples must be 1..65536, depth 1..64 and exposure -32..32 EV"));
         }
         Ok(())
     }
@@ -307,6 +321,12 @@ pub trait ImageExecutor: Send + Sync {
     }
     fn descriptor(&self) -> Result<crate::ExecutorDescriptor>;
     fn admit(&self, scene: &crate::ProductScene, request: &ImageRequest, options: JobOptions) -> Result<Admission>;
+    /// Validate the captured producer representation under its already reserved
+    /// work lease. Check and Start run this before a job identity is created.
+    /// Implementations must observe cancellation and retain no unbilled state.
+    fn validate_prepared(&self, _scene: &crate::ProductScene, _request: &ImageRequest, _options: JobOptions, cancel: &CancelToken) -> Result<()> {
+        cancel.check()
+    }
     fn begin(&self, scene: crate::ProductScene, request: ImageRequest, options: JobOptions, cancel: CancelToken) -> Result<Box<dyn ImageWork>>;
 }
 
@@ -721,14 +741,14 @@ fn bounded_dielectrics<'de, D: serde::Deserializer<'de>>(deserializer: D) -> std
     impl<'de> serde::de::Visitor<'de> for Inputs {
         type Value = Vec<DielectricOptions>;
         fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.write_str("at most eight dielectric overrides")
+            f.write_str("at most 128 dielectric overrides")
         }
         fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut sequence: A) -> std::result::Result<Self::Value, A::Error> {
             let mut inputs = Vec::new();
             inputs.try_reserve_exact(8).map_err(serde::de::Error::custom)?;
             while let Some(input) = sequence.next_element()? {
-                if inputs.len() == 8 {
-                    return Err(serde::de::Error::custom("at most eight dielectric overrides"));
+                if inputs.len() == MAX_OPTICAL_TARGETS {
+                    return Err(serde::de::Error::custom("at most 128 dielectric overrides"));
                 }
                 inputs.push(input);
             }
@@ -809,6 +829,12 @@ pub fn validate_cpu_denoise_image(width: u32, height: u32) -> Result<()> {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RaytraceOptions {
+    /// Explicit ray-footprint mip and bounded anisotropic texture filtering.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub texture_filtering: bool,
+    /// Approximate the missing microfacet bounces of rough isotropic conductors.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub metal_energy_compensation: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caustics: Option<CausticOptions>,
     /// One bounded world-space participating medium, available with explicit Path.
@@ -868,6 +894,8 @@ pub struct RaytraceOptions {
 impl Default for RaytraceOptions {
     fn default() -> Self {
         Self {
+            texture_filtering: false,
+            metal_energy_compensation: false,
             caustics: None,
             volume: None,
             sun: None,
@@ -1127,6 +1155,9 @@ impl RaytraceOptions {
     }
     pub fn validate(&self) -> Result<()> {
         let _ = self.retained_volume_bytes()?;
+        if self.metal_energy_compensation && self.path.is_none() {
+            return Err(JobError::new(ErrorCode::InvalidRequest, "CPU rough metal energy compensation requires explicit Indirect lighting"));
+        }
         if let Some(caustics) = self.caustics {
             caustics.validate()?;
             if self.path.is_none() {
@@ -1215,8 +1246,9 @@ impl RaytraceOptions {
         }) {
             return Err(JobError::new(ErrorCode::InvalidRequest, "invalid constant raytrace environment"));
         }
-        if self.dielectrics.len() > 8 || self.dielectrics.capacity() > 8 {
-            return Err(JobError::new(ErrorCode::InvalidRequest, "at most eight dielectric overrides"));
+        let optical_limit = if self.path.is_some() { MAX_OPTICAL_TARGETS } else { 8 };
+        if self.dielectrics.len() > optical_limit || self.dielectrics.capacity() > optical_limit {
+            return Err(JobError::new(ErrorCode::InvalidRequest, format!("at most {optical_limit} dielectric overrides for this CPU transport")));
         }
         for (index, input) in self.dielectrics.iter().enumerate() {
             if let Some(model) = input.model {

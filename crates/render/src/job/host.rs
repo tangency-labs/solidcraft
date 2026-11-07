@@ -26,6 +26,25 @@ use super::admit;
 const MEMORY_LIMIT: u64 = 512 * 1024 * 1024;
 const QUEUE_LIMIT: usize = 2;
 
+fn validate_image_profiles(descriptor: &ExecutorDescriptor) -> Result<()> {
+    if descriptor.profiles.is_empty()
+        || descriptor.profiles.len() > 2
+        || descriptor.profiles.iter().any(|profile| {
+            !matches!(profile.mode, RenderMode::Preview | RenderMode::Final)
+                || profile.operation != RenderOperation::Image
+                || profile.formats != [RenderFormat::Png]
+        })
+        || descriptor
+            .profiles
+            .iter()
+            .enumerate()
+            .any(|(index, profile)| descriptor.profiles[..index].iter().any(|previous| previous.mode == profile.mode))
+    {
+        return Err(JobError::new(ErrorCode::InvalidRequest, "image worker requires unique Preview/Final Image/PNG profiles"));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 struct CpuExecutor;
 #[cfg(test)]
@@ -745,6 +764,7 @@ pub struct PreparedSubmission {
     environment_info: Option<JobEnvironmentInfo>,
     textures: Option<super::textures::TextureSummary>,
     resolved: crate::ResolvedRequest,
+    execution_descriptor: [u8; 32],
     admission: Admission,
     cancel: CancelToken,
     #[cfg(feature = "raytrace-cpu")]
@@ -754,6 +774,48 @@ pub struct PreparedSubmission {
     host: ImageHost,
 }
 impl PreparedSubmission {
+    /// Preserve the requested image mode in queued/status metadata without
+    /// changing its owning producer, captured scene, numerical options or proof.
+    pub fn select_image_mode(&mut self, mode: RenderMode) -> Result<()> {
+        self.check_cancel()?;
+        if !matches!(mode, RenderMode::Preview | RenderMode::Final) {
+            return Err(JobError::new(ErrorCode::InvalidRequest, "image mode must be Preview or Final"));
+        }
+        let mut descriptor = self.host.descriptor_for_request(self.request())?;
+        for profile in &mut descriptor.profiles {
+            profile.formats.sort_unstable();
+            profile.features.sort_unstable();
+        }
+        descriptor.profiles.sort_unstable_by_key(|profile| (profile.mode, profile.operation));
+        if capture_fingerprint(&descriptor)? != self.execution_descriptor {
+            return Err(JobError::new(ErrorCode::HostUnavailable, "prepared image executor descriptor changed"));
+        }
+        if !descriptor.profiles.iter().any(|profile| profile == &self.resolved.profile) {
+            return Err(JobError::new(ErrorCode::HostUnavailable, "prepared image executor profile changed"));
+        }
+        let mut backend = crate::builtin_backend();
+        backend.id = self.resolved.backend.clone();
+        backend.executors = vec![descriptor];
+        let resolved = crate::resolve_request(
+            &[backend],
+            &crate::RenderRequest {
+                backend: Some(self.resolved.backend.clone()),
+                mode,
+                operation: RenderOperation::Image,
+                width: self.resolved.width,
+                height: self.resolved.height,
+                format: self.resolved.format,
+                features: self.resolved.profile.features.clone(),
+                policy: Default::default(),
+            },
+        )
+        .map_err(|error| JobError::new(ErrorCode::InvalidRequest, error.to_string()))?;
+        if resolved.executor != self.resolved.executor {
+            return Err(JobError::new(ErrorCode::WrongOwner, "image mode changed the captured executor"));
+        }
+        self.resolved = resolved;
+        Ok(())
+    }
     /// Check a simultaneously retained metadata owner under the same unchanged
     /// per-job/profile cap. It is not funded by a Work/frame lease.
     pub fn check_retained_metadata(&self, bytes: u64) -> Result<()> {
@@ -1491,14 +1553,7 @@ impl ImageHost {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn with_executor(executor: Arc<dyn ImageExecutor>) -> Result<Self> {
         let descriptor = executor.descriptor()?;
-        if descriptor.profiles.len() != 1
-            || descriptor
-                .profiles
-                .iter()
-                .any(|p| p.mode != RenderMode::Preview || p.operation != RenderOperation::Image || p.formats != [RenderFormat::Png])
-        {
-            return Err(JobError::new(ErrorCode::InvalidRequest, "image worker currently accepts one Preview/Image/PNG profile"));
-        }
+        validate_image_profiles(&descriptor)?;
         let limit = executor.memory_limit_bytes();
         let ceiling = if usize::BITS >= 64 { super::NATIVE_CPU_POOL_BYTES } else { MEMORY_LIMIT };
         if limit == 0 || limit > ceiling {
@@ -1568,7 +1623,7 @@ impl ImageHost {
             budget.validate_execution()?;
         }
         let descriptor = self.descriptor_for(profile.integrator())?;
-        if descriptor.availability != Availability::Available || descriptor.profiles.len() != 1 {
+        if descriptor.availability != Availability::Available || descriptor.profiles.is_empty() || descriptor.profiles.len() > 2 {
             return Err(JobError::new(ErrorCode::HostUnavailable, "capture executor is unavailable"));
         }
         Ok(descriptor)
@@ -1593,7 +1648,8 @@ impl ImageHost {
             profile.formats.sort_unstable();
             profile.features.sort_unstable();
         }
-        let execution = capture_fingerprint(&(&descriptor.id, descriptor.profiles.first()))?;
+        descriptor.profiles.sort_unstable_by_key(|profile| (profile.mode, profile.operation));
+        let execution = capture_fingerprint(&(&descriptor.id, &descriptor.profiles))?;
         let reservation = self.0.shared.budget.reserve(bytes)?;
         Ok(CaptureLease {
             host: self.clone(),
@@ -1642,7 +1698,7 @@ impl ImageHost {
                 return Err(JobError::new(ErrorCode::InvalidRequest, "registered executor does not implement the authored advanced Glass models"));
             }
             if options.caustics.is_some() && !executor.supports_caustics() {
-                return Err(JobError::new(ErrorCode::InvalidRequest, "registered executor does not implement delta-light caustic photons"));
+                return Err(JobError::new(ErrorCode::InvalidRequest, "registered executor does not implement caustic photons"));
             }
             if request.raytrace.is_some() {
                 return Err(JobError::new(ErrorCode::InvalidRequest, "registered executors do not accept CPU raytrace options"));
@@ -1768,18 +1824,25 @@ impl ImageHost {
             } else {
                 Availability::Available
             },
-            profiles: vec![RenderProfile {
-                mode: RenderMode::Preview,
-                operation: RenderOperation::Image,
-                formats: vec![RenderFormat::Png],
-                features: if integrator == Integrator::Raytrace && cfg!(feature = "raytrace-cpu") && self.kind() == HostKind::NativeWorker {
-                    // Refraction is the certified thin-sheet/axis-aligned-box CPU preview
-                    // contract. Admission still refuses unsupported geometry and combinations.
-                    vec![crate::RenderFeature::Pbr, crate::RenderFeature::Hdri, crate::RenderFeature::Refraction]
-                } else {
-                    vec![crate::RenderFeature::Pbr]
-                },
-            }],
+            profiles: [RenderMode::Preview, RenderMode::Final]
+                .into_iter()
+                .filter(|mode| {
+                    *mode == RenderMode::Preview
+                        || (integrator == Integrator::Raytrace && cfg!(feature = "raytrace-cpu") && self.kind() == HostKind::NativeWorker)
+                })
+                .map(|mode| RenderProfile {
+                    mode,
+                    operation: RenderOperation::Image,
+                    formats: vec![RenderFormat::Png],
+                    features: if integrator == Integrator::Raytrace && cfg!(feature = "raytrace-cpu") && self.kind() == HostKind::NativeWorker {
+                        // Admission certifies the same physical producer and combinations
+                        // for both image modes. Numerical quality remains authored intent.
+                        vec![crate::RenderFeature::Pbr, crate::RenderFeature::Hdri, crate::RenderFeature::Refraction]
+                    } else {
+                        vec![crate::RenderFeature::Pbr]
+                    },
+                })
+                .collect(),
             limits: if integrator == Integrator::Raytrace && self.kind() == HostKind::NativeWorker && usize::BITS >= 64 {
                 super::CpuBudget::Workstation.image_limits(false)
             } else {
@@ -1949,20 +2012,29 @@ impl ImageHost {
             .ok_or_else(|| JobError::new(ErrorCode::LimitExceeded, "retained preparation byte overflow"))?;
         self.check_request_sum(estimated_total_bytes, simultaneous, request.cpu_budget())?;
         let mut backend = crate::builtin_backend();
-        let descriptor = self.descriptor_for_request(&request)?;
+        let mut descriptor = self.descriptor_for_request(&request)?;
         if let Some(credit) = capture.as_deref()
             && credit.profile == CaptureProfile::Registered
             && capture_fingerprint(&descriptor)? != credit.descriptor
         {
             return Err(JobError::new(ErrorCode::HostUnavailable, "resolved capture executor metadata changed"));
         }
+        for profile in &mut descriptor.profiles {
+            profile.formats.sort_unstable();
+            profile.features.sort_unstable();
+        }
+        descriptor.profiles.sort_unstable_by_key(|profile| (profile.mode, profile.operation));
+        let execution = capture_fingerprint(&(&descriptor.id, &descriptor.profiles))?;
+        let execution_descriptor = capture_fingerprint(&descriptor)?;
+        let initial_mode =
+            if descriptor.profiles.iter().any(|profile| profile.mode == RenderMode::Preview) { RenderMode::Preview } else { RenderMode::Final };
         let expected_executor = descriptor.id.clone();
         backend.executors = vec![descriptor];
         let resolved = crate::resolve_request(
             &[backend],
             &crate::RenderRequest {
                 backend: None,
-                mode: RenderMode::Preview,
+                mode: initial_mode,
                 operation: RenderOperation::Image,
                 width: u64::from(request.width),
                 height: u64::from(request.height),
@@ -1986,7 +2058,7 @@ impl ImageHost {
             .checked_add(request_bytes)
             .ok_or_else(|| JobError::new(ErrorCode::LimitExceeded, "prepared work/request byte overflow"))?;
         if let Some(credit) = capture.as_deref()
-            && capture_fingerprint(&(&resolved.executor, Some(&resolved.profile)))? != credit.execution
+            && execution != credit.execution
         {
             return Err(JobError::new(ErrorCode::WrongOwner, "resolved capture executor/profile changed"));
         }
@@ -2032,6 +2104,7 @@ impl ImageHost {
             environment_info,
             textures,
             resolved,
+            execution_descriptor,
             admission,
             cancel,
             #[cfg(feature = "raytrace-cpu")]
@@ -2060,6 +2133,9 @@ impl ImageHost {
                 }
                 prepared.proof.push(certified);
             }
+        }
+        if let Some(executor) = &self.0.executor {
+            executor.validate_prepared(&prepared.scene, prepared.request(), options, &prepared.cancel)?;
         }
         prepared.cancel.check()?;
         prepared.options = if options.is_structural_default() { None } else { Some(RetainedOptions::new(options)?) };
@@ -2105,6 +2181,7 @@ impl ImageHost {
             environment_info,
             textures,
             resolved,
+            execution_descriptor: _,
             admission,
             cancel,
             #[cfg(feature = "raytrace-cpu")]

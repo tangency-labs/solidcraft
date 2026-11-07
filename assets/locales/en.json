@@ -3370,7 +3370,7 @@
   "render.cpu_opaque_required": "CPU ray tracing needs an opaque background. Clear Transparent background to continue.",
   "render.cpu_options_pending": "This CPU panel cannot edit emission, surface effects, glass or anisotropy yet. Clear those API options before using it.",
   "render.cpu_path_depth": "Path depth",
-  "render.cpu_path_help": "Adds light bouncing between opaque surfaces and through supported Glass shapes. Requires progressive rendering and traced shadows. Path depth counts shaded surfaces, Glass boundaries and scattering events, starting with the first hit (1–16). Depth 1 gives direct lighting on opaque surfaces; higher values allow more bounces or Glass crossings and may take longer. Turn off Indirect lighting to use custom reflections or anisotropy.",
+  "render.cpu_path_help": "Adds light bouncing between opaque surfaces and through supported Glass shapes. Requires progressive rendering and traced shadows. Path depth counts shaded surfaces, Glass boundaries and scattering events, starting with the first hit (1–64). Depth 1 gives direct lighting on opaque surfaces; higher values allow more bounces or Glass crossings and may take longer. Turn off Indirect lighting to use custom reflections or anisotropy.",
   "render.cpu_path_lighting": "Indirect lighting",
   "render.cpu_path_optics_reason": "Your settings are kept. Turn off Indirect lighting to use custom reflections or anisotropy.",
   "render.cpu_point": "Point light",

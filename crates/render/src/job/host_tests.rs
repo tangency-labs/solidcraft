@@ -330,7 +330,7 @@ fn cooperative_raytrace_descriptor_matches_native_only_validation() {
 
 #[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
 #[test]
-fn native_raytrace_refraction_capability_resolves_only_preview_images() {
+fn native_raytrace_refraction_capability_resolves_preview_and_final_images() {
     let host = CpuHost::for_platform().unwrap();
     let descriptor = host.descriptor_for(Integrator::Raytrace).unwrap();
     assert_eq!(descriptor.availability, Availability::Available);
@@ -350,7 +350,9 @@ fn native_raytrace_refraction_capability_resolves_only_preview_images() {
     let resolved = crate::resolve_request(std::slice::from_ref(&backend), &request).unwrap();
     assert_eq!(resolved.executor.as_str(), "cpu-raytrace");
     request.mode = RenderMode::Final;
-    assert!(crate::resolve_request(std::slice::from_ref(&backend), &request).is_err());
+    let final_image = crate::resolve_request(std::slice::from_ref(&backend), &request).unwrap();
+    assert_eq!(final_image.executor, resolved.executor);
+    assert_eq!(final_image.profile.mode, RenderMode::Final);
     request.mode = RenderMode::Preview;
     backend.executors = vec![host.descriptor_for(Integrator::Raster).unwrap()];
     assert!(crate::resolve_request(&[backend], &request).is_err(), "CPU raster must not advertise physical refraction");
@@ -2137,6 +2139,9 @@ mod capture_credit {
             // The full raw descriptor still must remain exactly pinned.
             descriptor.profiles[0].features.push(crate::RenderFeature::Hdri);
             descriptor.profiles[0].formats.insert(0, RenderFormat::Exr);
+            let mut final_image = descriptor.profiles[0].clone();
+            final_image.mode = RenderMode::Final;
+            descriptor.profiles.push(final_image);
             let state = self.0.load(Ordering::Acquire);
             descriptor.id = ExecutorId::new(if state == 1 { "changed-capture-map" } else { "capture-map" }).unwrap();
             if state == 3 {
@@ -2592,6 +2597,88 @@ fn actual_cpu_texture_worker_releases_sources_after_completion_or_cancel_while_s
         assert_eq!(job.frame().unwrap().is_some(), !cancelled);
         drop(status);
         drop(job);
+        assert_eq!(host.admitted_bytes(), 0);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn registered_preview_and_final_profiles_keep_capture_identity_and_completed_mode() {
+    struct TwoModes;
+    impl ImageExecutor for TwoModes {
+        fn descriptor(&self) -> Result<ExecutorDescriptor> {
+            let mut descriptor = CpuExecutor.descriptor()?;
+            let mut final_image = descriptor.profiles[0].clone();
+            final_image.mode = RenderMode::Final;
+            descriptor.profiles.push(final_image);
+            Ok(descriptor)
+        }
+        fn admit(&self, scene: &ProductScene, request: &ImageRequest, options: JobOptions) -> Result<Admission> {
+            CpuExecutor.admit(scene, request, options)
+        }
+        fn begin(&self, scene: ProductScene, request: ImageRequest, options: JobOptions, cancel: CancelToken) -> Result<Box<dyn ImageWork>> {
+            CpuExecutor.begin(scene, request, options, cancel)
+        }
+    }
+    let host = ImageHost::with_executor(Arc::new(TwoModes)).unwrap();
+    let cancel = CancelToken::default();
+    let credit = host.reserve_capture(0, CaptureProfile::Registered, &cancel, None).unwrap();
+    assert_eq!(host.descriptor().unwrap().profiles.len(), 2);
+    let mut unsupported = CpuExecutor.descriptor().unwrap();
+    unsupported.profiles[0].mode = RenderMode::Quick;
+    assert!(validate_image_profiles(&unsupported).is_err());
+    drop(credit);
+    let mut submission = host.prepare_submission_with_metadata(empty(), request(), JobOptions::default(), None, cancel, None).unwrap();
+    assert!(submission.select_image_mode(RenderMode::Quick).is_err());
+    assert_eq!(submission.resolved.profile.mode, RenderMode::Preview);
+    submission.select_image_mode(RenderMode::Final).unwrap();
+    let job = host.submit_prepared(JobId { session: 981, serial: 1, generation: 1 }, 1, submission).unwrap();
+    let status = job.wait_timeout(std::time::Duration::from_secs(30)).unwrap();
+    assert_eq!(status.progress.phase, Phase::Completed);
+    assert_eq!(status.resolved.profile.mode, RenderMode::Final);
+    assert_eq!(status.resolved.executor.as_str(), "cpu-product");
+    assert!(job.frame().unwrap().is_some());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn prepared_image_mode_pins_the_final_profile_limits_and_scratch_before_job_creation() {
+    struct ChangingDescriptor(Arc<AtomicU64>);
+    impl ImageExecutor for ChangingDescriptor {
+        fn descriptor(&self) -> Result<ExecutorDescriptor> {
+            let mut descriptor = CpuExecutor.descriptor()?;
+            let mut final_image = descriptor.profiles[0].clone();
+            final_image.mode = RenderMode::Final;
+            match self.0.load(Ordering::Acquire) {
+                1 => final_image.features.push(crate::RenderFeature::Hdri),
+                2 => descriptor.limits.max_dimension -= 1,
+                3 => descriptor.scratch.sample_bytes_per_pixel += 1,
+                _ => {}
+            }
+            descriptor.profiles.push(final_image);
+            Ok(descriptor)
+        }
+        fn admit(&self, scene: &ProductScene, request: &ImageRequest, options: JobOptions) -> Result<Admission> {
+            CpuExecutor.admit(scene, request, options)
+        }
+        fn begin(&self, scene: ProductScene, request: ImageRequest, options: JobOptions, cancel: CancelToken) -> Result<Box<dyn ImageWork>> {
+            CpuExecutor.begin(scene, request, options, cancel)
+        }
+    }
+    let changed = Arc::new(AtomicU64::new(0));
+    let host = ImageHost::with_executor(Arc::new(ChangingDescriptor(changed.clone()))).unwrap();
+    for mutation in 1..=3 {
+        changed.store(0, Ordering::Release);
+        let mut prepared = host.prepare_submission(empty(), request(), JobOptions::default(), None, CancelToken::default()).unwrap();
+        let held = host.admitted_bytes();
+        changed.store(mutation, Ordering::Release);
+        let error = prepared.select_image_mode(RenderMode::Final).unwrap_err();
+        assert_eq!(error.code, ErrorCode::HostUnavailable);
+        assert!(error.message.contains("descriptor changed"));
+        assert_eq!(prepared.resolved.profile.mode, RenderMode::Preview);
+        assert!(host.0.shared.queue.lock().unwrap().is_empty());
+        assert_eq!(host.admitted_bytes(), held);
+        drop(prepared);
         assert_eq!(host.admitted_bytes(), 0);
     }
 }

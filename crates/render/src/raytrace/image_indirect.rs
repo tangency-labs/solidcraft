@@ -65,6 +65,8 @@ pub(super) struct State {
     radiance: Vec3,
     previous_pdf: f64,
     previous_position: Vec3,
+    texture_position: Vec3,
+    texture_distance: f64,
     contribution: Vec3,
     after_shadow: Stage,
     shadow_ray: Option<Ray>,
@@ -73,6 +75,7 @@ pub(super) struct State {
     caustic_gather: super::caustics::Gather,
     glass_lighting: Option<glass_lighting::Context>,
     sampled_continuous: bool,
+    smooth_caustic_chain: Option<u8>,
 }
 impl Default for State {
     fn default() -> Self {
@@ -96,6 +99,8 @@ impl Default for State {
             radiance: Vec3::ZERO,
             previous_pdf: 0.0,
             previous_position: Vec3::ZERO,
+            texture_position: Vec3::ZERO,
+            texture_distance: 0.0,
             contribution: Vec3::ZERO,
             after_shadow: Stage::Directional,
             shadow_ray: None,
@@ -104,6 +109,7 @@ impl Default for State {
             caustic_gather: Default::default(),
             glass_lighting: None,
             sampled_continuous: false,
+            smooth_caustic_chain: None,
         }
     }
 }
@@ -190,7 +196,7 @@ impl State {
     pub(super) fn origin_slot_info(&self) -> (usize, usize, bool) {
         (self.origins.len(), self.origins.capacity(), self.origins.first().is_some_and(|o| o.ready()))
     }
-    pub(super) fn initial_medium(&self) -> Option<([usize; 8], usize, Vec3)> {
+    pub(super) fn initial_medium(&self) -> Option<([usize; job::MAX_NESTED_MEDIA], usize, Vec3)> {
         self.optical.as_ref().map(|o| (o.media, o.len, o.segment_start))
     }
     pub(super) fn stage_name(&self) -> &'static str {
@@ -234,8 +240,31 @@ fn variates(task: &ImageTask, state: &State, domain: u64) -> job::Result<[f64; 2
     let p = task.progressive.as_ref().ok_or_else(|| invalid("CPU path needs progressive film"))?;
     p.variates(task.pixel, (0x5041_5448_0000_u64 + u64::from(state.depth) * 0x10000).wrapping_add(domain))
 }
+fn remaining_depth(task: &ImageTask, state: &State) -> job::Result<u8> {
+    Ok(task.options.path.ok_or_else(|| invalid("CPU path settings disappeared"))?.max_depth.saturating_sub(state.depth))
+}
 fn continuing(task: &ImageTask, state: &State) -> job::Result<bool> {
-    Ok(state.depth + 1 < task.options.path.ok_or_else(|| invalid("CPU path settings disappeared"))?.max_depth)
+    Ok(remaining_depth(task, state)? > 1)
+}
+fn owned_caustic_tail(task: &ImageTask, state: &State) -> Option<job::CausticOptions> {
+    let events = state.smooth_caustic_chain?;
+    task.options.caustics.filter(|caustics| events > 0 && events < caustics.max_depth)
+}
+pub(super) fn environment_sample(task: &ImageTask, u: [f64; 2]) -> job::Result<(Vec3, Vec3, f64)> {
+    if let Some(environment) = &task.environment {
+        let env = environment.view().map_err(environment_error)?;
+        env.require_linear_srgb().map_err(environment_error)?;
+        let sample = env.sample(u).map_err(environment_error)?;
+        return Ok((sample.direction, sample.radiance_source_rgb, sample.pdf_solid_angle));
+    }
+    let direction = indirect::uniform_environment(u);
+    let radiance = if let Some(sky) = task.options.sky.as_deref() {
+        sky.radiance(direction)?
+    } else {
+        let environment = task.options.environment.ok_or_else(|| invalid("CPU path environment missing"))?;
+        Vec3::new(environment.color[0], environment.color[1], environment.color[2]) * environment.intensity
+    };
+    Ok((direction, radiance, indirect::ENVIRONMENT_PDF))
 }
 pub(super) fn advanced_normals(task: &ImageTask) -> bool {
     // An HG collision adds phase transport inside the medium. Its closure does
@@ -463,6 +492,7 @@ fn advance(task: &mut ImageTask, state: &mut State) -> job::Result<()> {
         return Ok(());
     }
     task.work.tick(&task.cancel).map_err(error)?;
+    let track_texture_distance = task.options.texture_filtering && !task.maps.is_empty();
     match state.stage {
         Stage::New => {
             let p = task.progressive.as_ref().ok_or_else(|| invalid("CPU path progressive film missing"))?;
@@ -477,7 +507,7 @@ fn advance(task: &mut ImageTask, state: &mut State) -> job::Result<()> {
             let ray = if let Some(lens) = task.options.lens.filter(|l| l.aperture_radius_mm > 0.0) {
                 let pupil = task.pupil_sample.take().ok_or_else(|| invalid("CPU path pupil missing"))?;
                 let ray = lens_primary_ray(&task.request, x, y, task.clip, lens, pupil).map_err(error)?;
-                if !task.glass.is_empty() || volume::enabled(task) {
+                if !task.glass.is_empty() || volume::enabled(task) || track_texture_distance {
                     let (right, up, _) = task.request.camera.basis();
                     let radius = lens.aperture_radius_mm * pupil[0].sqrt();
                     let phi = std::f64::consts::TAU * pupil[1];
@@ -486,7 +516,7 @@ fn advance(task: &mut ImageTask, state: &mut State) -> job::Result<()> {
                 ray
             } else {
                 let ray = primary_ray(&task.request, x, y, task.clip).map_err(error)?;
-                if (!task.glass.is_empty() || volume::enabled(task)) && task.request.camera.fov > 0.0 {
+                if (!task.glass.is_empty() || volume::enabled(task) || track_texture_distance) && task.request.camera.fov > 0.0 {
                     physical_origin = Some(task.request.camera.eye());
                 }
                 ray
@@ -494,6 +524,10 @@ fn advance(task: &mut ImageTask, state: &mut State) -> job::Result<()> {
             let ray = if volume::enabled(task) { volume::primary(task, ray, physical_origin)? } else { ray };
             if volume::enabled(task) {
                 volume::begin(task, state, ray)?;
+            }
+            if track_texture_distance {
+                state.texture_position = physical_origin.unwrap_or(ray.origin());
+                state.texture_distance = 0.0;
             }
             state.ray = Some(ray);
             state.cursor = Some(TraceCursor::new(ray, false));
@@ -538,7 +572,12 @@ fn advance(task: &mut ImageTask, state: &mut State) -> job::Result<()> {
                 };
             }
         }
-        Stage::Medium | Stage::MediumScatter | Stage::MediumSurface => scattering::step(task, state)?,
+        Stage::Medium | Stage::MediumScatter | Stage::MediumSurface => {
+            if state.stage == Stage::MediumScatter {
+                state.smooth_caustic_chain = None;
+            }
+            scattering::step(task, state)?;
+        }
         Stage::Volume | Stage::VolumeSurface | Stage::VolumeShadow => volume::step(task, state)?,
         Stage::Resolve => {
             if state.optical.is_some() {
@@ -552,6 +591,12 @@ fn advance(task: &mut ImageTask, state: &mut State) -> job::Result<()> {
                 }
             }
             if let Some((index, _, position)) = state.emitter {
+                // The photon prepass owns the reverse of an opaque continuation
+                // followed exclusively by one or more smooth closed events.
+                if owned_caustic_tail(task, state).is_some_and(|caustics| caustics.area_lights) {
+                    state.stage = Stage::Commit;
+                    return Ok(());
+                }
                 let input = task.options.area_lights.as_ref().and_then(|v| v.get(index)).ok_or_else(|| invalid("CPU path emitter disappeared"))?;
                 let light = Rectangle::new(input).map_err(error)?;
                 let weight = if state.depth == 0 || state.optical.as_ref().is_some_and(|optical| optical.delta) {
@@ -569,6 +614,11 @@ fn advance(task: &mut ImageTask, state: &mut State) -> job::Result<()> {
                 }
                 state.stage = Stage::Commit;
             } else if state.hit.is_some() {
+                if track_texture_distance {
+                    let position = unmapped(task, state)?.position;
+                    state.texture_distance += (position - state.texture_position).len();
+                    state.texture_position = position;
+                }
                 if state.depth == 0 {
                     task.primary_coverage = 1;
                 }
@@ -588,30 +638,32 @@ fn advance(task: &mut ImageTask, state: &mut State) -> job::Result<()> {
                 // A camera miss remains the separate unexposed display background.
                 if state.depth > 0 {
                     let direction = state.ray.ok_or_else(|| invalid("CPU escaped path ray missing"))?.direction();
-                    let (radiance, pdf, n) = if let Some(environment) = &task.environment {
-                        let env = environment.view().map_err(environment_error)?;
-                        (
-                            env.radiance_linear_srgb(direction).map_err(environment_error)?,
-                            env.pdf_solid_angle(direction).map_err(environment_error)?,
-                            environment.samples,
-                        )
-                    } else if let Some(sky) = task.options.sky.as_deref() {
-                        (sky.radiance(direction)?, indirect::ENVIRONMENT_PDF, 1)
-                    } else if let Some(environment) = task.options.environment {
-                        (
-                            Vec3::new(environment.color[0], environment.color[1], environment.color[2]) * environment.intensity,
-                            indirect::ENVIRONMENT_PDF,
-                            1,
-                        )
-                    } else {
-                        (Vec3::ZERO, 0.0, 0)
-                    };
-                    let weight = if state.optical.as_ref().is_some_and(|optical| optical.delta) {
-                        1.0
-                    } else {
-                        power_weight(state.previous_pdf, f64::from(n) * pdf).map_err(error)?
-                    };
-                    state.radiance += multiply(state.throughput, radiance) * weight;
+                    if !owned_caustic_tail(task, state).is_some_and(|caustics| caustics.environment) {
+                        let (radiance, pdf, n) = if let Some(environment) = &task.environment {
+                            let env = environment.view().map_err(environment_error)?;
+                            (
+                                env.radiance_linear_srgb(direction).map_err(environment_error)?,
+                                env.pdf_solid_angle(direction).map_err(environment_error)?,
+                                environment.samples,
+                            )
+                        } else if let Some(sky) = task.options.sky.as_deref() {
+                            (sky.radiance(direction)?, indirect::ENVIRONMENT_PDF, 1)
+                        } else if let Some(environment) = task.options.environment {
+                            (
+                                Vec3::new(environment.color[0], environment.color[1], environment.color[2]) * environment.intensity,
+                                indirect::ENVIRONMENT_PDF,
+                                1,
+                            )
+                        } else {
+                            (Vec3::ZERO, 0.0, 0)
+                        };
+                        let weight = if state.optical.as_ref().is_some_and(|optical| optical.delta) {
+                            1.0
+                        } else {
+                            power_weight(state.previous_pdf, f64::from(n) * pdf).map_err(error)?
+                        };
+                        state.radiance += multiply(state.throughput, radiance) * weight;
+                    }
                     if let Some(sun) = task.options.sun.as_deref().copied() {
                         let pdf = super::super::celestial::pdf(sun, direction).map_err(error)?;
                         let weight = if state.optical.as_ref().is_some_and(|o| o.delta) {
@@ -659,8 +711,9 @@ fn advance(task: &mut ImageTask, state: &mut State) -> job::Result<()> {
             let input = {
                 let hit = unmapped(task, state)?;
                 let has_face_override = task.looks.get(hit.primitive_index).is_none_or(|look| look.has_face_override);
-                // Primary rays retain the upstream physical footprint. Secondary
-                // derivatives are unavailable, so the cache selects its coarsest mip.
+                let ray = state.ray.ok_or_else(|| invalid("CPU mapped path ray missing"))?;
+                // Exact primary differentials and an optional secondary ray cone
+                // use the same receiver-plane footprint representation.
                 let footprint = if state.depth == 0 {
                     primary_footprint(
                         &task.request,
@@ -672,6 +725,14 @@ fn advance(task: &mut ImageTask, state: &mut State) -> job::Result<()> {
                         hit.position,
                         hit.oriented_geometric_normal(),
                     )?
+                } else if track_texture_distance {
+                    crate::job::textures::secondary_footprint(
+                        &task.request.camera,
+                        task.request.height,
+                        state.texture_distance,
+                        ray.direction(),
+                        hit.oriented_geometric_normal(),
+                    )?
                 } else {
                     None
                 };
@@ -681,7 +742,7 @@ fn advance(task: &mut ImageTask, state: &mut State) -> job::Result<()> {
                     crate::job::textures::cpu_preparation::MapPoint {
                         position: hit.position,
                         geometric_normal: hit.oriented_geometric_normal(),
-                        view_direction: -state.ray.ok_or_else(|| invalid("CPU mapped path ray missing"))?.direction(),
+                        view_direction: -ray.direction(),
                     },
                     footprint,
                 )
@@ -730,7 +791,8 @@ fn advance(task: &mut ImageTask, state: &mut State) -> job::Result<()> {
         Stage::Caustics => {
             let hit = shared(task, state)?;
             let view = -state.ray.ok_or_else(|| invalid("CPU caustic receiver ray missing"))?.direction();
-            if let Some(contribution) = super::caustics::gather(task, &mut state.caustic_gather, hit, view)? {
+            let remaining = remaining_depth(task, state)?;
+            if let Some(contribution) = super::caustics::gather(task, &mut state.caustic_gather, hit, view, remaining)? {
                 state.radiance += multiply(state.throughput, contribution);
                 super::super::lighting::validate_radiance(state.radiance).map_err(error)?;
             } else {
@@ -853,22 +915,7 @@ fn advance(task: &mut ImageTask, state: &mut State) -> job::Result<()> {
                 indirect::open_stratum(dx, state.sample / side, side).map_err(error)?,
                 indirect::open_stratum(dy, state.sample % side, side).map_err(error)?,
             ];
-            let (direction, emitted, pdf) = if let Some(environment) = &task.environment {
-                let env = environment.view().map_err(environment_error)?;
-                env.require_linear_srgb().map_err(environment_error)?;
-                let sample = env.sample(u).map_err(environment_error)?;
-                (sample.direction, sample.radiance_source_rgb, sample.pdf_solid_angle)
-            } else if let Some(sky) = task.options.sky.as_deref() {
-                let direction = indirect::uniform_environment(u);
-                (direction, sky.radiance(direction)?, indirect::ENVIRONMENT_PDF)
-            } else {
-                let environment = task.options.environment.ok_or_else(|| invalid("CPU path environment missing"))?;
-                (
-                    indirect::uniform_environment(u),
-                    Vec3::new(environment.color[0], environment.color[1], environment.color[2]) * environment.intensity,
-                    indirect::ENVIRONMENT_PDF,
-                )
-            };
+            let (direction, emitted, pdf) = environment_sample(task, u)?;
             let weight = light_weight(task, state, direction, pdf, count)?;
             let value = multiply(response(task, state, direction)?, emitted) * (weight / (f64::from(count) * pdf));
             let ray = volume::ray(task, state, direction, None, true)?.ok_or_else(|| invalid("CPU environment source interval collapsed"))?;
@@ -947,7 +994,20 @@ fn advance(task: &mut ImageTask, state: &mut State) -> job::Result<()> {
                 state.throughput = multiply(state.throughput, sample.weight);
                 super::super::lighting::validate_radiance(state.throughput).map_err(error)?;
                 if state.throughput != Vec3::ZERO {
+                    // Match the GPU opaque continuation policy. Keep this draw
+                    // independent of the BSDF and preserve the expected weight.
+                    if state.depth >= 3 {
+                        let survive = state.throughput.x.max(state.throughput.y).max(state.throughput.z).clamp(0.05, 0.95);
+                        let [draw, _] = variates(task, state, 0x3002)?;
+                        if draw >= survive {
+                            state.stage = Stage::Commit;
+                            return Ok(());
+                        }
+                        state.throughput = state.throughput / survive;
+                        super::super::lighting::validate_radiance(state.throughput).map_err(error)?;
+                    }
                     state.sampled_continuous = true;
+                    state.smooth_caustic_chain = task.options.caustics.filter(|caustics| caustics.area_lights || caustics.environment).map(|_| 0);
                     state.previous_pdf = sample.pdf;
                     state.previous_position = hit.position;
                     if let Some(optical) = &mut state.optical {
@@ -986,7 +1046,7 @@ fn advance(task: &mut ImageTask, state: &mut State) -> job::Result<()> {
 /// Interface events consume the same finite depth domain as opaque surfaces.
 #[derive(Clone, Copy, Default)]
 struct GlassPath {
-    media: [usize; 8],
+    media: [usize; job::MAX_NESTED_MEDIA],
     len: usize,
     segment_start: Vec3,
     source_plane: Option<[Vec3; 3]>,
@@ -1099,6 +1159,11 @@ fn glass_one(task: &mut ImageTask, state: &mut State) -> job::Result<()> {
         }
         return Ok(());
     };
+    let input = task.options.dielectrics.get(index).ok_or_else(|| invalid("CPU glass interface disappeared"))?;
+    // A selected interface only reaches another endpoint after continuation.
+    if let Some(events) = state.smooth_caustic_chain {
+        state.smooth_caustic_chain = super::caustics::smooth_interface(input).then_some(events + 1);
+    }
     if advanced::required(task, state, index)? {
         return advanced::surface(task, state, index);
     }
@@ -1106,7 +1171,6 @@ fn glass_one(task: &mut ImageTask, state: &mut State) -> job::Result<()> {
         state.stage = Stage::Commit;
         return Ok(());
     }
-    let input = task.options.dielectrics.get(index).ok_or_else(|| invalid("CPU glass interface disappeared"))?;
     let direction = state.ray.ok_or_else(|| invalid("CPU glass incident ray missing"))?.direction();
     let normal = hit.oriented_geometric_normal();
     let [draw, _] = variates(task, state, 0x4000)?;
@@ -1171,7 +1235,7 @@ fn glass_one(task: &mut ImageTask, state: &mut State) -> job::Result<()> {
     let optical = state.optical.as_mut().ok_or_else(|| invalid("CPU glass stack missing"))?;
     if let Some(enter) = entering {
         if enter {
-            let slot = optical.media.get_mut(optical.len).ok_or_else(|| invalid("CPU glass medium stack exceeds eight"))?;
+            let slot = optical.media.get_mut(optical.len).ok_or_else(|| invalid("CPU glass medium stack exceeds 16"))?;
             *slot = index;
             optical.len += 1;
         } else {

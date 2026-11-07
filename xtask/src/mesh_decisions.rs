@@ -65,6 +65,10 @@ pub const SKIPPED_MODULES: &[(&str, &str)] = &[
 /// Functions, in modules that also decide geometry, whose job is the display mesh itself, a
 /// preview, or a mesh body.
 pub const SKIPPED_FUNCTIONS: &[(&str, &str)] = &[
+    (
+        "crates/doc/src/document.rs:MeshData::generate_crease_normals",
+        "mesh bodies: explicit shading metadata; positions, triangles and model decisions are unchanged",
+    ),
     ("crates/doc/src/eval.rs:ImportDigests::of", "mesh-body imports: retained content identities, not tessellated-solid decisions"),
     ("crates/doc/src/eval.rs:MeshDigest::matches", "mesh-body imports: compares retained source-array identities"),
     ("crates/doc/src/eval.rs:ModelBody::display_plan", "the display plan"),

@@ -1814,6 +1814,7 @@ mod tests {
                 positions: vec![0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0, 0.0].into(),
                 triangles: vec![0, 1, 2].into(),
                 color: Some([0.8, 0.2, 0.1]),
+                corner_normals: Default::default(),
             }],
         };
         let picture = saved_picture(preview).unwrap();
@@ -1830,6 +1831,7 @@ mod tests {
                 positions: vec![0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0, 0.0].into(),
                 triangles: (0..10_000).flat_map(|_| [0, 1, 2]).collect(),
                 color: None,
+                corner_normals: Default::default(),
             }],
         };
         assert!(saved_picture(preview).is_none());

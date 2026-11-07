@@ -3124,7 +3124,7 @@
   "render.cpu_opaque_required": "CPU-Raytracing benötigt einen undurchsichtigen Hintergrund. Entfernen Sie das Häkchen bei „Transparenter Hintergrund“, um fortzufahren.",
   "render.cpu_options_pending": "Dieses CPU-Bedienfeld kann Emission, Oberflächeneffekte, Glas oder Anisotropie noch nicht bearbeiten. Entfernen Sie diese API-Optionen, bevor Sie es verwenden.",
   "render.cpu_path_depth": "Pfadtiefe",
-  "render.cpu_path_help": "Berechnet Licht, das zwischen undurchsichtigen Flächen und durch unterstützte Glasformen läuft. Erfordert progressives Rendern und Raytracing-Schatten. Die Pfadtiefe zählt beleuchtete Flächen, Glasgrenzen und Streuereignisse ab dem ersten Treffer (1–16). Tiefe 1 liefert direkte Beleuchtung auf undurchsichtigen Flächen; höhere Werte erlauben mehr Reflexionen oder Glasdurchgänge und können länger dauern. Für eigene Reflexionen oder Anisotropie die indirekte Beleuchtung ausschalten.",
+  "render.cpu_path_help": "Berechnet Licht, das zwischen undurchsichtigen Flächen und durch unterstützte Glasformen läuft. Erfordert progressives Rendern und Raytracing-Schatten. Die Pfadtiefe zählt beleuchtete Flächen, Glasgrenzen und Streuereignisse ab dem ersten Treffer (1–64). Tiefe 1 liefert direkte Beleuchtung auf undurchsichtigen Flächen; höhere Werte erlauben mehr Reflexionen oder Glasdurchgänge und können länger dauern. Für eigene Reflexionen oder Anisotropie die indirekte Beleuchtung ausschalten.",
   "render.cpu_path_lighting": "Indirekte Beleuchtung",
   "render.cpu_path_optics_reason": "Die Einstellungen bleiben erhalten. Für eigene Reflexionen oder Anisotropie die indirekte Beleuchtung ausschalten.",
   "render.cpu_point": "Punktlicht",

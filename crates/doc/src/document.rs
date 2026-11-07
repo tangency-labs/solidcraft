@@ -2294,6 +2294,10 @@ pub struct MeshData {
     pub positions: std::sync::Arc<[f64]>,
     /// Three vertex indices per triangle.
     pub triangles: std::sync::Arc<[u32]>,
+    /// Unit shading normals, x/y/z for each triangle corner. Empty means flat shading.
+    /// Independent of the welded positions and the geometric boundary certificate.
+    #[serde(default, skip_serializing_if = "<[f64]>::is_empty")]
+    pub corner_normals: std::sync::Arc<[f64]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<[f32; 3]>,
 }
@@ -2309,6 +2313,36 @@ impl PartialEq for MeshData {
             && self.color == other.color
             && (Arc::ptr_eq(&self.triangles, &other.triangles) || self.triangles == other.triangles)
             && (Arc::ptr_eq(&self.positions, &other.positions) || self.positions == other.positions)
+            && (Arc::ptr_eq(&self.corner_normals, &other.corner_normals) || self.corner_normals == other.corner_normals)
+    }
+}
+
+impl MeshData {
+    /// Explicitly generate crease-aware shading for an existing imported source.
+    /// Coordinates, triangle indices, topology and body identity remain unchanged.
+    pub fn generate_crease_normals(&mut self, angle_degrees: f64) -> crate::Result<()> {
+        if !angle_degrees.is_finite()
+            || !(0.0..=180.0).contains(&angle_degrees)
+            || !self.positions.len().is_multiple_of(3)
+            || !self.triangles.len().is_multiple_of(3)
+        {
+            return Err(crate::DocError::Invalid("mesh crease angle must be between 0 and 180 degrees with complete triangles".into()));
+        }
+        let allocation = |_| crate::DocError::Invalid("could not reserve mesh normal generation".into());
+        let mut positions = Vec::new();
+        positions.try_reserve_exact(self.positions.len() / 3).map_err(allocation)?;
+        positions.extend(self.positions.as_chunks::<3>().0.iter().map(|p| solidcore_record::Vec3::new(p[0], p[1], p[2])));
+        let mut triangles = Vec::new();
+        triangles.try_reserve_exact(self.triangles.len() / 3).map_err(allocation)?;
+        triangles.extend_from_slice(self.triangles.as_chunks::<3>().0);
+        let mesh = solidcraft_geom::Mesh { positions, triangles, ..Default::default() };
+        let normals = mesh.crease_corner_normals(angle_degrees.to_radians(), None).map_err(crate::DocError::Invalid)?;
+        let count = normals.len().checked_mul(9).ok_or_else(|| crate::DocError::Invalid("mesh normal count overflow".into()))?;
+        let mut values = Vec::new();
+        values.try_reserve_exact(count).map_err(allocation)?;
+        values.extend(normals.iter().flatten().flat_map(|n| [n.x, n.y, n.z]));
+        self.corner_normals = values.into();
+        Ok(())
     }
 }
 

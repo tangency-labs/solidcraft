@@ -14,6 +14,7 @@ fn imported_box() -> Session {
                 positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
                 triangles: mesh.triangles.iter().flatten().copied().collect(),
                 color: Some([0.2, 0.5, 0.8]),
+                corner_normals: Default::default(),
             }],
         },
         Some("Imported mesh"),
@@ -39,9 +40,14 @@ fn edits_share_an_imported_meshs_triangles_with_undo() {
     run(&mut s, "edit.undo", json!({}));
     let (p, t) = arrays(&s);
     assert!(std::sync::Arc::ptr_eq(&p, &positions) && std::sync::Arc::ptr_eq(&t, &triangles), "shared after undo");
-    let saved =
-        serde_json::to_value(MeshData { name: "M".into(), positions: vec![1.5, 2.0, 3.0].into(), triangles: vec![0, 0, 0].into(), color: None })
-            .unwrap();
+    let saved = serde_json::to_value(MeshData {
+        name: "M".into(),
+        positions: vec![1.5, 2.0, 3.0].into(),
+        triangles: vec![0, 0, 0].into(),
+        color: None,
+        corner_normals: Default::default(),
+    })
+    .unwrap();
     assert_eq!(saved, json!({"name":"M","positions":[1.5,2.0,3.0],"triangles":[0,0,0]}));
     let back: MeshData = serde_json::from_value(saved).unwrap();
     assert_eq!(&back.positions[..], &[1.5, 2.0, 3.0]);
@@ -561,6 +567,7 @@ fn open_in_easyprint_reports_a_host_that_cannot_start_and_a_model_over_the_limit
                 positions: vec![0., 0., 0., 1., 0., 0., 0., 1., 0.].into(),
                 triangles: [0u32, 1, 2].repeat(2_100_000).into(),
                 color: None,
+                corner_normals: Default::default(),
             }],
         },
         Some("Imported mesh"),

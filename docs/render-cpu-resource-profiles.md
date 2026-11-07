@@ -13,15 +13,17 @@ A CPU image must not inherit a small interactive-preview ceiling when the owner 
 | Maximum side | 4,096 px | 8,192 px | 16,384 px |
 | Fixed-sampling pixels | 4,194,304 | 16,777,216 | 67,108,864 |
 | Progressive pixels | 1,048,576 | 16,777,216 | 67,108,864 |
-| Progressive samples/pixel | 64 | 1,024 | 4,096 |
-| Total camera samples | 16,777,216 | 4,294,967,296 | 68,719,476,736 |
+| Progressive samples/pixel | 64 | 1,024 | 65,536 |
+| Total camera samples | 16,777,216 | 4,294,967,296 | 1,099,511,627,776 |
 | Captured triangles | 262,144 | 2,000,000 | 8,000,000 |
 | Visible bodies | 16,384 | 65,536 | 262,144 |
 | Retained source geometry | 128 MiB | 1 GiB | 4 GiB |
 | Complete job admission | 384 MiB | 3 GiB | 12 GiB |
-| Cumulative work units | 1,000,000,000 | 1,000,000,000,000 | 16,000,000,000,000 |
+| Cumulative work units | 1,000,000,000 | 1,000,000,000,000 | 256,000,000,000,000 |
 
 Every column is an intersection of limits: a scene that fits the triangle count may still exceed its complete byte estimate. Similarly, a sample count within the per-pixel limit may exceed the total camera-sample or cumulative traversal-work limit. No claim is made that all maxima can be reached simultaneously or within a particular time.
+
+Workstation permits up to 65,536 total pilot/production passes. Exact CPU coverage and adaptive counts use 32-bit integers, with their larger count plane included in admission. The Workstation camera-sample and work envelopes scale by the same factor of 16 as its sample ceiling. Memory and cumulative work can refuse a scene before these numerical ceilings.
 
 Examples of cardinality admission, before geometry and memory are considered: Studio permits 3840 × 2160 at 128 samples/pixel; Workstation permits 7680 × 4320 at 128 samples/pixel. Compact rejects both instead of silently resizing them.
 

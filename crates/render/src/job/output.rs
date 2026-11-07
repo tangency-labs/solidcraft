@@ -9,19 +9,19 @@ fn invalid(message: &str) -> JobError {
     JobError::new(ErrorCode::InvalidRequest, message)
 }
 
-fn coverage_alpha(coverage: f32, samples: u16) -> Result<u8> {
-    if samples == 0 || !coverage.is_finite() || !(0.0..=1.0).contains(&coverage) {
+fn coverage_alpha(coverage: f32, samples: u32) -> Result<u8> {
+    if samples == 0 || samples > super::MAX_SAMPLES_PER_PIXEL || !coverage.is_finite() || !(0.0..=1.0).contains(&coverage) {
         return Err(invalid("invalid CPU display coverage count"));
     }
-    // Every CPU pass has one known denominator. Even at u16::MAX, float32
+    // Every CPU pass has one known denominator. At the admitted 65536 samples, float32
     // quantisation is far below half a hit, so the original count is unique.
     // Keep the raw FLOAT32 plane unchanged and round only the final byte from
     // the integer ratio: 5/6 rounds to 213; float32 alpha alone gives 212.
     let covered = (f64::from(coverage) * f64::from(samples)).round() as u32;
-    if covered > u32::from(samples) || (f64::from(covered) / f64::from(samples)) as f32 != coverage {
+    if covered > samples || (f64::from(covered) / f64::from(samples)) as f32 != coverage {
         return Err(invalid("CPU display coverage disagrees with its sample count"));
     }
-    let denominator = u32::from(samples);
+    let denominator = samples;
     u8::try_from((covered * 510 + denominator) / (denominator * 2)).map_err(|_| invalid("CPU display alpha exceeds one byte"))
 }
 
@@ -48,7 +48,7 @@ pub(crate) struct OutputTask {
     rgba: Vec<u8>,
     preserve_display: bool,
     denoise: bool,
-    coverage_samples: u16,
+    coverage_samples: u32,
     exr: Option<Vec<u8>>,
 }
 impl OutputTask {
@@ -63,7 +63,7 @@ impl OutputTask {
         preserve_display: bool,
         retain_exr: bool,
         denoise: bool,
-        coverage_samples: u16,
+        coverage_samples: u32,
         cancel: CancelToken,
         charge: &mut impl FnMut(u64) -> Result<()>,
     ) -> Result<Self> {

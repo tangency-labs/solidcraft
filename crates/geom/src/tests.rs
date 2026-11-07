@@ -22,6 +22,43 @@ fn cube_mesh(s: f64) -> Mesh {
 }
 
 #[test]
+fn crease_normals_respect_angles_groups_and_duplicate_vertex_seams() {
+    let theta = 30f64.to_radians();
+    let mesh = Mesh {
+        positions: vec![Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::new(0., -theta.cos(), theta.sin())],
+        triangles: vec![[0, 1, 2], [1, 0, 3]],
+        ..Default::default()
+    };
+    let flat = mesh.crease_corner_normals(20f64.to_radians(), None).unwrap();
+    assert!((flat[0][0] - Vec3::Z).len() < 1e-12);
+    assert!((flat[1][1] - Vec3::new(0., theta.sin(), theta.cos())).len() < 1e-12);
+    let smooth = mesh.crease_corner_normals(40f64.to_radians(), None).unwrap();
+    let expected = Vec3::new(0., (theta / 2.).sin(), (theta / 2.).cos());
+    assert!((smooth[0][0] - expected).len() < 1e-12);
+    assert_eq!(smooth[0][0], smooth[1][1]);
+    assert_eq!(mesh.crease_corner_normals(1., Some(&[1, 2])).unwrap(), flat);
+    assert_eq!(mesh.crease_corner_normals(1., Some(&[0, 0])).unwrap(), flat);
+    assert_eq!(mesh.crease_corner_normals(1., Some(&[7, 7])).unwrap(), smooth);
+    let split = Mesh {
+        positions: mesh.triangles.iter().flatten().map(|&i| mesh.positions[i as usize]).collect(),
+        triangles: vec![[0, 1, 2], [3, 4, 5]],
+        ..Default::default()
+    };
+    assert_eq!(split.crease_corner_normals(1., None).unwrap(), smooth);
+    assert!(mesh.crease_corner_normals(f64::NAN, None).is_err());
+    assert!(mesh.crease_corner_normals(1., Some(&[1])).is_err());
+    let cube = cube_mesh(1.);
+    let normals = cube.crease_corner_normals(45f64.to_radians(), None).unwrap();
+    for (t, n) in cube.triangles.iter().zip(normals) {
+        let [a, b, c] = t.map(|i| cube.positions[i as usize]);
+        let face = (b - a).cross(c - a).normalized().unwrap();
+        for n in n {
+            assert!((n - face).len() < 1e-12);
+        }
+    }
+}
+
+#[test]
 fn display_edge_masks_keep_identity_and_break_only_certified_sharp_patches() {
     let mut mesh =
         Mesh { edges: vec![vec![Vec3::ZERO, Vec3::Z]; 2], edge_faces: vec![vec![0, 1], vec![1, 2]], seams: vec![true, true], ..Mesh::default() };

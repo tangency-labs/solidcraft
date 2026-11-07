@@ -22,7 +22,7 @@ impl AdaptiveSampling {
     pub fn validate(self, maximum: u32) -> Result<()> {
         if !(16..=256).contains(&self.pilot_samples)
             || !(16..=maximum).contains(&self.min_samples)
-            || maximum > 4096
+            || maximum > super::MAX_SAMPLES_PER_PIXEL
             || !self.relative_error.is_finite()
             || !(0.0..=1.0).contains(&self.relative_error)
             || !self.absolute_error.is_finite()

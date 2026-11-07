@@ -15,8 +15,8 @@ impl Default for CpuPathOptions {
 }
 impl CpuPathOptions {
     pub fn validate(self) -> Result<()> {
-        if !(1..=16).contains(&self.max_depth) {
-            return Err(JobError::new(ErrorCode::InvalidRequest, "CPU path depth must be 1..16 surfaces, Glass boundaries or medium collisions"));
+        if !(1..=super::MAX_PATH_DEPTH).contains(&self.max_depth) {
+            return Err(JobError::new(ErrorCode::InvalidRequest, "CPU path depth must be 1..64 surfaces, Glass boundaries or medium collisions"));
         }
         Ok(())
     }

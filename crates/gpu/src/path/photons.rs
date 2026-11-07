@@ -191,7 +191,7 @@ pub(super) struct Resources {
     budget: dispatch::Budget,
 }
 impl Resources {
-    pub(super) fn new(context: &Context, options: CausticOptions, nodes: &[u8], source_count: u32) -> Result<Self> {
+    pub(super) fn new(context: &Context, options: CausticOptions, nodes: &[u8]) -> Result<Self> {
         options.validate()?;
         let head_count = heads(options)?;
         let word = |index: usize| -> Result<u32> {
@@ -223,7 +223,8 @@ impl Resources {
                 ));
             }
         }
-        header[12] = source_count;
+        header[12] = u32::from(options.area_lights);
+        header[13] = u32::from(options.environment);
         let mut bytes = [0u8; HEADER_WORDS as usize * 4];
         for (word, output) in header.into_iter().zip(bytes.as_chunks_mut::<4>().0) {
             output.copy_from_slice(&word.to_le_bytes());

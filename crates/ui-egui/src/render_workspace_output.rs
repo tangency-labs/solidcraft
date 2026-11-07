@@ -699,23 +699,30 @@ pub(super) fn sampling_editor(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 fn path_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     let label = app.tr("render.children.samples").to_string();
-    let mut samples = app.render_workspace.view.samples.clamp(1, 4096);
+    let mut samples = app.render_workspace.view.samples.clamp(1, solidcraft_engine::render::job::MAX_SAMPLES_PER_PIXEL);
     let response = ui_kit::row(ui, &label, |ui| {
         ui_kit::slider(
             ui,
             &mut samples,
-            1..=4096,
+            1..=solidcraft_engine::render::job::MAX_SAMPLES_PER_PIXEL,
             ui_kit::Slider { integer: true, step: Some(1.0), format: |v| format!("{v:.0}"), ..Default::default() },
         )
     });
     crate::scenario::publish_target("render:gpu-samples", response.rect);
     if response.changed() {
-        app.render_workspace.view.samples =
-            if app.preferences.render_legacy_image_defaults { samples.checked_next_power_of_two().unwrap_or(4096).min(4096) } else { samples };
+        app.render_workspace.view.samples = if app.preferences.render_legacy_image_defaults {
+            samples
+                .checked_next_power_of_two()
+                .unwrap_or(solidcraft_engine::render::job::MAX_SAMPLES_PER_PIXEL)
+                .min(solidcraft_engine::render::job::MAX_SAMPLES_PER_PIXEL)
+        } else {
+            samples
+        };
     }
     let label = app.tr("render.children.depth").to_string();
-    let mut depth = app.render_workspace.view.max_depth.clamp(1, 16);
-    let response = ui_kit::row(ui, &label, |ui| ui_kit::number_field(ui, &mut depth, 1..=16, 1.0, ""));
+    let mut depth = app.render_workspace.view.max_depth.clamp(1, u32::from(solidcraft_engine::render::job::MAX_PATH_DEPTH));
+    let response =
+        ui_kit::row(ui, &label, |ui| ui_kit::number_field(ui, &mut depth, 1..=u32::from(solidcraft_engine::render::job::MAX_PATH_DEPTH), 1.0, ""));
     crate::scenario::publish_target("render:gpu-depth", response.rect);
     if response.changed() {
         app.render_workspace.view.max_depth = depth;
@@ -1400,8 +1407,8 @@ pub(super) fn apply_quality(app: &mut SolveApp, plan: &Value) -> Result<(), Stri
         u32_at("gpu_options", "seed")?,
     );
     let denoise = plan["gpu_options"]["denoise"].as_bool().ok_or(crate::i18n::tr("render.error_denoise_setting"))?;
-    if !(1..=4096).contains(&samples)
-        || !(1..=16).contains(&depth)
+    if !(1..=solidcraft_engine::render::job::MAX_SAMPLES_PER_PIXEL).contains(&samples)
+        || !(1..=u32::from(solidcraft_engine::render::job::MAX_PATH_DEPTH)).contains(&depth)
         || solidcraft_engine::render::job::GPU_PATH_LIMITS.fit(u64::from(width), u64::from(height), None)
             != Some((u64::from(width), u64::from(height)))
     {

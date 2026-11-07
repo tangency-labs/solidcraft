@@ -323,6 +323,100 @@ pub struct MassProperties {
 }
 
 impl Mesh {
+    /// Generate angle-weighted corner normals without changing positions or connectivity.
+    /// Only opposite, two-face manifold edges join a smoothing fan. A group of zero
+    /// stays flat; different groups, boundaries and creases never share a normal.
+    /// `groups == None` is an explicitly requested crease policy for unannotated meshes.
+    pub fn crease_corner_normals(&self, angle: f64, groups: Option<&[u32]>) -> Result<Vec<[Vec3; 3]>, String> {
+        if !angle.is_finite() || !(0.0..=std::f64::consts::PI).contains(&angle) || groups.is_some_and(|g| g.len() != self.triangles.len()) {
+            return Err("invalid mesh smoothing angle or group count".into());
+        }
+        let corners = self.triangles.len().checked_mul(3).ok_or("mesh smoothing size overflow")?;
+        let mut parent = Vec::new();
+        parent.try_reserve_exact(corners).map_err(|_| "could not reserve mesh smoothing fans")?;
+        parent.extend(0..corners);
+        let mut weld = std::collections::HashMap::new();
+        weld.try_reserve(self.positions.len()).map_err(|_| "could not reserve mesh smoothing vertices")?;
+        let mut canonical = Vec::new();
+        canonical.try_reserve_exact(self.positions.len()).map_err(|_| "could not reserve mesh smoothing vertex indices")?;
+        for p in &self.positions {
+            if !p.is_finite() {
+                return Err("non-finite mesh smoothing position".into());
+            }
+            let next = weld.len();
+            canonical.push(*weld.entry([(p.x + 0.0).to_bits(), (p.y + 0.0).to_bits(), (p.z + 0.0).to_bits()]).or_insert(next));
+        }
+        let mut normals = Vec::new();
+        normals.try_reserve_exact(self.triangles.len()).map_err(|_| "could not reserve mesh smoothing normals")?;
+        // A third incident face makes an edge non-manifold and prevents a join.
+        let mut edges = std::collections::HashMap::<(usize, usize), (usize, Option<usize>, usize)>::new();
+        edges.try_reserve(corners).map_err(|_| "could not reserve mesh smoothing edges")?;
+        for (i, t) in self.triangles.iter().enumerate() {
+            let [a, b, c] = t.map(|v| self.positions.get(v as usize).copied());
+            let (Some(a), Some(b), Some(c)) = (a, b, c) else { return Err("mesh smoothing index is missing".into()) };
+            let n = (b - a).cross(c - a).normalized().filter(|n| n.is_finite()).ok_or("mesh smoothing has a degenerate triangle")?;
+            normals.push(n);
+            for k in 0..3 {
+                let (a, b) = (canonical[t[k] as usize], canonical[t[(k + 1) % 3] as usize]);
+                edges
+                    .entry((a.min(b), a.max(b)))
+                    .and_modify(|e| {
+                        e.1 = Some(i * 3 + k);
+                        e.2 += 1;
+                    })
+                    .or_insert((i * 3 + k, None, 1));
+            }
+        }
+        fn root(parent: &mut [usize], mut k: usize) -> usize {
+            while parent[k] != k {
+                parent[k] = parent[parent[k]];
+                k = parent[k];
+            }
+            k
+        }
+        let cosine = angle.cos();
+        for (_, (first, second, count)) in edges {
+            let Some(second) = second.filter(|_| count == 2) else { continue };
+            let (a, b) = (first / 3, second / 3);
+            if normals[a].dot(normals[b]) < cosine || groups.is_some_and(|g| g[a] == 0 || g[a] != g[b]) {
+                continue;
+            }
+            let (ak, bk) = (first % 3, second % 3);
+            // Consistent winding is required; do not smooth across an ambiguous join.
+            if canonical[self.triangles[a][ak] as usize] != canonical[self.triangles[b][(bk + 1) % 3] as usize]
+                || canonical[self.triangles[a][(ak + 1) % 3] as usize] != canonical[self.triangles[b][bk] as usize]
+            {
+                continue;
+            }
+            for (x, y) in [(first, b * 3 + (bk + 1) % 3), (a * 3 + (ak + 1) % 3, second)] {
+                let (x, y) = (root(&mut parent, x), root(&mut parent, y));
+                parent[y] = x;
+            }
+        }
+        let mut sums = Vec::new();
+        sums.try_reserve_exact(corners).map_err(|_| "could not reserve mesh smoothing sums")?;
+        sums.resize(corners, Vec3::ZERO);
+        for (i, t) in self.triangles.iter().enumerate() {
+            for k in 0..3 {
+                let p = self.positions[t[k] as usize];
+                let a = (self.positions[t[(k + 1) % 3] as usize] - p).normalized().ok_or("degenerate smoothing corner")?;
+                let b = (self.positions[t[(k + 2) % 3] as usize] - p).normalized().ok_or("degenerate smoothing corner")?;
+                let weight = a.dot(b).clamp(-1.0, 1.0).acos();
+                let r = root(&mut parent, i * 3 + k);
+                sums[r] += normals[i] * weight;
+            }
+        }
+        let mut out = Vec::new();
+        out.try_reserve_exact(self.triangles.len()).map_err(|_| "could not reserve mesh shading result")?;
+        for (i, n) in normals.into_iter().enumerate() {
+            out.push(std::array::from_fn(|k| {
+                let r = root(&mut parent, i * 3 + k);
+                sums[r].normalized().filter(|v| v.dot(n) > 0.0).unwrap_or(n)
+            }));
+        }
+        Ok(out)
+    }
+
     /// [`MassProperties`] of a closed mesh, by the divergence theorem over the tetrahedra its
     /// triangles make with the origin. `None` unless every edge (by vertex index: weld first) is
     /// shared by exactly two triangles that cross it in opposite directions (closed, consistently

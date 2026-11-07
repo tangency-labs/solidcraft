@@ -10,11 +10,11 @@ const GIB: u64 = 1024 * MIB;
 /// Native CPU reservations, including retained frames, share this finite ceiling.
 pub const NATIVE_CPU_POOL_BYTES: u64 = 16 * GIB;
 /// Hard implementation ceilings; individual requests retain their selected envelope.
-pub const MAX_CPU_WORK: u64 = 16_000_000_000_000;
+pub const MAX_CPU_WORK: u64 = 256_000_000_000_000;
 pub const MAX_CPU_TRIANGLES: usize = 8_000_000;
 pub const MAX_CPU_BODIES: usize = 262_144;
 /// Maximum admitted primary-film samples, shared with the display resolver.
-pub const MAX_CPU_SAMPLES_PER_PIXEL: u32 = 4096;
+pub const MAX_CPU_SAMPLES_PER_PIXEL: u32 = super::MAX_SAMPLES_PER_PIXEL;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -77,7 +77,7 @@ impl CpuBudget {
                 max_pixels: 67_108_864,
                 max_progressive_pixels: 67_108_864,
                 max_samples_per_pixel: MAX_CPU_SAMPLES_PER_PIXEL,
-                max_camera_samples: 68_719_476_736,
+                max_camera_samples: 1_099_511_627_776,
                 max_triangles: MAX_CPU_TRIANGLES as u64,
                 max_bodies: MAX_CPU_BODIES,
                 max_geometry_bytes: 4 * GIB,
@@ -206,7 +206,7 @@ mod tests {
             assert!(budget.validate_samples(limits.max_samples_per_pixel + 1).is_err());
             assert!(budget.validate_samples(limits.max_samples_per_pixel).is_ok());
         }
-        let p = Some(CpuProgressiveOptions { samples_per_pixel: 4096, seed: 0 });
+        let p = Some(CpuProgressiveOptions { samples_per_pixel: MAX_CPU_SAMPLES_PER_PIXEL, seed: 0 });
         assert!(CpuBudget::Workstation.validate_image(8192, 8192, p).is_err());
         assert!(CpuBudget::Workstation.validate_image(3840, 2160, p).is_ok());
     }
