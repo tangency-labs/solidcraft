@@ -1300,7 +1300,10 @@ mod tests {
             .into_iter()
             .find(|&f| {
                 let s = face_ops::surface(&b, f).unwrap().unwrap();
-                let uv = s.natural_uv_domain_with_nurb(&k).unwrap().evaluate(0.5, 0.5);
+                let uv = s
+                    .natural_uv_domain_with_nurb(&k)
+                    .unwrap()
+                    .evaluate(0.5, 0.5);
                 (s.evaluate_point(&k, uv).unwrap().z - 2.0).abs() < 1e-9
             })
             .unwrap();

@@ -93,7 +93,7 @@ impl<'a> EnclosedCurve<'a> {
                     step = Ivl::from(domain.min())
                         + along * (Ivl::from(domain.max()) - Ivl::from(domain.min()));
                 } else if line.inside_out() {
-                    step = -step;
+                    step = Ivl::from(0.0) - step;
                 }
                 let p = line.line_point();
                 let v = line.line_vector();
@@ -153,7 +153,10 @@ pub(super) fn separated(
             Err(e @ SolidError::Cancelled { .. }) => return Err(e),
             _ => return Ok(false),
         };
-        if box_.iter().any(|x| !(x.lo.is_finite() && x.hi.is_finite() && x.lo <= x.hi)) {
+        if box_
+            .iter()
+            .any(|x| !(x.lo.is_finite() && x.hi.is_finite() && x.lo <= x.hi))
+        {
             return Ok(false);
         }
         // The centre need not lie on the curve. Its computed binary64 value is exact

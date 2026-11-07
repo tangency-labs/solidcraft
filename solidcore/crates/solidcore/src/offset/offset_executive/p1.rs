@@ -447,9 +447,10 @@ impl OffsetExecutive {
             let interval = edge::interval(original, e)?;
             let mut clear = true;
             for (surface, tolerance) in &surfaces {
-                let tolerance = (Ivl::from(edge::tolerance(original, e)?.max(original.tolerance()))
-                    + Ivl::from(*tolerance))
-                .hi;
+                let tolerance =
+                    (Ivl::from(edge::tolerance(original, e)?.max(original.tolerance()))
+                        + Ivl::from(*tolerance))
+                    .hi;
                 if !super::clearance::separated(kernel, curve, &interval, surface, tolerance)? {
                     clear = false;
                     break;
@@ -4221,7 +4222,7 @@ mod tests {
     /// Minimal face-creation prefix for the keep-rule tests: the actual result surfaces
     /// and the original-face-use correspondence the production prefix supplies.
     fn seed_clearance_surfaces(executive: &mut OffsetExecutive, original: &Brep) {
-        let mut result = original.clone();
+        let mut result = original.clone_standing_for_self().unwrap();
         for (&f, surface) in executive.local_faces.iter().zip(&executive.local_surfaces) {
             result.face_mut(f).unwrap().surface = Some(surface.clone());
             let faceuse = face::upward_faceuse(original, f).unwrap().unwrap();
@@ -4236,22 +4237,18 @@ mod tests {
     #[test]
     fn a_moved_surface_crossing_an_edges_interior_prevents_keeping_it() {
         let mut kernel = Kernel::default();
-        let brep = crate::primitive::api_primitives::create_box(
-            &mut kernel,
-            Vec3::ZERO,
-            2.0,
-            2.0,
-            2.0,
-        )
-        .unwrap();
+        let brep =
+            crate::primitive::api_primitives::create_box(&mut kernel, Vec3::ZERO, 2.0, 2.0, 2.0)
+                .unwrap();
         let faces = bp1::faces(&brep, None).unwrap();
         let top = *faces
             .iter()
             .find(|&&f| {
                 face_edges(&brep, f).unwrap().iter().all(|&e| {
-                    edge::vertices(&brep, e, None).unwrap().iter().all(|&v| {
-                        (vertex::point(&brep, v.unwrap()).unwrap().z - 2.0).abs() < 1e-12
-                    })
+                    edge::vertices(&brep, e, None)
+                        .unwrap()
+                        .iter()
+                        .all(|&v| (vertex::point(&brep, v.unwrap()).unwrap().z - 2.0).abs() < 1e-12)
                 })
             })
             .unwrap();
@@ -4283,11 +4280,13 @@ mod tests {
             if !points.iter().all(|p| p.z.abs() < 1e-12) {
                 continue;
             }
-            let crosses = points.iter().any(|p| p.x < 1.0)
-                && points.iter().any(|p| p.x > 1.0);
+            let crosses = points.iter().any(|p| p.x < 1.0) && points.iter().any(|p| p.x > 1.0);
             if crosses {
                 crossing += 1;
-                assert!(!executive.kept_edges.contains(&e), "crossed edge {e:?} kept");
+                assert!(
+                    !executive.kept_edges.contains(&e),
+                    "crossed edge {e:?} kept"
+                );
             } else {
                 far += 1;
                 assert!(executive.kept_edges.contains(&e), "far edge {e:?} lost");
