@@ -190,3 +190,139 @@ fn opening_does_not_draw_bodies_before_their_meshes_are_shown() {
     let proj = projection(&app, Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0)));
     assert!(build_sketch_scene(&app, &proj).shadow.is_empty(), "the shadow uses that same picture");
 }
+
+fn wireframe_cylinder() -> SolveApp {
+    let mut s = solidcraft_engine::Session::default();
+    s.execute("sketch.create", &json!({"plane":"XY"})).unwrap();
+    s.execute("sketch.circle.center", &json!({"center":[0,0],"radius":10})).unwrap();
+    s.execute("sketch.finish", &json!({})).unwrap();
+    s.execute("solid.extrude", &json!({"distance":20})).unwrap();
+    let mut app = SolveApp::new(s, crate::Services::default());
+    app.set_origin_shown(false);
+    app.ui.show_grid = false;
+    app.ui.ground_shadow = false;
+    app.ui.visual_style = 2;
+    app.cam.pitch = 0.0;
+    app.cam.yaw = 0.0;
+    app.cam.fov = 0.0;
+    app
+}
+
+fn settle_wireframe(app: &mut SolveApp) {
+    for _ in 0..1000 {
+        let proj = projection(app, Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0)));
+        refresh_sketch_scene(app, &proj);
+        if !app.viewport.wireframe.busy() {
+            return;
+        }
+    }
+    panic!("wireframe work did not finish");
+}
+
+#[test]
+fn wireframe_silhouettes_follow_orbit_without_changing_rims_or_model_buffers() {
+    let mut app = wireframe_cylinder();
+    let key = scene_key(&app);
+    let rims = build_scene(&app).merged().lines;
+    assert!(!rims.is_empty(), "circular rims were already drawn");
+    settle_wireframe(&mut app);
+    let sides = app.viewport.wireframe.segments().to_vec();
+    let vertical_length: f64 = sides.iter().filter(|[a, b]| (a.z - b.z).abs() > 1e-6).map(|[a, b]| a.dist(*b)).sum();
+    assert!((vertical_length - 40.0).abs() < 1e-6, "two 20 mm cylinder sides: {vertical_length}");
+    let drawn = app.viewport.sketch_slot.lock().unwrap().as_ref().unwrap().clone().merged();
+    assert_eq!(drawn.lines.len(), sides.len() * crate::gpu::LINE_SIZE);
+    assert!(drawn.tris.is_empty(), "wireframe outlines must not restore shaded faces");
+    app.cam.yaw += 0.7;
+    settle_wireframe(&mut app);
+    assert_ne!(app.viewport.wireframe.segments(), sides);
+    assert_eq!(scene_key(&app), key, "orbit must not invalidate the model buffers");
+    assert_eq!(build_scene(&app).merged().lines, rims, "authored rims are unchanged");
+    app.session.visibility.hidden_bodies.push("Body1".into());
+    settle_wireframe(&mut app);
+    assert!(app.viewport.wireframe.segments().is_empty(), "hidden bodies contribute no silhouette");
+    app.session.visibility.hidden_bodies.clear();
+    settle_wireframe(&mut app);
+    assert!(!app.viewport.wireframe.segments().is_empty());
+    app.ui.visual_style = 0;
+    settle_wireframe(&mut app);
+    assert!(app.viewport.wireframe.model().is_none(), "leaving Wireframe releases its cache");
+    assert!(app.viewport.wireframe.segments().is_empty());
+}
+
+#[test]
+fn wireframe_silhouette_work_is_bounded_and_shared_placements_draw_in_world_space() {
+    use crate::wireframe_silhouettes::{Outlines, Source};
+    use solidcraft_engine::doc::IDENTITY;
+    let app = wireframe_cylinder();
+    let mesh = app.session.world_state().unwrap().bodies[0].mesh();
+    let mut shifted = IDENTITY;
+    shifted[3][0] = 100.0;
+    let mut outlines = Outlines::default();
+    outlines.set_model(Some(1), 2);
+    let source = |index| Source::new(mesh.clone(), if index == 0 { IDENTITY } else { shifted });
+    let mesh_owners = std::sync::Arc::strong_count(&mesh);
+    assert_eq!(outlines.advance(&app.cam, 0, source), 0);
+    assert!(outlines.busy());
+    let mut frames = 0;
+    while outlines.busy() {
+        assert!(outlines.advance(&app.cam, 7, source) <= 7);
+        frames += 1;
+        assert!(frames < 100_000);
+    }
+    assert!(frames > 1, "the work must continue across frames");
+    assert_eq!(std::sync::Arc::strong_count(&mesh), mesh_owners, "cached topology must not retain obsolete mesh buffers");
+    let left: Vec<_> = outlines.segments().iter().filter(|s| s[0].x < 50.0).copied().collect();
+    let right: Vec<_> = outlines.segments().iter().filter(|s| s[0].x > 50.0).map(|s| s.map(|p| p - Vec3::new(100.0, 0.0, 0.0))).collect();
+    assert_eq!(left.len(), right.len());
+    assert!(!left.is_empty());
+    for (a, b) in left.iter().zip(right) {
+        assert!(a.iter().zip(b).all(|(p, q)| p.dist(q) < 1e-12));
+    }
+    let generation = outlines.generation();
+    assert_eq!(outlines.advance(&app.cam, 100, source), 0, "a stationary completed view does no work");
+    assert_eq!(outlines.generation(), generation);
+}
+
+#[test]
+fn wireframe_silhouette_preparation_survives_orbits_and_cancels_incrementally() {
+    use crate::wireframe_silhouettes::{Outlines, Source};
+    use solidcraft_engine::doc::IDENTITY;
+    let mut app = wireframe_cylinder();
+    let mesh = app.session.world_state().unwrap().bodies[0].mesh();
+    let source = |_| Source::new(mesh.clone(), IDENTITY);
+    let mut outlines = Outlines::default();
+    outlines.set_model(Some(1), 1);
+    for _ in 0..20 {
+        app.cam.yaw += 0.1;
+        assert!(outlines.advance(&app.cam, 3, source) <= 3);
+    }
+    let settle = |outlines: &mut Outlines| {
+        for _ in 0..100_000 {
+            assert!(outlines.advance(&app.cam, 7, source) <= 7);
+            if !outlines.busy() {
+                return;
+            }
+        }
+        panic!("bounded silhouette job failed to settle");
+    };
+    settle(&mut outlines);
+    let mut fresh = Outlines::default();
+    fresh.set_model(Some(1), 1);
+    settle(&mut fresh);
+    assert_eq!(outlines.segments(), fresh.segments(), "orbits must not corrupt unfinished adjacency");
+    let mut canceled = Outlines::default();
+    canceled.set_model(Some(1), 1);
+    canceled.advance(&app.cam, 10, source);
+    canceled.set_model(None, 0);
+    assert!(canceled.busy(), "retire unfinished adjacency over subsequent frames");
+    settle(&mut canceled);
+    assert!(canceled.segments().is_empty());
+    let mut hidden = Outlines::default();
+    hidden.set_model(Some(2), 100_000);
+    let mut discovered = 0;
+    hidden.advance(&app.cam, 7, |_| {
+        discovered += 1;
+        None
+    });
+    assert_eq!(discovered, 7, "hidden and empty bodies cannot bypass the discovery budget");
+}
