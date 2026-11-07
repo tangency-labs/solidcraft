@@ -1261,3 +1261,14 @@ fn a_body_pattern_keeps_each_sources_appearance_and_material() {
         assert!(!s.doc.materials.contains_key(copy), "{copy} has no material of its own");
     }
 }
+
+/// A pattern of bodies that makes no copy (a count of 1) is still added: the copies' look is
+/// copied only where there are copies.
+#[test]
+fn a_body_pattern_with_no_copies_is_still_added() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"center":[0,0,5],"operation":"new","body_name":"Base"}));
+    run(&mut s, "material.assign", json!({"bodies":["Base"],"material":"Steel"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies":["Base"],"dir1":[1,0,0],"count1":1,"spacing1":30}));
+    assert_eq!(s.model.state().bodies.len(), 1);
+}

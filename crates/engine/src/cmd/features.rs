@@ -2236,8 +2236,11 @@ fn finish_pattern(
     if comps.is_empty() {
         let copied = bodies.clone();
         let reply = add_feature(s, p, FeatureKind::Pattern { features, pattern, bodies: bodies.into_iter().map(BodyName).collect() })?;
+        // The pattern is added either way: when it made no copies (the feature failed to
+        // evaluate) or an uneven number of them, there is nothing to tell the copies apart by
+        // and they keep no look, as before.
         if !copied.is_empty() {
-            copy_keeps_appearance(s, &reply, &copied, "pattern")?;
+            let _ = copy_keeps_appearance(s, &reply, &copied, "pattern");
         }
         return Ok(reply);
     }
