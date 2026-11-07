@@ -42,7 +42,6 @@ frame.member
 frame.profile.insert
 frame.profile.list
 frame.profile.properties
-inspect.interference
 inspect.measure
 inspect.silhouette
 joint.as_built
