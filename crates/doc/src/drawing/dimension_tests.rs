@@ -335,35 +335,44 @@ fn a_chain_saves_its_points_in_order_and_keeps_its_rules() {
     assert!(reading.starts_with("damaged drawing: "), "{reading}");
 }
 
-/// A cylinder dimension saves its face by name, and the face keeps a reference's rules.
+/// A cylinder or a sphere dimension saves its face by name, and the face keeps a reference's rules.
 #[test]
-fn a_cylinder_dimension_saves_its_face() {
-    let (mut d, _) = measured();
-    let (view, id) = (d.views[0].id, d.allocate_id(&mut IdSource::seeded(SEED + 1)).unwrap());
+fn a_cylinder_or_sphere_dimension_saves_its_face() {
     let face = ModelFace { body: BODY.into(), origin_feature: FEATURE, name: "F4:boss".into(), path: vec![3] };
-    let kind = DimensionKind::Cylinder { face };
-    d.add_dimensions([Arc::new(Dimension {
-        id,
-        view,
-        kind,
-        offset_mm: 6.0,
-        text: TextPlace::Centred,
-        decimals: 1,
-        override_text: None,
-        last_good: None,
-    })]);
-    d.validate().unwrap();
-    let cylinder = ids::encode(id);
-    let mut v = file(&d);
-    let saved = json!({"cylinder": {"face": {"body": "Box", "origin_feature": 7, "name": "F4:boss", "path": [3]}}});
-    assert_eq!(dim(&mut v, &cylinder)["kind"], saved);
-    assert_eq!(Drawing::from_json(&v.to_string()).unwrap(), d);
-    let rule = |rule: &str| format!("damaged drawing: dimension {cylinder}: {rule}");
-    let changed = |key: &str, value: Value| refused(&d, |v| dim(v, &cylinder)["kind"]["cylinder"]["face"][key] = value);
-    assert_eq!(changed("name", json!("")), rule("a name in a reference is 1 to 512 bytes, without control characters"));
-    assert_eq!(changed("origin_feature", json!(0)), rule("a reference names the feature that made its body"));
-    assert_eq!(changed("path", json!([0])), rule("an occurrence path is at most 64 occurrences, none of them 0"));
-    assert!(changed("edges", json!(["F4:boss"])).starts_with("damaged drawing: "), "a face has no edges");
+    for (key, kind) in [("cylinder", DimensionKind::Cylinder { face: face.clone() }), ("sphere", DimensionKind::Sphere { face: face.clone() })] {
+        let (mut d, _) = measured();
+        let (view, id) = (d.views[0].id, d.allocate_id(&mut IdSource::seeded(SEED + 1)).unwrap());
+        d.add_dimensions([Arc::new(Dimension {
+            id,
+            view,
+            kind,
+            offset_mm: 6.0,
+            text: TextPlace::Centred,
+            decimals: 1,
+            override_text: None,
+            last_good: None,
+        })]);
+        d.validate().unwrap();
+        let encoded = ids::encode(id);
+        let mut v = file(&d);
+        let saved = json!({key: {"face": {"body": "Box", "origin_feature": 7, "name": "F4:boss", "path": [3]}}});
+        assert_eq!(dim(&mut v, &encoded)["kind"], saved);
+        assert_eq!(Drawing::from_json(&v.to_string()).unwrap(), d);
+        let rule = |rule: &str| format!("damaged drawing: dimension {encoded}: {rule}");
+        let changed = |field: &str, value: Value| refused(&d, |v| dim(v, &encoded)["kind"][key]["face"][field] = value);
+        assert_eq!(changed("name", json!("")), rule("a name in a reference is 1 to 512 bytes, without control characters"));
+        assert_eq!(changed("origin_feature", json!(0)), rule("a reference names the feature that made its body"));
+        assert_eq!(changed("path", json!([0])), rule("an occurrence path is at most 64 occurrences, none of them 0"));
+        assert!(changed("edges", json!(["F4:boss"])).starts_with("damaged drawing: "), "{key}: a face has no edges");
+    }
+}
+
+/// A sphere's size reads SØ or SR, the diameter sign as a diameter's (ISO 129-1).
+#[test]
+fn a_spheres_label_is_sr_or_s_diameter() {
+    assert_eq!(reading_label(LabelKind::SphericalDiameter, 20.0, "mm", 2), "SØ20.00");
+    assert_eq!(reading_label(LabelKind::SphericalRadius, 10.0, "mm", 1), "SR10.0");
+    assert_eq!(reading_label(LabelKind::Diameter, 20.0, "mm", 0), "Ø20", "unchanged");
 }
 
 /// A dimension between two cylinders' silhouettes saves each one's face and side, and its

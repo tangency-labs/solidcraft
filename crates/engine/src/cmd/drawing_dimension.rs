@@ -59,7 +59,8 @@ pub static COMMANDS: &[CommandSpec] = &[
              reading?: projected (default) or true}}, {length: {edge, direction?, reading?}}, {angle: {a, b: straight edges, reading?, \
              other_side?}}, {radial: {edge: a circle or an arc the view sees face on, diameter?: by default for a whole circle or \
              half a turn or more}}, {cylinder: {face: a face of a whole cylinder the view doesn't see end-on, read as Ø between its \
-             silhouettes}}, {silhouettes: {a, b: {face, side: near or far, the silhouette nearer the other cylinder or farther}, \
+             silhouettes}}, {sphere: {face: a face of a sphere, read as SØ when the body's faces on it are the whole sphere, else as SR \
+             on the arc of its outline in the view that is on them}}, {silhouettes: {a, b: {face, side: near or far, the silhouette nearer the other cylinder or farther}, \
              direction?: as a linear one's, aligned being square to them}: two of one cylinder make its cylinder dimension}, \
              {faces: {a, b: flat, parallel faces the view sees edge-on, direction?: as a linear one's, aligned being square to them}} or \
              {chain: {points: [3 to 64 corners, in order along one line], direction?: as a linear one's, aligned being first to \
@@ -92,7 +93,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<DimensionResult>)
         .params(
             "dimension: its id, one that reads lost or ambiguous; slot: which of its references, a or b (a linear dimension's corners, \
-             an angle's edges, the faces of silhouettes or of faces), edge (a length's or a radial one's), face (a cylinder's) or a \
+             an angle's edges, the faces of silhouettes or of faces), edge (a length's or a radial one's), face (a cylinder's or a sphere's) or a \
              chain's point by its number from 0, one that no longer finds the one thing it names; pick: what that reference names \
              now, {edge}, {corner} or {face}, each as add takes it but without path (it keeps its own); a candidate inspect lists \
              of the slot's kind passes back as it stands → what drawing.dimension.inspect answers for it. Saved by name; its id, \
@@ -143,6 +144,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
         }
         KindParam::Radial { edge: e, diameter } => DimensionKind::Radial { edge: edge(&e)?, diameter: diameter.unwrap_or(false) },
         KindParam::Cylinder { face: f } => DimensionKind::Cylinder { face: face(&f)? },
+        KindParam::Sphere { face: f } => DimensionKind::Sphere { face: face(&f)? },
         KindParam::Silhouettes { a, b, direction } => {
             let silhouette = |s: &SilhouetteParam| face(&s.face).map(|face| Silhouette { face, side: s.side });
             doc.silhouettes_kind(model, silhouette(&a)?, silhouette(&b)?, direction).map_err(|why| bad(ADD, why.to_string()))?
@@ -274,7 +276,7 @@ pub(super) fn repair_reference(s: &mut Session, cmd: &str, now: Status, put: imp
 
 /// The reference of `kind` that `slot` names: a linear dimension's corners `a` and `b`, a length's
 /// or a radial one's `edge`, an angle's edges `a` and `b`, a chain's points by number, a cylinder's
-/// `face`, and the faces `a` and `b` of silhouettes (each keeps its side) or of faces.
+/// or a sphere's `face`, and the faces `a` and `b` of silhouettes (each keeps its side) or of faces.
 fn slot(kind: &mut DimensionKind, slot: SlotParam) -> Result<Slot<'_>> {
     let fits = slots(kind);
     let found = match kind {
@@ -285,7 +287,7 @@ fn slot(kind: &mut DimensionKind, slot: SlotParam) -> Result<Slot<'_>> {
             SlotParam::Point(k) => points.get_mut(k).map(Slot::Point),
             _ => None,
         },
-        DimensionKind::Cylinder { face } => (slot == SlotParam::Face).then_some(Slot::Face(face)),
+        DimensionKind::Cylinder { face } | DimensionKind::Sphere { face } => (slot == SlotParam::Face).then_some(Slot::Face(face)),
         DimensionKind::Silhouettes { a, b, .. } => a_or_b(slot, &mut a.face, &mut b.face).map(Slot::Face),
         DimensionKind::Faces { a, b, .. } => a_or_b(slot, a, b).map(Slot::Face),
     };
@@ -308,7 +310,7 @@ fn slots(kind: &DimensionKind) -> String {
         DimensionKind::Length { .. } | DimensionKind::Radial { .. } => "`edge`".into(),
         DimensionKind::Angle { .. } => "`a` and `b`, its edges".into(),
         DimensionKind::Chain { points, .. } => format!("its points, 0 to {}", points.len().saturating_sub(1)),
-        DimensionKind::Cylinder { .. } => "`face`".into(),
+        DimensionKind::Cylinder { .. } | DimensionKind::Sphere { .. } => "`face`".into(),
         DimensionKind::Silhouettes { .. } | DimensionKind::Faces { .. } => "`a` and `b`, its faces".into(),
     }
 }
@@ -426,6 +428,11 @@ fn change(d: &mut Drawing, id: u64, set: &DimensionSet) -> Result<Vec<String>> {
                 return Err(bad(EDIT, "a cylinder's diameter has no direction, reading or side: it reads between its silhouettes"));
             }
         }
+        DimensionKind::Sphere { .. } => {
+            if set.direction.is_some() || set.reading.is_some() || set.other_side.is_some() {
+                return Err(bad(EDIT, "a sphere's size has no direction, reading or side: it reads on its outline in the view"));
+            }
+        }
     }
     Ok(changed_fields(&before, dimension))
 }
@@ -441,7 +448,7 @@ fn kind_settings(kind: &DimensionKind) -> (Option<LinearDirection>, Option<Readi
         DimensionKind::Chain { direction, .. } | DimensionKind::Silhouettes { direction, .. } | DimensionKind::Faces { direction, .. } => {
             (Some(*direction), None, false, false)
         }
-        DimensionKind::Cylinder { .. } => (None, None, false, false),
+        DimensionKind::Cylinder { .. } | DimensionKind::Sphere { .. } => (None, None, false, false),
     }
 }
 

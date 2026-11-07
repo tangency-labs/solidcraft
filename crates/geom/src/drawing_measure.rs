@@ -6,6 +6,8 @@
 //! `foreshortened` says a measured line isn't parallel to the view's plane, so the two differ. The
 //! view's scale and place on the sheet never change a measurement.
 
+use std::f64::consts::TAU;
+
 use serde::{Deserialize, Serialize};
 
 use crate::EPS;
@@ -140,6 +142,46 @@ pub struct Cylinder {
     pub origin: Vec3,
     pub axis: Vec3,
     pub radius: f64,
+}
+
+/// A sphere as a measurement takes it (model): its centre and its radius.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Sphere {
+    pub center: Vec3,
+    pub radius: f64,
+}
+
+impl Sphere {
+    /// The point `angle` round the sphere's contour on the view through `basis`, from the view's
+    /// horizontal and counter-clockwise as the view shows it. Any view shows a sphere as a circle as
+    /// wide as its diameter: its contour, the great circle square to the view's normal, so its size
+    /// reads true.
+    pub fn contour_point(&self, basis: &Plane, angle: f64) -> Vec3 {
+        self.center + (basis.x * angle.cos() + basis.y * angle.sin()) * self.radius
+    }
+}
+
+/// The angles round `sphere`'s contour on the view through `basis` (as [`Sphere::contour_point`]
+/// takes them, from 0 to 2π) where it crosses the plane through `point` square to `normal`: none,
+/// one where it touches, or two. None for a plane parallel to the view's, which the contour never
+/// crosses.
+pub fn contour_crossings(basis: &Plane, sphere: &Sphere, point: Vec3, normal: Vec3) -> Result<Vec<f64>> {
+    validate_plane(basis).map_err(|_| Invalid("a view's basis is finite and orthonormal"))?;
+    let round = model_point(sphere.center) && sphere.radius > EPS && sphere.radius <= MAX_NUMBER;
+    require(round && model_point(point), "a sphere has its centre within 1e12 mm of the origin and a radius over 0, and a plane a point as near")?;
+    let normal = normal.normalized().ok_or(Invalid("a plane's normal is zero or not finite"))?;
+    // The contour meets the plane where a cos θ + b sin θ = d.
+    let (a, b, d) = (sphere.radius * basis.x.dot(normal), sphere.radius * basis.y.dot(normal), (point - sphere.center).dot(normal));
+    let reach = a.hypot(b);
+    if reach <= PARALLEL * sphere.radius || d.abs() > reach {
+        return Ok(Vec::new());
+    }
+    let (at, off) = (b.atan2(a), (d / reach).clamp(-1.0, 1.0).acos());
+    let mut angles = vec![(at - off).rem_euclid(TAU)];
+    if off > EPS {
+        angles.push((at + off).rem_euclid(TAU));
+    }
+    Ok(angles)
 }
 
 /// Which of a cylinder's two silhouettes on a view, by where another cylinder is there: the one

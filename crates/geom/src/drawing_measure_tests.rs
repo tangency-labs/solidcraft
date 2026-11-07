@@ -1,3 +1,5 @@
+use std::f64::consts::PI;
+
 use super::*;
 use crate::drawing_view::{NamedView, basis_looking};
 
@@ -208,6 +210,38 @@ fn a_cylinders_silhouettes_are_square_to_its_axis_and_the_view() {
     refused(silhouette_side(&front(), Vec3::ZERO), "axis");
     refused(silhouette_side(&front(), Vec3::new(f64::NAN, 0.0, 1.0)), "axis");
     refused(silhouette_side(&Plane { x: Vec3::new(2.0, 0.0, 0.0), ..front() }, Vec3::X), "basis");
+}
+
+/// A ball of radius 5 at (1, 2, 3): its contour in a view is the great circle square to the view's
+/// normal, from the view's horizontal round. The plane x = 4 crosses it where 5 cos θ = 3, once each
+/// side; x = 6 touches it once; x = 7 and a plane parallel to the view's miss it.
+#[test]
+fn a_spheres_contour_is_its_great_circle_square_to_the_view() {
+    let ball = Sphere { center: Vec3::new(1.0, 2.0, 3.0), radius: 5.0 };
+    for basis in [front(), iso()] {
+        for k in 0..8 {
+            let p = ball.contour_point(&basis, f64::from(k) * 0.8);
+            assert!(close(p.dist(ball.center), 5.0) && (p - ball.center).dot(basis.normal()).abs() < 1e-12, "{p:?}");
+        }
+    }
+    assert!(ball.contour_point(&front(), 0.0).dist(ball.center + front().x * 5.0) < 1e-12);
+    let across = |x: f64| contour_crossings(&front(), &ball, Vec3::new(x, 0.0, 0.0), Vec3::X * 2.0).unwrap();
+    let half = 0.6f64.acos();
+    let crossed = across(4.0);
+    assert_eq!(crossed.len(), 2, "{crossed:?}");
+    assert!(crossed.iter().any(|t| close(*t, half)) && crossed.iter().any(|t| close(*t, TAU - half)), "{crossed:?}");
+    assert!(crossed.iter().all(|t| (ball.contour_point(&front(), *t).x - 4.0).abs() < 1e-12), "{crossed:?}");
+    let touched = across(6.0);
+    assert!(touched.len() == 1 && touched[0].abs() < 1e-12, "{touched:?}");
+    assert!(across(7.0).is_empty());
+    assert!(contour_crossings(&front(), &ball, ball.center, front().normal()).unwrap().is_empty(), "parallel to the view");
+    let tilted = contour_crossings(&iso(), &ball, ball.center, Vec3::new(1.0, -1.0, 0.5)).unwrap();
+    assert_eq!(tilted.len(), 2, "through the centre: across a diameter");
+    assert!(close((tilted[0] - tilted[1]).abs(), PI), "{tilted:?}");
+    refused(contour_crossings(&front(), &Sphere { radius: 0.0, ..ball }, ball.center, Vec3::X), "radius over 0");
+    refused(contour_crossings(&front(), &Sphere { center: Vec3::new(f64::NAN, 0.0, 0.0), ..ball }, Vec3::ZERO, Vec3::X), "centre");
+    refused(contour_crossings(&front(), &ball, ball.center, Vec3::ZERO), "normal");
+    refused(contour_crossings(&Plane { x: Vec3::new(2.0, 0.0, 0.0), ..front() }, &ball, ball.center, Vec3::X), "basis");
 }
 
 fn cylinder(origin: Vec3, axis: Vec3, radius: f64) -> Cylinder {

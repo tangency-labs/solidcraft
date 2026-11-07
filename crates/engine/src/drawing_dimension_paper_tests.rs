@@ -33,6 +33,7 @@ fn read(points: &[[f64; 2]], text: &str) -> Resolved {
         status: Status::Ok,
         measured: None,
         text: Some(text.into()),
+        label: None,
         members: Vec::new(),
         exact: true,
         // Front view: x along X and y along Z.
@@ -250,6 +251,24 @@ fn a_radial_dimensions_arrows_sit_on_its_rim() {
     assert!(close(back[0].x, m) && close(back[0].y, m), "{back:?}");
 }
 
+/// A sphere is drawn as its label says: SØ as a whole circle's diameter, an arrow each side of its
+/// contour; SR as a radius, one arrow on the middle of the arc it reads on.
+#[test]
+fn a_spheres_size_is_drawn_as_its_label_says() {
+    let sphere = || DimensionKind::Sphere { face: face() };
+    let lay = |points: &[[f64; 2]], text: &str, label| {
+        let r = Resolved { label: Some(label), ..read(points, text) };
+        parts(&laid(&dimension(sphere(), 10.0, TextPlace::Centred), &r, &view_at("1:1")).unwrap().group).1
+    };
+    let whole = [[0.0, 0.0], [10.0, 0.0], [-10.0, 0.0], [10.0, 0.0]];
+    let tips = lay(&whole, "SØ20.00", LabelKind::SphericalDiameter);
+    assert!(tips.len() == 2 && close((tips[0] + tips[1]).len(), 0.0), "opposite, on the contour: {tips:?}");
+    let m = 10.0 * FRAC_1_SQRT_2;
+    let dome = [[0.0, 0.0], [10.0, 0.0], [m, m], [0.0, 10.0]];
+    let tips = lay(&dome, "SR10.00", LabelKind::SphericalRadius);
+    assert!(tips.len() == 1 && close(tips[0].x, m) && close(tips[0].y, m), "{tips:?}");
+}
+
 /// A chain is one line of frames at one offset: a shared extension line is drawn once, whichever
 /// point is further from the line.
 #[test]
@@ -393,8 +412,12 @@ fn a_cylinder_is_dimensioned_across_its_silhouettes() {
 fn a_dimension_with_no_points_has_no_lines() {
     let mut lost = read(&[], "");
     lost.status = Status::Lost("gone".into(), Vec::new());
-    for kind in [length(LinearDirection::Aligned), DimensionKind::Radial { edge: edge(), diameter: false }, DimensionKind::Cylinder { face: face() }]
-    {
+    for kind in [
+        length(LinearDirection::Aligned),
+        DimensionKind::Radial { edge: edge(), diameter: false },
+        DimensionKind::Cylinder { face: face() },
+        DimensionKind::Sphere { face: face() },
+    ] {
         assert!(laid(&dimension(kind, 10.0, TextPlace::Centred), &lost, &view_at("1:1")).is_none());
     }
     let chain = DimensionKind::Chain { points: Vec::new(), direction: LinearDirection::Aligned };
@@ -441,6 +464,7 @@ fn hostile_points_and_offsets_never_panic() {
             DimensionKind::Radial { edge: edge(), diameter: next() % 2 == 0 },
             DimensionKind::Chain { points: Vec::new(), direction: LinearDirection::Aligned },
             DimensionKind::Cylinder { face: face() },
+            DimensionKind::Sphere { face: face() },
         ];
         for kind in kinds {
             let d = dimension(kind, offset, text);

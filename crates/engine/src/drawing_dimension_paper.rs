@@ -9,7 +9,7 @@
 use std::f64::consts::{FRAC_1_SQRT_2, PI, TAU};
 
 use solidcore_record::{Seg2, Vec2};
-use solidcraft_doc::drawing::dimension::{Dimension, DimensionKind, Resolved, TextPlace};
+use solidcraft_doc::drawing::dimension::{Dimension, DimensionKind, LabelKind, Resolved, TextPlace};
 use solidcraft_geom::drawing_measure::LinearDirection;
 use solidcraft_geom::drawing_view::ViewFrame;
 use solidcraft_geom::paper::annotate::{ArrowShape, Terminator};
@@ -134,6 +134,11 @@ fn pieces(dimension: &Dimension, resolved: &Resolved, on: &[Vec2], set: &impl Fn
             Some(vec![radial(centre, [start, mid, end], *diameter, offset, place, text())?])
         }
         (DimensionKind::Chain { direction, .. }, points) => chain(points, *direction, offset, resolved, set),
+        // As a circle's or an arc's, on the arc of its contour it reads on.
+        (DimensionKind::Sphere { .. }, &[centre, start, mid, end]) => {
+            let diameter = resolved.label == Some(LabelKind::SphericalDiameter);
+            Some(vec![radial(centre, [start, mid, end], diameter, offset, place, text())?])
+        }
         (DimensionKind::Cylinder { .. }, &[a0, a1, b0, b1]) => across([a0, a1], [b0, b1], LinearDirection::Aligned, offset, place, text()),
         (DimensionKind::Silhouettes { direction, .. } | DimensionKind::Faces { direction, .. }, &[a0, a1, b0, b1]) => {
             across([a0, a1], [b0, b1], *direction, offset, place, text())

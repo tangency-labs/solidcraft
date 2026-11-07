@@ -258,7 +258,7 @@ impl JsonSchema for SlotParam {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "Which of a dimension's references: `a` or `b` (a linear dimension's corners, an angle's edges, or the faces of silhouettes or of faces), `edge` (a length's or a radial dimension's), `face` (a cylinder's), or a chain's point by its number from 0.",
+            "description": "Which of a dimension's references: `a` or `b` (a linear dimension's corners, an angle's edges, or the faces of silhouettes or of faces), `edge` (a length's or a radial dimension's), `face` (a cylinder's or a sphere's), or a chain's point by its number from 0.",
             "anyOf": [{"type": "string", "enum": ["a", "b", "edge", "face"]}, {"type": "integer", "minimum": 0, "maximum": MAX_CHAIN_POINTS - 1}]
         })
     }
@@ -338,6 +338,12 @@ pub enum KindParam {
     /// its axis.
     Cylinder {
         /// A face on the cylinder.
+        face: FaceParam,
+    },
+    /// A sphere's size, on any view: SØ when the body's faces on it are the whole sphere, else SR
+    /// on the arc of its outline in the view that is on them.
+    Sphere {
+        /// A face on the sphere.
         face: FaceParam,
     },
     /// The distance between a silhouette of one cylinder and a silhouette of another, as the view
