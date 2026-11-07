@@ -1954,11 +1954,16 @@ pub fn solve_holding_with_analysis(doc: &Document, st: &ModelState, held: &Held,
         // Measured at the joint, where the loop solver closes it.
         let (dt, da) = mismatch(&mat_mul(&want, &frames.b), &mat_mul(tb, &frames.b));
         if dt > CONFLICT_MM || da > CONFLICT_RAD {
-            sol.conflicts.push((
-                j.id,
-                j.name.clone(),
-                format!("off by {dt:.4} mm and {:.3}° from the placement the other joints give", da.to_degrees()),
-            ));
+            let why = if tree.fixed.contains_key(&j.a.occurrence) && tree.fixed.contains_key(&j.b.occurrence) {
+                let name = |occ: u64| doc.occurrences.iter().find(|o| o.id == occ).map_or_else(|| occ.to_string(), |o| o.name.clone());
+                match (j.a.occurrence, j.b.occurrence) {
+                    (0, o) | (o, 0) => format!("it joins the design's base to {}, which is grounded, so it can move neither", name(o)),
+                    (a, b) => format!("both its parts are grounded ({}, {}), so it can move neither", name(a), name(b)),
+                }
+            } else {
+                format!("off by {dt:.4} mm and {:.3}° from the placement the other joints give", da.to_degrees())
+            };
+            sol.conflicts.push((j.id, j.name.clone(), why));
         } else if stuck.contains(id) {
             // It meets there, but the loop would have to come apart on the way (a rocker
             // driven a full turn ends where it started).
