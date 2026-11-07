@@ -107,6 +107,7 @@ material.inspect                  materials and their properties
 material.list                     materials and their properties
 material.properties.directional   materials and their properties
 material.properties.validate      materials and their properties
+model.body_features               a listing of the model's timeline per body; crates/engine/src/schema/inspect_tests.rs
 model.edges                       a listing of the model's topology
 model.faces                       a listing of the model's topology
 model.threads                     a listing of the model's topology

@@ -1,0 +1,42 @@
+{
+  "en": {
+    "cmd.model_body_features": "List Body Features",
+    "prefs.browser_body_features": "Features under bodies",
+    "prefs.browser_body_features_note": "Each body in the browser folds open on the timeline features that built it, in timeline order."
+  },
+  "ar": {
+    "cmd.model_body_features": "سرد ميزات الجسم",
+    "prefs.browser_body_features": "الميزات تحت الأجسام",
+    "prefs.browser_body_features_note": "يمكن فتح كل جسم في المستعرض لعرض ميزات المخطط الزمني التي بنته، بترتيب المخطط الزمني."
+  },
+  "de": {
+    "cmd.model_body_features": "Körper-Features auflisten",
+    "prefs.browser_body_features": "Features unter Körpern",
+    "prefs.browser_body_features_note": "Jeder Körper im Browser lässt sich aufklappen und zeigt die Features der Zeitleiste, die ihn erzeugt haben, in deren Reihenfolge."
+  },
+  "fr": {
+    "cmd.model_body_features": "Lister les fonctions du corps",
+    "prefs.browser_body_features": "Fonctions sous les corps",
+    "prefs.browser_body_features_note": "Chaque corps du navigateur se déplie sur les fonctions de l'historique qui l'ont construit, dans l'ordre de l'historique."
+  },
+  "he": {
+    "cmd.model_body_features": "הצגת פיצ'רים של גוף",
+    "prefs.browser_body_features": "פיצ'רים מתחת לגופים",
+    "prefs.browser_body_features_note": "כל גוף בדפדפן נפתח ומציג את הפיצ'רים מציר הזמן שבנו אותו, לפי סדר ציר הזמן."
+  },
+  "ja": {
+    "cmd.model_body_features": "ボディのフィーチャーを一覧表示",
+    "prefs.browser_body_features": "ボディの下にフィーチャー",
+    "prefs.browser_body_features_note": "ブラウザーの各ボディを展開すると、そのボディを作ったタイムラインのフィーチャーがタイムライン順に表示されます。"
+  },
+  "vi": {
+    "cmd.model_body_features": "Liệt kê tính năng của thân",
+    "prefs.browser_body_features": "Tính năng dưới thân",
+    "prefs.browser_body_features_note": "Mỗi thân trong trình duyệt có thể mở ra để hiện các tính năng trên dòng thời gian đã tạo nên nó, theo thứ tự dòng thời gian."
+  },
+  "zh": {
+    "cmd.model_body_features": "列出实体特征",
+    "prefs.browser_body_features": "实体下显示特征",
+    "prefs.browser_body_features_note": "浏览器中的每个实体都可展开，按时间线顺序显示构建它的时间线特征。"
+  }
+}
