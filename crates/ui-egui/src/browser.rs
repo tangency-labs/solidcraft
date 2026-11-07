@@ -2094,7 +2094,9 @@ fn occurrence_rows_inner(
     if !render {
         features::rows(app, ui, placement.component, path, depth + 1, acts);
         // The joints that attach this placement, as the root's Joints folder lists them (#9130).
-        crate::dialogs_assembly::component_joints(app, ui, path, key, depth + 1);
+        if let Some(joint) = crate::dialogs_assembly::component_joints(app, ui, path, key, depth + 1) {
+            acts.hover_joint = Some(joint);
+        }
     }
     if path.len() < 64 {
         for child in &placement.children {

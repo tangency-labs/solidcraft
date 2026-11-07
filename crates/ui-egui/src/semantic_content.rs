@@ -232,6 +232,13 @@ pub(crate) fn set_external_body_hover(app: &mut SolveApp, bodies: Vec<String>) {
     app.viewport.hover_bodies = bodies;
 }
 
+/// The timeline's own write of the hovered feature. A Browser row that lit the same feature a
+/// frame earlier no longer owns it, so expiring the Browser's hover leaves the timeline's alone.
+pub(crate) fn set_timeline_feature_hover(app: &mut SolveApp, feature: Option<u64>) {
+    app.tree.content.last_feature = None;
+    app.viewport.hover_feature = feature;
+}
+
 fn expire_hover(app: &mut SolveApp) -> (Vec<String>, Option<String>) {
     let old_bodies = std::mem::take(&mut app.tree.content.last_bodies);
     let old_plane = app.tree.content.last_plane.take();
@@ -443,6 +450,7 @@ pub(crate) fn finalize(app: &mut SolveApp, ctx: &egui::Context) {
     }
     // Keep the previous contribution until finalization: floating viewports paint before
     // their overlaid panels. Expire only our contribution, leaving other producers intact.
+    let lit_before = (app.viewport.hover_feature, app.viewport.hover_joint);
     let (old_bodies, old_plane) = expire_hover(app);
     // Egui's response hit testing supplies pointer ownership, including occlusion and capture.
     // Stable owner iteration only breaks ties; submission order never decides the winner.
@@ -487,7 +495,10 @@ pub(crate) fn finalize(app: &mut SolveApp, ctx: &egui::Context) {
         }
         crate::browser::apply_content_actions(app, actions);
     }
-    if old_bodies != app.tree.content.last_bodies || old_plane != app.tree.content.last_plane {
+    if old_bodies != app.tree.content.last_bodies
+        || old_plane != app.tree.content.last_plane
+        || lit_before != (app.viewport.hover_feature, app.viewport.hover_joint)
+    {
         ctx.request_repaint();
     }
 }

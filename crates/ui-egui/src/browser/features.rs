@@ -666,6 +666,12 @@ mod tests {
         assert_eq!(h.app.viewport.hover_feature, Some(round));
         h.step(&json!({"move":[5,5]})).unwrap();
         assert_eq!(h.app.viewport.hover_feature, None);
+        // The timeline taking over the same feature the row lit (the pointer going straight from
+        // one to the other) keeps it lit when the row's hover expires.
+        h.step(&json!({"move":[row.x,row.y]})).unwrap();
+        crate::semantic_content::set_timeline_feature_hover(&mut h.app, Some(round));
+        h.step(&json!({"move":[5,5]})).unwrap();
+        assert_eq!(h.app.viewport.hover_feature, Some(round));
     }
 
     fn find_in_timeline(app: &mut SolveApp, feature: u64, body: &str) {

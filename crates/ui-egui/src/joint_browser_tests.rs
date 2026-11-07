@@ -163,6 +163,11 @@ fn each_placement_lists_the_joints_that_attach_it() {
     assert_eq!(rows("Glue").len(), 1, "Glue doesn't attach B");
     let at = crate::scenario::handle_at("row:Hinge").unwrap();
     assert_eq!(at.y, hinges[1], "the row clicked below is B's");
+    // Hovering B's row lights the glyph as the root's row does.
+    h.step(&json!({"move": [at.x, at.y]})).unwrap();
+    assert_eq!(h.app.viewport.hover_joint, Some(hinge));
+    h.step(&json!({"move": [5, 5]})).unwrap();
+    assert_eq!(h.app.viewport.hover_joint, None);
 
     h.step(&json!({"click": {"handle": "row:Hinge"}, "double": true})).unwrap();
     h.frames(3);
