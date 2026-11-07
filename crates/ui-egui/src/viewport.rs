@@ -7013,7 +7013,10 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
             painter.rect_filled(Rect::from_center_size(sp, vec2(4.0, 4.0)), 0.0, t.sketch);
         }
     }
-    let Some(sid) = app.session.active_sketch else { return };
+    let Some(sid) = app.session.active_sketch else {
+        crate::scenario::publish_count("spline_control_segments", 0.0);
+        return;
+    };
     // While a dimension's value is typed, its points where that value puts them.
     let st = crate::dim_view::preview_world(app).unwrap_or(st);
     let Some(ss) = st.sketch(sid) else { return };
@@ -7055,6 +7058,35 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
             painter.circle_stroke(sp, 6.0, Stroke::new(2.0, t.sel_edge));
         }
     }
+    // A control-point spline's polygon stays after the tool finishes: the dashed lines between
+    // its control points, while the sketch is open (#12830). A fit-point spline's points lie on
+    // the curve, so it has none. Hidden with the points, or with the curve.
+    let mut control_segments = 0.0;
+    if !sk.view.hide_points {
+        let guide = Stroke::new(1.0, t.sketch_accent.gamma_multiply(0.55));
+        for (index, curve) in sk.curves.iter().enumerate() {
+            let CurveKind::Spline { pts, control: true, periodic, .. } = &curve.kind else { continue };
+            if !solidcraft_engine::view::sketch_curve_visible(sk, index) {
+                continue;
+            }
+            let mut screen = Vec::new();
+            for pi in pts {
+                let Some(point) = sk.points.get(*pi).and_then(|p| proj.to_screen(ss.plane.to_world(p.pos))) else { continue };
+                if screen.last().is_some_and(|last: &Pos2| last.distance(point) < 0.5) {
+                    continue;
+                }
+                screen.push(point);
+            }
+            if *periodic && screen.len() >= 2 && screen.first().zip(screen.last()).is_some_and(|(a, b)| a.distance(*b) > 0.5) {
+                screen.push(screen[0]);
+            }
+            for side in screen.windows(2) {
+                painter.extend(dashed_line(&[side[0], side[1]], painter.clip_rect(), guide, 5.0, 4.0));
+                control_segments += 1.0;
+            }
+        }
+    }
+    crate::scenario::publish_count("spline_control_segments", control_segments);
     // The markers and the status line are drawn straight onto the view: its side's colours (#4146).
     let v = Tokens::view();
     for selected in &app.session.selection {
@@ -13333,6 +13365,23 @@ mod tests {
         h.call("ui.set", json!({"lassoSelect": false}));
         h.step(&json!({"drag": loop_at(&[[15.0, 15.0], [85.0, 85.0]])})).unwrap();
         assert_eq!(curves(&h).len(), 4, "the window box takes all four lines inside it: {:?}", curves(&h));
+    }
+
+    #[test]
+    fn a_control_point_spline_keeps_dashed_lines_between_its_points() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.spline.control_point", json!({"points": [[0, 0], [10, 20], [30, 18], [40, 0]]})).unwrap();
+        h.frames(2);
+        assert_eq!(crate::scenario::count_of("spline_control_segments"), Some(3.0));
+        h.app.run("sketch.spline.fit_point", json!({"points": [[0, -10], [10, -20], [30, -16], [40, -10]]})).unwrap();
+        h.frames(2);
+        assert_eq!(crate::scenario::count_of("spline_control_segments"), Some(3.0), "a fit-point spline adds no polygon");
+        h.app.finish_sketch();
+        h.frames(2);
+        assert_eq!(crate::scenario::count_of("spline_control_segments"), Some(0.0));
     }
 }
 
