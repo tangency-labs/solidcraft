@@ -337,7 +337,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              The format comes from the extension unless given; for OpenUSD the path's extension picks text, binary or package, and a \
              format naming another encoding is refused. URDF (.urdf) exports the whole assembly for robot simulators: a link per \
              component placement with mass and inertia, joints from the assembly's joints, and STL meshes in metres written \
-             next to it (docs/urdf.md); RViz needs mesh_prefix such as package://robot/meshes/. SDF (.sdf) writes a Gazebo \
+             next to it or in the folder mesh_prefix names (docs/urdf.md); RViz needs mesh_prefix such as package://robot/meshes/. SDF (.sdf) writes a Gazebo \
              model folder at the path (a .sdf ending dropped): model.config, model.sdf, an STL per body and each decal's image \
              on a textured quad, the image also its visual's albedo map (docs/sdf.md).",
             object(
@@ -346,7 +346,8 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                     "format": {"type": "string", "enum": ["step", "stp", "iges", "igs", "3mf", "3mf-tagged", "stl", "stla", "obj", "glb", "usd", "usda", "usdc", "usdz", "3dm", "urdf", "sdf"]},
                     "bodies": {"type": "array", "items": {"type": "string"}, "description": "Body names (default: all; not with urdf)"},
                     "writer": {"type": "string", "enum": ["solidcraft", "cadmpeg"], "description": "STEP and IGES only: SolidCraft's own writer (default), or cadmpeg's, which writes STEP AP242 with the components and colours but no solid names, and IGES 5.3 with each body where the design shows it; refused for other formats"},
-                    "mesh_prefix": string("urdf: put before each mesh file name (default: none, so relative to the .urdf)"),
+                    "mesh_prefix": string("urdf: put before each mesh file name; a folder in it is where the meshes are written (default: none, so next to the .urdf)"),
+                    "place_meshes": {"type": "boolean", "description": "urdf: write the meshes where mesh_prefix points (default true); false keeps them next to the .urdf"},
                     "effort": {"type": "number", "description": "urdf: effort limit for joints with none saved, N or N m (default 1000)"},
                     "velocity": {"type": "number", "description": "urdf: velocity limit for joints with none saved, m/s or rad/s (default 10)"},
                     "hierarchy": {"type": "boolean", "description": "glb: false writes every body flat under the root in world coordinates, as SolidCraft 0.40 did (default true: a named node per occurrence)"},
