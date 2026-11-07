@@ -2834,6 +2834,10 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
         object_type_row(d, ui);
         return;
     }
+    if crate::hole_folder::active(d) {
+        crate::hole_folder::note(app, d, ui);
+        return;
+    }
     let Kind::Hole { opts, .. } = &mut d.kind else { return };
     let mut m = usize::from(opts.multiple);
     choice_row(ui, "Placement", "hole_place", &mut m, &["Single", "Multiple"]);
@@ -4995,6 +4999,9 @@ pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>
     let mut cmds = dialog_commands(app, &normalized)?;
     exact_regions(d, &mut cmds);
     crate::op_auto::scope_targets(app, d, &mut cmds)?;
+    if crate::hole_folder::active(d) {
+        return crate::hole_folder::commands(app, d, cmds);
+    }
     if let Some((id, _)) = d.editing {
         let (cmd, mut params) = cmds.into_iter().next().ok_or("nothing to apply")?;
         if let Some(feature) = app.session.doc.feature(id) {
@@ -5769,14 +5776,20 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
         Kind::Move { .. } => return Ok(vec![("solid.move".into(), crate::dialogs_move::params(app, d)?)]),
         Kind::Hole { diameter, depth, kind, cb_diameter, cb_depth, cs_diameter, cs_angle, opts } => {
-            need(0, if opts.multiple { "sketch points" } else { "a face position" })?;
+            let folder = crate::hole_folder::active(d);
+            if !folder {
+                need(0, if opts.multiple { "sketch points" } else { "a face position" })?;
+            }
             let ty = match *kind {
                 0 if opts.angled => "drilled",
                 k => HOLE_TYPES.get(k).copied().unwrap_or("simple"),
             };
             // One hole per picked face position, or one Hole feature per sketch for sketch points.
             let mut places: Vec<Value> = Vec::new();
-            if opts.multiple {
+            if folder {
+                // Every hole of a folder keeps its own place (`hole_folder`).
+                places.push(json!({}));
+            } else if opts.multiple {
                 let mut by_sketch: Vec<(u64, Vec<String>)> = Vec::new();
                 for x in sels(d, 0) {
                     if let Sel::SketchPoint { id } = x
@@ -5804,10 +5817,16 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 );
             } else {
                 // One hole per pick: a curved surface split at its seam is picked whole (both
-                // halves, the clicked one first), but the hole goes where it was clicked only.
+                // halves, the clicked one first), but the hole goes where it was clicked only. A
+                // face takes one hole, or several when Preferences says so.
+                let several = crate::hole_place::several(app, d).then(|| crate::hole_place::several_places(s, sels(d, 0)));
                 let mut taken: Vec<Sel> = Vec::new();
-                for x in sels(d, 0) {
-                    if !matches!(x, Sel::Face { .. }) || taken.iter().any(|t| same_face(t, x)) {
+                for (i, x) in sels(d, 0).iter().enumerate() {
+                    let skip = match &several {
+                        Some(places) => !places.contains(&i),
+                        None => !matches!(x, Sel::Face { .. }) || taken.iter().any(|t| same_face(t, x)),
+                    };
+                    if skip {
                         continue;
                     }
                     taken.extend(crate::viewport::grouped_selection(s, x));

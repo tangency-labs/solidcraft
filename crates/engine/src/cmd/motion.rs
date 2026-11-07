@@ -16,8 +16,10 @@ use super::joints::{cannot_move, effective_values, joint_id, occurrence_id, plac
 use crate::params::{bad, bool_, str_, vec3};
 use crate::schema::motion::{
     ContactCheck, ContactCollision, ContactCreateParams, ContactEditParams, ContactEnableParams, ContactNoParams, ContactSetChange,
-    ContactSetCreated, ContactSetEdited, ContactSetInfo, ContactSets, ContactSwitch, FindLimitsParams, FindLimitsResult, MotionListParams,
-    MotionStudies, MotionStudyDeleteParams, MotionStudyDeleted, MotionStudyInfo, MotionStudyKeyInfo, MotionStudyParams, MotionStudySaved,
+    ContactSetCreated, ContactSetEdited, ContactSetInfo, ContactSets, ContactSwitch, ExplodeCreateParams, ExplodeCreated, ExplodeDeleteParams,
+    ExplodeDeleted, ExplodeListParams, ExplodeMoveInfo, ExplodeShowParams, ExplodeShown, ExplodeViews, ExplodedViewInfo, FindLimitsParams,
+    FindLimitsResult, MotionListParams, MotionStudies, MotionStudyDeleteParams, MotionStudyDeleted, MotionStudyInfo, MotionStudyKeyInfo,
+    MotionStudyParams, MotionStudySaved,
 };
 use crate::schema::motion_play::{
     DriveReport, ExportParams, PartPose, PlayParams, Pose, StudyExport, StudyExported, StudyPlayed, StudySample, UnmovedJoint,
@@ -53,6 +55,10 @@ const CONTACT_EDIT_CONTRACT: TypedContract<ContactEditParams> = TypedContract::n
 const STUDY_CONTRACT: TypedContract<MotionStudyParams> = TypedContract::new();
 const STUDY_DELETE_CONTRACT: TypedContract<MotionStudyDeleteParams> = TypedContract::new();
 const STUDY_LIST_CONTRACT: TypedContract<MotionListParams> = TypedContract::new();
+const EXPLODE_CREATE_CONTRACT: TypedContract<ExplodeCreateParams> = TypedContract::new();
+const EXPLODE_SHOW_CONTRACT: TypedContract<ExplodeShowParams> = TypedContract::new();
+const EXPLODE_LIST_CONTRACT: TypedContract<ExplodeListParams> = TypedContract::new();
+const EXPLODE_DELETE_CONTRACT: TypedContract<ExplodeDeleteParams> = TypedContract::new();
 const PLAY_CONTRACT: TypedContract<PlayParams> = TypedContract::new();
 const EXPORT_CONTRACT: TypedContract<ExportParams> = TypedContract::new();
 
@@ -175,16 +181,32 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&STUDY_DELETE_CONTRACT)
         .output(output_schema_for::<MotionStudyDeleted>)
         .params("study"),
-    CommandSpec::new("explode.create", "Exploded View", explode_create).at("SOLID", "ASSEMBLE").icon("explode").enabled(has_parts_to_explode).params(
-        "name?; scale? (automatic: each occurrence pushed away from the assembly's centre by scale × its offset, default 1); \
-         moves?: [{occurrence, translate: [x,y,z]}] (instead of automatic)",
-    ),
-    CommandSpec::new("explode.show", "Show Exploded View", explode_show)
+    CommandSpec::new("explode.create", "Exploded View", crate::checked!("explode.create", explode_create))
+        .at("SOLID", "ASSEMBLE")
+        .icon("explode")
+        .enabled(has_parts_to_explode)
+        .contract(&EXPLODE_CREATE_CONTRACT)
+        .output(output_schema_for::<ExplodeCreated>)
+        .params(
+            "name?; scale? (automatic: each occurrence pushed away from the assembly's centre by scale × its offset, default 1); \
+             moves?: [{occurrence, translate: [x,y,z]}] (instead of automatic)",
+        ),
+    CommandSpec::new("explode.show", "Show Exploded View", crate::checked!("explode.show", explode_show))
         .icon("explode")
         .noundo()
+        .contract(&EXPLODE_SHOW_CONTRACT)
+        .output(output_schema_for::<ExplodeShown>)
         .params("view: id|name (or none: back to the assembled placement) — shown only; the design keeps its placements"),
-    CommandSpec::new("explode.list", "List Exploded Views", explode_list).icon("list").noundo(),
-    CommandSpec::new("explode.delete", "Delete Exploded View", explode_delete).icon("delete").params("view"),
+    CommandSpec::new("explode.list", "List Exploded Views", crate::checked!("explode.list", explode_list))
+        .icon("list")
+        .noundo()
+        .contract(&EXPLODE_LIST_CONTRACT)
+        .output(output_schema_for::<ExplodeViews>),
+    CommandSpec::new("explode.delete", "Delete Exploded View", crate::checked!("explode.delete", explode_delete))
+        .icon("delete")
+        .contract(&EXPLODE_DELETE_CONTRACT)
+        .output(output_schema_for::<ExplodeDeleted>)
+        .params("view"),
 ];
 
 const MAX_ITEMS: usize = 10_000;
@@ -1233,7 +1255,8 @@ fn explode_create(s: &mut Session, p: &Value) -> Result<Value> {
     let name =
         str_(p, "name").map(str::to_string).unwrap_or_else(|| free_name("Exploded View", s.doc.assembly.exploded.iter().map(|v| v.name.as_str())));
     s.doc_mut().assembly.exploded.push(ExplodedView { id, name: name.clone(), moves: moves.clone() });
-    Ok(json!({"view": id, "name": name, "moves": moves.iter().map(|(o, t)| json!({"occurrence": o, "translate": t})).collect::<Vec<_>>()}))
+    let moves = moves.iter().map(ExplodeMoveInfo::from).collect();
+    typed_reply(cmd, ExplodeCreated { view: id, name, moves, param_warnings: Vec::new() })
 }
 
 fn explode_show(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1242,7 +1265,7 @@ fn explode_show(s: &mut Session, p: &Value) -> Result<Value> {
         s.pending_moves.clear();
         s.exploded.clear();
         s.revision += 1;
-        return Ok(json!({"view": null}));
+        return typed_reply(cmd, ExplodeShown { view: None, name: None, param_warnings: Vec::new() });
     }
     let i = view_index(s, p, cmd)?;
     let v = s.doc.assembly.exploded.get(i).cloned().ok_or_else(|| bad(cmd, "view"))?;
@@ -1254,7 +1277,7 @@ fn explode_show(s: &mut Session, p: &Value) -> Result<Value> {
     s.exploded.clone_from(&moves);
     s.pending_moves = moves;
     s.revision += 1;
-    Ok(json!({"view": v.id, "name": v.name}))
+    typed_reply(cmd, ExplodeShown { view: Some(v.id), name: Some(v.name), param_warnings: Vec::new() })
 }
 
 /// Whether the pending moves are an exploded view shown (`explode.show`), which places the
@@ -1287,13 +1310,14 @@ fn exploded_at(moves: &[(u64, Mat, Vec3)], amount: f64) -> std::collections::BTr
 }
 
 fn explode_list(s: &mut Session, _p: &Value) -> Result<Value> {
-    Ok(json!({"views": s.doc.assembly.exploded}))
+    let views = s.doc.assembly.exploded.iter().map(ExplodedViewInfo::from).collect();
+    typed_reply("explode.list", ExplodeViews { views, param_warnings: Vec::new() })
 }
 
 fn explode_delete(s: &mut Session, p: &Value) -> Result<Value> {
     let i = view_index(s, p, "explode.delete")?;
     let v = s.doc_mut().assembly.exploded.remove(i);
-    Ok(json!({"deleted": v.name}))
+    typed_reply("explode.delete", ExplodeDeleted { deleted: v.name, param_warnings: Vec::new() })
 }
 
 /// World position of a point of an occurrence (tests).
