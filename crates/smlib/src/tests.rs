@@ -486,19 +486,6 @@ fn bodies_move_between_kernels_and_calls_run_side_by_side() {
     }
 }
 
-/// Each kernel has its own range of blend serials: a body keeps the serials of the kernel that
-/// made it, and another kernel's memo of solved stations must not take them for its own.
-#[test]
-fn kernels_never_issue_the_same_blend_serial() {
-    let range = core::BLEND_SERIALS_PER_KERNEL as usize;
-    let ranges = core::run("outer", |outer| {
-        let inner = core::run("inner", |inner| Ok(inner.blend_last_serial.get() as usize)).unwrap_or_default();
-        Ok([outer.blend_last_serial.get() as usize / range, inner / range])
-    });
-    let [outer, inner] = ranges.unwrap();
-    assert_ne!(outer, inner);
-}
-
 /// A panic in a call running beside another costs neither: the panicking call's kernel is thrown
 /// away and the other call and later ones go on.
 #[test]

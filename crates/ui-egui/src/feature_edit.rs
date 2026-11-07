@@ -19,6 +19,11 @@ impl PendingFeatureEdit {
         self.next_command = None;
     }
 
+    /// The feature whose editor this prepares, until the preparation is cancelled.
+    pub(crate) fn feature(&self) -> Option<u64> {
+        self.feature
+    }
+
     pub(crate) fn then_start(&mut self, command: &str) {
         self.cancel();
         self.next_command = Some(command.to_owned());

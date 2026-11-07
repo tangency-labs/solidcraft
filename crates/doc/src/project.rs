@@ -912,7 +912,31 @@ pub fn refresh_face_anchor_links(
     sk: &mut Sketch,
     anchor: &crate::FaceAnchor,
 ) -> Result<Vec<String>> {
-    refresh_links_in(doc, vals, st, plane, sk, Some(anchor))
+    refresh_links_in(doc, vals, st, plane, sk, Some(anchor), LostNames::Fail)
+}
+
+/// What a link kept by the name of a face or edge does when the name finds nothing any more.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LostNames {
+    /// The sketch fails, asking for the reference to be picked again ([`DocError::Reselect`]).
+    Fail,
+    /// The link is marked lost and keeps its last geometry, with a warning naming the reference.
+    /// No other face or edge is taken for it. Only for showing a failed sketch while it is edited
+    /// (#12085), never for the evaluation the features after it build from.
+    Mark,
+}
+
+/// [`refresh_links`] (or [`refresh_face_anchor_links`] with `anchor`) that marks a link whose
+/// named face or edge is gone lost instead of failing ([`LostNames::Mark`]).
+pub(crate) fn refresh_links_marking_lost(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    st: &ModelState,
+    plane: &Plane,
+    sk: &mut Sketch,
+    anchor: Option<&crate::FaceAnchor>,
+) -> Result<Vec<String>> {
+    refresh_links_in(doc, vals, st, plane, sk, anchor, LostNames::Mark)
 }
 
 /// Remove degree-two straight stations introduced by coplanar face subdivision.
@@ -989,7 +1013,7 @@ fn merge_family_lines(geom: Vec<LinkGeom>) -> Result<Vec<LinkGeom>> {
 /// longer finds exactly that face or edge is not lost: the sketch fails, asking for the
 /// reference to be picked again ([`DocError::Reselect`]).
 pub fn refresh_links(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, plane: &Plane, sk: &mut Sketch) -> Result<Vec<String>> {
-    refresh_links_in(doc, vals, st, plane, sk, None)
+    refresh_links_in(doc, vals, st, plane, sk, None, LostNames::Fail)
 }
 
 /// Lay every text that runs along a curve of its sketch along that curve as the solve left it.
@@ -1025,6 +1049,7 @@ fn refresh_links_in(
     plane: &Plane,
     sk: &mut Sketch,
     anchor: Option<&crate::FaceAnchor>,
+    lost_names: LostNames,
 ) -> Result<Vec<String>> {
     let mut warn = Vec::new();
     let links = sk.links.clone();
@@ -1034,16 +1059,17 @@ fn refresh_links_in(
         if !l.auto_face
             && let (Some(name), LinkSource::Face { body, at }) = (&l.face_name, &mut source)
         {
-            let (index, p) = st
-                .body(body)
-                .and_then(|target| {
-                    if l.kind == LinkKind::Project {
-                        crate::name_lookup::locate_projected_face(target, name, *at)
-                    } else {
-                        crate::naming::face_on_body(target, name, *at)
-                    }
-                })
-                .ok_or_else(|| DocError::reselect(name.as_str()))?;
+            let found = st.body(body).and_then(|target| {
+                if l.kind == LinkKind::Project {
+                    crate::name_lookup::locate_projected_face(target, name, *at)
+                } else {
+                    crate::naming::face_on_body(target, name, *at)
+                }
+            });
+            let Some((index, p)) = found else {
+                lose_named(sk, &l.id, name, lost_names, &mut warn)?;
+                continue;
+            };
             *at = p;
             named_face = Some((body.clone(), index, p));
         }
@@ -1051,7 +1077,10 @@ fn refresh_links_in(
         // edge has the name any more no other edge is taken for it: the sketch fails.
         let mut named_edge = None;
         if let (Some(name), LinkSource::Edge { body, at }) = (&l.edge_name, &source) {
-            let (body, hit) = locate_named_edge(st, body, name, *at).ok_or_else(|| DocError::reselect(name.as_str()))?;
+            let Some((body, hit)) = locate_named_edge(st, body, name, *at) else {
+                lose_named(sk, &l.id, name, lost_names, &mut warn)?;
+                continue;
+            };
             warn.extend(hit.note(name).map(|note| format!("projected {note}")));
             named_edge = Some((body, hit.edge, *at));
         }
@@ -1117,6 +1146,19 @@ fn refresh_links_in(
         }
     }
     Ok(warn)
+}
+
+/// A link whose face or edge `name` finds nothing: the sketch fails asking for it again, or (only
+/// while a failed sketch is shown for editing) the link is marked lost, with a warning naming it.
+fn lose_named(sk: &mut Sketch, id: &str, name: &str, lost_names: LostNames, warn: &mut Vec<String>) -> Result<()> {
+    match lost_names {
+        LostNames::Fail => Err(DocError::reselect(name)),
+        LostNames::Mark => {
+            sk.set_link_lost(id, true);
+            warn.push(format!("projected reference lost: `{name}` no longer exists as it was picked; reselect it"));
+            Ok(())
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1626,7 +1668,57 @@ pub(crate) fn section(plane: &Plane, m: &Mesh, face: Option<u32>) -> Vec<LinkGeo
     let tight = size * 1e-4;
     let checkable = exact.len().saturating_mul(close.len()) <= 4_000_000;
     let strays = |v: &[LinkGeom]| exact.iter().any(|p| !v.iter().any(|g| plain_distance(g, *p).is_none_or(|d| d <= tight)));
-    if plain(&close) && (close.len() <= lossy.len() || (checkable && strays(&lossy) && !strays(&close))) { close } else { lossy }
+    let fitted = if plain(&close) && (close.len() <= lossy.len() || (checkable && strays(&lossy) && !strays(&close))) { close } else { lossy };
+    join_rounds(fitted, size * 1e-5)
+}
+
+/// Where the fit left a line and an arc ends apart by at most `tol`, both end at one point. A
+/// line can swallow an arc's first chord (a mesh crossing just past the tangent line), and
+/// [`refine_round`] moves an arc's ends but not the lines': the outline would not close.
+fn join_rounds(mut fitted: Vec<LinkGeom>, tol: f64) -> Vec<LinkGeom> {
+    for i in 0..fitted.len() {
+        let Some(&LinkGeom::Arc { c, mut a, mut b }) = fitted.get(i) else { continue };
+        let r = c.dist(a);
+        for end in [&mut a, &mut b] {
+            for curve in &mut fitted {
+                let LinkGeom::Line(p, q) = curve else { continue };
+                let (near, far) = if p.dist(*end) <= q.dist(*end) { (p, q) } else { (q, p) };
+                if near.dist(*end) <= tol {
+                    let joint = line_meets_round(*far, *near, c, r, tol);
+                    *near = joint;
+                    *end = joint;
+                }
+            }
+        }
+        if let Some(arc) = fitted.get_mut(i) {
+            *arc = LinkGeom::Arc { c, a, b };
+        }
+    }
+    fitted
+}
+
+/// Where a line from `far` ending near `near` meets the circle (`c`, `r`): the tangent point when
+/// the line runs into the circle there, within `tol` of it over the arc's first chord, else its
+/// crossing nearest `near`, else the circle's point nearest `near`.
+fn line_meets_round(far: Vec2, near: Vec2, c: Vec2, r: f64, tol: f64) -> Vec2 {
+    let nearest = |[x, y]: [Vec2; 2]| if x.dist(near) <= y.dist(near) { x } else { y };
+    let to_centre = c - far;
+    let span = to_centre.len();
+    if let Some(unit) = to_centre.normalized().filter(|_| span > r) {
+        let reach = (span * span - r * r).sqrt();
+        let (along, side) = (unit * (reach * reach / span), unit.perp() * (reach * r / span));
+        let tangent = nearest([far + along + side, far + along - side]);
+        if tangent.dist(near) <= tol + (2.0 * r * tol).sqrt() {
+            return tangent;
+        }
+    }
+    let Some(dir) = (near - far).normalized() else { return near };
+    let foot = far + dir * (c - far).dot(dir);
+    let half = r * r - (foot - c).len2();
+    if half >= 0.0 {
+        return nearest([foot + dir * half.sqrt(), foot - dir * half.sqrt()]);
+    }
+    (near - c).normalized().map_or(near, |unit| c + unit * r)
 }
 
 /// How far `p` lies from a line, arc or circle; None for any other curve.
