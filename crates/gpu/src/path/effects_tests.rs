@@ -8,6 +8,7 @@ use solidcraft_render::job::{
     looks::{LookKind, LookLayer, LookStack},
     photographic::{Flare, Photographic},
 };
+use wgpu::util::DeviceExt;
 
 #[test]
 fn saved_targeted_aging_reaches_preflight_and_start_after_cold_reopen() {
