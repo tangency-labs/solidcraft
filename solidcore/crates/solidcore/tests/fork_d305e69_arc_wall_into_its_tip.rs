@@ -45,9 +45,10 @@ use solidcore::{Brep, Kernel, SolidError};
 
 /// Every fix.
 fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes = UpstreamFixes::all();
-    k
+    Kernel {
+        fixes: UpstreamFixes::all(),
+        ..Kernel::default()
+    }
 }
 
 fn pick(k: &Kernel, b: &Brep, q: Point3) -> EdgeId {

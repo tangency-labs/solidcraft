@@ -463,6 +463,9 @@ impl FilletSurfaceGenerator {
         ball: Option<&crate::blend::fillet_standard_solver::p2::CircleBall>,
     ) -> Result<(Surface, Option<crate::blend::law_corners::LawCornerPieces>)> {
         use crate::blend::fillet_standard_solver::p1::RailSurface;
+        use crate::blend::fillet_standard_solver::touch_circle::{
+            corner_angle, fillet_curve_corners,
+        };
         if let Self::GnSection(g) = self {
             let center =
                 center_line.ok_or_else(|| SolidError::invalid_input(OP, "NULL centre line"))?;
@@ -490,9 +493,6 @@ impl FilletSurfaceGenerator {
             }
             // the fork's `SmGnSectionFSG::CircleSurface` (6eecf04, 5fbffc9): where the
             // centre line or a rail turns, the round skinned piece by piece and joined
-            use crate::blend::fillet_standard_solver::touch_circle::{
-                corner_angle, fillet_curve_corners,
-            };
             let corners =
                 fillet_curve_corners(center, rail1, rail2, corner_angle(ball.ang_tol_rad))?;
             if !corners.is_empty() {

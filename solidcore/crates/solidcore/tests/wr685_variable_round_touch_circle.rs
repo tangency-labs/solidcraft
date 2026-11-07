@@ -67,13 +67,14 @@ fn edge_between(k: &Kernel, b: &Brep, p: Point3, q: Point3) -> (EdgeId, bool) {
 
 /// The kernel: every fix on (the fork's own behaviour) when `fork`, else the default.
 fn kernel(fork: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes = if fork {
-        UpstreamFixes::all()
-    } else {
-        UpstreamFixes::default()
-    };
-    k
+    Kernel {
+        fixes: if fork {
+            UpstreamFixes::all()
+        } else {
+            UpstreamFixes::default()
+        },
+        ..Kernel::default()
+    }
 }
 
 /// The fork at d01d7b0 (and 58d03ef): every fix but the exact circle of 523bc25
