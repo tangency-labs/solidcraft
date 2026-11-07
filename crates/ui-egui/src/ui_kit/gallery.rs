@@ -1662,7 +1662,7 @@ const ELEMENTS: &[Element] = &[
         expr_row(ui, "Gallery", &mut s.value);
     }),
     element!("value_row", "dialog:row:Gallery", None, |ui, _| {
-        value_row(ui, "Gallery", "Origin plane XY, seen from its other side");
+        value_row(ui, "Gallery", "XY plane");
     }),
     element!("count_row", "dialog:row:Gallery", Some("dialog:Gallery up"), |ui, _| {
         let mut count = "6".to_owned();
