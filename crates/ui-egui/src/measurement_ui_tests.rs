@@ -492,3 +492,26 @@ fn measure_imported_stl_edges_and_vertices_from_viewport_clicks() {
         h.app.session.selection.clear();
     }
 }
+
+/// The Measure tool lists a face's perimeter after its area, and the outer and inner lengths when
+/// the face has a hole (#12048).
+#[test]
+fn measure_lists_a_faces_perimeter_after_its_area() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"length": 60, "width": 40, "height": 10, "body_name": "Plate"})).unwrap();
+    h.app.run("solid.cylinder", json!({"radius": 5, "height": 12, "base": [30, 20, -1], "operation": "cut"})).unwrap();
+    let rows = |h: &mut Harness, point: [f64; 3]| {
+        let r = h.app.session.execute("inspect.measure", &json!({"items":[{"type":"face","body":"Plate","point":point}]})).unwrap();
+        crate::quick_measure::item_lines(&h.app, &r["items"][0])
+    };
+    let holed = rows(&mut h, [5., 5., 10.]);
+    let circle = crate::prefs::show_mm(&h.app, std::f64::consts::TAU * 5.0, 1);
+    let total = crate::prefs::show_mm(&h.app, 200.0 + std::f64::consts::TAU * 5.0, 1);
+    let outer = crate::prefs::show_mm(&h.app, 200.0, 1);
+    assert!(holed[0].starts_with("Area  "), "{holed:?}");
+    assert_eq!(holed[1..], [format!("Perimeter  {total}"), format!("Outer perimeter  {outer}"), format!("Inner perimeter  {circle}")], "{holed:?}");
+    let plain = rows(&mut h, [5., 0., 5.]);
+    assert_eq!(plain.len(), 2, "a face with no hole has one perimeter row: {plain:?}");
+    assert!(plain[1].starts_with("Perimeter  "), "{plain:?}");
+}

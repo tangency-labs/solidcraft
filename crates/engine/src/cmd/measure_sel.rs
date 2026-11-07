@@ -109,8 +109,18 @@ fn fit_circle(pts: &[Vec3], tol: f64) -> Option<(Vec3, UnitVec3, f64)> {
 /// is the same edge (its ends on the polyline), else fitted to the polyline's points; and
 /// whether it is the exact one.
 fn edge_round(b: &solidcraft_doc::ModelBody, m: &Mesh, index: usize, whole: bool) -> Option<(Shape, bool)> {
+    edge_round_within(b, m, index, whole, edge_tolerance(m))
+}
+
+/// How far a point may lie from an exact curve and still count as on it, for mesh `m`.
+fn edge_tolerance(m: &Mesh) -> f64 {
+    (m.bounds().diagonal().max(1.0) * 1e-6).max(1e-9)
+}
+
+/// [`edge_round`] with the mesh's tolerance already worked out: finding it reads every vertex of
+/// the mesh, which a caller going through many edges should do once.
+fn edge_round_within(b: &solidcraft_doc::ModelBody, m: &Mesh, index: usize, whole: bool, tol: f64) -> Option<(Shape, bool)> {
     let pts = m.edges.get(index)?;
-    let tol = (m.bounds().diagonal().max(1.0) * 1e-6).max(1e-9);
     let exact = solidcraft_kernel::edge_circle(&b.body, index).filter(|c| {
         let ends = [pts.first(), pts.last()].into_iter().flatten().all(|p| p.dist(c.start).min(p.dist(c.end)) <= tol * 10.0);
         let on = pts.iter().all(|p| (p.dist(c.center) - c.radius).abs() <= tol * 10.0);
@@ -357,6 +367,19 @@ fn describe(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<I
             let normals: Vec<UnitVec3> = tris.iter().filter_map(|[a, b, c]| (*b - *a).cross(*c - *a).unit()).collect();
             let planar = normals.first().copied().filter(|n0| normals.iter().all(|n| n.dot(*n0) > 1.0 - 1e-6));
             let mut json = json!({"type": "face", "area_mm2": area, "planar": planar.is_some()});
+            // Each border edge counts for what Measure shows for that edge on its own.
+            let tol = edge_tolerance(&m);
+            let edge_len = |edge: usize| {
+                let polyline = m.edges.get(edge).map_or(0.0, |pts| polyline_len(pts));
+                edge_round_within(b, &m, edge, false, tol).map_or(polyline, |(shape, exact)| curve_len(&shape, exact, polyline))
+            };
+            if let Some(perimeter) = super::measure_exact::patch_perimeter(&m, &patch, planar.is_some(), edge_len) {
+                json["perimeter_mm"] = json!(perimeter.total);
+                if let Some((outer, inner)) = perimeter.outer_inner {
+                    json["outer_perimeter_mm"] = json!(outer);
+                    json["inner_perimeter_mm"] = json!(inner);
+                }
+            }
             let verts: Vec<Vec3> = tris.iter().flat_map(|t| t.iter().copied()).collect();
             let surface = solidcraft_kernel::face_surface(&b.body, *index);
             let shape = match surface {
