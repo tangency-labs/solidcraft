@@ -2001,6 +2001,8 @@
   "prefs.ground_shadow_follows_model_help": "표시된 바디의 가장 낮은 지점 아래에 그림자를 배치합니다. 끄면 위로 이동한 모델의 그림자가 원점을 지나는 지면에 유지됩니다.",
   "prefs.hide_constraint_glyphs_zoomed_out": "축소 시 구속 조건 기호 숨기기",
   "prefs.hide_constraint_glyphs_zoomed_out_note": "스케치를 충분히 축소하면 구속 조건 기호가 가려지지 않도록 숨깁니다. 끄기: 확대/축소와 관계없이 고정된 화면 크기를 유지합니다.",
+  "prefs.hide_hovered": "커서 아래 요소 숨기기",
+  "prefs.hide_hovered_help": "V는 포인터 아래의 바디, 스케치, 평면 또는 축을 선택하지 않고 숨깁니다. 여러 항목이 선택된 상태에서 포인터가 그 중 하나 위에 있으면 V는 선택 전체를 숨깁니다. 끄면 V는 선택을 숨깁니다.",
   "prefs.history": "이력",
   "prefs.history_bar_groups": "이력 막대를 그룹으로 접기",
   "prefs.history_bar_groups_note": "긴 이력에서는 한 컴포넌트의 연속된 특성을 하나의 칩으로 접고, 특성 폴더는 접힌 상태로 시작합니다. 삽입한 STEP 어셈블리는 Group 폴더에 들어갑니다. 끄면 각 특성을 표시하고, 폴더를 펼친 상태로 시작하며, 폴더를 만들지 않습니다.",

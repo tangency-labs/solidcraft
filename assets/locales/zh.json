@@ -2633,6 +2633,8 @@
   "prefs.ground_shadow_follows_model_help": "将阴影放在可见实体的最低点下方。关闭时，抬高模型的阴影仍位于经过原点的地面上。",
   "prefs.hide_constraint_glyphs_zoomed_out": "缩小时隐藏约束符号",
   "prefs.hide_constraint_glyphs_zoomed_out_note": "草图缩小到一定程度时隐藏约束符号，以免遮挡草图。关闭：任意缩放比例下符号仍保持固定屏幕大小。",
+  "prefs.hide_hovered": "隐藏光标下的元素",
+  "prefs.hide_hovered_help": "按 V 隐藏指针下的实体、草图、平面或轴，而不先选中它。多选时若指针位于其中一项上，V 仍隐藏整个选择。关闭后，V 隐藏当前选择。",
   "prefs.history": "历史",
   "prefs.history_bar_groups": "将历史栏折叠为分组",
   "prefs.history_bar_groups_note": "在较长的历史中，同一组件的连续特征折叠为一个标签，特征文件夹开始时为折叠状态。插入的 STEP 装配体放入 Group 文件夹。关闭后显示每个特征，文件夹开始时为展开状态，且不创建文件夹。",
