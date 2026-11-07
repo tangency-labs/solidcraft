@@ -87,6 +87,10 @@ pub struct ExportUrdfParams {
     /// Default: none.
     #[serde(default)]
     pub mesh_prefix: Option<String>,
+    /// Write the meshes where `mesh_prefix` points; false keeps every mesh next to the `.urdf`
+    /// whatever the prefix says. Default: true.
+    #[serde(default)]
+    pub place_meshes: Option<bool>,
     /// The effort limit of joints with none saved (`joint.dynamics`), a positive number. Default: 1000.
     #[serde(default)]
     pub effort: Option<f64>,

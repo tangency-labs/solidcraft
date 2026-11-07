@@ -356,13 +356,14 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
             "Export bodies to STEP (.step/.stp), 3MF (.3mf), binary STL (.stl), ASCII STL (format stla) or OBJ. The format \
              comes from the extension unless given. URDF (.urdf) exports the whole assembly for robot simulators: a link per \
              component placement with mass and inertia, joints from the assembly's joints, and STL meshes in metres written \
-             next to it (docs/urdf.md); RViz needs mesh_prefix such as package://robot/meshes/.",
+             next to it or in the folder mesh_prefix names (docs/urdf.md); RViz needs mesh_prefix such as package://robot/meshes/.",
             obj(
                 json!({
                     "path": string("Output file"),
                     "format": {"type": "string", "enum": ["step", "3mf", "3mf-tagged", "stl", "stla", "obj", "urdf"]},
                     "bodies": {"type": "array", "items": {"type": "string"}, "description": "Body names (default: all; not with urdf)"},
-                    "mesh_prefix": string("urdf: put before each mesh file name (default: none, so relative to the .urdf)"),
+                    "mesh_prefix": string("urdf: put before each mesh file name; a folder in it is where the meshes are written (default: none, so next to the .urdf)"),
+                    "place_meshes": {"type": "boolean", "description": "urdf: write the meshes where mesh_prefix points (default true); false keeps them next to the .urdf"},
                     "effort": {"type": "number", "description": "urdf: effort limit for joints with none saved, N or N m (default 1000)"},
                     "velocity": {"type": "number", "description": "urdf: velocity limit for joints with none saved, m/s or rad/s (default 10)"},
                     "mimic": {"type": "boolean", "description": "urdf: write <mimic> for motion links (default true)"},

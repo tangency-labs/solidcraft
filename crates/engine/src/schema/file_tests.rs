@@ -10,7 +10,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<ExportStepParams>(), &["bodies", "path"]);
     assert_keys(input_schema_for::<ExportMeshParams>(), &["bodies", "path", "quality"]);
     assert_keys(input_schema_for::<Export3mfParams>(), &["bodies", "objects", "path", "quality"]);
-    assert_keys(input_schema_for::<ExportUrdfParams>(), &["collision", "effort", "mesh_prefix", "mimic", "path", "velocity"]);
+    assert_keys(input_schema_for::<ExportUrdfParams>(), &["collision", "effort", "mesh_prefix", "mimic", "path", "place_meshes", "velocity"]);
 }
 
 #[test]

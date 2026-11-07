@@ -1620,7 +1620,10 @@ const DYNAMICS_CONTRACT: crate::schema::TypedContract<crate::schema::joints::Joi
 fn dynamics(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "joint.dynamics";
     let id = joint_id(s, p.get("joint"), cmd)?;
-    let i = num(p, "index").unwrap_or(0.0).max(0.0) as usize;
+    let i = match p.get("index") {
+        None | Some(Value::Null) => 0,
+        Some(v) => v.as_u64().and_then(|i| usize::try_from(i).ok()).ok_or_else(|| bad(cmd, "`index` must be a whole number, 0 or more"))?,
+    };
     let kind = s.doc.assembly.joints.iter().find(|j| j.id == id).map(|j| j.kind).ok_or_else(|| bad(cmd, "joint"))?;
     if i >= kind.dofs().len() {
         return Err(bad(cmd, "no such value"));

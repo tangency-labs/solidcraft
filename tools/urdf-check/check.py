@@ -36,7 +36,7 @@ def check_urdf(urdf, expected):
     tool = shutil.which("check_urdf")
     if not tool:
         raise Skip("check_urdf is not installed")
-    r = subprocess.run([tool, str(urdf)], capture_output=True, text=True)
+    r = subprocess.run([tool, str(urdf)], capture_output=True, text=True, check=False)
     if r.returncode:
         raise AssertionError((r.stdout + r.stderr).strip()[-400:])
     return "parsed"
@@ -270,7 +270,7 @@ def main():
         expected = json.loads((HERE / "expected" / f"{name}.json").read_text())
         with tempfile.TemporaryDirectory() as tmp:
             urdf = Path(tmp) / f"{name}.urdf"
-            r = subprocess.run([cli, "run", str(HERE / "fixtures" / f"{name}.json"), "--out", str(urdf)], capture_output=True, text=True)
+            r = subprocess.run([cli, "run", str(HERE / "fixtures" / f"{name}.json"), "--out", str(urdf)], capture_output=True, text=True, check=False)
             if r.returncode or not urdf.exists():
                 print(f"{name}: export FAILED: {(r.stdout + r.stderr).strip()[-400:]}")
                 failed += 1

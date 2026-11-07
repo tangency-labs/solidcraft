@@ -2810,6 +2810,9 @@ fn joint_dynamics_refuses_hostile_values() {
         json!({"joint": "Sleeve", "damping": -1.0}),
         json!({"joint": "Sleeve", "friction": 1e300}),
         json!({"joint": "Sleeve", "index": 99, "damping": 1.0}),
+        json!({"joint": "Sleeve", "index": -1, "damping": 1.0}),
+        json!({"joint": "Sleeve", "index": 0.5, "damping": 1.0}),
+        json!({"joint": "Sleeve", "index": "0", "damping": 1.0}),
         json!({"joint": "Nobody", "damping": 1.0}),
     ] {
         assert!(s.execute("joint.dynamics", &p).is_err(), "{p}");

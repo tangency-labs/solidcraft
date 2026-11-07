@@ -15,13 +15,19 @@ URDF always exports the whole assembly, so `bodies` is refused.
 
 ## Files
 
-The export writes one binary STL per component, in metres, next to `robot.urdf` unless `mesh_prefix`
-names a folder:
+The export writes binary STLs in metres, next to `robot.urdf` unless `mesh_prefix` names a folder
+(see [Parameters](#parameters)). `mesh_prefix` decides both the names the URDF gives and where
+the files go:
 
-- `robot-<component>.stl` holds all of the component's bodies. The root component's bodies go
-  in `robot-base.stl`.
-- `robot-<component>-collision.stl` appears only when a component mixes closed solids with
-  open surfaces: it holds the closed ones, which are the collision geometry.
+- `robot-<component>.stl` holds all of the component's bodies, as drawn. The root component's
+  bodies go in `robot-base.stl`. When every body collides as drawn (`mesh`), this file is also
+  the collision mesh.
+- `robot-<component>-collision.stl` holds the bodies that collide as their mesh, written
+  separately whenever the component's collision is not the same as its drawing: some bodies
+  are open surfaces, or other bodies have another collision shape (a hull, a fitted shape or
+  none).
+- `robot-<component>-<body>-collision.stl` is the convex hull of one body, one file per body
+  set to `convex_hull` (or left on `auto` with `collision: convex_hull`).
 
 Every path is checked before anything is written, including against the folders an agent may
 use (`allow_paths`). The meshes are written first and the `.urdf` last. If a write fails part
@@ -36,12 +42,14 @@ way, the error names the files already written and the one that failed.
 | `velocity` | 10 | Velocity limit for joint values with none saved, in m/s or rad/s. |
 | `collision` | mesh | What a body left on `auto` becomes: `mesh` or `convex_hull`. See [Collision shapes](#collision-shapes). |
 | `mimic` | true | Write `<mimic>` for motion links. `false` leaves each joint free, as older versions did. |
+| `place_meshes` | true | Write the meshes where `mesh_prefix` points. `false` writes them next to the URDF whatever the prefix says, as older versions did; copy them where the prefix points yourself. |
 
 URDF requires `effort` and `velocity` on every moving joint. A joint's own values come first, then
 these parameters, then the defaults, with a warning naming the joints that used them. A value that
 is not a positive number is refused.
 
-The meshes go where the URDF says they are, and a missing folder is created:
+The meshes go where the URDF says they are, and a missing folder is created (unless
+`place_meshes` is `false`):
 
 | `mesh_prefix` | Written to |
 |---|---|
@@ -49,7 +57,7 @@ The meshes go where the URDF says they are, and a missing folder is created:
 | `../meshes/` | `meshes/` beside the URDF's folder |
 | `v1_` | Next to the URDF, with names starting `v1_` |
 | `package://robot/meshes/` | `robot/meshes/` when the URDF is in `robot/` or `robot/urdf/`, otherwise `meshes/` next to the URDF |
-| `file:///opt/robot/meshes/` | That folder |
+| `file:///opt/robot/meshes/` | That folder (`%20` and the like are decoded; `file:///C:/robot/meshes/` is `C:/robot/meshes/` on Windows) |
 | `https://…` | Next to the URDF, with a warning: copy them there yourself |
 
 ## Joint dynamics
