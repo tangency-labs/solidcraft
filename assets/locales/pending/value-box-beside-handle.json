@@ -1,0 +1,21 @@
+{
+  "en": {
+    "prefs.value_box_beside_handle": "Keep the value box beside its handle",
+    "prefs.value_box_beside_handle_tip": "A command's value box stays beside its handle instead of going just outside the model, as before."
+  },
+  "ar": {
+    "prefs.value_box_beside_handle": "إبقاء مربع القيمة بجانب مقبضه"
+  },
+  "he": {
+    "prefs.value_box_beside_handle": "השארת תיבת הערך ליד הידית שלה"
+  },
+  "ja": {
+    "prefs.value_box_beside_handle": "値ボックスをハンドルの横に保つ"
+  },
+  "vi": {
+    "prefs.value_box_beside_handle": "Giữ ô giá trị bên cạnh tay nắm"
+  },
+  "zh": {
+    "prefs.value_box_beside_handle": "将数值框保持在控制柄旁边"
+  }
+}

@@ -890,13 +890,227 @@ fn value_box(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, selec
 /// through its values with it).
 fn value_box_with(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, select_all: bool, keep_tab: bool, place: BoxPlace) {
     let ids = (egui::Id::unique("sc_canvas_area"), egui::Id::unique("sc_canvas_value"));
-    value_box_in(ui, ids, label, value, (at, egui::Align2::LEFT_TOP), select_all, keep_tab, place);
+    value_box_in(ui, ids, label, value, placed(ui, at), select_all, keep_tab, place);
 }
 
 /// [`value_box`] with a note after the field (a pull's step size).
 fn value_box_noted(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, select_all: bool, note: Option<&str>, place: BoxPlace) {
     let ids = (egui::Id::unique("sc_canvas_area"), egui::Id::unique("sc_canvas_value"));
-    value_box_full(ui, ids, label, value, (at, egui::Align2::LEFT_TOP), (select_all, false), note, place);
+    value_box_full(ui, ids, label, value, placed(ui, at), (select_all, false), note, place);
+}
+
+/// Where the main value box goes this frame (see [`clear_of_model`]). With wheel stepping on, it
+/// stays put while the pointer is over it, so the wheel keeps stepping its value; off, it follows
+/// its handle as before.
+fn placed(ui: &egui::Ui, at: Pos2) -> (Pos2, egui::Align2) {
+    let last = egui::Id::unique("sc_canvas_box_at");
+    let over = crate::value_step::enabled(ui.ctx())
+        && ui.ctx().memory(|m| m.area_rect(egui::Id::unique("sc_canvas_area"))).zip(ui.ctx().pointer_hover_pos()).is_some_and(|(r, p)| r.contains(p));
+    if over && let Some(kept) = ui.ctx().data(|d| d.get_temp::<(Pos2, egui::Align2)>(last)) {
+        return kept;
+    }
+    let beside = ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique(BOX_BESIDE_HANDLE))).unwrap_or(false);
+    let model = ui.ctx().data(|d| d.get_temp::<Option<egui::Rect>>(egui::Id::unique(MODEL_OUTLINE))).flatten().filter(|_| !beside);
+    let at = clear_of_model(model, ui.clip_rect(), open_dialog(ui.ctx()), at);
+    ui.ctx().data_mut(|d| d.insert_temp(last, at));
+    at
+}
+
+const BOX_BESIDE_HANDLE: &str = "sc_canvas_box_beside_handle";
+
+/// The Keep the value box beside its handle preference, for [`placed`].
+pub(crate) fn set_box_beside_handle(ctx: &egui::Context, on: bool) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::unique(BOX_BESIDE_HANDLE), on));
+}
+
+/// The command window open now, for the value box to keep out from under.
+pub(crate) fn note_dialog(ctx: &egui::Context, id: egui::Id) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|d| d.insert_temp(egui::Id::unique("sc_canvas_dialog"), (id, pass)));
+}
+
+/// Where the command window noted this frame or last is on screen.
+fn open_dialog(ctx: &egui::Context) -> Option<egui::Rect> {
+    let (id, pass) = ctx.data(|d| d.get_temp::<(egui::Id, u64)>(egui::Id::unique("sc_canvas_dialog")))?;
+    if pass + 1 < ctx.cumulative_pass_nr() {
+        return None;
+    }
+    ctx.memory(|m| m.area_rect(id))
+}
+
+/// The egui memory key under which the viewport leaves the model's box on screen this frame.
+pub(crate) const MODEL_OUTLINE: &str = "sc_model_outline";
+
+/// How far the value box keeps from the model's outline (points).
+const BOX_GAP: f32 = 24.0;
+/// Room the box needs beside the model before it goes there (points).
+const BOX_ROOM: f32 = 150.0;
+
+/// Where the value box goes for a box the caller would put with its top-left at `at` (just right
+/// of and above the handle it belongs to): just outside the model's outline on screen (`model`),
+/// level with the handle, on the handle's side, so it never covers the edge or face being edited.
+/// Where the model fills the view on that side, or leaves no room before the command window
+/// (`dialog`), it stays beside the handle.
+fn clear_of_model(model: Option<egui::Rect>, view: egui::Rect, dialog: Option<egui::Rect>, at: Pos2) -> (Pos2, egui::Align2) {
+    let beside = (at, egui::Align2::LEFT_TOP);
+    let Some(m) = model else { return beside };
+    let handle = at + vec2(-16.0, 30.0);
+    let right = handle.x >= m.center().x;
+    let y = handle.y.clamp(view.top() + 12.0, view.bottom() - 12.0);
+    let mut view = view;
+    if let Some(d) = dialog {
+        if d.center().x >= m.center().x {
+            view.max.x = view.max.x.min(d.left());
+        } else {
+            view.min.x = view.min.x.max(d.right());
+        }
+    }
+    if right && view.right() - m.right() >= BOX_ROOM + BOX_GAP {
+        (egui::pos2(m.right() + BOX_GAP, y), egui::Align2::LEFT_CENTER)
+    } else if !right && m.left() - view.left() >= BOX_ROOM + BOX_GAP {
+        (egui::pos2(m.left() - BOX_GAP, y), egui::Align2::RIGHT_CENTER)
+    } else {
+        beside
+    }
+}
+
+/// Where the user has put the main value box.
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+enum BoxPin {
+    /// By its handle, the default.
+    #[default]
+    Handle,
+    /// Left or right of the navigation bar.
+    Left,
+    Right,
+    /// Where it was dropped (its top-left corner).
+    At(Pos2),
+}
+
+impl BoxPin {
+    fn parse(text: &str) -> BoxPin {
+        match text.trim() {
+            "left" => BoxPin::Left,
+            "right" => BoxPin::Right,
+            other => other
+                .split_once(',')
+                .and_then(|(x, y)| Some(egui::pos2(x.trim().parse().ok()?, y.trim().parse().ok()?)))
+                .filter(|p| p.is_finite())
+                .map_or(BoxPin::Handle, BoxPin::At),
+        }
+    }
+
+    fn text(self) -> String {
+        match self {
+            BoxPin::Handle => String::new(),
+            BoxPin::Left => "left".into(),
+            BoxPin::Right => "right".into(),
+            BoxPin::At(p) => format!("{:.0},{:.0}", p.x, p.y),
+        }
+    }
+}
+
+fn box_pin_id() -> egui::Id {
+    egui::Id::unique("sc_canvas_box_pin")
+}
+
+fn box_pin_change_id() -> egui::Id {
+    egui::Id::unique("sc_canvas_box_pin_change")
+}
+
+fn nav_bar_id() -> egui::Id {
+    egui::Id::unique("sc_canvas_nav_bar")
+}
+
+/// The app calls this every frame: last frame's move of the box goes into the preference, and the
+/// preference to the box.
+pub(crate) fn share_box_pin(ctx: &egui::Context, place: &mut String) {
+    if let Some(change) = ctx.data(|d| d.get_temp::<Option<BoxPin>>(box_pin_change_id())).flatten() {
+        *place = change.text();
+        ctx.data_mut(|d| d.insert_temp(box_pin_change_id(), None::<BoxPin>));
+    }
+    let pin = BoxPin::parse(place);
+    let shown = ctx.data(|d| d.get_temp::<Option<egui::Rect>>(nav_bar_id().with("now"))).flatten();
+    ctx.data_mut(|d| {
+        d.insert_temp(box_pin_id(), pin);
+        // Last frame's, so a hidden bar is forgotten; it is noted again as it draws.
+        d.insert_temp(nav_bar_id(), shown);
+        d.insert_temp(nav_bar_id().with("now"), None::<egui::Rect>);
+    });
+}
+
+/// The navigation bar's rectangle this frame, for the value box to dock beside.
+pub(crate) fn note_nav_bar(ctx: &egui::Context, rect: egui::Rect) {
+    ctx.data_mut(|d| d.insert_temp(nav_bar_id().with("now"), Some(rect)));
+}
+
+fn nav_bar(ctx: &egui::Context) -> Option<egui::Rect> {
+    ctx.data(|d| d.get_temp::<Option<egui::Rect>>(nav_bar_id())).flatten()
+}
+
+/// How near the navigation bar a dropped box docks to it (points).
+const BOX_DOCK_REACH: f32 = 90.0;
+/// The gap between a docked box and the navigation bar (points).
+const BOX_DOCK_GAP: f32 = 8.0;
+
+/// What a box dropped as `rect` becomes: docked to the side of the bar it is on when near it, else
+/// staying where it is.
+fn dropped_pin(rect: egui::Rect, nav: Option<egui::Rect>) -> BoxPin {
+    match nav {
+        Some(nav) if nav.expand(BOX_DOCK_REACH).intersects(rect) => {
+            if rect.center().x < nav.center().x {
+                BoxPin::Left
+            } else {
+                BoxPin::Right
+            }
+        }
+        _ => BoxPin::At(rect.min),
+    }
+}
+
+/// Where a pinned box goes, kept whole inside `view`; `None`: by its handle (also when docked to a
+/// navigation bar that isn't shown).
+fn pinned_at(pin: BoxPin, nav: Option<egui::Rect>, size: egui::Vec2, view: egui::Rect) -> Option<(Pos2, egui::Align2)> {
+    let min = match (pin, nav) {
+        (BoxPin::Handle, _) | (BoxPin::Left | BoxPin::Right, None) => return None,
+        (BoxPin::Left, Some(nav)) => egui::pos2(nav.left() - BOX_DOCK_GAP - size.x, nav.center().y - size.y / 2.0),
+        (BoxPin::Right, Some(nav)) => egui::pos2(nav.right() + BOX_DOCK_GAP, nav.center().y - size.y / 2.0),
+        (BoxPin::At(p), _) => p,
+    };
+    let max = (view.max - size).max(view.min);
+    Some((min.clamp(view.min, max), egui::Align2::LEFT_TOP))
+}
+
+/// The main value box's grip: drag it away (near the navigation bar it docks), click it to dock
+/// the box to the bar or send it back to its handle.
+fn box_grip(ui: &mut egui::Ui, area: egui::Id, pin: BoxPin) {
+    let dots = crate::ui_kit::panel_grip(ui);
+    let grip = ui.interact(dots.rect, area.with("grip"), egui::Sense::click_and_drag()).on_hover_cursor(egui::CursorIcon::Grab);
+    let ctx = ui.ctx().clone();
+    let shown = ctx.memory(|m| m.area_rect(area));
+    // By where the pointer is, not by each frame's motion: the box moves a frame after it.
+    let pointer = grip.interact_pointer_pos();
+    let held = area.with("grip_held");
+    if grip.drag_started()
+        && let (Some(r), Some(p)) = (shown, pointer)
+    {
+        ctx.data_mut(|d| d.insert_temp(held, p - r.min));
+    }
+    let moved = shown.zip(pointer).zip(ctx.data(|d| d.get_temp::<egui::Vec2>(held))).map(|((r, p), by)| r.translate(p - by - r.min));
+    let change = if grip.clicked() {
+        Some(if pin == BoxPin::Handle { BoxPin::Left } else { BoxPin::Handle })
+    } else if grip.drag_stopped() {
+        moved.or(shown).map(|r| dropped_pin(r, nav_bar(&ctx)))
+    } else if grip.dragged() {
+        ctx.set_cursor_icon(egui::CursorIcon::Grabbing);
+        moved.map(|r| BoxPin::At(r.min))
+    } else {
+        None
+    };
+    if change.is_some() {
+        ctx.data_mut(|d| d.insert_temp(box_pin_change_id(), change));
+        ctx.request_repaint();
+    }
 }
 
 /// [`value_box_with`] under its own ids (its area's and its field's), for a value beside the main
@@ -931,6 +1145,9 @@ fn value_box_full(
         return None;
     }
     let t = Tokens::get();
+    let main = area == egui::Id::unique("sc_canvas_area");
+    let pin = if main { ui.ctx().data(|d| d.get_temp::<BoxPin>(box_pin_id())).unwrap_or_default() } else { BoxPin::Handle };
+    let pinned = pinned_at(pin, nav_bar(ui.ctx()), box_size(ui, area, label, note), place.view.unwrap_or_else(|| ui.clip_rect()));
     // Held in place while the pointer is over it and value stepping is on (see `value_box`): by
     // its pivot, the point of the box that sits at `at`, which is not always its top-left corner.
     let pointer = ui.ctx().pointer_hover_pos();
@@ -942,12 +1159,15 @@ fn value_box_full(
     // #6608: the box moves out of the command window it would otherwise cover, and out of the
     // manipulator's handles: it keeps its place by its geometry, but a box that would cover
     // either of them moves out of it.
-    let at = if place.dialog.is_some() || place.handles.is_some() {
+    let at = if pinned.is_some() {
+        at
+    } else if place.dialog.is_some() || place.handles.is_some() {
         let kept = clear_of_dialog(rect_at(at, pivot, box_size(ui, area, label, note)), place);
         pivot.pos_in_rect(&kept)
     } else {
         at
     };
+    let (at, pivot) = pinned.unwrap_or((at, pivot));
     let mut field = None;
     // Background: under Preferences, Report a bug and other system windows (#9016). The box is
     // already kept clear of the command window (#6608), which floats at Middle with Features.
@@ -955,6 +1175,9 @@ fn value_box_full(
         let frame = Container::popup_frame(ui.style()).inner_margin(egui::Margin::symmetric(6, 3));
         Container::show_backing(ui, frame, |ui| {
             ui.horizontal(|ui| {
+                if main {
+                    box_grip(ui, area, pin);
+                }
                 ui.label(egui::RichText::new(solidcraft_ui_text::tr_label(label)).color(t.text_dim).size(crate::theme::Tokens::get().font_caption));
                 let r = crate::ui_kit::canvas_value_field(ui, id, value, keep_tab);
                 crate::params_dialog::complete(ui, &r, value);
@@ -2230,6 +2453,32 @@ mod tests {
         assert_eq!(clear_of_dialog(clear, place), clear, "a box that misses the window stays");
     }
 
+    /// A box stays with its handle until moved, is remembered, docks when dropped near the bar,
+    /// and stays whole in the view.
+    #[test]
+    fn a_value_box_can_be_dropped_docked_and_remembered() {
+        for pin in [BoxPin::Handle, BoxPin::Left, BoxPin::Right, BoxPin::At(egui::pos2(120.0, 340.0))] {
+            assert_eq!(BoxPin::parse(&pin.text()), pin);
+        }
+        assert_eq!(BoxPin::parse("nonsense"), BoxPin::Handle);
+        let view = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 700.0));
+        let nav = egui::Rect::from_min_size(egui::pos2(400.0, 640.0), egui::vec2(300.0, 40.0));
+        let size = egui::vec2(140.0, 30.0);
+        let box_at = |x, y| egui::Rect::from_min_size(egui::pos2(x, y), size);
+        assert_eq!(dropped_pin(box_at(300.0, 640.0), Some(nav)), BoxPin::Left);
+        assert_eq!(dropped_pin(box_at(720.0, 640.0), Some(nav)), BoxPin::Right);
+        assert_eq!(dropped_pin(box_at(300.0, 100.0), Some(nav)), BoxPin::At(egui::pos2(300.0, 100.0)));
+        assert_eq!(dropped_pin(box_at(300.0, 640.0), None), BoxPin::At(egui::pos2(300.0, 640.0)));
+        assert_eq!(pinned_at(BoxPin::Handle, Some(nav), size, view), None);
+        assert_eq!(pinned_at(BoxPin::Left, None, size, view), None, "the bar is hidden: by the handle");
+        let (left, _) = pinned_at(BoxPin::Left, Some(nav), size, view).unwrap();
+        assert!(left.x + size.x < nav.left() && (left.y + size.y / 2.0 - nav.center().y).abs() < 0.5, "{left:?}");
+        let (right, _) = pinned_at(BoxPin::Right, Some(nav), size, view).unwrap();
+        assert!(right.x > nav.right(), "{right:?}");
+        let (off, _) = pinned_at(BoxPin::At(egui::pos2(5000.0, -50.0)), None, size, view).unwrap();
+        assert!(view.contains_rect(egui::Rect::from_min_size(off, size)), "{off:?}");
+    }
+
     /// Canvas value boxes sit under Preferences and Report a bug (#9016).
     #[test]
     fn a_value_box_draws_under_system_windows() {
@@ -2249,7 +2498,7 @@ mod tests {
         assert!(order(&h) < Some(egui::Order::Middle), "Preferences draws over the value box");
         if window.intersects(box_rect) {
             assert!(
-                h.ctx.memory(|m| m.layer_id_at(box_rect.center())).is_some_and(|l| l.id == egui::Id::unique("sc_prefs")),
+                h.ctx.memory(|m| m.layer_id_at(window.intersect(box_rect).center())).is_some_and(|l| l.id == egui::Id::unique("sc_prefs")),
                 "Preferences covers the Distance box where they overlap"
             );
         }
@@ -2271,6 +2520,39 @@ mod tests {
         let side_by_side = egui::Rect::from_min_size(egui::pos2(560.0, 340.0), egui::vec2(280.0, 24.0));
         let kept = clear_of_dialog(side_by_side, BoxPlace { dialog: Some(dialog), view: Some(view), handles: Some(handles) });
         assert!(!kept.intersects(handles), "the box {kept:?} still covers the handles {handles:?}");
+    }
+}
+
+#[cfg(test)]
+mod clear_of_model_tests {
+    use egui::{Rect, pos2};
+
+    #[test]
+    fn the_preference_keeps_the_box_beside_its_handle() {
+        egui::__run_test_ui(|ui| {
+            let model = Rect::from_min_max(pos2(100.0, 100.0), pos2(200.0, 200.0));
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique(super::MODEL_OUTLINE), Some(model)));
+            let at = pos2(190.0, 100.0);
+            assert_ne!(super::placed(ui, at).0, at, "by default it goes outside the model");
+            super::set_box_beside_handle(ui.ctx(), true);
+            assert_eq!(super::placed(ui, at), (at, egui::Align2::LEFT_TOP));
+        });
+    }
+
+    #[test]
+    fn the_box_keeps_out_from_under_the_command_window() {
+        let view = Rect::from_min_max(pos2(0.0, 0.0), pos2(2000.0, 1000.0));
+        let model = Some(Rect::from_min_max(pos2(600.0, 200.0), pos2(1400.0, 800.0)));
+        let at = pos2(1200.0, 400.0);
+        let dialog = |left: f32, right: f32| Some(Rect::from_min_max(pos2(left, 300.0), pos2(right, 700.0)));
+        // Room before the window: just outside the model.
+        assert_eq!(super::clear_of_model(model, view, dialog(1700.0, 1990.0), at).0.x, 1424.0);
+        // None: beside the handle, as with a model that fills the view.
+        assert_eq!(super::clear_of_model(model, view, dialog(1450.0, 1740.0), at), (at, egui::Align2::LEFT_TOP));
+        // A window on the other side of the model takes nothing from this one.
+        assert_eq!(super::clear_of_model(model, view, dialog(10.0, 300.0), at).0.x, 1424.0);
+        // No window, no change.
+        assert_eq!(super::clear_of_model(model, view, None, at).0.x, 1424.0);
     }
 }
 

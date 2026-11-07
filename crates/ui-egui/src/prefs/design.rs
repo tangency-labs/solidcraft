@@ -89,6 +89,12 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     "value_boxes_in_view",
                     "Show values beside their handles in the view",
                 ),
+                (
+                    setting::value_box_beside_handle,
+                    "prefs.value_box_beside_handle_tip",
+                    "value_box_beside_handle",
+                    "Keep the value box beside its handle",
+                ),
             ] {
                 ui.horizontal_wrapped(|ui| {
                     let response = setting(app, ui).backing_on_hover_text(app.tr(help));

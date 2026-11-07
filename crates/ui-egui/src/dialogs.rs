@@ -3897,6 +3897,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let reset_scroll = d.reset_scroll;
     let panel =
         panel.reset_scroll(reset_scroll && matches!(d.kind, Kind::Appearance(_) | Kind::Motion(crate::dialogs_motion::Mo::Configurations { .. })));
+    crate::canvas::note_dialog(ctx, egui::Id::unique(("sc_dialog", title(&d.kind))));
     let window = panel.window(ctx);
     let repeatable =
         matches!(&d.kind, Kind::SketchModify(k) if crate::sketch_modify_ui::repeatable(k)) && d.editing.is_none() && !d.extra.contains_key("pattern");

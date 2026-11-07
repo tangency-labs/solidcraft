@@ -286,6 +286,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         return;
     }
     crate::scenario::publish_rect("nav:outer", bar.rect);
+    crate::canvas::note_nav_bar(ui.ctx(), bar.rect);
     let menu_id = ui.scope_id().with("navigation_bar_menu");
     let mut open = ui.data(|d| d.get_temp::<String>(menu_id)).unwrap_or_default();
     let active = ui.rect_contains_pointer(bar.rect)
