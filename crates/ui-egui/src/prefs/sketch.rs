@@ -408,6 +408,7 @@ fn selecting(app: &mut SolveApp, ui: &mut egui::Ui) {
             Some("prefs.select_hidden_edges_help"),
             &mut app.preferences.select_hidden_edges,
         );
+        check(ui, "hide_hovered", "prefs.hide_hovered", Some("prefs.hide_hovered_help"), &mut app.preferences.hide_hovered);
         check(
             ui,
             "select_other_hidden",

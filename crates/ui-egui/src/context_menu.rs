@@ -19,6 +19,7 @@ use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::{Sel, doc::FeatureKind};
 
 use crate::SolveApp;
+use crate::viewport::Hit;
 
 /// What a menu is about.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, serde::Deserialize)]
@@ -2029,13 +2030,93 @@ pub fn press_shortcut(app: &mut SolveApp, key: &str) -> bool {
     true
 }
 
+/// What Hide can act on under the pointer, without selecting it (#4128).
+enum HoveredHide {
+    Bodies(Vec<String>),
+    Sketch(u64),
+    Origin(String),
+}
+
+fn hovered_hide(app: &SolveApp) -> Option<HoveredHide> {
+    if let Some(hit) = &app.viewport.hover {
+        return match hit {
+            Hit::Face { body, .. } | Hit::Edge { body, .. } | Hit::Vertex { body, .. } => Some(HoveredHide::Bodies(vec![body.clone()])),
+            Hit::SketchPoint { sketch, .. } | Hit::SketchMidpoint { sketch, .. } | Hit::SketchCurve { sketch, .. } | Hit::Profile { sketch, .. } => {
+                Some(HoveredHide::Sketch(*sketch))
+            }
+            Hit::Plane { name, .. } | Hit::Axis { name } | Hit::ConstructionPoint { name } => Some(HoveredHide::Origin(name.clone())),
+        };
+    }
+    if app.viewport.hover_bodies.is_empty() { None } else { Some(HoveredHide::Bodies(app.viewport.hover_bodies.clone())) }
+}
+
+fn body_in_selection(app: &SolveApp, body: &str) -> bool {
+    app.session.selection.iter().any(|sel| match sel {
+        Sel::Body { name } => name == body,
+        Sel::Face { body: named, .. } | Sel::Edge { body: named, .. } | Sel::Vertex { body: named, .. } => named == body,
+        _ => false,
+    }) || app.tree.picked_components.iter().any(|id| component_bodies(app, *id).iter().any(|named| named == body))
+}
+
+fn sketch_in_selection(app: &SolveApp, id: u64) -> bool {
+    app.session.selection.iter().any(|sel| match sel {
+        Sel::Feature { id: feature } => *feature == id,
+        Sel::Profile { sketch, .. } | Sel::ExternalSketchCurve { sketch, .. } | Sel::ExternalSketchPoint { sketch, .. } => *sketch == id,
+        Sel::SketchCurve { .. } | Sel::SketchPoint { .. } | Sel::SketchMidpoint { .. } | Sel::SketchConstraint { .. } => {
+            app.session.active_sketch == Some(id)
+        }
+        _ => false,
+    })
+}
+
+fn hovered_within_selection(app: &SolveApp, target: &HoveredHide) -> bool {
+    match target {
+        HoveredHide::Bodies(names) => names.iter().any(|body| body_in_selection(app, body)),
+        HoveredHide::Sketch(id) => sketch_in_selection(app, *id),
+        HoveredHide::Origin(name) => app
+            .session
+            .selection
+            .iter()
+            .any(|sel| matches!(sel, Sel::Plane { name: n } | Sel::Axis { name: n } | Sel::ConstructionPoint { name: n } if n == name)),
+    }
+}
+
+/// Hide the element under the pointer when that preference is on and the pointer is not over the
+/// selection. The selection is left as it is. Returns whether the key was handled (#4128).
+fn hide_under_cursor(app: &mut SolveApp) -> bool {
+    if !app.preferences.hide_hovered {
+        return false;
+    }
+    let Some(target) = hovered_hide(app) else { return false };
+    if hovered_within_selection(app, &target) {
+        return false;
+    }
+    let (items, visible) = match &target {
+        HoveredHide::Bodies(names) => {
+            let hide = names.iter().any(|body| !app.session.visibility.hidden_bodies.contains(body));
+            (names.iter().map(|body| json!(body)).collect::<Vec<_>>(), !hide)
+        }
+        HoveredHide::Sketch(id) => (vec![json!(id)], !crate::browser::sketch_visible(app, *id)),
+        HoveredHide::Origin(name) => (vec![json!(name)], app.session.visibility.hidden_origin.iter().any(|hidden| hidden == name)),
+    };
+    if !items.is_empty() {
+        let _ = app.run("browser.visibility", json!({ "items": items, "visible": visible }));
+    }
+    true
+}
+
 /// Show/Hide (the V key): what is selected in the viewport or picked in the browser flips its
 /// visibility (bodies, faces' and edges' bodies, sketches, construction and origin planes and
 /// axes, components' bodies, canvases, joints' glyphs). When some are shown and some hidden, all are hidden.
 /// A clicked folder takes precedence, and toggles its own visibility without changing its items.
+/// With Hide under the cursor on, an element under the pointer that is not part of the selection
+/// is hidden instead, and the selection stays (#4128).
 pub fn toggle_visibility(app: &mut SolveApp) {
     use solidcraft_engine::doc::FeatureKind;
     if crate::browser::toggle_picked_folder(app) {
+        return;
+    }
+    if hide_under_cursor(app) {
         return;
     }
     let paths: Vec<Vec<u64>> =

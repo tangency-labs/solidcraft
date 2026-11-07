@@ -2420,6 +2420,8 @@
   "prefs.ground_shadow_follows_model_help": "Den Schatten unter dem niedrigsten sichtbaren Körper platzieren. Wenn deaktiviert, bleibt der Schatten angehobener Modelle auf der Bodenebene durch den Ursprung.",
   "prefs.hide_constraint_glyphs_zoomed_out": "Bindungssymbole bei starkem Herauszoomen ausblenden",
   "prefs.hide_constraint_glyphs_zoomed_out_note": "Bindungssymbole verschwinden, wenn die Skizze so weit herausgezoomt ist, dass sie sie überladen würden. Aus: sie behalten bei jedem Zoom eine feste Bildschirmgröße.",
+  "prefs.hide_hovered": "Element unter dem Zeiger ausblenden",
+  "prefs.hide_hovered_help": "V blendet den Körper, die Skizze, die Ebene oder die Achse unter dem Zeiger aus, ohne sie auszuwählen. Sind mehrere Elemente ausgewählt und der Zeiger liegt über einem davon, blendet V weiterhin die ganze Auswahl aus. Aus: V blendet die Auswahl aus.",
   "prefs.history": "Verlauf",
   "prefs.history_bar_groups": "Verlaufsleiste in Gruppen falten",
   "prefs.history_bar_groups_note": "In einem langen Verlauf wird eine Folge von Features einer Komponente zu einem Chip gefaltet, und Merkmalsordner beginnen gefaltet. Eine eingefügte STEP-Baugruppe kommt in einen Group-Ordner. Aus zeigt jedes Feature, öffnet Ordner und legt keinen Ordner an.",

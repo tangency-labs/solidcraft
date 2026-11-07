@@ -2633,6 +2633,8 @@
   "prefs.ground_shadow_follows_model_help": "Place the shadow below the lowest visible body. When off, raised models keep their shadow on the origin ground plane.",
   "prefs.hide_constraint_glyphs_zoomed_out": "Hide constraint glyphs when zoomed out",
   "prefs.hide_constraint_glyphs_zoomed_out_note": "Constraint glyphs leave the view when the sketch is zoomed out far enough that they would clutter it. Off: they stay at a fixed screen size at every zoom.",
+  "prefs.hide_hovered": "Hide the element under the cursor",
+  "prefs.hide_hovered_help": "V hides the body, sketch, plane or axis under the pointer without selecting it. When several items are selected and the pointer is over one of them, V still hides the whole selection. Off: V hides the selection.",
   "prefs.history": "History",
   "prefs.history_bar_groups": "Fold the History bar into groups",
   "prefs.history_bar_groups_note": "In a long history, a run of one component's features folds into one chip, and feature folders start folded. An inserted STEP assembly goes into a Group folder. Off shows each feature, starts folders open and makes no folder.",

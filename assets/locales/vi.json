@@ -2633,6 +2633,8 @@
   "prefs.ground_shadow_follows_model_help": "Đặt bóng bên dưới khối hiển thị thấp nhất. Khi tắt, bóng của mô hình được nâng lên vẫn nằm trên mặt phẳng đất đi qua gốc tọa độ.",
   "prefs.hide_constraint_glyphs_zoomed_out": "Ẩn biểu tượng ràng buộc khi thu nhỏ",
   "prefs.hide_constraint_glyphs_zoomed_out_note": "Biểu tượng ràng buộc biến mất khi bản phác được thu nhỏ đủ xa để không làm rối khung nhìn. Tắt: chúng giữ kích thước màn hình cố định ở mọi mức thu phóng.",
+  "prefs.hide_hovered": "Ẩn phần tử dưới con trỏ",
+  "prefs.hide_hovered_help": "V ẩn khối, bản phác, mặt phẳng hoặc trục dưới con trỏ mà không chọn nó. Khi nhiều mục được chọn và con trỏ nằm trên một mục trong số đó, V vẫn ẩn cả lựa chọn. Tắt: V ẩn lựa chọn.",
   "prefs.history": "Lịch sử",
   "prefs.history_bar_groups": "Thu gọn thanh Lịch sử thành nhóm",
   "prefs.history_bar_groups_note": "Trong lịch sử dài, một chuỗi tính năng của cùng một thành phần được thu gọn thành một thẻ, và thư mục tính năng bắt đầu ở dạng thu gọn. Cụm lắp ráp STEP được chèn vào sẽ nằm trong thư mục Group. Khi tắt, mỗi tính năng đều hiện, thư mục bắt đầu ở dạng mở và không tạo thư mục nào.",

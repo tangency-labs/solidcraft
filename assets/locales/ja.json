@@ -2633,6 +2633,8 @@
   "prefs.ground_shadow_follows_model_help": "表示中のボディの最下部に影を配置します。オフの場合、持ち上げたモデルの影は原点を通る地面上に残ります。",
   "prefs.hide_constraint_glyphs_zoomed_out": "ズームアウト時に拘束グリフを隠す",
   "prefs.hide_constraint_glyphs_zoomed_out_note": "スケッチを十分にズームアウトすると、拘束グリフは表示されず画面を散らかしません。オフ: ズームに関係なく固定の画面サイズのままです。",
+  "prefs.hide_hovered": "カーソル下の要素を非表示にする",
+  "prefs.hide_hovered_help": "V はポインタの下のボディ、スケッチ、平面、軸を選択せずに非表示にします。複数選択のときにポインタがそのどれかの上にある場合、V は選択全体を非表示にします。オフでは、V は選択を非表示にします。",
   "prefs.history": "履歴",
   "prefs.history_bar_groups": "履歴バーをグループにまとめる",
   "prefs.history_bar_groups_note": "長い履歴では、1つのコンポーネントの連続したフィーチャーを1つのチップにまとめ、フィーチャーフォルダは閉じた状態で始まります。挿入したSTEPアセンブリはGroupフォルダに入ります。オフにすると、各フィーチャーを表示し、フォルダは開いた状態で始まり、フォルダは作成されません。",

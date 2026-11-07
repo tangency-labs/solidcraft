@@ -946,6 +946,83 @@ fn v_toggles_what_is_selected() {
     assert_eq!(find(&context_menu::items(&app, &Target::Body { name: body(&app) }), "Show/Hide").shortcut, "V");
 }
 
+/// Hide (V) acts on the element under the pointer, and leaves the selection alone. A
+/// multi-selection still hides together when the pointer is over one of its items, and empty
+/// space still hides the selection. Off keeps the previous behaviour (#4128).
+#[test]
+fn v_hides_the_element_under_the_cursor() {
+    let mut app = sample_app();
+    assert!(app.preferences.hide_hovered);
+    let selected = body(&app);
+    app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [200, 0, 0]})).unwrap();
+    let hovered = app.session.model.state().bodies.iter().map(|b| b.name.clone()).find(|name| name != &selected).expect("a second body");
+    app.run("select.set", json!({"items": [{"type": "body", "name": &selected}]})).unwrap();
+    let selection = app.session.selection.clone();
+    app.viewport.hover = Some(Hit::Face { body: hovered.clone(), index: 0, point: Vec3::new(1.0, 2.0, 3.0) });
+    context_menu::toggle_visibility(&mut app);
+    assert_eq!(app.session.visibility.hidden_bodies, vec![hovered.clone()], "the body under the cursor hides");
+    assert_eq!(app.session.selection, selection, "hovering it does not select it");
+    context_menu::toggle_visibility(&mut app);
+    assert!(app.session.visibility.hidden_bodies.is_empty(), "V shows that body again");
+    assert_eq!(app.session.selection, selection);
+
+    // A browser row under the pointer is the same element when the viewport has no hit.
+    app.viewport.hover = None;
+    app.viewport.hover_bodies = vec![hovered.clone()];
+    context_menu::toggle_visibility(&mut app);
+    assert_eq!(app.session.visibility.hidden_bodies, vec![hovered.clone()]);
+    assert_eq!(app.session.selection, selection);
+    context_menu::toggle_visibility(&mut app);
+    assert!(app.session.visibility.hidden_bodies.is_empty());
+    app.viewport.hover_bodies.clear();
+
+    // Empty space keeps today's behaviour: the selection hides.
+    app.viewport.hover = None;
+    context_menu::toggle_visibility(&mut app);
+    assert_eq!(app.session.visibility.hidden_bodies, vec![selected.clone()]);
+    context_menu::toggle_visibility(&mut app);
+    assert!(app.session.visibility.hidden_bodies.is_empty());
+
+    // A sketch under the pointer hides on its own.
+    let sketch = app
+        .session
+        .doc
+        .features
+        .iter()
+        .find(|feature| matches!(feature.kind, solidcraft_engine::doc::FeatureKind::Sketch { .. }))
+        .expect("a sketch")
+        .id;
+    crate::browser::set_sketch_visible(&mut app, sketch, true);
+    app.viewport.hover = Some(Hit::Profile { sketch, index: 0 });
+    context_menu::toggle_visibility(&mut app);
+    assert!(!crate::browser::sketch_visible(&app, sketch), "the sketch under the cursor hides");
+    assert!(app.session.visibility.hidden_bodies.is_empty());
+    assert_eq!(app.session.selection.len(), 1);
+
+    // Over one item of a multi-selection, the whole selection hides.
+    app.run("select.set", json!({"items": [{"type": "body", "name": &selected}, {"type": "body", "name": &hovered}]})).unwrap();
+    app.viewport.hover = Some(Hit::Face { body: selected.clone(), index: 0, point: Vec3::new(1.0, 2.0, 3.0) });
+    context_menu::toggle_visibility(&mut app);
+    assert!(app.session.visibility.hidden_bodies.contains(&selected) && app.session.visibility.hidden_bodies.contains(&hovered));
+    context_menu::toggle_visibility(&mut app);
+    assert!(app.session.visibility.hidden_bodies.is_empty());
+
+    // A plane under the pointer hides on its own.
+    app.run("select.set", json!({"items": [{"type": "body", "name": &selected}]})).unwrap();
+    app.viewport.hover = Some(Hit::Plane { name: "XY".into(), point: Vec3::ZERO });
+    context_menu::toggle_visibility(&mut app);
+    assert!(app.session.visibility.hidden_origin.iter().any(|name| name == "XY"));
+    assert!(app.session.visibility.hidden_bodies.is_empty(), "the selected body stays shown");
+    app.viewport.hover = None;
+
+    // Off: V hides the selection even when the pointer is over another body.
+    app.preferences.hide_hovered = false;
+    app.viewport.hover = Some(Hit::Face { body: hovered.clone(), index: 0, point: Vec3::new(1.0, 2.0, 3.0) });
+    context_menu::toggle_visibility(&mut app);
+    assert_eq!(app.session.visibility.hidden_bodies, vec![selected]);
+    assert!(!app.session.visibility.hidden_bodies.contains(&hovered));
+}
+
 /// V pressed with a browser menu open runs that menu's Show/Hide, as its row says, on the row
 /// the menu was opened for: a folder, the Origin folder or an origin plane is not selected by
 /// the right-click, so V used to act on the selection instead (nothing, or another body).

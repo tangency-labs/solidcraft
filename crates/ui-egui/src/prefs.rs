@@ -1671,6 +1671,9 @@ preference_settings! {
     /// tangent arc, and the same again back to lines (#9489). Off (the default): resting there
     /// does nothing, and tangent arcs are the Arc tool's.
     line_hover_tangent_arc: bool = false, PAGE_SKETCH;
+    /// Hide (V) acts on the body, sketch, plane or axis under the pointer, without selecting it.
+    /// Off keeps the previous behaviour: V hides the selection (#4128).
+    hide_hovered: bool = true, PAGE_SKETCH;
     /// Allow ordinary edge picks through faces in Shaded with hidden edges.
     /// Off preserves the visible-only picking used in v0.30.1.
     select_hidden_edges: bool = false, PAGE_SKETCH;
@@ -6322,6 +6325,7 @@ mod tests {
             ("selection_shift_add_only", json!(true), PAGE_SKETCH),
             ("select_other_hidden", json!(false), PAGE_SKETCH),
             ("select_hidden_edges", json!(true), PAGE_SKETCH),
+            ("hide_hovered", json!(false), PAGE_SKETCH),
             ("sketch_conflict_colour", json!(false), PAGE_SKETCH),
             ("hide_constraint_glyphs_zoomed_out", json!(false), PAGE_SKETCH),
             ("suppress_sketch_snap", json!(ModifierCombo::NONE), PAGE_SKETCH),
