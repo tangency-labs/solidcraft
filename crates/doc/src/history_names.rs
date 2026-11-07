@@ -191,7 +191,7 @@ impl<'a> OperandNames<'a> {
                 }
             }),
             Operand::Inner(_) => {
-                given(&self.names).map(|n| Named { name: format!("F{fid}:inner:{}", n.name), verified: n.verified, ..Named::default() })
+                given(&self.names).map(|n| Named { name: format!("F{fid}:inner({})", n.name), verified: n.verified, ..Named::default() })
             }
             Operand::Made(roles) => {
                 let (first, rest) = roles.get(face)?.split_first()?;
@@ -235,11 +235,11 @@ fn from_origins(face: &FaceProv, operands: &[OperandNames], fid: u64) -> Option<
             FaceOrigin::Face { operand, face } => operands.get(operand)?.face(face, fid)?,
             FaceOrigin::Edge { operand, edge } => {
                 let (edge, verified) = operands.get(operand)?.edge(edge)?;
-                Named { name: format!("F{fid}:blend:{edge}"), verified, ..Named::default() }
+                Named { name: format!("F{fid}:blend({edge})"), verified, ..Named::default() }
             }
             FaceOrigin::Offset { operand, face } => {
                 let source = operands.get(operand)?.face(face, fid)?;
-                Named { name: format!("F{fid}:inner:{}", source.name), verified: source.verified, ..Named::default() }
+                Named { name: format!("F{fid}:inner({})", source.name), verified: source.verified, ..Named::default() }
             }
             // A profile or cap of a body made from nothing: only a built body's own roles name
             // these, and those come in as `Made` operands.
@@ -534,7 +534,7 @@ fn without_index(origin: FaceOrigin) -> FaceOrigin {
     }
 }
 
-/// How a stored face name matches a current face.
+/// How the stored face name matches a current face.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Match {
     /// Only its root stem is the same: some piece of the same face (the caller picks by point).
@@ -549,11 +549,21 @@ pub(crate) enum Match {
 
 /// How the stored name `name` matches face `index` (`None`: not at all).
 pub(crate) fn matches(names: &Names, index: usize, name: &str) -> Option<Match> {
+    matches_read(names, index, name, crate::persistent_name::FaceName::parse(name).ok())
+}
+
+/// [`matches`], with the wanted name already read: a name of many faces is compared with each of
+/// them, and reading it once keeps that cheap.
+pub(crate) fn matches_read(names: &Names, index: usize, name: &str, wanted: Option<crate::persistent_name::FaceName>) -> Option<Match> {
     let current = names.faces.get(index)?;
     let info = names.info.get(index);
-    if current == name {
+    if current == name || wanted.as_ref().is_some_and(|w| crate::persistent_name::same_face_read(current, w)) {
         return Some(Match::Exact);
     }
+    // A name in the older form reads as the name it was, and is compared in today's form: the
+    // checks below compare names as they are written now.
+    let canonical = wanted.as_ref().filter(|_| crate::persistent_name::in_old_form(name)).map(|w| w.to_string());
+    let name = canonical.as_deref().unwrap_or(name);
     // Another name of this very face; of a piece of it, when the face was split since.
     if info.is_some_and(|i| i.synonyms.iter().any(|a| a == name)) {
         return Some(if crate::naming::strip_piece(current) == current { Match::Exact } else { Match::Piece });

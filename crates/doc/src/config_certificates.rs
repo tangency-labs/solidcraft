@@ -211,7 +211,7 @@ pub enum FaceCertificate {
     },
     /// A flat face known by its exact history name (the target's `name`, without piece
     /// numbers): what the kernel's face history says it came from, followed through every
-    /// feature since (a cut wall `F5:side:l1`, a chamfer `F7:blend:…`, a pattern copy
+    /// feature since (a cut wall `F5:side:l1`, a chamfer `F7:blend(…)`, a pattern copy
     /// `F4:top@F6.2`, a face a join merged from two features). Used where no construction
     /// certificate above names the face uniquely. Its plane is the face's exact current plane in
     /// the frame [`lineage_frame`] gives it. See docs/face-attachments.md.
