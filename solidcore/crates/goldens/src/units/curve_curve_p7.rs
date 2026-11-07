@@ -1589,4 +1589,74 @@ mod tests {
         }
         assert_eq!(stats.len(), 3);
     }
+    /// The changed CCI records are valid projected points on curves differing by a tiny translation.
+    #[test]
+    fn review_projected_intersections_satisfy_their_geometry() {
+        let k = Kernel::default();
+        for name in ["gen2091", "gen2538", "gen2574"] {
+            let case = crate::case::regression_case(&Runner, name);
+            let input: OpIn = case.parse().unwrap();
+            let OpIn::CciSolve { cci } = &input else {
+                panic!("CCI, not comb data");
+            };
+            let first = build(&cci.c1).unwrap();
+            let second = build(cci.c2.as_ref().unwrap()).unwrap();
+            let CurveIn::Bspline(a) = &cci.c1 else {
+                panic!("B-spline");
+            };
+            let CurveIn::Bspline(b) = cci.c2.as_ref().unwrap() else {
+                panic!("B-spline");
+            };
+            assert_eq!(a.u, b.u);
+            assert_eq!(a.p, b.p);
+            let mut matching_bound = 0.0_f64;
+            for (a, b) in a.cpts.iter().zip(&b.cpts) {
+                assert_eq!(a[3], b[3]);
+                let weight = if a[3] == NOW { 1.0 } else { a[3] };
+                assert!(weight > 0.0);
+                matching_bound = matching_bound
+                    .max((v3([b[0], b[1], b[2]]) - v3([a[0], a[1], a[2]])).length() / weight);
+            }
+            // Equal positive weights make the full matching-parameter difference a convex combination.
+            assert!(matching_bound < cci.tol);
+            let origin = v3(cci.vecs[0]);
+            let normal = v3(cci.vecs[1]);
+            let third = v3(cci.vecs[2]);
+            let view_normal = normal.cross(third).unitize().unwrap();
+            let project = |point: Vec3| {
+                if cci.ptype == 2 {
+                    point - view_normal * (point - origin).dot(view_normal)
+                } else {
+                    let ray = point - third;
+                    third + ray * ((origin - third).dot(normal) / ray.dot(normal))
+                }
+            };
+            let output = rust(&input).unwrap();
+            let values = &output.values["out"];
+            assert_eq!(&values[..2], &[0.0, 0.0]);
+            let count = values[2] as usize;
+            assert_eq!(values.len(), 3 + 13 * count);
+            let mut worst = 0.0_f64;
+            for record in values[3..].chunks_exact(13) {
+                assert_eq!(&record[..3], &[1.0, 2.0, 2.0]);
+                let (u, v) = (record[8], record[9]);
+                assert!(cci.ivl1[0] <= u && u <= cci.ivl1[1]);
+                assert!(cci.ivl2[0] <= v && v <= cci.ivl2[1]);
+                let p = first.evaluate_point(&k, u).unwrap();
+                let q = second.evaluate_point(&k, v).unwrap();
+                let distance = project(p).distance(project(q));
+                let rounding =
+                    512.0 * f64::EPSILON * (1.0 + p.length() + q.length() + third.length());
+                assert!(distance <= cci.tol);
+                assert!(
+                    (distance - record[7]).abs() <= rounding,
+                    "{name}: metric {distance} vs {}",
+                    record[7]
+                );
+                worst = worst.max(distance);
+            }
+            eprintln!("{name}: {count} projected points; residual <= {worst:e}; matching-parameter hull <= {matching_bound:e}");
+        }
+    }
+
 }

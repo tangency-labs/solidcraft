@@ -919,6 +919,7 @@ mod tests {
         }
     }
 
+    /// An initial evaluation error cannot certify the zero residual left in scratch storage.
     #[test]
     fn wr20_failing_first_evaluation_finds_no_solution_by_default() {
         let mut e = Failing;
@@ -958,6 +959,7 @@ mod tests {
         }
     }
 
+    /// A scaled candidate carries its own Jacobian into the next Newton step.
     #[test]
     fn scaled_step_uses_the_jacobian_at_its_own_point() {
         let mut e = QuadraticAndLinear;
@@ -1002,6 +1004,7 @@ mod tests {
         }
     }
 
+    /// A failed scaled evaluation cannot overwrite a successfully evaluated clamped candidate.
     #[test]
     fn failed_scaled_evaluation_cannot_replace_the_valid_clamped_step() {
         let mut e = BoundedLinear {
@@ -1014,6 +1017,7 @@ mod tests {
         assert_eq!(r.x, [1.0, 0.5]);
     }
 
+    /// A failed clamped evaluation preserves the last fully evaluated scaled candidate.
     #[test]
     fn failed_clamped_evaluation_keeps_the_last_valid_scaled_point() {
         let mut e = BoundedLinear {
@@ -1048,6 +1052,7 @@ mod tests {
         }
     }
 
+    /// A later evaluation error cannot turn stale residuals into a successful solution.
     #[test]
     fn a_failed_next_evaluation_cannot_create_a_solution() {
         for bounded in [false, true] {
@@ -1085,6 +1090,7 @@ mod tests {
         }
     }
 
+    /// The saved best point must still evaluate successfully before it can be returned.
     #[test]
     fn a_best_point_that_fails_reevaluation_is_not_a_solution() {
         let mut e = BestReevaluationFails { calls: 0 };

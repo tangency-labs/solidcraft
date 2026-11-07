@@ -2273,4 +2273,67 @@ mod tests {
         assert!(count("Recalc", "status:") > 20, "too few compared Recalc cases");
         assert_eq!(count("Recalc", "deferred:"), 0, "deferred Recalc cases");
     }
+    /// A successful guess is on both extended offsets; the documented retry may move its plane.
+    #[test]
+    fn review_guess_is_on_both_extended_offset_surfaces() {
+        let case = crate::case::regression_case(&Runner, "gen0336");
+        let input: Inputs = case.parse().unwrap();
+        let Inputs::Guess { solver, plane } = input else {
+            panic!("guess case");
+        };
+        let k = Kernel::default();
+        let built = solver_of(&k, &solver).unwrap();
+        let Solver::Cr(mut fs) = built.solver else {
+            panic!("assisted solver");
+        };
+        let mut point = TsectPnt::new();
+        assert!(fs
+            .guess_point_on_plane_solve(
+                &k,
+                v3(plane.orig),
+                v3(plane.normal),
+                &extent2(plane.d1),
+                &extent2(plane.d2),
+                p2(plane.uv1),
+                p2(plane.uv2),
+                &mut point
+            )
+            .unwrap());
+        let uv = [
+            point.uv_pos(SrfIndex::First),
+            point.uv_pos(SrfIndex::Second),
+        ];
+        for (uv, dom) in uv.iter().zip([plane.d1, plane.d2]) {
+            assert!(dom[0] <= uv.x && uv.x <= dom[2] && dom[1] <= uv.y && uv.y <= dom[3]);
+        }
+        let first = fs
+            .surface(0)
+            .unwrap()
+            .surface
+            .evaluate_point(&k, uv[0])
+            .unwrap();
+        let second = fs
+            .surface(1)
+            .unwrap()
+            .surface
+            .evaluate_point(&k, uv[1])
+            .unwrap();
+        let gap = first.distance(second);
+        eprintln!(
+            "gen0336: extended offset gap {gap:e}; original plane distance {}",
+            (first - v3(plane.orig)).dot(v3(plane.normal))
+        );
+        assert!(gap < fs.solver.approx_tol_3d);
+        assert!(fs
+            .surface(0)
+            .unwrap()
+            .surface
+            .with_extended_base_surface(|s| s.is_some()));
+        assert!(fs
+            .surface(1)
+            .unwrap()
+            .surface
+            .with_extended_base_surface(|s| s.is_some()));
+    }
+
 }

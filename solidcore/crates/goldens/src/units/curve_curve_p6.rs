@@ -1539,4 +1539,121 @@ mod tests {
         }
         assert_eq!(stats.len(), 8);
     }
+    /// The reported gap is exactly the largest nearest distance on the documented 32 samples.
+    #[test]
+    fn review_reduced_gap_has_a_nearest_point_and_sampling_proof() {
+        let case = crate::case::regression_case(&Runner, "gen0210");
+        let input: OpIn = case.parse().unwrap();
+        let output = rust(&input).unwrap();
+        let values = &output.values["out"];
+        let (reported, t, u) = (values[0], values[1], values[2]);
+        let OpIn::MaxDist {
+            c1,
+            c2: Some(c2),
+            ivl,
+            s: other_start,
+            e: other_end,
+            nsamp,
+            ..
+        } = input
+        else {
+            panic!("two-curve gap");
+        };
+        assert_eq!(nsamp, 0);
+        assert_eq!([other_start, other_end], [0.0, 1.0]);
+        let k = Kernel::default();
+        let first = build(&c1).unwrap();
+        let second = build(&c2).unwrap();
+        assert_eq!(t, ivl[1]);
+        assert!((u - 29.0 / 31.0).abs() < 1e-15);
+        let endpoint = first.evaluate_point(&k, t).unwrap();
+        let query = second.evaluate_point(&k, u).unwrap();
+        assert!((endpoint.distance(query) - reported).abs() < 1e-12);
+        let CurveKind::BSpline(bspline) = first.kind() else {
+            panic!("B-spline");
+        };
+        assert!(!bspline.is_out_of_bounds_enabled());
+        let rounding =
+            1024.0 * f64::EPSILON * (1.0 + query.length_squared() + endpoint.length_squared());
+        let mut smallest_bound = f64::INFINITY;
+        for segment in
+            solidcore::nurbs::nurbs_crv::create_bez_segments(bspline.gw_nurb().unwrap()).unwrap()
+        {
+            let (a, b) = segment.param_bounds();
+            if a >= t {
+                continue;
+            }
+            let mut points: Vec<Vec3> = segment
+                .cpts()
+                .iter()
+                .map(|p| {
+                    assert_eq!(p.w, NOW);
+                    Vec3::new(p.x, p.y, p.z)
+                })
+                .collect();
+            if b > t {
+                let alpha = (t - a) / (b - a);
+                let mut left = vec![points[0]];
+                while points.len() > 1 {
+                    for i in 0..points.len() - 1 {
+                        points[i] = points[i] * (1.0 - alpha) + points[i + 1] * alpha;
+                    }
+                    points.pop();
+                    left.push(points[0]);
+                }
+                points = left;
+            }
+            let c4 = [1.0, 4.0, 6.0, 4.0, 1.0];
+            let c8 = [1.0, 8.0, 28.0, 56.0, 70.0, 56.0, 28.0, 8.0, 1.0];
+            let mut coefficients = [0.0; 9];
+            for n in 0_usize..=8 {
+                for i in 0_usize..=4 {
+                    if let Some(j) = n.checked_sub(i).filter(|&j| j < 5) {
+                        coefficients[n] += c4[i] * c4[j] / c8[n]
+                            * ((points[i] - query).dot(points[j] - query) - reported * reported);
+                    }
+                }
+            }
+            // Convex hulls of the squared-distance polynomial prove no point is closer.
+            let mut stack = vec![(coefficients, 0_u8)];
+            while let Some((coefficients, depth)) = stack.pop() {
+                let lower = coefficients.iter().copied().fold(f64::INFINITY, f64::min);
+                if lower >= -rounding {
+                    smallest_bound = smallest_bound.min(lower);
+                    continue;
+                }
+                assert!(depth < 12, "distance lower bound {lower:e}");
+                let mut work = coefficients;
+                let mut left = [0.0; 9];
+                let mut right = [0.0; 9];
+                left[0] = work[0];
+                right[8] = work[8];
+                for level in 1..=8 {
+                    for j in 0..=8 - level {
+                        work[j] = 0.5 * work[j] + 0.5 * work[j + 1];
+                    }
+                    left[level] = work[0];
+                    right[8 - level] = work[8 - level];
+                }
+                stack.push((right, depth + 1));
+                stack.push((left, depth + 1));
+            }
+        }
+        // Every other sample has an explicit admissible witness no farther than the returned gap.
+        for i in 0..32 {
+            let other_t = f64::from(i) / 31.0;
+            let witness_t = other_t.min(t);
+            let distance = first
+                .evaluate_point(&k, witness_t)
+                .unwrap()
+                .distance(second.evaluate_point(&k, other_t).unwrap());
+            assert!(distance <= reported + rounding);
+        }
+        // The removed 7.56 pair was a stationary farthest point, not a nearest drop.
+        let old_query = second.evaluate_point(&k, 0.8871097642341919).unwrap();
+        let old_drop = first.evaluate_point(&k, 0.058895516544628046).unwrap();
+        assert!(old_drop.distance(old_query) > endpoint.distance(old_query) + 1.0);
+        eprintln!("gen0210: sample maximum {reported}; squared-distance lower residual {smallest_bound:e}; old drop {} vs admissible {}",old_drop.distance(old_query),endpoint.distance(old_query));
+    }
+
 }
