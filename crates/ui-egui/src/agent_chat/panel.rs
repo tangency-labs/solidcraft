@@ -1973,18 +1973,26 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
         slot.1 = buf;
     }
     if app.agent_chat.items.is_empty() && app.agent_chat.pending.is_empty() {
-        if agents::entries(app).is_empty() && app.agent_chat.detecting.is_none() {
-            ui_kit::assistant_empty(ui, tr("ui.agent_chat_setup_title"), tr("ui.agent_chat_setup_body"), |ui| {
-                if ui_kit::primary_button(ui, tr("ui.agent_chat_open_settings")).clicked() {
-                    crate::prefs::open_at(app, crate::prefs::PAGE_ASSISTANT);
-                }
-            });
-        } else {
-            ui_kit::assistant_prose(ui, |ui| {
-                ui.label(RichText::new(tr("ui.agent_chat_intro")).color(t.text_dim));
-                ui.label(RichText::new(tr("ui.agent_chat_privacy")).color(t.text_dim).size(t.font_small));
-            });
-        }
+        // Sit the empty-state copy just above the composer: a full-height scroll used to leave a
+        // large blank band under top-aligned intro text (#11256).
+        ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+            ui.set_min_width(ui.available_width().max(0.0));
+            ui.spacing_mut().item_spacing.y = t.space_8;
+            if agents::entries(app).is_empty() && app.agent_chat.detecting.is_none() {
+                ui_kit::assistant_empty(ui, tr("ui.agent_chat_setup_title"), tr("ui.agent_chat_setup_body"), |ui| {
+                    if ui_kit::primary_button(ui, tr("ui.agent_chat_open_settings")).clicked() {
+                        crate::prefs::open_at(app, crate::prefs::PAGE_ASSISTANT);
+                    }
+                });
+            } else {
+                ui_kit::assistant_prose(ui, |ui| {
+                    let prompt = ui.label(RichText::new(tr("ui.agent_chat_empty_prompt")).color(t.text));
+                    crate::scenario::publish_rect("agent_chat:empty_intro", prompt.rect);
+                    ui.label(RichText::new(tr("ui.agent_chat_intro")).color(t.text_dim).size(t.font_small));
+                    ui.label(RichText::new(tr("ui.agent_chat_privacy")).color(t.text_dim).size(t.font_small));
+                });
+            }
+        });
     }
     if let Some((n, text)) = edit_done {
         if let (Some(text), Some(p)) = (text.filter(|t| !t.trim().is_empty()), app.agent_chat.pending.get_mut(n)) {
@@ -2537,5 +2545,46 @@ mod tests {
                 assert!(!a.shrink(0.5).intersects(b.shrink(0.5)), "picker overlap: {a:?} {b:?}");
             }
         }
+    }
+
+    /// Empty Assistant keeps the intro next to the composer, not a tall blank band (#11256).
+    #[test]
+    fn empty_assistant_intro_sits_above_the_composer() {
+        let ctx = crate::fonts::test_context();
+        crate::theme::apply(&ctx);
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.agent_chat.detection = Some(discover::Detection {
+            found: vec![discover::Found {
+                id: "opencode",
+                name: "OpenCode",
+                argv: vec!["opencode".into(), "acp".into()],
+                version: None,
+                login: discover::Login::Unknown,
+                problem: None,
+                install: "npm install -g opencode-ai",
+            }],
+            ..Default::default()
+        });
+        app.agent_chat.picking = Some(false);
+        app.agent_chat.state = Some(State::Ready);
+        let height = 720.0;
+        let width = 320.0;
+        let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(width + 16.0, height))), ..Default::default() };
+        for _ in 0..2 {
+            crate::scenario::clear_handles();
+            let mut output = ctx.run_ui(input.clone(), |ui| {
+                ui.set_width(width);
+                ui_kit::scope(ui, |ui| {
+                    header(&mut app, ui, false);
+                    desktop_body(&mut app, ui);
+                });
+            });
+            output.textures_delta.clear();
+        }
+        let intro = crate::scenario::rect_of("agent_chat:empty_intro").expect("empty intro");
+        let composer = crate::scenario::rect_of("agent_chat:composer_footer").expect("composer");
+        assert!(intro.bottom() <= composer.top() + 1.0, "intro stays above the composer: {intro:?} {composer:?}");
+        assert!(intro.top() > height * 0.35, "intro is not left at the top of a tall empty panel: {intro:?}");
+        assert!(app.agent_chat.items.is_empty());
     }
 }
