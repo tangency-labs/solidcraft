@@ -5,7 +5,7 @@
 use serde_json::json;
 
 use crate::SolveApp;
-use crate::browser::{answer_capture, apply_occurrence_move, occurrence_origin, panel_pos, revert_occurrence_dialog};
+use crate::browser::{answer_capture, apply_occurrence_move, move_origin, occurrence_origin, panel_pos, revert_occurrence_dialog};
 use crate::ui_kit;
 
 /// Move/Copy of an occurrence: offsets and a rotation about Z, pending until Capture Position.
@@ -36,16 +36,17 @@ pub(crate) fn occurrence_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
         };
     }
     let name = app.session.doc.occurrences.iter().find(|o| o.id == m.occurrence).map(|o| o.name.clone()).unwrap_or_default();
-    let before = (m.translate, m.angles);
+    let before = (m.translate, m.angles, m.origin_only);
     let shared = !m.path.is_empty() && app.session.occurrence_scope_count(&m.path).is_ok_and(|n| n > 1);
     let title = crate::i18n::format("browser.move_title", &[("name", &name)]);
     let at = panel_pos(app);
     let (units, decimals) = (app.session.doc.units.clone(), app.preferences.length_decimals);
+    let ok = if m.origin_only { crate::i18n::tr("browser.move_origin_ok").to_string() } else { "Capture All Positions".to_string() };
     let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_occ_move"), "move", &title)
         .placed(egui::Align2::LEFT_TOP, at)
         .fields()
         .cards(2.0)
-        .actions("Capture All Positions", "Cancel", Some("Revert All Positions"))
+        .actions(&ok, "Cancel", Some("Revert All Positions"))
         .show(&ctx, true, |ui| {
             if shared {
                 ui_kit::text(
@@ -66,11 +67,28 @@ pub(crate) fn occurrence_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     crate::scenario::publish_handle(&format!("occurrence-move:angle:{k}"), response.rect.center());
                 }
             }
+            // Move Origin (#13136): the values move the component's origin; the part stays.
+            if ui_kit::checkbox_row(ui, "move_origin", crate::i18n::tr("browser.move_origin"), m.origin_only) {
+                m.origin_only = !m.origin_only;
+            }
+            if m.origin_only {
+                ui_kit::text(ui, crate::i18n::tr("browser.move_origin_note"), ui_kit::Text::Note("move_origin"));
+            }
         });
-    if (m.translate, m.angles) != before {
+    if m.origin_only != before.2 {
+        // The part goes back to where it was (moving the origin), or follows the values again.
+        if m.origin_only { revert_occurrence_dialog(app, &m) } else { apply_occurrence_move(app, &m) }
+    } else if (m.translate, m.angles) != (before.0, before.1) && !m.origin_only {
         apply_occurrence_move(app, &m);
     }
     match action {
+        ui_kit::Action::Ok if m.origin_only => {
+            revert_occurrence_dialog(app, &m);
+            if let Err(error) = move_origin(app, &m) {
+                app.set_status(error, true);
+            }
+            app.tree.occurrence_move = None;
+        }
         ui_kit::Action::Ok => {
             let _ = app.run("component.capture_position", json!({}));
             app.tree.occurrence_move = None;

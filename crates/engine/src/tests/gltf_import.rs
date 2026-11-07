@@ -209,3 +209,42 @@ fn a_gltf_with_its_bin_next_to_it_opens_and_broken_files_say_why() {
     assert_eq!(s.doc.to_json(), before);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// #13136: an imported glTF part's origin moves to a point while every mesh stays where it is:
+/// the file's own component (stood up from Y up), a node's component inside it, and the mesh
+/// placed four times. The rigid group still holds, saved and opened again it is the same, and
+/// the origin is where it was put.
+#[test]
+fn a_gltf_parts_origin_moves_and_nothing_else_does() {
+    let dir = temp_dir("origin");
+    let (mut s, r, _) = robot(&dir, None);
+    let want = shown_boxes(&s);
+    let list = components(&mut s);
+    let id = |n: &str| list.iter().find(|c| c["name"] == n).unwrap()["id"].as_u64().unwrap();
+    let robot = r["component"].as_u64().unwrap();
+    let moved = run(&mut s, "component.set_origin", json!({"component": robot, "point": "bottom"}));
+    assert_eq!(shown_boxes(&s), want, "{moved}");
+    run(&mut s, "component.set_origin", json!({"component": id("Base"), "point": "center"}));
+    assert_eq!(shown_boxes(&s), want);
+    let peg = run(&mut s, "component.set_origin", json!({"component": id("Peg"), "frame": {"origin": [5, 5, 5], "z": [1, 0, 0]}}));
+    assert_eq!(peg["placements"].as_array().unwrap().len(), 4, "{peg}");
+    assert_eq!(shown_boxes(&s), want);
+    s.refresh();
+    assert_eq!(shown_boxes(&s), want, "the rigid group keeps them where they are");
+    // The file's component now has its origin at the bottom centre of its box.
+    let o = s.doc.occurrences.iter().find(|o| o.component == robot).unwrap();
+    let at = solidcraft_doc::apply_point(&o.transform, solidcore_record::Vec3::ZERO);
+    let origin: Vec<f64> = moved["origin"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
+    assert!((at.x - origin[0]).abs() < 1e-6 && (at.y - origin[1]).abs() < 1e-6 && (at.z - origin[2]).abs() < 1e-6, "{at:?} {moved}");
+    assert!(at.z.abs() < 1e-6, "on the ground: {at:?}");
+
+    let design = dir.join("robot.solidcraft").to_string_lossy().to_string();
+    run(&mut s, "file.save_as", json!({"path": design}));
+    let mut again = Session::default();
+    run(&mut again, "doc.open", json!({"path": design}));
+    assert_eq!(shown_boxes(&again), want);
+    // Unlocked, the parts still stand where they were.
+    run(&mut again, "component.unlock", json!({"component": robot}));
+    assert_eq!(shown_boxes(&again), want);
+    let _ = std::fs::remove_dir_all(&dir);
+}

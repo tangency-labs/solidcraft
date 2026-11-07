@@ -193,7 +193,7 @@ fn map_plane(m: &Mat, p: &Plane) -> Plane {
     Plane::new(o, x, y).unwrap_or(*p)
 }
 
-fn map_plane_ref(m: &Mat, p: &mut PlaneRef) {
+pub(crate) fn map_plane_ref(m: &Mat, p: &mut PlaneRef) {
     match p {
         PlaneRef::Custom { plane } => *plane = map_plane(m, plane),
         PlaneRef::Placed { origin, x_dir, y_dir } => {

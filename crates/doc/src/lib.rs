@@ -50,6 +50,7 @@ mod name_lookup;
 mod names;
 pub mod naming;
 mod occurrence_tree;
+pub mod origin_rebase;
 mod params;
 pub mod persistent_name;
 pub mod physical_material;

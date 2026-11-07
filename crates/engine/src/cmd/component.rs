@@ -19,7 +19,8 @@ use crate::schema::component::{
     MoveBodiesResult, MoveFeaturesParams, MoveFeaturesResult, MoveParams, MoveResult, MoveSketchesParams, MoveSketchesResult,
     MoveSketchesToPartsParams, MoveSketchesToPartsResult, NamesOrCount, OccurrenceAlignParams, OccurrenceAlignResult, OccurrencePropertiesParams,
     OccurrencePropertiesResult, PasteNewParams, PasteNewResult, PlacementEntry, PlacementInfo, PropertiesParams, PropertiesResult, RenameParams,
-    RenameResult, ReparentItemsParams, ReparentItemsResult, RevertPositionParams, RevertPositionResult, UnlockParams, UnlockResult,
+    RenameResult, ReparentItemsParams, ReparentItemsResult, RevertPositionParams, RevertPositionResult, SetOriginParams, SetOriginResult,
+    UnlockParams, UnlockResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -47,6 +48,7 @@ const MOVE_SKETCHES_CONTRACT: TypedContract<MoveSketchesParams> = TypedContract:
 const OCCURRENCE_PROPERTIES_CONTRACT: TypedContract<OccurrencePropertiesParams> = TypedContract::new();
 const PASTE_NEW_CONTRACT: TypedContract<PasteNewParams> = TypedContract::new();
 const REVERT_POSITION_CONTRACT: TypedContract<RevertPositionParams> = TypedContract::new();
+const SET_ORIGIN_CONTRACT: TypedContract<SetOriginParams> = TypedContract::new();
 
 #[path = "component_align.rs"]
 mod align;
@@ -66,6 +68,8 @@ pub(super) mod properties;
 mod reparent;
 #[path = "component_reparent_items.rs"]
 mod reparent_items;
+#[path = "component_set_origin.rs"]
+mod set_origin;
 #[path = "component_sketches_to_parts.rs"]
 mod sketches_to_parts;
 #[path = "component_transfer.rs"]
@@ -210,6 +214,22 @@ pub static COMMANDS: &[CommandSpec] = &[
          component.move_sketches moves it, and stays where it is on the face; the others (on an origin, construction or fixed \
          plane, on a body of the design itself, or already in their part) stay where they are. One undo step",
     ),
+    CommandSpec::new("component.set_origin", "Move Component Origin", crate::checked!("component.set_origin", set_origin::set_origin))
+        .icon("move")
+        .contract(&SET_ORIGIN_CONTRACT)
+        .output(output_schema_for::<SetOriginResult>)
+        .params(
+            "component: id or name; path?: the placement the inputs are read in (occurrence ids, default its first); point?: [x, y, z] \
+             | \"center\" | \"bottom\" (the middle of the box around the placement's bodies, or of its bottom: lowest world Z), or \
+             frame?: {origin?, x?: [dir], z?: [dir]} (default: the component's axes as they are); space?: world (default) | component \
+             (its coordinates as they are now); keep_world?: bool (default true) → component, path, origin, x, y, z, offset, \
+             placements, inserted, unchanged. Moves the component's origin there, and turns its axes to x and z if given: every \
+             placement moves by the change and everything the component holds (bodies, imported meshes, sketches, construction \
+             geometry, joint origins, child placements) by the opposite, so nothing moves in the world; a STEP import gets a Move \
+             feature after it (`inserted`). keep_world: false moves the placements only, so the contents go with the origin. One \
+             undo step; refused, changing nothing, while the timeline is rolled back or components are moved and not captured, for \
+             a linked component or a standard part, and when anything would move",
+        ),
     CommandSpec::new("component.move_features", "Move Features to Component", crate::checked!("component.move_features", move_features::move_features))
         .icon("move")
         .contract(&MOVE_FEATURES_CONTRACT)

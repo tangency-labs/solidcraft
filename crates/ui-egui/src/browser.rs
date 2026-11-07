@@ -372,11 +372,24 @@ pub struct OccMove {
     pub pivot: Option<solidcore_record::Vec3>,
     /// The values when the current triad drag began.
     drag0: Option<([f64; 3], [f64; 3])>,
+    /// Move Origin (#13136): the values move the component's origin, not the part; OK runs
+    /// `component.set_origin` and nothing moves until then.
+    pub origin_only: bool,
 }
 
 impl OccMove {
     pub fn new(occurrence: u64) -> Self {
-        OccMove { occurrence, path: Vec::new(), baseline: None, had_pending: false, translate: [0.0; 3], angles: [0.0; 3], pivot: None, drag0: None }
+        OccMove {
+            occurrence,
+            path: Vec::new(),
+            baseline: None,
+            had_pending: false,
+            translate: [0.0; 3],
+            angles: [0.0; 3],
+            pivot: None,
+            drag0: None,
+            origin_only: false,
+        }
     }
 }
 
@@ -3573,9 +3586,42 @@ pub fn apply_occurrence_move(app: &mut SolveApp, m: &OccMove) {
     );
 }
 
+/// Move Origin (#13136): put the component's origin (and its axes) where the panel's values move
+/// it to, turned about the starting origin and then moved, as a move of the part would; the part
+/// stays where it is.
+pub(crate) fn move_origin(app: &mut SolveApp, m: &OccMove) -> Result<(), String> {
+    use crate::gizmo;
+    use solidcore_record::Vec3;
+    use solidcraft_engine::doc::{apply_point, apply_vector, mat_mul, rigid};
+    let o = app.session.doc.occurrences.iter().find(|o| o.id == m.occurrence).cloned().ok_or("that placement no longer exists")?;
+    let path = if m.path.is_empty() {
+        let mut path = app.session.doc.first_path(o.parent);
+        path.push(o.id);
+        path
+    } else {
+        m.path.clone()
+    };
+    let world = app.session.occurrence_placement(&path).map_err(|e| e.to_string())?.world;
+    let a = m.angles.map(f64::to_radians);
+    let r = gizmo::mul(&gizmo::mul(&gizmo::rotation(Vec3::Z, a[2]), &gizmo::rotation(Vec3::Y, a[1])), &gizmo::rotation(Vec3::X, a[0]));
+    let (axis, angle) = gizmo::axis_angle(&r);
+    let pivot = m.pivot.unwrap_or_else(|| apply_point(&world, Vec3::ZERO));
+    let moved = mat_mul(&rigid(Vec3::new(m.translate[0], m.translate[1], m.translate[2]), pivot, axis, angle), &world);
+    let (at, x, z) = (apply_point(&moved, Vec3::ZERO), apply_vector(&moved, Vec3::X), apply_vector(&moved, Vec3::Z));
+    app.run(
+        "component.set_origin",
+        json!({"component": o.component, "path": path, "frame": {"origin": [at.x, at.y, at.z], "x": [x.x, x.y, x.z], "z": [z.x, z.y, z.z]}}),
+    )
+    .map(|_| ())
+}
+
 /// The shared move triad at the occurrence's origin: arrows and squares move it, rings turn it.
 pub(crate) fn occurrence_triad_model(app: &SolveApp) -> Option<crate::gizmo::Triad> {
-    let movement = app.tree.occurrence_move.as_ref()?;
+    occurrence_triad_model_for(app.tree.occurrence_move.as_ref()?)
+}
+
+/// The triad a Move panel's values put at its starting origin, moved.
+pub(crate) fn occurrence_triad_model_for(movement: &OccMove) -> Option<crate::gizmo::Triad> {
     let center = movement.pivot? + solidcore_record::Vec3::new(movement.translate[0], movement.translate[1], movement.translate[2]);
     Some(crate::gizmo::Triad { center, translate: true, rotate: true })
 }
@@ -3603,7 +3649,8 @@ pub(crate) fn occurrence_triad(app: &mut SolveApp, ui: &mut egui::Ui, painter: &
     if g.done {
         m.drag0 = None;
     }
-    if (m.translate, m.angles) != before {
+    // Moving the origin only moves the triad until OK.
+    if (m.translate, m.angles) != before && !m.origin_only {
         apply_occurrence_move(app, &m);
     }
     app.tree.occurrence_move = Some(m);

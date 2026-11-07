@@ -677,3 +677,50 @@ fn sketches_folder_moves_its_sketches_to_the_part_they_are_on() {
     assert!(!error && status.contains("Moved 1") && status.contains("1 stayed") && status.contains("not on a part's face"), "{status}");
     assert!(context_menu::items(&h.app, &Target::Sketch { id: on_xy }).iter().any(|i| i.id == "component.move_sketches.to_parts"));
 }
+
+/// Move Origin in the Move panel (#13136): the values move the triad, not the part, until OK,
+/// which puts the component's origin there and leaves every body where it is.
+#[test]
+fn move_origin_moves_the_triad_and_not_the_part() {
+    let (mut h, component, first, second) = fixture();
+    let bounds = |h: &Harness| {
+        let mut b: Vec<[i64; 6]> = h
+            .app
+            .session
+            .world_state()
+            .unwrap()
+            .bodies
+            .iter()
+            .map(|b| {
+                let m = b.mesh().bounds();
+                [m.min.x, m.min.y, m.min.z, m.max.x, m.max.y, m.max.z].map(|v| (v * 1e4).round() as i64)
+            })
+            .collect();
+        b.sort();
+        b
+    };
+    let before = bounds(&h);
+    let mut m = crate::browser::OccMove::new(first);
+    m.pivot = crate::browser::occurrence_origin(&h.app, first);
+    m.origin_only = true;
+    m.translate = [3.0, 4.0, 5.0];
+    m.angles = [0.0, 0.0, 90.0];
+    let start = m.pivot.unwrap();
+    // While the box is ticked the triad shows where the origin goes; the part has not moved.
+    let triad = crate::browser::occurrence_triad_model_for(&m).unwrap();
+    assert!((triad.center.x - start.x - 3.0).abs() < 1e-9 && (triad.center.z - start.z - 5.0).abs() < 1e-9);
+    assert!(h.app.session.pending_moves.is_empty());
+    crate::browser::move_origin(&mut h.app, &m).unwrap();
+    h.frames(2);
+    assert_eq!(bounds(&h), before);
+    for (occurrence, offset) in [(first, 0.0), (second, 50.0)] {
+        let at = crate::browser::occurrence_origin(&h.app, occurrence).unwrap();
+        assert!((at.x - start.x - 3.0 - offset).abs() < 1e-6 && (at.y - start.y - 4.0).abs() < 1e-6 && (at.z - start.z - 5.0).abs() < 1e-6, "{at:?}");
+    }
+    // Turned a quarter about Z: the component's X now runs along the world's Y.
+    let t = h.app.session.doc.occurrences.iter().find(|o| o.id == first).unwrap().transform;
+    assert!((t[0][1] - 1.0).abs() < 1e-9, "{t:?}");
+    assert_eq!(h.app.session.doc.components.iter().filter(|c| c.id == component).count(), 1);
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert!((crate::browser::occurrence_origin(&h.app, first).unwrap().x - start.x).abs() < 1e-9);
+}

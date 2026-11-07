@@ -61,6 +61,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<OccurrencePropertiesParams>(), &["about", "descendants", "occurrence", "path"]);
     assert_keys(input_schema_for::<MoveBodiesParams>(), &["bodies", "component", "component_path", "from_path"]);
     assert_keys(input_schema_for::<MoveSketchesParams>(), &["component", "sketches"]);
+    assert_keys(input_schema_for::<SetOriginParams>(), &["component", "frame", "keep_world", "path", "point", "space"]);
 }
 
 /// The calls these commands already refuse (the handlers' own messages), refused alike in strict.

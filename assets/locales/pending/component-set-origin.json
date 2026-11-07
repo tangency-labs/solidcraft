@@ -1,0 +1,50 @@
+{
+  "en": {
+    "browser.move_origin": "Move origin only",
+    "browser.move_origin_note": "The origin goes where the triad is; the part stays where it is.",
+    "browser.move_origin_ok": "Move Origin",
+    "cmd.component.set_origin": "Move Component Origin"
+  },
+  "ar": {
+    "browser.move_origin": "نقل نقطة الأصل فقط",
+    "browser.move_origin_note": "تنتقل نقطة الأصل إلى موضع المحاور الثلاثة، ويبقى الجزء في مكانه.",
+    "browser.move_origin_ok": "نقل نقطة الأصل",
+    "cmd.component.set_origin": "نقل نقطة أصل المكوّن"
+  },
+  "de": {
+    "browser.move_origin": "Nur Ursprung verschieben",
+    "browser.move_origin_note": "Der Ursprung wandert zum Achsenkreuz; das Teil bleibt, wo es ist.",
+    "browser.move_origin_ok": "Ursprung verschieben",
+    "cmd.component.set_origin": "Komponentenursprung verschieben"
+  },
+  "he": {
+    "browser.move_origin": "הזזת נקודת הראשית בלבד",
+    "browser.move_origin_note": "נקודת הראשית עוברת למקום מערכת הצירים; החלק נשאר במקומו.",
+    "browser.move_origin_ok": "הזזת נקודת הראשית",
+    "cmd.component.set_origin": "הזזת נקודת הראשית של הרכיב"
+  },
+  "ja": {
+    "browser.move_origin": "原点のみ移動",
+    "browser.move_origin_note": "原点が三軸の位置に移動し、部品はその場に残ります。",
+    "browser.move_origin_ok": "原点を移動",
+    "cmd.component.set_origin": "コンポーネントの原点を移動"
+  },
+  "ko": {
+    "browser.move_origin": "원점만 이동",
+    "browser.move_origin_note": "원점이 삼축 위치로 이동하고 부품은 제자리에 남습니다.",
+    "browser.move_origin_ok": "원점 이동",
+    "cmd.component.set_origin": "구성요소 원점 이동"
+  },
+  "vi": {
+    "browser.move_origin": "Chỉ di chuyển gốc tọa độ",
+    "browser.move_origin_note": "Gốc tọa độ chuyển đến vị trí bộ ba trục; chi tiết vẫn giữ nguyên vị trí.",
+    "browser.move_origin_ok": "Di chuyển gốc tọa độ",
+    "cmd.component.set_origin": "Di chuyển gốc tọa độ của thành phần"
+  },
+  "zh": {
+    "browser.move_origin": "仅移动原点",
+    "browser.move_origin_note": "原点移到三轴所在位置；零件保持原位。",
+    "browser.move_origin_ok": "移动原点",
+    "cmd.component.set_origin": "移动组件原点"
+  }
+}

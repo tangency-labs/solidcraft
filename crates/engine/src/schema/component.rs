@@ -1961,3 +1961,101 @@ pub struct MoveSketchesResult {
 #[cfg(test)]
 #[path = "component_tests.rs"]
 mod tests;
+
+/// Where `component.set_origin` puts a component's origin: a point, or a place on the box
+/// around the placement's bodies.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum OriginPoint {
+    /// A point in mm (world, or the component's coordinates with `space: component`).
+    At(Point3),
+    /// `center`: the middle of the box around the placement's bodies; `bottom`: the middle of
+    /// that box's bottom (lowest world Z).
+    Keyword(OriginKeyword),
+}
+
+/// A place on the box around a placement's bodies.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum OriginKeyword {
+    Center,
+    Bottom,
+}
+
+/// A new origin with its axes, for `component.set_origin`.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct OriginFrame {
+    /// Where the origin goes. Default: where it is.
+    #[serde(default, deserialize_with = "present")]
+    pub origin: Option<OriginPoint>,
+    /// The new X axis (laid square to `z`). Default: the component's X as it is now.
+    #[serde(default, deserialize_with = "present")]
+    pub x: Option<Point3>,
+    /// The new Z axis. Default: the component's Z as it is now.
+    #[serde(default, deserialize_with = "present")]
+    pub z: Option<Point3>,
+}
+
+/// The coordinates `component.set_origin` reads its point and axes in.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum OriginSpace {
+    World,
+    Component,
+}
+
+/// Move a component's origin, and turn its axes if asked, to a new place while everything it
+/// holds (bodies, meshes, sketches, construction geometry, joints and child placements) stays
+/// where it is in the world: each placement of the component moves by the change, and its
+/// contents by the opposite. One undo step; nothing changes if anything would move.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SetOriginParams {
+    /// The component, by id or name.
+    pub component: IdOrName,
+    /// The placement the point and axes are read in (occurrence ids from the top). Default: the
+    /// component's first placement.
+    #[serde(default, deserialize_with = "present")]
+    pub path: Option<Vec<u64>>,
+    /// Where the origin goes, keeping the component's axes. Give this or `frame`.
+    #[serde(default, deserialize_with = "present")]
+    pub point: Option<OriginPoint>,
+    /// The new origin and axes. Give this or `point`.
+    #[serde(default, deserialize_with = "present")]
+    pub frame: Option<OriginFrame>,
+    /// `world` (default) or `component`: the component's coordinates as they are now.
+    #[serde(default, deserialize_with = "present")]
+    pub space: Option<OriginSpace>,
+    /// Default true: the contents stay where they are in the world. False: they keep their
+    /// coordinates and go with the origin (the placements move).
+    #[serde(default, deserialize_with = "present")]
+    pub keep_world: Option<bool>,
+}
+
+/// What `component.set_origin` returns.
+#[derive(Debug, Default, Serialize, JsonSchema)]
+pub struct SetOriginResult {
+    pub component: u64,
+    /// The placement the inputs were read in.
+    pub path: Vec<u64>,
+    /// The new origin and axes, in the world as that placement shows them.
+    pub origin: [f64; 3],
+    pub x: [f64; 3],
+    pub y: [f64; 3],
+    pub z: [f64; 3],
+    /// The new origin's pose in the component's old coordinates (column-major 4×4): each
+    /// placement's transform was multiplied by it on the right.
+    pub offset: [[f64; 4]; 4],
+    /// The component's placements (occurrence ids), all of which moved.
+    pub placements: Vec<u64>,
+    /// Whether the contents stayed where they were in the world (`keep_world`).
+    pub kept_world: bool,
+    /// Move features added right after STEP imports, whose bodies can't be rewritten.
+    pub inserted: Vec<String>,
+    /// True when the origin was already there: nothing changed.
+    pub unchanged: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}

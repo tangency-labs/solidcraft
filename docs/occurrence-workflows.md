@@ -70,6 +70,46 @@ Use `sketch.redefine` with the sketch ID and a new plane to repair or convert an
 
 Paste New remaps internal certified targets and authoring paths to the copied definitions. Timeline paste reports retained external face targets and refuses translating such attachments until an explicit fixed-plane conversion establishes independent geometry. Rename preserves certified body identity; another producer using the same body name cannot repair a lost attachment.
 
+## Move a component's origin
+
+A component's origin is the frame everything in it is written in, and the point its placements
+are measured and turned about. An imported part keeps the origin its file had, often a corner
+or a point in mid-air. `component.set_origin` moves the origin, and turns its axes if asked,
+without moving anything in the world:
+
+```json
+{"component": "chair", "point": "bottom"}
+{"component": 3, "path": [2, 3], "point": [120, 40, 0]}
+{"component": 3, "frame": {"origin": [120, 40, 0], "x": [0, 1, 0], "z": [0, 0, 1]}}
+```
+
+- `point` is a world point, or `center` / `bottom`: the middle of the box around the
+  placement's bodies (with its child placements' bodies), or the middle of its bottom (lowest
+  world Z). `frame` also sets the axes: `z`, then `x` laid square to it. An axis left out keeps
+  the component's current one. With `space: "component"` the inputs are in the component's
+  current coordinates.
+- `path` picks the placement the inputs are read in. The default is the component's first.
+- Every placement of the component moves by the change, and everything it holds moves by the
+  opposite amount, so nothing moves in the world. That covers bodies, imported meshes, sketches,
+  construction geometry, joint origins on its placements, child placements, face attachments,
+  canvases, and bodies it hands to or takes from other components. References to the
+  component's own origin planes, axes and point are written out first, so they stay where they
+  are. Move features, which turn about the origin, are re-expressed about the new one.
+- A STEP import's bodies can't be rewritten, because they are the file's text. A box can't be
+  either when the axes turn, because a box is always square to its component's axes. Each one
+  gets a Move feature named *Origin Moved* right after it. The reply's `inserted` lists these.
+- The change is worked out on a copy and compared with the design: every body, sketch plane,
+  construction item and other placement must be where it was, and no feature may gain an error.
+  Otherwise the command is refused and nothing changes. It is one undo step. Nothing new is
+  saved, so the design opens in older releases.
+- The command is refused while the timeline is rolled back, while components have moves that
+  are not captured, for a linked component, and for a standard part (resizing rebuilds it).
+- `keep_world: false` moves the placements only, so the contents go with the origin.
+
+In the app, the Move panel of a placement (the Browser's **Move**) has **Move origin only**.
+With it ticked, the distances, angles and triad move the origin instead of the part, and the
+part stays where it is. OK puts the origin where the triad is.
+
 ## Floating joint chains
 
 Dragging any member of a floating joint chain carries the chain together without changing its

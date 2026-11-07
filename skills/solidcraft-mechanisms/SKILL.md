@@ -26,6 +26,7 @@ Written against SolidCraft `main` after 0.11.1, which counts the degrees of free
 1. **Components and grounding.**
    - Bodies made in the root go into components with `component.create {"name":..., "parent":"root", "activate":false}`, then `component.move_bodies {"bodies":[...], "component":...}`.
    - A part that moves in two pieces, such as an actuator's barrel and rod, becomes two components.
+   - An origin in an awkward place, such as an imported mesh's: `component.set_origin {"component":..., "point":"bottom"}` (or `"center"`, a world point, or `frame: {origin, x, z}`) moves it there and leaves every body, sketch, joint and child placement where it is. Do it before adding joints, so that turns and joint origins are measured from it.
    - Ground the base: `occurrence.ground {"occurrence":"Frame:1", "grounded":true}`. The design's first top-level part is grounded when it is made; check `joint.list` `fixed`, and unground it (`"grounded":false`) if it is not the base. A grounded part refuses `occurrence.move`. Occurrences are named `<component>:<n>`. Joint commands also take a component name (its first occurrence); `occurrence.ground` does not.
 2. **Open-chain joints in one batch.** Read `occurrence.properties` of each moving occurrence before the batch and after it. If something moved, split the batch to find the joint.
 3. **Each joint that closes a loop, in a call of its own.** Then check `conflicts` in its reply.
