@@ -861,16 +861,19 @@ impl Assembled {
 
 impl Cache {
     /// What [`as_shown`] reads of the drawing open, for a copy of the session that exports it
-    /// ([`Session::scratch_as_shown`]): the world state its last [`update`] took, and each view's and
+    /// ([`Session::scratch_as_shown`]): the world state its last [`update`] took, each view's and
     /// dimension's last drawing, and the serial they were numbered to, so the copy's numbers never
-    /// repeat theirs. Not the lines kept for drawings closed, the last answer or a request in flight,
-    /// which only the session's own page uses; the drawing and sheet are set by the read.
-    pub(crate) fn shown_copy(&self) -> Cache {
+    /// repeat theirs. Also the lines kept for `open` when it closed, if nothing has read it since it
+    /// opened again, so the copy takes them back as the session would ([`Self::take_kept`]). Not the lines
+    /// kept for other drawings, the last answer or a request in flight, which only the session's own
+    /// page uses; the drawing and sheet are set by the read.
+    pub(crate) fn shown_copy(&self, open: Option<u64>) -> Cache {
         Cache {
             views: self.views.clone(),
             dimensions: self.dimensions.clone(),
             updated: self.updated.clone(),
             serial: self.serial,
+            kept: self.kept.copy_of(open),
             ..Cache::default()
         }
     }

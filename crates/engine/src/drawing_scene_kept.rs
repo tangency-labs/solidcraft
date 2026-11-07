@@ -16,13 +16,14 @@ use super::{Drawn, DrawnDimension, Lettering, SourceKey};
 pub(super) struct KeptLines(BTreeMap<u64, Kept>);
 
 /// A closed drawing's last lines: its views' and its dimensions', by id.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct Kept {
     pub(super) views: BTreeMap<u64, KeptView>,
     pub(super) dimensions: BTreeMap<u64, KeptDimension>,
 }
 
 /// A view's last lines: drawn as `view` drew, from a world state that showed `shows`.
+#[derive(Clone)]
 pub(super) struct KeptView {
     pub(super) view: ResolvedView,
     pub(super) drawn: Drawn,
@@ -30,6 +31,7 @@ pub(super) struct KeptView {
 }
 
 /// A dimension's last reading: of `record`, on its view's drawing `view_serial`, with `lettering`.
+#[derive(Clone)]
 pub(super) struct KeptDimension {
     pub(super) record: Arc<Dimension>,
     pub(super) view_serial: u64,
@@ -47,6 +49,11 @@ impl KeptLines {
     /// Drawing `drawing`'s, taken out.
     pub(super) fn take(&mut self, drawing: u64) -> Kept {
         self.0.remove(&drawing).unwrap_or_default()
+    }
+
+    /// Drawing `drawing`'s alone, copied, if it has any kept.
+    pub(super) fn copy_of(&self, drawing: Option<u64>) -> KeptLines {
+        KeptLines(drawing.and_then(|d| Some((d, self.0.get(&d)?.clone()))).into_iter().collect())
     }
 
     /// Forgets each drawing `exists` says is gone.
