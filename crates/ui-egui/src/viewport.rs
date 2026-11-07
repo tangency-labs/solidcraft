@@ -5721,6 +5721,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && !crate::shell::covered(app, *p)
     });
     crate::tool_cursor::show(app, &painter, badge_at);
+    // With no tool running, where the pointer is in the open sketch (#11070).
+    crate::sketch_cursor_readout::show(app, &painter, &proj, badge_at);
 }
 
 fn paint_box_selection(painter: &egui::Painter, bx: &BoxSel, sketch: bool) {
