@@ -4566,13 +4566,13 @@ fn hole_spots(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, f
     Ok((spots.into_iter().map(|p| hole_on_surface_in(st, p, dir, hole_scope(f), from_inside)).collect(), dir))
 }
 
-/// Whether the sketch lies on a picked face (or a plane given outright), so a hole at its points
+/// Whether the sketch lies on a picked face, a standard plane (or a plane given outright), so a hole at its points
 /// follows that face back to the surface; a sketch on an offset, construction or other derived
 /// plane is where the user put it.
 fn sketch_plane_follows_face(doc: &Document, sketch: u64) -> bool {
     fn picked(p: &PlaneRef) -> bool {
         match p {
-            PlaneRef::Face { .. } | PlaneRef::Custom { .. } => true,
+            PlaneRef::Origin { .. } | PlaneRef::Face { .. } | PlaneRef::Custom { .. } => true,
             PlaneRef::Flipped { base, .. } => picked(base),
             _ => false,
         }

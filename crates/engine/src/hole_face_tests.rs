@@ -592,3 +592,17 @@ fn hole_from_a_sketch_on_an_offset_plane_inside_the_part_starts_at_the_plane() {
     assert!(solid_at(&s, 20.0, 20.0, 6.5) && !solid_at(&s, 20.0, 20.0, 7.5) && !solid_at(&s, 20.0, 20.0, 11.5));
     assert!(solid_at(&s, 20.0, 20.0, 14.5) && solid_at(&s, 20.0, 20.0, 18.0) && base - volume(&mut s) < pi() * 25.0 * 6.0);
 }
+
+/// A sketch on a standard plane through the middle of a part keeps drilling from the part's
+/// surface, as before #11538 limited the new rule to derived planes.
+#[test]
+fn hole_from_a_sketch_on_a_standard_plane_inside_the_part_still_starts_at_the_surface() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 20, "corner": [-20, -20, -10], "name": "Part"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Pts"}));
+    run(&mut s, "sketch.point", json!({"point": [0, 0], "id": "p1"}));
+    run(&mut s, "sketch.finish", json!({}));
+    drill(&mut s, &["p1".to_string()], json!({"depth": 5}));
+    // Starts at the top (z 10) going down, not at z 0.
+    assert!(!solid_at(&s, 0.0, 0.0, 7.5) && solid_at(&s, 0.0, 0.0, 3.0) && solid_at(&s, 0.0, 0.0, -3.0));
+}
