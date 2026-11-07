@@ -1949,7 +1949,7 @@ fn constraint_entities(k: &solidcraft_engine::sketch::ConstraintKind) -> (Vec<us
         PatternRadius { a, b } => (vec![a, b], vec![]),
         Fix { p } => (vec![], vec![p]),
         Midpoint { p, l } => (vec![l], vec![p]),
-        PointOnCurve { p, c } => (vec![c], vec![p]),
+        PointOnCurve { p, c } | PointAlong { p, c, .. } => (vec![c], vec![p]),
         Symmetric { p, q, l } => (vec![l], vec![p, q]),
         Horizontal { l } | Vertical { l } => (vec![l], vec![]),
         Parallel { a, b }
@@ -1983,7 +1983,7 @@ fn glyph_anchors(sk: &solidcraft_engine::sketch::Sketch, k: &solidcraft_engine::
     };
     let pt = |p: usize| sk.point(p).map(|q| (q, None));
     match *k {
-        Coincident { p, .. } | Fix { p } | Midpoint { p, .. } | PointOnCurve { p, .. } => pt(p).into_iter().collect(),
+        Coincident { p, .. } | Fix { p } | Midpoint { p, .. } | PointOnCurve { p, .. } | PointAlong { p, .. } => pt(p).into_iter().collect(),
         PatternPoint { p, center, .. } => pt(center.unwrap_or(p)).into_iter().collect(),
         PatternRadius { .. } => Vec::new(),
         HorizontalPoints { p, q } | VerticalPoints { p, q } | Symmetric { p, q, .. } => {
@@ -2074,6 +2074,28 @@ mod glyph_zoom_tests {
     fn glyphs_stay_while_a_large_sketch_fills_the_view() {
         assert!(constraint_glyphs_visible_at_scale(1.5, true, || 500.0 * 1.5));
         assert!(constraint_glyphs_visible_at_scale(0.05, true, || MIN_GLYPH_SPAN_PX));
+    }
+
+    /// A Divide Curve point's constraint has a glyph on its point, an icon, and lights its point
+    /// and curve, as a point-on-curve constraint does (#8969).
+    #[test]
+    fn a_point_along_constraint_has_a_glyph_on_its_point() {
+        use solidcraft_engine::sketch::{ConstraintKind, CurveKind, Sketch};
+        let mut sk = Sketch::new();
+        let (Ok(a), Ok(b), Ok(q)) = (
+            sk.add_point(super::Vec2::new(0.0, 0.0), None),
+            sk.add_point(super::Vec2::new(10.0, 0.0), None),
+            sk.add_point(super::Vec2::new(2.5, 0.0), None),
+        ) else {
+            panic!("points");
+        };
+        let Ok(l) = sk.add_curve(CurveKind::Line { a, b }, None) else { panic!("line") };
+        let k = ConstraintKind::PointAlong { p: q, c: l, at: 0.25 };
+        assert_eq!(super::constraint_entities(&k), (vec![l], vec![q]));
+        let anchors = super::glyph_anchors(&sk, &k);
+        assert_eq!(anchors.len(), 1);
+        assert!(anchors.first().is_some_and(|(at, dir)| (at.x - 2.5).abs() < 1e-9 && at.y.abs() < 1e-9 && dir.is_none()));
+        assert_eq!(crate::icons::markers::glyph_icon(k.name()), Some("c_midpoint"));
     }
 }
 

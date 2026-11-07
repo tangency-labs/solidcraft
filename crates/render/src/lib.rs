@@ -12,6 +12,7 @@ pub mod clear_coat;
 mod curve_display;
 pub mod film;
 mod gif;
+pub mod glass_model;
 pub mod hatch;
 pub mod job;
 pub mod lighting;

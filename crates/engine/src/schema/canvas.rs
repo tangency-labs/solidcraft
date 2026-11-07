@@ -147,6 +147,10 @@ pub struct CanvasEditParams {
     /// Its new name; blank text keeps the name.
     #[serde(default)]
     pub name: Option<String>,
+    /// Lock it or unlock it. A locked canvas refuses a new centre, width, angle or flip, Calibrate
+    /// and Delete until it is unlocked; its opacity, visibility and name can still change.
+    #[serde(default)]
+    pub locked: Option<bool>,
 }
 
 /// Scale a canvas so that two points on it are a known distance apart: the image is scaled about

@@ -89,7 +89,7 @@ pub(crate) fn glyph_icon(name: &str) -> Option<&'static str> {
         "Smooth" => "c_smooth",
         "Equal" => "c_equal",
         "Concentric" => "c_concentric",
-        "MidPoint" => "c_midpoint",
+        "MidPoint" | "PointAlong" => "c_midpoint",
         "Symmetry" => "c_symmetry",
         "Fix" => "c_fix",
         _ => return None,

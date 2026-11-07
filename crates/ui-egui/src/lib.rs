@@ -529,6 +529,7 @@ pub(crate) enum EscapeOwner {
 pub struct SolveApp {
     /// Common panel foundation, internal opt-in; stays on the app across document tabs.
     pub(crate) panel_runtime: Option<panel_runtime::AppPanelRuntime>,
+    pub(crate) panel_layout_preferences: panel_runtime::PanelLayoutPreferences,
     pub blur: blur::State,
     pub(crate) blur_session: blur::Session,
     pub(crate) viewport_status: ui_kit::StatusPresentation,
@@ -574,6 +575,8 @@ pub struct SolveApp {
     pub render_workspace: render_workspace::State,
     pub tool: Option<tools::Tool>,
     pub dialog: Option<dialogs::Dialog>,
+    /// The joint dialogs' picked and hovered snaps ([`dialogs_assembly::picked_snap`]).
+    pub(crate) snaps: dialogs_assembly::SnapMemo,
     /// Each command dialog's options and values as last applied (this session only).
     pub(crate) remembered_commands: Vec<dialogs::RememberedCommand>,
     /// The Change Parameters window, when open.
@@ -693,7 +696,7 @@ pub struct SolveApp {
     pub lock_prompts: Vec<open_elsewhere::LockPrompt>,
     /// A Save waiting for "the file changed on disk" to be answered.
     pub disk_prompt: bool,
-    /// Update Links or Open Linked Design waiting for a network server to be allowed.
+    /// Update Links, Open Linked Design or Reload from file waiting for a network server to be allowed.
     pub network_prompt: Option<network_prompt::NetworkPrompt>,
     /// Designs left by crashed apps, offered for recovery.
     pub recoverable: Vec<solidcraft_engine::recovery::Entry>,
@@ -755,6 +758,8 @@ pub struct SolveApp {
     pub synthetic_mods: egui::Modifiers,
     /// A click that came in the same frame as typing before it, held for the next frame.
     held_click: Vec<egui::Event>,
+    /// A synthetic press is held: its drag never moves the real cursor (`navigation::wrap_cursor`).
+    pub(crate) synthetic_press: bool,
     control_rx: Option<Receiver<ControlRequest>>,
     /// Control requests that change the design, held while a file loads or an agent's design
     /// change computes.
@@ -833,6 +838,7 @@ impl SolveApp {
         let (shot_tx, shot_rx) = std::sync::mpsc::channel();
         let mut app = SolveApp {
             panel_runtime: None,
+            panel_layout_preferences: panel_runtime::PanelLayoutPreferences::default(),
             viewport_status: Default::default(),
             blur: Default::default(),
             blur_session: Default::default(),
@@ -857,6 +863,7 @@ impl SolveApp {
             render_workspace,
             tool: None,
             dialog: None,
+            snaps: Default::default(),
             remembered_commands: Vec::new(),
             params: None,
             design_properties: None,
@@ -945,6 +952,7 @@ impl SolveApp {
             synthetic: Vec::new(),
             synthetic_mods: egui::Modifiers::default(),
             held_click: Vec::new(),
+            synthetic_press: false,
             control_rx: None,
             agent_chat: Default::default(),
             ai_connect: Default::default(),
@@ -1078,8 +1086,38 @@ impl SolveApp {
         self.viewport.adapter = format!("{:?} · {}", info.backend, info.name);
     }
 
-    /// Preferences kept between runs (JSON), for the host to store.
+    /// Preferences as JSON for inspection and compatibility. Storage hosts use
+    /// `try_prefs` and retain the stored panel record if portable conversion refuses.
     pub fn prefs(&self) -> String {
+        self.try_prefs().unwrap_or_else(|reason| {
+            log::warn!("Preferences export retained recovery data: {reason}");
+            self.prefs_with_panel_layout(prefs::held_panel_layout(self).unwrap_or_else(|| panel_runtime::preferences_value(self)))
+        })
+    }
+
+    /// Portable preferences for storage. On refusal the host retains its stored panel record.
+    pub fn try_prefs(&self) -> Result<String, String> {
+        let layout = prefs::held_panel_layout(self).unwrap_or_else(|| panel_runtime::preferences_value(self));
+        let portable = panel_runtime::portable_preferences_value(self, layout).map_err(solidcraft_engine::panels::commands::error_text)?;
+        Ok(self.prefs_with_panel_layout(portable))
+    }
+
+    /// Save ordinary settings after portable layout conversion refuses, retaining the
+    /// exact previous panel record (including null or absence). Invalid stored JSON
+    /// refuses the whole write rather than replacing recovery data.
+    pub fn prefs_with_stored_panel_layout(&self, previous: Option<&str>) -> Result<String, String> {
+        let panel_layout = match previous {
+            None => None,
+            Some(previous) => {
+                let value: Value = serde_json::from_str(previous).map_err(|reason| format!("stored preferences are invalid: {reason}"))?;
+                let object = value.as_object().ok_or_else(|| "stored preferences must be an object".to_owned())?;
+                object.get(panel_runtime::PREFERENCES_KEY).cloned()
+            }
+        };
+        Ok(self.prefs_with_panel_layout(panel_layout))
+    }
+
+    fn prefs_with_panel_layout(&self, panel_layout: Option<Value>) -> String {
         let mut v = json!({
             "dark": self.ui.dark,
             "grid": self.ui.show_grid,
@@ -1108,6 +1146,11 @@ impl SolveApp {
             "view_gizmo": self.view_gizmo.stored(),
             "gpu_path_setup_seconds": self.render_workspace.setup_seconds,
         });
+        if let Some(layout) = panel_layout
+            && let Some(obj) = v.as_object_mut()
+        {
+            obj.insert(panel_runtime::PREFERENCES_KEY.into(), layout);
+        }
         // While the Preferences dialog is open the file holds what Cancel would restore: a change
         // that was never applied must not reach disk through the periodic save, a quit or a
         // window close (#9730). One change covers every writer — desktop save and on_exit, the
@@ -1217,6 +1260,7 @@ impl SolveApp {
             .and_then(Value::as_array)
             .map(|a| a.iter().filter_map(|c| serde_json::from_value::<[u8; 3]>(c.clone()).ok()).take(recent_colors::MAX_RECENT_COLORS).collect())
             .unwrap_or_default();
+        panel_runtime::load_preferences(self, &v);
     }
 
     pub fn with_control(mut self, rx: Receiver<ControlRequest>) -> Self {
@@ -2645,11 +2689,18 @@ impl SolveApp {
         self.set_status(text, false);
     }
 
-    pub fn open_path(&mut self, path: &str) {
+    /// Open the design (or file) at `path` here and now: it is read and evaluated before this
+    /// returns, which blocks the thread for a large design. The app opens through
+    /// [`Self::open_path_async`] or [`Self::open_path_answered`] (progress and Cancel, #10198);
+    /// this is for tests.
+    #[cfg(test)]
+    pub(crate) fn open_path(&mut self, path: &str) {
         self.open_path_with(path, &Default::default());
     }
 
-    /// [`Self::open_path`] with the import options of the request (`units` of an STL or OBJ file).
+    /// Open the design (or file) at `path` here and now, with the import options of the request
+    /// (`units` of an STL or OBJ file). The web file loader uses it for its own formats that have
+    /// no staged open.
     pub fn open_path_with(&mut self, path: &str, options: &serde_json::Map<String, Value>) {
         match documents::reuse_path(self, path) {
             Ok(true) => return,
@@ -3271,6 +3322,7 @@ impl SolveApp {
                     raw.events.push(egui::Event::ModifiersChanged(*modifiers));
                     // A drag keeps its press's modifiers until the release.
                     self.synthetic_mods = if *pressed { *modifiers } else { egui::Modifiers::NONE };
+                    self.synthetic_press = *pressed;
                 }
                 egui::Event::Key { modifiers, .. } => raw.events.push(egui::Event::ModifiersChanged(*modifiers)),
                 egui::Event::PointerMoved(_) => raw.events.push(egui::Event::ModifiersChanged(self.synthetic_mods)),
