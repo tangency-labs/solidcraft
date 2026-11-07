@@ -706,10 +706,11 @@ fn scale_about_a_base_point_or_the_bodies_centre() {
     let b = bounds(&h);
     assert!(near(b.min, Vec3::new(10.0, 0.0, 0.0)) && near(b.max, Vec3::new(30.0, 20.0, 20.0)), "{b:?}");
 
-    // Reopened and applied again, the Scale keeps the corner as its point.
+    // Reopened and applied again, the Scale keeps the corner, as the vertex it was.
     let d = crate::dialogs::for_feature(&h.app, id, None).unwrap();
     let (_, params) = apply_commands(&h.app, &d).unwrap().into_iter().next().unwrap();
-    assert_eq!(params["params"]["origin"], json!([10.0, 0.0, 0.0]), "{params}");
+    assert_eq!(params["params"]["about"]["type"], json!("vertex"), "{params}");
+    assert!(params["params"].get("origin").is_none_or(serde_json::Value::is_null), "{params}");
 
     // About the design origin: the box doubles and moves away from it.
     let (h, _) = scaled(Some(Vec3::ZERO), false);
@@ -722,8 +723,7 @@ fn scale_about_a_base_point_or_the_bodies_centre() {
     let st = h.app.session.model.state();
     let body = st.bodies[0].name.clone();
     let b = &st.bodies[0].body;
-    let top = b.faces((b.size() * 2e-3).max(1e-3)).unwrap().into_iter()
-        .find(|f| f.plane_normal.is_some_and(|n| n.z > 0.99)).unwrap();
+    let top = b.faces((b.size() * 2e-3).max(1e-3)).unwrap().into_iter().find(|f| f.plane_normal.is_some_and(|n| n.z > 0.99)).unwrap();
     let mut d = Dialog::for_command(&h.app, "solid.scale").unwrap();
     d.inputs[0].items = vec![Sel::Body { name: body.clone() }];
     d.inputs[1].items = vec![Sel::Face { body, index: top.index, point: Vec3::new(12.0, 3.0, 10.0) }];
@@ -746,9 +746,45 @@ fn scale_about_a_base_point_or_the_bodies_centre() {
     let mut d = Dialog::for_command(&h.app, "solid.scale").unwrap();
     d.inputs[0].items = vec![Sel::Body { name: body.clone() }];
     d.inputs[1].items = vec![Sel::Face { body, index: side.index, point: Vec3::new(15.0, 0.0, 2.0) }];
-    let (_, params) = apply_commands(&h.app, &d).unwrap().into_iter().next().unwrap();
-    let o: Vec<f64> = params["origin"].as_array().unwrap().iter().filter_map(serde_json::Value::as_f64).collect();
-    assert!(near(Vec3::new(o[0], o[1], o[2]), Vec3::new(10.0, 0.0, 0.0)), "{params}");
+    let Kind::Scale { factor, .. } = &mut d.kind else { panic!("not the Scale dialog") };
+    *factor = "2".into();
+    for (command, params) in apply_commands(&h.app, &d).unwrap() {
+        h.app.run(&command, params).unwrap();
+    }
+    let b = bounds(&h);
+    assert!((b.min.z - 0.0).abs() < 1e-6 && (b.max.z - 20.0).abs() < 1e-6, "the bottom end stays: {b:?}");
+}
+
+/// What a Scale grows its bodies about follows the features before it: the bodies' centre and a
+/// picked vertex are found again when an earlier parameter changes, not kept as old coordinates.
+#[test]
+fn scale_about_follows_the_features_before_it() {
+    let bounds = |h: &Harness| h.app.session.model.state().bodies[0].mesh().bounds();
+    let near = |a: Vec3, b: Vec3| (a - b).len() < 1e-6;
+    let scaled = |far_corner: bool| -> Harness {
+        let mut h = Harness::new();
+        h.app.run("parameters.add", json!({"name": "len", "expression": "10 mm"})).unwrap();
+        h.app.run("solid.box", json!({"length": "len", "width": 10, "height": 10, "corner": [10, 0, 0]})).unwrap();
+        let body = h.app.session.model.state().bodies[0].name.clone();
+        let mut d = Dialog::for_command(&h.app, "solid.scale").unwrap();
+        d.inputs[0].items = vec![Sel::Body { name: body.clone() }];
+        if far_corner {
+            d.inputs[1].items = vec![Sel::Vertex { body, point: Vec3::new(20.0, 10.0, 10.0) }];
+        }
+        let Kind::Scale { factor, .. } = &mut d.kind else { panic!("not the Scale dialog") };
+        *factor = "2".into();
+        for (command, params) in apply_commands(&h.app, &d).unwrap() {
+            h.app.run(&command, params).unwrap();
+        }
+        h.app.run("parameters.change", json!({"name": "len", "expression": "20 mm"})).unwrap();
+        h
+    };
+    // The box is now (10,0,0)..(30,10,10), centre (20,5,5): doubled about that, not the old (15,5,5).
+    let b = bounds(&scaled(false));
+    assert!(near(b.min, Vec3::new(0.0, -5.0, -5.0)) && near(b.max, Vec3::new(40.0, 15.0, 15.0)), "{b:?}");
+    // The far corner moved to (30,10,10) and stays put there.
+    let b = bounds(&scaled(true));
+    assert!(near(b.min, Vec3::new(-10.0, -10.0, -10.0)) && near(b.max, Vec3::new(30.0, 10.0, 10.0)), "{b:?}");
 }
 form_case!(offset_faces, "solid.offset_face", ["Distance"]);
 form_case!(section, "inspect.section", ["Distance"]);

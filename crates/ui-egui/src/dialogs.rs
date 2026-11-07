@@ -5371,23 +5371,22 @@ pub(crate) fn emboss_profile_plane(app: &SolveApp, sketch: u64) -> Result<Option
     .ok_or_else(|| "the Emboss author frame is degenerate".into())
 }
 
-/// The centre of the exact bounding box of the bodies a Scale picks, where they are before it (after
-/// the earlier features when it is being edited).
-fn scale_center(app: &SolveApp, d: &Dialog, bodies: &[String]) -> Option<Vec3> {
-    let st = match d.editing {
-        Some((id, _)) => app.session.model.state_before(id),
-        None => app.session.model.state(),
-    };
-    let mut bb: Option<(Vec3, Vec3)> = None;
-    for n in bodies {
-        let Some(b) = st.body(n) else { continue };
-        let Ok(x) = b.body.exact_bounds() else { continue };
-        bb = Some(match bb {
-            None => (x.min, x.max),
-            Some((lo, hi)) => (lo.min(x.min), hi.max(x.max)),
-        });
-    }
-    bb.map(|(lo, hi)| (lo + hi) * 0.5).filter(|c| c.is_finite())
+/// A Scale's base point pick as the reference `solid.scale` saves: a vertex (the origin), a face,
+/// an edge, a sketch point or a construction point.
+fn scale_pick(s: &Session, x: &Sel) -> Option<Value> {
+    Some(match x {
+        Sel::Vertex { body, .. } if body.is_empty() => json!({"type": "origin"}),
+        Sel::Vertex { point, .. } => json!({"vertex": pt(*point)}),
+        Sel::Face { point, .. } => json!({"face": pt(*point)}),
+        Sel::Edge { point, .. } => json!({"edge": pt(*point)}),
+        Sel::ExternalSketchPoint { sketch, id } => json!({"sketch": sketch, "point": id}),
+        Sel::SketchPoint { id } => match id.split_once(':') {
+            Some((sketch, point)) => json!({"sketch": sketch.parse::<u64>().ok()?, "point": point}),
+            None => json!({"sketch": s.active_sketch?, "point": id}),
+        },
+        Sel::ConstructionPoint { name } => json!({"construct_point": name}),
+        _ => return None,
+    })
 }
 
 /// The commands (id, parameters) a dialog's OK runs.
@@ -6023,27 +6022,25 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             need(0, "bodies")?;
             let bodies = sels(d, 0).body_names();
             let mut p = json!({"bodies": bodies});
-            // The picked base point; else the one an edited Scale keeps (from `extra`); else the
-            // centre of the bodies, so a new Scale grows them in place, not away from the origin.
-            // A face stands for its centre: a hole's or shaft's round end, a flat face's middle.
-            // A pick that gives no point (a sphere's or torus's face) is refused, not swapped for
-            // another point the user didn't pick.
-            let base = match sels(d, 1).first() {
-                None => None,
-                Some(x) => Some(
-                    match x {
-                        Sel::Face { .. } => crate::dialogs_assembly::snap_of(s, x).map(|snap| snap.at),
-                        _ => crate::primitive_placement::world_point(s, x),
+            // What it scales about is saved as a reference, found again each time the design
+            // updates, so it follows the features before it: the picked base point; else what an
+            // edited Scale keeps (from `extra`); else the bodies' centre, so a new Scale grows
+            // them in place, not away from the origin. A face stands for its centre: a hole's or
+            // shaft's round end, a flat face's middle. A pick that gives no point (a sphere's or
+            // torus's face) is refused, not swapped for another point the user didn't pick.
+            match sels(d, 1).first() {
+                Some(x) => {
+                    if matches!(x, Sel::Face { .. }) && crate::dialogs_assembly::snap_of(s, x).is_none() {
+                        return Err("This face has no centre to scale about: pick a flat or round face, a vertex or a point".into());
                     }
-                    .ok_or("This face has no centre to scale about: pick a flat or round face, a vertex or a point")?,
-                ),
-            };
-            if let Some(at) = base {
-                p["origin"] = pt(at);
-            } else if !d.extra.contains_key("origin")
-                && let Some(c) = scale_center(app, d, &bodies)
-            {
-                p["origin"] = pt(c);
+                    p["about"] = scale_pick(s, x).ok_or("Pick a vertex, a face or a point to scale about")?;
+                    // An edited Scale from before kept a fixed point: the pick replaces it.
+                    if d.extra.contains_key("origin") {
+                        p["origin"] = Value::Null;
+                    }
+                }
+                None if d.extra.contains_key("origin") || d.extra.contains_key("about") => {}
+                None => p["about"] = json!("centre"),
             }
             ("solid.scale", p)
         }
@@ -7878,13 +7875,26 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Scale { bodies, origin, .. } => {
+        FeatureKind::Scale { bodies, origin, about, .. } => {
             let mut d = start("solid.scale")?;
             d.kind = Kind::simple_restore(&f.kind)?;
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = bodies.iter().map(|n| Sel::Body { name: n.to_string() }).collect();
             }
-            d.extra.insert("origin".into(), pt3(origin.0));
+            // It keeps what it scales about: the bodies' centre, its reference, or a fixed point.
+            match about {
+                Some(solidcraft_engine::doc::ScaleAbout::Centre) => {
+                    d.extra.insert("about".into(), json!("centre"));
+                }
+                Some(solidcraft_engine::doc::ScaleAbout::Pick { at }) => {
+                    if let Ok(v) = serde_json::to_value(at) {
+                        d.extra.insert("about".into(), v);
+                    }
+                }
+                None => {
+                    d.extra.insert("origin".into(), pt3(origin.0));
+                }
+            }
             d
         }
         FeatureKind::OffsetFace { faces, body, .. } => {
