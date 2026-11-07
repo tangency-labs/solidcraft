@@ -19,7 +19,7 @@
   - asked 4.25 (1.110): 34 → 30, 8,025 → 7,150;
   - r 5 set back 8 (1): 2 → 3, 4 → 22 (degree 9 first costs a certifying attempt one programme);
   - every edge held (refused): 10 → 2, 2,590 → 1,324.
-  - "Before" steps other than the first corner's are from #2783's validation run; the "after" counts equal the fork's 3843ddb on x86-64.
+  - "Before" is main at a445bdaac, "after" the change on it; the "after" counts equal the fork's 3843ddb on x86-64.
 - **Open:**
   - Step counts stay platform-dependent: only libm differs by target on this path, as far as read (the fan's `cos`/`sin`, the kernel direction's `atan2`, the Givens rotations' `hypot`); the fork's 3843ddb counts 6,425 steps for the first corner on aarch64 against 6,537 here.
   - An attempt whose degree 9 ends unproven still tries 3 to 8, so a long unproven dual run like the degree-7 one stays reachable.
