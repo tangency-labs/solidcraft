@@ -909,7 +909,8 @@ fn drawn_length(v: &Value, visibility: &str) -> f64 {
 
 /// The block's front view at 1:2, centred on the A3 sheet at (210, 148.5): visible lines round its
 /// 50 x 10 mm outline and nothing else. The back edges lie under the front ones and are counted as
-/// covered; the edges seen end on draw nothing. The lines are the mesh's, so they say sampled.
+/// covered; the edges seen end on draw nothing. The lines are the block's exact edges, so they say
+/// analytic, and certify any accuracy.
 #[test]
 fn a_views_lines_are_the_blocks_outline() {
     let mut s = block();
@@ -926,10 +927,161 @@ fn a_views_lines_are_the_blocks_outline() {
     assert!(segments(&v, "visible").iter().all(|(a, b)| on_outline(*a) && on_outline(*b)), "{v}");
     for line in v["lines"].as_array().unwrap() {
         assert_eq!((&line["body"], &line["occurrence"], &line["reference"]), (&json!("Block"), &json!([]), &json!(false)), "{line}");
-        assert!(line["pieces"].as_array().unwrap().iter().all(|p| p["accuracy"]["kind"] == "sampled"), "{line}");
+        assert!(line["pieces"].as_array().unwrap().iter().all(|p| p["accuracy"]["kind"] == "analytic"), "{line}");
     }
-    assert_eq!((&v["status"]["lines"], &v["status"]["provenance"]), (&json!("approximate"), &json!("mesh_projection")));
+    assert_eq!((&v["status"]["lines"], &v["status"]["provenance"]), (&json!("exact"), &json!("hidden_lines")));
     assert!(v["status"]["covered_pieces"].as_u64().unwrap() >= 4, "{v}");
+    assert_eq!((v["stats"]["shared_meshes"].as_u64(), v["stats"]["triangles"].as_u64()), (Some(0), Some(0)), "nothing is meshed: {v}");
+    snap(&mut s, json!({"scale": "1:2", "max_error_mm": 0.0001}));
+}
+
+/// A view looking as the front view does, its plane through another point, draws the same lines on
+/// paper: a view is centred on what it shows, wherever its plane's origin is.
+#[test]
+fn a_views_origin_moves_nothing_on_paper() {
+    let mut s = block();
+    let front = snap(&mut s, json!({"scale": "1:2", "visual_style": "visible_hidden"}));
+    let looking = json!({"direction": [0, 1, 0], "up": [0, 0, 1], "origin": [30, 7, 5]});
+    let moved = snap(&mut s, json!({"view": looking, "scale": "1:2", "visual_style": "visible_hidden"}));
+    let ends = |v: &Value, visibility: &str| {
+        let mut ends: Vec<[f64; 4]> = segments(v, visibility).into_iter().map(|(a, b)| [a.x, a.y, b.x, b.y]).collect();
+        ends.sort_by(|p, q| p.partial_cmp(q).unwrap());
+        ends
+    };
+    for visibility in ["visible", "hidden"] {
+        let (a, b) = (ends(&front, visibility), ends(&moved, visibility));
+        assert!(!a.is_empty() || visibility == "hidden", "{front}");
+        assert_eq!(a.len(), b.len(), "{visibility}: {moved}");
+        assert!(a.iter().zip(&b).all(|(p, q)| p.iter().zip(q).all(|(x, y)| (x - y).abs() < 1e-9)), "{visibility}: {a:?} {b:?}");
+    }
+}
+
+/// The block in iso, hidden lines too: its three back edges are hidden over all their length, each
+/// one straight analytic piece, as long on paper as the block is along it at 1:2 (100, 50 and 20
+/// mm, foreshortened to sqrt(2/3) of it), and nothing else is hidden.
+#[test]
+fn an_iso_views_back_edges_are_hidden_end_to_end() {
+    let mut s = block();
+    let v = snap(&mut s, json!({"view": "iso", "scale": "1:2", "visual_style": "visible_hidden"}));
+    let hidden: Vec<&Value> =
+        v["lines"].as_array().unwrap().iter().filter(|l| l["pieces"].as_array().unwrap().iter().any(|p| p["visibility"] == "hidden")).collect();
+    assert_eq!(hidden.len(), 3, "{v}");
+    let mut lengths: Vec<f64> = Vec::new();
+    for line in hidden {
+        let [piece] = line["pieces"].as_array().unwrap().as_slice() else { panic!("one piece: {line}") };
+        assert_eq!((&piece["visibility"], &piece["accuracy"]["kind"]), (&json!("hidden"), &json!("analytic")), "{line}");
+        let [seg] = piece["path"].as_array().unwrap().as_slice() else { panic!("one segment: {line}") };
+        lengths.push(point(&seg["a"]).dist(point(&seg["b"])));
+    }
+    lengths.sort_by(f64::total_cmp);
+    let along = (2.0f64 / 3.0).sqrt() / 2.0;
+    for (got, want) in lengths.iter().zip([20.0, 50.0, 100.0]) {
+        assert!((got - want * along).abs() < 1e-9, "{lengths:?}: {v}");
+    }
+}
+
+/// A cylinder in iso: its rims, circles seen at an angle, are chords within `chord_mm` on paper,
+/// bounded by it; its sides are one exact silhouette line each, named by its first face.
+#[test]
+fn a_cylinder_in_iso_has_bounded_rims_and_exact_sides() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"diameter": 20, "height": 30, "body_name": "Cylinder"}));
+    let v = snap(&mut s, json!({"view": "iso", "scale": "1:1"}));
+    let lines = v["lines"].as_array().unwrap();
+    let (rims, sides): (Vec<&Value>, Vec<&Value>) = lines.iter().partition(|l| l["source"]["kind"] == "edge");
+    assert!(!rims.is_empty() && sides.len() == 2, "{v}");
+    for piece in rims.iter().flat_map(|l| l["pieces"].as_array().unwrap()) {
+        assert_eq!(piece["accuracy"], json!({"kind": "bounded", "max_deviation_mm": 0.01}), "{piece}");
+        assert!(piece["path"].as_array().unwrap().iter().all(|seg| seg["type"] == "line"), "{piece}");
+    }
+    for side in sides {
+        let [piece] = side["pieces"].as_array().unwrap().as_slice() else { panic!("{side}") };
+        assert_eq!(piece["accuracy"]["kind"], "analytic", "{side}");
+        let [seg] = piece["path"].as_array().unwrap().as_slice() else { panic!("{side}") };
+        assert!((point(&seg["a"]).dist(point(&seg["b"])) - 30.0 * (2.0f64 / 3.0).sqrt()).abs() < 1e-9, "{side}");
+    }
+    let faces: Vec<&Value> = lines.iter().filter(|l| l["source"]["kind"] == "silhouette").map(|l| &l["source"]["face"]).collect();
+    assert_eq!(faces[0], faces[1], "both sides are the silhouette of one surface: {v}");
+    assert_eq!((&v["status"]["lines"], &v["status"]["provenance"]), (&json!("exact"), &json!("hidden_lines")));
+}
+
+/// `s` with a 20 mm cube inserted as a mesh body (from an STL), its corner at `corner`.
+fn with_mesh_cube(s: &mut Session, corner: [f64; 3], tag: &str) {
+    let dir = std::env::temp_dir().join(format!("solidcraft-view-mesh-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("cube.stl");
+    let mut cube = Session::default();
+    run(&mut cube, "solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": corner, "body_name": "Cube"}));
+    run(&mut cube, "file.export", json!({"path": stl.to_string_lossy()}));
+    run(s, "file.insert_mesh", json!({"path": stl.to_string_lossy()}));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A mesh body is drawn from its mesh and a B-rep body beside it exactly. Once the mesh body stands
+/// in front of the block, the block may be hidden by it where `hlr` can't see, so it is drawn from
+/// the mesh too, its hidden part hidden; asked to certify, the view says why.
+#[test]
+fn a_body_a_mesh_body_could_hide_is_drawn_from_the_mesh() {
+    // The accuracies of the pieces of the block's lines (`true`) or the others'.
+    let kinds = |v: &Value, of_block: bool| -> std::collections::BTreeSet<String> {
+        let lines = v["lines"].as_array().unwrap().iter().filter(|l| (l["body"] == "Block") == of_block);
+        lines.flat_map(|l| l["pieces"].as_array().unwrap().iter()).map(|p| p["accuracy"]["kind"].as_str().unwrap().to_string()).collect()
+    };
+    let only = |kind: &str| std::collections::BTreeSet::from([kind.to_string()]);
+    let mut apart = block();
+    with_mesh_cube(&mut apart, [150.0, 0.0, 0.0], "apart");
+    let v = snap(&mut apart, json!({"scale": "1:2"}));
+    assert_eq!(v["status"]["provenance"], "hidden_lines_and_mesh_projection", "{v}");
+    assert_eq!((kinds(&v, true), kinds(&v, false)), (only("analytic"), only("sampled")), "{v}");
+    // The cube 20 mm across in front of the block's bottom edge, from x 40 to 60: 10 mm of it hidden
+    // at 1:2.
+    let mut in_front = block();
+    with_mesh_cube(&mut in_front, [40.0, -30.0, -10.0], "front");
+    let v = snap(&mut in_front, json!({"scale": "1:2", "visual_style": "visible_hidden"}));
+    assert_eq!((&v["status"]["lines"], &v["status"]["provenance"]), (&json!("approximate"), &json!("mesh_projection")), "{v}");
+    assert!((drawn_length(&v, "hidden") - 10.0).abs() < 1e-6, "the block's bottom edge behind the cube: {v}");
+    let e = refused(&mut in_front, json!({"scale": "1:2", "max_error_mm": 0.01}));
+    assert!(e.contains("bodies drawn from the mesh: 1 for mesh bodies, 1 for a mesh body in front"), "{e}");
+}
+
+/// A mirrored copy of a plate with a hole is drawn from its own record, not the mesh: from the top,
+/// its outline and rim are the original's mirrored about the plane. The original's pieces and both
+/// rims are analytic. The copy's straight edges come from the kernel as splines (a mirror isn't a
+/// rigid move, so SMLib transforms the body), which `hlr` samples; they lie within 1e-12 of the line.
+#[test]
+fn a_mirrored_body_is_drawn_exact() {
+    let mut s = plate();
+    run(&mut s, "solid.mirror", json!({"bodies": ["Plate"], "plane": "YZ"}));
+    let v = snap(&mut s, json!({"view": "top", "scale": "1:1"}));
+    assert_eq!((&v["status"]["provenance"], &v["source"]["bodies"]), (&json!("hidden_lines"), &json!(2)), "{v}");
+    for line in v["lines"].as_array().unwrap() {
+        for piece in line["pieces"].as_array().unwrap() {
+            let (accuracy, arc) = (&piece["accuracy"], piece["path"][0]["type"] == "arc");
+            let sampled_by_the_copy = line["body"] != "Plate" && !arc && accuracy["max_sample_deviation_mm"].as_f64().is_some_and(|d| d < 1e-12);
+            assert!(accuracy["kind"] == "analytic" || sampled_by_the_copy, "{line}");
+        }
+    }
+    let rims = arcs(&v, "visible");
+    assert_eq!(rims.len(), 2, "one whole rim each: {v}");
+    let centres: Vec<f64> = rims.iter().map(|(c, _, _, _)| c.x).collect();
+    assert!(
+        (centres[0] + centres[1] - 2.0 * point(&v["boundary_mm"]["min"]).x.midpoint(point(&v["boundary_mm"]["max"]).x)).abs() < 1e-9,
+        "{centres:?}: {v}"
+    );
+}
+
+/// A cylinder split along its length draws its split line from the mesh, as the viewport does:
+/// `hlr` never draws a split between two faces of one surface, so the body falls back.
+#[test]
+fn a_split_round_face_is_drawn_from_the_mesh() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"diameter": 20, "height": 30, "body_name": "Cylinder"}));
+    run(&mut s, "solid.split_face", json!({"body": "Cylinder", "faces": [[-10, 0, 15]], "plane": {"origin": [0, 0, 15], "normal": [0, 0, 1]}}));
+    let v = snap(&mut s, json!({"view": "front", "scale": "1:1"}));
+    assert_eq!(v["status"]["provenance"], "mesh_projection", "{v}");
+    let e = refused(&mut s, json!({"view": "front", "scale": "1:1", "max_error_mm": 0.01}));
+    assert!(e.contains("1 for split faces"), "{e}");
 }
 
 /// A 20 x 20 x 40 tower behind the block, 40 to 60 mm across: in the front view at 1:1 its sides
@@ -960,25 +1112,30 @@ fn each_copys_lines_name_its_occurrence() {
     assert_eq!(paths, want, "{v}");
 }
 
-/// A view cancelled while its lines are made says so in a drawing's words, never as a DXF export.
+/// A view cancelled while its lines are made says so in a drawing's words, never as a DXF export:
+/// cancelled while the exact lines are worked out (the block), or while a mesh body's are (a mesh
+/// cube).
 #[test]
 fn a_view_cancelled_while_its_lines_are_made_says_so_on_a_drawing() {
     use std::sync::atomic::{AtomicBool, Ordering};
-    struct CancelOcclusion(AtomicBool);
-    impl solidcraft_kernel::watch::Watch for CancelOcclusion {
+    struct CancelAt(&'static str, AtomicBool);
+    impl solidcraft_kernel::watch::Watch for CancelAt {
         fn cancelled(&self) -> bool {
-            self.0.load(Ordering::Relaxed)
+            self.1.load(Ordering::Relaxed)
         }
         fn progress(&self, stage: &'static str, _done: usize, _total: usize) {
-            if stage == "dxf_occlusion" {
-                self.0.store(true, Ordering::Relaxed);
+            if stage == self.0 {
+                self.1.store(true, Ordering::Relaxed);
             }
         }
     }
-    let mut s = block();
-    let watch = Arc::new(CancelOcclusion(AtomicBool::new(false)));
-    let e = solidcraft_kernel::watch::watching(watch, || s.execute(CMD, &json!({}))).err().map(|e| e.to_string()).unwrap_or_default();
-    assert!(e.contains("drawing the view was cancelled") && !e.contains("DXF"), "{e}");
+    let mut mesh = Session::default();
+    with_mesh_cube(&mut mesh, [0.0, 0.0, 0.0], "cancel");
+    for (mut s, stage) in [(block(), "hidden_lines"), (mesh, "dxf_occlusion")] {
+        let watch = Arc::new(CancelAt(stage, AtomicBool::new(false)));
+        let e = solidcraft_kernel::watch::watching(watch, || s.execute(CMD, &json!({}))).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.contains("drawing the view was cancelled") && !e.contains("DXF"), "{stage}: {e}");
+    }
 }
 
 /// The mesh's chord is `chord_mm` on paper over the scale. Below 1:100 it passes 1 mm and is still
@@ -1116,8 +1273,9 @@ fn seeded_views_of_the_sample_stay_in_bounds_and_apart() {
     }
 }
 
-/// `chord_mm` and `max_error_mm` out of range are refused by name; a `max_error_mm` the mesh's
-/// lines can't certify is refused with the count of pieces short of it.
+/// `chord_mm` and `max_error_mm` out of range are refused by name; a `max_error_mm` the lines can't
+/// certify is refused with the count of pieces short of it: a cylinder's rims in iso are bounded by
+/// the chord, 0.01, so they don't certify 0.001.
 #[test]
 fn chords_and_accuracy_checks_out_of_range_are_refused() {
     let mut s = block();
@@ -1130,12 +1288,16 @@ fn chords_and_accuracy_checks_out_of_range_are_refused() {
         (json!({"max_error_mm": 0}), "max_error_mm is a number above 0"),
         (json!({"max_error_mm": -1}), "max_error_mm is a number above 0"),
         (json!({"max_error_mm": null}), "max_error_mm"),
-        (json!({"scale": "1:2", "max_error_mm": 0.5}), "accuracy not met: 0 bounded and"),
     ] {
         let e = refused(&mut s, p.clone());
         assert!(e.contains(says), "{p}: {e}");
         assert!(std::sync::Arc::ptr_eq(&doc, &s.doc), "{p}");
     }
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"diameter": 20, "height": 30}));
+    let e = refused(&mut s, json!({"view": "iso", "scale": "1:1", "max_error_mm": 0.001}));
+    assert!(e.contains("accuracy not met: ") && e.contains(" bounded and 0 sampled pieces") && !e.contains("from the mesh"), "{e}");
+    snap(&mut s, json!({"view": "iso", "scale": "1:1", "max_error_mm": 0.01}));
 }
 
 /// A stadium of cubic segments, two straight sides and four quarter circles, extruded 20: seen from
@@ -1196,25 +1358,25 @@ fn a_hole_seen_end_on_is_its_exact_circle() {
 
 /// A bar across the plate, above the hole, hides the rim where it passes over: the rim is cut where
 /// the bar's sides cross it (2 mm either side of its centre), 4 asin 0.4 of it hidden and the rest
-/// visible. The cut arcs end where the mesh found the change, so they stay sampled.
+/// visible. The rim is cut where its exact curve crosses the bar's sides, so the arcs are exact.
 #[test]
-fn a_rim_cut_where_its_visibility_changes_stays_sampled() {
+fn a_rim_cut_where_its_visibility_changes_is_exact() {
     let mut s = plate();
     run(&mut s, "solid.box", json!({"length": 30, "width": 4, "height": 2, "corner": [5, 18, 10], "body_name": "Bar", "operation": "new"}));
     let v = snap(&mut s, json!({"view": "top", "scale": "1:1", "visual_style": "visible_hidden"}));
     let hidden = 4.0 * 0.4f64.asin();
     for (visibility, want) in [("hidden", hidden), ("visible", std::f64::consts::TAU - hidden)] {
         let rims = arcs(&v, visibility);
-        let on_rim = |(c, r, _, a): &(Vec2, f64, f64, Value)| c.dist(Vec2::new(210.0, 148.5)) < 1e-9 && (r - 5.0).abs() < 1e-9 && a == "sampled";
+        let on_rim = |(c, r, _, a): &(Vec2, f64, f64, Value)| c.dist(Vec2::new(210.0, 148.5)) < 1e-9 && (r - 5.0).abs() < 1e-9 && a == "analytic";
         assert!(!rims.is_empty() && rims.iter().all(on_rim), "{visibility}: {v}");
         let round: f64 = rims.iter().map(|(_, _, sweep, _)| sweep.abs()).sum();
-        assert!((round - want).abs() < 0.02, "{visibility}: {round}, not {want}: {v}");
+        assert!((round - want).abs() < 1e-9, "{visibility}: {round}, not {want}: {v}");
     }
 }
 
-/// A part with a hole placed three times, the third turned a quarter turn: one mesh serves all
-/// three, and each hole is an exact circle where its own placement puts it, 50 mm apart on the
-/// sheet round its centre.
+/// A part with a hole placed three times, the third turned a quarter turn: all three are drawn
+/// exact, nothing meshed, and each hole is an exact circle where its own placement puts it, 50 mm
+/// apart on the sheet round its centre.
 #[test]
 fn each_placements_hole_is_its_own_exact_circle() {
     let mut s = Session::default();
@@ -1225,7 +1387,7 @@ fn each_placements_hole_is_its_own_exact_circle() {
     let turned = run(&mut s, "occurrence.copy", json!({"occurrence": first, "translate": [140, 0, 0]}))["occurrence"].as_u64().unwrap();
     run(&mut s, "occurrence.move", json!({"occurrence": turned, "space": "world", "axis": [0, 0, 1], "angle": "90 deg", "origin": [140, 0, 0]}));
     let v = snap(&mut s, json!({"view": "top", "scale": "1:1"}));
-    assert_eq!(v["stats"]["shared_meshes"], json!(1), "{v}");
+    assert_eq!((&v["status"]["provenance"], &v["stats"]["shared_meshes"]), (&json!("hidden_lines"), &json!(0)), "{v}");
     let mut round: std::collections::BTreeMap<i64, f64> = std::collections::BTreeMap::new();
     for (centre, radius, sweep, accuracy) in arcs(&v, "visible") {
         assert!((centre.y - 148.5).abs() < 1e-9 && (radius - 5.0).abs() < 1e-9 && accuracy == "analytic", "{v}");
@@ -1582,7 +1744,8 @@ fn no_reference_parts_means_the_setting_changes_nothing() {
     assert!(plain["lines"].as_array().unwrap().iter().all(|l| l["reference"] == false), "{plain}");
 }
 
-/// The snapshot's scene draws reference parts as saved views do: thin, and first.
+/// The snapshot's scene draws reference parts as saved views do: thin, and first. The reference
+/// block is drawn from the mesh beside the exact plate, and asked to certify, the view says why.
 #[test]
 fn a_scene_draws_reference_parts_thin_under_the_model() {
     let (mut s, _) = plate_and_block(5.0);
@@ -1590,6 +1753,9 @@ fn a_scene_draws_reference_parts_thin_under_the_model() {
     let widths: Vec<f64> = strokes(&v).iter().map(|(_, _, width)| *width).collect();
     let thin = widths.iter().take_while(|w| **w == LineKind::Thin.width_mm(LineGroup::DEFAULT)).count();
     assert!(thin > 0 && widths[thin..].iter().all(|w| *w == LineKind::Visible.width_mm(LineGroup::DEFAULT)), "{widths:?}");
+    assert_eq!(v["status"]["provenance"], "hidden_lines_and_mesh_projection", "{v}");
+    let e = refused(&mut s, json!({"view": "top", "scale": "1:1", "reference_shown_percent": 100, "max_error_mm": 0.01}));
+    assert!(e.contains("bodies drawn from the mesh: 1 for reference parts"), "{e}");
 }
 
 /// A scene's hidden reference lines are dashed as the model's are, by the reference parts' own
