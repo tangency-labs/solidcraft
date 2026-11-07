@@ -327,7 +327,8 @@ pub(crate) fn add_in_component(
 /// component's frame; `None` when the import has no bodies to place.
 pub(crate) fn move_to_origin(s: &mut Session, placed: &Placed) -> Result<Option<Vec3>> {
     let occ = placed.occurrence.ok_or_else(|| EngineError::Other("the import has no placement to move".into()))?;
-    let active = s.active_occurrence_path.clone().unwrap_or_default();
+    // A component activated without a path is shown at its first placement, as elsewhere.
+    let active = s.active_occurrence_path.clone().unwrap_or_else(|| s.doc.first_path(s.active_component));
     // The frame the import was placed in: the origin it goes to.
     let parent = s.doc.path_transform(s.active_component, &active).unwrap_or(IDENTITY);
     let to_parent =
@@ -344,17 +345,17 @@ pub(crate) fn move_to_origin(s: &mut Session, placed: &Placed) -> Result<Option<
     let world = s.world_state()?;
     let mut bounds = solidcraft_geom::Aabb3::EMPTY;
     for body in world.bodies.iter().filter(|b| ours.contains(&b.name)) {
-        let b = body.body.exact_bounds()?;
+        // Each body's own box in the active component's frame: a turned component's frame would
+        // only take a larger box around the world box's corners, leaving the mesh off Z = 0.
+        let b = if solidcraft_doc::is_identity(&to_parent) {
+            body.body.exact_bounds()?
+        } else {
+            solidcraft_doc::kernel::place_matrix(&body.body, to_parent)?.exact_bounds()?
+        };
         if b.is_empty() {
             continue;
         }
-        for x in [b.min.x, b.max.x] {
-            for y in [b.min.y, b.max.y] {
-                for z in [b.min.z, b.max.z] {
-                    bounds.add(solidcraft_doc::apply_point(&to_parent, Vec3::new(x, y, z)));
-                }
-            }
-        }
+        bounds = bounds.union(&b);
     }
     if bounds.is_empty() {
         return Ok(None);

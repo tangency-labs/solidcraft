@@ -351,6 +351,36 @@ fn a_mesh_moved_to_the_origin_sits_on_the_active_components_origin() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Moving to the origin measures the mesh in the active component's own frame, so a component
+/// turned 45 degrees takes exactly the file box's shift (not a larger box around the turned
+/// one's corners); and a component made active without an occurrence path is taken at its first
+/// placement, as everywhere else.
+#[test]
+fn a_mesh_moves_to_the_origin_of_a_turned_or_pathless_active_component() {
+    let dir = temp_dir("origin-turned");
+    let stl = off_origin_stl(&dir);
+    let shift = |r: &Value| -> Vec3 {
+        let v = r["moved_to_origin"].as_array().unwrap_or_else(|| panic!("not moved: {r}"));
+        Vec3::new(v[0].as_f64().unwrap(), v[1].as_f64().unwrap(), v[2].as_f64().unwrap())
+    };
+
+    let mut s = Session::default();
+    let holder = run(&mut s, "component.create", json!({"name": "Holder", "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": holder["occurrence"], "axis": [1, 0, 0], "angle": "45 deg", "translate": [0, 0, 40]}));
+    assert_ne!(s.active_component, 0);
+    let r = run(&mut s, "file.insert_mesh", json!({"path": stl, "origin": true}));
+    assert!(close(shift(&r), Vec3::new(-105.0, -60.0, -7.0)), "in Holder's frame: {r}");
+
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Holder", "grounded": false}));
+    assert_ne!(s.active_component, 0);
+    s.active_occurrence_path = None;
+    let r = run(&mut s, "file.insert_mesh", json!({"path": stl, "origin": true}));
+    assert!(close(shift(&r), Vec3::new(-105.0, -60.0, -7.0)), "at Holder's first placement: {r}");
+    assert_eq!(only_box(&s), [-5_000, -10_000, 0, 5_000, 10_000, 30_000]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn undo_takes_the_whole_import_away() {
     let dir = temp_dir("undo");
