@@ -140,7 +140,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let mut act: Option<(Entry, bool)> = None;
     let mut discard_all = false;
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_recover_prompt"), "restore", crate::i18n::tr_label("Recover unsaved design?"))
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_recover_prompt"), "restore", crate::i18n::tr_label("Recover unsaved design?"))
         .actions("", crate::i18n::tr_label("Later"), None)
         .show_with_left(
             ctx,
@@ -216,7 +216,7 @@ pub fn browser_copies_window(ctx: &egui::Context, language: &str, copies: &[Brow
         _ => crate::i18n::tr("recovery.restore_title").to_string(),
     };
     let mut act = None;
-    let _ = ui_kit::Window::new(egui::Id::new("sc_browser_keep_restore"), "restore", &title).required().show_body(ctx, |ui| {
+    let _ = ui_kit::Window::new(egui::Id::unique("sc_browser_keep_restore"), "restore", &title).required().show_body(ctx, |ui| {
         ui_kit::text(ui, crate::i18n::tr("recovery.restore_intro"), ui_kit::Text::Report("intro", false));
         for (index, c) in copies.iter().enumerate() {
             if copies.len() > 1 {
@@ -249,7 +249,7 @@ fn confirm_discard_all(app: &mut SolveApp, ctx: &egui::Context) {
     } else {
         crate::i18n::format("recovery.discard_all_title", &[("count", &count.to_string())])
     };
-    let (closed, action) = ui_kit::Confirm::new(egui::Id::new("sc_recover_discard_all"), "delete", &title)
+    let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_recover_discard_all"), "delete", &title)
         .tone(ui_kit::Tone::Danger)
         .actions(crate::i18n::tr("recovery.discard_all"), crate::i18n::tr("ui.cancel"), None)
         .show(ctx, true, |ui| {

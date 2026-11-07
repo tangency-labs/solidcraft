@@ -11,7 +11,7 @@
 //! state; [`items`] lists them and [`run_item`] runs one, so the control channel (`ui.menu`,
 //! `ui.menuPick`) and tests reach everything a click does.
 
-use crate::ui_kit::{Container, Surface};
+use crate::ui_kit::{BackingTooltipExt as _, Container, Surface};
 use egui::{Color32, Pos2, Rect, Sense, Vec2, pos2, vec2};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -137,6 +137,9 @@ pub struct Item {
     pub children: Vec<Item>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub swatch: Option<[u8; 3]>,
+    /// Why the entry is off: shown on hover, and in the control channel's report.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tip: Option<String>,
 }
 
 impl Item {
@@ -154,6 +157,7 @@ impl Item {
             params: None,
             children: Vec::new(),
             swatch: None,
+            tip: None,
         }
     }
     pub(crate) fn heading(label: &str) -> Item {
@@ -166,6 +170,7 @@ impl Item {
             params: None,
             children: Vec::new(),
             swatch: None,
+            tip: None,
         }
     }
     fn is_sep(&self) -> bool {
@@ -183,6 +188,14 @@ impl Item {
     }
     pub(crate) fn on(mut self, enabled: bool) -> Item {
         self.enabled &= enabled;
+        self
+    }
+    /// Off, saying why, when there is a reason.
+    pub(crate) fn off_because(mut self, why: Option<String>) -> Item {
+        if let Some(why) = why {
+            self.enabled = false;
+            self.tip = Some(why);
+        }
         self
     }
     pub fn key(mut self, k: &str) -> Item {
@@ -208,6 +221,7 @@ pub(crate) fn cmd(app: &SolveApp, id: &str, label: &str) -> Item {
         params: None,
         children: Vec::new(),
         swatch: None,
+        tip: None,
     }
 }
 
@@ -222,6 +236,7 @@ pub(crate) fn act(id: &str, label: &str, icon: &str) -> Item {
         params: None,
         children: Vec::new(),
         swatch: None,
+        tip: None,
     }
 }
 
@@ -1647,6 +1662,12 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 crate::edit_clipboard::leave_text(app, text);
             }
         }
+        "ui.groupFeatures" => {
+            let ids: Vec<u64> = p.get("features").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_u64).collect();
+            if !ids.is_empty() {
+                crate::timeline_folders::group(app, &ids, p.get("parent").and_then(Value::as_u64), at);
+            }
+        }
         "ui.deleteFeatures" | "ui.deleteAfterMarker" => {
             let ids: Vec<u64> = p.get("features").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_u64).collect();
             if !ids.is_empty() {
@@ -2555,7 +2576,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         inside |= pointer.is_some_and(|p| area.contains(p));
         let hot = pointer.and_then(|p| sector(p - c));
         let resp = Container::new(ctx, Surface::Popup)
-            .area(egui::Id::new("sc_marking_menu"))
+            .area(egui::Id::unique("sc_marking_menu"))
             .fixed_pos(area.min)
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
@@ -2602,7 +2623,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let key_row = app.menu.key_row;
     let mut seen: Vec<Seen> = Vec::new();
     let resp = Container::new(ctx, Surface::Popup)
-        .area(egui::Id::new("sc_context_menu"))
+        .area(egui::Id::unique("sc_context_menu"))
         .fixed_pos(list_at)
         .constrain(true)
         .order(egui::Order::Foreground)
@@ -2624,7 +2645,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         let Some(row) = seen.get(depth - 1).and_then(|s| s.anchor) else { break };
         // One area per flyout and contents: an egui area keeps its last size, so a flyout sharing
         // one with a shorter one would be squeezed into it and scroll.
-        let id = egui::Id::new(("sc_context_submenu", depth)).with(rows.iter().map(|i| (&i.id, &i.label)).collect::<Vec<_>>());
+        let id = egui::Id::unique(("sc_context_submenu", depth)).with(rows.iter().map(|i| (&i.id, &i.label)).collect::<Vec<_>>());
         let cursor = if depth == path.len() { app.menu.submenu_key } else { None };
         let sub = crate::ui_kit::Menu::submenu(ctx, id, row, list_height(rows), leftward, |ui| {
             egui::ScrollArea::vertical()
@@ -2769,6 +2790,10 @@ fn level_rows(
             kit.id = &handle;
         }
         let row = kit.show(ui);
+        let row = match &item.tip {
+            Some(tip) => row.backing_on_hover_text(tip.as_str()),
+            None => row,
+        };
         if item.children.is_empty() {
             if row.clicked() && item.enabled {
                 *picked = Some(item.clone());
@@ -2815,7 +2840,7 @@ fn show_rename(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut r) = app.menu.rename.take() else { return };
     let mut done: Option<bool> = None;
     let resp =
-        Container::new(ctx, Surface::Popup).area(egui::Id::new("sc_rename")).fixed_pos(r.at).constrain(true).order(egui::Order::Foreground).show(
+        Container::new(ctx, Surface::Popup).area(egui::Id::unique("sc_rename")).fixed_pos(r.at).constrain(true).order(egui::Order::Foreground).show(
             ctx,
             |ui| {
                 done = crate::ui_kit::rename_menu(ui, &mut r.text, &mut r.focused);
@@ -3087,6 +3112,7 @@ mod tests {
         assert!(h.app.viewport.context_menu.is_none());
     }
 
+    /// Direct Trim undoes back to the association; the explicit Break menu still makes the offset editable.
     #[test]
     fn line_offset_context_menu_breaks_association_and_allows_trim() {
         use solidcore_record::Vec2;

@@ -1,8 +1,9 @@
 # Matched GGX visible-normal proposal (#1658)
 
-Recovered VNDF source port, connected to the CPU image consumer. The tests are
-written but have not run on this combined CPU/GPU2 revision. No measured variance
-reduction or visual acceptance follows from this document. The exact integration
+Recovered VNDF source port, connected to the CPU image consumer. The combined
+CPU renderer has executed its PDF/moment/null-support, visible-sampler and actual
+image-consumer regressions. No measured variance reduction or native visual
+acceptance follows from these numerical results. The exact integration
 baseline and recovered source identity are recorded in
 [advanced CPU integration](render-cpu-advanced-integration.md).
 
@@ -104,13 +105,13 @@ The current planar bridge rebuilds its frame from the oriented geometric normal
 and captured visual tangent; that receiver behavior is preserved. Its existing
 exact-equality regression now calls the visible-normal reference API, retaining
 every equality/rotation/reciprocity assertion. Projected-NDF controls remain
-explicit and unchanged. All fifteen VNDF tests are WRITTEN, NOT RUN.
+explicit and unchanged. The corresponding renderer VNDF regressions have executed.
 
-Independent numerical review and actual execution must verify the cap measure/Jacobian, Smith
-separability, no accidental NDF production path, geometric rejection, extreme
-arithmetic and null accounting. Future separately allocated gates must compile
-default/feature modes, run old controls and new VNDF tests, strict Clippy, wasm
-and required full CI on the final receiver. Only then compare actual matched
+Executed numerical checks cover the cap measure/Jacobian, Smith separability,
+production visible-sampler path, geometric rejection, extreme arithmetic and null
+accounting. Remaining gates include current combined workflow acceptance,
+default/platform checks, strict Clippy, wasm and required full CI on the final
+receiver. Only then compare actual matched
 images and measure error/work with appropriate references. The foundation
 publication is not held hostage by this unqualified follow-up.
 

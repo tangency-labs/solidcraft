@@ -35,7 +35,7 @@ pub fn constraint_params(command: &str, selection: &[Sel], sketch: Option<&Sketc
         (unique.len() == ids.len()).then_some(ids)
     };
     let rule = match (command, selection) {
-        ("sketch.constraint.fix", _) => selected_ids(false, 1).map(|ids| json!({"entities":ids})),
+        ("sketch.constraint.fix", _) => fix_preselection(selection).map(|ids| json!({"entities":ids})),
         ("sketch.constraint.polygon", _) => selected_ids(true, 3).map(|ids| json!({"lines":ids})),
         // Three or more curves: all of them equal, in pick order (#4985). Two keep the `a, b` form.
         ("sketch.constraint.equal", _) if selection.len() >= 3 => selected_ids(true, 3).map(|ids| json!({"curves":ids})),
@@ -72,6 +72,30 @@ pub fn constraint_params(command: &str, selection: &[Sel], sketch: Option<&Sketc
         _ => None,
     };
     rule.or_else(|| curve_pair(command, selection))
+}
+
+/// The sketch points and curves Fix takes from a selection (#11663). A box drawn over a sketch
+/// also takes its dimensions and constraint icons; those cannot be fixed and are passed over, so
+/// the geometry boxed with them is still fixed at once. Anything else selected (a body, a
+/// midpoint, a curve of another sketch) leaves the choice to the pick tool. As many entities as the command takes.
+fn fix_preselection(selection: &[Sel]) -> Option<Vec<&str>> {
+    use Sel::{SketchConstraint, SketchCurve, SketchPoint};
+    const MAX_ENTITIES: usize = 10_000;
+    let mut ids = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for s in selection {
+        let id = match s {
+            SketchCurve { id, sketch: None } | SketchPoint { id } => id.as_str(),
+            // A curve of another sketch: its id alone would name a curve of this one (#3726).
+            SketchCurve { .. } => return None,
+            SketchConstraint { .. } => continue,
+            _ => return None,
+        };
+        if seen.insert(id) {
+            ids.push(id);
+        }
+    }
+    (1..=MAX_ENTITIES).contains(&ids.len()).then_some(ids)
 }
 
 /// Curve-pair constraints take exactly two distinct curves, as `a, b` in pick order.
@@ -146,7 +170,8 @@ pub fn kinds_fit(command: &str, selection: &[Sel], sketch: &Sketch) -> bool {
 fn from_session(command: &str, s: &Session) -> Option<Value> {
     let state = s.world_state().ok()?;
     let sketch = super::sketch_store::active(s).and_then(|id| state.sketch(id)).map(|ss| &ss.sketch)?;
-    if !kinds_fit(command, &s.selection, sketch) {
+    // Fix reads its own selection: a box's dimensions and constraint icons come along (#11663).
+    if command != "sketch.constraint.fix" && !kinds_fit(command, &s.selection, sketch) {
         return None;
     }
     constraint_params(command, &s.selection, Some(sketch))
