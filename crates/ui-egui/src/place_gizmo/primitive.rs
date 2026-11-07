@@ -1,0 +1,310 @@
+//! Box, Cylinder, Cone, Sphere, Torus and Coil: the marker places the primitive on the face under
+//! the pointer, standing on it as a pre-selected face places it, while the dialog is open, from
+//! Edit Feature too. The primitives do not turn in their face: no ring.
+//!
+//! Where the place is kept differs by primitive, and the marker moves it there:
+//! - a Cylinder stands where its Face input is picked (and its reference edges measure from
+//!   there, #6380), so a drag replaces that item, as a click on the input does; one reference
+//!   edge holds it on a line at the typed distance, as it holds a hole;
+//! - a Box placed by its typed corner or centre (#5638) has the drop written into those fields,
+//!   so it stands on the face, centred across it;
+//! - any other, and a Box a pre-selected face placed, takes the drop as its picked place.
+//!
+//! The marker sits at the dialog's picked place when there is one, else at the stored or typed
+//! position (the centre, the base, or the middle of the box's side on its face), else where the
+//! command puts a primitive with none (the origin). A typed Box's side on its face is found from
+//! the model: the side that lies on a planar face looking at it, its bottom first.
+//!
+//! A Cylinder, Cone or Coil needs a planar face for its axis: a curved one does not take the drop.
+//! A Torus is made flat, so its outline is drawn flat whatever face it is over.
+//!
+//! A Coil with a sketch profile has no marker: its place is the profile's, and the base and axis
+//! the dialog would send from a picked place move the axis but not the section.
+
+use std::cell::RefCell;
+use std::sync::Arc;
+
+use serde_json::Value;
+use solidcore_record::Vec3;
+use solidcraft_engine::doc::expr::Kind as ValueKind;
+use solidcraft_engine::geom::prelude::*;
+
+use solidcraft_engine::Sel;
+
+use super::{PlaceSource, Spec, circle, face_pick, rect, vec3_of};
+use crate::SolveApp;
+use crate::dialogs::{Dialog, Kind};
+use crate::viewport::Hit;
+
+pub(super) static SPEC: Spec = Spec {
+    name: "primitive",
+    serves: |app, d| super::on(app) && matches!(d.kind, Kind::Primitive { .. }) && !coil_with_profile(d),
+    snap_commands: &[],
+    move_tip: "Drag to place it on another face.",
+    many: false,
+    place: PlaceSource::Own { places: |app, d| super::one(frame(app, d)), move_to },
+    click: None,
+    footprint,
+    freedom: |app, d, key| crate::hole_refs::freedom(&app.session, d, key),
+    turn: None,
+};
+
+/// A planar face's plane: a point on it, its outward normal and the face's bounds (lowest and
+/// highest corner of the box round it).
+type FacePlane = (Vec3, Vec3, [Vec3; 2]);
+
+thread_local! {
+    /// The planes of the planar faces of the model state last asked about, found once per state.
+    static PLANES: RefCell<(Option<Arc<solidcraft_engine::doc::ModelState>>, Arc<Vec<FacePlane>>)> = RefCell::new((None, Arc::new(Vec::new())));
+}
+
+/// The planes of the model's planar faces.
+fn planes(app: &SolveApp) -> Arc<Vec<FacePlane>> {
+    let st = crate::open_meshing::session_world(&app.session);
+    if let Some(known) = PLANES.with(|c| c.borrow().0.as_ref().filter(|k| Arc::ptr_eq(k, &st)).map(|_| c.borrow().1.clone())) {
+        return known;
+    }
+    let found: Vec<FacePlane> = st
+        .bodies
+        .iter()
+        .flat_map(|b| {
+            let m = b.mesh();
+            let mut bounds: std::collections::HashMap<usize, [Vec3; 2]> = std::collections::HashMap::new();
+            for (t, f) in m.triangles.iter().zip(&m.tri_face) {
+                for q in m.tri(t).into_iter().flatten() {
+                    let e = bounds.entry(*f as usize).or_insert([q, q]);
+                    *e = [e[0].min(q), e[1].max(q)];
+                }
+            }
+            b.body
+                .faces((b.body.size() * 1e-3).max(1e-3))
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|f| Some((f.centroid, f.plane_normal?, *bounds.get(&f.index)?)))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    let found = Arc::new(found);
+    PLANES.with(|c| *c.borrow_mut() = (Some(st), found.clone()));
+    found
+}
+
+/// Is this a Coil whose section comes from a sketch (its Profile input holds something)?
+fn coil_with_profile(d: &Dialog) -> bool {
+    matches!(&d.kind, Kind::Primitive { cmd: "solid.coil", .. }) && d.inputs.iter().any(|i| !i.items.is_empty())
+}
+
+/// A size field's value (mm), zero when it is missing or does not evaluate, read as OK reads it
+/// (`length_input::eval`): a bare number, a decimal comma or a unitless expression is in the
+/// design's unit.
+fn size(app: &SolveApp, d: &Dialog, key: &str) -> f64 {
+    let Kind::Primitive { fields, .. } = &d.kind else { return 0.0 };
+    fields
+        .iter()
+        .find(|f| f.0 == key)
+        .and_then(|f| crate::length_input::eval(&app.session.doc, &f.1, ValueKind::Length).ok())
+        .filter(|v| v.is_finite())
+        .map(f64::abs)
+        .unwrap_or(0.0)
+}
+
+/// The radius, from whichever of `radius` (Edit Feature) or `diameter` (a new one) the dialog holds.
+fn radius(app: &SolveApp, d: &Dialog) -> f64 {
+    let Kind::Primitive { fields, .. } = &d.kind else { return 0.0 };
+    if fields.iter().any(|f| f.0 == "radius") { size(app, d, "radius") } else { size(app, d, "diameter") * 0.5 }
+}
+
+/// The box's length, width and height (mm).
+fn box_size(app: &SolveApp, d: &Dialog) -> Vec3 {
+    Vec3::new(size(app, d, "length"), size(app, d, "width"), size(app, d, "height"))
+}
+
+/// A stored or typed point of expressions (numbers, or strings in the design's terms); an empty
+/// field is 0, as OK sends it.
+fn expr_point(app: &SolveApp, v: &Value) -> Option<Vec3> {
+    let c = |i: usize| -> Option<f64> {
+        let x = v.as_array()?.get(i)?;
+        if x.as_str().is_some_and(|t| t.trim().is_empty()) {
+            return Some(0.0);
+        }
+        x.as_f64()
+            .or_else(|| app.session.doc.eval(&app.session.doc.with_design_unit(x.as_str()?, ValueKind::Length), ValueKind::Length).ok())
+            .filter(|v| v.is_finite())
+    };
+    Some(Vec3::new(c(0)?, c(1)?, c(2)?))
+}
+
+/// Is `n` along a world axis (either way)?
+fn square_to(n: Vec3, axis: Vec3) -> bool {
+    n.dot(axis).abs() > 1.0 - 1e-9
+}
+
+/// The faces a Box can stand on, by their normal, in the order they are looked for.
+const STANDS_ON: [Vec3; 6] = [Vec3::Z, Vec3::X, Vec3::new(-1.0, 0.0, 0.0), Vec3::Y, Vec3::new(0.0, -1.0, 0.0), Vec3::new(0.0, 0.0, -1.0)];
+
+/// How far a box side may be from the face plane and still stand on it (mm): a drop is written to
+/// the micrometre.
+const ON_PLANE: f64 = 1e-3;
+
+/// Where a typed Box stands: the middle of its side that lies on a planar face of the model
+/// looking at it (its bottom first), else the middle of its bottom.
+fn box_frame(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Vec3)> {
+    let half = box_size(app, d) * 0.5;
+    let centre = match d.extra.get("center") {
+        Some(v) => expr_point(app, v)?,
+        None => d.extra.get("corner").and_then(|v| expr_point(app, v)).unwrap_or(Vec3::ZERO) + half,
+    };
+    let side = |n: Vec3| centre - Vec3::new(n.x * half.x, n.y * half.y, n.z * half.z);
+    // The side's rectangle overlaps the face across its plane: a far face in the same plane is
+    // not one the box stands on.
+    let overlaps = |n: Vec3, [lo, hi]: [Vec3; 2]| {
+        let (c, across) = (side(n), half - Vec3::new(n.x.abs() * half.x, n.y.abs() * half.y, n.z.abs() * half.z));
+        let (a, b) = (c - across, c + across);
+        [(a.x, b.x, lo.x, hi.x, n.x), (a.y, b.y, lo.y, hi.y, n.y), (a.z, b.z, lo.z, hi.z, n.z)]
+            .into_iter()
+            .all(|(a, b, lo, hi, along)| along.abs() > 0.5 || (b.min(hi) - a.max(lo)) > ON_PLANE)
+    };
+    let planes = planes(app);
+    let n = STANDS_ON
+        .into_iter()
+        .find(|n| planes.iter().any(|(q, m, bounds)| m.dot(*n) > 1.0 - 1e-9 && (side(*n) - *q).dot(*m).abs() < ON_PLANE && overlaps(*n, *bounds)))
+        .unwrap_or(Vec3::Z);
+    Some((side(n), n))
+}
+
+fn frame(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Vec3)> {
+    let Kind::Primitive { cmd, at, .. } = &d.kind else { return None };
+    let axis = || d.extra.get("axis").and_then(vec3_of).and_then(|a| a.normalized()).unwrap_or(Vec3::Z);
+    match (*cmd, at) {
+        (_, Some((p, Some(n)))) => return Some((*p, *n)),
+        // A box at a vertex or on a curved face is centred on the point: the marker at its bottom.
+        ("solid.box", Some((p, None))) => return Some((*p - Vec3::Z * (box_size(app, d).z * 0.5), Vec3::Z)),
+        // No face to stand on: the axis it is made along, the stored one or the command's.
+        ("solid.cylinder" | "solid.coil" | "solid.cone", Some((p, None))) => return Some((*p, axis())),
+        (_, Some((p, None))) => return Some((*p, Vec3::Z)),
+        (_, None) => {}
+    }
+    match *cmd {
+        "solid.box" => box_frame(app, d),
+        "solid.cylinder" | "solid.coil" | "solid.cone" => Some((d.extra.get("base").and_then(|v| expr_point(app, v)).unwrap_or(Vec3::ZERO), axis())),
+        _ => Some((d.extra.get("center").and_then(|v| expr_point(app, v)).unwrap_or(Vec3::ZERO), Vec3::Z)),
+    }
+}
+
+/// Stand the primitive on the face under the pointer, as a pre-selected face places it: through
+/// the Cylinder's Face input (its place follows in the same frame), into a typed Box's corner or
+/// centre, else as the picked place; the point pick, which no longer says where it is, is
+/// dropped. A Cylinder, Cone or Coil does not take a curved face: it has no one axis there.
+fn move_to(app: &SolveApp, d: &mut Dialog, hits: &[Hit], _: usize) -> bool {
+    let s = &app.session;
+    let planar = |sel: &Sel| match sel {
+        Sel::Face { body, index, point } => crate::dialogs::planar_face(s, body, *index).map(|(_, n)| (*point, n)),
+        _ => None,
+    };
+    if crate::hole_refs::takes(d) {
+        let Some(to) = face_pick(d, s, hits) else { return false };
+        let Some((p, n)) = planar(&to) else { return false };
+        // One reference edge holds it on a line at the typed distance, as it holds a hole; where
+        // the line leaves the face it stays. On another body the edge is let go (below).
+        let same_body = |a: &Sel, b: Option<&Sel>| matches!((a, b), (Sel::Face { body: x, .. }, Some(Sel::Face { body: y, .. })) if x == y);
+        if same_body(&to, d.inputs.first().and_then(|inp| inp.items.first()))
+            && let super::Freedom::Line(_) = crate::hole_refs::freedom(s, d, 0)
+        {
+            return crate::hole_refs::drag_to(s, d, 0, p).is_ok();
+        }
+        if let Some(inp) = d.inputs.first_mut() {
+            inp.items = vec![to];
+        }
+        if let Kind::Primitive { at, .. } = &mut d.kind {
+            *at = Some((p, Some(n)));
+        }
+        // Reference edges the new place cannot be measured from (another body's) are let go.
+        crate::hole_refs::keep_reachable(s, d);
+        d.error = None;
+        return true;
+    }
+    let Some((p, n)) = hits.iter().find_map(|h| match h {
+        Hit::Face { body, index, point } => Some((*point, planar(&Sel::Face { body: body.clone(), index: *index, point: *point }).map(|(_, n)| n))),
+        _ => None,
+    }) else {
+        return false;
+    };
+    let sz = box_size(app, d);
+    let texts = ["length", "width", "height"].map(|k| match &d.kind {
+        Kind::Primitive { fields, .. } => fields.iter().find(|f| f.0 == k).map(|f| f.1.clone()).unwrap_or_default(),
+        _ => String::new(),
+    });
+    let Kind::Primitive { cmd, at, .. } = &mut d.kind else { return false };
+    match *cmd {
+        "solid.cone" | "solid.coil" if n.is_none() => return false,
+        "solid.box" => {
+            if at.is_none() {
+                // Typed fields stand the box square to the world: on a curved face, the way out of
+                // it at the point; a tilted face or a curved one whose way out there is off the
+                // axes, which has no outline for it, does not take it.
+                let n = n.or_else(|| solidcraft_engine::doc::hole_direction_at(&crate::open_meshing::session_world(s), p, &[]).map(|d| -d));
+                if n.is_some_and(|n| !STANDS_ON.iter().any(|axis| square_to(n, *axis))) {
+                    return false;
+                }
+                crate::primitive_placement::dropped(s, &mut d.extra, p, n.unwrap_or(Vec3::Z), sz, [&texts[0], &texts[1], &texts[2]]);
+            } else {
+                *at = Some((p, n));
+            }
+        }
+        _ => *at = Some((p, n)),
+    }
+    // The point pick no longer says where it is.
+    if let Some(inp) = d.inputs.first_mut() {
+        inp.items.clear();
+    }
+    d.error = None;
+    true
+}
+
+/// A pick on the Cylinder's face while one reference edge holds it, with its Face input active:
+/// it moves along the edge at the typed distance, as a drag of the marker does and as a hole held
+/// so moves on a pick; where the line leaves the face it stays. False when the pick is not that
+/// (another face, a vertex, two edges or none, or a pick on the cylinder itself, within its
+/// radius of its place), for the dialog to take it as usual.
+pub(super) fn pick_held(app: &SolveApp, d: &mut Dialog, sel: &Sel) -> bool {
+    let s = &app.session;
+    if !matches!(d.kind, Kind::Primitive { cmd: "solid.cylinder", .. }) || d.active != 0 {
+        return false;
+    }
+    let Sel::Face { body, index, point } = sel else { return false };
+    let Some(Sel::Face { body: b, index: i, point: was }) = d.inputs.first().and_then(|inp| inp.items.first()) else { return false };
+    if b != body || i != index || was.dist(*point) <= radius(app, d) {
+        return false;
+    }
+    if !matches!(crate::hole_refs::freedom(s, d, 0), super::Freedom::Line(_)) {
+        return false;
+    }
+    !matches!(crate::hole_refs::drag_to(s, d, 0, *point), Err(crate::hole_refs::Stuck::Not))
+}
+
+/// The primitive's outline on the face: the box's side that stands on it (a face square to an
+/// axis), the cylinder's, cone's or coil's base circle, the sphere's widest circle across the
+/// face, the torus's outer circle lying flat, as it is made.
+fn footprint(app: &SolveApp, d: &Dialog, base: Vec3, n: Vec3) -> Vec<Vec3> {
+    let Kind::Primitive { cmd, .. } = &d.kind else { return Vec::new() };
+    match *cmd {
+        "solid.box" => {
+            let sz = box_size(app, d) * 0.5;
+            if square_to(n, Vec3::Z) {
+                rect(base, n, Vec3::X, sz.x, sz.y)
+            } else if square_to(n, Vec3::X) {
+                rect(base, n, Vec3::Y, sz.y, sz.z)
+            } else if square_to(n, Vec3::Y) {
+                rect(base, n, Vec3::X, sz.x, sz.z)
+            } else {
+                Vec::new()
+            }
+        }
+        "solid.torus" => circle(base, Vec3::Z, size(app, d, "major") + size(app, d, "minor")),
+        _ => circle(base, n, radius(app, d)),
+    }
+}
+
+#[cfg(test)]
+#[path = "primitive_tests.rs"]
+mod tests;

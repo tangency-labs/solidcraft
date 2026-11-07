@@ -419,10 +419,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
         return;
     }
     // A cylinder's values are typed in its window; its distances from its reference edges
-    // (#6380) are shown and typed on the canvas, as a hole's.
+    // (#6380) are shown and typed on the canvas, as a hole's, then its placement handles drawn.
     if matches!(d.kind, Kind::Primitive { cmd: "solid.cylinder", .. }) {
         crate::hole_refs::canvas(app, ui, painter, proj, &mut d);
         app.dialog = Some(d);
+        crate::place_gizmo::show(app, ui, painter, proj);
         return;
     }
     if let Some((base, dir)) = anchor(app, &d)
@@ -430,10 +431,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
     {
         draw(app, ui, painter, proj, &mut d, base, bs, dir);
     }
-    crate::place_gizmo::show(app, ui, painter, proj, &mut d);
     app.dialog = Some(d);
-    // A Single hole's handles, over the depth arrow's stem: a press on a hole moves it.
-    crate::hole_place::show(app, ui, painter, proj);
+    // The placement handles (a Single hole's among them), over the depth arrow's stem: a press
+    // on a marker moves the feature.
+    crate::place_gizmo::show(app, ui, painter, proj);
+    crate::hole_place::marks(app, painter, proj);
 }
 
 struct MoveRotation {

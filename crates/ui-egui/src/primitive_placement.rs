@@ -14,7 +14,7 @@ use serde_json::{Map, Value, json};
 use solidcore_record::Vec3;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
-use solidcraft_engine::geom::PlaneGeom as _;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::i18n::tr;
 use crate::selection::{EDGES, EXTERNAL_POINTS, FACES, ORIGIN, POINTS, SelInput, VERTICES};
@@ -101,9 +101,10 @@ pub(crate) fn rows(ui: &mut egui::Ui, s: &Session, cmd: &str, extra: &mut Map<St
     enter
 }
 
-/// A coordinate of a picked point (mm) as a field shows it and OK sends it: in the design's
-/// length unit, kept to the micrometre in every unit, so a vertex at 38.1 mm reads "1.5 in", not
-/// "1.5000000000000002 in", and one in a metre design does not move by a rounded millimetre.
+/// A coordinate of a picked or dropped point (mm) as a field shows it and OK sends it: in the
+/// design's length unit, kept to the nanometre in every unit, so a vertex at 38.1 mm reads
+/// "1.5 in", not "1.5000000000000002 in", and one in a metre design does not move by a rounded
+/// millimetre.
 fn coord(s: &Session, v: f64) -> String {
     let v = (v * 1e6).round() / 1e6;
     // No "-0 mm".
@@ -136,6 +137,51 @@ pub(crate) fn picked(s: &Session, cmd: &str, at: &mut Option<(Vec3, Option<Vec3>
     let Some((index, _)) = current(s, cmd, extra) else { return };
     store(cmd, extra, index, &[coord(s, point.x), coord(s, point.y), coord(s, point.z)]);
     *at = None;
+}
+
+/// A Box dropped by its placement marker at `p` on a face with normal `n`: the current placement
+/// (the corner or the centre) written so the box stands on the face, centred on `p` across it
+/// (only centred on `p` on a face square to no axis), as a pre-selected face places it. `size` is
+/// the box's length, width and height (mm), `texts` the same as typed: a size that is an
+/// expression stays one in the place (as `dialogs::box_corner` keeps it), so the box keeps
+/// standing there when the size changes. Returns the point written, in the design's length unit
+/// as the fields show it.
+pub(crate) fn dropped(s: &Session, extra: &mut Map<String, Value>, p: Vec3, n: Vec3, size: Vec3, texts: [&str; 3]) -> Option<Value> {
+    if !p.is_finite() {
+        return None;
+    }
+    let index = keys("solid.box").iter().position(|k| extra.contains_key(*k)).unwrap_or(0);
+    // How much of the size lies behind `p` along each axis: for the corner none (or all) along
+    // the face's normal and half across it; the centre is half a size further on.
+    let behind = |axis: Vec3| {
+        let corner = match n.dot(axis) {
+            d if d > 1.0 - 1e-9 => 0.0,
+            d if d < -1.0 + 1e-9 => 1.0,
+            _ => 0.5,
+        };
+        if index == 0 { corner } else { corner - 0.5 }
+    };
+    // A drop is only as exact as the pointer: to the micrometre, so the fields read 45 mm, not
+    // 44.999991 mm.
+    let um = |v: f64| coord(s, (v * 1e3).round() / 1e3);
+    let at = |c: f64, size: f64, text: &str, axis: Vec3| {
+        let f = behind(axis);
+        // A size typed as `l = 20` is placed by its value: `l` exists only once the box does.
+        let text = solidcraft_engine::doc::expr::definition(text).map_or(text, |(_, rhs)| rhs).trim();
+        if f == 0.0 || text.is_empty() || solidcraft_engine::doc::expr::is_literal(text) {
+            return um(c - f * size);
+        }
+        // A bare number in it has the design's unit, as OK reads the size.
+        let text = crate::length_input::expression(&s.doc, text, ValueKind::Length);
+        match f {
+            1.0 => format!("{} - ({text})", um(c)),
+            0.5 => format!("{} - ({text}) / 2", um(c)),
+            _ => format!("{} + ({text}) / 2", um(c)),
+        }
+    };
+    let coords = [at(p.x, size.x, texts[0], Vec3::X), at(p.y, size.y, texts[1], Vec3::Y), at(p.z, size.z, texts[2], Vec3::Z)];
+    store("solid.box", extra, index, &coords);
+    Some(json!(coords))
 }
 
 /// The typed placement into the command's parameters: a bare number typed into a field is in the
