@@ -61,7 +61,10 @@ fn format20_scalar_looks_upgrade_and_format21_setups_keep_their_meaning() {
     assert_eq!(d.render.setups["Studio"].width, 320);
     for version in [crate::doc::format::FORMAT + 1, crate::doc::format::FORMAT + 2] {
         saved["format"] = json!(format!("solidcraft/{version}"));
-        assert!(crate::doc::Document::from_json(&saved.to_string()).is_err());
+        // A newer build's file opens, says so, and keeps its number.
+        let newer = crate::doc::Document::from_json(&saved.to_string()).unwrap();
+        assert_eq!(newer.newer_file.as_ref().unwrap().format, version);
+        assert_eq!(newer.format, format!("solidcraft/{version}"));
     }
 }
 

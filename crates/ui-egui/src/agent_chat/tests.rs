@@ -1687,7 +1687,7 @@ fn custom_instructions_reach_the_system_note_of_each_new_session() {
     h.frames(4);
     assert!(crate::scenario::rect_of("prefs:agent_instructions").is_some(), "the field is on the AI page");
     h.app.preferences.ai_features = true;
-    h.ctx.memory_mut(|m| m.request_focus(egui::Id::new("prefs_agent_instructions")));
+    h.ctx.memory_mut(|m| m.request_focus(egui::Id::unique("prefs_agent_instructions")));
     h.frames(2);
     h.step(&json!({"text": "M3"})).unwrap();
     h.frames(2);

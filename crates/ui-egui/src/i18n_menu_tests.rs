@@ -57,6 +57,7 @@ fn take(app: &SolveApp, out: &mut BTreeSet<String>) {
     for id in &features {
         take_items(out, &context_menu::items(app, &Target::Sketch { id: *id }));
         take_items(out, &context_menu::items(app, &Target::Plane { id: *id }));
+        take_items(out, &context_menu::items(app, &Target::Timeline { feature: *id }));
     }
     for id in &components {
         take_items(out, &context_menu::items(app, &Target::Component { id: *id }));

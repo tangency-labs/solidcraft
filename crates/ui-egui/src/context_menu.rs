@@ -11,7 +11,7 @@
 //! state; [`items`] lists them and [`run_item`] runs one, so the control channel (`ui.menu`,
 //! `ui.menuPick`) and tests reach everything a click does.
 
-use crate::ui_kit::{Container, Surface};
+use crate::ui_kit::{BackingTooltipExt as _, Container, Surface};
 use egui::{Color32, Pos2, Rect, Sense, Vec2, pos2, vec2};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -88,6 +88,10 @@ pub enum Target {
     Toolbar,
     /// The History controls (first, previous, next, last, and Play when shown).
     HistoryControls,
+    /// A feature in the History bar.
+    Timeline {
+        feature: u64,
+    },
     /// The workspace switcher.
     Workspace,
     /// The view gizmo (axes, cube or a custom body) at the viewport's corner.
@@ -131,6 +135,9 @@ pub struct Item {
     pub children: Vec<Item>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub swatch: Option<[u8; 3]>,
+    /// Why the entry is off: shown on hover, and in the control channel's report.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tip: Option<String>,
 }
 
 impl Item {
@@ -148,6 +155,7 @@ impl Item {
             params: None,
             children: Vec::new(),
             swatch: None,
+            tip: None,
         }
     }
     pub(crate) fn heading(label: &str) -> Item {
@@ -160,6 +168,7 @@ impl Item {
             params: None,
             children: Vec::new(),
             swatch: None,
+            tip: None,
         }
     }
     fn is_sep(&self) -> bool {
@@ -177,6 +186,14 @@ impl Item {
     }
     pub(crate) fn on(mut self, enabled: bool) -> Item {
         self.enabled &= enabled;
+        self
+    }
+    /// Off, saying why, when there is a reason.
+    pub(crate) fn off_because(mut self, why: Option<String>) -> Item {
+        if let Some(why) = why {
+            self.enabled = false;
+            self.tip = Some(why);
+        }
         self
     }
     pub fn key(mut self, k: &str) -> Item {
@@ -202,6 +219,7 @@ pub(crate) fn cmd(app: &SolveApp, id: &str, label: &str) -> Item {
         params: None,
         children: Vec::new(),
         swatch: None,
+        tip: None,
     }
 }
 
@@ -216,6 +234,7 @@ pub(crate) fn act(id: &str, label: &str, icon: &str) -> Item {
         params: None,
         children: Vec::new(),
         swatch: None,
+        tip: None,
     }
 }
 
@@ -416,6 +435,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::ToolbarCommand { id } => crate::toolbar_custom::command_items(app, id),
         Target::Toolbar => crate::toolbar_custom::toolbar_items(app),
         Target::HistoryControls => crate::timeline::transport_items(app),
+        Target::Timeline { feature } => crate::timeline::feature_items(app, *feature),
         Target::Workspace => {
             let rendering = crate::render_workspace::active(app);
             let mut v = vec![
@@ -928,7 +948,7 @@ fn joint_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let hidden = !joints.iter().any(|j| app.session.joint_visible(*j));
     vec![
         act("ui.editJoint", "Edit Joint", "joint").with(json!({ "joint": id })),
-        act("ui.editJoint", "Edit Joint Limits", "joint").with(json!({ "joint": id })).on(!rigid),
+        act("ui.editJointLimits", "Edit Joint Limits", "joint").with(json!({ "joint": id })).on(!rigid),
         act("ui.driveJoint", "Drive Joint", "drive").with(json!({ "joint": id })).on(!rigid),
         act("ui.animateJoint", "Animate Joint", "play").with(json!({ "joint": id })).on(!rigid && !j.suppressed),
         act("ui.findJoint", "Find in Window", "fit").with(json!({ "joint": id })),
@@ -1588,6 +1608,13 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             let what = if let Some(b) = p.get("body").and_then(Value::as_str) {
                 RenameWhat::Body(b.to_string())
             } else if let Some(f) = id_of(&p, "feature") {
+                // The History bar renames in a dialog.
+                if p.get("dialog").and_then(Value::as_bool) == Some(true) {
+                    if let Some(name) = app.session.doc.feature(f).map(|f| f.name.clone()) {
+                        app.dialog = Some(crate::dialogs::Dialog::rename(f, &name));
+                    }
+                    return;
+                }
                 RenameWhat::Feature(f)
             } else if let Some(c) = id_of(&p, "component") {
                 RenameWhat::Component(c)
@@ -1641,6 +1668,25 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 // Selected first: the rows above the body stay marked until the selection changes.
                 let _ = app.run("select.set", json!({"items": [{"type": "body", "name": b}]}));
                 crate::browser::reveal_body(app, b);
+            } else if let Some(f) = id_of(&p, "feature") {
+                crate::timeline::find_in_browser(app, f);
+            }
+        }
+        "ui.copyMessage" => {
+            if let Some(text) = id_of(&p, "feature").and_then(|f| crate::timeline::feature_message(app, f)) {
+                crate::edit_clipboard::leave_text(app, text);
+            }
+        }
+        "ui.groupFeatures" => {
+            let ids: Vec<u64> = p.get("features").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_u64).collect();
+            if !ids.is_empty() {
+                crate::timeline_folders::group(app, &ids, p.get("parent").and_then(Value::as_u64), at);
+            }
+        }
+        "ui.deleteFeatures" | "ui.deleteAfterMarker" => {
+            let ids: Vec<u64> = p.get("features").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_u64).collect();
+            if !ids.is_empty() {
+                crate::timeline::delete_features(app, ids);
             }
         }
         "ui.findTimeline" => {
@@ -1793,10 +1839,11 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 crate::dialogs_assembly::find_joint(app, id);
             }
         }
-        "ui.editJoint" | "ui.driveJoint" | "ui.animateJoint" => {
+        "ui.editJoint" | "ui.editJointLimits" | "ui.driveJoint" | "ui.animateJoint" => {
             if let Some(id) = id_of(&p, "joint") {
                 let d = match item.id.as_str() {
                     "ui.editJoint" => crate::dialogs_assembly::edit_joint(app, id),
+                    "ui.editJointLimits" => crate::dialogs_assembly::edit_joint_limits(app, id),
                     "ui.animateJoint" => crate::dialogs_assembly::animate_joint(app, id),
                     _ => crate::dialogs_assembly::drive_joint(app, id),
                 };
@@ -2255,6 +2302,79 @@ pub fn request_open(app: &mut SolveApp, at: Pos2, target: Target) {
     app.menu.pending = Some((at, target));
 }
 
+/// What a right-click can open a menu on is there (for `ui.menu`'s `target`): a body, feature,
+/// component, joint… that the design doesn't have has no menu.
+pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
+    let doc = &app.session.doc;
+    let feature = |id: u64| doc.feature(id).is_some();
+    let component = |id: u64| id == 0 || doc.components.iter().any(|c| c.id == id);
+    let found = match target {
+        Target::Viewport
+        | Target::Origin
+        | Target::Units
+        | Target::InsertDesign
+        | Target::EditSketch
+        | Target::VisualStyle
+        | Target::ViewTool
+        | Target::SelectionFilter
+        | Target::Navigation
+        | Target::Toolbar
+        | Target::HistoryControls
+        | Target::Workspace
+        | Target::NamedViews
+        | Target::ViewGizmo => true,
+        Target::Body { name } => crate::open_meshing::session_world(&app.session).body(name).is_some(),
+        Target::Sketch { id } => doc.feature(*id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. })),
+        // Construction geometry, as the browser's Construction folder lists it.
+        Target::Plane { id } => doc.feature(*id).is_some_and(|f| {
+            matches!(f.kind, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
+        }),
+        Target::Feature { id } => feature(*id),
+        Target::Timeline { feature: id } => feature(*id),
+        Target::OriginPlane { name } => crate::prefs::OriginPlaneNames::PLANES.contains(&name.as_str()),
+        Target::OriginAxis { name } => ["X", "Y", "Z"].contains(&name.as_str()),
+        Target::Component { id } => component(*id),
+        Target::Occurrence { path } => app.session.occurrence_placement(path).is_ok(),
+        // The scope is the row it is under: the component's own, or one of its placements.
+        Target::Group { id, scope } => doc.browser_groups.iter().any(|g| g.id == *id && crate::browser::scope_shows(app, scope, g.component)),
+        Target::Folder { component: id, folder, scope } => {
+            component(*id) && ["bodies", "sketches", "construction"].contains(&folder.as_str()) && crate::browser::scope_shows(app, scope, *id)
+        }
+        Target::Joint { id } => doc.assembly.joints.iter().any(|j| j.id == *id),
+        Target::ToolbarCommand { id } => solidcraft_engine::find_command(id).is_some(),
+        Target::NamedView { name } => {
+            doc.named_views.iter().any(|v| v.name == *name) || crate::browser::STANDARD_VIEWS.iter().any(|(label, _)| label == name)
+        }
+        Target::Canvas { id } => doc.canvases.iter().any(|c| c.id == *id),
+        Target::PointCloud { id } => doc.point_clouds.iter().any(|c| c.id == *id),
+        // Shown or hidden, the browser lists it.
+        Target::Section => app.session.section.is_some() || app.tree.hidden_section.is_some(),
+    };
+    if found {
+        return Ok(());
+    }
+    // A folder or group is found by more than one field: name them all.
+    match target {
+        Target::Folder { component, folder, scope } => return Err(format!("no `{folder}` folder of component {component} under `{scope}`")),
+        Target::Group { id, scope } => return Err(format!("no group {id} under `{scope}`")),
+        _ => {}
+    }
+    let what = serde_json::to_value(target).ok();
+    // A History item is a feature.
+    let kind = match target {
+        Target::Timeline { .. } => "feature".to_string(),
+        _ => what.as_ref().and_then(|v| v.get("type")).and_then(Value::as_str).unwrap_or("target").replace('_', " "),
+    };
+    let key = what
+        .as_ref()
+        .and_then(Value::as_object)
+        .and_then(|o| o.iter().find(|(k, _)| *k != "type").map(|(_, v)| v.as_str().map_or_else(|| v.to_string(), str::to_string)));
+    Err(match key {
+        Some(key) => format!("no {kind} `{key}`"),
+        None => format!("no {kind}"),
+    })
+}
+
 /// The open menu as JSON (for `ui.menu`).
 pub fn describe(app: &SolveApp) -> Value {
     let Some(at) = app.viewport.context_menu else {
@@ -2469,7 +2589,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         inside |= pointer.is_some_and(|p| area.contains(p));
         let hot = pointer.and_then(|p| sector(p - c));
         let resp = Container::new(ctx, Surface::Popup)
-            .area(egui::Id::new("sc_marking_menu"))
+            .area(egui::Id::unique("sc_marking_menu"))
             .fixed_pos(area.min)
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
@@ -2516,7 +2636,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let key_row = app.menu.key_row;
     let mut seen: Vec<Seen> = Vec::new();
     let resp = Container::new(ctx, Surface::Popup)
-        .area(egui::Id::new("sc_context_menu"))
+        .area(egui::Id::unique("sc_context_menu"))
         .fixed_pos(list_at)
         .constrain(true)
         .order(egui::Order::Foreground)
@@ -2533,7 +2653,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         let Some(row) = seen.get(depth - 1).and_then(|s| s.anchor) else { break };
         // One area per flyout and contents: an egui area keeps its last size, so a flyout sharing
         // one with a shorter one would be squeezed into it and scroll.
-        let id = egui::Id::new(("sc_context_submenu", depth)).with(rows.iter().map(|i| (&i.id, &i.label)).collect::<Vec<_>>());
+        let id = egui::Id::unique(("sc_context_submenu", depth)).with(rows.iter().map(|i| (&i.id, &i.label)).collect::<Vec<_>>());
         let cursor = if depth == path.len() { app.menu.submenu_key } else { None };
         let sub = crate::ui_kit::Menu::submenu(ctx, id, row, list_height(rows), leftward, |ui| {
             egui::ScrollArea::vertical()
@@ -2678,6 +2798,10 @@ fn level_rows(
             kit.id = &handle;
         }
         let row = kit.show(ui);
+        let row = match &item.tip {
+            Some(tip) => row.backing_on_hover_text(tip.as_str()),
+            None => row,
+        };
         if item.children.is_empty() {
             if row.clicked() && item.enabled {
                 *picked = Some(item.clone());
@@ -2724,7 +2848,7 @@ fn show_rename(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut r) = app.menu.rename.take() else { return };
     let mut done: Option<bool> = None;
     let resp =
-        Container::new(ctx, Surface::Popup).area(egui::Id::new("sc_rename")).fixed_pos(r.at).constrain(true).order(egui::Order::Foreground).show(
+        Container::new(ctx, Surface::Popup).area(egui::Id::unique("sc_rename")).fixed_pos(r.at).constrain(true).order(egui::Order::Foreground).show(
             ctx,
             |ui| {
                 done = crate::ui_kit::rename_menu(ui, &mut r.text, &mut r.focused);
@@ -2996,6 +3120,7 @@ mod tests {
         assert!(h.app.viewport.context_menu.is_none());
     }
 
+    /// Direct Trim undoes back to the association; the explicit Break menu still makes the offset editable.
     #[test]
     fn line_offset_context_menu_breaks_association_and_allows_trim() {
         use solidcore_record::Vec2;

@@ -375,7 +375,10 @@ mod preferences_tests {
             let window = crate::scenario::rect_of("dialog:window");
             let centre = window.map(|r| r.center());
             let top = centre.and_then(|c| h.ctx.layer_id_at(c));
-            assert!(top.is_some_and(|layer| layer.id == egui::Id::new("sc_prefs")), "{device:?}: the layer on top at the window centre is {top:?}");
+            assert!(
+                top.is_some_and(|layer| layer.id == egui::Id::unique("sc_prefs")),
+                "{device:?}: the layer on top at the window centre is {top:?}"
+            );
             assert!(h.app.prefs_window.open, "{device:?}: still open");
             assert!(crate::scenario::rect_of("dialog:window").is_some_and(|r| r.is_positive()), "{device:?}: the window is drawn");
         }
@@ -417,7 +420,10 @@ mod preferences_tests {
                         let at = window.min + egui::vec2(window.width() * f, window.height() * g);
                         let top = h.ctx.layer_id_at(at);
                         let order = h.ctx.memory(|m| m.areas().visible_layer_ids());
-                        assert!(top.is_some_and(|l| l.id == egui::Id::new("sc_prefs")), "frame {frame} at {at:?}: top is {top:?}; order {order:?}");
+                        assert!(
+                            top.is_some_and(|l| l.id == egui::Id::unique("sc_prefs")),
+                            "frame {frame} at {at:?}: top is {top:?}; order {order:?}"
+                        );
                     }
                 }
             }
@@ -445,7 +451,7 @@ mod preferences_tests {
                 if frame > 4 {
                     let window = crate::scenario::rect_of("dialog:window").expect("drawn");
                     let top = h.ctx.layer_id_at(window.center());
-                    assert!(top.is_some_and(|l| l.id == egui::Id::new("sc_prefs")), "{device:?} frame {frame}: top is {top:?}");
+                    assert!(top.is_some_and(|l| l.id == egui::Id::unique("sc_prefs")), "{device:?} frame {frame}: top is {top:?}");
                 }
             }
         }
@@ -717,8 +723,11 @@ mod preferences_tests {
             run(&mut h, 2.0);
             assert!(card_up(&h), "{widget}");
             let before = h.app.preferences.clone();
+            // Where the button was: once the guard hides the card, a name finds nothing (or another
+            // control), so a click by name would not test the click behind it.
+            let at = h.widget(widget).unwrap();
             crate::issue_report::set_cad_input_blocked_for_test(true);
-            h.step(&serde_json::json!({"widget": widget})).ok();
+            h.step(&serde_json::json!({"click": at})).unwrap();
             h.frames(3);
             crate::issue_report::set_cad_input_blocked_for_test(false);
             assert!(h.app.space_mouse.calibrating.is_none() && !h.app.prefs_window.open, "{widget}: no wizard, no Preferences");

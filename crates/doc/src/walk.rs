@@ -42,6 +42,7 @@ impl Walk for i8 {}
 impl Walk for f64 {}
 impl Walk for usize {}
 impl Walk for u32 {}
+impl Walk for crate::newer_file::RawFeature {}
 impl Walk for ProfileSel {}
 impl Walk for std::collections::BTreeMap<String, String> {}
 impl Walk for crate::frame::Anchor {}
@@ -410,9 +411,12 @@ impl PlaneRef {
                 base.walk_feature_refs(f, depth + 1);
                 point.walk_feature_refs(f, depth + 1);
             }
-            Self::AtAngle { base, line, .. } => {
+            Self::AtAngle { base, line, pivot, .. } => {
                 base.walk_feature_refs(f, depth + 1);
                 if let Some(g) = line {
+                    g.walk_feature_refs(f, depth + 1);
+                }
+                if let Some(g) = pivot {
                     g.walk_feature_refs(f, depth + 1);
                 }
             }
@@ -447,9 +451,12 @@ impl PlaneRef {
                 base.walk_feature_refs_mut(f, depth + 1);
                 point.walk_feature_refs_mut(f, depth + 1);
             }
-            Self::AtAngle { base, line, .. } => {
+            Self::AtAngle { base, line, pivot, .. } => {
                 base.walk_feature_refs_mut(f, depth + 1);
                 if let Some(g) = line {
+                    g.walk_feature_refs_mut(f, depth + 1);
+                }
+                if let Some(g) = pivot {
                     g.walk_feature_refs_mut(f, depth + 1);
                 }
             }
