@@ -92,11 +92,12 @@ pub struct OccurrenceDof {
     pub dof: usize,
 }
 
-/// What `joint.edit` returns: the joints that disagree with the solved placement, and those the
-/// solve could not apply. Unless `quiet`, also each occurrence's degrees of freedom and the
-/// occurrences fixed in place.
+/// What `joint.edit` returns: the joint edited, the joints that disagree with the solved
+/// placement, and those the solve could not apply. Unless `quiet`, also each occurrence's degrees
+/// of freedom and the occurrences fixed in place.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct EditJointResult {
+    pub joint: u64,
     pub conflicts: Vec<JointProblem>,
     pub errors: Vec<JointProblem>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
