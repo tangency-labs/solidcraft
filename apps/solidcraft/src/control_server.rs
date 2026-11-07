@@ -26,11 +26,126 @@ const EVENT_GAP: Duration = Duration::from_millis(100);
 /// send, so this is plenty; one that doesn't send it loses the connection, and its seat among
 /// [`MAX_CONNECTIONS`] goes to someone else.
 const TOKEN_WAIT: Duration = Duration::from_secs(5);
+/// The longest a connection's read waits before it looks whether the server is stopping.
+const POLL: Duration = Duration::from_millis(100);
+/// How long a start keeps trying an exact `--control` port that is taken: the launch this one
+/// replaces may still be closing (a restart after a lost device, into an update), and the port
+/// is free once it has (#1789).
+const EXACT_PORT_WAIT: Duration = Duration::from_secs(3);
+
+/// Bind `127.0.0.1:port`, trying again every [`POLL`] for at most `wait` while it is taken.
+fn bind_exact(port: u16, wait: Duration) -> std::io::Result<TcpListener> {
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        match TcpListener::bind(("127.0.0.1", port)) {
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse && std::time::Instant::now() < deadline => std::thread::sleep(POLL),
+            result => return result,
+        }
+    }
+}
 
 static OPEN: AtomicUsize = AtomicUsize::new(0);
 /// The token files this launch wrote (its control port, the agent chat's endpoint) and the
 /// token in each, removed when the app ends unless another launch has written the file since.
 static TOKEN_FILES: std::sync::Mutex<Vec<(std::path::PathBuf, String)>> = std::sync::Mutex::new(Vec::new());
+
+static SERVERS: std::sync::Mutex<Vec<Server>> = std::sync::Mutex::new(Vec::new());
+
+/// Own the listener until shutdown, rather than leaving it in a detached thread while
+/// a failed parent waits for its software-renderer child (#1789).
+struct Server {
+    stopping: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Server {
+    fn start(listener: TcpListener, token: String, tx: Sender<ControlRequest>, ctx: egui::Context, patient: bool) -> std::io::Result<Self> {
+        listener.set_nonblocking(true)?;
+        let stopping = Arc::new(AtomicBool::new(false));
+        let stop = stopping.clone();
+        let thread = std::thread::Builder::new().name("control listener".into()).spawn(move || {
+            let mut workers: Vec<(TcpStream, std::thread::JoinHandle<()>)> = Vec::new();
+            let token = Arc::new(token);
+            while !stop.load(Ordering::Acquire) {
+                workers.retain(|(_, thread)| !thread.is_finished());
+                let stream = match listener.accept() {
+                    Ok((stream, _)) => stream,
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(20));
+                        continue;
+                    }
+                    Err(e)
+                        if matches!(
+                            e.kind(),
+                            std::io::ErrorKind::Interrupted | std::io::ErrorKind::ConnectionAborted | std::io::ErrorKind::ConnectionReset
+                        ) =>
+                    {
+                        continue;
+                    }
+                    Err(e) => {
+                        log::warn!("control accept: {e}");
+                        break;
+                    }
+                };
+                // Winsock can inherit the listener's nonblocking mode.
+                // Windows does not always wake a synchronous reader on socket shutdown.
+                // Periodic reads observe `stop`; partial JSON lines stay buffered below.
+                // Bound writes too, so a client that stops reading cannot block shutdown.
+                if stream.set_nonblocking(false).is_err()
+                    || stream.set_read_timeout(Some(POLL)).is_err()
+                    || stream.set_write_timeout(Some(Duration::from_secs(1))).is_err()
+                {
+                    continue;
+                }
+                if OPEN.fetch_add(1, Ordering::Relaxed) >= MAX_CONNECTIONS {
+                    OPEN.fetch_sub(1, Ordering::Relaxed);
+                    let mut refused = stream;
+                    let _ = send(&mut refused, &json!({"ok": false, "error": "too many connections"}));
+                    continue;
+                }
+                let socket = match stream.try_clone() {
+                    Ok(socket) => socket,
+                    Err(_) => {
+                        OPEN.fetch_sub(1, Ordering::Relaxed);
+                        continue;
+                    }
+                };
+                let (tx, ctx, token, stop) = (tx.clone(), ctx.clone(), token.clone(), stop.clone());
+                match std::thread::Builder::new().name("control connection".into()).spawn(move || {
+                    serve_with(stream, &token, tx, ctx, patient, WAITS, &RUNNING, &DESIGN_WATCH, Some(&stop));
+                    OPEN.fetch_sub(1, Ordering::Relaxed);
+                }) {
+                    Ok(thread) => workers.push((socket, thread)),
+                    Err(e) => {
+                        OPEN.fetch_sub(1, Ordering::Relaxed);
+                        log::warn!("control connection: {e}");
+                    }
+                }
+            }
+            stop.store(true, Ordering::Release);
+            drop(listener);
+            // Wake readers and writers, including unauthenticated or idle clients.
+            // Requests waiting on the UI also observe `stop`, so joining cannot wait
+            // for the normal 60 s / 1 h request deadline.
+            for (socket, _) in &workers {
+                let _ = socket.shutdown(std::net::Shutdown::Both);
+            }
+            for (_, thread) in workers {
+                let _ = thread.join();
+            }
+        })?;
+        Ok(Self { stopping, thread: Some(thread) })
+    }
+}
+
+impl Drop for Server {
+    fn drop(&mut self) {
+        self.stopping.store(true, Ordering::Release);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
 
 /// A new random token: 32 bytes from the operating system, as hex.
 fn new_token() -> Option<String> {
@@ -39,12 +154,15 @@ fn new_token() -> Option<String> {
     Some(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
-/// Remove this launch's token files and discovery file (at exit), leaving any that another
-/// launch has written since (#8794).
-pub fn remove_token_file() {
-    if let Ok(files) = TOKEN_FILES.lock() {
-        for (path, token) in files.iter() {
-            control_auth::remove_token_file(path, token);
+/// Stop all launch-owned endpoints before returning or starting a replacement process, and
+/// remove this launch's token files and discovery file, leaving any that another launch has
+/// written since (#8794).
+pub fn shutdown() {
+    let servers = SERVERS.lock().map(|mut servers| std::mem::take(&mut *servers)).unwrap_or_default();
+    drop(servers);
+    if let Ok(mut files) = TOKEN_FILES.lock() {
+        for (path, token) in files.drain(..) {
+            control_auth::remove_token_file(&path, &token);
         }
     }
     if let Some((port, token)) = APP_PORT.lock().ok().and_then(|p| p.clone()) {
@@ -61,7 +179,7 @@ pub fn start(listen_on: control_auth::Listen, ctx: egui::Context) -> Receiver<Co
     match control_auth::env_token().or_else(new_token) {
         Some(token) => {
             let listener = match listen_on {
-                control_auth::Listen::Exact(port) => TcpListener::bind(("127.0.0.1", port)),
+                control_auth::Listen::Exact(port) => bind_exact(port, EXACT_PORT_WAIT),
                 control_auth::Listen::Default => control_auth::bind_with_fallback(control_auth::DEFAULT_PORT, control_auth::PORT_TRIES),
             };
             match listener {
@@ -134,35 +252,40 @@ fn listen_on_listener(listener: TcpListener, token: String, tx: Sender<ControlRe
             )
         }
     }
-    let token = std::sync::Arc::new(token);
-    std::thread::spawn(move || {
-        for stream in listener.incoming().flatten() {
-            if OPEN.fetch_add(1, Ordering::Relaxed) >= MAX_CONNECTIONS {
-                OPEN.fetch_sub(1, Ordering::Relaxed);
-                let mut refused = stream;
-                let _ = send(&mut refused, &json!({"ok": false, "error": "too many connections"}));
-                continue;
-            }
-            let tx = tx.clone();
-            let ctx = ctx.clone();
-            let token = token.clone();
-            std::thread::spawn(move || {
-                serve(stream, &token, tx, ctx, patient);
-                OPEN.fetch_sub(1, Ordering::Relaxed);
-            });
+    let server = match Server::start(listener, token, tx, ctx, patient) {
+        Ok(server) => server,
+        Err(e) => {
+            solidcraft_engine::note!("solidcraft: control listener could not start: {e}");
+            return None;
         }
-    });
+    };
+    let Ok(mut servers) = SERVERS.lock() else { return None };
+    servers.push(server);
     Some(port)
 }
 
 /// One line without its newline, or `None` at the end of the stream. A client that sends
 /// gigabytes with no newline would otherwise make this thread allocate until the process is
 /// killed, so the line is refused as soon as it passes `max`.
-fn read_line(r: &mut impl BufRead, max: usize) -> std::io::Result<Option<Vec<u8>>> {
+fn read_line(r: &mut impl BufRead, max: usize, stopping: Option<&AtomicBool>) -> std::io::Result<Option<Vec<u8>>> {
     let mut line = Vec::new();
     loop {
         let (done, used) = {
-            let available = r.fill_buf()?;
+            if stopping.is_some_and(|stop| stop.load(Ordering::Acquire)) {
+                return Ok(None);
+            }
+            let available = match r.fill_buf() {
+                Ok(available) => available,
+                // The socket's poll timeout, not a client out of time (`token_too_late`).
+                Err(e)
+                    if stopping.is_some()
+                        && e.get_ref().is_none()
+                        && matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) =>
+                {
+                    continue;
+                }
+                Err(e) => return Err(e),
+            };
             if available.is_empty() {
                 return Ok((!line.is_empty()).then_some(line));
             }
@@ -243,18 +366,26 @@ fn refuse(out: &mut TcpStream, reader: &mut BufReader<ClientInput>) {
 
 /// What a client sends. Until it shows the token, all of its reads share one deadline, so neither
 /// blank lines nor a line sent a byte at a time buy it more time. After that it may stay idle as
-/// long as it likes.
+/// long as it likes. With `poll`, no read waits longer than that, so the connection sees the
+/// server stopping ([`read_line`]).
 struct ClientInput {
     socket: TcpStream,
     deadline: Option<Instant>,
+    poll: Option<Duration>,
 }
 
 impl ClientInput {
     /// No deadline any more: the client showed the token.
     fn admit(&mut self) -> std::io::Result<()> {
         self.deadline = None;
-        self.socket.set_read_timeout(None)
+        self.socket.set_read_timeout(self.poll)
     }
+}
+
+/// The error of a client that didn't show the token in time: a `TimedOut` that, unlike the
+/// socket's own, [`read_line`] doesn't wait out again.
+fn token_too_late() -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::TimedOut, "the token did not come in time")
 }
 
 impl std::io::Read for ClientInput {
@@ -262,9 +393,9 @@ impl std::io::Read for ClientInput {
         if let Some(deadline) = self.deadline {
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() {
-                return Err(std::io::ErrorKind::TimedOut.into());
+                return Err(token_too_late());
             }
-            self.socket.set_read_timeout(Some(left))?;
+            self.socket.set_read_timeout(Some(self.poll.map_or(left, |poll| poll.min(left))))?;
         }
         self.socket.read(buf)
     }
@@ -563,8 +694,9 @@ fn answer(out: &mut TcpStream, events: Option<&Subscription>, reply: &Value) -> 
     }
 }
 
+#[cfg(test)]
 fn serve(stream: TcpStream, token: &str, tx: Sender<ControlRequest>, ctx: egui::Context, patient: bool) {
-    serve_with(stream, token, tx, ctx, patient, WAITS, &RUNNING, &DESIGN_WATCH);
+    serve_with(stream, token, tx, ctx, patient, WAITS, &RUNNING, &DESIGN_WATCH, None);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -577,19 +709,24 @@ fn serve_with(
     waits: Waits,
     running: &'static Running,
     design: &'static DesignWatch,
+    stopping: Option<&AtomicBool>,
 ) {
     let connection = running.connections.fetch_add(1, Ordering::Relaxed) + 1;
     let Ok(read) = stream.try_clone() else { return };
     let mut out = stream;
-    let mut reader = BufReader::new(ClientInput { socket: read, deadline: Some(Instant::now() + waits.token) });
+    let poll = stopping.map(|_| POLL);
+    let mut reader = BufReader::new(ClientInput { socket: read, deadline: Some(Instant::now() + waits.token), poll });
     let mut bad = 0usize;
     let mut authenticated = false;
     let mut pending: Option<Pending> = None;
     let mut events: Option<Subscription> = None;
     loop {
+        if stopping.is_some_and(|stop| stop.load(Ordering::Acquire)) {
+            break;
+        }
         // A first `control.subscribe` on its way to the window (#6985).
         let mut joining = None;
-        let line = match read_line(&mut reader, MAX_LINE) {
+        let line = match read_line(&mut reader, MAX_LINE, stopping) {
             Ok(Some(l)) => String::from_utf8_lossy(&l).into_owned(),
             Ok(None) => break,
             // Closed without a word: a client that connected early and only now sends its first
@@ -677,8 +814,9 @@ fn serve_with(
                         break;
                     }
                     ctx.request_repaint();
-                    match rrx.recv_timeout(wait) {
+                    match wait_reply(&rrx, wait, stopping) {
                         Ok(r) => r,
+                        Err(_) if stopping.is_some_and(|stop| stop.load(Ordering::Acquire)) => break,
                         Err(_) => {
                             let r = json!({"ok": false, "running": true, "error": timeout_message(&what, effect)});
                             pending = Some(Pending { id: id.clone(), method, what, reply: watch(rrx, ticket) });
@@ -718,6 +856,21 @@ fn serve_with(
     }
 }
 
+fn wait_reply(rx: &Receiver<Value>, wait: Duration, stopping: Option<&AtomicBool>) -> Result<Value, std::sync::mpsc::RecvTimeoutError> {
+    let Some(stopping) = stopping else { return rx.recv_timeout(wait) };
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        if stopping.load(Ordering::Acquire) {
+            return Err(std::sync::mpsc::RecvTimeoutError::Disconnected);
+        }
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        match rx.recv_timeout(remaining.min(Duration::from_millis(20))) {
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) if !remaining.is_zero() => continue,
+            result => return result,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -742,7 +895,7 @@ mod tests {
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
                 let tx = tx.clone();
-                std::thread::spawn(move || serve_with(stream, token, tx, egui::Context::default(), false, waits, &RUNNING, &DESIGN_WATCH));
+                std::thread::spawn(move || serve_with(stream, token, tx, egui::Context::default(), false, waits, &RUNNING, &DESIGN_WATCH, None));
             }
         });
         let open = || {
@@ -796,6 +949,102 @@ mod tests {
         assert!(l.contains("unauthorized"), "{l}");
     }
 
+    #[test]
+    fn control_connects_while_startup_recovery_is_still_eligible() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let token = "0123456789abcdef0123456789abcdef";
+        let recovery = crate::startup::Recovery::new();
+        let (tx, rx) = channel();
+        let server = Server::start(listener, token.into(), tx, egui::Context::default(), false).unwrap();
+        let mut client = TcpStream::connect(addr).unwrap();
+        client.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let request = json!({"id":1,"method":"ui.inspect","token":token}).to_string();
+        let split = request.len() / 2;
+        client.write_all(&request.as_bytes()[..split]).unwrap();
+        // A request split across the shutdown polling timeout must keep its prefix.
+        std::thread::sleep(Duration::from_millis(250));
+        writeln!(client, "{}", &request[split..]).unwrap();
+        let request = rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(request.method, "ui.inspect");
+        request.reply.send(json!({"ok":true})).unwrap();
+        let mut reply = String::new();
+        BufReader::new(client).read_line(&mut reply).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&reply).unwrap()["ok"], true);
+        assert!(recovery.eligible(), "control access does not wait for or settle recovery");
+        drop(server);
+    }
+
+    /// While the server polls for its shutdown, a client that never shows the token is still
+    /// closed without a word once its time is up, not waited for again and again.
+    #[test]
+    fn a_polled_connection_without_the_token_is_closed_in_time() {
+        use std::io::Read;
+        let token = "0123456789abcdef0123456789abcdef";
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, _rx) = channel::<ControlRequest>();
+        static RUNNING: Running = Running::new();
+        let waits = Waits { short: Duration::from_secs(10), long: Duration::from_secs(10), token: Duration::from_millis(300) };
+        let served = std::thread::spawn(move || {
+            let stop = AtomicBool::new(false);
+            let stream = listener.incoming().flatten().next().unwrap();
+            stream.set_read_timeout(Some(POLL)).unwrap();
+            serve_with(stream, token, tx, egui::Context::default(), false, waits, &RUNNING, &DESIGN_WATCH, Some(&stop));
+        });
+        let mut client = TcpStream::connect(addr).unwrap();
+        client.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
+        client.write_all(b"{").unwrap();
+        // The end of the stream, or a reset; never a reply, and never a read still waiting.
+        let read = client.read(&mut [0u8; 1]);
+        let waiting = read.as_ref().is_err_and(|e| matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut));
+        assert!(!waiting && !matches!(read, Ok(1..)), "closed, with no answer: {read:?}");
+        served.join().unwrap();
+    }
+
+    /// A start whose exact port the closing launch still holds gets it once that one lets go,
+    /// instead of starting without a control channel (os error 10048, #1789); a port that stays
+    /// taken is still an error, after the wait.
+    #[test]
+    fn an_exact_port_taken_by_the_closing_launch_is_bound_once_it_is_free() {
+        let holder = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = holder.local_addr().unwrap().port();
+        assert_eq!(super::bind_exact(port, Duration::ZERO).err().map(|e| e.kind()), Some(std::io::ErrorKind::AddrInUse));
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(400));
+            drop(holder);
+        });
+        let started = std::time::Instant::now();
+        let bound = super::bind_exact(port, Duration::from_secs(5)).expect("free once the holder closes");
+        assert!(started.elapsed() >= Duration::from_millis(300), "it waited for the holder");
+        assert_eq!(bound.local_addr().unwrap().port(), port);
+        release.join().unwrap();
+        let started = std::time::Instant::now();
+        assert!(super::bind_exact(port, Duration::from_millis(300)).is_err(), "still taken: an error");
+        assert!(started.elapsed() >= Duration::from_millis(300));
+    }
+
+    #[test]
+    fn shutdown_releases_the_port_with_idle_and_pending_clients() {
+        use std::io::Read;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let token = "0123456789abcdef0123456789abcdef";
+        let (tx, rx) = channel();
+        let server = Server::start(listener, token.into(), tx, egui::Context::default(), true).unwrap();
+        let _idle = TcpStream::connect(addr).unwrap();
+        let mut pending = TcpStream::connect(addr).unwrap();
+        writeln!(pending, "{}", json!({"id":1,"method":"engine.batch","token":token})).unwrap();
+        // Keep the unanswered request alive: shutdown must not wait for its 1 h deadline.
+        let _request = rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let before = std::time::Instant::now();
+        drop(server);
+        assert!(before.elapsed() < Duration::from_secs(2));
+        let replacement = TcpListener::bind(addr).expect("the retry must immediately bind the original port");
+        drop(replacement);
+        assert_eq!(pending.read(&mut [0u8; 1]).unwrap_or(0), 0);
+    }
+
     /// #1618: a request that outlasts its wait says it is still running; the connection keeps its
     /// reply for `control.pending`, and refuses other requests as `busy` until it lands, so none
     /// is queued to run unseen behind it.
@@ -823,7 +1072,7 @@ mod tests {
         static RUNNING: Running = Running::new();
         std::thread::spawn(move || {
             if let Some(stream) = listener.incoming().flatten().next() {
-                serve_with(stream, token, tx, egui::Context::default(), false, waits, &RUNNING, &DESIGN_WATCH);
+                serve_with(stream, token, tx, egui::Context::default(), false, waits, &RUNNING, &DESIGN_WATCH, None);
             }
         });
         let s = TcpStream::connect(addr).unwrap();
@@ -889,7 +1138,7 @@ mod tests {
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
                 let tx = tx.clone();
-                std::thread::spawn(move || serve_with(stream, token, tx, egui::Context::default(), false, waits, &RUNNING, &DESIGN_WATCH));
+                std::thread::spawn(move || serve_with(stream, token, tx, egui::Context::default(), false, waits, &RUNNING, &DESIGN_WATCH, None));
             }
         });
         let open = || {
@@ -994,7 +1243,7 @@ mod tests {
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
                 let tx = tx.clone();
-                std::thread::spawn(move || serve_with(stream, token, tx, egui::Context::default(), false, WAITS, &RUNNING, &WATCH));
+                std::thread::spawn(move || serve_with(stream, token, tx, egui::Context::default(), false, WAITS, &RUNNING, &WATCH, None));
             }
         });
         let open = || {
@@ -1087,7 +1336,7 @@ mod tests {
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
                 let tx = tx.clone();
-                std::thread::spawn(move || serve_with(stream, token, tx, egui::Context::default(), false, WAITS, &RUNNING, &WATCH));
+                std::thread::spawn(move || serve_with(stream, token, tx, egui::Context::default(), false, WAITS, &RUNNING, &WATCH, None));
             }
         });
         let s = TcpStream::connect(addr).unwrap();
@@ -1205,7 +1454,7 @@ mod tests {
     fn lines_past_the_cap_are_refused() {
         let flood = vec![b'A'; MAX_LINE + 2];
         let mut r = BufReader::new(flood.as_slice());
-        let e = read_line(&mut r, MAX_LINE).unwrap_err();
+        let e = read_line(&mut r, MAX_LINE, None).unwrap_err();
         assert_eq!(e.kind(), std::io::ErrorKind::InvalidData);
         assert!(e.to_string().contains("request too large"), "{e}");
     }
@@ -1216,11 +1465,11 @@ mod tests {
         let text = b"{\"a\":1}\n\n{\"b\":2}\nlast".to_vec();
         let mut r = BufReader::new(text.as_slice());
         let mut got = Vec::new();
-        while let Some(line) = read_line(&mut r, MAX_LINE).unwrap() {
+        while let Some(line) = read_line(&mut r, MAX_LINE, None).unwrap() {
             got.push(String::from_utf8(line).unwrap());
         }
         assert_eq!(got, vec!["{\"a\":1}", "", "{\"b\":2}", "last"]);
-        assert!(read_line(&mut r, MAX_LINE).unwrap().is_none());
+        assert!(read_line(&mut r, MAX_LINE, None).unwrap().is_none());
     }
 
     /// A line that spans several reads of the underlying stream still arrives whole.
@@ -1229,12 +1478,12 @@ mod tests {
         let long = "x".repeat(200_000);
         let text = format!("{long}\n{long}\n").into_bytes();
         let mut r = BufReader::with_capacity(64, text.as_slice());
-        assert_eq!(read_line(&mut r, MAX_LINE).unwrap().unwrap().len(), long.len());
-        assert_eq!(read_line(&mut r, MAX_LINE).unwrap().unwrap().len(), long.len());
-        assert!(read_line(&mut r, MAX_LINE).unwrap().is_none());
+        assert_eq!(read_line(&mut r, MAX_LINE, None).unwrap().unwrap().len(), long.len());
+        assert_eq!(read_line(&mut r, MAX_LINE, None).unwrap().unwrap().len(), long.len());
+        assert!(read_line(&mut r, MAX_LINE, None).unwrap().is_none());
         // The same line against a smaller cap is refused.
         let mut r = BufReader::with_capacity(64, text.as_slice());
-        assert!(read_line(&mut r, 1000).is_err());
+        assert!(read_line(&mut r, 1000, None).is_err());
     }
 
     /// A large reply reaches the socket in one write, not one per JSON piece (a component tree of
