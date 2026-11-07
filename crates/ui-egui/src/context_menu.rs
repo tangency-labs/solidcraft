@@ -1360,6 +1360,16 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     {
         v.push(cmd(app, "sketch.spline.reverse", "Reverse Spline Direction").with(json!({ "curve": curve })));
     }
+    // #6502: a fit point spline without handles can be given them.
+    if let [curve] = curves.as_slice()
+        && ss
+            .sketch
+            .curve_index(curve)
+            .and_then(|i| ss.sketch.curves.get(i))
+            .is_some_and(|c| c.link.is_none() && matches!(&c.kind, CurveKind::Spline { control: false, handles, .. } if handles.is_empty()))
+    {
+        v.push(cmd(app, "sketch.spline.handles", "Show Tangent Handles").with(json!({ "curve": curve })));
+    }
     // #10783: a point of one spline of the sketch's own, alone, comes out of that spline.
     if let ([], [point]) = (curves.as_slice(), points.as_slice())
         && let Some(at) = ss.sketch.resolve_point(point)

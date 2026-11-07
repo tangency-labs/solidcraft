@@ -17,7 +17,9 @@ use super::sketch::{add_c, circumcircle, edit, ids_of, mark_construction, req_pa
 use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, num, req_vec2, str_, string_list};
-use crate::schema::sketch_create::{SplineRemovePointParams, SplineRemovePointResult, SplineReverseParams, SplineReverseResult};
+use crate::schema::sketch_create::{
+    SplineHandlesParams, SplineHandlesResult, SplineRemovePointParams, SplineRemovePointResult, SplineReverseParams, SplineReverseResult,
+};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
@@ -31,6 +33,7 @@ mod text_expr_tests;
 
 const SPLINE_REVERSE_CONTRACT: TypedContract<SplineReverseParams> = TypedContract::new();
 const SPLINE_REMOVE_POINT_CONTRACT: TypedContract<SplineRemovePointParams> = TypedContract::new();
+const SPLINE_HANDLES_CONTRACT: TypedContract<SplineHandlesParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.line.midpoint", "Midpoint Line", midpoint_line)
@@ -96,6 +99,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SPLINE_REMOVE_POINT_CONTRACT)
         .output(output_schema_for::<SplineRemovePointResult>)
         .params("curve: spline id, point: one of its points (a point id, or the curve's start or end such as s1.end): the spline runs through (or over) its other points only, and the point goes with the constraints on it unless another curve uses it. Fit point, control point and closed splines. Refused for a closed spline's closing point, for an end joined to other geometry or held by a constraint, when fewer than 2 points would be left (3 on a closed spline), and for a projected, offset or patterned spline. Returns curve, point: the point's id, deleted: whether the point went too"),
+    CommandSpec::new("sketch.spline.handles", "Show Tangent Handles", crate::checked!("sketch.spline.handles", spline_handles))
+        .icon("spline")
+        .enabled(in_sketch)
+        .contract(&SPLINE_HANDLES_CONTRACT)
+        .output(output_schema_for::<SplineHandlesResult>)
+        .params("curve: fit point spline id: gives it a tangent handle at each fit point (a free point joined to it by a construction line) where the curve already runs, so its shape does not change until a handle is moved; moving a fit point moves the handles nobody has turned with it. Refused for a spline that has handles already, a control point, projected, offset, patterned or equation spline. Returns curve, handles: the handle point ids in fit point order"),
     CommandSpec::new("sketch.spline.reverse", "Reverse Spline Direction", crate::checked!("sketch.spline.reverse", spline_reverse))
         .icon("spline")
         .enabled(in_sketch)
@@ -704,9 +713,6 @@ fn spline(s: &mut Session, p: &Value, cmd: &str, control: bool, degree: u8) -> R
             pts.push(*pts.first().ok_or_else(|| bad(cmd, "missing first point"))?);
         }
         let c = sk.add_curve(CurveKind::Spline { pts, control, degree, periodic, nurbs: None, handles: Vec::new() }, None)?;
-        if !control {
-            sk.add_spline_handles(c)?;
-        }
         mark_construction(sk, &[c], p);
         Ok((ids_of(sk, &[c]), Vec::new()))
     })?;
@@ -758,6 +764,24 @@ fn spline_remove_point(s: &mut Session, p: &Value) -> Result<Value> {
         Ok((name, deleted))
     })?;
     let reply = SplineRemovePointResult { curve: id, point, deleted, sketch: info, param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+fn spline_handles(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.spline.handles";
+    let id = str_(p, "curve").ok_or_else(|| bad(cmd, "`curve` must be a spline id"))?.to_string();
+    let (handles, info) = edit(s, p, cmd, false, |sk, _| {
+        let c = sk.curve_index(&id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
+        if matches!(sk.curves.get(c).map(|x| &x.kind), Some(CurveKind::Spline { handles, .. }) if !handles.is_empty()) {
+            return Err(bad(cmd, format!("`{id}` already has tangent handles")));
+        }
+        sk.add_spline_handles(c).map_err(|e| bad(cmd, e.to_string()))?;
+        Ok(match sk.curves.get(c).map(|x| &x.kind) {
+            Some(CurveKind::Spline { handles, .. }) => handles.iter().filter_map(|h| sk.points.get(*h).map(|p| p.id.clone())).collect(),
+            _ => Vec::new(),
+        })
+    })?;
+    let reply = SplineHandlesResult { curve: id, handles, sketch: info, param_warnings: Vec::new() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
@@ -1227,6 +1251,13 @@ mod blend_tests {
     fn fit_spline_handles_are_visible_lines_and_accept_existing_constraints() {
         let mut s = new_sketch();
         let spline_id = ids(&run(&mut s, "sketch.spline.fit_point", json!({"points": [[0, 0], [8, 6], [17, 2], [25, 10]]}))["curves"])[0].clone();
+        assert!(
+            matches!(&sketch(&s).curves[sketch(&s).curve_index(&spline_id).unwrap()].kind, CurveKind::Spline { handles, .. } if handles.is_empty()),
+            "no handles until asked"
+        );
+        let given = run(&mut s, "sketch.spline.handles", json!({"curve": spline_id}));
+        assert_eq!(given["handles"].as_array().map(Vec::len), Some(4), "{given}");
+        assert!(s.execute("sketch.spline.handles", &json!({"curve": spline_id})).is_err(), "twice is refused");
         let sk = sketch(&s);
         let spline_index = sk.curve_index(&spline_id).unwrap();
         let CurveKind::Spline { pts, handles, .. } = &sk.curves[spline_index].kind else { panic!("expected a fit spline") };

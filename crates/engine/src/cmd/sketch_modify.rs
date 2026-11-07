@@ -2775,7 +2775,6 @@ fn offset_side(sk: &mut Sketch, cmd: &str, order: &[(usize, bool)], sources: &[(
                         CurveKind::Spline { pts: idx, control: false, degree: 3, periodic: false, nurbs: None, handles: Vec::new() },
                         None,
                     )?;
-                    sk.add_spline_handles(spline)?;
                     made.push(spline);
                 }
             }

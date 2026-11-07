@@ -1990,6 +1990,17 @@ impl Sketch {
         if !existing.is_empty() {
             return Ok(());
         }
+        // An equation places its fit points, a pattern moves its copies' points, an offset
+        // rebuilds its output: none of them would carry free handles along.
+        if self.equations.iter().any(|equation| equation.curve == spline_id) {
+            return Err(SketchError::Invalid("an equation curve's shape comes from its formula; it has no tangent handles".into()));
+        }
+        if self.patterns.iter().any(|pattern| pattern.contains(&spline_id) || pattern.instances.iter().any(|i| i.curves.contains(&spline_id))) {
+            return Err(SketchError::Invalid("a patterned spline has no tangent handles".into()));
+        }
+        if self.freeform_offsets.iter().any(|offset| offset.output == spline_id) || self.offsets.iter().any(|offset| offset.owns_output(&spline_id)) {
+            return Err(SketchError::Invalid("an offset's spline follows its source; it has no tangent handles".into()));
+        }
         let count = if periodic { points.len().saturating_sub(1) } else { points.len() };
         if self.points.len().saturating_add(count) > MAX_POINTS || self.curves.len().saturating_add(count) > MAX_CURVES {
             return Err(SketchError::TooLarge);

@@ -473,6 +473,7 @@ fn untouched_spline_handles_follow_a_dragged_fit_point() {
         .as_str()
         .expect("a spline")
         .to_owned();
+    run(&mut s, "sketch.spline.handles", json!({"curve": id}));
     let fit = |s: &Session| {
         let sk = sketch_of(s);
         let ci = sk.curve_index(&id).expect("the spline");

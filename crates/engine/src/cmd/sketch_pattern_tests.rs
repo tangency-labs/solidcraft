@@ -538,7 +538,7 @@ fn patterned_arc_ellipse_spline_and_conic_follow_seed_geometry_exactly() {
         if cmd == "sketch.spline.fit_point" {
             let sk = sketch(&s);
             let helper_count = sk.curves.iter().filter(|curve| curve.spline_handle_of.as_deref() == Some(seed.as_str())).count();
-            assert!(helper_count > 0);
+            assert_eq!(helper_count, 0, "a spline has tangent handles only when it is given them");
             for copy in ids(&out["curves"]) {
                 let copy_id = &sk.curves[sk.curve_index(&copy).unwrap()].id;
                 assert_eq!(sk.curves.iter().filter(|curve| curve.spline_handle_of.as_deref() == Some(copy_id.as_str())).count(), helper_count);
