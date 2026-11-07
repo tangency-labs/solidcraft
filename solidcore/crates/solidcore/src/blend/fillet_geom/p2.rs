@@ -1083,7 +1083,9 @@ pub fn srf_srf_intersection_with_context(
             } else {
                 (surf1, surf2)
             };
-            if !surface.is_planar(k, approx_tol)?.is_planar
+            // a curve between two points: ends that coincide are no such curve
+            if start_pnt.distance(end_pnt) > approx_tol
+                && !surface.is_planar(k, approx_tol)?.is_planar
                 && ends_on_both(k, [surf1, surf2], [start_pnt, end_pnt], approx_tol)?
             {
                 let c = surface_plane_curve(
