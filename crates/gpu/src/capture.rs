@@ -763,6 +763,34 @@ mod tests {
         }
     }
 
+    /// A background with a middle colour (#9230) is two bands: the top colour at the top, the
+    /// middle one halfway and the bottom one at the bottom, each band blending only its own two
+    /// (on this machine's GPU, skipped without one).
+    #[test]
+    fn a_background_with_a_middle_colour_is_two_bands_through_it() {
+        let Ok(capturer) = Capturer::headless_single_sample() else {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        let size = [64, 64];
+        let cam = Camera::default();
+        let Ok(mut state) = capturer.state.lock() else { panic!("capturer state") };
+        let (red, green, blue) = (Rgb(255, 0, 0), Rgb(0, 255, 0), Rgb(0, 0, 255));
+        let empty = frame(&Scene::default(), &cam, size, 1, None);
+        let px = capturer.picture(&mut state, &empty, (red, blue), Some(green), size).unwrap().0;
+        let row = |y: usize| -> [u8; 4] { px[(y * 64 + 32) * 4..][..4].try_into().unwrap() };
+        let (top, upper, mid, lower, bottom) = (row(0), row(16), row(32), row(48), row(63));
+        assert!(top[0] > 230 && top[1] < 30 && top[2] < 10, "top {top:?}");
+        assert!(upper[0] > 40 && upper[1] > 40 && upper[2] < 10, "top band blends red and green only: {upper:?}");
+        assert!(mid[1] > 200 && mid[0] < 60 && mid[2] < 60, "green halfway: {mid:?}");
+        assert!(lower[0] < 10 && lower[1] > 40 && lower[2] > 40, "bottom band blends green and blue only: {lower:?}");
+        assert!(bottom[2] > 230 && bottom[1] < 30 && bottom[0] < 10, "bottom {bottom:?}");
+        // Without it, halfway is red and blue, no green.
+        let plain = capturer.picture(&mut state, &empty, (red, blue), None, size).unwrap().0;
+        let half = &plain[(32 * 64 + 32) * 4..][..4];
+        assert!(half[1] < 10 && half[0] > 40 && half[2] > 40, "no middle colour: {half:?}");
+    }
+
     /// A face with a colour of its own is drawn in that colour, and takes its body's opacity:
     /// painting one face does not make the body solid again.
     #[test]
