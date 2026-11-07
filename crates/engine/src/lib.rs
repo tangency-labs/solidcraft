@@ -178,6 +178,11 @@ pub enum Sel {
     SketchConstraint {
         id: String,
     },
+    /// A pattern (by id) of the active sketch, picked from its row when it has no copies to
+    /// select (a count of 1). Deleting it removes the pattern, never its sources (#12081).
+    SketchPattern {
+        id: String,
+    },
     /// A closed profile of a sketch (by index).
     Profile {
         sketch: u64,
