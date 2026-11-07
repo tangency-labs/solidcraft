@@ -1184,6 +1184,44 @@ fn a_modelled_threads_flank_joins_are_not_drawn() {
     assert!(flank_joins >= 32 && worst < 1e-4, "{flank_joins} flank joins, the worst {worst} deg apart");
 }
 
+/// Named thread-face picks must survive the healing before Offset Face, and the resulting
+/// offset feature must rebuild from the saved history with either flank-only or lateral picks.
+#[test]
+fn a_modelled_thread_offsets_its_named_faces_and_reopens() {
+    use solidcore_record::brep::Surface;
+    for (all_lateral, distance) in [(false, "-0.1 mm"), (false, "0.1 mm"), (true, "-0.1 mm"), (true, "0.1 mm")] {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"base": [-1, -64, 0], "radius": 10, "height": 20, "body_name": "Shaft"}));
+        run(&mut s, "solid.thread", json!({"face": [9, -64, 10], "designation": "M20x2.5", "modeled": true}));
+        let state = s.model.state();
+        let shaft = state.body("Shaft").unwrap();
+        let record = shaft.body.record();
+        let names = solidcraft_doc::naming::face_names(shaft);
+        let faces: Vec<_> = record
+            .faces
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| {
+                if all_lateral {
+                    !matches!(f.surface, Surface::Plane { .. })
+                } else {
+                    f.nurbs.is_none() && matches!(f.surface, Surface::Spline { .. } | Surface::RationalSpline { .. })
+                }
+            })
+            .map(|(i, _)| names[i].clone())
+            .collect();
+        assert!(!faces.is_empty());
+        run(&mut s, "solid.offset_face", json!({"body": "Shaft", "faces": faces, "distance": distance}));
+        assert!(matches!(s.doc.features.last().unwrap().kind, solidcraft_doc::FeatureKind::OffsetFace { .. }));
+        assert!(s.model.state().body("Shaft").unwrap().body.validity().is_empty());
+        let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        reopened.refresh();
+        assert_eq!(reopened.doc.features.len(), s.doc.features.len());
+        assert!(reopened.model.results.iter().all(|r| r.error.is_none()), "{:?}", reopened.model.results);
+        assert!(reopened.model.state().body("Shaft").unwrap().body.validity().is_empty());
+    }
+}
+
 /// A pipe thread's profile for [`pipe_material`]: (flank half angle, thread height h, flat at crest
 /// and root), each per the pitch: ISO 228-1/7-1 55° h 0.640327 P of H 0.960491 P (parallel) or
 /// 0.960237 P (taper), ASME B1.20.1 60° h 0.8 P of H 0.866025 P.
