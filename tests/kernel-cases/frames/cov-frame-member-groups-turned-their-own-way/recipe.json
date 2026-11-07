@@ -1,0 +1,84 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Frame"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      600,
+      0
+     ]
+    ],
+    "ids": [
+     "l1"
+    ],
+    "infer": false
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      200
+     ],
+     [
+      600,
+      200
+     ]
+    ],
+    "ids": [
+     "l2"
+    ],
+    "infer": false
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {
+    "sketch": "Frame"
+   }
+  },
+  {
+   "command": "frame.member",
+   "params": {
+    "sketch": "Frame",
+    "profile": {
+     "kind": "angle",
+     "width": 60,
+     "height": 40,
+     "thickness": 5
+    },
+    "groups": [
+     {
+      "lines": [
+       "l1"
+      ],
+      "anchor": "bottom_left",
+      "body_name": "Rail"
+     },
+     {
+      "lines": [
+       "l2"
+      ],
+      "anchor": "bottom_left",
+      "angle": "90 deg",
+      "body_name": "Post"
+     }
+    ]
+   }
+  }
+ ]
+}

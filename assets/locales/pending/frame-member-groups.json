@@ -1,0 +1,50 @@
+{
+  "ar": {
+    "ui.frame_member.group": "المجموعة {number}",
+    "ui.frame_member.groups": "المجموعات",
+    "ui.frame_member.new_group": "مجموعة جديدة",
+    "ui.frame_member.remove_group": "إزالة المجموعة"
+  },
+  "de": {
+    "ui.frame_member.group": "Gruppe {number}",
+    "ui.frame_member.groups": "Gruppen",
+    "ui.frame_member.new_group": "Neue Gruppe",
+    "ui.frame_member.remove_group": "Gruppe entfernen"
+  },
+  "en": {
+    "ui.frame_member.group": "Group {number}",
+    "ui.frame_member.groups": "Groups",
+    "ui.frame_member.new_group": "New Group",
+    "ui.frame_member.remove_group": "Remove Group"
+  },
+  "he": {
+    "ui.frame_member.group": "קבוצה {number}",
+    "ui.frame_member.groups": "קבוצות",
+    "ui.frame_member.new_group": "קבוצה חדשה",
+    "ui.frame_member.remove_group": "הסרת קבוצה"
+  },
+  "ja": {
+    "ui.frame_member.group": "グループ {number}",
+    "ui.frame_member.groups": "グループ",
+    "ui.frame_member.new_group": "新しいグループ",
+    "ui.frame_member.remove_group": "グループを削除"
+  },
+  "ko": {
+    "ui.frame_member.group": "그룹 {number}",
+    "ui.frame_member.groups": "그룹",
+    "ui.frame_member.new_group": "새 그룹",
+    "ui.frame_member.remove_group": "그룹 제거"
+  },
+  "vi": {
+    "ui.frame_member.group": "Nhóm {number}",
+    "ui.frame_member.groups": "Nhóm",
+    "ui.frame_member.new_group": "Tạo nhóm mới",
+    "ui.frame_member.remove_group": "Xóa nhóm"
+  },
+  "zh": {
+    "ui.frame_member.group": "组 {number}",
+    "ui.frame_member.groups": "组",
+    "ui.frame_member.new_group": "新建组",
+    "ui.frame_member.remove_group": "删除组"
+  }
+}

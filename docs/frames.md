@@ -37,6 +37,10 @@ the selected body (or the last body of the active component).
   dimensions follow; optional ones left empty take their defaults.
 - **Anchor**, **Angle** and **Mirror** place the section on each line, as below. **Name** names
   the members (default: after the profile).
+- **Groups**: one feature can lay several groups of lines in the same profile, each with its own
+  lines, **Anchor**, **Angle**, **Mirror** and **Name** (uprights turned one way, rails another).
+  **New Group** starts an empty group and shows it; click a group to show and edit it, **Remove
+  Group** removes the one shown. A line belongs to one group only.
 - The preview shows the members as you change the values. **Edit Feature** reopens the dialog with
   the feature's values; the members keep their names through the edit, and a new **Name**
   renames them all. A member made with a whole profile sketch keeps it (the **Section** row shows
@@ -68,6 +72,11 @@ the selected body (or the last body of the active component).
   feature, leaves the other members' names alone; `body.rename` renames a member on its line.
   `names` (`{line id: name}`) gives names to keep, as Edit Feature (`timeline.redefine`) passes
   them unless the edit changes `body_name`.
+- `groups` (`[{lines, anchor?, angle?, mirror?, body_name?}]`): several groups of lines in the
+  feature's one profile, each placed and named its own way. Each group lists its lines, and no
+  line is in two groups. With `groups`, give `lines`, `anchor`, `angle`, `mirror` and `body_name`
+  in each group, not beside them. A feature with one group saves as before, so designs without
+  groups don't change.
 
 Every built-in profile is SolidCraft's own parametric definition, built in code
 (`solidcraft_doc::frame`). SolidCraft ships no vendor's or standard's size table: you give the

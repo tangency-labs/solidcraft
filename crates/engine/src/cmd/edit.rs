@@ -1790,6 +1790,26 @@ fn input_keys(kind: &FeatureKind) -> Vec<(String, solidcraft_doc::expr::Kind)> {
     keys
 }
 
+/// The name a frame member feature gives the member on `line` (its group's `body_name`); none:
+/// named after the profile.
+fn member_group_name(kind: &FeatureKind, line: &str) -> Option<String> {
+    let groups = solidcraft_doc::frame::member_groups(kind);
+    let group = groups.iter().find(|g| g.lines.is_empty() || g.lines.iter().any(|l| l == line))?;
+    group.body_name.as_deref().map(str::trim).filter(|n| !n.is_empty()).map(str::to_string)
+}
+
+/// The name `frame.member` parameters give the member on `line`, as [`member_group_name`].
+fn given_group_name(p: &serde_json::Map<String, Value>, line: &str) -> Option<String> {
+    let named = match p.get("groups").and_then(Value::as_array) {
+        Some(groups) => groups
+            .iter()
+            .find(|g| g.get("lines").and_then(Value::as_array).is_some_and(|ls| ls.iter().any(|l| l.as_str() == Some(line))))?
+            .get("body_name"),
+        None => p.get("body_name"),
+    };
+    named.and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty()).map(str::to_string)
+}
+
 fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.redefine";
     let id = feature_id(s, p.get("feature"), cmd)?;
@@ -1853,12 +1873,16 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         parameters.entry("old_auto_size").or_insert_with(|| json!(true));
     }
     // Members keep their names through an edit, unless it gives them another name.
-    if let FeatureKind::FrameMember { names, body_name, .. } = &old.kind
+    // With groups, a member keeps its name while its group's name stays the same.
+    if let FeatureKind::FrameMember { names, .. } = &old.kind
         && cid == "frame.member"
         && let Some(parameters) = params.as_object_mut()
-        && parameters.get("body_name").and_then(Value::as_str) == body_name.as_deref()
     {
-        parameters.entry("names").or_insert_with(|| json!(names));
+        let kept: BTreeMap<&String, &String> =
+            names.iter().filter(|(line, _)| member_group_name(&old.kind, line) == given_group_name(parameters, line)).collect();
+        if !kept.is_empty() {
+            parameters.entry("names").or_insert_with(|| json!(kept));
+        }
     }
     if !old.participants.is_empty()
         && let Some(parameters) = params.as_object_mut()

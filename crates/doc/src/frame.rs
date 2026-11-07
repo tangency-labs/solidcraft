@@ -260,7 +260,7 @@ impl crate::walk::Walk for ProfileSpec {
     }
 }
 
-pub use crate::eval::frame_member::{member_line_ids, member_names};
+pub use crate::eval::frame_member::{group_member_names, member_line_ids, member_names};
 
 /// Where a frame member's cross-section comes from.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
@@ -278,6 +278,42 @@ pub enum MemberProfile {
         #[walk(profiles_of = sketch)]
         profiles: crate::ProfileSel,
     },
+}
+
+/// One group of a frame member feature: lines whose members share a placement on the profile
+/// (#4003). Per-group finishing, such as how the group's corners are treated, belongs here too.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+pub struct MemberGroup {
+    /// The lines, by curve id; none (only in a feature's single group): every straight line drawn
+    /// in the frame sketch.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lines: Vec<String>,
+    /// The profile point that sits on each line.
+    #[serde(default, skip_serializing_if = "Anchor::is_origin")]
+    pub anchor: Anchor,
+    /// How far the profile turns about each line (see [`member_axes`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(angle = "Rotation")]
+    pub angle: Option<Expr>,
+    /// The profile mirrored across its y axis (before it turns).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub mirror: bool,
+    /// What the group's members are named after when they have no name of their own; none: the
+    /// profile's description or the profile sketch's name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body_name: Option<String>,
+}
+
+/// The groups of a frame member feature, in the order their members are made: its `groups`, or,
+/// without them, the one group its own `lines`, `anchor`, `angle`, `mirror` and `body_name` make.
+pub fn member_groups(kind: &crate::FeatureKind) -> Vec<MemberGroup> {
+    match kind {
+        crate::FeatureKind::FrameMember { groups, .. } if !groups.is_empty() => groups.clone(),
+        crate::FeatureKind::FrameMember { lines, anchor, angle, mirror, body_name, .. } => {
+            vec![MemberGroup { lines: lines.clone(), anchor: *anchor, angle: angle.clone(), mirror: *mirror, body_name: body_name.clone() }]
+        }
+        _ => Vec::new(),
+    }
 }
 
 impl Anchor {

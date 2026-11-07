@@ -1,0 +1,22 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4003"
+ ],
+ "what": "one frame member feature with two groups of lines in one 60x40x5 angle: one laid flat, one turned a quarter about its line",
+ "source": "analytic",
+ "method": "on a line along +X the profile's x is world +Y and y world +Z, the bottom left corner on the line: the rail fills y 0..60, z 0..40. Turned 90 deg counter-clockwise looking back from the line's end, x goes to +Z and y to -Y: the second fills y 160..200, z 0..60. Box x 0..600, y 0..200, z 0..60. Section 60*5 + 35*5 = 475, plus the root round's r^2 (1 - pi/4) (r 5), less the two toes' (r 2.5): 475 + 12.5 (1 - pi/4); V = 2 * 600 * that",
+ "body_count": 2,
+ "volume_mm3": 573219.027549,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   600,
+   200,
+   60
+  ]
+ }
+}

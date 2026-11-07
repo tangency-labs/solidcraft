@@ -638,3 +638,124 @@ fn editing_the_feature_keeps_member_names_until_it_names_them() {
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(boxes(&mut s).into_keys().collect::<Vec<_>>(), names);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Groups: several groups of lines of one profile, each placed and named its own way
+
+/// The rectangle frame's rails (bottom and top) and posts (left and right), by line id.
+fn rails_and_posts(s: &Session) -> (Vec<String>, Vec<String>) {
+    let rails = vec![line_at_y(s, "Frame", 0.0), line_at_y(s, "Frame", 400.0)];
+    let posts = vec![line_at_x(s, "Frame", 0.0), line_at_x(s, "Frame", 600.0)];
+    (rails, posts)
+}
+
+fn grouped(rails: &[String], posts: &[String]) -> Value {
+    json!({"sketch": "Frame", "profile": {"kind": "angle", "width": 60, "height": 40, "thickness": 5}, "groups": [
+        {"lines": rails, "anchor": "bottom_left", "body_name": "Rail"},
+        {"lines": posts, "anchor": "bottom_left", "angle": "90 deg", "body_name": "Post"},
+    ]})
+}
+
+#[test]
+fn groups_place_and_name_their_members_their_own_way() {
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    let (rails, posts) = rails_and_posts(&s);
+    run(&mut s, "frame.member", grouped(&rails, &posts));
+    let bs = boxes(&mut s);
+    assert_eq!(bs.keys().collect::<Vec<_>>(), ["Post", "Post (2)", "Rail", "Rail (2)"], "{bs:?}");
+    // Where each group puts its members is graded in tests/kernel-cases/frames
+    // (cov-frame-member-groups-turned-their-own-way).
+}
+
+#[test]
+fn one_group_is_saved_as_the_flat_form() {
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    let (rails, _) = rails_and_posts(&s);
+    run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": tube(), "groups": [{"lines": rails, "mirror": true, "body_name": "Rail"}]}));
+    let saved = serde_json::to_value(&s.doc.features.last().unwrap().kind).unwrap();
+    assert!(saved.get("groups").is_none(), "{saved}");
+    assert_eq!((&saved["lines"], &saved["mirror"], &saved["body_name"]), (&json!(rails), &json!(true), &json!("Rail")));
+    assert_eq!(boxes(&mut s).keys().collect::<Vec<_>>(), ["Rail", "Rail (2)"]);
+}
+
+#[test]
+fn bad_groups_are_refused() {
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    let (rails, posts) = rails_and_posts(&s);
+    let with = |groups: Value| json!({"sketch": "Frame", "profile": tube(), "groups": groups});
+    for (p, why) in [
+        (with(json!([])), "`groups`"),
+        (with(json!("all")), "`groups`"),
+        (with(json!([1, 2])), "`groups`"),
+        (with(json!([{"lines": rails}, {}])), "group 2: `lines`"),
+        (with(json!([{"lines": rails}, {"lines": []}])), "group 2: `lines`"),
+        (with(json!([{"lines": rails}, {"lines": [&posts[0], &posts[0]]}])), "listed twice"),
+        (with(json!([{"lines": rails}, {"lines": [&rails[0]]}])), "in two groups"),
+        (with(json!([{"lines": rails}, {"lines": posts, "anchor": "middle"}])), "group 2: `anchor`"),
+        (with(json!([{"lines": rails}, {"lines": posts, "angle": "a lot"}])), "angle"),
+        (with(json!([{"lines": rails}, {"lines": posts, "mirror": "yes"}])), "group 2: `mirror`"),
+        (with(json!([{"lines": rails}, {"lines": posts, "body_name": ""}])), "group 2: `body_name`"),
+        (with(json!([{"lines": rails}, {"lines": ["nope"]}])), "nope"),
+        (json!({"sketch": "Frame", "profile": tube(), "lines": rails, "groups": [{"lines": posts}]}), "not beside"),
+        (json!({"sketch": "Frame", "profile": tube(), "mirror": true, "groups": [{"lines": posts}]}), "not beside"),
+    ] {
+        let err = s.execute("frame.member", &p).unwrap_err().to_string();
+        assert!(err.contains(why), "{p}: {err}");
+    }
+    assert!(bodies(&mut s).is_empty(), "nothing was made");
+}
+
+/// A design's groups survive saving and reopening; an edit keeps every member's name but those of
+/// a group given another name, and a member renamed by hand keeps its new name.
+#[test]
+fn groups_survive_reopening_and_edits_keep_their_names() {
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    let (rails, posts) = rails_and_posts(&s);
+    run(&mut s, "frame.member", grouped(&rails, &posts));
+    let fid = s.doc.features.last().unwrap().id;
+    let before = boxes(&mut s);
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(boxes(&mut reopened), before);
+    run(&mut s, "body.rename", json!({"body": "Post (2)", "name": "Right post"}));
+    // Turn the posts back: same names, the rails untouched.
+    let mut p = grouped(&rails, &posts);
+    p["groups"][1]["angle"] = json!("0 deg");
+    run(&mut s, "timeline.redefine", json!({"feature": fid, "command": "frame.member", "params": p.clone()}));
+    let after = boxes(&mut s);
+    assert_eq!(after.keys().collect::<Vec<_>>(), ["Post", "Rail", "Rail (2)", "Right post"], "{after:?}");
+    assert_eq!((after["Rail"], after["Rail (2)"]), (before["Rail"], before["Rail (2)"]));
+    assert_ne!(after["Post"], before["Post"], "the post turned");
+    // The rails' group renamed: its members take the new name, the posts keep theirs.
+    p["groups"][0]["body_name"] = json!("Beam");
+    run(&mut s, "timeline.redefine", json!({"feature": fid, "command": "frame.member", "params": p}));
+    assert_eq!(boxes(&mut s).keys().collect::<Vec<_>>(), ["Beam", "Beam (2)", "Post", "Right post"]);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(boxes(&mut s).keys().collect::<Vec<_>>(), ["Post", "Rail", "Rail (2)", "Right post"]);
+}
+
+/// A flat feature turned into groups keeps its members' names (no group renamed them).
+#[test]
+fn a_flat_feature_split_into_groups_keeps_its_names() {
+    let mut s = Session::default();
+    rectangle_frame(&mut s);
+    let (rails, posts) = rails_and_posts(&s);
+    run(&mut s, "frame.member", json!({"sketch": "Frame", "profile": tube()}));
+    let fid = s.doc.features.last().unwrap().id;
+    let before = boxes(&mut s);
+    let p = json!({"sketch": "Frame", "profile": tube(), "groups": [{"lines": rails}, {"lines": posts, "anchor": "bottom"}]});
+    run(&mut s, "timeline.redefine", json!({"feature": fid, "command": "frame.member", "params": p}));
+    let after = boxes(&mut s);
+    assert_eq!(after.keys().collect::<Vec<_>>(), before.keys().collect::<Vec<_>>());
+    for line in &rails {
+        let name = &s.doc.feature(fid).map(|f| f.kind.clone()).and_then(|k| match k {
+            solidcraft_doc::FeatureKind::FrameMember { names, .. } => names.get(line).cloned(),
+            _ => None,
+        });
+        let name = name.as_ref().unwrap();
+        assert_eq!(after[name], before[name], "the rail {name} stayed put");
+    }
+}

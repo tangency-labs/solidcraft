@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use serde_json::{Value, json};
 use solidcore_record::{Loop2, Seg2, Vec2};
 use solidcraft_doc::expr::Kind;
-use solidcraft_doc::frame::{self, Anchor, MemberProfile, Profile, ProfileSpec};
+use solidcraft_doc::frame::{self, Anchor, MemberGroup, MemberProfile, Profile, ProfileSpec};
 use solidcraft_doc::{FeatureKind, SketchId};
 use solidcraft_sketch::Sketch;
 
@@ -34,7 +34,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("frame.member", "Frame Member", member).at("WELDMENTS", "CREATE").icon("frame_member").enabled(not_in_sketch).params(concat!(
         "sketch: the frame sketch (id or name; 2D or 3D); lines?: [curve ids] (one member each; default: every straight line drawn in the sketch: not construction, not projected or otherwise linked, not of no length); ",
         profile_doc!(),
-        " | profile_sketch: a sketch whose profile is the section, in its own x and y around its origin, with profiles?: picks as solid.extrude takes them (default: its material, nested loops alternating, so two circles make a tube); anchor?: origin|center|centroid|top_left|top|top_right|left|right|bottom_left|bottom|bottom_right (the profile point that sits on each line, default origin); angle?: angle expr (the profile turned about the line; default 0: its y as near world up as the line allows, a vertical member's x along world X); mirror?: bool (the profile mirrored across its y axis); name?; body_name? (what the members are named after, then numbered: `Rail`, `Rail (2)`…; default the profile's description, `Rect Tube 40x40x3`, or the profile sketch's name); names?: {line id: name} (names to keep, as Edit Feature keeps them). One body per line, from its start to its end; each member keeps its name when other lines are added or deleted. Returns the feature and the bodies it made"
+        " | profile_sketch: a sketch whose profile is the section, in its own x and y around its origin, with profiles?: picks as solid.extrude takes them (default: its material, nested loops alternating, so two circles make a tube); anchor?: origin|center|centroid|top_left|top|top_right|left|right|bottom_left|bottom|bottom_right (the profile point that sits on each line, default origin); angle?: angle expr (the profile turned about the line; default 0: its y as near world up as the line allows, a vertical member's x along world X); mirror?: bool (the profile mirrored across its y axis); name?; body_name? (what the members are named after, then numbered: `Rail`, `Rail (2)`…; default the profile's description, `Rect Tube 40x40x3`, or the profile sketch's name); names?: {line id: name} (names to keep, as Edit Feature keeps them); groups?: [{lines, anchor?, angle?, mirror?, body_name?}] (instead of those keys beside the profile: several groups of lines of one profile, each placed and named its own way, no line in two groups). One body per line, from its start to its end; each member keeps its name when other lines are added or deleted. Returns the feature and the bodies it made"
     )),
     CommandSpec::new("frame.profile.list", "Profile Library", list).icon("library")
         .noundo()
@@ -183,20 +183,24 @@ fn add_loop(sk: &mut Sketch, l: &Loop2, fixed: bool, cmd: &str) -> Result<()> {
     Ok(())
 }
 
-fn member(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "frame.member";
-    let path_sketch = sketch_id(s, p.get("sketch"), cmd, "sketch")?;
+/// The keys of one group of members, given beside `profile` for a feature's single group or in
+/// each of its `groups`.
+const GROUP_KEYS: [&str; 5] = ["lines", "anchor", "angle", "mirror", "body_name"];
+
+/// One group of members as `p` (the command's parameters, or one of its `groups`) gives it; `at`
+/// names the group in errors, and a group of several must list its lines.
+fn member_group(s: &Session, cmd: &str, p: &Value, at: &str, several: bool) -> Result<MemberGroup> {
     let lines = match p.get("lines") {
-        None | Some(Value::Null) => Vec::new(),
+        None | Some(Value::Null) if !several => Vec::new(),
         Some(Value::Array(a)) if !a.is_empty() && a.len() <= frame::MAX_MEMBERS && a.iter().all(Value::is_string) => {
             let lines = string_list(cmd, p, "lines")?;
             let mut seen = std::collections::HashSet::new();
             if let Some(twice) = lines.iter().find(|l| !seen.insert(l.as_str())) {
-                return Err(bad(cmd, format!("line `{twice}` is listed twice")));
+                return Err(bad(cmd, format!("{at}line `{twice}` is listed twice")));
             }
             lines
         }
-        Some(_) => Err(bad(cmd, format!("`lines` must list 1…{} curve ids", frame::MAX_MEMBERS)))?,
+        _ => Err(bad(cmd, format!("{at}`lines` must list 1…{} curve ids", frame::MAX_MEMBERS)))?,
     };
     let body_name = match p.get("body_name") {
         None | Some(Value::Null) => None,
@@ -204,10 +208,64 @@ fn member(s: &mut Session, p: &Value) -> Result<Value> {
             str_(p, "body_name")
                 .map(str::trim)
                 .filter(|n| !n.is_empty() && n.len() <= 128)
-                .ok_or_else(|| bad(cmd, "`body_name` must be 1…128 characters"))?
+                .ok_or_else(|| bad(cmd, format!("{at}`body_name` must be 1…128 characters")))?
                 .to_string(),
         ),
     };
+    let anchor: Anchor = match p.get("anchor") {
+        None | Some(Value::Null) => Anchor::default(),
+        Some(v) => serde_json::from_value(v.clone()).map_err(|_| {
+            bad(
+                cmd,
+                format!("{at}`anchor` must be origin, center, centroid, top_left, top, top_right, left, right, bottom_left, bottom or bottom_right"),
+            )
+        })?,
+    };
+    let angle = match p.get("angle") {
+        None | Some(Value::Null) => None,
+        Some(_) => {
+            let e = expr(p, "angle").ok_or_else(|| bad(cmd, format!("{at}`angle` must be an angle expression")))?;
+            check_expr(s, &e, solidcraft_doc::expr::Kind::Angle, cmd, "angle")?;
+            Some(e)
+        }
+    };
+    let mirror = match p.get("mirror") {
+        None | Some(Value::Null) => false,
+        Some(_) => bool_(p, "mirror").ok_or_else(|| bad(cmd, format!("{at}`mirror` must be true or false")))?,
+    };
+    Ok(MemberGroup { lines, anchor, angle, mirror, body_name })
+}
+
+/// The groups of members `p` asks for: its `groups`, or the one group its own keys make.
+fn member_groups(s: &Session, cmd: &str, p: &Value) -> Result<Vec<MemberGroup>> {
+    let list = match p.get("groups") {
+        None | Some(Value::Null) => return Ok(vec![member_group(s, cmd, p, "", false)?]),
+        Some(Value::Array(a)) if !a.is_empty() && a.len() <= frame::MAX_MEMBERS && a.iter().all(Value::is_object) => a,
+        Some(_) => {
+            return Err(bad(
+                cmd,
+                format!("`groups` must list 1…{} groups, each {{lines, anchor?, angle?, mirror?, body_name?}}", frame::MAX_MEMBERS),
+            ));
+        }
+    };
+    if let Some(key) = GROUP_KEYS.iter().find(|k| p.get(**k).is_some_and(|v| !v.is_null())) {
+        return Err(bad(cmd, format!("give `{key}` in each of `groups`, not beside them")));
+    }
+    let groups = list.iter().enumerate().map(|(k, g)| member_group(s, cmd, g, &format!("group {}: ", k + 1), true)).collect::<Result<Vec<_>>>()?;
+    if groups.iter().map(|g| g.lines.len()).sum::<usize>() > frame::MAX_MEMBERS {
+        return Err(bad(cmd, format!("at most {} members in one feature", frame::MAX_MEMBERS)));
+    }
+    let mut seen = std::collections::HashSet::new();
+    if let Some(twice) = groups.iter().flat_map(|g| &g.lines).find(|l| !seen.insert(l.as_str())) {
+        return Err(bad(cmd, format!("line `{twice}` is in two groups")));
+    }
+    Ok(groups)
+}
+
+fn member(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "frame.member";
+    let path_sketch = sketch_id(s, p.get("sketch"), cmd, "sketch")?;
+    let mut groups = member_groups(s, cmd, p)?;
     let (profile, default_name) = match (p.get("profile"), p.get("profile_sketch")) {
         (Some(_), None) => {
             let spec = profile_spec(cmd, p)?;
@@ -225,24 +283,6 @@ fn member(s: &mut Session, p: &Value) -> Result<Value> {
         }
         _ => return Err(bad(cmd, "give `profile` (a built-in profile) or `profile_sketch` (a sketch), one of them")),
     };
-    let anchor: Anchor = match p.get("anchor") {
-        None | Some(Value::Null) => Anchor::default(),
-        Some(v) => serde_json::from_value(v.clone()).map_err(|_| {
-            bad(cmd, "`anchor` must be origin, center, centroid, top_left, top, top_right, left, right, bottom_left, bottom or bottom_right")
-        })?,
-    };
-    let angle = match p.get("angle") {
-        None | Some(Value::Null) => None,
-        Some(_) => {
-            let e = expr(p, "angle").ok_or_else(|| bad(cmd, "`angle` must be an angle expression"))?;
-            check_expr(s, &e, solidcraft_doc::expr::Kind::Angle, cmd, "angle")?;
-            Some(e)
-        }
-    };
-    let mirror = match p.get("mirror") {
-        None | Some(Value::Null) => false,
-        Some(_) => bool_(p, "mirror").ok_or_else(|| bad(cmd, "`mirror` must be true or false"))?,
-    };
     let kept: BTreeMap<String, String> = match p.get("names") {
         None | Some(Value::Null) => BTreeMap::new(),
         Some(Value::Object(m)) if m.len() <= frame::MAX_MEMBERS => m
@@ -255,14 +295,44 @@ fn member(s: &mut Session, p: &Value) -> Result<Value> {
             .collect::<Result<_>>()?,
         Some(_) => return Err(bad(cmd, format!("`names` must map up to {} line ids to names", frame::MAX_MEMBERS))),
     };
-    let base = body_name.clone().unwrap_or(default_name);
-    let mut kind =
-        FeatureKind::FrameMember { path_sketch: SketchId(path_sketch), lines, profile, anchor, angle, mirror, body_name, names: BTreeMap::new() };
+    let base = |g: &MemberGroup| g.body_name.clone().unwrap_or_else(|| default_name.clone());
+    // One group is saved as the feature's own lines and placement, as before groups existed.
+    let mut kind = match groups.as_mut_slice() {
+        [one] => {
+            let MemberGroup { lines, anchor, angle, mirror, body_name } = std::mem::take(one);
+            FeatureKind::FrameMember {
+                path_sketch: SketchId(path_sketch),
+                lines,
+                profile,
+                anchor,
+                angle,
+                mirror,
+                body_name,
+                names: BTreeMap::new(),
+                groups: Vec::new(),
+            }
+        }
+        _ => FeatureKind::FrameMember {
+            path_sketch: SketchId(path_sketch),
+            lines: Vec::new(),
+            profile,
+            anchor: Anchor::default(),
+            angle: None,
+            mirror: false,
+            body_name: None,
+            names: BTreeMap::new(),
+            groups,
+        },
+    };
     // Each member's name is pinned to its line as the feature is made, so deleting or adding a
     // line later leaves the other members' names alone.
     let st = s.model.state();
     let ids = frame::member_line_ids(&st, &kind).map_err(|e| bad(cmd, e.to_string()))?;
-    let pinned: BTreeMap<String, String> = ids.iter().cloned().zip(frame::member_names(&st, &ids, &kept, &base)).collect();
+    let bases: Vec<String> = match frame::member_groups(&kind).as_slice() {
+        [one] => vec![base(one); ids.len()],
+        several => several.iter().flat_map(|g| std::iter::repeat_n(base(g), g.lines.len())).collect(),
+    };
+    let pinned: BTreeMap<String, String> = ids.iter().cloned().zip(frame::group_member_names(&st, &ids, &bases, &kept)).collect();
     if let FeatureKind::FrameMember { names, .. } = &mut kind {
         *names = pinned;
     }
