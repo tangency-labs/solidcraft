@@ -5,8 +5,9 @@ rule values a shop supplies, the inference recipes for FR-17 to FR-20, the traps
 example. The example runs in CI (`sheetmetal_skill_example_builds_as_documented` in
 `crates/mcp/src/tests.rs`), so the numbers here stay honest.
 
-Lengths are mm, angles are degrees in expressions (`"90 deg"`). Any numeric field can be an
-expression over the design's parameters.
+Lengths are mm, angles are degrees in expressions (`"90 deg"`). Any numeric field that takes an
+expression can name the design's parameters; `segments[].from` and `segments[].to` are plain
+numbers (fractions 0…1), so an expression there is refused.
 
 ## Commands
 
@@ -115,7 +116,10 @@ falls back to the edge's own value, then the feature's.
   lines, or keep the partition symmetric, and swap the fractions if the bends land mirrored.
 - **Junctions:** no bend relief is cut where two segments meet and no corner is closed there; the
   two bends butt along the junction line. Only the outermost segments take part in corner closing
-  and end relief. A junction the command accepts within `SEGMENT_JOIN_EPS` is snapped shut, and a
+  and end relief. Where the two stretches bend to opposite sides the blank is cut along their
+  junction, from the bend line out to the shorter stretch's far edge, in the flat pattern and the
+  DXF: a blank joined there cannot fold, one stretch up and the next down. Same-side stretches stay
+  one piece. A junction the command accepts within `SEGMENT_JOIN_EPS` is snapped shut, and a
   stretch narrower than that tolerance is no bend of its own: the run before it takes that stretch
   (its angle and height do not build), so the bends still tile the edge with nothing left uncovered,
   every span the build makes runs forwards, and none reaches the flat pattern reversed. The same
@@ -136,6 +140,7 @@ The refusals are the contract; quote them when a call fails:
 | Wrong | Message |
 |---|---|
 | `segments` on a base or contour flange | `segments is only for edge flanges (a base or contour flange has no edge to divide)` |
+| `segments` beside `edges` | `` `segments` belongs inside an `edges` item: edges [{point, segments}] `` |
 | not a list | `edges[i].segments must list segments {from, to, angle?, height?, flip?}` |
 | count | `edges[i].segments must list 1…64 segments` |
 | unknown key | `edges[i].segments[j]: unknown key k (a segment takes from, to, angle, height and flip)` |
@@ -264,7 +269,8 @@ which edge is "the long edge" on a near-square part) before building.
   the only stretch left makes the whole edge. The dialog never submits a list with a gap.
 - **Per-edge versus per-segment:** `angle` and `height` at the edge entry are that edge's values; a
   segment's own values override them; the feature's values are the last fallback.
-- **`flip` is per segment:** it sets each bend's side.
+- **`flip` is per segment:** it sets that bend's side outright: `true` bends it the other way and
+  `false` the same way as the feature's `flip`, an override rather than a turn relative to it.
 - **`then` is refused with `segments`:** bend each segment's far edge in its own feature. The
   Flange dialog says the same, naming the edge: `edge N is split into segments: a split edge takes
   no `then`; bend each segment's far edge in its own feature`.

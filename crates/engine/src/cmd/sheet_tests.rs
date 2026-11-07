@@ -6864,6 +6864,10 @@ fn flange_segments_refuse_what_is_not_a_partition() {
             "not supported yet: then on a segmented edge (bend each segment's far edge in its own feature)",
         ),
         (
+            json!({"type":"edge","edges":[{"point":[100,0,2]}],"segments":[{"from":0,"to":1}],"height":"20 mm","angle":"90 deg"}),
+            "`segments` belongs inside an `edges` item: edges [{point, segments}]",
+        ),
+        (
             edge(json!([{"from":0,"to":0.5,"angle":"200 deg"},{"from":0.5,"to":1}])),
             "edges[0].segments[0]: the flange angle must be between 0 and 180°",
         ),
@@ -7467,4 +7471,50 @@ fn flange_segments_a_sliver_only_edge_builds_the_whole_edge() {
     assert!(no_errors_or_warnings(&whole), "{:?}", whole.model.results);
     assert!(rel(volume(&mut s), volume(&mut whole)) < 1e-9, "{} vs {}", volume(&mut s), volume(&mut whole));
     assert_eq!(f["bends"], flat(&mut whole)["bends"], "{f}");
+}
+
+/// A stored segment list that does not tile the edge is refused when the build reads it, naming the
+/// edge and the segment: a `from` or `to` outside 0…1, a gap wider than the junction tolerance, or a
+/// last `to` short of the edge's end. `sheet.flange` refuses these already, so only a design file
+/// can hold them; building past the edge or leaving part of it bare is worse than saying so (#5927,
+/// #5928). A list of slivers only is still the fallback below: it builds the edge whole.
+#[test]
+fn flange_segments_stored_bounds_outside_the_partition_are_refused() {
+    let cases: [(&str, [(f64, f64); 2], &str); 4] = [
+        ("from past the edge", [(0.0, 0.5), (2.0, 1.0)], "edges[0].segments[1].from must be a fraction from 0 to 1"),
+        ("to past the edge", [(0.0, 0.5), (0.5, 1.5)], "edges[0].segments[1].to must be a fraction from 0 to 1"),
+        (
+            "a gap wider than the junction tolerance",
+            [(0.0, 0.4), (0.5, 1.0)],
+            "edges[0].segments[1].from must equal the to of the segment before it (the segments must meet, with no gap or overlap)",
+        ),
+        ("short of the edge's end", [(0.0, 0.5), (0.5, 0.9)], "edges[0].segments[1].to must be 1: the segments cover the whole edge"),
+    ];
+    for (what, list, want) in cases {
+        let mut s = Session::default();
+        al2_base(&mut s);
+        run(
+            &mut s,
+            "sheet.flange",
+            json!({"type":"edge","edges":[{"point":[100,0,2],"segments":[{"from":0,"to":1}]}],"height":"20 mm","angle":"90 deg"}),
+        );
+        assert!(no_errors_or_warnings(&s), "{what}: {:?}", s.model.results);
+        {
+            let doc = std::sync::Arc::make_mut(&mut s.doc);
+            for f in doc.features.iter_mut() {
+                let solidcraft_doc::FeatureKind::SheetFlange { edges, .. } = &mut f.kind else { continue };
+                for e in edges.iter_mut() {
+                    if !e.segments.is_empty() {
+                        e.segments = list
+                            .iter()
+                            .map(|&(from, to)| solidcraft_doc::FlangeSegment { from, to, angle: None, height: None, flip: None })
+                            .collect();
+                    }
+                }
+            }
+        }
+        s.refresh();
+        let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+        assert!(errors.iter().any(|e| e == want), "{what}: {errors:?}");
+    }
 }

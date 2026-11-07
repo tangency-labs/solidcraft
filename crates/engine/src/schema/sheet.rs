@@ -431,6 +431,10 @@ pub struct FlangeParams {
     /// on a base or contour flange.
     #[serde(default)]
     pub then: Option<ThenSteps>,
+    /// Edge: segments belong inside an `edges` item (`{point, segments}`), not here. A top-level
+    /// `segments` is refused, naming where it goes, rather than ignored as an unknown key.
+    #[serde(default)]
+    pub segments: Option<Value>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

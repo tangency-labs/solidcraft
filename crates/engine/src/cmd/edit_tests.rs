@@ -1731,3 +1731,66 @@ fn reorder_refusal_after_a_feature_that_removes_its_body_does_not_blame_the_orde
     let e = s.execute("timeline.reorder", &json!({"feature": "Round", "position": 2})).unwrap_err().to_string();
     assert!(e.contains("breaks Round") && e.contains("changes what it works on") && !e.contains("earlier first"), "{e}");
 }
+
+/// A model parameter named on a segment's height stays on that stretch when the feature is
+/// redefined with a stretch inserted before it (#5927, #5928): each segment input is keyed by its
+/// edge and segment, so the name cannot land on another stretch that shares the "Segment height"
+/// label. The corner relief's name keeps its own input too.
+#[test]
+fn redefining_a_segmented_flange_keeps_a_named_height_on_its_stretch() {
+    fn value(s: &mut Session, name: &str) -> f64 {
+        let list = run(s, "parameters.list", json!({}));
+        list["parameters"].as_array().and_then(|a| a.iter().find(|p| p["name"] == name)).and_then(|p| p["value"].as_f64()).unwrap_or(f64::NAN)
+    }
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name":"AL2","thickness":"2 mm","k_factor":0.5,"bend_radius":"1 mm","active":true}));
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[200,100]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch":"Base"}));
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[100,0,2],"segments":[
+            {"from":0,"to":0.5,"height":"20 mm"},{"from":0.5,"to":1,"height":"15 mm"}]}],
+            "height":"20 mm","angle":"90 deg","corner_relief":"2 mm","name":"Lip"}),
+    );
+    // The model parameter of each segment height, in input order, and the corner relief's.
+    let (heights, relief) = {
+        let f = s.doc.find_feature("Lip").unwrap();
+        let inputs = f.kind.inputs();
+        let heights: Vec<String> =
+            inputs.iter().enumerate().filter(|(_, (label, _, _))| *label == "Segment height").map(|(i, _)| f.param_names[i].clone()).collect();
+        let relief = inputs.iter().position(|(label, _, _)| *label == "Corner relief").map(|i| f.param_names[i].clone()).unwrap();
+        (heights, relief)
+    };
+    assert_eq!(heights.len(), 2, "{heights:?}");
+    run(&mut s, "parameters.rename", json!({"name": heights[1], "new_name": "Tall"}));
+    run(&mut s, "parameters.rename", json!({"name": relief, "new_name": "Relief"}));
+    assert_eq!(value(&mut s, "Tall"), 15.0);
+    assert_eq!(value(&mut s, "Relief"), 2.0);
+    // A stretch inserted before the named one: the name stays on the 15 mm stretch.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":"Lip","command":"sheet.flange","params":{
+            "type":"edge","edges":[{"point":[100,0,2],"segments":[
+                {"from":0,"to":0.25,"height":"20 mm"},
+                {"from":0.25,"to":0.5,"height":"20 mm"},
+                {"from":0.5,"to":1,"height":"15 mm"}]}],
+            "height":"20 mm","angle":"90 deg","corner_relief":"2 mm"}}),
+    );
+    assert_eq!(value(&mut s, "Tall"), 15.0, "the name reads the stretch it was put on");
+    assert_eq!(value(&mut s, "Relief"), 2.0, "the corner relief keeps its own name");
+    let f = s.doc.find_feature("Lip").unwrap();
+    let inputs = f.kind.inputs();
+    let named: Vec<(String, String)> = inputs
+        .iter()
+        .enumerate()
+        .filter(|(_, (label, _, _))| *label == "Segment height")
+        .map(|(i, (_, expression, _))| (f.param_names[i].clone(), expression.clone()))
+        .collect();
+    assert!(named.iter().any(|(name, expression)| name == "Tall" && expression == "15 mm"), "{named:?}");
+    let relief_index = inputs.iter().position(|(label, _, _)| *label == "Corner relief").unwrap();
+    assert_eq!(f.param_names[relief_index], "Relief");
+}

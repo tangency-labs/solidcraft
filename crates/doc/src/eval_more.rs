@@ -674,7 +674,26 @@ pub(super) fn sheet_eval(
                 // it, so the runs are sorted, contiguous and non-overlapping by construction, and
                 // every accepted stretch's coverage is preserved up to the junction tolerance.
                 let mut covered = sheet::WHOLE_EDGE.0;
+                // The `to` of the segment before, as stored: the stretches must tile the edge, and
+                // a stored list that does not is refused here rather than built past the edge or
+                // with part of it left bare.
+                let mut prev_to = sheet::WHOLE_EDGE.0;
                 for (j, seg) in e.segments.iter().enumerate() {
+                    if !(0.0..=1.0).contains(&seg.from) {
+                        return Err(DocError::Invalid(format!("edges[{k}].segments[{j}].from must be a fraction from 0 to 1")));
+                    }
+                    if !(0.0..=1.0).contains(&seg.to) {
+                        return Err(DocError::Invalid(format!("edges[{k}].segments[{j}].to must be a fraction from 0 to 1")));
+                    }
+                    if j == 0 && seg.from > sheet::SEGMENT_JOIN_EPS {
+                        return Err(DocError::Invalid(format!("edges[{k}].segments[0].from must be 0: the segments cover the whole edge")));
+                    }
+                    if j > 0 && seg.from - prev_to > sheet::SEGMENT_JOIN_EPS {
+                        return Err(DocError::Invalid(format!(
+                            "edges[{k}].segments[{j}].from must equal the to of the segment before it (the segments must meet, with no gap or overlap)"
+                        )));
+                    }
+                    prev_to = seg.to;
                     let height = match &seg.height {
                         Some(x) => val(vals, x, Kind::Length)?,
                         None => height,
@@ -737,6 +756,13 @@ pub(super) fn sheet_eval(
                         runs.push((start, seg.to, height, angle, side));
                     }
                     covered = seg.to;
+                }
+                if !runs.is_empty() && prev_to < sheet::WHOLE_EDGE.1 - sheet::SEGMENT_JOIN_EPS {
+                    // A stored list that stops short of the edge's end leaves part of the edge
+                    // without a flange; the command refuses it, so the build does too. A list of
+                    // slivers only is the exception below: it builds the edge whole.
+                    let n = e.segments.len() - 1;
+                    return Err(DocError::Invalid(format!("edges[{k}].segments[{n}].to must be 1: the segments cover the whole edge")));
                 }
                 if runs.is_empty() {
                     // A list every stretch of which is absorbed cannot be written through
@@ -1725,7 +1751,7 @@ fn sheet_prism_cut(
             }
         }
         let candidates = if sh.flat {
-            if sh.frame.normal().cross(n).len() > 1e-6 { Vec::new() } else { sh.flat_regions()?.into_iter().map(|r| (None, r)).collect() }
+            if sh.frame.normal().cross(n).len() > 1e-6 { Vec::new() } else { sh.flat_material()?.into_iter().map(|r| (None, r)).collect() }
         } else {
             sh.material_panels(Some(plane), &mut work)?
         };

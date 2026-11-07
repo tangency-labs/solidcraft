@@ -387,6 +387,11 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
     if ty != "edge" && p.get("segments").is_some_and(|v| !v.is_null()) {
         return Err(bad(cmd, "segments is only for edge flanges (a base or contour flange has no edge to divide)"));
     }
+    // A top-level `segments` is a whole-edge bend's key, not a flange's: it belongs in an `edges`
+    // item, and saying so is better than a flange that quietly ignores it.
+    if ty == "edge" && p.get("segments").is_some_and(|v| !v.is_null()) {
+        return Err(bad(cmd, "`segments` belongs inside an `edges` item: edges [{point, segments}]"));
+    }
     match flange_type(&ty).map_err(|why| bad(cmd, why))? {
         FlangeType::Base => {
             let sketch = feature_sketch(s, p, cmd)?;

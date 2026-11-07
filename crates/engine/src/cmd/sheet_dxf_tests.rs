@@ -671,3 +671,49 @@ fn a_curve_away_from_a_fold_stays_its_curve_in_the_dxf() {
     assert_eq!(count(&es, "ARC"), 1, "{:?}", es.iter().map(|e| e.0.as_str()).collect::<Vec<_>>());
     assert!(count(&es, "LINE") < 12, "the arc went to chords: {} lines", count(&es, "LINE"));
 }
+
+/// Two stretches of one edge that bend to opposite sides are parted in the blank: the flat pattern
+/// carries a zero-width cut at their junction, from the bend line out to the far edge, and the DXF
+/// writes both of its lines on the outline. A blank still joined there cannot fold, one stretch up
+/// and the next down (FR-7 #5932). Same-side stretches stay one piece.
+#[test]
+fn segments_on_opposite_sides_cut_the_blank_at_the_junction() {
+    // A 100 x 60 sheet of the 2 mm rule (R 1, K 0.5): setback 3 mm, allowance pi, leg 17 mm.
+    let flange = |flip: [bool; 2], heights: [&str; 2]| {
+        json!({"type":"edge","edges":[{"point":[50,0,2],"segments":[
+            {"from":0,"to":0.5,"angle":"90 deg","height":heights[0],"flip":flip[0]},
+            {"from":0.5,"to":1,"angle":"90 deg","height":heights[1],"flip":flip[1]}]}],
+            "height":"20 mm","angle":"90 deg"})
+    };
+    let mut s = plate_in(sheet_of_2mm(), &[]);
+    run(&mut s, "sheet.flange", flange([false, true], ["20 mm", "20 mm"]));
+    let (from, to) = (Vec2::new(50.0, 3.0), Vec2::new(50.0, 3.0 - (PI + 17.0)));
+    let cut = |lp: &solidcore_record::Loop2, a: Vec2, b: Vec2| {
+        lp.segs.iter().any(|s| matches!(s, Seg2::Line { a: p, b: q } if p.dist(a) < 1e-6 && q.dist(b) < 1e-6))
+    };
+    // The flat pattern: the outline runs out along the junction and back.
+    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    assert!(
+        regions.iter().any(|r| cut(&r.outer, from, to) && cut(&r.outer, to, from)),
+        "the blank is cut at the junction: {:?}",
+        regions.iter().map(|r| r.outer.segs.len()).collect::<Vec<_>>()
+    );
+    // The DXF writes the same two lines, on the outline layer.
+    let es = entities(&export(&mut s, json!({})));
+    let outline: Vec<(Vec2, Vec2)> =
+        es.iter().filter(|e| e.0 == "LINE" && e.1.iter().any(|(c, v)| *c == 8 && v == "OUTLINE")).map(|e| (point(e, 10), point(e, 11))).collect();
+    let near = |p: Vec2, q: Vec2| p.dist(q) < 1e-6;
+    assert!(
+        outline.iter().any(|&(a, b)| near(a, from) && near(b, to)) && outline.iter().any(|&(a, b)| near(a, to) && near(b, from)),
+        "the DXF has no junction cut: {outline:?}"
+    );
+    // Unfolding builds the flat solid from the same regions: the slit must not stop it.
+    run(&mut s, "sheet.unfold", json!({}));
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "unfold: {errors:?}");
+    // Same-side stretches of different heights: two bends, one piece, no cut at the junction.
+    let mut same = plate_in(sheet_of_2mm(), &[]);
+    run(&mut same, "sheet.flange", flange([false, false], ["20 mm", "15 mm"]));
+    let regions = same.model.state().sheets[0].flat_regions().unwrap_or_default();
+    assert!(!regions.iter().any(|r| cut(&r.outer, from, to) && cut(&r.outer, to, from)), "a same-side junction stays joined");
+}

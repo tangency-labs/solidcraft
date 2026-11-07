@@ -1787,6 +1787,34 @@ fn input_keys(kind: &FeatureKind) -> Vec<(String, solidcraft_doc::expr::Kind)> {
             solidcraft_doc::FilletStyle::Constant | solidcraft_doc::FilletStyle::Chord | solidcraft_doc::FilletStyle::Curvature => {}
         }
     }
+    // Every segment's angle and height has the same label ("Segment angle", "Segment height"), so
+    // a name could only be matched by position: inserting or reordering stretches moved a named
+    // height onto another stretch (#5927, #5928). Each segment input is keyed by its edge and by
+    // the stretch it describes (its `from` and `to`, exactly), so a name stays on its own stretch
+    // however the list is reordered. The order is the walk's: angle before height, edges in order,
+    // and only the expressions a segment carries.
+    if let FeatureKind::SheetFlange { edges, .. } = kind {
+        let mut segment_keys = Vec::new();
+        for (edge, e) in edges.iter().enumerate() {
+            for s in &e.segments {
+                let stretch = format!("sheet.flange.edge{edge}.stretch{}.{}", s.from.to_bits(), s.to.to_bits());
+                if s.angle.is_some() {
+                    segment_keys.push(format!("{stretch}.angle"));
+                }
+                if s.height.is_some() {
+                    segment_keys.push(format!("{stretch}.height"));
+                }
+            }
+        }
+        let mut next = segment_keys.into_iter();
+        for (key, _) in keys.iter_mut() {
+            if (key == "Segment angle" || key == "Segment height")
+                && let Some(unique) = next.next()
+            {
+                *key = unique;
+            }
+        }
+    }
     keys
 }
 
@@ -1932,18 +1960,38 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     // Optional inputs can move other inputs' positions (e.g. Distance 2 goes before Taper).
     // Keep each existing model parameter attached to its semantic input, rather than its
     // old index. Constructor-assigned names for new inputs cannot reuse the old dimensions.
-    let mut old_inputs: Vec<_> = input_keys(&old.kind).into_iter().zip(&old.param_names).collect();
-    let param_names: Vec<String> = input_keys(&new.kind)
-        .iter()
-        .enumerate()
-        .map(|(i, (label, kind))| {
-            if let Some(k) = old_inputs.iter().position(|((old_label, old_kind), _)| old_label == label && old_kind == kind) {
-                old_inputs.remove(k).1.clone()
-            } else {
-                new.param_names.get(i).cloned().unwrap_or_default()
-            }
-        })
+    // A key names the input itself where its label doesn't (a segment's stretch, a fillet's
+    // control); it is matched first, so inserting or reordering stretches moves no name onto
+    // another stretch. An input whose key changed (a stretch's fractions edited) still keeps the
+    // name of the input with the same label and kind, as it did before keys were unique.
+    let old_labels: Vec<String> = old.kind.inputs().into_iter().map(|(label, _, _)| label.to_string()).collect();
+    let new_labels: Vec<String> = new.kind.inputs().into_iter().map(|(label, _, _)| label.to_string()).collect();
+    let mut old_inputs: Vec<(String, String, solidcraft_doc::expr::Kind, String)> = input_keys(&old.kind)
+        .into_iter()
+        .zip(old_labels)
+        .zip(&old.param_names)
+        .map(|(((key, kind), label), name)| (key, label, kind, name.clone()))
         .collect();
+    let keys = input_keys(&new.kind);
+    let mut param_names: Vec<String> = vec![String::new(); keys.len()];
+    for (i, (key, kind)) in keys.iter().enumerate() {
+        if let Some(k) = old_inputs.iter().position(|(old_key, _, old_kind, _)| old_key == key && old_kind == kind) {
+            param_names[i] = old_inputs.remove(k).3.clone();
+        }
+    }
+    for (i, (_, kind)) in keys.iter().enumerate() {
+        if !param_names[i].is_empty() {
+            continue;
+        }
+        if let Some(k) = old_inputs.iter().position(|(_, old_label, old_kind, _)| *old_label == new_labels[i] && old_kind == kind) {
+            param_names[i] = old_inputs.remove(k).3.clone();
+        }
+    }
+    for (i, name) in param_names.iter_mut().enumerate() {
+        if name.is_empty() {
+            *name = new.param_names.get(i).cloned().unwrap_or_default();
+        }
+    }
     trial.doc_mut().features.retain(|f| f.id != made);
     // Made right after the edited feature, the trial joined the timeline folder holding both:
     // it leaves it too, or its id stays there, and is given out again below (#9373).

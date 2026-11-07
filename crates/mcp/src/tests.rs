@@ -2690,6 +2690,29 @@ fn sheetmetal_skill_example_builds_as_documented() {
     let want = 2.0 * (200.0 * 100.0 - 150.0 * 3.0 - 50.0 * setback45 + 150.0 * (PI + 17.0) + 50.0 * (PI / 2.0 + 15.0 - setback45));
     let volume = tool(&mut s, "measure", json!({}))["total"]["volume_mm3"].as_f64().expect("a volume");
     assert!((volume - want).abs() < 1e-4, "the reference states {want} mm3, the build gives {volume}");
+    // The volumes the reference publishes are the ones the arithmetic gives, so a wrong number in
+    // the reference fails here instead of passing beside a correct build.
+    let published = |text: &str, after: &str| -> f64 {
+        let mut from = 0;
+        loop {
+            let at = text[from..].find(after).map(|i| from + i).unwrap_or_else(|| panic!("the reference states `{after}`"));
+            let rest = text[at + after.len()..].trim_start();
+            let number: String = rest.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+            if number.chars().any(|c| c.is_ascii_digit()) {
+                return number.parse().expect("a volume");
+            }
+            from = at + after.len();
+        }
+    };
+    let stated = published(doc, "folded volume ");
+    assert!((stated - want).abs() < 1e-6, "the reference states {stated} mm3 for the example, the arithmetic gives {want}");
+    let leg45 = 15.0 - setback45;
+    let want_three = 2.0 * (200.0 * 100.0 - 150.0 * 3.0 - 50.0 * setback45 + 100.0 * (PI + 17.0) + 50.0 * (PI + 12.0) + 50.0 * (PI / 2.0 + leg45));
+    let stated_three = published(doc, "volume of ");
+    assert!(
+        (stated_three - want_three).abs() < 1e-6,
+        "the reference states {stated_three} mm3 for the three-stretch variant, the arithmetic gives {want_three}"
+    );
     let reply = tool(&mut s, "execute", json!({"command":"sheet.export_bend_table","params":{"format":"json"}}));
     let table: Value = serde_json::from_str(reply["text"].as_str().expect("a JSON bend table")).expect("the bend table is JSON");
     let bends = table["bends"].as_array().expect("bends");

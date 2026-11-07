@@ -427,6 +427,71 @@ pub(crate) fn material_union(regions: Vec<Region2>, work: &mut FlatWork) -> Resu
     }
     Ok(groups.pop().unwrap_or_default())
 }
+
+/// Cut a loop along the line `at`–`tip` and back: a zero-width slit. `at` is anchored on the loop
+/// (a vertex, or the point of a segment that runs through it), `tip` lies inside the material on
+/// the bend line or on another boundary point. The loop keeps its sense and its area; the material
+/// either side of the doubled edge is parted, as a laser cut of the flat pattern leaves it. False
+/// when neither end is on the loop.
+fn slit_loop(lp: &mut Loop2, at: Vec2, tip: Vec2) -> bool {
+    // The boundary end is whichever end lies on the loop; the other is the slit's tip.
+    let (anchor, tip) = if split_loop_at(lp, at).is_some() {
+        (at, tip)
+    } else if split_loop_at(lp, tip).is_some() {
+        (tip, at)
+    } else {
+        return false;
+    };
+    let Some(k) = (0..lp.segs.len()).find(|&k| lp.segs[k].end().dist(anchor) <= 1e-6) else { return false };
+    let anchor = lp.segs[k].end();
+    if tip.dist(anchor) <= 1e-6 {
+        return false;
+    }
+    lp.segs.insert(k + 1, Seg2::Line { a: anchor, b: tip });
+    lp.segs.insert(k + 2, Seg2::Line { a: tip, b: anchor });
+    true
+}
+
+/// Split the loop's segment that runs through `p` into two there, so `p` is a vertex of the loop.
+/// A `p` already at a vertex splits nothing. None when no segment runs through `p`.
+fn split_loop_at(lp: &mut Loop2, p: Vec2) -> Option<usize> {
+    const TOL: f64 = 1e-6;
+    for k in 0..lp.segs.len() {
+        match lp.segs[k] {
+            Seg2::Line { a, b } => {
+                let d = b - a;
+                let len = d.len();
+                if len < TOL {
+                    continue;
+                }
+                let u = d / len;
+                let along = (p - a).dot(u);
+                if (p - (a + u * along)).len() > TOL || along <= TOL || along >= len - TOL {
+                    continue;
+                }
+                lp.segs[k] = Seg2::Line { a, b: p };
+                lp.segs.insert(k + 1, Seg2::Line { a: p, b });
+                return Some(k);
+            }
+            Seg2::Arc { center, radius, start, sweep } => {
+                if ((p - center).len() - radius).abs() > TOL || sweep.abs() < 1e-12 {
+                    continue;
+                }
+                let turn = ((p - center).angle() - start) * sweep.signum();
+                let share = turn.rem_euclid(std::f64::consts::TAU) / sweep.abs();
+                if share <= TOL || share >= 1.0 - TOL {
+                    continue;
+                }
+                lp.segs[k] = Seg2::Arc { center, radius, start, sweep: sweep * share };
+                lp.segs.insert(k + 1, Seg2::Arc { center, radius, start: start + sweep * share, sweep: sweep * (1.0 - share) });
+                return Some(k);
+            }
+            _ => continue,
+        }
+    }
+    None
+}
+
 /// A sheet metal rule. Values are expressions; `Thickness` inside them is the rule's thickness.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SheetRule {
@@ -796,8 +861,9 @@ pub struct EdgeFlange {
     /// still has there: `(0, 1)` is the whole edge, as every edge flange was before segments
     /// (`sheet.flange`'s `segments`); anything else is one segment of a split edge.
     pub span: (f64, f64),
-    /// This segment's side, where it has one of its own: `Some(true)` turns its bend the other
-    /// way than the feature's `flip`.
+    /// This segment's side, where it has one of its own: `Some(true)` bends it the other way and
+    /// `Some(false)` the same way as the feature's `flip`, replacing that setting for this
+    /// stretch rather than turning it relative to it.
     pub flip: Option<bool>,
 }
 
@@ -805,9 +871,10 @@ pub struct EdgeFlange {
 pub const WHOLE_EDGE: (f64, f64) = (0.0, 1.0);
 
 /// The tolerance on a segment list's junctions. `sheet.flange` accepts a list whose stretches meet
-/// within this, and its build merges stretches that match across it into one bend, so every list
-/// the command accepts builds exactly what the whole-edge flange builds (#5927, #5928). Both sides
-/// read this one number: a list can never pass validation and then stay split.
+/// within this, and its build snaps such a junction shut, so every list the command accepts tiles
+/// the edge with no gap and no overlap: stretches that match in angle, height and side merge into
+/// the bend the whole-edge flange builds, and stretches that differ build one bend each (#5927,
+/// #5928). Both sides read this one number: a list can never pass validation and then stay split.
 pub const SEGMENT_JOIN_EPS: f64 = 1e-9;
 
 impl EdgeFlange {
@@ -2210,9 +2277,14 @@ impl SheetBody {
         self.place_local_solid(body)
     }
 
-    /// The flat pattern as one extrusion (outline with its cut-outs).
+    /// The flat pattern as one extrusion (outline with its cut-outs). The junction slits of
+    /// [`Self::flat_regions`] are zero-width, so the material here is the same; the kernel
+    /// extrudes the material's loops, not the self-touching slit loops.
     pub fn flat_solid(&self) -> Result<Body> {
-        let mut regions = self.flat_regions()?;
+        let mut regions = self.flat_material()?;
+        if regions.is_empty() {
+            return Err(DocError::Invalid("empty flat pattern".into()));
+        }
         if !self.pockets.is_empty() {
             // Pockets are machined by the prism booleans, which read walls of planes and
             // cylinders: the blank they cut follows its fitted arcs then.
@@ -2407,7 +2479,7 @@ impl SheetBody {
         let outlines = self.pockets.iter().map(|p| chorded_region(&p.region)).collect::<Result<Vec<_>>>()?;
         regions_complexity(outlines.iter())?;
         let panels = if self.flat {
-            vec![(None, self.flat_regions()?)]
+            vec![(None, self.flat_material()?)]
         } else {
             self.material_panels(None, work)?.into_iter().map(|(pi, r)| (pi, vec![r])).collect()
         };
@@ -2535,7 +2607,9 @@ impl SheetBody {
 
     /// Pocket operations clipped to the surviving flat material, with exact depth intervals.
     pub fn machining(&self) -> Result<Vec<SheetPocket>> {
-        let material = self.flat_regions()?;
+        // The material without the junction slits: they are zero-width, and the kernel's planar
+        // booleans read the material's loops.
+        let material = self.flat_material()?;
         let mut work = FlatWork::new();
         let mut out = Vec::new();
         for pocket in &self.pockets {
@@ -2553,11 +2627,24 @@ impl SheetBody {
     /// the folded solid; planar unions remove panel/bend seams and turn edge-crossing cuts
     /// into notches. Lines and circular arcs remain exact through clipping and merging; a
     /// free-form loop that comes out whole is the curve it was drawn as, one that is clipped
-    /// follows it with tangent arcs.
+    /// follows it with tangent arcs. Where a split edge's stretches bend to opposite sides the
+    /// blank is cut along their junction (see [`Self::junction_slits`]).
     pub fn flat_regions(&self) -> Result<Vec<Region2>> {
-        let regions = self.flat_material()?;
+        let mut regions = self.flat_material()?;
         if regions.is_empty() {
             return Err(DocError::Invalid("empty flat pattern".into()));
+        }
+        // A junction between stretches that bend to opposite sides is a cut in the blank: the
+        // folded part is parted along it, so the flat pattern and its DXF are too. Same-side
+        // junctions and a whole-edge flange stay joined. The material itself (`flat_material`) is
+        // unchanged: the slit is a zero-width line, so it adds no area and no kernel boolean sees
+        // a self-touching loop.
+        for (at, tip) in self.junction_slits() {
+            for r in &mut regions {
+                if slit_loop(&mut r.outer, at, tip) {
+                    break;
+                }
+            }
         }
         Ok(regions)
     }
@@ -2652,6 +2739,45 @@ impl SheetBody {
         let cuts = material_union(cuts, &mut work)?;
         let regions = if cuts.is_empty() { regions } else { material_boolean(&regions, &cuts, kernel::BoolOp::Cut, &mut work)? };
         Ok(regions)
+    }
+
+    /// Where a split edge's stretches bend to opposite sides: the lines the flat pattern is cut
+    /// along at their junctions. Each runs from the bend line out to the nearer stretch's far edge,
+    /// the deepest bend line to the nearest far edge, so the material either side of the junction
+    /// parts there while the blank stays one piece. A whole-edge flange has no junction.
+    fn junction_slits(&self) -> Vec<(Vec2, Vec2)> {
+        let mut out = Vec::new();
+        for (i, a) in self.flanges.iter().enumerate() {
+            for b in self.flanges.iter().skip(i + 1) {
+                if a.parent != b.parent {
+                    continue;
+                }
+                let (Some(da), Some(db)) = (a.d.normalized(), b.d.normalized()) else { continue };
+                // One edge's stretches run the same way along it; one bending up and one down
+                // cannot share the bend line.
+                if da.dot(db) < 1.0 - 1e-9 || (a.angle >= 0.0) == (b.angle >= 0.0) {
+                    continue;
+                }
+                // Adjacent stretches: one ends where the other starts.
+                let (early, late) = if a.p.dot(da) <= b.p.dot(da) { (a, b) } else { (b, a) };
+                let junction = early.p + da * early.len;
+                if (late.p - junction).dot(da).abs() > 1e-6 {
+                    continue;
+                }
+                let Some(n) = a.n.normalized() else { continue };
+                // The material each stretch covers from its bend line out: the deeper bend line
+                // and the nearer far edge bound the stretch both cover, which is the junction.
+                let (sa, sb) = (a.p.dot(n), b.p.dot(n));
+                let (fa, fb) = (sa + self.allowance(a) + a.leg, sb + self.allowance(b) + b.leg);
+                let (start, end) = (sa.max(sb), fa.min(fb));
+                if end <= start + 1e-9 {
+                    continue;
+                }
+                let along = junction.dot(n);
+                out.push((junction + n * (start - along), junction + n * (end - along)));
+            }
+        }
+        out
     }
 
     /// The pieces of flat material that a cut parted from the base: `after` is this sheet's

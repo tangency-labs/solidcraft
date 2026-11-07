@@ -599,7 +599,9 @@ pub struct FlangeSegment {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[walk(length = "Segment height")]
     pub height: Option<Expr>,
-    /// Whether this segment's bend turns the other way than the feature's (`flip`).
+    /// This segment's side, where it has one of its own: `Some(true)` bends it the other way and
+    /// `Some(false)` the same way as the feature's `flip`, replacing that setting for this
+    /// stretch rather than turning it relative to it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flip: Option<bool>,
 }
