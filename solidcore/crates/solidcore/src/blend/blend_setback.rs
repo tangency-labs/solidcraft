@@ -42,6 +42,15 @@
 //! the faces as well takes rounds eased into a curvature-continuous section first
 //! ([`ease_surface`]).
 //!
+//! A round's jets come in the section's standard form across (`round_jets`): a round is one
+//! rational span across, so its section is its rows only up to a Moebius map of the parameter
+//! across (`w_j -> w_j c^j`) and a reversal; the standard form (the row's end weights equal, at
+//! every rail parameter, to the jets' order) removes the map, the cycle the reversal. With the
+//! rails' mean arc length along, two parametrizations of one round give the same jets. The
+//! planar fills take them as their rounds' rows; beside a curved face, and where the fill's
+//! order at the rounds is above its faces', rows 0 and 1 come from `geometric_rows` instead.
+//! A G2 fill's setback patch measures its spoke on the rows it takes.
+//!
 //! Faces are planes (a curved face is not filled here yet). Every patch lies in the convex
 //! hull of its control points (all weights positive), so [`containment`]'s bound is certified.
 //!
@@ -91,7 +100,10 @@
 //! subtracts) the port returns `SM_ERR`, and a least-squares system with fewer rows than
 //! columns (where the fork would allocate a wrapped size) is not solvable (`FALSE`); the
 //! fork's cases never reach these. The moved ease's errors name this module as their
-//! operation; their statuses are unchanged. No recursion.
+//! operation; their statuses are unchanged. Not the fork's (tangency-labs/solidcore#2697):
+//! `round_jets` puts its rows in the section's standard form across and returns no
+//! `rdDtDs`; the G2 fill's spokes are measured on those rows, not on the round's own
+//! evaluation at the middle of its parameter across. No recursion.
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // the fork's NaN-safe tests
 
@@ -105,8 +117,6 @@ use crate::nurbs::b_spline_curve::KnotType;
 use crate::nurbs::b_spline_surface::{
     BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData, SurfParamType,
 };
-use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
-use crate::nurbs::knots::Side;
 use crate::surface::surface::{Surface, SurfaceKind};
 
 mod certify;
@@ -1217,17 +1227,18 @@ fn first(net: &Net, u: f64, v: f64) -> Result<(Vec3, Vec3, Vec3)> {
 
 /// A round's homogeneous jets at its end section (`sm_SbRoundJets`'s out-params).
 struct RoundJets {
-    /// `H[j]` (`j = 0 ..= k`): the across Bezier curve of the j-th derivative by the rail
-    /// parameter, columns from its across start.
+    /// `H[j]` (`j = 0 ..= k`): the across Bezier curve of the j-th derivative by s, the mean
+    /// arc length of its rails, columns from its across start, in the section's standard
+    /// form across ([`standard_form_across`]).
     h: Vec<Vec<Hom>>,
     /// Its across degree.
     q: usize,
-    /// `rdDtDs` (the fork's d1de555): `dt/ds` there, s the mean arc length of its rails.
-    dt_ds: f64,
 }
 
 /// `sm_SbRoundJets`: a round's homogeneous derivatives along its rails at its end section,
-/// to order `k`, and its across degree.
+/// to order `k`, by the mean arc length of its rails, and its across degree; the rows in the
+/// section's standard form across, so that they are the round's geometry's, not its
+/// parametrization's (not the fork's, #2697).
 fn round_jets(
     kernel: &Kernel,
     round: &Round<'_>,
@@ -1380,10 +1391,12 @@ fn round_jets(
         }
     }
 
-    // the weights' share: G = H / W, W the rails' mean weight (the fork's d1de555)
+    // the weights' share: G = H / W, W the rails' mean weight (the fork's d1de555), once the
+    // section is in its standard form across (#2697)
     if k > 2 {
         return Err(sm_err().into()); // the jets are taken to second order
     }
+    standard_form_across(&mut h, lq, k)?;
     let mut sw = [0.0; 3];
     for (d, swd) in sw.iter_mut().enumerate().take(k + 1) {
         let hd = el_ref(&h, d)?;
@@ -1474,11 +1487,84 @@ fn round_jets(
             *el_mut(el_mut(&mut h, 2)?, j)? = axpy(&axpy(&HOM_ZERO, ts * ts, &g2), tss, &g1);
         }
     }
-    Ok(RoundJets {
-        h,
-        q: lq,
-        dt_ds: ts,
-    })
+    Ok(RoundJets { h, q: lq })
+}
+
+/// A round's raw jets at its end (`h[d][j]`: column j's d-th homogeneous derivative along,
+/// `d = 0 ..= k`, `k <= 2`) put in the section's standard form across at every rail parameter,
+/// to order k: column j times `c^j`, `c = (W_0 / W_q)^(1 / q)` the ratio of the row's end
+/// weights, its derivatives along by Leibniz' rule, so that both end weights are `W_0` all
+/// along. A one-span rational section of degree q is its rows only up to a Moebius map of its
+/// parameter across (the weights `w_j c^j`), so two parametrizations of one round give the
+/// same rows. Where the end weights are equal to order k the rows are kept as they are.
+///
+/// # Errors
+/// [`Refusal`] with `SM_ERR_INVALID_INPUT` for an end weight that is not positive; `SM_ERR`
+/// for a section of degree 0 or jets past the second order.
+fn standard_form_across(
+    h: &mut [Vec<Hom>],
+    q: usize,
+    k: usize,
+) -> core::result::Result<(), Refusal> {
+    if q == 0 || k > 2 || h.len() <= k {
+        return Err(sm_err().into());
+    }
+    // the end weights W_0, W_q and their derivatives along (0 past the jets' order)
+    let mut w0 = [0.0; 3];
+    let mut wq = [0.0; 3];
+    for d in 0..=k {
+        let row = el_ref(h, d)?;
+        *el_mut(&mut w0, d)? = el_ref(row, 0)?[3];
+        *el_mut(&mut wq, d)? = el_ref(row, q)?[3];
+    }
+    if !(w0[0] > 0.0) || !(wq[0] > 0.0) {
+        return Err(Refusal::invalid(
+            "SmBlendSetback: a round's weights must be positive",
+        ));
+    }
+    // ln c = (ln W_0 - ln W_q) / q, and its first two derivatives along
+    let qf = q as f64;
+    let l1 = (w0[1] / w0[0] - wq[1] / wq[0]) / qf;
+    let l2 = ((w0[2] * w0[0] - w0[1] * w0[1]) / (w0[0] * w0[0])
+        - (wq[2] * wq[0] - wq[1] * wq[1]) / (wq[0] * wq[0]))
+        / qf;
+    let c = (w0[0] / wq[0]).powf(1.0 / qf);
+    let (c1, c2) = (c * l1, c * (l2 + l1 * l1));
+    // c^j, c^(j - 1), c^(j - 2) (the last two only where j reaches them: their factors are 0
+    // below)
+    let (mut cj, mut cj1, mut cj2) = (1.0, 0.0, 0.0);
+    for j in 0..=q {
+        let jf = j as f64;
+        // (c^j)' and (c^j)''
+        let d1 = jf * cj1 * c1;
+        let d2 = jf * (jf - 1.0) * cj2 * c1 * c1 + jf * cj1 * c2;
+        let h0 = el(el_ref(h, 0)?, j)?;
+        *el_mut(el_mut(h, 0)?, j)? = axpy(&HOM_ZERO, cj, &h0);
+        if k >= 1 {
+            let h1 = el(el_ref(h, 1)?, j)?;
+            *el_mut(el_mut(h, 1)?, j)? = axpy(&axpy(&HOM_ZERO, cj, &h1), d1, &h0);
+            if k >= 2 {
+                let h2 = el(el_ref(h, 2)?, j)?;
+                let s2 = axpy(&axpy(&HOM_ZERO, cj, &h2), 2.0 * d1, &h1);
+                *el_mut(el_mut(h, 2)?, j)? = axpy(&s2, d2, &h0);
+            }
+        }
+        cj2 = cj1;
+        cj1 = cj;
+        cj *= c;
+    }
+    Ok(())
+}
+
+/// A row's homogeneous point at the middle of its parameter across: its Bernstein mean,
+/// `sum_j C(q, j) / 2^q H_j`.
+fn row_middle(row: &[Hom]) -> Result<Hom> {
+    let q = row.len().checked_sub(1).ok_or_else(sm_err)?;
+    let mut m = HOM_ZERO;
+    for (j, h) in row.iter().enumerate() {
+        m = axpy(&m, binomial(q, j)? / 2.0_f64.powf(q as f64), h);
+    }
+    Ok(m)
 }
 
 /// A circular round's end rows to order `k` (at most 2) from its GEOMETRY, not its
@@ -2182,14 +2268,10 @@ fn fill_hole_with(
     // each round's jets at its end, and the faces its across ends lie on
     let mut jets: Vec<Vec<Vec<Hom>>> = Vec::with_capacity(n);
     let mut qs: Vec<usize> = Vec::with_capacity(n);
-    let mut dt_ds: Vec<f64> = Vec::with_capacity(n);
     let mut face_at = [vec![n; n], vec![n; n]];
     for (r, round) in rounds.iter().enumerate() {
-        let RoundJets {
-            h,
-            q,
-            dt_ds: r_dt_ds,
-        } = round_jets(kernel, round, if any_curved { smax_usize(k, 2) } else { k })?;
+        let RoundJets { h, q } =
+            round_jets(kernel, round, if any_curved { smax_usize(k, 2) } else { k })?;
         // beside circular rounds a fill of a higher order than its faces' (G2 to the rounds,
         // G1 to the faces) takes their rows from their geometry
         let (h, q) = if kf < k {
@@ -2197,7 +2279,6 @@ fn fill_hole_with(
         } else {
             (h, q)
         };
-        dt_ds.push(r_dt_ds);
         for (e, at_e) in face_at.iter_mut().enumerate() {
             let hp = el_ref(el_ref(&h, 0)?, if e == 0 { 0 } else { q })?;
             let p = euclid(hp);
@@ -2345,36 +2426,17 @@ fn fill_hole_with(
         let mut mids: Vec<Point3> = Vec::with_capacity(n);
         let mut centre = Vec3::ZERO;
         let mut speeds: Vec<f64> = Vec::with_capacity(n);
-        let flags = EvaluateFlags {
-            u_side: Side::Left,
-            v_side: Side::Left,
-            only_upper_half: false,
-            non_zero_tangents: false,
-        };
         for &r in &cycle_round {
-            let round = el_ref(rounds, r)?;
-            let dom = round.surface.natural_uv_domain_with_nurb(kernel)?;
-            let across = if round.along == SurfParamType::U {
-                dom.v_interval()
-            } else {
-                dom.u_interval()
-            };
-            let uv = if round.along == SurfParamType::U {
-                Point2::new(round.end, across.evaluate(0.5))
-            } else {
-                Point2::new(across.evaluate(0.5), round.end)
-            };
-            let d = round.surface.evaluate(kernel, uv, 1, 1, flags)?;
-            let row0 = el_ref(&d, 0)?;
-            let point = el(row0, 0)?;
-            let speed = if round.along == SurfParamType::U {
-                el(el_ref(&d, 1)?, 0)?
-            } else {
-                el(row0, 1)?
-            };
+            // the end section's middle and its speed along there, by s, on the rows the patch
+            // takes (in the section's standard form, the middle of the geometry's parameter
+            // across, not of the round's own; #2697)
+            let jets_r = el_ref(&jets, r)?;
+            let m0 = row_middle(el_ref(jets_r, 0)?)?;
+            let m1 = row_middle(el_ref(jets_r, 1)?)?;
+            let point = euclid(&m0);
+            let speed = (xyz(&m1) - point * m1[3]) / m0[3];
             mids.push(point);
-            // by s (sm_SbRoundJets; the fork's d1de555)
-            speeds.push(speed.length() * el(&dt_ds, r)?);
+            speeds.push(speed.length());
             centre += point * (1.0 / nf);
         }
         for m in 0..n {
@@ -3253,8 +3315,9 @@ mod tests {
 
     /// A circular round's geometric rows are its geometry's: two parametrizations of one round
     /// (linear along with the arc's own weights, against quadratic along at an uneven speed with
-    /// the arc's weights scaled `1, 2, 4`) give the same rows to order 1 and 2, where their
-    /// jets differ; and a section that is no circular arc is refused.
+    /// the arc's weights scaled `1, 2, 4`) give the same rows to order 1 and 2, and the same
+    /// jets (by the rails' mean arc length, in the section's standard form across); and a
+    /// section that is no circular arc is refused.
     #[test]
     fn geometric_rows_are_the_geometry() {
         let k = Kernel::default();
@@ -3290,7 +3353,7 @@ mod tests {
                 most <= 1e-12 * (1.0 + r + s),
                 "order {order}: rows differ by {most}"
             );
-            // their jets do differ
+            // and so do their jets, the rows in the section's standard form across
             let mut jet_gap = 0.0f64;
             for (row_a, row_b) in raw[0].iter().zip(&raw[1]) {
                 for (ha, hb) in row_a.iter().zip(row_b) {
@@ -3299,7 +3362,10 @@ mod tests {
                     }
                 }
             }
-            assert!(jet_gap > 1e-3, "order {order}: the jets agree ({jet_gap})");
+            assert!(
+                jet_gap <= 1e-12 * (1.0 + r + s),
+                "order {order}: the jets differ by {jet_gap}"
+            );
             // row 0 is the end section: its ends are the rails' ends
             let row0 = &ra[0];
             let (pa, pb) = (euclid(&row0[0]), euclid(&row0[*qa]));
