@@ -21,8 +21,6 @@ doc.open
 doc.recover
 doc.recovery_discard
 doc.recovery_list
-document.inspect
-engine.commands
 explode.create
 explode.delete
 explode.list
@@ -43,7 +41,6 @@ frame.profile.insert
 frame.profile.list
 frame.profile.properties
 inspect.interference
-inspect.measure
 inspect.silhouette
 joint.as_built
 joint.cam
@@ -62,8 +59,6 @@ joint.rigid_group
 joint.screw
 joint.solve
 joint.sweep
-material.assign
-material.list
 mesh.convert
 motion.export
 motion.export_animation
@@ -169,7 +164,6 @@ sketch.include_3d
 sketch.infinite
 sketch.insert_dxf
 sketch.insert_svg
-sketch.inspect
 sketch.intersect
 sketch.intersection_curve
 sketch.isoparametric_curve
