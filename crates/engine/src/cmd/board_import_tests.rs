@@ -176,6 +176,58 @@ fn inserting_a_board_from_its_files_is_one_undo_step() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A board's folder is one set: picking any file in it finds the outline, the drills and the
+/// layers by their names, and the job file gives the thickness and finish. `file.gerber_files`
+/// says beforehand what will be used. A file named in `outline` is looked up in the set.
+#[test]
+fn a_boards_folder_is_inserted_as_one_set() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-board-set-{}", std::process::id())).join("Treasure");
+    let _ = std::fs::create_dir_all(&dir);
+    let head = "%FSLAX46Y46*%%MOMM*%";
+    let copper = format!("{head}%ADD10R,2X2*%D10*X110000000Y60000000D03*M02*");
+    let job = r#"{"GeneralSpecs": {"BoardThickness": 1.0, "Finish": "ENIG"}}"#;
+    for (name, text) in [
+        ("Gerber_BoardOutlineLayer.GKO", RECTANGLE_GERBER),
+        ("Drill_PTH_Through.DRL", CORNER_DRILLS),
+        ("Gerber_TopLayer.GTL", copper.as_str()),
+        ("board-job.gbrjob", job),
+        ("readme.txt", "not a layer"),
+    ] {
+        std::fs::write(dir.join(name), text).unwrap_or_else(|e| panic!("{e}"));
+    }
+    let picked = dir.join("Gerber_TopLayer.GTL").to_string_lossy().into_owned();
+    let mut s = Session::default();
+    let files = s.execute("file.gerber_files", &json!({"path": picked})).unwrap_or_else(|e| panic!("{e}"));
+    let roles: Vec<(String, String)> = files["files"]
+        .as_array()
+        .map(|a| a.iter().map(|f| (f["name"].as_str().unwrap_or("").into(), f["role"].as_str().unwrap_or("").into())).collect())
+        .unwrap_or_default();
+    assert_eq!(
+        roles,
+        [
+            ("Drill_PTH_Through.DRL".to_string(), "drill".to_string()),
+            ("Gerber_BoardOutlineLayer.GKO".into(), "outline".into()),
+            ("Gerber_TopLayer.GTL".into(), "top_copper".into()),
+        ],
+        "{files}"
+    );
+    assert_eq!(
+        (files["thickness"].as_f64(), files["finish"].as_str(), files["name"].as_str()),
+        (Some(1.0), Some("enig"), Some("Treasure")),
+        "{files}"
+    );
+    let r = s.execute("file.insert_gerber", &json!({"set": picked})).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!((r["holes"].as_u64(), r["thickness"].as_f64(), r["component_name"].as_str()), (Some(4), Some(1.0), Some("Treasure")), "{r}");
+    assert_eq!(r["layer_sketches"].as_array().map(Vec::len), Some(1), "{r}");
+    let component = r["component"].as_u64().unwrap_or(0);
+    assert_eq!(property(&s, component, "pcb.outline").as_deref(), Some("Gerber_BoardOutlineLayer.GKO"));
+    assert_eq!(property(&s, component, "pcb.top_copper").as_deref(), Some("Gerber_TopLayer.GTL"));
+    // A name not in the set is refused, naming it.
+    let e = s.execute("file.insert_gerber", &json!({"set": picked, "outline": "gone.gko"})).map(|_| ()).unwrap_err().to_string();
+    assert!(e.contains("gone.gko"), "{e}");
+    let _ = std::fs::remove_dir_all(dir.parent().unwrap_or(&dir));
+}
+
 /// `thickness` is how far the board is extruded.
 #[test]
 fn the_thickness_is_the_boards() {

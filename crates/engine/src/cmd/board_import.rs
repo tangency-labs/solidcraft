@@ -24,26 +24,87 @@ use std::f64::consts::{FRAC_PI_2, TAU};
 use serde_json::{Value, json};
 use solidcore_record::Vec2;
 use solidcraft_geom::prelude::*;
-use solidcraft_io::{Drills, Geom2, MAX_DRAWING_BYTES};
+use solidcraft_io::{Drills, Geom2, GerberSet, MAX_DRAWING_BYTES, SetRole};
 
 use super::CommandSpec;
 use super::board_layers::{self, Finish, Layer};
 use super::sketch::{edit, ids_of};
 use super::sketch_import::{add_geometry, bounds_of};
 use crate::params::{bad, string_list};
-use crate::schema::board_import::{BoardImportResult, InsertGerberParams};
+use crate::schema::board_import::{BoardImportResult, GerberFilesParams, GerberFilesResult, InsertGerberParams, SetFileInfo};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 pub(super) const CMD: &str = "file.insert_gerber";
 const CONTRACT: TypedContract<InsertGerberParams> = TypedContract::new();
+const FILES_CMD: &str = "file.gerber_files";
+const FILES_CONTRACT: TypedContract<GerberFilesParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("file.insert_gerber", "Insert PCB (Gerber)", crate::checked!("file.insert_gerber", insert_gerber))
     .at("SOLID", "INSERT")
     .icon("import")
     .contract(&CONTRACT)
     .output(output_schema_for::<BoardImportResult>)
-    .params("outline: path of the board outline Gerber (RS-274X) layer | outline_text: its text; drills?: path or [paths] of Excellon drill files (up to 16) and/or drills_text?: text or [texts]; thickness?: mm (default 1.6, more than 0, at most 20); name?: the new component's (default: the outline file's name without its extension, or Board); origin?: file (default: keep the files' coordinates) | corner (the lower-left corner of the box around the outline at the origin); layers?: {top_copper?, bottom_copper?, top_mask?, bottom_mask?, top_silk?, bottom_silk?: path of that Gerber layer} and/or layers_text?: the same keys with the layers' text; finish?: hasl (default) | enig, how bare copper looks → {component, component_name, sketch, feature, body, bodies, holes, slots, skipped, thickness, offset: [x, y] added to the files' coordinates, layer_sketches?: ids, prints?: names, warnings}: a new component in the active one, named after the board, holding a sketch Outline on XY with the outline (closed loops inside it are cut-outs) and every hole and slot wholly inside the board, and one extrude of the board by its thickness as the body Board; its properties pcb.outline, pcb.drills and pcb.thickness name the files and the thickness; a hole or slot outside the board or across its edge is skipped with a warning; gaps in the outline up to 0.05 mm are closed with a line and a warning, a wider gap is refused, naming it; each layer given is kept exactly as hidden sketches in the component (Top copper, Bottom mask...) and the board gets each side's printed look (solder mask, copper, finish, silkscreen) as an image on its face, Top print and Bottom print; component properties pcb.<layer> name the layer files. A sketch being edited is finished first. One undo step")];
+    .params("set?: a board's files as one: a zip, a folder, or any file in the board's folder; each file's layer is found from what it says (Gerber X2, Excellon), the job file (.gbrjob, which also gives thickness and finish) and its name, and outline, drills and layers then name files in the set to use instead; outline: path of the board outline Gerber (RS-274X) layer | outline_text: its text; drills?: path or [paths] of Excellon drill files (up to 16) and/or drills_text?: text or [texts]; thickness?: mm (default 1.6, more than 0, at most 20); name?: the new component's (default: the outline file's name without its extension, or Board); origin?: file (default: keep the files' coordinates) | corner (the lower-left corner of the box around the outline at the origin); layers?: {top_copper?, bottom_copper?, top_mask?, bottom_mask?, top_silk?, bottom_silk?: path of that Gerber layer} and/or layers_text?: the same keys with the layers' text; finish?: hasl (default) | enig, how bare copper looks → {component, component_name, sketch, feature, body, bodies, holes, slots, skipped, thickness, offset: [x, y] added to the files' coordinates, layer_sketches?: ids, prints?: names, warnings}: a new component in the active one, named after the board, holding a sketch Outline on XY with the outline (closed loops inside it are cut-outs) and every hole and slot wholly inside the board, and one extrude of the board by its thickness as the body Board; its properties pcb.outline, pcb.drills and pcb.thickness name the files and the thickness; a hole or slot outside the board or across its edge is skipped with a warning; gaps in the outline up to 0.05 mm are closed with a line and a warning, a wider gap is refused, naming it; each layer given is kept exactly as hidden sketches in the component (Top copper, Bottom mask...) and the board gets each side's printed look (solder mask, copper, finish, silkscreen) as an image on its face, Top print and Bottom print; component properties pcb.<layer> name the layer files. A sketch being edited is finished first. One undo step"),
+    CommandSpec::new("file.gerber_files", "PCB Files", gerber_files)
+        .icon("import")
+        .noundo()
+        .contract(&FILES_CONTRACT)
+        .output(output_schema_for::<GerberFilesResult>)
+        .params("path: a board's files as one: a zip, a folder, or any file in the board's folder → {source, files: [{name, role: outline | drill | top_copper | bottom_copper | top_mask | bottom_mask | top_silk | bottom_silk | other}], thickness?: mm, finish?: hasl | enig, name, warnings}: what file.insert_gerber with this `set` would use; nothing changes"),
+];
+
+/// Read a board's set of files from `path`, naming the set in a failure.
+fn read_set(cmd: &str, path: &str) -> Result<GerberSet> {
+    if path.trim().is_empty() || path.len() >= 4096 {
+        return Err(bad(cmd, "a file path must be a path"));
+    }
+    solidcraft_io::read_gerber_set(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))
+}
+
+/// The finish the job file names, when it is one the import draws.
+fn job_finish(set: &GerberSet) -> Option<&'static str> {
+    let f = set.job.as_ref()?.finish.as_ref()?.to_ascii_lowercase();
+    if f.contains("enig") || f.contains("gold") {
+        Some("enig")
+    } else if f.contains("hal") || f.contains("hasl") {
+        Some("hasl")
+    } else {
+        None
+    }
+}
+
+/// The board's name from the set: the zip's or the folder's name.
+fn set_name(set: &GerberSet) -> String {
+    let path = std::path::Path::new(&set.source);
+    let stem = if solidcraft_io::is_zip_path(&set.source) { path.file_stem() } else { path.file_name() };
+    stem.map(|s| s.to_string_lossy().trim().chars().take(MAX_NAME).collect::<String>()).filter(|s| !s.is_empty()).unwrap_or_else(|| "Board".into())
+}
+
+fn gerber_files(_s: &mut Session, p: &Value) -> Result<Value> {
+    let path = text_key(p, "path")?.ok_or_else(|| bad(FILES_CMD, "give `path`: a zip, a folder, or a file in the board's folder"))?;
+    let set = read_set(FILES_CMD, path)?;
+    let reply = GerberFilesResult {
+        source: set.source.clone(),
+        files: set.files.iter().map(|f| SetFileInfo { name: f.name.clone(), role: f.role.key().to_string() }).collect(),
+        thickness: set.job.as_ref().and_then(|j| j.thickness),
+        finish: job_finish(&set).map(str::to_string),
+        name: set_name(&set),
+        warnings: set.warnings.clone(),
+    };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+/// A file's name and text: from the set when there is one (`name` is a file in it), else from disk.
+pub(super) fn fetch(set: Option<&GerberSet>, name: &str) -> Result<(String, String)> {
+    match set {
+        Some(set) => set
+            .file(name)
+            .map(|f| (f.name.clone(), f.text.clone()))
+            .ok_or_else(|| bad(CMD, format!("`{name}` is not one of the files in {}", set.source))),
+        None => Ok((file_name(name), read_text(name)?)),
+    }
+}
 
 /// End points closer than this (mm) are one point. Fabrication files give coordinates to a
 /// micrometre or finer, and a drawn outline's ends meet exactly.
@@ -104,10 +165,11 @@ const BODY_NAME: &str = "Board";
 
 fn insert_gerber(s: &mut Session, p: &Value) -> Result<Value> {
     let thickness = match p.get("thickness") {
-        None | Some(Value::Null) => DEFAULT_THICKNESS,
+        None | Some(Value::Null) => None,
         Some(v) => v
             .as_f64()
             .filter(|t| t.is_finite() && *t > 0.0 && *t <= MAX_THICKNESS)
+            .map(Some)
             .ok_or_else(|| bad(CMD, "`thickness` must be a number of mm, more than 0 and at most 20"))?,
     };
     let origin = match p.get("origin") {
@@ -128,22 +190,53 @@ fn insert_gerber(s: &mut Session, p: &Value) -> Result<Value> {
     if drill_paths.len() + drill_texts.len() > MAX_DRILL_FILES {
         return Err(bad(CMD, format!("give at most {MAX_DRILL_FILES} drill files")));
     }
-    let (layer_sources, finish) = board_layers::params(p)?;
+    let (layer_sources, mut finish) = board_layers::params(p)?;
+    let set_path = text_key(p, "set")?;
     // Every parameter is checked before any file is read.
+    let set = set_path.map(|path| read_set(CMD, path)).transpose()?;
+    let set_ref = set.as_ref();
+    let mut layer_sources = layer_sources;
+    let mut warnings = Vec::new();
+    let mut drill_paths = drill_paths;
+    let mut outline_path = outline_path;
+    if let Some(set) = set_ref {
+        warnings.extend(set.warnings.iter().cloned());
+        if outline_path.is_none() && outline_text.is_none() {
+            let found = set
+                .with_role(SetRole::Outline)
+                .ok_or_else(|| EngineError::Other(format!("{}: no board outline file was found; name it in `outline`", set.source)))?;
+            outline_path = Some(found.name.as_str());
+        }
+        if drill_paths.is_empty() && drill_texts.is_empty() && p.get("drills").is_none_or(Value::is_null) {
+            drill_paths = set.files.iter().filter(|f| f.role == SetRole::Drill).take(MAX_DRILL_FILES).map(|f| f.name.clone()).collect();
+        }
+        if layer_sources.is_empty() && p.get("layers").is_none_or(Value::is_null) && p.get("layers_text").is_none_or(Value::is_null) {
+            layer_sources = board_layers::ROLES
+                .iter()
+                .filter_map(|r| {
+                    let f = set.files.iter().find(|f| f.role.layer_key() == Some(r.key))?;
+                    Some((*r, board_layers::Source::Path(f.name.as_str())))
+                })
+                .collect();
+        }
+        if p.get("finish").is_none_or(Value::is_null) && job_finish(set) == Some("enig") {
+            finish = board_layers::Finish::Enig;
+        }
+    }
+    let thickness = thickness.or_else(|| set_ref.and_then(|s| s.job.as_ref()?.thickness)).unwrap_or(DEFAULT_THICKNESS);
     let (outline_name, outline_text) = match (outline_path, outline_text) {
         (Some(_), Some(_)) => return Err(bad(CMD, "give `outline` or `outline_text`, not both")),
-        (Some(path), None) => (file_name(path), read_text(path)?),
+        (Some(path), None) => fetch(set_ref, path)?,
         (None, Some(text)) if text.len() <= MAX_DRAWING_BYTES => ("outline text".to_string(), text.to_string()),
         (None, Some(_)) => return Err(bad(CMD, "the outline is too large")),
         (None, None) => return Err(bad(CMD, "give `outline` (the board outline Gerber file) or `outline_text`")),
     };
-    let mut warnings = Vec::new();
     let read = solidcraft_io::read_gerber_outline(&outline_text).map_err(|e| EngineError::Other(format!("{outline_name}: {e}")))?;
     warnings.extend(read.warnings.iter().map(|w| format!("{outline_name}: {w}")));
     let mut drills = Drills::default();
     let mut sources: Vec<(String, String)> = Vec::new();
     for path in &drill_paths {
-        sources.push((file_name(path), read_text(path)?));
+        sources.push(fetch(set_ref, path)?);
     }
     for (i, text) in drill_texts.iter().enumerate() {
         if text.len() > MAX_DRAWING_BYTES {
@@ -162,13 +255,16 @@ fn insert_gerber(s: &mut Session, p: &Value) -> Result<Value> {
         drills.arcs.extend(d.arcs);
         warnings.extend(d.warnings.iter().map(|w| format!("{label}: {w}")));
     }
-    let default_name = outline_path
-        .and_then(|path| std::path::Path::new(path).file_stem())
-        .map(|stem| stem.to_string_lossy().trim().chars().take(MAX_NAME).collect::<String>())
-        .filter(|stem| !stem.is_empty())
-        .unwrap_or_else(|| "Board".to_string());
+    let default_name = match set_ref {
+        Some(set) => set_name(set),
+        None => outline_path
+            .and_then(|path| std::path::Path::new(path).file_stem())
+            .map(|stem| stem.to_string_lossy().trim().chars().take(MAX_NAME).collect::<String>())
+            .filter(|stem| !stem.is_empty())
+            .unwrap_or_else(|| "Board".to_string()),
+    };
     let drill_files: Vec<String> = sources.into_iter().map(|(label, _)| label).collect();
-    let layers = board_layers::read(&layer_sources, &mut warnings)?;
+    let layers = board_layers::read(&layer_sources, set_ref, &mut warnings)?;
     let board = Board {
         outline: &read.geom,
         drills: &drills,

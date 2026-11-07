@@ -25,6 +25,12 @@ use super::types::StringList;
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct InsertGerberParams {
+    /// A board's files as one: a zip, a folder, or any file in the board's folder. Each file's
+    /// layer is found from what it says (Gerber X2 attributes, an Excellon header), the job file
+    /// (`.gbrjob`, which also gives the thickness and finish when they aren't given) and its name.
+    /// With a set, `outline`, `drills` and `layers` name files in it, to use instead of those found.
+    #[serde(default)]
+    pub set: Option<String>,
     /// The board outline layer, a Gerber file: its path. Give this or `outline_text`.
     #[serde(default)]
     pub outline: Option<String>,
@@ -125,6 +131,44 @@ fn origin<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
 
 fn origin_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({"enum": ["file", "corner", null]})
+}
+
+/// Look at a board's files before inserting them: which file is which layer, and what the job
+/// file says. Nothing changes.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct GerberFilesParams {
+    /// A zip, a folder, or any file in the board's folder.
+    pub path: String,
+}
+
+/// One Gerber or Excellon file of a board's set.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SetFileInfo {
+    /// Its name in the set (a path inside a zip), as `file.insert_gerber` takes it.
+    pub name: String,
+    /// `outline`, `drill`, `top_copper`, `bottom_copper`, `top_mask`, `bottom_mask`, `top_silk`,
+    /// `bottom_silk`, or `other` (not used: paste, inner copper, drawings...).
+    pub role: String,
+}
+
+/// What `file.gerber_files` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct GerberFilesResult {
+    /// The zip or folder read.
+    pub source: String,
+    /// The Gerber and Excellon files found; other files are left out.
+    pub files: Vec<SetFileInfo>,
+    /// The board's thickness the job file gives, in mm.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thickness: Option<f64>,
+    /// The finish the job file gives, when it is one the import draws (`hasl` or `enig`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finish: Option<String>,
+    /// The board's default name: the zip's or the folder's.
+    pub name: String,
+    /// What was noticed, such as two files for one layer.
+    pub warnings: Vec<String>,
 }
 
 /// What `file.insert_gerber` returns.

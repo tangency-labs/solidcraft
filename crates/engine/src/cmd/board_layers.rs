@@ -11,7 +11,7 @@ use solidcore_record::Vec2;
 use solidcraft_io::{Geom2, MAX_DRAWING_BYTES};
 use tiny_skia::{FillRule, Mask, Path, PathBuilder, Transform};
 
-use super::board_import::{CMD, file_name, read_text, run};
+use super::board_import::{CMD, fetch, run};
 use super::sketch::edit;
 use super::sketch_import::add_geometry;
 use crate::params::bad;
@@ -106,11 +106,11 @@ pub(super) enum Source<'a> {
 }
 
 /// Read the layers' files; their warnings go to `warnings`, named by file.
-pub(super) fn read(given: &[(Role, Source)], warnings: &mut Vec<String>) -> Result<Vec<Layer>> {
+pub(super) fn read(given: &[(Role, Source)], set: Option<&solidcraft_io::GerberSet>, warnings: &mut Vec<String>) -> Result<Vec<Layer>> {
     let mut out = Vec::with_capacity(given.len());
     for (role, src) in given {
         let (label, text) = match src {
-            Source::Path(path) => (file_name(path), read_text(path)?),
+            Source::Path(path) => fetch(set, path)?,
             Source::Text(t) => (format!("{} text", role.name.to_lowercase()), (*t).to_string()),
         };
         let layer = solidcraft_io::read_gerber_layer(&text).map_err(|e| EngineError::Other(format!("{label}: {e}")))?;
