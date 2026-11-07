@@ -4269,6 +4269,22 @@ mod tests {
         executive.set_local_surfaces(&faces, surfaces, &[top]);
         seed_clearance_surfaces(&mut executive, &brep);
         executive.keep_unmoved_edges(&kernel, &brep).unwrap();
+        let mut eligible_before = 0;
+        for e in bp1::edges(&brep, None).unwrap() {
+            let mut neighbourhood = edge::faces(&brep, e, None).unwrap();
+            let (start, end) = vertex::edge_vertex_pair(&brep, e).unwrap();
+            for v in [start, end].into_iter().flatten() {
+                neighbourhood.extend(vertex::faces(&brep, v).unwrap());
+            }
+            if !neighbourhood.is_empty() && neighbourhood.iter().all(|f| *f != top) {
+                eligible_before += 1;
+            }
+        }
+        eprintln!(
+            "issue 2976 kept edges: before={eligible_before}, after={}",
+            executive.kept_edges.len()
+        );
+        assert_eq!(eligible_before, 4);
         let mut crossing = 0;
         let mut far = 0;
         for e in bp1::edges(&brep, None).unwrap() {
