@@ -207,6 +207,10 @@ pub struct DimensionStatusResult {
     pub status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub why: Option<String>,
+    /// Its sheet shows it as it last was: its view is out of date, or it was read from another model
+    /// or record than it has now.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub out_of_date: bool,
 }
 
 /// What `drawing.status` returns.
@@ -218,7 +222,7 @@ pub struct DrawingStatusResult {
     pub dimensions: Vec<DimensionStatusResult>,
     /// How many views are out of date.
     pub waiting: usize,
-    /// A deferred drawing: they wait for `drawing.update`.
+    /// A deferred drawing: its views and dimensions out of date wait for `drawing.update`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub held: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

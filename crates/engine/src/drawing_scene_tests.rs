@@ -1573,14 +1573,15 @@ fn overfill(s: &mut Session, view: u64) -> Drawn {
     std::mem::replace(&mut entry.drawn, Drawn { group: Some(group), status: Status::Drawn, stats: None, boundary: None, frame: None, owners: None })
 }
 
-/// Each dimension's word is the one inspect uses: read, then lost when its body goes, with why. A
-/// parameter status takes nothing, and needs a drawing open.
+/// Each dimension's word is the one inspect uses: read, then lost when its body goes, with why. Its
+/// view not drawn yet, it isn't either: it is out of date. A parameter status takes nothing, and
+/// needs a drawing open.
 #[test]
 fn status_says_where_each_dimension_stands() {
     let (mut s, _, [front, _]) = front_and_top();
     let added = run(&mut s, "drawing.dimension.add", json!({"view": ids::encode(front), "kind": {"length": {"edge": [50, 0, 20]}}}));
     let reply = status_of(&mut s).0;
-    assert_eq!(reply["dimensions"], json!([{"dimension": added["record"]["id"], "status": "ok"}]), "{reply}");
+    assert_eq!(reply["dimensions"], json!([{"dimension": added["record"]["id"], "status": "ok", "out_of_date": true}]), "{reply}");
     let drawing = ids::encode(s.open_drawing.unwrap());
     run(&mut s, "drawing.close", json!({}));
     assert!(s.execute("drawing.status", &json!({})).is_err(), "no drawing open");
@@ -1592,6 +1593,68 @@ fn status_says_where_each_dimension_stands() {
     assert_eq!(lost["status"], json!("lost"), "{reply}");
     assert!(!lost["why"].as_str().unwrap().is_empty(), "{reply}");
     assert!(s.execute("drawing.status", &json!({"sheet": "x"})).is_err());
+}
+
+/// The dimensions a `drawing.status` reply says are out of date, by id, in its order.
+fn out_of_date_dimensions(reply: &Value) -> Vec<Value> {
+    let dimensions = reply["dimensions"].as_array().unwrap().iter();
+    dimensions.filter(|d| d["out_of_date"] == json!(true)).map(|d| d["dimension"].clone()).collect()
+}
+
+/// A deferred drawing, its front view's bottom edge dimensioned, updated and drawn, then closed while
+/// `change` runs on the model and opened again: the session, its sheet and the dimension.
+fn held_after(change: impl FnOnce(&mut Session)) -> (Session, u64, u64) {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let id = front_edge(&mut s, front);
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    run(&mut s, "drawing.update", json!({}));
+    settled(&mut s, sheet);
+    run(&mut s, "drawing.close", json!({}));
+    change(&mut s);
+    run(&mut s, "drawing.open", drawing);
+    (s, sheet, id)
+}
+
+/// Updated and drawn, a drawing has nothing out of date, and doesn't hold.
+fn nothing_waits_once_updated(s: &mut Session, sheet: u64) {
+    run(s, "drawing.update", json!({}));
+    settled(s, sheet);
+    let (reply, words) = status_of(s);
+    assert!(all_are(&words, "current") && out_of_date_dimensions(&reply).is_empty() && reply.get("held").is_none(), "{reply}");
+}
+
+/// A deferred drawing held by a model change lists, beside its views out of date, their dimension:
+/// the sheet shows its last reading too, as `drawing.export` lists it.
+#[test]
+fn status_lists_a_held_views_dimensions_with_it() {
+    let (mut s, sheet, id) = held_after(|s| {
+        let block = s.doc.features[0].id;
+        run(s, "timeline.edit", json!({"feature": block.to_string(), "set": {"length": 120}}));
+    });
+    let (reply, words) = status_of(&mut s);
+    assert!(all_are(&words, "out_of_date"), "{reply}");
+    assert_eq!((&reply["held"], &reply["waiting"]), (&json!(true), &json!(2)), "{reply}");
+    assert_eq!(out_of_date_dimensions(&reply), [json!(ids::encode(id))], "{reply}");
+    assert_eq!(out_of_date_dimensions(&reply), listed(&mut s, sheet)[2..], "as the export lists it, after the views");
+    nothing_waits_once_updated(&mut s, sheet);
+}
+
+/// A change that shows the same (a sketch: a new world state, no new body) leaves a held drawing's
+/// views current, but not their dimension, read from the model before it: listed out of date, with
+/// the drawing held though no view waits, as `drawing.export` lists it.
+#[test]
+fn status_lists_dimensions_out_of_date_whose_views_are_current() {
+    let (mut s, sheet, id) = held_after(|s| {
+        run(s, "sketch.create", json!({"plane": "XY", "name": "Note"}));
+        run(s, "sketch.finish", json!({}));
+    });
+    let (reply, words) = status_of(&mut s);
+    assert!(all_are(&words, "current"), "{reply}");
+    assert_eq!((&reply["held"], &reply["waiting"]), (&json!(true), &json!(0)), "{reply}");
+    assert_eq!(out_of_date_dimensions(&reply), [json!(ids::encode(id))], "{reply}");
+    assert_eq!(out_of_date_dimensions(&reply), listed(&mut s, sheet), "as the export lists it");
+    nothing_waits_once_updated(&mut s, sheet);
 }
 
 /// A dimension of the block's top front edge on view `view`, 10 from it; its id.
