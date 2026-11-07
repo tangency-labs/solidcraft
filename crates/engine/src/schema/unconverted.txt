@@ -17,8 +17,6 @@ file.save_mesh
 file.slicers
 joint.sweep
 motion.export_animation
-motion.interference
-motion.plot
 motion.trace
 motion.trace.edit
 motion.trace.keep
