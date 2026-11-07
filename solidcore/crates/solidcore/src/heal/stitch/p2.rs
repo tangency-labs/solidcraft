@@ -384,20 +384,27 @@ pub enum ClosedGapKind {
     },
 }
 
-/// One gap the stitcher closed: what it closed (the entity pair), the gap it
-/// measured, and the tolerance growth the closure applied (solidcore#2975). The
-/// growth is the fused entity's tolerance after the closure minus the larger of
-/// the two operands' tolerances before: the closure's own rounding is what grows
-/// the body's tolerance, and this reports it so a caller can gate it.
+/// A closure's certified geometry bound and tolerance accounting (solidcore#2975).
+/// The bound includes floating-point rounding. For edges it bounds both directed
+/// Hausdorff distances via an endpoint-to-endpoint parameter correspondence; it
+/// need not be the tightest Hausdorff bound. Unsupported enclosures return an
+/// error from the reporting operation, never a sampled estimate as a certificate.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ClosedGap {
     /// What the stitcher closed.
     pub kind: ClosedGapKind,
-    /// The gap the stitcher measured between the two pieces.
+    /// Certified upper bound on the gap, in model units. A squeeze bounds the
+    /// whole removed curve's distance to the kept point; a split bounds the source
+    /// point's distance to the original curve at the split parameter.
     pub gap: f64,
-    /// The tolerance growth the closure applied (never negative; `0.0` when the
-    /// fused entity keeps the operands' larger tolerance exactly).
+    /// Upper bound on `max(tolerance_after - tolerance_before, 0)`, rounded up.
+    /// Exactly zero when the surviving entity's stored tolerance did not grow.
     pub growth: f64,
+    /// The surviving entity's own stored tolerance before this closure. For a
+    /// split this is the new vertex's tolerance before its explicit adjustment.
+    pub tolerance_before: f64,
+    /// The surviving entity's stored tolerance after this closure.
+    pub tolerance_after: f64,
 }
 
 /// The result of [`Stitch::split_edges_with_vertices`].
@@ -529,16 +536,16 @@ impl Stitch<'_> {
 
                     let surv_v = surv_v.ok_or_else(|| deref("edge without vertex"))?;
                     let deleted_report = del_v.unwrap_or(surv_v);
-                    // (not upstream, #2975) the squeeze's closure record: the edge it
-                    // closed, the short length it closed it by, and the growth of the
-                    // surviving vertex's tolerance over the larger of the two.
+                    // Bound all the removed geometry, not its sampled length or
+                    // merely the distance between its endpoints.
                     let squeeze_report = if self.report_gaps.is_some() {
                         Some((
-                            smos_max(
-                                vertex::tolerance(b, surv_v)?,
-                                vertex::tolerance(b, deleted_report)?,
-                            ),
-                            length,
+                            vertex::tolerance(b, surv_v)?,
+                            super::bounds::curve_to_point(
+                                curve_of(b, e)?,
+                                &edge::interval(b, e)?,
+                                vertex::point(b, surv_v)?,
+                            )?,
                         ))
                     } else {
                         None
@@ -554,8 +561,9 @@ impl Stitch<'_> {
                                 deleted: deleted_report,
                             },
                             gap,
-                            (after - pre).max(0.0),
-                        );
+                            pre,
+                            after,
+                        )?;
                     }
 
                     if candidate_vertices.is_some() {
@@ -646,24 +654,40 @@ impl Stitch<'_> {
                             let new_tol =
                                 smos_max(vertex::tolerance(b, v)?, vertex::tolerance(b, new_v)?);
                             let split_report = if self.report_gaps.is_some() {
-                                Some(new_tol)
+                                let range = edge::interval(b, e)?;
+                                let parameter = if edge::start_vertex(b, e)? == Some(new_v) {
+                                    range.min()
+                                } else if edge::end_vertex(b, e)? == Some(new_v) {
+                                    range.max()
+                                } else {
+                                    return Err(SolidError::invalid_input(
+                                        "heal::stitch::bounds",
+                                        "split vertex is not on either resulting edge end",
+                                    ));
+                                };
+                                Some((
+                                    vertex::tolerance(b, new_v)?,
+                                    super::bounds::point_at_curve(
+                                        vertex::point(b, v)?,
+                                        curve_of(b, e)?,
+                                        parameter,
+                                    )?,
+                                ))
                             } else {
                                 None
                             };
                             vertex::set_tolerance(b, new_v, zone_tol3d(k, new_tol), true, true)?;
-                            if let Some(pre) = split_report {
-                                // (not upstream, #2975) the split's closure record: the
-                                // distance it split by and the rounding it applied to the
-                                // new vertex's tolerance.
+                            if let Some((pre, bound)) = split_report {
                                 let after = vertex::tolerance(b, new_v)?;
                                 self.record_gap(
                                     ClosedGapKind::Split {
                                         edge: e,
                                         created: new_v,
                                     },
-                                    split.dist_to_edge,
-                                    (after - pre).max(0.0),
-                                );
+                                    bound,
+                                    pre,
+                                    after,
+                                )?;
                             }
                             more_work_needed = true;
 
@@ -835,7 +859,26 @@ impl Stitch<'_> {
                     let deleted = if choice.keep_first { cv } else { v };
                     let pair_report = if self.report_gaps.is_some() && (do_glue || do_squeeze) {
                         Some((
-                            smos_max(vertex::tolerance(b, kept)?, vertex::tolerance(b, deleted)?),
+                            vertex::tolerance(b, kept)?,
+                            if do_squeeze {
+                                if let Some(e) = squeeze_edge {
+                                    super::bounds::curve_to_point(
+                                        curve_of(b, e)?,
+                                        &edge::interval(b, e)?,
+                                        vertex::point(b, kept)?,
+                                    )?
+                                } else {
+                                    super::bounds::points(
+                                        vertex::point(b, kept)?,
+                                        vertex::point(b, deleted)?,
+                                    )?
+                                }
+                            } else {
+                                super::bounds::points(
+                                    vertex::point(b, kept)?,
+                                    vertex::point(b, deleted)?,
+                                )?
+                            },
                             if do_glue {
                                 ClosedGapKind::Vertex { kept, deleted }
                             } else {
@@ -861,9 +904,9 @@ impl Stitch<'_> {
                         }
                         v = cv;
                     }
-                    if let Some((pre, kind)) = pair_report {
+                    if let Some((pre, bound, kind)) = pair_report {
                         let after = vertex::tolerance(b, v)?;
-                        self.record_gap(kind, dist_to_v, (after - pre).max(0.0));
+                        self.record_gap(kind, bound, pre, after)?;
                     }
 
                     // The surviving vertex (which is pV) should be a candidate.
@@ -1176,9 +1219,14 @@ impl Stitch<'_> {
                     // (not upstream, #2975) capture the closure's operands before the
                     // glue, and the kept edge's tolerance after.
                     let edge_report = if self.report_gaps.is_some() {
-                        Some(smos_max(
+                        Some((
                             edge::tolerance(b, keep)?,
-                            edge::tolerance(b, delete)?,
+                            super::bounds::curves(
+                                curve_of(b, e)?,
+                                [e_ivl.min(), e_ivl.max()],
+                                curve_of(b, test_e)?,
+                                [t_start, t_end],
+                            )?,
                         ))
                     } else {
                         None
@@ -1202,16 +1250,17 @@ impl Stitch<'_> {
                             }
                             set_none(&mut v_edges, kk)?;
                             done_with_vertex = false;
-                            if let Some(pre) = edge_report {
+                            if let Some((pre, bound)) = edge_report {
                                 let after = edge::tolerance(b, e)?;
                                 self.record_gap(
                                     ClosedGapKind::Edge {
                                         kept: e,
                                         deleted: delete,
                                     },
-                                    dist_to_curve,
-                                    (after - pre).max(0.0),
-                                );
+                                    bound,
+                                    pre,
+                                    after,
+                                )?;
                             }
                         }
                         Err(err) if err.is_unported_or_cancelled() => return Err(err),

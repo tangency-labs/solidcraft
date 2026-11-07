@@ -935,7 +935,7 @@ pub struct Stitch<'c> {
     /// default `FALSE`).
     pub remove_laminar_slivers: bool,
     /// When `Some`, the stitch records what it closed: the entities, the gap it
-    /// measured, and the tolerance growth its editing applied (not upstream,
+    /// enclosed, and the tolerance growth its editing applied (not upstream,
     /// solidcore#2975). Nothing else changes.
     pub report_gaps: Option<Vec<ClosedGap>>,
 }
@@ -948,12 +948,32 @@ impl Stitch<'_> {
     }
 
     /// Records one closed gap when the caller asked for the report. The growth is
-    /// how much the fused entity's tolerance rose over the larger of the two
-    /// operands' tolerances at the moment the stitcher decided to glue.
-    pub(crate) fn record_gap(&mut self, kind: ClosedGapKind, gap: f64, growth: f64) {
+    /// an outward-rounded bound on how much the surviving entity's tolerance rose
+    /// over its own tolerance before the closure, including inherited tolerance.
+    pub(crate) fn record_gap(
+        &mut self,
+        kind: ClosedGapKind,
+        gap: f64,
+        before: f64,
+        after: f64,
+    ) -> Result<()> {
         if let Some(gaps) = self.report_gaps.as_mut() {
-            gaps.push(ClosedGap { kind, gap, growth });
+            let growth = super::bounds::growth(before, after)?;
+            if !gap.is_finite() || gap < 0.0 {
+                return Err(SolidError::invalid_input(
+                    "heal::stitch::bounds",
+                    "non-finite or negative gap bound",
+                ));
+            }
+            gaps.push(ClosedGap {
+                kind,
+                gap,
+                growth,
+                tolerance_before: before,
+                tolerance_after: after,
+            });
         }
+        Ok(())
     }
 }
 

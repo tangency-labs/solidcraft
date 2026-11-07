@@ -1902,11 +1902,13 @@ pub(crate) fn stitch_faces_with_callback<'a, C: StitchCallback>(
 
 /// [`stitch_faces_with_callback`] that additionally returns each gap the stitch
 /// closed, with the tolerance growth its closure applied (not upstream,
-/// solidcore#2975). Nothing else the stitch does changes.
+/// solidcore#2975). The caller supplies the rollback boundary; certificate errors
+/// propagate regardless of the legacy edit-status flags.
 ///
 /// # Errors
 ///
-/// Those of [`stitch_faces`].
+/// Those of [`stitch_faces`] and geometry enclosure failures (unsupported curve
+/// kinds, invalid data or non-finite bounds).
 pub(crate) fn stitch_faces_with_gap_report(
     k: &mut Kernel,
     b: &mut Brep,
