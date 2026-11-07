@@ -330,6 +330,33 @@ fn project_dialog_keeps_geometry_targets_and_can_project_whole_bodies_unlinked()
     assert!(!sketch.curves.is_empty());
 }
 
+/// Project's Geometry field takes a named construction point and makes a linked point of it
+/// (#12075).
+#[test]
+fn project_dialog_takes_a_construction_point() {
+    let mut h = Harness::new();
+    h.app.run("construct.point.vertex", json!({"point": {"point": [10, 5, 20]}, "name": "Point1"})).unwrap();
+    h.app.run("sketch.create", json!({"plane": "YZ"})).unwrap();
+    h.app.start("sketch.project");
+    h.frames(4);
+    let point = Sel::ConstructionPoint { name: "Point1".into() };
+    {
+        let d = h.app.dialog.as_mut().expect("Project opens its dialog");
+        assert_ne!(d.inputs[0].accept & crate::selection::CONSTRUCTION_POINTS, 0, "the Geometry field takes construction points");
+        d.inputs[0].items = vec![point];
+    }
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(apply_commands(&h.app, d).unwrap(), vec![("sketch.project".into(), json!({"refs":[{"point":"Point1"}],"projection_link":true}))]);
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    h.settle();
+    let sketch = h.app.session.active_sketch.expect("Project leaves the sketch active");
+    let state = crate::open_meshing::session_world(&h.app.session);
+    let sketch = &state.sketch(sketch).unwrap().sketch;
+    assert_eq!(sketch.links.len(), 1);
+    assert_eq!(sketch.links[0].source, solidcraft_engine::sketch::LinkSource::ConstructionPoint { name: "Point1".into() });
+    assert_eq!(sketch.link_points(&sketch.links[0].id).len(), 1);
+}
+
 #[test]
 fn apply_commits_once_keeps_values_and_waits_for_new_selection_ok_closes() {
     for command in ["sketch.offset", "sketch.mirror", "sketch.pattern.rectangular", "sketch.pattern.circular"] {

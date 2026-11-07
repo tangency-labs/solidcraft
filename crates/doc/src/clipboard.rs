@@ -178,7 +178,7 @@ pub(crate) fn remap_link(
             remap_link(a, ids, names, bodies, depth + 1);
             remap_link(b, ids, names, bodies, depth + 1);
         }
-        LinkSource::Plane { name } => mapped_name(name, names),
+        LinkSource::Plane { name } | LinkSource::ConstructionPoint { name } => mapped_name(name, names),
         // A construction axis, by name (#9324); the origin axes are no feature's.
         LinkSource::Axis { name } if !matches!(name.as_str(), "X" | "Y" | "Z") => mapped_name(name, names),
         _ => {}

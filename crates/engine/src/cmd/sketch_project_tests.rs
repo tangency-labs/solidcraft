@@ -268,6 +268,84 @@ fn a_construction_axis_projects_and_stays_linked() {
     assert!(error.contains("unknown axis `Axis9`"), "{error}");
 }
 
+/// A named construction point projects as a fixed point linked to it, on a sketch plane that
+/// is not the plane it was made on, and the projection follows when the point moves and when it
+/// is renamed (#12075).
+#[test]
+fn a_construction_point_projects_and_stays_linked() {
+    let mut s = Session::default();
+    let point = |x: f64, z: f64| json!({"point": {"point": [x, 5, z]}, "name": "Point1"});
+    run(&mut s, "construct.point.vertex", point(10.0, 20.0));
+    let sketch = run(&mut s, "sketch.create", json!({"plane": "YZ"}))["sketch"].as_u64().unwrap();
+    let r = run(&mut s, "sketch.project", json!({"refs": [{"point": "Point1"}]}));
+    let projected = r["links"][0]["points"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    // Where the projected point is, against where the construction point projects in 3D.
+    let check = |s: &mut Session, world: solidcore_record::Vec3| {
+        let plane = s.model.state().sketch(sketch).unwrap().plane;
+        let want = plane.to_local(world);
+        run(s, "sketch.edit", json!({"sketch": sketch}));
+        let si = inspect(s);
+        let p = si["points"].as_array().unwrap().iter().find(|p| p["id"] == projected).cloned().unwrap();
+        run(s, "sketch.finish", json!({}));
+        assert!(p["link"].is_string() && p["fixed"] == true, "{p}");
+        let at = (p["at"][0].as_f64().unwrap(), p["at"][1].as_f64().unwrap());
+        assert!((at.0 - want.x).abs() < 1e-9 && (at.1 - want.y).abs() < 1e-9, "{at:?} {want:?}");
+    };
+    check(&mut s, solidcore_record::Vec3::new(10.0, 5.0, 20.0));
+    run(&mut s, "timeline.redefine", json!({"feature": "Point1", "command": "construct.point.vertex", "params": point(10.0, 35.0)}));
+    check(&mut s, solidcore_record::Vec3::new(10.0, 5.0, 35.0));
+    run(&mut s, "timeline.rename", json!({"feature": "Point1", "name": "Pivot"}));
+    let opened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    for session in [&s, &opened] {
+        let state = session.model.state();
+        let link = &state.sketch(sketch).unwrap().sketch.links[0];
+        assert_eq!(link.source, solidcraft_sketch::LinkSource::ConstructionPoint { name: "Pivot".into() });
+        assert!(!link.lost, "renamed, the point is still found");
+    }
+    // A name that is no construction point is refused, by its name.
+    run(&mut s, "sketch.edit", json!({"sketch": sketch}));
+    let error = s.execute("sketch.project", &json!({"refs": [{"point": "Point9"}]})).unwrap_err().to_string();
+    assert!(error.contains("unknown point `Point9`"), "{error}");
+}
+
+/// A construction point of a component that is moved projects where the component puts it: into a
+/// sketch of the root, where it moves with the component, and into a sketch of the component
+/// itself, where it stays where the component's own coordinates put it (#12075).
+#[test]
+fn a_construction_point_of_a_moved_component_projects_where_it_is_placed() {
+    let mut s = Session::default();
+    let part = run(&mut s, "component.create", json!({"name": "Part"}))["component"].as_u64().unwrap();
+    run(&mut s, "construct.point.vertex", json!({"point": {"point": [10, 5, 20]}, "name": "Point1"}));
+    let own = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.project", json!({"refs": [{"point": "Point1"}]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let root = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.project", json!({"refs": [{"point": "Point1"}]}));
+    run(&mut s, "sketch.finish", json!({}));
+    // The projected point of each sketch, in its sketch's coordinates.
+    let at = |s: &Session, id: u64| {
+        let state = s.model.state();
+        let sk = &state.sketch(id).unwrap().sketch;
+        assert!(sk.links.iter().all(|l| !l.lost), "{:?}", sk.links);
+        let link = sk.links.first().unwrap();
+        let p = sk.link_points(&link.id).first().and_then(|p| sk.points.get(*p)).unwrap().pos;
+        (p.x, p.y)
+    };
+    let near = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).abs() < 1e-9 && (a.1 - b.1).abs() < 1e-9;
+    assert!(near(at(&s, own), (10.0, 5.0)), "{:?}", at(&s, own));
+    assert!(near(at(&s, root), (10.0, 5.0)), "{:?}", at(&s, root));
+    let placement = s.doc.occurrences.iter().find(|o| o.component == part).map(|o| o.id).unwrap();
+    run(&mut s, "occurrence.ground", json!({"occurrence": placement, "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": placement, "translate": [100, 0, 0], "capture": true}));
+    let opened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    for session in [&s, &opened] {
+        assert!(near(at(session, root), (110.0, 5.0)), "the root's projection moves with the part: {:?}", at(session, root));
+        assert!(near(at(session, own), (10.0, 5.0)), "the part's own projection stays: {:?}", at(session, own));
+    }
+}
+
 #[test]
 fn project_whole_body_can_create_unlinked_geometry() {
     let mut s = Session::default();
