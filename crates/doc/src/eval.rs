@@ -6807,6 +6807,10 @@ fn replay(
     kept.dedup();
     let (mut missed, mut total) = (0usize, 0usize);
     let plan = copy_plan(doc, vals, st, &kept, mats)?;
+    // A source's named faces are looked up in the model as it was before any copy was made: the
+    // copy of an earlier source (a boss joined to the body) changes the faces a later source (a cut
+    // starting on the boss) names, though the later source means the original's (#11792).
+    let named_from = plan.iter().any(|(src, _, _)| src.face_names.iter().any(|n| !n.is_empty())).then(|| st.clone());
     for (src, mats, first) in &plan {
         // A fillet or chamfer repeats at the copied edges.
         if let FeatureKind::Fillet { edges, radius, .. } | FeatureKind::Chamfer { edges, distance: radius, .. } = &src.kind {
@@ -6922,7 +6926,7 @@ fn replay(
             // Each copy's faces are named as the source feature's, with the instance. Its face
             // points follow their named faces, as the feature's own did (#2121): a To Object
             // extrude's copies reach the face where it is now, not where it was picked.
-            let moved = with_named_face_points(doc, st, src)?.map(|(g, _)| g);
+            let moved = with_named_face_points(doc, named_from.as_ref().unwrap_or(st), src)?.map(|(g, _)| g);
             let tools = feature_tools_with_constructor(doc, vals, moved.as_ref().unwrap_or(src), st, &mut None, &mut None, &mut None)?;
             for (k, m) in mats.iter().enumerate() {
                 let start = copies.len();
