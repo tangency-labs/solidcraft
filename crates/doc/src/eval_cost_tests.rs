@@ -21,7 +21,7 @@ use crate::*;
 /// intersect) ran its booleans on, bodies searched for the cylinder a tap marking lies on,
 /// bodies whose faces a tapped hole read for its wall, intersects run to find a pattern's copies
 /// that cut nothing, and the tools a cut of many tools is made with (one when they are cut in one
-/// go).
+/// go), and face surfaces classified for a hole's direction.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Counts {
     pub moved: usize,
@@ -36,6 +36,7 @@ pub(super) struct Counts {
     pub tapped_wall: usize,
     pub miss_intersects: usize,
     pub cut_tools: usize,
+    pub surfaces: usize,
 }
 
 thread_local! {
@@ -53,6 +54,7 @@ thread_local! {
             tapped_wall: 0,
             miss_intersects: 0,
             cut_tools: 0,
+            surfaces: 0,
         })
     };
 }
@@ -652,6 +654,126 @@ fn a_tool_cutting_another_part_cuts_again_when_that_part_moves() {
     model.evaluate(&doc);
     assert_eq!(model.last_recomputed, 0);
     assert!((volume(&model, &body) - (400.0 - 16.0)).abs() < 1e-6, "{}", volume(&model, &body));
+}
+
+/// A root design with two 10 x 10 x 4 mm plates, "Plate" at the origin and "Other" 30 mm along Y,
+/// and a sketch on origin plane `plane` of the rectangle `profile` spans (opposite corners, in mm):
+/// (the plate part, the other part, the sketch).
+fn two_plates_and_a_sketch(doc: &mut Document, plane: &str, profile: [Vec2; 2]) -> (u64, u64, u64) {
+    let plate = doc.add_component(Some("Plate"), 0).unwrap();
+    let other = doc.add_component(Some("Other"), 0).unwrap();
+    place(doc, other, rigid(Vec3::new(0.0, 30.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+    plate_with_holes(doc, other, other, 0);
+    plate_with_holes(doc, plate, plate, 0);
+    let mut sk = Sketch::new();
+    let [a, c] = profile;
+    let p = [a, Vec2::new(c.x, a.y), c, Vec2::new(a.x, c.y)].map(|q| sk.add_point(q, None).unwrap());
+    for k in 0..4 {
+        sk.add_line_pts(p[k], p[(k + 1) % 4], None).unwrap();
+    }
+    let sketch = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: plane.into() }, sketch: sk }, None).unwrap();
+    (plate, other, sketch)
+}
+
+/// `kind` added to the root with its face points named after the faces under them, as the
+/// command that makes it names them.
+fn add_named(doc: &mut Document, kind: FeatureKind) -> u64 {
+    let mut model = Model::new();
+    model.evaluate(doc);
+    let names = face_point_names(doc, &model.state(), &kind, 0).unwrap();
+    assert!(names.iter().all(|n| !n.is_empty()), "{names:?}");
+    let id = doc.add_feature(kind, None).unwrap();
+    doc.feature_mut(id).unwrap().face_names = names;
+    id
+}
+
+/// An extrude in the root from the top of the plate (z 4) 6 mm up, over 2 to 8 mm on X and Y.
+fn extrude_from_the_plate(doc: &mut Document) -> (u64, u64, u64) {
+    let (plate, other, sketch) = two_plates_and_a_sketch(doc, "XY", [Vec2::new(2.0, 2.0), Vec2::new(8.0, 8.0)]);
+    let kind = FeatureKind::Extrude {
+        thin: None,
+        sketch: SketchId(sketch),
+        profiles: ProfileSel::All,
+        extent: serde_json::from_value(serde_json::json!({"distance": "6", "from": [5.0, 5.0, 4.0]})).unwrap(),
+        operation: Operation::NewBody,
+        targets: vec![],
+    };
+    (plate, other, add_named(doc, kind))
+}
+
+/// Where the body feature `id` made has its centre.
+fn centroid_of(model: &Model, id: u64) -> Vec3 {
+    let st = model.state();
+    kernel::measure(&st.bodies.iter().find(|b| b.feature == id).unwrap().body).unwrap().centroid
+}
+
+/// An extrude from a face of the plate reads where the plate is, and nothing else (#6325): a
+/// joint moving another part leaves its result, and every result after it, as it was.
+#[test]
+fn an_extrude_from_its_own_part_keeps_its_result_when_another_part_moves() {
+    let mut doc = Document::new("from object");
+    let (plate, other, extrude) = extrude_from_the_plate(&mut doc);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert!((centroid_of(&model, extrude).z - 7.0).abs() < 1e-6, "{:?}", centroid_of(&model, extrude));
+    place(&mut doc, other, rigid(Vec3::new(0.0, 40.0, 3.0), Vec3::ZERO, Vec3::Z, 0.0));
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 0);
+    // The plate lifted 5 mm: the extrude starts on its top where it is now (#928).
+    place(&mut doc, plate, rigid(Vec3::new(0.0, 0.0, 5.0), Vec3::ZERO, Vec3::Z, 0.0));
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 1);
+    assert!((centroid_of(&model, extrude).z - 12.0).abs() < 1e-6, "{:?}", centroid_of(&model, extrude));
+}
+
+/// A revolve To a face of the plate, as the extrude from it: it turns again only when the plate
+/// moves.
+#[test]
+fn a_revolve_to_its_own_part_keeps_its_result_when_another_part_moves() {
+    let mut doc = Document::new("revolve to object");
+    let (plate, other, sketch) = two_plates_and_a_sketch(&mut doc, "XZ", [Vec2::new(12.0, 0.0), Vec2::new(15.0, 2.0)]);
+    let kind = FeatureKind::Revolve {
+        sketch: SketchId(sketch),
+        profiles: ProfileSel::All,
+        axis: AxisRef::SketchAxis { axis: "y".into() },
+        angle: "90 deg".into(),
+        operation: Operation::NewBody,
+        targets: vec![],
+        angle2: None,
+        symmetric: false,
+        convention: Default::default(),
+        to: Some(serde_json::from_value(serde_json::json!([5.0, 5.0, 4.0])).unwrap()),
+    };
+    let revolve = add_named(&mut doc, kind);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    let turned = volume(&model, &model.state().bodies.iter().find(|b| b.feature == revolve).unwrap().name.clone());
+    place(&mut doc, other, rigid(Vec3::new(0.0, 40.0, 3.0), Vec3::ZERO, Vec3::Z, 0.0));
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 0);
+    // The plate turned a quarter about Z: the revolve turns to its top where it is now.
+    place(&mut doc, plate, rigid(Vec3::ZERO, Vec3::ZERO, Vec3::Z, std::f64::consts::FRAC_PI_2));
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 1);
+    let now = volume(&model, &model.state().bodies.iter().find(|b| b.feature == revolve).unwrap().name.clone());
+    assert!((now - turned).abs() > 1.0, "{turned} then {now}");
+}
+
+/// A From face without a name is found by its point, on whatever body lies there: moving any
+/// part extrudes again.
+#[test]
+fn an_extrude_from_a_face_without_a_name_extrudes_again_when_any_part_moves() {
+    let mut doc = Document::new("from a point");
+    let (_, other, extrude) = extrude_from_the_plate(&mut doc);
+    doc.feature_mut(extrude).unwrap().face_names.clear();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!((centroid_of(&model, extrude).z - 7.0).abs() < 1e-6, "{:?}", centroid_of(&model, extrude));
+    place(&mut doc, other, rigid(Vec3::new(0.0, 40.0, 3.0), Vec3::ZERO, Vec3::Z, 0.0));
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 1);
 }
 
 #[test]
@@ -1785,4 +1907,52 @@ fn an_added_and_deleted_sketch_entity_keeps_its_fingerprint() {
     model.evaluate(&doc);
     assert_eq!(model.state().sketch_keys.get(&id).copied(), key);
     assert_eq!((model.last_recomputed, model.last_restored), (0, 0));
+}
+
+#[test]
+fn a_hole_skips_the_parts_its_line_cannot_reach() {
+    use solidcraft_geom::Aabb3;
+    let unit = Aabb3 { min: Vec3::ZERO, max: Vec3::new(1.0, 1.0, 1.0) };
+    // Down through the box, from above and from below (the line runs both ways).
+    assert!(super::line_meets_box(Vec3::new(0.5, 0.5, 5.0), Vec3::new(0.0, 0.0, -1.0), &unit));
+    assert!(super::line_meets_box(Vec3::new(0.5, 0.5, -5.0), Vec3::new(0.0, 0.0, -1.0), &unit));
+    // Beside it, parallel to a side: a zero direction component keeps the line out of the slab.
+    assert!(!super::line_meets_box(Vec3::new(2.0, 0.5, 5.0), Vec3::new(0.0, 0.0, -1.0), &unit));
+    // Slanted past a corner, and slanted through it.
+    assert!(!super::line_meets_box(Vec3::new(3.0, 0.0, 0.0), Vec3::new(1.0, 1.0, 0.0), &unit));
+    assert!(super::line_meets_box(Vec3::new(-1.0, -1.0, 0.5), Vec3::new(1.0, 1.0, 0.0), &unit));
+    // Touching a face counts; an empty box never meets.
+    assert!(super::line_meets_box(Vec3::new(1.0, 0.5, 9.0), Vec3::new(0.0, 0.0, 1.0), &unit));
+    assert!(!super::line_meets_box(Vec3::new(0.5, 0.5, 0.5), Vec3::new(0.0, 0.0, 1.0), &Aabb3::EMPTY));
+}
+
+#[test]
+fn a_hole_classifies_the_faces_it_reads_not_every_face_of_the_design() {
+    // Forty separate cylinders, three faces each. A hole placed on the top of one drills down,
+    // and finding that out reads the nearest face only: it used to classify every face of every
+    // body first, which in an assembly of hundreds of imported parts took seconds per hole.
+    let mut doc = Document::new("hole direction work");
+    for k in 0..40 {
+        let kind = FeatureKind::Cylinder {
+            base: point_expr(Vec3::new(10.0 * f64::from(k), 0.0, 0.0)),
+            axis: Dir(Vec3::Z),
+            radius: "2".into(),
+            height: "10".into(),
+            operation: Operation::NewBody,
+            references: Vec::new(),
+        };
+        doc.add_feature(kind, None).unwrap();
+    }
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 40);
+    let mut dir = None;
+    let work = counted(|| dir = super::hole_direction_at(&st, Vec3::new(250.5, 0.5, 10.0), &[]));
+    let dir = dir.unwrap();
+    assert!((dir - Vec3::new(0.0, 0.0, -1.0)).len() < 1e-9, "drills down into the top: {dir:?}");
+    assert!(work.surfaces <= 2, "classified {} face surfaces for one hole", work.surfaces);
+    // A point on a side wall drills into that wall.
+    let side = super::hole_direction_at(&st, Vec3::new(252.0, 0.0, 5.0), &[]).unwrap();
+    assert!((side - Vec3::new(-1.0, 0.0, 0.0)).len() < 1e-6, "into the side wall: {side:?}");
 }

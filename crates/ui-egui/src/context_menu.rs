@@ -1801,7 +1801,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.isolateOccurrence" => {
             let _ = app.run("browser.visibility", json!({"visible": true, "paths": [p["path"]], "isolate": true}));
         }
-        "ui.canvasVisible" => drop(app.run("canvas.edit", p)),
+        "ui.canvasVisible" | "ui.canvasLocked" => drop(app.run("canvas.edit", p)),
         "ui.toolbarPin"
         | "ui.toolbarRemove"
         | "ui.toolbarReset"

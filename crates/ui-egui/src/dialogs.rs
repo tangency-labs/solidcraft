@@ -1589,7 +1589,7 @@ impl Dialog {
     /// lies on that face (a circle's centre) is taken at the point, as a points input picks it.
     pub(crate) fn candidate_on(&self, s: &Session, h: &Hit, snap: Option<&FaceSnap>) -> Option<Sel> {
         if matches!(self.kind, Kind::SketchModify(_)) {
-            return crate::sketch_modify_ui::candidate(self, s, h);
+            return crate::sketch_modify_ui::pick_candidate(self, s, h);
         }
         if let Some(target) = self.extrude_target(s, h) {
             return Some(target);
