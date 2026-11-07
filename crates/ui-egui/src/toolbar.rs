@@ -2434,8 +2434,9 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         if let Some(id) = toggle {
             crate::toolbar_custom::toggle(app, &tab, id);
         }
+        // A row's menu (its ⋯, or a right-click) opens over the drop-down, which stays open under
+        // it; picking an item or clicking elsewhere closes both.
         if let Some((at, id)) = menu {
-            ui.ctx().data_mut(|d| d.remove::<egui::Id>(egui::Id::unique("sc_panel_open")));
             crate::context_menu::open_for(app, at, crate::context_menu::Target::ToolbarCommand { id: id.to_string() });
         }
         tab_click
@@ -2864,7 +2865,11 @@ fn dropdown_row(
     // The pin at the row's end (above the row, so it takes its own clicks).
     let pr = Rect::from_center_size(pos2(rect.right() - 13.0, rect.center().y), vec2(20.0, 20.0));
     let pin = ui.interact(pr, ui.scope_id().with(("dropdown_pin", c.id)), Sense::click());
-    let pointer_on = (resp.hovered() || pin.hovered()) && !egui::DragAndDrop::has_any_payload(ui.ctx());
+    // Its ⋯ beside the pin: the command's menu (pin to the toolbar or the shortcuts, change its
+    // keyboard shortcut, customize the toolbar), as a right-click on the row opens it.
+    let mr = Rect::from_center_size(pos2(pr.left() - 12.0, rect.center().y), vec2(20.0, 20.0));
+    let more = ui.interact(mr, ui.scope_id().with(("dropdown_more", c.id)), Sense::click());
+    let pointer_on = (resp.hovered() || pin.hovered() || more.hovered()) && !egui::DragAndDrop::has_any_payload(ui.ctx());
     let label = app.tr_label(info.label).to_string();
     let mut checked = None;
     if persistent_available(app, c.id) && app.preferences.persistent_ribbon_pressed {
@@ -2887,7 +2892,8 @@ fn dropdown_row(
     row.highlighted = hot || revealed.is_some();
     let shortcut = crate::keymap::display_for(app, c.id).unwrap_or_default();
     row.shortcut = &shortcut;
-    row.paint(ui, rect, &resp, 26.0);
+    // Room at the end for the ⋯ and the pin.
+    row.paint(ui, rect, &resp, rect.right() - mr.left() + 4.0);
     if let Some(strength) = revealed {
         paint_reveal(ui.painter(), rect, &crate::theme::TabAccent::for_tab(&t, &app.ui.tab), strength, false);
         crate::scenario::publish_rect("ribbon:reveal", rect);
@@ -2906,6 +2912,13 @@ fn dropdown_row(
         }
         pin_icon(p, pr, pinned, if pinned { t.accent } else { t.text_dim });
         crate::scenario::publish_handle(&format!("dropdown_pin:{}", c.id), pr.center());
+        if more.hovered() {
+            p.rect_filled(mr, 3.0, t.border.gamma_multiply(0.6));
+        }
+        for dx in [-5.0, 0.0, 5.0] {
+            p.circle_filled(pos2(mr.center().x + dx, mr.center().y), 1.6, if more.hovered() { t.text } else { t.text_dim });
+        }
+        crate::scenario::publish_handle(&format!("dropdown_more:{}", c.id), mr.center());
     }
     let tip = if pinned { "Remove from Toolbar" } else { "Pin to Toolbar" };
     // The drop-down's rect from the last pass: tips sit beside it, never over its rows (#10481).
@@ -2916,6 +2929,12 @@ fn dropdown_row(
     dropdown_tip(ui, menu, &pin, |ui| {
         ui.label(crate::i18n::tr_label(tip));
     });
+    dropdown_tip(ui, menu, &more, |ui| {
+        ui.label(crate::i18n::tr_label("More: pin, keyboard shortcut, toolbar"));
+    });
+    if more.clicked() {
+        return RowAction::Menu(mr.left_bottom());
+    }
     // A disabled row says why; a documented command also shows its help (#2758).
     let reason = info.disabled_reason.as_deref().filter(|_| !info.enabled).map(|reason| app.tr_label(reason));
     if let Some(hint) = persistent_hint(app, c, info.enabled) {

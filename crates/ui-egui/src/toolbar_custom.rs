@@ -378,6 +378,7 @@ pub fn command_items(app: &SolveApp, id: &str) -> Vec<Item> {
     } else {
         Item::action("ui.quickAccessAdd", "Add to Quick Access", "plus").with(json!({ "command": id }))
     });
+    v.push(Item::action("ui.shortcutKey", "Change Keyboard Shortcut…", "settings").with(json!({ "command": id })));
     v.push(Item::sep());
     v.push(Item::action("ui.toolbarCustomize", "Customize Toolbar…", "settings"));
     v.push(Item::action("ui.toolbarReset", "Reset Toolbar", "restore").with(json!({ "tab": tab })));
@@ -434,6 +435,7 @@ pub fn run(app: &mut SolveApp, action: &str, p: &Value) {
             }
         }
         "ui.quickAccessRemove" => quick_remove(app, id),
+        "ui.shortcutKey" => crate::keymap::open_for(app, id),
         _ => {}
     }
 }

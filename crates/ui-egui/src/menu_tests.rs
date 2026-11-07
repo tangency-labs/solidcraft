@@ -1334,6 +1334,19 @@ fn occurrence_moves_turn_about_their_origin_then_move() {
     assert_eq!(*app.session.pending_moves.get(&occ).unwrap(), solidcraft_engine::doc::IDENTITY);
 }
 
+/// A command's menu (its ⋯ in a drop-down, or a right-click) changes its keyboard shortcut:
+/// Preferences › Keyboard Shortcuts opens on that command, waiting for the new key.
+#[test]
+fn a_commands_menu_changes_its_keyboard_shortcut() {
+    let mut app = sample_app();
+    app.ui.tab = "MODEL".into();
+    let items = crate::toolbar_custom::command_items(&app, "solid.extrude");
+    assert!(items.iter().any(|i| i.label == "Change Keyboard Shortcut…"), "{:?}", items.iter().map(|i| &i.label).collect::<Vec<_>>());
+    act(&mut app, &Target::ToolbarCommand { id: "solid.extrude".into() }, "Change Keyboard Shortcut…");
+    assert!(app.prefs_window.open && app.prefs_window.section == crate::prefs::PAGE_SHORTCUTS, "the Keyboard Shortcuts page is open");
+    assert!(crate::keymap::capturing(&app), "waiting for the new key");
+}
+
 #[test]
 fn toolbar_pins_removes_reorders_and_keeps_its_layout() {
     use crate::toolbar_custom as tc;
