@@ -149,6 +149,9 @@ fn workspace_selector(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesV
                         }
                         ui_kit::segmented(ui, &mut selected, &options, ui_kit::Segments { intrinsic: true, focus, ..Default::default() });
                         for id in ids {
+                            if ui.ctx().read_response(id).is_some_and(|response| response.clicked()) {
+                                ui.memory_mut(|memory| memory.request_focus(id));
+                            }
                             ui.ctx().accesskit_node_builder(id, |node| node.set_role(egui::Role::RadioButton));
                         }
                     } else {
@@ -579,10 +582,10 @@ fn popover(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView, state:
                                 message
                                     .map(|message| validation_alert(app, ui, message, if duplicate.is_some() { t.pref_note } else { t.form_error }))
                             };
-                            if let Some(response) = notice {
-                                if let Some(field) = focus_ids.first() {
-                                    ui.ctx().accesskit_node_builder(*field, |node| node.push_described_by(response.id.accesskit_id()));
-                                }
+                            if let Some(response) = notice
+                                && let Some(field) = focus_ids.first()
+                            {
+                                ui.ctx().accesskit_node_builder(*field, |node| node.push_described_by(response.id.accesskit_id()));
                             }
                         }
                         PopoverKind::Replace { name } => {

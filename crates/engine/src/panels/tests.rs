@@ -1891,6 +1891,7 @@ fn command_storage_native_stale_and_lifecycle_failures_preserve_layout_and_catal
 
 #[test]
 fn command_presets_enforce_unicode_names_overwrite_builtins_and_user_count() {
+    use commands::LayoutCatalogue;
     let mut backend = fixture_command_backend().unwrap();
     for invalid in ["".into(), "   ".into(), "x\n".into(), "x\u{0000}".into(), "🦀".repeat(65), " ".repeat(1025)] {
         assert!(backend.execute("layout.save", &serde_json::json!({"name":invalid})).is_err());
@@ -1910,6 +1911,7 @@ fn command_presets_enforce_unicode_names_overwrite_builtins_and_user_count() {
 
 #[test]
 fn saved_layout_names_ignore_case_and_replacement_preserves_the_named_slot() {
+    use commands::LayoutCatalogue;
     let mut backend = command_ready_backend();
     backend.execute("layout.save", &serde_json::json!({"name":"  Bench setup  "})).unwrap();
     let original = backend.service.layout().clone();

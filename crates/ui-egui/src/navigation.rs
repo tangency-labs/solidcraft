@@ -462,7 +462,8 @@ pub(crate) struct KeyHold {
 
 /// A menu, the command box or a focused widget has the keyboard, so the view keys are not ours.
 fn view_keys_blocked(app: &SolveApp, ctx: &egui::Context, canvas: Option<egui::Id>) -> bool {
-    egui::Popup::is_any_open(ctx)
+    app.prefs_window.open
+        || egui::Popup::is_any_open(ctx)
         || app.viewport.context_menu.is_some()
         || app.ui.palette_open
         || ctx.memory(|m| m.focused().is_some_and(|focused| Some(focused) != canvas))
@@ -2957,6 +2958,36 @@ mod view_key_tests {
 
     fn arrow(pressed: bool, repeat: bool) -> egui::Event {
         egui::Event::Key { key: egui::Key::ArrowLeft, physical_key: None, pressed, repeat, modifiers: egui::Modifiers::NONE }
+    }
+
+    #[test]
+    fn unfocused_preferences_owns_tapped_and_held_view_keys_before_its_controls_draw() {
+        let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        app.preferences.look_at_anim = false;
+        let ctx = crate::fonts::test_context();
+        let mut output = ctx.run_ui(egui::RawInput { events: vec![arrow(true, false)], focused: true, ..Default::default() }, |ui| {
+            assert!(ui.memory(|memory| memory.focused().is_none()));
+            assert!(!egui::Popup::is_any_open(ui.ctx()));
+            app.prefs_window.open = true;
+            let before = app.cam;
+            let log = app.session.log.len();
+            assert!(!super::view_key(&mut app, ui.ctx(), egui::Key::ArrowLeft, egui::Modifiers::NONE, false));
+            assert_eq!(app.cam, before, "Preferences keeps the arrow even before a selector has focus");
+            assert_eq!(app.session.log.len(), log);
+            assert!(app.viewport.key_hold.is_none());
+
+            app.prefs_window.open = false;
+            assert!(super::view_key(&mut app, ui.ctx(), egui::Key::ArrowLeft, egui::Modifiers::NONE, false));
+            assert!(app.viewport.key_hold.is_some());
+            app.now += super::TAP_SECONDS + 1.0;
+            app.prefs_window.open = true;
+            let before = app.cam;
+            assert!(ui.input(|input| input.key_down(egui::Key::ArrowLeft)));
+            super::step_key_hold(&mut app, ui.ctx());
+            assert!(app.viewport.key_hold.is_none(), "opening Preferences releases a previous held view key");
+            assert_eq!(app.cam, before);
+        });
+        output.textures_delta.clear();
     }
 
     /// A press and release in one frame, without the harness settling the view after it.

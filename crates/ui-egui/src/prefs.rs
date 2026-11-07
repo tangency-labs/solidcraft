@@ -9171,6 +9171,22 @@ mod tests {
     }
 
     #[test]
+    fn panel_workspace_arrows_follow_a_mouse_click_without_turning_the_view() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":1100}));
+        h.call("ui.panel_fixture", json!({"preset":"docks","remember":true}));
+        h.call("ui.prefs", json!({"open":"Layout","language":"en"}));
+        h.frames(3);
+        let camera = h.app.cam;
+        h.step(&json!({"click":{"handle":"dialog:Layout workspace:Modelling"}})).unwrap();
+        h.step(&json!({"key":"ArrowRight"})).unwrap();
+        h.frames(2);
+        assert_eq!(crate::panel_runtime::layout_preferences_view(&h.app).unwrap().selected_workspace.0, "panel_fixture.workspace.sketch");
+        assert_eq!(h.app.cam, camera, "workspace arrows belong to Preferences after a pointer click");
+    }
+
+    #[test]
     fn panel_save_popover_requires_explicit_replace_and_owns_the_first_escape() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
