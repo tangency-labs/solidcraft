@@ -4543,6 +4543,13 @@ fn a_tool_card_shows_its_summary_and_keeps_the_json_behind_details() {
     h.frames(3);
     assert!(h.widget("Arguments").is_some() && h.widget(&pretty).is_some(), "the arguments unfold");
     assert!(h.widget("Result").is_some() && h.widget(output).is_some(), "and what it returned");
+    // Copy buttons put the full Arguments / Result text on the clipboard (#11082).
+    let args_copy = handle_at(&format!("agent_chat:tool:{n}:copy_args")).expect("Arguments Copy");
+    click_at(&mut h, args_copy, egui::PointerButton::Primary);
+    assert_eq!(copied_text(&h).as_deref(), Some(pretty.as_str()), "Arguments Copy puts the JSON on the clipboard");
+    let result_copy = handle_at(&format!("agent_chat:tool:{n}:copy_result")).expect("Result Copy");
+    click_at(&mut h, result_copy, egui::PointerButton::Primary);
+    assert_eq!(copied_text(&h).as_deref(), Some(output), "Result Copy puts the output on the clipboard");
 }
 
 /// The card says "Screenshot"; the full temp path is only under Details.

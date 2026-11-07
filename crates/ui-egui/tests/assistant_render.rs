@@ -111,3 +111,74 @@ fn assistant_transcript_tools_and_approvals_fit_in_both_themes() {
     }
     theme::set_dark(previous);
 }
+
+/// Review evidence for #11082: expanded tool Details with Arguments / Result Copy buttons.
+#[test]
+fn assistant_tool_details_copy_evidence() {
+    let Ok(dir) = std::env::var("SOLIDCRAFT_PR_EVIDENCE") else { return };
+    std::fs::create_dir_all(&dir).unwrap();
+    let previous = theme::is_dark();
+    theme::set_dark(true);
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", json!({"width": 1100, "height": 1200}));
+    h.call("ui.set", json!({"dark": true}));
+    h.call("ui.agent_chat", json!({"features": true, "open": true, "picker": false, "width": 440.0}));
+    let input = json!({"command": "solid.extrude", "params": {"sketch": "Sketch1", "distance": 10}});
+    let output = r#"{"feature": 4, "name": "Extrude1", "created_bodies": []}"#;
+    h.app.agent_chat.items = vec![
+        Item::User {
+            text: "Extrude the sketch by 10 mm.".into(),
+            image: false,
+            pictures: vec![],
+            context: Default::default(),
+            files: vec![],
+        },
+        Item::Tool {
+            id: "t".into(),
+            title: "execute: solid.extrude".into(),
+            kind: String::new(),
+            status: Some(ToolStatus::Completed),
+            input: Some(input),
+            output: Some(output.into()),
+        },
+    ];
+    h.ctx = egui::Context::default();
+    h.ctx.enable_accesskit();
+    solidcraft_ui_egui::fonts::setup_fonts(&h.ctx);
+    theme::apply(&h.ctx);
+    let mut textures: HashMap<TextureId, ColorImage> = HashMap::new();
+    for _ in 0..8 {
+        raster::paint(&mut h, &mut textures, vec![]);
+    }
+    let at = scenario::handle_at("agent_chat:tool:1").expect("tool card");
+    for pressed in [true, false] {
+        raster::paint(
+            &mut h,
+            &mut textures,
+            vec![
+                egui::Event::PointerMoved(at),
+                egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE },
+            ],
+        );
+    }
+    for _ in 0..8 {
+        raster::paint(&mut h, &mut textures, vec![]);
+    }
+    assert!(scenario::handle_at("agent_chat:tool:1:copy_args").is_some(), "Arguments Copy");
+    assert!(scenario::handle_at("agent_chat:tool:1:copy_result").is_some(), "Result Copy");
+    let output = raster::paint(&mut h, &mut textures, vec![]);
+    let screenshot = raster::raster(&mut h, &textures, output);
+    let panel = scenario::rect_of("agent_chat:panel").expect("Assistant panel");
+    image::imageops::crop_imm(
+        &screenshot,
+        panel.left().max(0.0) as u32,
+        panel.top().max(0.0) as u32,
+        panel.width().max(1.0) as u32,
+        panel.height().max(1.0) as u32,
+    )
+    .to_image()
+    .save(std::path::Path::new(&dir).join("11102-assistant-tool-details.png"))
+    .unwrap();
+    theme::set_dark(previous);
+}

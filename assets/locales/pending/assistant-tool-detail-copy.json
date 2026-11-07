@@ -1,0 +1,20 @@
+{
+  "ar": {
+    "ui.ai_tool_copy_tip": "نسخ النص الكامل إلى الحافظة"
+  },
+  "en": {
+    "ui.ai_tool_copy_tip": "Copy the full text to the clipboard"
+  },
+  "he": {
+    "ui.ai_tool_copy_tip": "העתקת כל הטקסט ללוח"
+  },
+  "ja": {
+    "ui.ai_tool_copy_tip": "全文をクリップボードにコピー"
+  },
+  "vi": {
+    "ui.ai_tool_copy_tip": "Sao chép toàn bộ văn bản vào bảng tạm"
+  },
+  "zh": {
+    "ui.ai_tool_copy_tip": "将完整文本复制到剪贴板"
+  }
+}
