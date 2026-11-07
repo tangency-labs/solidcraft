@@ -1,5 +1,9 @@
 //! Modal confirmations share the Panel/Window frame and the single kit footer.
-use super::{Action, Footer, Window, actions::footer_with_left, text::paint_text};
+use super::{
+    Action, Footer, Window,
+    actions::{first_letter_action, footer_with_left},
+    text::paint_text,
+};
 use crate::{scenario, theme::Tokens};
 use egui::{Ui, vec2};
 
@@ -65,6 +69,22 @@ impl<'a> Confirm<'a> {
         self
     }
 
+    /// The footer's visible buttons with their live states, for the first-letter accelerator:
+    /// OK needs valid inputs, Cancel always answers, and a confirmation's left action is live.
+    fn accelerators(&self, valid: bool) -> Vec<(Action, &'a str, bool)> {
+        let mut out = Vec::new();
+        if !self.ok.is_empty() {
+            out.push((Action::Ok, self.ok, valid));
+        }
+        if let Some(left) = self.left {
+            out.push((Action::Apply, left, true));
+        }
+        if !self.cancel.is_empty() {
+            out.push((Action::Cancel, self.cancel, true));
+        }
+        out
+    }
+
     pub(crate) fn show(self, ctx: &egui::Context, valid: bool, message: impl FnOnce(&mut Ui)) -> (bool, Action) {
         // Reviewed reports and native pickers temporarily own input. Keep the pending
         // answer untouched and resume the modal when that boundary closes.
@@ -80,6 +100,9 @@ impl<'a> Confirm<'a> {
             ui.spacing_mut().item_spacing.y = 0.0;
             // Consume before native button focus can interpret Enter as a different answer.
             let enter = ui.is_enabled() && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+            // #9841: a typed letter answers the button whose translated label starts with it.
+            // Read here so the keystroke is consumed even when Escape or a click wins the frame.
+            let accel = if ui.is_enabled() { first_letter_action(ui.ctx(), &self.accelerators(valid)) } else { Action::None };
             let mut closed = false;
             egui::Frame::NONE
                 .inner_margin(egui::Margin {
@@ -148,6 +171,8 @@ impl<'a> Confirm<'a> {
                 action
             } else if enter && valid {
                 self.selected.unwrap_or(Action::Ok)
+            } else if action == Action::None && accel != Action::None {
+                accel
             } else {
                 action
             };
@@ -155,3 +180,7 @@ impl<'a> Confirm<'a> {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "confirm_tests.rs"]
+mod tests;
