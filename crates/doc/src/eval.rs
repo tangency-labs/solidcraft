@@ -5746,7 +5746,7 @@ fn feature_tools_with_constructor(
                 let regions = solidcraft_sketch::merge_regions(&select_profiles(ss, profiles)?);
                 let start = regions.first().map(|r| ss.plane.to_world(r.centroid())).unwrap_or_default();
                 let tool = |r: &Region2, body: Body| crate::lineage::ProfileRoles::swept(Some(ss), Some(r)).tool(body, None);
-                let segs = edge_path_segments(st, body, path_edges, start)?;
+                let segs = edge_path_segments(st, body, path_edges, start, Some(&ss.plane))?;
                 let path_start = segs.first().map(kernel::PathSeg::start).unwrap_or(start);
                 let rails = rail_polylines(doc, st, rails, f.component, path_start)?;
                 let ctl = sweep_control(vals, orientation, twist, scale, rails, *rail_fit)?;
@@ -6058,32 +6058,155 @@ fn path_segments(ps: &SolvedSketch, ids: &[String], start: Vec3) -> Result<Vec<k
 }
 
 /// The path segments of a sweep's path on a body's edges (#2216): the chain the picked edges
-/// make, each edge as the curve it is, reversed where the chain runs against it. The path
-/// begins at the end nearest the profile, so the profile is swept from where it stands.
-pub(crate) fn edge_path_segments(st: &ModelState, body: &crate::BodyName, edges: &[crate::Position], start: Vec3) -> Result<Vec<kernel::PathSeg>> {
+/// make, each edge as the curve it is, reversed where the chain runs against it. An open chain
+/// runs from the end nearest the profile, so the profile is swept from where it stands. A
+/// closed chain begins at the profile instead: the edge the profile's plane crosses there
+/// split in two, the chain rejoined from that point.
+pub(crate) fn edge_path_segments(
+    st: &ModelState,
+    body: &crate::BodyName,
+    edges: &[crate::Position],
+    start: Vec3,
+    profile: Option<&Plane>,
+) -> Result<Vec<kernel::PathSeg>> {
     let Some(b) = st.body(&body.0) else { return Err(DocError::Unknown(format!("body `{body}`"))) };
     let points: Vec<Vec3> = crate::plain(edges);
     if points.is_empty() {
         return Err(DocError::Invalid("the path needs at least one edge".into()));
     }
     let chain = kernel::chain(&b.body, &points).map_err(|e| DocError::Invalid(format!("the path's edges: {e}")))?;
-    let mut segs: Vec<kernel::PathSeg> = Vec::new();
-    for (edge, forward) in chain {
-        let mut s = kernel::edge_path(&b.body, edge).map_err(|e| DocError::Invalid(format!("the path's edge: {e}")))?;
-        if !forward {
+    // Each edge of the chain as its own path segments, in the chain's direction of travel.
+    let mut groups: Vec<Vec<kernel::PathSeg>> = Vec::with_capacity(chain.len());
+    for (edge, forward) in &chain {
+        let mut s = kernel::edge_path(&b.body, *edge).map_err(|e| DocError::Invalid(format!("the path's edge: {e}")))?;
+        if !*forward {
             s = s.into_iter().rev().map(|seg| seg.reversed()).collect();
         }
-        segs.extend(s);
+        groups.push(s);
     }
-    if segs.is_empty() {
+    if groups.iter().all(|g| g.is_empty()) {
         return Err(DocError::Invalid("the path's edges have no curve to follow".into()));
     }
+    if kernel::chain_closes(&b.body, &chain) {
+        // A closed chain is begun at the profile, so the profile is swept from where it stands.
+        let segs = match profile {
+            Some(profile) => from_profile_on_closed_edge_path(&b.body, &chain, groups, profile, start),
+            None => groups.iter().flatten().copied().collect(),
+        };
+        return Ok(segs);
+    }
     // The path runs from the end nearest the profile.
+    let mut segs: Vec<kernel::PathSeg> = groups.iter().flatten().copied().collect();
     let (Some(first), Some(last)) = (segs.first(), segs.last()) else { return Ok(segs) };
     if first.start().dist(start) > last.end().dist(start) {
         segs = segs.into_iter().rev().map(|seg| seg.reversed()).collect();
     }
     Ok(segs)
+}
+
+/// A closed chain of a body's edges begun where the profile's plane crosses it nearest the
+/// profile: the edge it crosses there split in two, its second part first and its first part
+/// last (or the chain begun at the joint there), so the path starts at the profile (#2216).
+/// Unchanged when the chain's point nearest the profile is off that plane.
+fn from_profile_on_closed_edge_path(
+    body: &Body,
+    chain: &[(usize, bool)],
+    groups: Vec<Vec<kernel::PathSeg>>,
+    profile: &Plane,
+    start: Vec3,
+) -> Vec<kernel::PathSeg> {
+    let flat = |groups: &[Vec<kernel::PathSeg>]| groups.iter().flatten().copied().collect::<Vec<_>>();
+    let record = body.record();
+    let size: f64 = groups.iter().flatten().filter_map(kernel::PathSeg::length).sum();
+    if !start.is_finite() || !(size > 0.0 && size.is_finite()) {
+        return flat(&groups);
+    }
+    // The chain's point nearest the profile: the edge it is on, and the parameter there.
+    let mut best: Option<(usize, f64, Vec3)> = None;
+    for (k, (edge, _)) in chain.iter().enumerate() {
+        let Some(e) = record.edges.get(*edge) else { continue };
+        let Some((t, q)) = closest_on_curve(e.parameters(), e.interval, start) else { continue };
+        if best.as_ref().is_none_or(|(_, _, bq)| q.dist(start) < bq.dist(start)) {
+            best = Some((k, t, q));
+        }
+    }
+    let Some((k, t, q)) = best else { return flat(&groups) };
+    // The profile stands on the chain only where the chain meets the profile's plane.
+    if profile.height(q).abs() > (size * 1e-6).max(1e-6) {
+        return flat(&groups);
+    }
+    let (Some(g), Some(e)) = (groups.get(k), record.edges.get(chain[k].0)) else { return flat(&groups) };
+    let (Some(first), Some(last)) = (g.first(), g.last()) else { return flat(&groups) };
+    // The crossing at the edge's own joint: the chain is begun there, whole.
+    if q.dist(first.start()) <= 1e-6 {
+        return rotate(&groups, k);
+    }
+    if q.dist(last.end()) <= 1e-6 {
+        return rotate(&groups, k + 1);
+    }
+    // The edge split in two at the crossing: the part the chain reaches first, and the part it
+    // leaves last.
+    let curve = e.parameters();
+    let [t0, t1] = e.interval;
+    let turned = |s: Vec<kernel::PathSeg>| s.into_iter().rev().map(|seg| seg.reversed()).collect::<Vec<_>>();
+    let (before, after) = if chain[k].1 {
+        match (kernel::curve_path(curve, [t0, t]), kernel::curve_path(curve, [t, t1])) {
+            (Ok(a), Ok(b)) => (a, b),
+            _ => return flat(&groups),
+        }
+    } else {
+        match (kernel::curve_path(curve, [t, t1]), kernel::curve_path(curve, [t0, t])) {
+            (Ok(a), Ok(b)) => (turned(a), turned(b)),
+            _ => return flat(&groups),
+        }
+    };
+    let mut out = Vec::with_capacity(groups.len() + 1);
+    out.extend(after);
+    out.extend(groups[k + 1..].iter().flatten().copied());
+    out.extend(groups[..k].iter().flatten().copied());
+    out.extend(before);
+    out
+}
+
+/// The chain of a body's edges begun at its edge `k`, its edges in order.
+fn rotate(groups: &[Vec<kernel::PathSeg>], k: usize) -> Vec<kernel::PathSeg> {
+    let n = groups.len();
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        out.extend(groups[(k + i) % n].iter().copied());
+    }
+    out
+}
+
+/// The point of the record curve `c` on `[t0, t1]` nearest `p`, and the parameter there: the
+/// curve sampled and the nearest sample's piece narrowed.
+fn closest_on_curve(c: &solidcore_record::brep::Curve, [t0, t1]: [f64; 2], p: Vec3) -> Option<(f64, Vec3)> {
+    let eval = solidcraft_geom::brep::eval::CurveEval::new(c).ok()?;
+    /// Samples along the curve to find the nearest piece.
+    const SAMPLES: usize = 64;
+    let step = (t1 - t0) / SAMPLES as f64;
+    let mut best = (0usize, f64::INFINITY);
+    for i in 0..=SAMPLES {
+        let Some(q) = eval.point(t0 + step * i as f64) else { continue };
+        let d = q.dist(p);
+        if d < best.1 {
+            best = (i, d);
+        }
+    }
+    // Narrow the piece around the nearest sample (the distance is smallest near it).
+    let (mut lo, mut hi) = (t0 + step * best.0.saturating_sub(1) as f64, t0 + step * (best.0 + 1).min(SAMPLES) as f64);
+    for _ in 0..60 {
+        let (a, b) = (lo + (hi - lo) / 3.0, hi - (hi - lo) / 3.0);
+        let da = eval.point(a).map_or(f64::INFINITY, |q| q.dist(p));
+        let db = eval.point(b).map_or(f64::INFINITY, |q| q.dist(p));
+        if da < db {
+            hi = b;
+        } else {
+            lo = a;
+        }
+    }
+    let t = 0.5 * (lo + hi);
+    Some((t, eval.point(t)?))
 }
 
 /// [`path_segments`] for a profile in `profile`: a closed path is followed from where the

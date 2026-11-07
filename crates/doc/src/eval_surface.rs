@@ -380,7 +380,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 // The path runs on from the end nearest the middle of the curves.
                 let pts: Vec<Vec2> = chains.iter().flatten().flat_map(|s| s.polyline(1e-2)).collect();
                 let start = ss.plane.to_world(pts.iter().fold(Vec2::default(), |a, p| a + *p) * (1.0 / pts.len().max(1) as f64));
-                let segs = crate::eval::edge_path_segments(st, body, path_edges, start)?;
+                let segs = crate::eval::edge_path_segments(st, body, path_edges, start, Some(&ss.plane))?;
                 let path_start = segs.first().map(kernel::PathSeg::start).unwrap_or(start);
                 let rails = crate::eval::rail_polylines(doc, st, rails, f.component, path_start)?;
                 let ctl = crate::eval::sweep_control(vals, orientation, twist, scale, rails, *rail_fit)?;
