@@ -17,10 +17,6 @@ component.properties
 component.rename
 component.revert_position
 component.unlock
-doc.open
-doc.recover
-doc.recovery_discard
-doc.recovery_list
 document.inspect
 engine.commands
 explode.create
