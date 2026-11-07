@@ -18,6 +18,7 @@ pub(in crate::render_workspace) struct Draft {
     pub acknowledged: bool,
     pub bounds: bool,
     pub emitters_only: bool,
+    pub enable_indirect: bool,
     pub center: [f64; 3],
     pub extent: f64,
     revision: u64,
@@ -47,6 +48,7 @@ pub(in crate::render_workspace) fn open(app: &mut SolveApp, variant: &'static st
         acknowledged: false,
         bounds: true,
         emitters_only: false,
+        enable_indirect: false,
         center: [0.0; 3],
         extent: 1000.0,
         revision: app.session.revision,
@@ -67,10 +69,20 @@ pub(in crate::render_workspace) fn quality(app: &mut SolveApp, id: &str) -> Resu
 }
 
 pub(in crate::render_workspace) fn light(app: &mut SolveApp, view: &View, id: &str) -> Result<(), String> {
-    if let Some(reason) = light_reason(app, &view.kind) {
+    if let Some(reason) = selected_light_reason(app, view) {
         return Err(reason);
     }
-    let set = patch(app)?;
+    let mut set = patch(app)?;
+    if matches!(view.kind.as_str(), "native_scenes" | "rigs" | "hdr")
+        && (app.session.doc.render.setups.contains_key(&app.render_workspace.view.name)
+            || (app.render_workspace.view.method == ImageMethod::CpuRaytrace && view.kind != "hdr"))
+    {
+        // A lighting transaction preserves the saved shot camera; viewport
+        // navigation is not an implicit camera-save action.
+        if let Some(fields) = set.as_object_mut() {
+            fields.remove("camera");
+        }
+    }
     let name = app.render_workspace.view.name.clone();
     let label = view.details.as_ref().and_then(|d| d["resource"]["name"].as_str()).unwrap_or(id).to_string();
     match view.kind.as_str() {
@@ -93,7 +105,12 @@ pub(in crate::render_workspace) fn light(app: &mut SolveApp, view: &View, id: &s
         ),
         "rigs" => {
             let rig = json!({"id":id,"variant":"complete","center_mm":view.center,"subject_extent_mm":view.extent});
-            let plan = app.run("render.library.studio.prepare", rig.clone())?;
+            let mut prepare = rig.clone();
+            if app.render_workspace.view.method == ImageMethod::CpuRaytrace {
+                prepare["name"] = json!(name);
+                prepare["set"] = set.clone();
+            }
+            let plan = app.run("render.library.studio.prepare", prepare)?;
             open(
                 app,
                 "rig",
@@ -101,7 +118,7 @@ pub(in crate::render_workspace) fn light(app: &mut SolveApp, view: &View, id: &s
                 plan,
                 Apply::Command {
                     id: "render.library.studio.apply".into(),
-                    params: json!({"rig":rig,"name":name,"set":set,"replace_lighting_and_environment":true,"replace_stage":true}),
+                    params: json!({"rig":rig,"name":name,"set":set,"expected_revision":app.session.revision,"replace_lighting_and_environment":true,"replace_stage":true}),
                 },
             )?;
             if let Some(draft) = &mut app.render_workspace.view.library.review {
@@ -132,7 +149,14 @@ fn apply(app: &mut SolveApp, draft: &mut Draft) -> Result<(), String> {
                 params["rig"]["center_mm"] = json!(draft.center);
                 params["rig"]["subject_extent_mm"] = json!(draft.extent);
                 params["rig"]["variant"] = json!(if draft.emitters_only { "emitters_only" } else { "complete" });
-                app.run("render.library.studio.prepare", params["rig"].clone())?;
+                let mut prepare = params["rig"].clone();
+                if draft.method == ImageMethod::CpuRaytrace {
+                    prepare["name"] = params["name"].clone();
+                    prepare["set"] = params["set"].clone();
+                    prepare["enable_indirect"] = json!(draft.enable_indirect);
+                    params["enable_indirect"] = json!(draft.enable_indirect);
+                }
+                app.run("render.library.studio.prepare", prepare)?;
             }
             app.run(id, params.clone())?;
             if id.as_str() != "render.library.appearance.apply" {
@@ -142,10 +166,7 @@ fn apply(app: &mut SolveApp, draft: &mut Draft) -> Result<(), String> {
         Apply::Maps { id, target, plane, scale, rotation_rad } => {
             materials::install_library_surface(app, id, target.clone(), plane, *scale, *rotation_rad)?
         }
-        Apply::Quality(plan) => {
-            super::super::inspector::apply_quality(app, plan)?;
-            setups::save(app)?;
-        }
+        Apply::Quality(plan) => super::super::inspector::apply_quality_transaction(app, plan)?,
         Apply::Physical(_) => {}
     }
     Ok(())
@@ -174,13 +195,18 @@ pub(in crate::render_workspace) fn dialog(app: &mut SolveApp, ctx: &egui::Contex
             _ => "render.stage_panels.acknowledge",
         })
         .to_string();
+    let needs_indirect = draft.plan["requires_indirect"] == true;
     let apply_label = app
-        .tr(match draft.variant {
-            "studio" => "render.stage_panels.apply_studio",
-            "rig" => "render.stage_panels.fit_save",
-            "physical" => "ui.close",
-            "quality" => "render.stage_panels.use_budget",
-            _ => "render.stage_panels.apply",
+        .tr(if needs_indirect {
+            "render.cpu_studio_enable_apply"
+        } else {
+            match draft.variant {
+                "studio" => "render.stage_panels.apply_studio",
+                "rig" => "render.stage_panels.fit_save",
+                "physical" => "ui.close",
+                "quality" => "render.stage_panels.use_budget",
+                _ => "render.stage_panels.apply",
+            }
         })
         .to_string();
     let physical_notice = app.tr("render.physical_plan_only").to_string();
@@ -195,9 +221,15 @@ pub(in crate::render_workspace) fn dialog(app: &mut SolveApp, ctx: &egui::Contex
         copy: draft.variant == "physical",
         notice: (draft.variant == "physical").then_some(physical_notice.as_str()),
     };
-    let (closed, answer) = review.show(ctx, current, &mut draft.acknowledged, |ui| {
+    let can_apply = current && (!needs_indirect || draft.enable_indirect);
+    let (closed, answer) = review.show(ctx, can_apply, &mut draft.acknowledged, |ui| {
         if !current {
             ui_kit::text(ui, app.tr("render.review_stale"), ui_kit::Text::Error("review:stale"));
+        }
+        if needs_indirect {
+            ui_kit::text(ui, app.tr("render.cpu_studio_indirect_help"), ui_kit::Text::Note("review:cpu-indirect"));
+            let response = ui_kit::checkbox(ui, app.tr("render.cpu_studio_enable"), &mut draft.enable_indirect);
+            crate::scenario::publish_target("render:review:enable-indirect", response.rect);
         }
         match draft.variant {
             "rig" => {
@@ -248,6 +280,11 @@ pub(in crate::render_workspace) fn dialog(app: &mut SolveApp, ctx: &egui::Contex
                         ui_kit::Text::Inline,
                     );
                 });
+                ui_kit::row(ui, app.tr("render.children.seed"), |ui| {
+                    ui_kit::text(ui, &draft.plan["gpu_options"]["seed"].to_string(), ui_kit::Text::Inline);
+                });
+                let denoise = if draft.plan["gpu_options"]["denoise"] == true { "render.quality_denoise_on" } else { "render.quality_denoise_off" };
+                ui_kit::text(ui, app.tr(denoise), ui_kit::Text::Inline);
                 ui_kit::text(ui, app.tr("render.stage_panels.omits"), ui_kit::Text::Note("review:omits"));
                 ui_kit::text(ui, app.tr("render.stage_panels.quality_omissions"), ui_kit::Text::Note("review:omissions"));
             }
@@ -300,7 +337,7 @@ pub(in crate::render_workspace) fn confirmation(app: &mut SolveApp, ctx: &egui::
     let title = app.tr(if stage { "render.stage_panels.remove_stage_title" } else { "render.stage_panels.remove_optics_title" }).to_string();
     let message = app.tr(if stage { "render.stage_panels.remove_stage_help" } else { "render.stage_panels.remove_optics_help" }).to_string();
     let label = app.tr(if stage { "render.stage_panels.remove_stage" } else { "render.stage_panels.remove_optics" }).to_string();
-    let (closed, answer) = ui_kit::Confirm::new(egui::Id::new("render_resource_removal"), "delete", &title)
+    let (closed, answer) = ui_kit::Confirm::new(egui::Id::unique("render_resource_removal"), "delete", &title)
         .tone(ui_kit::Tone::Danger)
         .actions(&label, app.tr("render.stage_panels.keep"), None)
         .show(ctx, true, |ui| {

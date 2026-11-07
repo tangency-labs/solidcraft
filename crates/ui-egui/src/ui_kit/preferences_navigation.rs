@@ -118,7 +118,7 @@ pub(crate) fn settings_axis_row(
             } else {
                 let [label_rect, live_rect, invert_rect, speed_rect, source_rect] = axis_columns(rect);
                 paint_text(ui, label_rect, name, FontId::proportional(t.font_label), t.form_ink, false);
-                ui.interact(label_rect, ui.id().with("axis_name"), Sense::hover()).backing_on_hover_text(name);
+                ui.interact(label_rect, ui.scope_id().with("axis_name"), Sense::hover()).backing_on_hover_text(name);
                 let live_rect = Rect::from_center_size(live_rect.center(), vec2(live_rect.width(), t.space_14));
                 live_axis_bar_in(ui, live_rect, value, dead_zone);
                 axis_control(ui, invert_rect, "invert", name, invert);

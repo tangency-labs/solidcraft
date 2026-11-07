@@ -1158,6 +1158,8 @@ pub fn convert_body(
                 zone_shape: None,
                 tag: String::new(),
                 tear: (false, false),
+                tear_curved: (false, false),
+                tear_ease: (0.0, 0.0),
             });
             let i = sh.flanges.len() - 1;
             let (ba, n) = sh.flanges.get(i).map_or((0.0, Vec2::new(d.y, -d.x)), |f| (sh.allowance(f), f.n));

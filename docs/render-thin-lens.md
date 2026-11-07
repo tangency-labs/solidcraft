@@ -1,6 +1,12 @@
-# GPU depth of field
+# Physical depth of field
 
-`render.preflight` and `render.start` accept an optional runtime lens:
+The Frame editor exposes the same physical thin lens for CPU ray tracing and GPU
+path tracing. Lens changes save numerical intent in one undo step; they do not
+move the view or replace the saved shot camera. Positive CPU aperture requires
+explicit progressive sampling. A saved fixed CPU shot keeps its sampling choice
+until the user adopts progressive sampling in Sampling.
+
+`render.preflight` and `render.start` accept the GPU runtime lens:
 
 ```json
 {"progressive":true,"samples":256,
@@ -11,7 +17,20 @@ Use a perspective camera in `settings.camera` or the current view. Focus distanc
 is measured from the eye along the forward axis, to a plane perpendicular to that
 axis. It is not distance along each ray. Aperture is the physical radius in mm,
 not an f-number. Units follow the scene; a radius of 0.5 mm is small for a room and
-large for a 3 mm object. No saved camera or render setup fields are added.
+large for a 3 mm object. Saved CPU and GPU jobs both use `job.options.lens`;
+the setup camera remains their single saved camera authority. The CPU runtime
+form is nested inside `raytrace`, rather than the GPU top-level `lens`:
+
+```json
+{"integrator":"raytrace", "settings":{"width":512,"height":512,
+ "camera":{"target":[0,0,0],"yaw":0,"pitch":0,"fov":0.7,"distance":120}}, "raytrace":{
+ "progressive":{"samples_per_pixel":16,"seed":81}, "primary_samples":1,
+ "lens":{"aperture_radius_mm":0.5,"focus_distance_mm":120}}}
+```
+
+Saving, reopening and undoing lens intent work without an installed render host.
+Neither a missing lens nor an explicitly saved zero aperture is inferred into an
+active lens. Legacy fixed CPU and orthographic images keep their original path.
 
 A uniform-area circular aperture uses `r = radius * sqrt(u)` and `phi = 2*pi*v`.
 Each primary ray starts at that aperture point and aims at the pinhole ray's
@@ -27,43 +46,39 @@ Radius is finite in [0, 1e7] mm and focus distance in [1e-6, 1e9] mm. Active len
 also require camera distance >= 1e-6 mm and tan(fov/2) in [1e-6, 1e6] to keep the
 f32 basis and focal point bounded. Existing image and scene caps still apply.
 The whole aperture must remain outside glass volumes, as must the pinhole camera.
-No UI lens editor or dedicated CLI flags are included; use the shared render
-commands through the control protocol, scripts or MCP.
+CPU admission conservatively requires the sphere containing the entire circular
+pupil to stay outside every certified closed glass box, including contact. This
+can refuse a disk that would fit beside glass; it does not guess its starting
+medium. Existing near-plane and per-path certification checks still apply.
+CPU also checks the whole pupil's possible near/far ray interval against its
+existing coordinate and distance envelope before starting transport. Extreme
+physical lens/camera combinations that exceed that envelope refuse explicitly.
+No general glass geometry or medium nesting is added.
 
-Tests read rays from the production WGSL camera function and compare against
-f64 geometric focus and defocus oracles, including an oblique rolled camera.
+Tests read rays from the production GPU camera function and from the CPU camera
+generator, comparing against analytical focus and defocus oracles with an oblique
+rolled camera. CPU image tests also check actual defocused coverage, every
+complete-pass prefix, worker-quanta independence, zero-aperture PNG/master/work
+identity, cancellation and conservative glass admission. The CPU pupil sampler
+uses a separate counter domain keyed by seed, pixel and absolute film ordinal;
+it adds one charged continuation per camera sample, no extra rays or image
+buffers. Existing job memory and cumulative work caps remain unchanged.
 At axial depth z, the displacement from a pinhole ray is
 `aperture_point * (1 - z/focus_distance)`: zero at focus, opposite-signed beyond it.
 Other tests cover strict admission, zero-aperture image identity and fixed-seed
 repeatability with an active lens. Glass evidence is an original procedural scene,
 with test-only uniform environment lighting, not a claim of HDRI implementation.
 
-## CPU draft coordination
+## Historical coordination
 
-Read-only comparison: [CPU integration draft #1698](https://github.com/tangency-labs/solidcraft/pull/1698),
-head `463a3e0daaa6b84f169ba5f8f215fba4642c194a` (2026-10-17).
-No source from that draft is copied into this change.
+The original GPU lens work compared the then-current CPU integration draft
+[#1698](https://github.com/tangency-labs/solidcraft/pull/1698), head
+`463a3e0daaa6b84f169ba5f8f215fba4642c194a` (2026-10-17), without copying its
+source. That draft predates the current CPU lens and certified optical transport.
+It is not the current capability contract.
 
-- `raytrace/reflection.rs` uses the existing opaque surface's Schlick Fresnel,
-  GGX NDF sampling and solid-angle PDF `D(h)*n.h/(4*v.h)`. Our opaque lobe already
-  shares that surface oracle; the GPU mixes GGX and cosine samples with equal
-  probability. CPU sample sequences differ, so comparisons are statistical.
-- The draft has no dielectric transport or thin-lens implementation to use as an
-  oracle. GPU glass retains the f64 Fresnel, Snell, slab and ball-lens checks.
-- Both intersections use dominant-axis projection, closed edges and two-sided
-  triangles. CPU uses f64 with outward representable bounds; GPU uses f32 after
-  target rebasing and conservative epsilon bounds. CPU secondary rays use a
-  component-wise barycentric error bound and outward representable steps; GPU
-  still uses max(1e-5 mm, scene extent * 1e-7). This precision difference is
-  explicit; no CPU/GPU intersection identity is claimed.
-- `lighting/environment_sampling.rs` defines +Z north, longitude atan2(y,x),
-  latitude acos(z), and inverse positive +Z rotation for lookup. The future GPU
-  environment adapter should use these conventions. CPU samples the sphere
-  uniformly with PDF 1/(4*pi); a GPU luminance CDF would use its own correctly
-  normalized solid-angle PDF and MIS. Neither is implemented by this lens change.
-- CPU accepts only explicitly declared sRGB/D65 HDR primaries. GPU HDR input
-  must honor that boundary or provide a separately validated gamut conversion.
-
-The agreed shared dielectric fields are IOR, linear RGB extinction per mm and
-thin-sheet thickness vs certified closed boundaries, identified by ordinal and name.
-Persistence belongs to the shared contract follow-up, not this GPU executor slice.
+CPU primary geometry uses f64 with outward representable bounds; GPU uses f32
+after target rebasing. Sample sequences and secondary-origin policies differ,
+so cross-method pixel identity is not promised. Focus-plane geometry and shared
+physical units are the analytical comparison. CPU HDR still requires declared
+linear sRGB/D65 primaries; adding a lens does not add a gamut conversion or GI.

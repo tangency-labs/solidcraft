@@ -206,7 +206,7 @@ fn construction_length(t: &Tool, b: &DimBox) -> bool {
 
 /// The id of the `i`th value box of the tool being drawn.
 pub(crate) fn box_id(i: usize) -> egui::Id {
-    egui::Id::new(("sc_dim", i))
+    egui::Id::unique(("sc_dim", i))
 }
 
 /// Where the preview and the value boxes put the tool's next point for the hover `p`: for a
@@ -543,7 +543,7 @@ pub(crate) fn locked_expression<'a>(t: &'a Tool, label: &str) -> Option<&'a str>
 /// still show its boxes, so a finished or restarted shape is left alone.
 pub fn restore_box_focus(app: &SolveApp, ctx: &egui::Context) {
     let Some(count) = app.tool.as_ref().map(|t| t.dims.len()) else { return };
-    let holder = ctx.memory(|memory| (0..count).map(|i| egui::Id::new(("sc_dim", i))).find(|id| memory.had_focus_last_frame(*id)));
+    let holder = ctx.memory(|memory| (0..count).map(|i| egui::Id::unique(("sc_dim", i))).find(|id| memory.had_focus_last_frame(*id)));
     if let Some(id) = holder {
         ctx.memory_mut(|memory| memory.request_focus(id));
     }
@@ -553,7 +553,7 @@ pub fn restore_box_focus(app: &SolveApp, ctx: &egui::Context) {
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
     // Esc in a box ends the shape (the box had the keyboard, so the shortcut didn't see it).
     let in_box =
-        app.tool.as_ref().is_some_and(|t| (0..t.dims.len()).any(|i| ui.ctx().memory(|m| m.had_focus_last_frame(egui::Id::new(("sc_dim", i))))));
+        app.tool.as_ref().is_some_and(|t| (0..t.dims.len()).any(|i| ui.ctx().memory(|m| m.had_focus_last_frame(egui::Id::unique(("sc_dim", i))))));
     if in_box && !app.esc_handled && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
         app.esc_handled = true;
         crate::tools::finish(app);
@@ -595,8 +595,8 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
     let source = tab.and_then(|_| {
         ui.ctx().memory(|memory| {
             (0..t.dims.len())
-                .find(|i| memory.had_focus_last_frame(egui::Id::new(("sc_dim", i))))
-                .or_else(|| (0..t.dims.len()).find(|i| memory.has_focus(egui::Id::new(("sc_dim", i)))))
+                .find(|i| memory.had_focus_last_frame(egui::Id::unique(("sc_dim", i))))
+                .or_else(|| (0..t.dims.len()).find(|i| memory.has_focus(egui::Id::unique(("sc_dim", i)))))
         })
     });
     if source.is_some() {
@@ -635,7 +635,7 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
     for (i, b) in t.dims.iter_mut().enumerate() {
         let Some((_, at)) = lv.get(i).copied() else { continue };
         let Some(sp) = proj.to_screen(plane.to_world(at)) else { continue };
-        let id = egui::Id::new(("sc_dim", i));
+        let id = egui::Id::unique(("sc_dim", i));
         let has_focus = ui.ctx().memory(|m| m.has_focus(id));
         // While a box follows the cursor its whole text is selected, so typing replaces it.
         if (has_focus || (focus && i == 0)) && !b.locked {
@@ -649,7 +649,7 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
             .and_then(|positions| positions.get(i).copied())
             .unwrap_or_else(|| in_view(sp + vec2(-34.0, -11.0), view, ui.ctx().pointer_latest_pos()));
         // Background: under Preferences and Report a bug (#9016), like canvas value boxes.
-        Container::new(ui.ctx(), Surface::Canvas).area(egui::Id::new(("sc_dim_area", i))).fixed_pos(pos).order(egui::Order::Background).show(
+        Container::new(ui.ctx(), Surface::Canvas).area(egui::Id::unique(("sc_dim_area", i))).fixed_pos(pos).order(egui::Order::Background).show(
             ui.ctx(),
             |ui| {
                 let fill = if b.locked { tk.accent_soft } else { tk.panel };
@@ -675,7 +675,7 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
         && !completed
     {
         let next = if tab == Some(true) { (source + t.dims.len() - 1) % t.dims.len() } else { (source + 1) % t.dims.len() };
-        let id = egui::Id::new(("sc_dim", next));
+        let id = egui::Id::unique(("sc_dim", next));
         if let Some(dimension) = t.dims.get(next) {
             let mut state = egui::TextEdit::load_state(ui.ctx(), id).unwrap_or_default();
             state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
@@ -728,8 +728,8 @@ pub(crate) const BOX: egui::Vec2 = egui::vec2(76.0, 24.0);
 /// sketch point, so the viewport asks before letting one take the click.
 pub(crate) fn over_tool_boxes(app: &SolveApp, ctx: &egui::Context, p: egui::Pos2) -> bool {
     let Some(t) = app.tool.as_ref() else { return false };
-    (0..t.dims.len()).any(|i| ctx.memory(|m| m.area_rect(egui::Id::new(("sc_dim_area", i)))).is_some_and(|r| r.contains(p)))
-        || ctx.memory(|m| m.area_rect(egui::Id::new("sc_construction_switch"))).is_some_and(|r| r.contains(p))
+    (0..t.dims.len()).any(|i| ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i)))).is_some_and(|r| r.contains(p)))
+        || ctx.memory(|m| m.area_rect(egui::Id::unique("sc_construction_switch"))).is_some_and(|r| r.contains(p))
 }
 
 /// Where a value box whose top left would be `pos` goes so it stays in the drawing area `view`:
