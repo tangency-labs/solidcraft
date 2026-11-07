@@ -5047,8 +5047,11 @@ fn hole_tools_and_prisms(
             // radius, and above the face the rim's cylinder, as the bore's own cylinder runs on
             // above it. The cone widening on above the face would cut what stands beside the rim
             // (#5041). The cone is the profile's first segment (`csink:side:0`).
-            let r_end = r * 0.9;
-            let len = (rc - r_end) / half.tan();
+            // The cone stops at the hole's depth when that comes first: a countersink deeper
+            // than its hole is cut to the hole (#10697).
+            let reach = (rc - r * 0.9) / half.tan();
+            let len = reach.min(-bottom);
+            let r_end = rc - len * half.tan();
             let up = -dir;
             let rp = Plane::new(*position, up.any_perp(), up).ok_or_else(|| DocError::Invalid("hole axis".into()))?;
             let pts = [Vec2::new(rc, 0.0), Vec2::new(r_end, -len), Vec2::new(0.0, -len), Vec2::new(0.0, top), Vec2::new(rc, top)];
