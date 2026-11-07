@@ -97,6 +97,36 @@ fn a_path_gets_the_svg_written_to_it() {
     );
 }
 
+/// A PNG export stopped part way (the window's background export, cancelled once its first band is
+/// drawn) is refused and writes no file: the file is written only once the whole sheet is drawn.
+#[test]
+fn a_cancelled_png_export_writes_no_file() {
+    /// Cancels as soon as the sheet PNG has reported a band, so nothing before it is stopped.
+    #[derive(Default)]
+    struct AfterABand(std::sync::atomic::AtomicBool);
+    impl solidcraft_kernel::watch::Watch for AfterABand {
+        fn cancelled(&self) -> bool {
+            self.0.load(std::sync::atomic::Ordering::Relaxed)
+        }
+        fn progress(&self, stage: &'static str, _: usize, _: usize) {
+            if stage == "sheet_png" {
+                self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+    }
+    let (mut s, sheet, _) = front_and_top();
+    let folder = Folder::new("drawing-export-cancelled");
+    let path = folder.path("sheet.png");
+    // A3 at 300 dpi draws in 5 bands.
+    let p = json!({"sheet": ids::encode(sheet), "format": "png", "path": path});
+    let watch = std::sync::Arc::new(AfterABand::default());
+    let why = solidcraft_kernel::watch::watching(watch.clone(), || s.execute(CMD, &p)).unwrap_err().to_string();
+    assert!(why.contains("the sheet PNG: cancelled") && watch.0.load(std::sync::atomic::Ordering::Relaxed), "{why}");
+    assert!(!std::path::Path::new(&path).exists());
+    run(&mut s, CMD, p);
+    assert!(std::path::Path::new(&path).exists(), "unwatched, it is written");
+}
+
 /// A view drawing hidden lines exports with the rest of its sheet, dashed: a style that used to
 /// refuse the whole sheet. The top view is projected from the front one, so it follows its style:
 /// 4 dashes for the pocket seen from the front, 3 from above (its fourth edge is on the outline).

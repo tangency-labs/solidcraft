@@ -783,6 +783,7 @@ impl SourceKey {
 
 /// A view's last drawing, and what it was drawn from: the world state (held, so its address can't
 /// be reused while it is compared), what that showed, and the view as it drew.
+#[derive(Clone)]
 struct Entry {
     state: Arc<ModelState>,
     shows: Option<Arc<SourceKey>>,
@@ -800,6 +801,7 @@ impl Entry {
 
 /// A dimension's last drawing, and what it was drawn from: its record, the world state, its view's
 /// drawing (by serial, which holds its frame) and the drawing's lettering.
+#[derive(Clone)]
 struct DimensionEntry {
     state: Arc<ModelState>,
     record: Arc<Dimension>,
@@ -853,6 +855,21 @@ impl Assembled {
 }
 
 impl Cache {
+    /// What [`as_shown`] reads of the drawing open, for a copy of the session that exports it
+    /// ([`Session::scratch_as_shown`]): the world state its last [`update`] took, and each view's and
+    /// dimension's last drawing, and the serial they were numbered to, so the copy's numbers never
+    /// repeat theirs. Not the lines kept for drawings closed, the last answer or a request in flight,
+    /// which only the session's own page uses; the drawing and sheet are set by the read.
+    pub(crate) fn shown_copy(&self) -> Cache {
+        Cache {
+            views: self.views.clone(),
+            dimensions: self.dimensions.clone(),
+            updated: self.updated.clone(),
+            serial: self.serial,
+            ..Cache::default()
+        }
+    }
+
     /// Drawing `drawing`'s lines kept when it closed, as its views' entries: from a world state that
     /// has gone, so each is out of date until [`keep_what_shows_the_same`] finds it shows the same.
     fn take_kept(&mut self, drawing: u64) {

@@ -796,6 +796,66 @@ fn a_deferred_drawing_keeps_its_lines_until_it_is_updated() {
     assert_eq!((waiting.stale.len(), bytes(&waiting.scene)), (2, bytes(&now.scene)));
 }
 
+/// The copy a background export runs on ([`Session::scratch_as_shown`]) exports a sheet as the
+/// session does: a drawing that isn't deferred, drawn at once, also after a view's edit; a
+/// deferred drawing after its update, with a view edited since; and one held since its update,
+/// with its views' and dimensions' last lines, on the sheet last shown and on another.
+#[test]
+fn a_held_deferred_drawing_exports_the_same_from_a_scratch_copy() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let svg = |sheet: u64| json!({"sheet": ids::encode(sheet), "format": "svg"});
+    // The file and what it leaves out of date; a view drawn here again has its own timings.
+    let shown = |reply: &Value| (reply["svg"].clone(), reply["out_of_date"].clone());
+    let same = |s: &mut Session, sheet: u64| {
+        let there = s.scratch_as_shown().execute("drawing.export", &svg(sheet)).unwrap();
+        let here = run(s, "drawing.export", svg(sheet));
+        assert_eq!(shown(&there), shown(&here));
+        here
+    };
+    // The front view's bottom edge, so a dimension's last reading is held too.
+    run(&mut s, "drawing.dimension.add", json!({"view": ids::encode(front), "kind": {"length": {"edge": [50, 0, 0]}}}));
+    same(&mut s, sheet);
+    // A view edited after the sheet was drawn: the copy draws it and its dimension again.
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"scale": "1:4"}}));
+    same(&mut s, sheet);
+    // A second sheet, with a view of its own.
+    run(&mut s, "drawing.sheet.add", json!({}));
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let (other, source) = (d.sheets[1].id, d.sources[0].id);
+    let id = d.allocate_id(&mut solidcraft_doc::ids::IdSource::seeded(10431)).unwrap();
+    let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Top) };
+    let settings = ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() };
+    let view = View { id, sheet: other, kind, place: ViewPlace::At([150.0, 150.0]), settings, reference_shown_percent: 0.0 };
+    d.add_views([Arc::new(view)]);
+    d.validate().unwrap();
+    s.doc_mut().put_drawing(Arc::new(d));
+
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    let checkpoint = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].clone();
+    run(&mut s, "drawing.close", json!({}));
+    let block = s.doc.features[0].id;
+    run(&mut s, "timeline.edit", json!({"feature": block.to_string(), "set": {"height": 40}}));
+    run(&mut s, "drawing.open", drawing);
+    run(&mut s, "drawing.update", json!({}));
+    settled(&mut s, other);
+    settled(&mut s, sheet);
+    // Updated, so not held: a view edited since draws at once, on the copy too, and its dimension
+    // is read again.
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"scale": "1:2"}}));
+    let here = same(&mut s, sheet);
+    assert_eq!(here["out_of_date"].as_array().map_or(0, Vec::len), 0, "drawn: {here}");
+    // Held with the drawing open, every line drawn: closing it would keep only its views' lines.
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": checkpoint}));
+    settled(&mut s, sheet);
+    // Sheet 1: its two views and the dimension's last reading; the other sheet: its one view.
+    for (on, views, dimensions) in [(sheet, 2, 1), (other, 1, 0)] {
+        let here = same(&mut s, on);
+        let count = |key: &str| here[key].as_array().map(Vec::len);
+        assert_eq!((count("out_of_date"), count("dimensions")), (Some(views), Some(dimensions)), "held: {here}");
+    }
+}
+
 /// `drawing.update` on a drawing that follows the model changes nothing, and draws nothing itself.
 #[test]
 fn updating_an_automatic_drawing_changes_nothing() {

@@ -247,6 +247,43 @@ fn bands_change_nothing_and_the_bytes_repeat() {
     }
 }
 
+/// The window's background export watches the sheet PNG: before each band it hears the rows drawn so
+/// far, and once cancelled the PNG stops at the next band with an error. A watch changes no byte.
+#[test]
+fn a_watched_sheet_png_reports_its_rows_and_stops_when_cancelled() {
+    struct Stop {
+        reports: std::sync::Mutex<Vec<(&'static str, usize, usize)>>,
+        after: usize,
+    }
+    impl solidcraft_kernel::watch::Watch for Stop {
+        fn cancelled(&self) -> bool {
+            self.reports.lock().unwrap().len() >= self.after
+        }
+        fn progress(&self, stage: &'static str, done: usize, total: usize) {
+            self.reports.lock().unwrap().push((stage, done, total));
+        }
+    }
+    let sheet = small();
+    let prepared = sheet.prepare().unwrap();
+    let options = PngOptions { dpi: 254.0, colour: PngColour::Grey };
+    let (plain, _) = bytes(&sheet, options);
+    // 20 x 10 mm at 254 dpi is 200 x 100 pixels; three rows a band make 34 bands.
+    let run = |after| {
+        let watch = std::sync::Arc::new(Stop { reports: Default::default(), after });
+        let mut out = Vec::new();
+        let written = solidcraft_kernel::watch::watching(watch.clone(), || write(&prepared, options, &NoPictures, &mut out, 3 * 200 * 4));
+        let reports = watch.reports.lock().unwrap().clone();
+        (written.map(|_| out), reports)
+    };
+    let (whole, reports) = run(usize::MAX);
+    assert_eq!(whole.unwrap(), plain, "a watch changes no byte");
+    assert_eq!(reports.len(), 34);
+    assert!(reports.iter().enumerate().all(|(i, r)| *r == ("sheet_png", 3 * i, 100)), "{reports:?}");
+    let (stopped, reports) = run(2);
+    assert!(stopped.unwrap_err().to_string().contains("cancelled"));
+    assert_eq!(reports.len(), 2, "it stops before the third band");
+}
+
 /// Out of range resolutions, text (B2b) and more points than the cap are refused, never drawn some
 /// other way. An ellipse, which the walk once refused, draws.
 #[test]
