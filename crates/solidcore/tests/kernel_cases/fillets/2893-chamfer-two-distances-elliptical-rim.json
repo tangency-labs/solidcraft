@@ -111,7 +111,7 @@
   "case": "2893-chamfer-two-distances-elliptical-rim",
   "expected": {
     "body_count": 1,
-    "method": "the axis (1, 0, 2)/sqrt5 through (0, 0, -10) meets z = 10 at (10, 0, 10); the rim is the ellipse there with semi-axes 5 (along y) and 5 sqrt5/2 (along x); (10, 5, 10) is on it. An unequal chamfer of an ellipse has no closed-form volume: one closed valid solid (the owner, 2026-10-31: it builds). The two arcs are one chamfer with one pair of offsets, measured at the wider of their middles' wedges (101.46 deg): the top's offset (2 + cos w') / sin w' = 2.2435 and the wall's (1 + 2 cos w') / sin w' = 1.4259, w' = 78.54 deg.",
+    "method": "the axis (1, 0, 2)/sqrt5 through (0, 0, -10) meets z = 10 at (10, 0, 10); the rim is the ellipse there with semi-axes 5 (along y) and 5 sqrt5/2 (along x); (10, 5, 10) is on it. An unequal chamfer of an ellipse has no closed-form volume: one closed valid solid (the owner, 2026-10-31: it builds). The two arcs are one chamfer with one pair of offsets: the narrowest wedge of their middles (78.54 deg) folds at the far tip, where the wedge opens to 116.57 deg, so the chamfer is measured at 86.43 deg, where the smallest setback there keeps a thousand edge tolerances (0.01): the top's offset (2 - cos a) / sin a = 1.9415 and the wall's (1 - 2 cos a) / sin a = 0.8772.",
     "outcome": "solid",
     "source": "invariants",
     "sources": [
@@ -120,7 +120,7 @@
     "what": "a cylinder r5 tilted 26.6 deg from Z cut flat at z = 10, its elliptical rim chamfered 1 and 2: one closed valid solid"
   },
   "expressible": true,
-  "gallery_note": "the rim's two arcs are one chamfer, one pair of offsets measured where the wedge is widest of their middles (101.5 deg), so the sizes 1 and 2 hold only there: the wedge runs 63.4 to 116.6 deg round the rim, and the setbacks run 0.47 to 2.72 along the top and 1.80 to 3.22 down the wall. Setbacks that hold at every station are another definition (a follow-up)",
+  "gallery_note": "the rim's two arcs are one chamfer, one pair of offsets measured at 86.4 deg, the narrowest wedge at which no station folds, so the sizes 1 and 2 hold only there: the wedge runs 63.4 to 116.6 deg round the rim, and the setbacks run 0.01 to 1.95 along the top and 1.73 to 2.61 down the wall, the chamfer all but gone on the top at the far tip. Setbacks that hold at every station are another definition (a follow-up)",
   "operation_expressible": true,
   "records": "2893-chamfer-two-distances-elliptical-rim.bodies.json.gz",
   "result": [

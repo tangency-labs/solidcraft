@@ -70,8 +70,9 @@ or a law r(t).
 - **Chamfer.** The same construction with the contacts at the setback distances, joined by the chord. The
   offsets are constant along an edge, converted from its sizes at one wedge; edges of one size on a
   tangent chain are one chamfer, so their rails meet: measured at the wedge of its edges between
-  planes, where the sizes then hold all along, else at the widest wedge of their middles. Where the
-  wedge varies the sizes hold only where it was measured.
+  planes, where the sizes then hold all along, else at the narrowest wedge of their middles, moved
+  up as far as unequal sizes need so that no station folds. Where the wedge varies the sizes hold
+  only where it was measured.
 
 Every geometric quantity downstream (rails, sections, events, corner boundaries) is built from the
 same exact spine points.

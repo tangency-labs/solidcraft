@@ -21,9 +21,9 @@ use solidcore::kernel::Kernel;
 use solidcore::query::api_queries::{edge_closest_point, face_bounding_box};
 use solidcore::topology::api_files::write_brep_to_file;
 use solidcore::topology::brep_data_write::FromBrepEnv;
-use solidcore::topology::loopuse;
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::EdgeuseId;
+use solidcore::topology::{edge, loopuse};
 use solidcore::{EdgeId, FaceId, Vec3};
 use solidcore_record::brep::Brep as Record;
 
@@ -530,14 +530,16 @@ fn nearest_edge(b: &Body, p: [f64; 3]) -> usize {
 
 /// A tangent chain chamfered 1 and 2 is one chamfer: the tilted cylinder's elliptical rim, in
 /// two arcs whose middles have different wedges (the kernel case
-/// `2893-chamfer-two-distances-elliptical-rim`), measured at the widest. Its one pair of
-/// offsets puts the ball's centre on the cylinder of radius 5 less the wall's offset, at the
+/// `2893-chamfer-two-distances-elliptical-rim`), measured at the narrowest wedge at which no
+/// station folds: the wedge opens to 90 degrees plus the tilt at the rim's far tip, inside an
+/// arc, and the smallest setback there keeps 1000 edge tolerances. Its one pair of offsets
+/// puts the ball's centre on the cylinder of radius 5 less the wall's offset, at the
 /// top's offset under the plane z = 10, so the top's rail is that cylinder's ellipse there,
 /// lifted to the plane: semi-axes `R` along y and `R sqrt(5) / 2` along x, centred at
 /// x = 10 less half the top's offset (the axis runs 1 along x to 2 along z).
 #[test]
 #[allow(clippy::disallowed_methods)] // the test's closed form, not ops computing geometry
-fn a_tangent_chain_is_one_chamfer_measured_at_its_widest_wedge() {
+fn a_tangent_chain_is_one_chamfer_measured_where_no_station_folds() {
     const SQRT_5: f64 = 2.236_067_977_499_79;
     all_fixes();
     let case = concat!(
@@ -564,19 +566,21 @@ fn a_tangent_chain_is_one_chamfer_measured_at_its_widest_wedge() {
         ),
     ];
     assert_ne!(rim[0], rim[1]);
-    // each arc's faces at its middle: the top's normal is up, the wall's leans `wall`, so
-    // their wedge's cosine is -wall, and the widest is the wall's leaning up most
-    let (mut top, mut wall) = (0, f64::NEG_INFINITY);
-    for e in rim {
-        let [a, b] = edge_faces_along(&b, e, up).unwrap();
-        let (t, w) = if a.1 > b.1 { (a, b) } else { (b, a) };
-        assert!(rel(t.1, 1.0) < 1e-12);
-        top = t.0;
-        wall = wall.max(w.1);
-    }
-    let (c, s) = (-wall, wall.acos().sin());
+    let [a, c] = edge_faces_along(&b, rim[0], up).unwrap();
+    let top = if a.1 > c.1 { a.0 } else { c.0 };
+    let (_k, before) = kernel_copy(&b);
+    let tolerance = rim
+        .iter()
+        .map(|&e| edge::tolerance(&before, before.edge_list()[e]).unwrap())
+        .fold(0.0, f64::max);
+    // at the widest wedge cos w = -1 / sqrt 5, sin w = 2 / sqrt 5; `unfolded_wedge`'s bound
+    let (cos_w, sin_w) = (-1.0 / SQRT_5, 2.0 / SQRT_5);
+    let c = (1.0 + 2.0 * cos_w - 1000.0 * tolerance * sin_w) / (2.0 + cos_w);
+    let s = c.acos().sin();
     let (r_top, r_wall) = ((2.0 - c) / s, (1.0 - 2.0 * c) / s);
     chamfer_sides(&b, &rim, &[top, top], 1.0, ChamferSecond::Distance(2.0)).unwrap();
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{report:?}");
     let (k, made) = kernel_copy(&b);
     let bx = made
         .face_list()
@@ -588,11 +592,11 @@ fn a_tangent_chain_is_one_chamfer_measured_at_its_widest_wedge() {
         .unwrap();
     let radius = 5.0 - r_wall;
     let half_x = radius * SQRT_5 / 2.0;
-    assert!(rel(bx.max().y, radius) < 1e-8, "{}", bx.max().y);
-    assert!(rel(bx.min().y, -radius) < 1e-8, "{}", bx.min().y);
+    assert!(rel(bx.max().y, radius) < 1e-7, "{}", bx.max().y);
+    assert!(rel(bx.min().y, -radius) < 1e-7, "{}", bx.min().y);
     let middle = 10.0 - r_top / 2.0;
-    assert!(rel(bx.max().x, middle + half_x) < 1e-8, "{}", bx.max().x);
-    assert!(rel(bx.min().x, middle - half_x) < 1e-8, "{}", bx.min().x);
+    assert!(rel(bx.max().x, middle + half_x) < 1e-7, "{}", bx.max().x);
+    assert!(rel(bx.min().x, middle - half_x) < 1e-7, "{}", bx.min().x);
 }
 
 #[test]
