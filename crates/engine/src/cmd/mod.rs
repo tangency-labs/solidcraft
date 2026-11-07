@@ -85,8 +85,10 @@ mod point_cloud;
 mod script;
 mod section;
 pub mod settings;
+pub(crate) use clipboard::{component_path_form, copy_keys};
 pub(crate) use measure_sel::{measure_items, shape_of};
 pub(crate) use measure_shape::Shape;
+pub(crate) use script::step_params;
 #[cfg(test)]
 mod kernel_heal_tests;
 mod panels;
