@@ -313,12 +313,16 @@ impl ThemeFile {
 /// Strictly bounded strokes shared by file imports and direct preference updates.
 pub(crate) fn parse_borders(values: &BTreeMap<String, Value>) -> Result<crate::theme::Borders, String> {
     use crate::theme::{Bevel, Borders, InsetBorder};
-    if values.len() > 7 {
-        return Err("`borders` has more than seven roles".into());
+    if values.len() > 8 {
+        return Err("`borders` has more than eight roles".into());
     }
     let mut borders = Borders::default();
     for (key, value) in values {
         let obj = value.as_object().ok_or_else(|| format!("`borders.{key}` must be an object"))?;
+        if key == "plate" {
+            borders.plate = Some(crate::plate::parse(obj)?);
+            continue;
+        }
         if key == "bevel" {
             if obj.keys().any(|k| !matches!(k.as_str(), "width" | "highlight" | "light" | "shadow" | "dark_shadow")) {
                 return Err("`borders.bevel` has an unknown setting".into());
@@ -1281,6 +1285,9 @@ pub fn export(name: &str, base: Base, t: &Tokens) -> Value {
             json!({"width": bevel.width, "highlight": format_color(bevel.highlight),
             "light": format_color(bevel.light), "shadow": shadow, "dark_shadow": format_color(bevel.dark_shadow)}),
         );
+    }
+    if let Some(plate) = t.borders.plate {
+        borders.insert("plate".into(), crate::plate::export(plate));
     }
     let icon_palette = export_icon_palette(t.icon_palette);
     json!({"format": FORMAT, "name": name, "base": base, "colors": colors, "radii": radii, "borders": borders, "icon_palette": icon_palette})

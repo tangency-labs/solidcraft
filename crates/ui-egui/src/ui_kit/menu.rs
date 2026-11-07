@@ -322,7 +322,7 @@ impl<'a> MenuItem<'a> {
             painter.multiply_opacity(0.4);
         }
         if hot {
-            painter.rect_filled(r, t.control_radius, t.accent_soft);
+            t.paint_highlight(&painter, r, t.control_radius, t.accent_soft);
         }
         let icon = Rect::from_center_size(pos2(r.left() + t.control_height / 2.0, r.center().y), vec2(t.space_16, t.space_16));
         if let Some(on) = self.checked {
