@@ -3696,9 +3696,10 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                     continue;
                 }
                 // Two quick presses in a sketch finish it (keeping it, like Finish Sketch);
-                // the first one has already cancelled whatever was active.
+                // the first one has already cancelled whatever was active. A preference turns
+                // this off, so Esc never leaves the sketch (#12069).
                 let now = ctx.input(|i| i.time);
-                let again = app.last_escape.is_some_and(|t| now - t <= ESCAPE_TWICE_S);
+                let again = app.preferences.escape_twice_finishes_sketch && app.last_escape.is_some_and(|t| now - t <= ESCAPE_TWICE_S);
                 app.last_escape = Some(now);
                 // Not while a tool is still out (its first Esc only ended a chain): this press
                 // puts it down, and the next quick one finishes.
@@ -6404,7 +6405,7 @@ mod persistent_ribbon_tests {
             let effects = h.app.session.status_items();
             let ctx = h.ctx.clone();
             let mut expected = Vec::new();
-            let output = ctx.run_ui(
+            let mut output = ctx.run_ui(
                 egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(400.0, 240.0))), focused: true, ..Default::default() },
                 |ui| {
                     expected.clear(); // Context layout passes never accumulate stale paint expectations.
@@ -6433,6 +6434,7 @@ mod persistent_ribbon_tests {
                     paint_persistent_ribbon(&h.app, ui, paints, "INSPECT", "ribbon_grid");
                 },
             );
+            output.textures_delta.clear();
             assert_eq!(h.app.session.status_items(), effects, "rendering real active cells never changes their effects");
             for (id, cell, original_clip) in expected {
                 let mut backgrounds = Vec::new();

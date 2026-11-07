@@ -116,11 +116,12 @@ fn blur_meter_boundaries_and_off_thumb() {
             let ctx = crate::fonts::test_context();
             let t = Tokens::get();
             let mut value = radius;
-            let out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
                 scope(ui, |ui| {
                     slider(ui, &mut value, 0.0..=40.0, Slider { step: Some(1.0), show_value: false, off_endpoint: true, ..Default::default() });
                 });
             });
+            out.textures_delta.clear();
             assert_eq!(value, radius, "drawing cannot round persisted fractional values");
             assert_eq!(out.shapes.iter().filter(|s| matches!(s.shape, egui::Shape::Circle(_))).count(), 1, "off/solid thumb has no native duplicate");
             let hit = scenario::rect_of("dialog:slider_track:").expect("blur slider track");

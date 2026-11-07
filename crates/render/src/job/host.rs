@@ -513,6 +513,10 @@ impl JobHandle {
     pub fn id(&self) -> JobId {
         self.0.id
     }
+    /// Time since submission, including queueing and preparation.
+    pub fn elapsed(&self) -> std::time::Duration {
+        self.0.started.elapsed()
+    }
     /// True only after queued/running captures, tasks and their work reservations
     /// have been dropped. A terminal phase alone does not prove resource release.
     /// Retained final/preview images and status-input leases remain owned by their
