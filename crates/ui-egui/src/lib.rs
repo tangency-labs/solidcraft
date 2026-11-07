@@ -574,6 +574,8 @@ pub struct SolveApp {
     pub render_workspace: render_workspace::State,
     pub tool: Option<tools::Tool>,
     pub dialog: Option<dialogs::Dialog>,
+    /// The joint dialogs' picked and hovered snaps ([`dialogs_assembly::picked_snap`]).
+    pub(crate) snaps: dialogs_assembly::SnapMemo,
     /// Each command dialog's options and values as last applied (this session only).
     pub(crate) remembered_commands: Vec<dialogs::RememberedCommand>,
     /// The Change Parameters window, when open.
@@ -859,6 +861,7 @@ impl SolveApp {
             render_workspace,
             tool: None,
             dialog: None,
+            snaps: Default::default(),
             remembered_commands: Vec::new(),
             params: None,
             design_properties: None,
