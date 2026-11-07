@@ -218,7 +218,6 @@ solid.align
 solid.boundary_fill
 solid.chamfer
 solid.coil
-solid.combine
 solid.draft
 solid.emboss
 solid.hole

@@ -601,6 +601,41 @@ impl JsonSchema for ExtrudeOperation {
     }
 }
 
+/// What Combine's tools do to its target, as `features::combine` reads `operation`: a spelling
+/// of join, cut or intersect that `Operation::parse` accepts. A spelling of new, or any other
+/// word, gets the handler's message.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CombineOperation(pub Operation);
+
+/// The handler's message for an operation Combine doesn't take.
+const COMBINE_OPERATION_MESSAGE: &str = "operation must be join, cut or intersect";
+
+/// Combine's operation for `s`: `Operation::parse`'s, but not new.
+fn combine_operation(s: &str) -> Option<Operation> {
+    Operation::parse(s).filter(|o| *o != Operation::NewBody)
+}
+
+impl<'de> Deserialize<'de> for CombineOperation {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let ok = |s: &str| combine_operation(s).is_some();
+        let s = string_matching(d, ok, "join, cut or intersect", |_| whole(COMBINE_OPERATION_MESSAGE))?;
+        combine_operation(&s).map(CombineOperation).ok_or_else(|| D::Error::custom(whole(COMBINE_OPERATION_MESSAGE)))
+    }
+}
+
+impl JsonSchema for CombineOperation {
+    fn schema_name() -> Cow<'static, str> {
+        "CombineOperation".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let values: Vec<&str> = OPERATIONS.iter().copied().filter(|s| combine_operation(s).is_some()).collect();
+        enum_schema(
+            &values,
+            "What the tools do to the target: join (the default), cut or intersect. The others are aliases. Matching ignores case, spaces, '_' and '-'.",
+        )
+    }
+}
+
 const DIRECTIONS: &[&str] = &["positive", "negative", "symmetric", "one_side", "reverse", "flip"];
 
 /// Extrude's direction, as `extent_param` reads it (lowercased, not trimmed).
