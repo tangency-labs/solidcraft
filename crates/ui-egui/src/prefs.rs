@@ -7248,6 +7248,62 @@ mod tests {
         }
     }
 
+    /// #11445: the theme row opens on the theme in use each time Preferences or its page shows it,
+    /// and the arrows still move it freely while it stays in view.
+    #[test]
+    fn theme_row_opens_on_the_theme_in_use_each_time_it_comes_into_view() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":1100}));
+        h.call("ui.prefs", json!({"theme":"dark","language":"en","open":"Appearance"}));
+        h.frames(4);
+        let count = theme_choices(&h.app).len();
+        let page_back = |h: &mut crate::scenario::Harness| {
+            for _ in 0..=count {
+                if crate::scenario::rect_of("prefs:theme_previous").is_none() {
+                    return;
+                }
+                h.step(&json!({"click":{"handle":"prefs:theme_previous"}})).unwrap();
+                h.frames(3);
+            }
+            panic!("the previous arrow never reached the start: the row is held in place");
+        };
+        page_back(&mut h);
+        // A theme the row does not show at its start.
+        let far =
+            theme_choices(&h.app).into_iter().map(|(id, _)| id).find(|id| crate::scenario::rect_of(&format!("prefs:theme:{id}")).is_none()).unwrap();
+        let shows = |id: &str| {
+            let viewport = crate::scenario::rect_of("prefs:theme_viewport").unwrap();
+            crate::scenario::rect_of(&format!("prefs:theme:{id}")).is_some_and(|rect| viewport.expand(1.0).contains_rect(rect))
+        };
+        h.call("ui.prefs", json!({"theme":far}));
+        h.frames(4);
+        assert!(shows(&far), "a theme chosen elsewhere comes into view: {far}");
+        page_back(&mut h);
+        assert!(!shows(&far), "the arrows move the row away from the theme in use");
+        h.call("ui.prefs", json!({"button":"ok"}));
+        h.frames(3);
+        h.call("ui.prefs", json!({"open":"Appearance"}));
+        h.frames(4);
+        assert!(shows(&far), "reopening Preferences shows the theme in use: {far}");
+        page_back(&mut h);
+        h.frames(4);
+        assert!(!shows(&far), "the row stays where the arrows leave it");
+        h.call("ui.prefs", json!({"open":"General"}));
+        h.frames(3);
+        h.call("ui.prefs", json!({"open":"Appearance"}));
+        h.frames(4);
+        assert!(shows(&far), "coming back to the page shows the theme in use: {far}");
+        page_back(&mut h);
+        h.app.prefs_window.filter = "Onyx".to_owned();
+        h.frames(5);
+        h.app.prefs_window.filter.clear();
+        h.frames(5);
+        assert!(shows(&far), "clearing a search shows the theme in use: {far}");
+        assert_eq!(h.app.preferences.theme, far, "showing a theme never chooses one");
+        h.call("ui.prefs", json!({"button":"cancel"}));
+    }
+
     #[test]
     fn appearance_controls_edit_real_fields_and_cancel_restores_them() {
         let mut h = crate::scenario::Harness::new();
