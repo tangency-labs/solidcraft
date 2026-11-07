@@ -89,8 +89,6 @@ render.result.regrade
 render.scene
 render.start
 render.status
-select.clear
-select.set
 sheet.export_bend_table
 sheet.export_dxf
 sheet.flat_pattern

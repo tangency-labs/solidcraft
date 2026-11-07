@@ -8,13 +8,14 @@ use solidcraft_doc::{Feature, FeatureKind};
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, name_or_id_values, num, str_};
-use crate::schema::TypedContract;
 use crate::schema::edit::{
     FailingFeature, FeatureInfo, FeatureInput, Inspected, OmittedField, SuppressChanged, TimelineComputeAllParams, TimelineComputeAllResult,
     TimelineDeleteParams, TimelineDeleteResult, TimelineDependentsParams, TimelineDependentsResult, TimelineEditParams, TimelineEditResult,
     TimelineInspectParams, TimelineInspectResult, TimelineMarkerResult, TimelineRenameParams, TimelineRenameResult, TimelineRollToParams,
     TimelineRollbackParams, TimelineSuppressParams, TimelineSuppressResult,
 };
+use crate::schema::select::{PartialPick, SelectClearParams, SelectClearResult, SelectItem, SelectSetParams, SelectSetResult, read_item};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Sel, Session, Snapshot};
 
 pub static COMMANDS: &[CommandSpec] = &[
@@ -152,16 +153,24 @@ pub static COMMANDS: &[CommandSpec] = &[
         "group: folder id → group, name, parent, features, joints; or feature: id|name → type, definition (the fields timeline.edit's set changes, with their current values), \
          inputs: [{label, param, expression, unit}] (named inputs parameters.change can also set), error, warning",
     ),
-    CommandSpec::new("select.set", "Select", select_set).icon("select")
+    CommandSpec::new("select.set", "Select", crate::checked!("select.set", select_set)).icon("select")
         .noundo()
+        .contract(&SELECT_SET_CONTRACT)
+        .output(output_schema_for::<SelectSetResult>)
         .params("items: [{type: body|edge|face|feature|sketch_curve|sketch_point|profile, …}], add?: bool; face/edge: body plus point [x,y,z] in world mm or index (both also accepted); a point uses Measure's pick tolerance, an index supplies a point on the item; invalid partial picks leave the selection unchanged"),
     CommandSpec::new("select.filter", "Selection filter", select_filter).icon("select").noundo().doc_only()
         .params("mode: body|face|component → validated UI pick granularity; headless echo only, no document edits or undo"),
-    CommandSpec::new("select.clear", "Clear Selection", select_clear).icon("select").noundo(),
+    CommandSpec::new("select.clear", "Clear Selection", crate::checked!("select.clear", select_clear))
+        .icon("select")
+        .noundo()
+        .contract(&SELECT_CLEAR_CONTRACT)
+        .output(output_schema_for::<SelectClearResult>),
     CommandSpec::new("select.same_look", "Select Same Look", select_same_look).icon("select").noundo().doc_only()
         .params("body?: world body name, face?: face index; defaults to the current body/face selection → selects objects using the resolved appearance"),
 ];
 
+const SELECT_SET_CONTRACT: TypedContract<SelectSetParams> = TypedContract::new();
+const SELECT_CLEAR_CONTRACT: TypedContract<SelectClearParams> = TypedContract::new();
 const COMPUTE_ALL_CONTRACT: TypedContract<TimelineComputeAllParams> = TypedContract::new();
 const DELETE_CONTRACT: TypedContract<TimelineDeleteParams> = TypedContract::new();
 const RENAME_CONTRACT: TypedContract<TimelineRenameParams> = TypedContract::new();
@@ -1408,20 +1417,10 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
 /// an existing index-and-point pair. Unlike Measure, selection keeps the exact face/edge index:
 /// it must not merge a cylinder's patches or a circular rim's arcs into a different item.
 fn selection_item(s: &Session, value: Value) -> Result<Sel> {
-    use solidcore_record::Vec3;
-
-    let kind = value.get("type").and_then(Value::as_str);
-    if !matches!(kind, Some("face" | "edge")) || (value.get("index").is_some() && value.get("point").is_some()) {
-        return serde_json::from_value(value).map_err(|e| bad("select.set", e.to_string()));
-    }
-    let face = kind == Some("face");
-    #[derive(serde::Deserialize)]
-    struct Pick {
-        body: String,
-        index: Option<usize>,
-        point: Option<Vec3>,
-    }
-    let Pick { body, index, point } = serde_json::from_value(value).map_err(|e| bad("select.set", e.to_string()))?;
+    let (face, PartialPick { body, index, point }) = match read_item(value).map_err(|e| bad("select.set", e))? {
+        SelectItem::Exact(sel) => return Ok(sel),
+        SelectItem::Pick { face, pick } => (face, pick),
+    };
     let state = s.world_state()?;
     let b = state.body(&body).ok_or_else(|| bad("select.set", format!("no body `{body}`")))?;
     let missing = || bad("select.set", format!("no {} of `{body}` at the given index or point", if face { "face" } else { "edge" }));
@@ -1496,7 +1495,7 @@ fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     s.refresh_display();
-    Ok(json!({"selected": s.selection.len()}))
+    reply("select.set", SelectSetResult { selected: s.selection.len(), param_warnings: Vec::new() })
 }
 
 fn select_filter(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -1553,7 +1552,7 @@ fn select_same_look(s: &mut Session, p: &Value) -> Result<Value> {
 fn select_clear(s: &mut Session, _p: &Value) -> Result<Value> {
     s.selection.clear();
     s.refresh_display();
-    Ok(json!({"selected": 0}))
+    reply("select.clear", SelectClearResult { selected: 0, param_warnings: Vec::new() })
 }
 
 /// Features that worked in `before` and fail in `after`: (name, error).
