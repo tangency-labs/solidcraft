@@ -1417,6 +1417,57 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b97b65636e5b9ef369943878ac74335ba1c55c1cb6adbf1e2c293c624248d693"
 
 [[package]]
+name = "fieldcraft-fem"
+version = "0.7.5"
+source = "git+https://github.com/tangency-labs/fieldcraft.git?rev=6b613217851b4c5ddf2d315930db12e9e25354dc#6b613217851b4c5ddf2d315930db12e9e25354dc"
+dependencies = [
+ "fieldcraft-model",
+ "serde",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "fieldcraft-mesh"
+version = "0.7.5"
+source = "git+https://github.com/tangency-labs/fieldcraft.git?rev=6b613217851b4c5ddf2d315930db12e9e25354dc#6b613217851b4c5ddf2d315930db12e9e25354dc"
+dependencies = [
+ "fieldcraft-model",
+ "fieldcraft-parallel",
+ "libm",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "fieldcraft-model"
+version = "0.7.5"
+source = "git+https://github.com/tangency-labs/fieldcraft.git?rev=6b613217851b4c5ddf2d315930db12e9e25354dc#6b613217851b4c5ddf2d315930db12e9e25354dc"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "fieldcraft-parallel"
+version = "0.7.5"
+source = "git+https://github.com/tangency-labs/fieldcraft.git?rev=6b613217851b4c5ddf2d315930db12e9e25354dc#6b613217851b4c5ddf2d315930db12e9e25354dc"
+dependencies = [
+ "rayon",
+]
+
+[[package]]
+name = "fieldcraft-solver"
+version = "0.7.5"
+source = "git+https://github.com/tangency-labs/fieldcraft.git?rev=6b613217851b4c5ddf2d315930db12e9e25354dc#6b613217851b4c5ddf2d315930db12e9e25354dc"
+dependencies = [
+ "fieldcraft-fem",
+ "fieldcraft-model",
+ "fieldcraft-parallel",
+ "serde",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4165,6 +4216,10 @@ dependencies = [
 name = "solidcraft-engine"
 version = "0.40.0-rc.2"
 dependencies = [
+ "fieldcraft-fem",
+ "fieldcraft-mesh",
+ "fieldcraft-model",
+ "fieldcraft-solver",
  "image",
  "log",
  "schemars",

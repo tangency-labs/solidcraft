@@ -82,6 +82,10 @@ pub const SKIPPED_FUNCTIONS: &[(&str, &str)] = &[
     ("crates/doc/src/eval.rs:mesh_bodies", "mesh bodies: a mesh import's triangles"),
     ("crates/doc/src/eval.rs:mesh_content_digest", "mesh-body imports: hashes source arrays without geometric classification"),
     ("crates/engine/src/cmd/file.rs:saved_preview", "the preview picture saved in a design"),
+    (
+        "crates/engine/src/vibration_tessellation.rs:build",
+        "finite-element preview: generates the analysis mesh without choosing model faces or contacts",
+    ),
     ("crates/kernel/src/body.rs:Body::classify_point", "mesh bodies: its mesh-body branch (a B-rep is classified by SMLib)"),
     ("crates/kernel/src/body.rs:Body::mesh_untimed", "the mesher: a body's tessellation"),
     ("crates/kernel/src/body.rs:Body::retained_bytes", "the evaluation cache's memory estimate"),

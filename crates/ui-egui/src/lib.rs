@@ -318,6 +318,7 @@ pub mod ui_kit;
 mod ui_kit_guard_tests;
 pub mod update;
 mod value_step;
+mod vibration;
 pub(crate) mod view_angles;
 mod view_confirm;
 pub mod view_gizmo;
@@ -571,6 +572,7 @@ pub struct SolveApp {
     pub(crate) easyprint: easyprint_ui::State,
     /// A Save or Save As being written on a worker (see [`save_job`]).
     saving: Option<save_job::Saving>,
+    vibration: Option<vibration::Study>,
     pub viewport: viewport::ViewportState,
     pub render_workspace: render_workspace::State,
     pub tool: Option<tools::Tool>,
@@ -857,6 +859,7 @@ impl SolveApp {
             slicer_wait: None,
             easyprint: Default::default(),
             saving: None,
+            vibration: None,
             viewport: viewport::ViewportState::default(),
             render_workspace,
             tool: None,
@@ -2100,6 +2103,17 @@ impl SolveApp {
         }
         if id == "assembly.bom" {
             bom_panel::open(self);
+            return;
+        }
+        if id == solidcraft_engine::vibration::COMMAND {
+            if let Some(pending) = &mut self.pending_feature_edit {
+                pending.then_start(id);
+                return;
+            }
+            if self.dialog.is_some() {
+                dialogs::cancel(self);
+            }
+            vibration::open(self);
             return;
         }
         // Inspect → Measure → Properties: the window, not a reply nobody sees (#8095).
@@ -3401,6 +3415,7 @@ impl SolveApp {
         }
         issue_report::CadInput::block(self, ui, report_input);
         file_load::show(self, ui.ctx());
+        vibration::show(self, ui.ctx());
         open_meshing::show(self, ui.ctx());
         documents::prompt(self, ui.ctx());
         open_elsewhere::show(self, ui.ctx());

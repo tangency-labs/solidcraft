@@ -498,6 +498,20 @@ edge as a torus.
 - **Elsewhere:** mitred corner, swept corner, corner sweep.
 - **For translators:** "Mitre" and "Swept" name the two shapes, not a direction of travel.
 
+### vibration sweep
+
+An analysis of the displacement of a supported structure as the frequency of a harmonic
+excitation varies across a specified range.
+
+The natural modes show the deformation patterns of the structure and normalize their largest
+surface amplitudes to one. The frequency response gives the surface displacement relative to
+the driven base for the stated excitation and damping.
+
+The assembly sweep includes hidden bodies. Choose a single body to restrict the analysis.
+
+- **In SolidCraft:** `inspect.vibration` ("Vibration Sweep"), `supports`, `start_hz`, `end_hz`.
+- **For translators:** keep the fixed faces, natural frequencies and response peaks distinct.
+
 ### view angles
 
 The yaw, pitch and roll, in degrees, that give the direction a view looks along and how its
