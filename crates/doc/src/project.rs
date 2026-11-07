@@ -1184,6 +1184,345 @@ pub(crate) fn closest_on_triangle(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
         .unwrap_or(a)
 }
 
+/// Faces considered when a click asks which hole opening it passed through.
+const HOLE_MAX_FACES: usize = 8_000;
+/// Edges of one body considered for that same question.
+const HOLE_MAX_EDGES: usize = 20_000;
+/// Edges in one opening. A circular rim is one circle or two semicircles; more is not one hole.
+const HOLE_MAX_LOOP_EDGES: usize = 128;
+
+/// The rim of a hole whose opening a ray passes through: each edge named by a point on it,
+/// in world space.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HoleRim {
+    /// Name of the body whose face the hole is cut through.
+    pub body: String,
+    /// Where the ray crosses the opening.
+    pub at: Vec3,
+    /// One point on each boundary edge of that opening.
+    pub edges: Vec<Vec3>,
+}
+
+/// The nearest hole opening `origin + t·dir` (t > 0) passes through.
+///
+/// A click in the dark centre of a hole hits no face: the opening is outside the trimmed B-rep.
+/// The rim is the inner loop of the exact planar face the hole is cut through. `visible` skips
+/// hidden bodies. `None` when the ray misses every opening, the inputs are not finite, or the
+/// body is past the work limits above.
+pub fn hole_rim_along_ray(st: &ModelState, origin: Vec3, dir: Vec3, visible: impl Fn(&str) -> bool) -> Option<HoleRim> {
+    if !origin.is_finite() || !dir.is_finite() || dir.len2() < 1e-24 {
+        return None;
+    }
+    let mut best: Option<(f64, HoleRim)> = None;
+    for body in &st.bodies {
+        // `body.body` is already placed exactly. A display mesh's reuse of a definition's pose
+        // is not a reason to un-transform the B-rep.
+        if !visible(&body.name) || body.body.is_mesh() || body.body.face_count() > HOLE_MAX_FACES || body.body.edge_count() > HOLE_MAX_EDGES {
+            continue;
+        }
+        let Some((t, at, edges)) = opening_along_ray(&body.body, origin, dir) else { continue };
+        let along = t * dir.len();
+        if !(along > 1e-9) || edges.is_empty() || edges.len() > HOLE_MAX_LOOP_EDGES || edges.iter().any(|p| !p.is_finite()) {
+            continue;
+        }
+        let rim = HoleRim { body: body.name.clone(), at, edges };
+        if best.as_ref().is_none_or(|(d, _)| along < *d) {
+            best = Some((along, rim));
+        }
+    }
+    best.map(|(_, rim)| rim)
+}
+
+/// Distance along `dir` (not necessarily unit) to the nearest opening, the point there, and one
+/// exact point on each of its full edges. All in the body's own coordinates.
+fn opening_along_ray(body: &solidcraft_kernel::Body, origin: Vec3, dir: Vec3) -> Option<(f64, Vec3, Vec<Vec3>)> {
+    let planes = planar_faces(body)?;
+    let span = ray_bounds(origin, dir, &body.exact_bounds().ok()?)?;
+    let mut best: Option<(f64, Vec3, Vec<Vec3>)> = None;
+    for (face, plane) in planes.iter().enumerate() {
+        let Some(plane) = plane else { continue };
+        let den = dir.dot(plane.normal());
+        if den.abs() < 1e-12 * dir.len().max(1.0) {
+            continue;
+        }
+        let t = (plane.origin - origin).dot(plane.normal()) / den;
+        if !(t.is_finite() && t >= span.0 && t <= span.1) || best.as_ref().is_some_and(|(d, _, _)| t >= *d) {
+            continue;
+        }
+        let at = origin + dir * t;
+        if !at.is_finite() || !matches!(body.classify_point(at), Ok(solidcraft_kernel::PointClass::Outside)) {
+            continue;
+        }
+        let Some(edges) = hole_edges(body, face, at) else { continue };
+        best = Some((t, at, edges));
+    }
+    best
+}
+
+/// The forward interval where a ray overlaps a body's exact box.
+fn ray_bounds(origin: Vec3, dir: Vec3, bounds: &solidcraft_geom::Aabb3) -> Option<(f64, f64)> {
+    let mut range: (f64, f64) = (0.0, f64::INFINITY);
+    for (o, d, lo, hi) in
+        [(origin.x, dir.x, bounds.min.x, bounds.max.x), (origin.y, dir.y, bounds.min.y, bounds.max.y), (origin.z, dir.z, bounds.min.z, bounds.max.z)]
+    {
+        if d.abs() <= 1e-14 * dir.len().max(1.0) {
+            if o < lo || o > hi {
+                return None;
+            }
+            continue;
+        }
+        let a = (lo - o) / d;
+        let b = (hi - o) / d;
+        range = (range.0.max(a.min(b)), range.1.min(a.max(b)));
+    }
+    let t = (range.0 > 1e-6).then_some(range.0).or_else(|| (range.1 > 1e-6).then_some(1e-6))?;
+    (t.is_finite() && range.1.is_finite() && t <= range.1).then_some((t, range.1))
+}
+
+/// The exact plane of each B-rep face that has one, `None` for every other face.
+fn planar_faces(body: &solidcraft_kernel::Body) -> Option<Vec<Option<Plane>>> {
+    (!body.is_mesh() && body.face_count() <= HOLE_MAX_FACES).then(|| (0..body.face_count()).map(|face| body.planar_face(face)).collect())
+}
+
+/// One exact point on each edge of the innermost hole boundary containing `at`. Canonical loop
+/// winding distinguishes holes from material: outer loops are CCW, inner loops CW in the face's
+/// natural B-rep frame. Neither a display triangle nor a display polyline decides this.
+fn hole_edges(body: &solidcraft_kernel::Body, face: usize, at: Vec3) -> Option<Vec<Vec3>> {
+    let record = body.record().faces.get(face)?;
+    let frame = match &record.surface {
+        solidcore_record::brep::Surface::Plane { origin, u_axis, v_axis } => {
+            let o = Vec3::from(*origin);
+            (o, o + Vec3::from(*u_axis), o + Vec3::from(*v_axis))
+        }
+        solidcore_record::brep::Surface::PlaneThrough { origin, u_point, v_point } => {
+            (Vec3::from(*origin), Vec3::from(*u_point), Vec3::from(*v_point))
+        }
+        _ => return None,
+    };
+    let native = Plane { origin: frame.0, x: frame.1 - frame.0, y: frame.2 - frame.0 };
+    let (u, v) = plane_point(native, at)?;
+    let mut loops = Vec::new();
+    let mut work = 0usize;
+    for lp in &record.loops {
+        let solidcore_record::brep::Loop::Edges { edges } = lp else { continue };
+        work = work.checked_add(edges.len())?;
+        if work > HOLE_MAX_EDGES || edges.is_empty() || edges.len() > HOLE_MAX_LOOP_EDGES {
+            return None;
+        }
+        // Body::exact_bounds gave the caller its ray interval. Loop orientation is independent
+        // of exact body placement, including a reflected B-rep whose face frame changed.
+        let area = loop_area(edges)?;
+        loops.push((area, edges));
+    }
+    // The innermost containing negative loop is the hole, and its immediately larger
+    // containing loop must be a positive material boundary. This also allows nested holes
+    // and islands without relying on producer loop ordering.
+    loops.sort_by(|a, b| a.0.abs().total_cmp(&b.0.abs()));
+    let containing: Vec<(f64, &[solidcore_record::brep::OrientedEdge])> =
+        loops.iter().filter(|(_, edges)| loop_contains(edges, u, v)).map(|(area, edges)| (*area, edges.as_slice())).collect();
+    let (&(area, edges), enclosing) = containing.split_first()?;
+    if area >= 0.0 || enclosing.first().is_none_or(|(outer_area, _)| *outer_area <= 0.0) {
+        return None;
+    }
+
+    edges
+        .iter()
+        .map(|used| {
+            let edge = body.record().edges.get(usize::try_from(used.edge).ok()?)?;
+            let [t0, t1] = edge.interval;
+            solidcraft_geom::brep::eval::CurveEval::new(edge.parameters()).ok()?.point(t0.midpoint(t1)).filter(|p| p.is_finite())
+        })
+        .collect::<Option<Vec<_>>>()
+        .filter(|points| !points.is_empty())
+}
+
+/// Point on a plane in its native B-rep surface coordinates. `PlaneThrough` axes are arbitrary
+/// spanning vectors, whereas `Plane::new` orthonormalises them for sketch/body geometry.
+fn plane_point(plane: Plane, at: Vec3) -> Option<(f64, f64)> {
+    let d = at - plane.origin;
+    let a = plane.x.len2();
+    let b = plane.x.dot(plane.y);
+    let c = plane.y.len2();
+    let den = a * c - b * b;
+    let x = d.dot(plane.x);
+    let y = d.dot(plane.y);
+    let (u, v) = ((x * c - y * b) / den, (y * a - x * b) / den);
+    (den.abs() > 1e-24 && u.is_finite() && v.is_finite()).then_some((u, v))
+}
+
+/// Signed area of an ordered B-rep loop, evaluated on its exact pcurve geometry.
+/// Homogeneous rational weights are retained: this does not flatten a rational circle to its
+/// control polygon or consult the display tessellation.
+fn loop_area(edges: &[solidcore_record::brep::OrientedEdge]) -> Option<f64> {
+    let mut work = HOLE_MAX_AREA_WORK;
+    let mut area = 0.0;
+    for used in edges {
+        let oriented = if used.forward { 1.0 } else { -1.0 };
+        area += oriented * pcurve_spans(used, &mut work)?.iter().sum::<f64>();
+    }
+    (area != 0.0 && area.is_finite()).then_some(area)
+}
+
+/// Total spline decomposition and integration across one loop.
+const HOLE_MAX_AREA_WORK: usize = 2_000_000;
+
+/// Area contributions of an edge's exact pcurve over its active parameter interval. Each
+/// polynomial piece of that curve becomes one Bézier, with every rational weight retained.
+fn pcurve_spans(used: &solidcore_record::brep::OrientedEdge, work: &mut usize) -> Option<Vec<f64>> {
+    use solidcraft_geom::bspline::{HPoint, insert_knot, segment};
+    let [t0, t1] = used.pcurve.interval()?;
+    let (knots, control) = match &used.pcurve {
+        solidcore_record::brep::Curve2::Spline { knots, points } => {
+            (knots.as_slice(), points.iter().map(|p| HPoint::weighted(Vec3::new(p[0], p[1], 0.0), 1.0)).collect::<Vec<_>>())
+        }
+        solidcore_record::brep::Curve2::RationalSpline { knots, homogeneous } => {
+            (knots.as_slice(), homogeneous.iter().map(|p| HPoint { x: p[0], y: p[1], z: 0.0, w: p[2] }).collect::<Vec<_>>())
+        }
+    };
+    let degree = knots.len().checked_sub(control.len() + 1)?;
+    *work = work.checked_sub(control.len().checked_mul(knots.len())?.checked_mul(degree + 1)?)?;
+    let (mut k, mut c) = segment(degree, knots, &control, t0, t1).ok()?;
+    let mut interior: Vec<f64> = k.iter().copied().filter(|t| *t > t0 && *t < t1).collect();
+    interior.dedup();
+    for t in interior {
+        while k.iter().filter(|q| **q == t).count() < degree {
+            (k, c) = insert_knot(degree, &k, &c, t).ok()?;
+        }
+    }
+    let mut spans = Vec::new();
+    for i in degree..c.len() {
+        let (a, b) = (*k.get(i)?, *k.get(i + 1)?);
+        if a < b {
+            *work = work.checked_sub(1)?;
+            spans.push(bezier_area(c.get(i - degree..=i)?)?);
+        }
+    }
+    (!spans.is_empty()).then_some(spans)
+}
+
+fn bezier_area(control: &[solidcraft_geom::bspline::HPoint]) -> Option<f64> {
+    let point = |p: solidcraft_geom::bspline::HPoint| {
+        let q = p.project()?;
+        Some(Vec2::new(q.x, q.y))
+    };
+    if control.len() == 2 {
+        return Some(solidcraft_geom::bezier(&[point(*control.first()?)?, point(*control.last()?)?])?.area_term());
+    }
+    if let [a, apex, b] = control {
+        let (wa, wb, wc) = (a.w, apex.w, b.w);
+        let w = wb / (wa * wc).sqrt();
+        if !(w.is_finite() && w > 0.0) {
+            return None;
+        }
+        return Some(Seg2::Conic { a: point(*a)?, apex: point(*apex)?, b: point(*b)?, w }.area_term());
+    }
+    if control.iter().all(|p| p.w == 1.0) {
+        let points = control.iter().copied().map(point).collect::<Option<Vec<_>>>()?;
+        return Some(solidcraft_geom::bezier(&points)?.area_term());
+    }
+    rational_area(control)
+}
+
+/// An integral over a general rational Bézier. Homogeneous de Casteljau evaluates
+/// (X,Y,W), while the quotient derivative gives ½(x y' - y x') = (X Y' - X' Y)/(2W²).
+/// Bounded Gauss–Legendre quadrature evaluates that exact curve, not a fitted polygon.
+fn rational_area(control: &[solidcraft_geom::bspline::HPoint]) -> Option<f64> {
+    use solidcraft_geom::bspline::HPoint;
+    if control.len() < 3 || control.iter().any(|p| !p.is_finite() || p.w <= 0.0) {
+        return None;
+    }
+    let difference: Vec<HPoint> = control.windows(2).map(|w| (w[1] - w[0]) * (control.len() - 1) as f64).collect();
+    let at = |control: &[HPoint], t: f64| -> Option<HPoint> {
+        if !(0.0..=1.0).contains(&t) {
+            return None;
+        }
+        let mut work = control.to_vec();
+        while work.len() > 1 {
+            work = work.windows(2).map(|w| w[0] * (1.0 - t) + w[1] * t).collect();
+        }
+        let p = *work.first()?;
+        (p.is_finite() && p.w > 0.0).then_some(p)
+    };
+    const GL5: [(f64, f64); 5] = [
+        (0.046_910_077_030_668, 0.118_463_442_528_095),
+        (0.230_765_344_947_158, 0.239_314_335_249_683),
+        (0.5, 0.284_444_444_444_444),
+        (0.769_234_655_052_842, 0.239_314_335_249_683),
+        (0.953_089_922_969_332, 0.118_463_442_528_095),
+    ];
+    let mut area = 0.0;
+    for i in 0..16 {
+        for (x, weight) in GL5 {
+            let t = (i as f64 + x) / 16.0;
+            let q = at(control, t)?;
+            let d = at(&difference, t)?;
+            let part = weight * (q.x * d.y - q.y * d.x) / (2.0 * q.w * q.w * 16.0);
+            if !part.is_finite() {
+                return None;
+            }
+            area += part;
+        }
+    }
+    area.is_finite().then_some(area)
+}
+
+/// Exact B-rep pcurve crossing containment. This follows the kernel's isoparametric face clipping:
+/// samples only bracket crossings; bisection then solves each one on the pcurve itself.
+fn loop_contains(edges: &[solidcore_record::brep::OrientedEdge], u: f64, v: f64) -> bool {
+    let mut cuts = Vec::new();
+    for used in edges {
+        let Some([t0, t1]) = used.pcurve.interval() else { return false };
+        let samples = pcurve_levels(&used.pcurve, t0, t1);
+        for pair in samples.windows(2) {
+            let (Some(a), Some(b)) = (pair.first().copied(), pair.last().copied()) else { return false };
+            let Some((qa, qb)) = solidcraft_geom::brep::pcurve::eval(&used.pcurve, a).zip(solidcraft_geom::brep::pcurve::eval(&used.pcurve, b))
+            else {
+                return false;
+            };
+            let above_a = qa[1] > v;
+            if above_a == (qb[1] > v) {
+                continue;
+            }
+            let (mut lo, mut hi) = (a, b);
+            for _ in 0..80 {
+                let mid = lo.midpoint(hi);
+                let Some(q) = solidcraft_geom::brep::pcurve::eval(&used.pcurve, mid) else { return false };
+                if (q[1] > v) == above_a {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+            let Some(q) = solidcraft_geom::brep::pcurve::eval(&used.pcurve, lo.midpoint(hi)).filter(|q| q[0].is_finite()) else { return false };
+            cuts.push(q[0]);
+        }
+    }
+    let mut inside = false;
+    cuts.sort_by(f64::total_cmp);
+    let mut previous = None;
+    for cut in cuts {
+        if previous.is_none_or(|last| cut > last) && cut > u {
+            inside = !inside;
+        }
+        previous = Some(cut);
+    }
+    inside
+}
+
+/// At least 64 levels of each exact record interval, with internal spline knots included. Limited
+/// by solidcore-record's bounded knot and control-point counts.
+fn pcurve_levels(curve: &solidcore_record::brep::Curve2, lo: f64, hi: f64) -> Vec<f64> {
+    const LEVELS: usize = 64;
+    let knots = match curve {
+        solidcore_record::brep::Curve2::Spline { knots, .. } | solidcore_record::brep::Curve2::RationalSpline { knots, .. } => knots.as_slice(),
+    };
+    let mut out: Vec<_> = (0..=LEVELS).map(|i| lo + (hi - lo) * i as f64 / LEVELS as f64).collect();
+    out.extend(knots.iter().copied().filter(|t| *t > lo && *t < hi));
+    out.sort_by(f64::total_cmp);
+    out.dedup_by(|a, b| (*a - *b).abs() <= (lo.abs() + hi.abs() + 1.0) * f64::EPSILON * 8.0);
+    out
+}
+
 /// Nearest face: (B-rep face index, closest point, distance).
 pub(crate) fn nearest_face(m: &Mesh, p: Vec3) -> Option<(u32, Vec3, f64)> {
     let mut best: Option<(u32, Vec3, f64)> = None;
@@ -2250,5 +2589,38 @@ fn fit_piece(p: &[Vec2], tol: f64, exact: bool, preserve_arcs: bool, out: &mut V
             }
             i = jl;
         }
+    }
+}
+
+#[cfg(test)]
+mod exact_loop_tests {
+    use super::*;
+    use solidcore_record::brep::Curve2;
+
+    #[test]
+    fn a_full_rational_circle_has_an_exact_signed_area() {
+        let c = std::f64::consts::FRAC_1_SQRT_2;
+        let edge = solidcore_record::brep::OrientedEdge {
+            edge: 0,
+            forward: true,
+            pcurve: Curve2::RationalSpline {
+                knots: vec![0.0, 0.0, 0.0, 0.25, 0.25, 0.5, 0.5, 0.75, 0.75, 1.0, 1.0, 1.0],
+                homogeneous: vec![
+                    [5., 0., 1.],
+                    [5. * c, 5. * c, c],
+                    [0., 5., 1.],
+                    [-5. * c, 5. * c, c],
+                    [-5., 0., 1.],
+                    [-5. * c, -5. * c, c],
+                    [0., -5., 1.],
+                    [5. * c, -5. * c, c],
+                    [5., 0., 1.],
+                ],
+            },
+        };
+        let spans = pcurve_spans(&edge, &mut 2_000_000).unwrap();
+        assert_eq!(spans.len(), 4, "{spans:?}");
+        let area = loop_area(core::slice::from_ref(&edge)).unwrap();
+        assert!((area - std::f64::consts::PI * 25.).abs() < 1e-10, "{area}");
     }
 }
