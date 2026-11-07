@@ -602,10 +602,22 @@ pub fn refine_snap(
     let px = 1.0 / (a.distance(b) as f64).max(1e-9);
     let tol = 7.0 * px;
     // A model vertex under the cursor: drawing on it projects it into the sketch.
+    // A snap point of a model edge or another sketch's curve (#11229) is one too: an end of a
+    // body's edge is a vertex, projected and linked like one; a centre or a middle (and a point
+    // of another sketch) is no vertex to link, so the point goes where it projects to.
     for h in pick(app, proj, a) {
-        if let Hit::Vertex { point, .. } = h {
-            SNAP.with(|s| *s.borrow_mut() = Some(("Pt", plane.to_local(point))));
-            return Some((plane.to_local(point), Some(format!("vertex:{},{},{}", point.x, point.y, point.z))));
+        if let Hit::Vertex { point, body } = h {
+            use solidcraft_engine::snap::SnapKind;
+            let vertex = Some(format!("vertex:{},{},{}", point.x, point.y, point.z));
+            let (label, arg) = match crate::snap_wake::woken_at(app, point).map(|p| p.kind) {
+                Some(SnapKind::Centre | SnapKind::FaceCentre) => ("Ctr", None),
+                Some(SnapKind::Middle) => ("Mid", None),
+                Some(SnapKind::End) if body.is_empty() => ("End", None),
+                Some(SnapKind::End) => ("End", vertex),
+                Some(SnapKind::Vertex) | None => ("Pt", vertex),
+            };
+            SNAP.with(|s| *s.borrow_mut() = Some((label, plane.to_local(point))));
+            return Some((plane.to_local(point), arg));
         }
     }
     let mid_only = crate::tool_modifiers::target_midpoint();
@@ -852,6 +864,15 @@ pub fn takes(id: &str, hit: &Hit) -> bool {
     match id {
         "inspect.continuity" => matches!(hit, Hit::Edge { .. }),
         _ => true,
+    }
+}
+
+/// Whether a tool places points on the sketch plane (and so takes snap points, #11229).
+pub fn places_points(t: &Tool) -> bool {
+    match t.kind {
+        Kind::Draw(_) => true,
+        Kind::Ext => matches!(mode(t.cmd), Some(Mode::Points(_))),
+        _ => false,
     }
 }
 

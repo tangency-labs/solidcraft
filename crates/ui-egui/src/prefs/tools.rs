@@ -62,6 +62,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                             ui_kit::help_icon(ui, app.tr("ui.placement_handles_tip"));
                         }
                     });
+                    ui.horizontal_wrapped(|ui| {
+                        let response = setting::snap_points(app, ui);
+                        crate::scenario::publish_target("prefs:snap_points", response.rect);
+                    });
                 });
             });
         });

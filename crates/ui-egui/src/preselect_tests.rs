@@ -1979,6 +1979,19 @@ fn align_snaps_to_centres_and_edge_middles() {
     assert_eq!(p["to"]["snap"], json!("edge_mid"));
 }
 
+/// A snap point of no body (a sketch line's middle) aligns to where it is, not to the origin.
+#[test]
+fn align_takes_a_bodyless_snap_point_where_it_is() {
+    let mut app = boxed();
+    let mut d = start(&mut app, vec![], "solid.align");
+    d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    d.inputs[1].items = vec![Sel::Vertex { body: String::new(), point: Vec3::new(30.0, 5.0, 0.0) }];
+    d.inputs[2].items = vec![Sel::Vertex { body: String::new(), point: Vec3::new(0.0, 0.0, 0.0) }];
+    let p = apply_commands(&app, &d).unwrap().remove(0).1;
+    assert_ne!(p["from"], json!("origin"), "{p}");
+    assert_eq!(p["to"], json!("origin"), "{p}");
+}
+
 /// Align by frames (#6257): a sketch circle or point picked as To is a frame whatever the snap, a
 /// face with the Joint Origin snap is the joint origin the Joint dialog makes of it, and Angle is
 /// sent when given; As Picked builds what it built before.
