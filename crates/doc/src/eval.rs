@@ -6456,18 +6456,26 @@ fn reverse_seg(s: &kernel::PathSeg) -> kernel::PathSeg {
 /// the tangent and never rolls about it, as a swept profile does, so on a 3D path a copy keeps
 /// the relation to the path that the original has; on a planar path it is the turn about the
 /// sketch's normal. `normal` (the sketch's) is the axis of a half turn where the path doubles
-/// back on itself.
+/// back on itself. A segment with no length (a point repeated where a spline is sampled) has no
+/// direction: it turns nothing, and the next segment turns from the last one that had one.
 fn path_station(segs: &[kernel::PathSeg], d: f64, normal: Vec3) -> (Vec3, crate::Mat) {
     let mut r = crate::IDENTITY;
     let mut left = d.max(0.0);
     let mut came_along: Option<Vec3> = None;
     for (i, s) in segs.iter().enumerate() {
+        let l = seg_len(s);
+        let last = left <= l + 1e-9 || i + 1 == segs.len();
+        if l <= solidcraft_geom::EPS {
+            if last {
+                return (s.end(), r);
+            }
+            left -= l;
+            continue;
+        }
         let (_, t_in) = seg_at(s, 0.0);
         if let Some(t) = came_along {
             r = crate::mat_mul(&least_turn(t, t_in, normal), &r);
         }
-        let l = seg_len(s);
-        let last = left <= l + 1e-9 || i + 1 == segs.len();
         let along = if last { left.min(l) } else { l };
         if let kernel::PathSeg::Arc { a, center, axis, angle } = *s {
             let radius = (a - center).len().max(1e-12);
@@ -9443,5 +9451,33 @@ mod named_face_lookup_tests {
         assert_eq!(on_copy.note(&name), None);
         assert!(crate::naming::locate_face(&st, &name, Vec3::new(15.0, 5.0, 30.0)).is_none());
         assert_eq!(crate::name_lookup::locate_face_on_body(&st, Some("Part1"), &name, Vec3::new(15.0, 5.0, 30.0)).map(|hit| hit.body), Some(1));
+    }
+}
+
+#[cfg(test)]
+mod path_station_tests {
+    use super::*;
+
+    /// A point repeated in a path (a flattened spline samples one twice) leaves a segment with no
+    /// length and no direction. The frame along the path is the one it has without that
+    /// segment: it does not turn through a made-up direction at the repeat, which would roll
+    /// every copy after it. Repeats at the path's ends keep the stations clamped to its ends.
+    #[test]
+    fn a_repeated_point_does_not_turn_the_path_frame() {
+        let line = |a: Vec3, b: Vec3| kernel::PathSeg::Line { a, b };
+        let (a, b, c) = (Vec3::ZERO, Vec3::new(0.0, 10.0, 0.0), Vec3::new(5.0, 10.0, 5.0));
+        let clean = [line(a, b), line(b, c)];
+        let repeated = [line(a, a), line(a, b), line(b, b), line(b, c), line(c, c)];
+        let total = 10.0 + 50f64.sqrt();
+        for d in [0.0, 5.0, 10.0, 12.0, total, total + 1.0] {
+            let (p, r) = path_station(&clean, d, Vec3::Z);
+            let (q, s) = path_station(&repeated, d, Vec3::Z);
+            assert!(p.dist(q) < 1e-12, "at {d}: {p:?} vs {q:?}");
+            for (row, other) in r.iter().zip(&s) {
+                for (x, y) in row.iter().zip(other) {
+                    assert!((x - y).abs() < 1e-12, "at {d}: {r:?} vs {s:?}");
+                }
+            }
+        }
     }
 }
