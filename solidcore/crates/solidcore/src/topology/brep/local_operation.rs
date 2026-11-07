@@ -2085,6 +2085,43 @@ mod tests {
         );
     }
 
+    /// Clearing one face's failure cannot pay for the same failure on a newly built
+    /// face. Isolate the check comparison: the existing defective-roof test is refused
+    /// by the reach certificate before it can reach the final gate.
+    #[test]
+    fn the_gate_refuses_a_failure_transferred_to_another_face() {
+        use crate::geom::assert_array::labels::FACE_TYPE;
+        use crate::geom::assert_array::{AssertArray, AssertReport, ObjectKey, ReportSpec};
+        let check = |face: u32| {
+            let site = ObjectKey((FACE_TYPE as u64) << 32 | u64::from(face));
+            let mut reports = AssertArray::new();
+            reports.add_unique_delete_duplicate(
+                AssertReport::new(ReportSpec {
+                    reporter: Some(site),
+                    test_class: FACE_TYPE,
+                    test_index: 37,
+                    owner: Some(site),
+                    owner_type: FACE_TYPE,
+                    ..ReportSpec::default()
+                })
+                .unwrap(),
+            );
+            validation::BrepCheck {
+                pointers_status: crate::error::SM_SUCCESS,
+                pointer_reports: AssertArray::new(),
+                assert_valid: Some(false),
+                reports,
+            }
+        };
+        let input = check(0);
+        let result = check(6);
+        assert_eq!(result.failure_classes(), input.failure_classes());
+        assert!(
+            !result.failures_beyond(&input).is_empty(),
+            "the gate accepts a new Face #37 failure at face 6 in place of face 0"
+        );
+    }
+
     /// A body whose pointer check fails is not checked further (`AssertValid` is skipped):
     /// the gate refuses it even where its input failed the pointer check alike, rather
     /// than finding nothing beyond the input's failures.
