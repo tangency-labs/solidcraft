@@ -141,7 +141,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(concat!("p0, p1: overall ends, width", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.point", "Point", draw_point).at("SKETCH", "CREATE").icon("point").enabled(in_sketch).params(concat!("point: [x,y] (each a number or an expression over the design's parameters: the point is then fixed where it comes to and follows them) or a snap: \"mid:<line>\" (held at the line's midpoint), \"on:<curve>:x,y\" (on the curve near x,y), {vertex: [x,y,z]} or {on_edge: [x,y,z]} of the model; id?", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.dimension", "Sketch Dimension", dimension).at("SKETCH", "CREATE").icon("dimension").key("D").enabled(in_sketch).params(
-        "entities: [refs] (a line midpoint is \"mid:line_id\"; a model edge or vertex, {edge: [x,y,z], body?} or {vertex: [x,y,z], body?}, is projected into the sketch first and measured there: a point against the projected edge measures the distance to it), type?: auto|distance|horizontal|distance_x|vertical|distance_y|length|radius|diameter|major|minor|angle, value?: number or expression (default: current; a bare number is in the design's units, e.g. 2 means 2 in in an inch design; give a unit such as \"50 mm\" to override), or `name = expression` (e.g. \"width = 40\"; also `#name = expression`), which adds the user parameter `name` with that expression and dimensions with `name` (refused when the name is taken or reserved; the reply's `defined` names it); text_at?: [x, y]. Two points or a line off the axes: with auto, text_at across from them (between the perpendiculars through them, or a tenth of their distance past) is the distance between them; pulled further past an end, up or down from it horizontal, sideways vertical. Two midpoints: placing text above or below their bounding box measures horizontally, beside it vertically, anywhere else (inside it or past its corners) the distance between them. Two lines: the angle between them (acute, or 180° − it when the value is nearer that) unless text_at picks a sector. A line and a circle or arc: the distance from the line to its edge (the gap, or how far the edge reaches past a line that cuts it; 0 is tangent); dimension the centre point for the distance to the centre. A point and a circle or arc: the distance from the point to its edge (or how far within it a point inside lies). Two circles or arcs: the gap between their edges (or how far they overlap when they cross, or the narrowest gap between them when one lies inside the other), or the centre-to-centre distance when they are the two caps of a slot. An ellipse: a half-axis, the distance from the centre to an axis end (major or minor; with auto, text_at pulled across the major axis gives the major half-axis, pulled out past an end of it the minor one, the minor without text_at; previous_axis?: major|minor, the half-axis an earlier placement chose, kept while text_at is near the boundary between them; the reply's axis names the one chosen; with auto, when a driving dimension already holds one half-axis (or its whole axis), the other one, wherever text_at is; without its major axis line the major half-axis goes to the ellipse's own major end, without its minor axis line the minor half-axis is the minor radius); any other type, radius among them, the minor radius; an ellipse's axis line with auto: its length, the whole axis, wherever text_at is; half_axes?: bool (default true; false: with auto, the minor radius wherever text_at is, as before half-axes, which the Dimension tool sends with Draw ellipses with their axes off). An arc and one of its end points: the arc's length (type arc_length does it from the arc alone). A dimension the sketch already determines is refused (naming what determines it); if_redundant?: \"driven\" places it as a driven (reference) dimension instead. scale_sketch?: bool (the dimension tool sends the Sketch preference, on by default): when this is the sketch's first length dimension and nothing in the sketch fixes a size (no other driving length dimension, nothing fixed or projected), the whole sketch scales about its origin to the value instead of distorting. Returns measured in unit (mm or deg), and scaled: the factor when the sketch was scaled",
+        "entities: [refs] (3D sketch geometry too, #10608: a drawn 3D line for its length, two 3D points such as \"w1.start\" for their distance, with type distance_x / distance_y / distance_z for the run along an axis, two drawn 3D lines for the angle between them, a drawn 3D arc for its radius; driven and value work as below; a line midpoint is \"mid:line_id\"; a model edge or vertex, {edge: [x,y,z], body?} or {vertex: [x,y,z], body?}, is projected into the sketch first and measured there: a point against the projected edge measures the distance to it), type?: auto|distance|horizontal|distance_x|vertical|distance_y|length|radius|diameter|major|minor|angle, value?: number or expression (default: current; a bare number is in the design's units, e.g. 2 means 2 in in an inch design; give a unit such as \"50 mm\" to override), or `name = expression` (e.g. \"width = 40\"; also `#name = expression`), which adds the user parameter `name` with that expression and dimensions with `name` (refused when the name is taken or reserved; the reply's `defined` names it); text_at?: [x, y]. Two points or a line off the axes: with auto, text_at across from them (between the perpendiculars through them, or a tenth of their distance past) is the distance between them; pulled further past an end, up or down from it horizontal, sideways vertical. Two midpoints: placing text above or below their bounding box measures horizontally, beside it vertically, anywhere else (inside it or past its corners) the distance between them. Two lines: the angle between them (acute, or 180° − it when the value is nearer that) unless text_at picks a sector. A line and a circle or arc: the distance from the line to its edge (the gap, or how far the edge reaches past a line that cuts it; 0 is tangent); dimension the centre point for the distance to the centre. A point and a circle or arc: the distance from the point to its edge (or how far within it a point inside lies). Two circles or arcs: the gap between their edges (or how far they overlap when they cross, or the narrowest gap between them when one lies inside the other), or the centre-to-centre distance when they are the two caps of a slot. An ellipse: a half-axis, the distance from the centre to an axis end (major or minor; with auto, text_at pulled across the major axis gives the major half-axis, pulled out past an end of it the minor one, the minor without text_at; previous_axis?: major|minor, the half-axis an earlier placement chose, kept while text_at is near the boundary between them; the reply's axis names the one chosen; with auto, when a driving dimension already holds one half-axis (or its whole axis), the other one, wherever text_at is; without its major axis line the major half-axis goes to the ellipse's own major end, without its minor axis line the minor half-axis is the minor radius); any other type, radius among them, the minor radius; an ellipse's axis line with auto: its length, the whole axis, wherever text_at is; half_axes?: bool (default true; false: with auto, the minor radius wherever text_at is, as before half-axes, which the Dimension tool sends with Draw ellipses with their axes off). An arc and one of its end points: the arc's length (type arc_length does it from the arc alone). A dimension the sketch already determines is refused (naming what determines it); if_redundant?: \"driven\" places it as a driven (reference) dimension instead. scale_sketch?: bool (the dimension tool sends the Sketch preference, on by default): when this is the sketch's first length dimension and nothing in the sketch fixes a size (no other driving length dimension, nothing fixed or projected), the whole sketch scales about its origin to the value instead of distorting. Returns measured in unit (mm or deg), and scaled: the factor when the sketch was scaled",
     ),
     CommandSpec::new("sketch.constraint.horizontal_vertical", "Horizontal/Vertical", c_horizontal_vertical)
         .at("SKETCH", "CONSTRAINTS")
@@ -152,7 +152,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_coincident")
         .enabled(in_sketch)
-        .params(concat!("a, b: points (or a line's middle as {midpoint: line}, which becomes a point tied there), a point and a curve or sketch axis (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created), or two distinct lines (joins their closest endpoints), or two circles/arcs (the second lies on the first: concentric and equal, `constraints` lists both)", model_operand_doc!())),
+        .params(concat!("a, b: points (or a line's middle as {midpoint: line}, which becomes a point tied there), a point and a curve or sketch axis (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created), or two distinct lines (joins their closest endpoints), or two circles/arcs (the second lies on the first: concentric and equal, `constraints` lists both); in a 3D sketch, two 3D points (`<3D curve>.start`, `.end`, `.through`, `.<n>`, or a 3D point's id) or a 3D point and a drawn 3D line", model_operand_doc!())),
     CommandSpec::new("sketch.constraint.tangent", "Tangent", c_tangent)
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_tangent")
@@ -177,7 +177,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_fix")
         .enabled(in_sketch)
-        .params("entity: point or curve | entities: [points and curves]; fixed?: bool (default: fix them all unless all are fixed, then unfix)"),
+        .params("entity: point or curve | entities: [points and curves] (3D points and drawn 3D curves too, not mixed with planar ones); fixed?: bool (default: fix them all unless all are fixed, then unfix)"),
     CommandSpec::new("sketch.constraint.midpoint", "MidPoint", c_midpoint)
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_midpoint")
@@ -252,9 +252,16 @@ pub(super) fn edit<T>(
     Ok((out, rep.map(|rep| report_json(&rep)).unwrap_or(Value::Null)))
 }
 
-/// A solve's outcome as commands return it.
+/// A solve's outcome as commands return it: `dof` counts the 3D curves' freedoms too, and a
+/// sketch with drawn 3D curves also gives the planar sketch's alone (`planar_dof`, #10608).
+/// `solved` is the planar sketch's; a sketch with drawn 3D curves also gives `wires_solved`.
 pub(super) fn report_json(rep: &SolveReport) -> Value {
-    json!({"solved": rep.keeps_orientation(), "dof": rep.dof})
+    let mut out = json!({"solved": rep.keeps_orientation(), "dof": rep.shown_dof()});
+    if rep.wires.is_some() {
+        out["planar_dof"] = json!(rep.dof);
+        out["wires_solved"] = json!(rep.wires_ok());
+    }
+    out
 }
 
 /// What an [`edit_solved`] step leaves for the edit's own solve.
@@ -308,8 +315,33 @@ pub(super) fn edit_solved<T>(
     let stored = sk.driving_values();
     // The constraints the sketch has before the edit: a conflict message must not name one the
     // edit itself adds (the trial already holds it under the id it would get, #9735).
-    let pre: Vec<String> = sk.constraints.iter().map(|c| c.id.clone()).collect();
+    let pre: Vec<String> = sk.constraints.iter().map(|c| c.id.clone()).chain(sk.wire_constraints.iter().map(|c| c.id.clone())).collect();
+    // What the edit changes: a strict edit is refused for breaking the planar sketch only when
+    // it changed the planar sketch, and for breaking 3D constraints only when it changed the 3D
+    // curves or their constraints, and only constraints that held before it or that it adds
+    // (#10608). A 3D sketch too large to solve refuses only an edit that makes it so.
+    let before = strict.then(|| {
+        let big = s.model.state().sketch(id).and_then(|k| k.report.wires.as_ref()).is_some_and(|w| w.oversized.is_some() || w.out_of_time);
+        (
+            sk.points.clone(),
+            sk.curves.clone(),
+            sk.constraints.clone(),
+            sk.wires.clone(),
+            sk.wire_constraints.clone(),
+            sk.wire_constraints_holding(),
+            big,
+        )
+    });
     let (out, left) = f(&mut sk, &mut doc)?;
+    let strictness = match before {
+        Some((points, curves, constraints, wires, wire_constraints, held, was_big)) => Strict {
+            planar: sk.points != points || sk.curves != curves || sk.constraints != constraints,
+            wires: sk.wires != wires || sk.wire_constraints != wire_constraints,
+            held,
+            was_big,
+        },
+        None => Strict::default(),
+    };
     // A curve that took an offset spline's generated node (drawn from its end) gets its own point there.
     sk.detach_offset_points()?;
     let offsets = !sk.offsets.is_empty() || !sk.freeform_offsets.is_empty();
@@ -328,7 +360,11 @@ pub(super) fn edit_solved<T>(
                 sk.refresh_offsets()?;
                 rep = counted_solve(&mut sk, &Hold::default(), Some(&reference), analysis, None);
             }
-            Some(settle(strict, rep, &mut sk, unsolved, &pre)?)
+            // The 3D curves' report too, so every reply counts their freedoms alike.
+            if sk.wires.iter().any(|w| w.link.is_none() && !w.fit.is_empty()) {
+                rep.wires = Some(sk.solve_wires_with(None, analysis != Analysis::StatusOnly));
+            }
+            Some(settle(strictness, rep, &mut sk, unsolved, &pre)?)
         }
         // Solved for the document's values, continuing from the stored solved state.
         Left::Solved | Left::Unsolved => {
@@ -338,9 +374,13 @@ pub(super) fn edit_solved<T>(
             #[cfg(test)]
             solve_counts::record(analysis);
             let rep = doc.solve_sketch_with_analysis(&vals, &mut sk, &stored, None, analysis)?;
-            Some(settle(strict, rep, &mut sk, unsolved, &pre)?)
+            Some(settle(strictness, rep, &mut sk, unsolved, &pre)?)
         }
     };
+    let mut rep = rep;
+    if let Some(r) = rep.as_mut() {
+        doc.discount_traces(id, &sk, r);
+    }
     sketch_store::checked(&sk)?;
     sketch_store::write(&mut doc, id, sk)?;
     s.set_doc(doc);
@@ -353,7 +393,37 @@ pub(super) fn edit_solved<T>(
 /// `pre` are the constraint ids the sketch had before the edit: the trial already holds any
 /// constraint the edit adds, under the id it would get, so a conflict list that named it would
 /// name an id the sketch does not have yet (#9735).
-fn settle(strict: bool, mut rep: SolveReport, sk: &mut Sketch, unsolved: Sketch, pre: &[String]) -> Result<SolveReport> {
+/// The 3D constraints (#10608) are settled apart, see [`Strict`]. A 3D group that fails moves
+/// none of its curves; a planar solve that fails keeps the 3D curves as the 3D solve left them.
+fn settle(strict: Strict, mut rep: SolveReport, sk: &mut Sketch, unsolved: Sketch, pre: &[String]) -> Result<SolveReport> {
+    let Strict { planar: strict, wires: strict_wires, held, was_big } = strict;
+    let collapse = wire_collapse(&unsolved, sk);
+    if strict_wires && let Some(why) = collapse.clone() {
+        return Err(EngineError::Other(why));
+    }
+    if let Some(w) = rep.wires.as_ref().filter(|w| strict_wires && !w.ok) {
+        if w.oversized.is_some() || w.out_of_time {
+            if !was_big {
+                return Err(EngineError::Other(w.failure(|f| f.to_string())));
+            }
+        } else {
+            // What it breaks: a constraint that held before the edit, or one the edit adds.
+            let broken: Vec<&String> = w.failing.iter().filter(|id| held.contains(*id) || !pre.contains(*id)).collect();
+            let had: Vec<String> = broken.iter().filter(|id| pre.contains(**id)).map(|id| (*id).clone()).collect();
+            if !broken.is_empty() && had.is_empty() {
+                return Err(EngineError::Other(
+                    "that would over-constrain the 3D sketch (it conflicts with what its other 3D constraints already determine)".into(),
+                ));
+            }
+            if !had.is_empty() {
+                return Err(EngineError::Other(format!("that would over-constrain the 3D sketch (conflicts with {})", had.join(", "))));
+            }
+        }
+    }
+    // A non-strict edit's 3D solve that squeezed a curve away keeps the curves as the edit left them.
+    if !strict_wires && collapse.is_some() {
+        sk.wires.clone_from(&unsolved.wires);
+    }
     if strict && !rep.keeps_orientation() {
         if rep.folded.is_empty() && rep.oversized.is_none() && !rep.failing.is_empty() {
             let had: Vec<String> = rep.failing.iter().filter(|id| pre.iter().any(|p| p == *id)).cloned().collect();
@@ -382,9 +452,63 @@ fn settle(strict: bool, mut rep: SolveReport, sk: &mut Sketch, unsolved: Sketch,
         return Err(EngineError::Other(format!("that would shrink {curve} to a point: its constraints can only be met without it")));
     }
     if !rep.keeps_orientation() || far || gone.is_some() {
+        let (wires, wire_constraints) = (std::mem::take(&mut sk.wires), std::mem::take(&mut sk.wire_constraints));
         *sk = unsolved;
+        (sk.wires, sk.wire_constraints) = (wires, wire_constraints);
     }
     Ok(rep)
+}
+
+/// Which failures refuse an edit's solve: the planar sketch's when the edit changed it
+/// (`planar`), the 3D constraints' when it changed the 3D curves or their constraints (`wires`)
+/// and they held before it (`wires_held`). An edit is not refused for a failure it did not touch.
+#[derive(Clone, Default)]
+pub(super) struct Strict {
+    planar: bool,
+    wires: bool,
+    held: std::collections::HashSet<String>,
+    was_big: bool,
+}
+
+/// Why solving `before` into `after` collapsed a drawn 3D curve (#10608), as `shrunk` and
+/// `flung` judge planar geometry: a line or arc from longer (or wider) than 1e-3 to shorter
+/// than 1e-5, or a point thrown further than [`FLUNG`] times the 3D curves' size.
+pub(super) fn wire_collapse(before: &Sketch, after: &Sketch) -> Option<String> {
+    let size = |w: &solidcraft_sketch::Wire| match (w.arc, w.fit.as_slice()) {
+        (Some(a), _) => Some(a.radius),
+        (None, [p, q]) => Some(p.dist(*q)),
+        _ => None,
+    };
+    let drawn = |sk: &Sketch| {
+        sk.wires
+            .iter()
+            .filter(|w| w.link.is_none() && !w.fit.is_empty())
+            .map(|w| (w.id.clone(), w.clone()))
+            .collect::<std::collections::HashMap<_, _>>()
+    };
+    let (old, new) = (drawn(before), drawn(after));
+    for w in after.wires.iter().filter(|w| w.link.is_none() && !w.fit.is_empty()) {
+        let id = &w.id;
+        if let Some(o) = old.get(id)
+            && matches!((size(o), size(w)), (Some(b), Some(a)) if b > 1e-3 && a < 1e-5)
+        {
+            return Some(format!("that would shrink {id} to a point: its 3D constraints can only be met without it"));
+        }
+    }
+    let (lo, hi) = old.values().flat_map(|w| w.fit.iter().copied()).fold(
+        (
+            solidcore_record::Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY),
+            solidcore_record::Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY),
+        ),
+        |(lo, hi), p| (lo.min(p), hi.max(p)),
+    );
+    let span = if lo.x <= hi.x { lo.dist(hi) } else { 0.0 };
+    // A 3D dimension may ask for more than the curves span now (its largest driving value).
+    let longest =
+        after.wire_constraints.iter().filter(|c| !c.driven && !c.kind.is_angle()).filter_map(|c| c.kind.value()).map(f64::abs).fold(0.0, f64::max);
+    let reach = FLUNG * (span + longest).max(1.0);
+    let thrown = new.iter().any(|(id, w)| old.get(id).is_some_and(|o| o.fit.iter().zip(&w.fit).any(|(p, q)| !(p.dist(*q) <= reach))));
+    thrown.then(|| "that would throw 3D points of the sketch far away: its 3D constraints have no solution near the sketch as it is".to_string())
 }
 
 /// The first line or circle that solving `before` into `after` shrank to a point: longer (or
@@ -418,7 +542,8 @@ pub(crate) fn collapse_reason(before: &Sketch, after: &Sketch) -> Option<String>
     if flung(before, after) {
         return Some("that would throw points of the sketch far away: its constraints have no solution near the sketch as it is".into());
     }
-    None
+    // The 3D curves too (#10608).
+    wire_collapse(before, after)
 }
 
 /// Did solving `before` into `after` throw some point further than [`FLUNG`] times the sketch's
@@ -665,13 +790,20 @@ pub(crate) fn created(before: Option<&Sketch>, after: &Sketch) -> Value {
         .chain(before.curves.iter().map(|x| x.id.as_str()))
         .chain(before.constraints.iter().map(|x| x.id.as_str()))
         .chain(before.wires.iter().map(|x| x.id.as_str()))
+        .chain(before.wire_constraints.iter().map(|x| x.id.as_str()))
         .collect();
     let new = |id: &&str| !old.contains(*id);
     let points: Vec<&str> = after.points.iter().map(|x| x.id.as_str()).filter(new).collect();
     let curves: Vec<&str> = after.curves.iter().map(|x| x.id.as_str()).filter(new).collect();
     let (dims, cons): (Vec<_>, Vec<_>) = after.constraints.iter().filter(|c| new(&c.id.as_str())).partition(|c| c.kind.is_dimension());
     let ids = |v: Vec<&solidcraft_sketch::Constraint>| v.into_iter().map(|c| c.id.clone()).collect::<Vec<_>>();
-    let mut out = json!({"points": points, "curves": curves, "constraints": ids(cons), "dimensions": ids(dims)});
+    // 3D constraints (#10608) are constraints too.
+    let mut cons = ids(cons);
+    let mut dims = ids(dims);
+    for c in after.wire_constraints.iter().filter(|c| new(&c.id.as_str())) {
+        if c.kind.is_dimension() { &mut dims } else { &mut cons }.push(c.id.clone());
+    }
+    let mut out = json!({"points": points, "curves": curves, "constraints": cons, "dimensions": dims});
     let wires: Vec<&str> = after.wires.iter().map(|x| x.id.as_str()).filter(new).collect();
     if !wires.is_empty()
         && let Some(o) = out.as_object_mut()
@@ -2216,7 +2348,8 @@ pub(super) fn redundancy(
     residual: Option<f64>,
     cid: &str,
 ) -> Result<Option<Vec<String>>> {
-    let after = info.get("dof").and_then(Value::as_u64).map(|d| d as usize);
+    // The planar sketch's freedoms, as `before` counts them (not its 3D curves', #10608).
+    let after = info.get("planar_dof").or_else(|| info.get("dof")).and_then(Value::as_u64).map(|d| d as usize);
     let (Some(b), Some(a)) = (before, after) else { return Ok(None) };
     if a < b {
         return Ok(None);
@@ -2363,6 +2496,9 @@ fn c_horizontal_vertical(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn c_coincident(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.constraint.coincident";
+    if let Some(reply) = super::sketch_3d::coincident_3d(s, p, cmd)? {
+        return Ok(reply);
+    }
     let p = &super::sketch_project::project_operands(s, p, cmd, &["a", "b"])?;
     // Already tied (e.g. connected when it was drawn there): nothing to add.
     let sk = sketch_store::read(&s.doc, sketch_store::target(s, p, cmd)?)?;
@@ -2849,6 +2985,9 @@ fn c_fix(s: &mut Session, p: &Value) -> Result<Value> {
     if refs.is_empty() {
         return Err(bad(cmd, "`entity` or `entities` must name sketch points or curves"));
     }
+    if let Some(reply) = super::sketch_3d::fix_3d(s, p, cmd, &refs, want)? {
+        return Ok(reply);
+    }
     let (n, info) = edit(s, p, cmd, false, |sk, _| {
         // Points and curves; a point is fixed by a Fix constraint, a curve by its flag (which
         // also holds its radius). Projected geometry is always fixed.
@@ -2907,6 +3046,9 @@ pub(super) fn line_pts(sk: &Sketch, l: usize) -> Option<(Vec2, Vec2)> {
 
 fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.dimension";
+    if let Some(reply) = super::sketch_3d::dimension_3d(s, p, cmd)? {
+        return Ok(reply);
+    }
     // A dimension may measure model geometry (#7912): an `{edge: [x,y,z], body?}` or a
     // `{vertex: [x,y,z], body?}` among its entities is projected into the sketch first, as
     // `sketch.project` does, and stands for the projected curve (or point) there.
@@ -3470,6 +3612,9 @@ fn dimension_text(s: &mut Session, p: &Value) -> Result<Value> {
     let key = str_(p, "dimension").ok_or_else(|| bad(cmd, "`dimension` must be a dimension id or parameter name"))?.to_string();
     let at = if bool_(p, "reset").unwrap_or(false) { None } else { Some(req_vec2(cmd, p, "at")?) };
     let (id, info) = edit(s, p, cmd, false, |sk, _| {
+        if sk.wire_constraints.iter().any(|c| c.kind.is_dimension() && (c.id == key || c.param.as_deref() == Some(key.as_str()))) {
+            return Err(bad(cmd, format!("`{key}` is a 3D dimension: 3D dimensions have no text to move yet (#10617)")));
+        }
         let c = sk
             .constraints
             .iter()
@@ -3662,6 +3807,9 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
         let mut curves = Vec::new();
         let mut points = Vec::new();
         let mut cons = Vec::new();
+        // 3D constraints and curves (#10608) go after the loop, so a curve and its own
+        // constraint can be deleted together.
+        let (mut wire_cons, mut wires) = (Vec::new(), Vec::new());
         for id in &ids {
             if let Some(c) = sk.curve_index(id) {
                 curves.push(c);
@@ -3672,8 +3820,10 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
                 points.push(q);
             } else if sk.constraints.iter().any(|c| &c.id == id) {
                 cons.push(id.clone());
+            } else if sk.wire_constraints.iter().any(|c| &c.id == id) {
+                wire_cons.push(id.clone());
             } else if sk.wire_index(id).is_some() {
-                sk.remove_wires(std::slice::from_ref(id));
+                wires.push(id.clone());
             } else if sk.link(id).is_some() {
                 curves.extend(sk.link_curves(id));
                 points.extend(sk.link_points(id));
@@ -3681,6 +3831,8 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
                 return Err(bad(cmd, format!("unknown sketch entity `{id}`")));
             }
         }
+        sk.remove_wire_constraints(&wire_cons);
+        sk.remove_wires(&wires);
         let selected_curves = curves.iter().copied().collect::<std::collections::BTreeSet<_>>();
         let selected_points = points.iter().copied().collect::<std::collections::BTreeSet<_>>();
         let removed = sk
@@ -3975,7 +4127,9 @@ fn solve_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let id = sketch_store::target(s, p, "sketch.solve")?;
     let st = s.model.state();
     let ss = st.sketch(id).ok_or_else(|| EngineError::Other("the sketch has not been evaluated".into()))?;
-    Ok(json!({"status": ss.report.status, "dof": ss.report.dof, "failing": ss.report.failing, "profiles": ss.profiles.len()}))
+    Ok(
+        json!({"status": ss.report.status, "dof": ss.report.shown_dof(), "planar_dof": ss.report.dof, "failing": ss.report.failing, "wires_solve": ss.report.wires, "profiles": ss.profiles.len()}),
+    )
 }
 
 #[cfg(test)]

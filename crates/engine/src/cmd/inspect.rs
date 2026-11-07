@@ -303,9 +303,26 @@ fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Opti
         "name": ss.name,
         "plane": ss.plane,
         "status": ss.report.status,
-        "dof": ss.report.dof,
-        "fully_constrained": ss.report.fully_constrained(),
+        "dof": ss.report.shown_dof(),
+        "fully_constrained": ss.report.shown_dof() == 0,
+        "planar_dof": ss.report.dof,
         "failing": ss.report.failing,
+        // The 3D constraints' solve (#10608): its freedoms are in `dof`, its failures here.
+        "wires_solve": ss.report.wires,
+        "wire_constraints": sk.wire_constraints.iter().map(|c| {
+            // As the planar constraints are listed: a dimension's parameter expression, and an
+            // angle in degrees beside the stored radians.
+            let mut v = serde_json::to_value(c).unwrap_or_default();
+            if let Some(o) = v.as_object_mut() {
+                if let Some(p) = &c.param {
+                    o.insert("expression".into(), json!(s.doc.param(p).map(|x| x.expr.clone())));
+                }
+                if let (true, Some(value)) = (c.kind.is_angle(), c.kind.value()) {
+                    o.insert("degrees".into(), json!(value.to_degrees()));
+                }
+            }
+            v
+        }).collect::<Vec<_>>(),
         "curves": curves,
         "points": points,
         "constraints": constraints,
@@ -426,7 +443,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
         .sketches
         .iter()
         .map(|ss| {
-            let mut v = json!({"id": ss.feature, "name": ss.name, "dof": ss.report.dof, "status": ss.report.status, "curves": ss.sketch.curves.len(), "profiles": ss.profiles.len(), "visible": crate::view::sketch_shown(s, ss.feature)});
+            let mut v = json!({"id": ss.feature, "name": ss.name, "dof": ss.report.shown_dof(), "status": ss.report.status, "wires_ok": ss.report.wires_ok(), "curves": ss.sketch.curves.len(), "profiles": ss.profiles.len(), "visible": crate::view::sketch_shown(s, ss.feature)});
             // A summary that stands in for the sketch's contents (the compact MCP inspect_design).
             if with_counts && let Some(o) = v.as_object_mut() {
                 o.insert("plane".into(), json!(ss.plane));

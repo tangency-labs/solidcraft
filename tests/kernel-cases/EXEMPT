@@ -241,6 +241,7 @@ sketch.circle.three_tangent       2D sketch only (the sketch solver and engine t
 sketch.circle.two_point           2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.circle.two_tangent         2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.constrainer                2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.constraint.along_axis      3D sketch solve only (the 3D solver and engine tests, sketch_3d_frame_tests.rs); no kernel operation
 sketch.constraint.coincident      2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.constraint.collinear       2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.constraint.concentric      2D sketch only (the sketch solver and engine tests); no kernel operation

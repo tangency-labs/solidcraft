@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Value, json};
 use solidcraft_doc::{Document, Feature, FeatureKind, Mat, PlaneRef};
+use solidcraft_geom::prelude::*;
 
 use crate::params::{bad, vec3};
 use crate::{Result, Sel, Session};
@@ -73,7 +74,7 @@ fn parameters(target: &mut Document, source: &Document, features: &[Feature], ma
     let mut texts = BTreeSet::new();
     for feature in features {
         if let FeatureKind::Sketch { sketch, .. } = &feature.kind {
-            pending.extend(sketch.constraints.iter().filter_map(|c| c.param.clone()));
+            pending.extend(sketch.dimension_params().into_iter().cloned());
             let text_and_points = sketch
                 .links
                 .iter()
@@ -82,7 +83,9 @@ fn parameters(target: &mut Document, source: &Document, features: &[Feature], ma
                     _ => None,
                 })
                 .flatten()
-                .chain(sketch.points.iter().filter_map(|p| p.exprs.as_deref()).flat_map(solidcraft_sketch::PointExprs::list));
+                .chain(sketch.points.iter().filter_map(|p| p.exprs.as_deref()).flat_map(solidcraft_sketch::PointExprs::list))
+                // 3D points placed by expressions (#10608).
+                .chain(sketch.wire_point_exprs());
             pending.extend(text_and_points.flat_map(|(_, e)| solidcraft_doc::expr::references(e)));
             for equation in &sketch.equations {
                 pending
@@ -278,6 +281,45 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> Result<Value> {
                 let matrix = if wire.space == solidcraft_sketch::WireSpace::Component { transform } else { &world_shift };
                 solidcraft_doc::map_wire(wire, matrix);
             }
+            // Their 3D constraints go with them (#10608): a fixed point where its curve now is,
+            // an axis the one the copy now runs along. One whose axis the paste turns away from
+            // every axis goes, and a point placed by expressions that the paste moves keeps
+            // where it lands, not its expressions (they would put it back).
+            let component: std::collections::HashSet<String> =
+                sketch.wires.iter().filter(|w| w.space == solidcraft_sketch::WireSpace::Component).map(|w| w.id.clone()).collect();
+            let matrix = |wire: &str| if component.contains(wire) { transform } else { &world_shift };
+            sketch.wire_constraints.retain_mut(|c| match &mut c.kind {
+                solidcraft_sketch::WireConstraintKind::Fix { p, at, exprs } => {
+                    let m = matrix(&p.wire);
+                    *at = solidcraft_doc::apply_point(m, *at);
+                    if !solidcraft_doc::is_identity(m) {
+                        *exprs = None;
+                    }
+                    true
+                }
+                solidcraft_sketch::WireConstraintKind::AlongAxis { line, axis } => {
+                    match solidcraft_sketch::Axis::along(solidcraft_doc::apply_vector(matrix(line), axis.unit())) {
+                        Some(a) => {
+                            *axis = a;
+                            true
+                        }
+                        None => false,
+                    }
+                }
+                // A distance along an axis: along the axis it now runs on, from the side it did.
+                solidcraft_sketch::WireConstraintKind::AxisDistance { a, axis, reversed, .. } => {
+                    let d = solidcraft_doc::apply_vector(matrix(&a.wire), axis.unit());
+                    match solidcraft_sketch::Axis::along(d) {
+                        Some(to) => {
+                            *reversed ^= d.dot(to.unit()) < 0.0;
+                            *axis = to;
+                            true
+                        }
+                        None => false,
+                    }
+                }
+                _ => true,
+            });
             // Patterns and text words have expressions outside FeatureKind's numeric inputs.
             for pattern in &mut sketch.patterns {
                 for e in pattern.count_expression.iter_mut().chain(pattern.expressions.values_mut()) {

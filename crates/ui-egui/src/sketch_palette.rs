@@ -357,8 +357,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         (
             ss.sketch.view.clone(),
             ss.name.clone(),
-            ss.report.dof,
-            ss.report.ok(),
+            ss.report.shown_dof(),
+            ss.report.shown_ok(),
             unconstrained_total(&ss.sketch),
             has_geometry(&ss.sketch),
             ss.ends.open.len(),

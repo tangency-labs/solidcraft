@@ -4290,7 +4290,7 @@ impl Document {
                 used.extend(expr::references(e));
             }
             if let FeatureKind::Sketch { sketch, .. } = &f.kind {
-                used.extend(sketch.constraints.iter().filter_map(|c| c.param.clone()));
+                used.extend(sketch.dimension_params().into_iter().cloned());
                 used.extend(sketch.text_exprs().into_iter().flat_map(|(_, e)| expr::references(e)));
             }
         }
@@ -4541,7 +4541,40 @@ impl Document {
         for c in &sk.constraints {
             sk.validate(&c.kind)?;
         }
-        Ok(())
+        self.apply_wire_values(vals, sk)
+    }
+
+    /// Apply parameter values to a sketch's 3D dimensions and to its 3D points placed by
+    /// expressions (#10608), in place.
+    pub fn apply_wire_values(&self, vals: &std::collections::BTreeMap<String, expr::Value>, sk: &mut Sketch) -> Result<()> {
+        if sk.wire_constraints.is_empty() {
+            return Ok(());
+        }
+        let mut wires = std::mem::take(&mut sk.wire_constraints);
+        let applied = (|| -> Result<()> {
+            for c in &mut wires {
+                if let (Some(p), false) = (&c.param, c.driven) {
+                    let kind = if c.kind.is_angle() { Kind::Angle } else { Kind::Length };
+                    let v = vals.get(p).copied().ok_or_else(|| DocError::Unknown(format!("parameter `{p}`")))?.to_kind(kind)?;
+                    c.kind.set_value(v);
+                }
+                if let solidcraft_sketch::WireConstraintKind::Fix { at, exprs: Some(e), .. } = &mut c.kind {
+                    let [x, y, z] = e.by_axis();
+                    let value = |e: Option<&String>, keep: f64| -> Result<f64> {
+                        match e {
+                            Some(e) => crate::eval::val(vals, &expr::Expr::new(e.as_str()), Kind::Length),
+                            None => Ok(keep),
+                        }
+                    };
+                    *at = solidcore_record::Vec3::new(value(x, at.x)?, value(y, at.y)?, value(z, at.z)?);
+                }
+            }
+            Ok(())
+        })();
+        sk.wire_constraints = wires;
+        applied?;
+        // A driven dimension's value need only be a number: it measures (#10608).
+        sk.validate_wire_constraints().map_err(|e| DocError::Invalid(e.to_string()))
     }
 
     /// Resolve circular Quantity expressions before solving. Rebuilding the copies here also
@@ -4683,6 +4716,21 @@ impl Document {
         self.solve_sketch_with_analysis(vals, sk, stored, moved_from, solidcraft_sketch::Analysis::Full)
     }
 
+    /// Take out of sketch `id`'s 3D report the freedoms of its motion traces' curves (#10608):
+    /// the motion places them and they take no 3D constraints, so they are no freedoms to show.
+    pub fn discount_traces(&self, id: u64, sk: &Sketch, report: &mut solidcraft_sketch::SolveReport) {
+        let Some(w) = report.wires.as_mut() else { return };
+        let fits: usize = self
+            .assembly
+            .traces
+            .iter()
+            .filter(|t| t.sketch == id)
+            .filter_map(|t| sk.wires.iter().find(|w| w.id == t.wire && w.link.is_none()))
+            .map(|w| w.fit.len())
+            .sum();
+        w.dof = w.dof.saturating_sub(fits.saturating_mul(3));
+    }
+
     /// [`Self::solve_sketch`] with the diagnostics needed by an internal edit. Parameter
     /// application, continuation and offset refreshes run regardless of the requested level.
     /// Model evaluation uses `solve_sketch` so its published report always has full diagnostics.
@@ -4746,6 +4794,11 @@ impl Document {
             {
                 report = retried;
             }
+        }
+        // The 3D constraints (#10608), reported apart: the planar report is the planar sketch's,
+        // which planar edits compare their freedoms and conflicts with.
+        if sk.wires.iter().any(|w| w.link.is_none() && !w.fit.is_empty()) {
+            report.wires = Some(sk.solve_wires_with(None, analysis != solidcraft_sketch::Analysis::StatusOnly));
         }
         Ok(report)
     }
