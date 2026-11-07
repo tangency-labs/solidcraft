@@ -1,5 +1,5 @@
 //! Bundled IBM Plex interface faces, user overrides, and language-specific system fallbacks
-//! (CJK, Hangul, Thai, Hebrew).
+//! (CJK, Hangul, Thai, Hebrew, Arabic, Georgian).
 //! The same definitions are used on desktop and web; the web shell adds Japanese and Chinese
 //! faces on demand.
 
@@ -155,6 +155,10 @@ pub const HEBREW_FALLBACK: &str = "hebrew_fallback";
 /// digits and Latin text, so each Arabic word is one shaped run (see [`crate::bidi`]).
 pub const ARABIC_FALLBACK: &str = "arabic_fallback";
 
+/// Name of the Georgian fallback entry in [`egui::FontDefinitions`], placed before Hack: egui's
+/// built-in faces have no Asomtavruli or Mtavruli, and only Hack's monospace Mkhedruli.
+pub const GEORGIAN_FALLBACK: &str = "georgian_fallback";
+
 /// egui's built-in monospace face, also the last fallback of every sans family (#2955).
 pub const SYMBOL_FALLBACK: &str = "Hack";
 
@@ -245,6 +249,24 @@ fn with_fallback(mut fonts: egui::FontDefinitions, name: &str, bytes: Vec<u8>) -
         list.push(name.to_owned());
     }
     Some(fonts)
+}
+
+/// `fonts` with the Georgian fallback moved ahead of Hack. Hack (egui's built-in last resort, see
+/// [`with_symbol_fallback`]) has Mkhedruli in a monospace design, so a fallback after it would
+/// only ever draw the Asomtavruli and Mtavruli letters Hack lacks. The monospace family keeps Hack's
+/// own design.
+fn georgian_before_symbols(mut fonts: egui::FontDefinitions) -> egui::FontDefinitions {
+    for family in sans_families() {
+        let Some(list) = fonts.families.get_mut(&family) else { continue };
+        if let Some(georgian) = list.iter().position(|name| name == GEORGIAN_FALLBACK)
+            && let Some(hack) = list.iter().position(|name| name == SYMBOL_FALLBACK)
+            && georgian > hack
+        {
+            let item = list.remove(georgian);
+            list.insert(hack, item);
+        }
+    }
+    fonts
 }
 
 /// Use one primary CJK face for mixed-script labels in every sans weight family.
@@ -566,6 +588,27 @@ const HEBREW_FONT_CANDIDATES: &[&str] = &[
     "/usr/share/fonts/dejavu/DejaVuSans.ttf",
 ];
 
+/// Georgian fonts, appended last: Mkhedruli (U+10D0..U+10FF), Asomtavruli (U+10A0..U+10CF, U+2D00..U+2D2F)
+/// and Mtavruli (U+1C90..U+1CBF) are not in egui's built-in faces. A candidate is used only if it draws
+/// Georgian (see [`covers`]).
+#[cfg(not(target_arch = "wasm32"))]
+const GEORGIAN_FONT_CANDIDATES: &[&str] = &[
+    // Windows: Sylfaen, Segoe UI
+    "C:\\Windows\\Fonts\\sylfaen.ttf",
+    "C:\\Windows\\Fonts\\segoeui.ttf",
+    // macOS: SF Georgian
+    "/System/Library/Fonts/SFGeorgian.ttf",
+    // Linux: Noto Sans Georgian, DejaVu Sans
+    "/usr/share/fonts/noto/NotoSansGeorgian-Regular.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSansGeorgian-Regular.ttf",
+    "/usr/share/fonts/google-noto/NotoSansGeorgian-Regular.ttf",
+    "/usr/share/fonts/google-noto-vf/NotoSansGeorgian[wght].ttf",
+    "/usr/share/fonts/opentype/noto/NotoSansGeorgian-Regular.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/TTF/DejaVuSans.ttf",
+    "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+];
+
 /// Arabic fonts with the joining forms the shaper uses. egui's built-in faces have no Arabic.
 #[cfg(not(target_arch = "wasm32"))]
 const ARABIC_FONT_CANDIDATES: &[&str] = &[
@@ -775,19 +818,19 @@ fn find_system_cjk_font() -> Option<Vec<u8>> {
 /// epaint centres each face's own line height in the row, so glyphs from two faces of very
 /// different height (Meiryo ≈ 2.0 em, Microsoft YaHei ≈ 1.4 em) sit at different heights
 /// inside one word. One face for the whole word keeps them on one baseline.
-/// Thai, Hebrew and Arabic come last whatever the language: no other face draws them. Arabic
+/// Thai, Hebrew, Arabic and Georgian come last whatever the language: no other face draws them. Arabic
 /// goes first for `ar` instead: a CJK font such as Arial Unicode also has Arabic letters, without
 /// the shaping data that joins them.
-pub fn fallback_order(language: &str) -> [&'static str; 6] {
+pub fn fallback_order(language: &str) -> [&'static str; 7] {
     match language {
-        "zh" | "zh-TW" => [CHINESE_FALLBACK, CJK_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK],
-        "ko" => [HANGUL_FALLBACK, CJK_FALLBACK, CHINESE_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK],
-        "ar" => [ARABIC_FALLBACK, CJK_FALLBACK, CHINESE_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK],
-        _ => [CJK_FALLBACK, CHINESE_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK],
+        "zh" | "zh-TW" => [CHINESE_FALLBACK, CJK_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK],
+        "ko" => [HANGUL_FALLBACK, CJK_FALLBACK, CHINESE_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK],
+        "ar" => [ARABIC_FALLBACK, CJK_FALLBACK, CHINESE_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, GEORGIAN_FALLBACK],
+        _ => [CJK_FALLBACK, CHINESE_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK],
     }
 }
 
-/// Configure font definitions with system CJK, Chinese, Hangul, Thai and Hebrew fallbacks where available,
+/// Configure font definitions with system CJK, Chinese, Hangul, Thai, Hebrew and Georgian fallbacks where available,
 /// ordered for the UI language (see [`fallback_order`]), after the interface font `ui_font`
 /// when one is chosen (see [`ui_font`]).
 #[cfg(not(target_arch = "wasm32"))]
@@ -806,6 +849,7 @@ struct SystemFonts {
     thai: Option<Vec<u8>>,
     hebrew: Option<Vec<u8>>,
     arabic: Option<Vec<u8>>,
+    georgian: Option<Vec<u8>>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -820,7 +864,8 @@ fn system_fallbacks() -> &'static SystemFonts {
         let thai = THAI_FONT_CANDIDATES.iter().find_map(|path| try_read_font(std::path::Path::new(path)));
         let hebrew = HEBREW_FONT_CANDIDATES.iter().find_map(|path| try_read_font(std::path::Path::new(path)).filter(|bytes| covers(bytes, 'א')));
         let arabic = arabic_font();
-        SystemFonts { cjk, chinese, hangul, thai, hebrew, arabic }
+        let georgian = GEORGIAN_FONT_CANDIDATES.iter().find_map(|path| try_read_font(std::path::Path::new(path)).filter(|bytes| covers(bytes, 'ა')));
+        SystemFonts { cjk, chinese, hangul, thai, hebrew, arabic, georgian }
     })
 }
 
@@ -861,9 +906,9 @@ pub fn setup_fonts_without_waiting(ctx: &egui::Context, language: &str, ui_font:
 
 #[cfg(not(target_arch = "wasm32"))]
 fn install_fonts(ctx: &egui::Context, language: &str, ui_font: &str, system: Option<&SystemFonts>) {
-    let (cjk, chinese, hangul, thai, hebrew, arabic) = match system {
-        Some(f) => (f.cjk.clone(), f.chinese.clone(), f.hangul.clone(), f.thai.clone(), f.hebrew.clone(), f.arabic.clone()),
-        None => (None, None, None, None, None, None),
+    let (cjk, chinese, hangul, thai, hebrew, arabic, georgian) = match system {
+        Some(f) => (f.cjk.clone(), f.chinese.clone(), f.hangul.clone(), f.thai.clone(), f.hebrew.clone(), f.arabic.clone(), f.georgian.clone()),
+        None => (None, None, None, None, None, None, None),
     };
     let mut fonts = base_font_definitions();
     if let Some(font) = self::ui_font(ui_font) {
@@ -877,7 +922,8 @@ fn install_fonts(ctx: &egui::Context, language: &str, ui_font: &str, system: Opt
             HANGUL_FALLBACK => hangul.clone(),
             THAI_FALLBACK => thai.clone(),
             HEBREW_FALLBACK => hebrew.clone(),
-            _ => arabic.clone(),
+            ARABIC_FALLBACK => arabic.clone(),
+            _ => georgian.clone(),
         };
         if let Some(bytes) = bytes
             && let Some(with_fallback) = with_fallback(fonts.clone(), name, bytes)
@@ -885,11 +931,13 @@ fn install_fonts(ctx: &egui::Context, language: &str, ui_font: &str, system: Opt
             fonts = with_fallback;
         }
     }
+    fonts = georgian_before_symbols(fonts);
     if needs_cjk_font(language) {
         // Select the first installed face in language order (a duplicate Chinese face may
         // already be installed as CJK_FALLBACK). Keep explicit interface choices ahead of it.
-        if let Some(primary) =
-            order.into_iter().find(|name| ![THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK].contains(name) && fonts.font_data.contains_key(*name))
+        if let Some(primary) = order
+            .into_iter()
+            .find(|name| ![THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK].contains(name) && fonts.font_data.contains_key(*name))
         {
             promote_font_to_front(&mut fonts, primary);
         }
@@ -1264,14 +1312,20 @@ mod tests {
 
     #[test]
     fn a_chinese_ui_puts_the_chinese_face_before_the_japanese_one() {
-        assert_eq!(fallback_order("zh"), [CHINESE_FALLBACK, CJK_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK]);
+        assert_eq!(
+            fallback_order("zh"),
+            [CHINESE_FALLBACK, CJK_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK]
+        );
         assert_eq!(fallback_order("zh-TW"), fallback_order("zh"));
-        assert_eq!(fallback_order("ko"), [HANGUL_FALLBACK, CJK_FALLBACK, CHINESE_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK]);
+        assert_eq!(
+            fallback_order("ko"),
+            [HANGUL_FALLBACK, CJK_FALLBACK, CHINESE_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK]
+        );
         assert_eq!(fallback_order("ar")[0], ARABIC_FALLBACK);
         for lang in ["en", "ja", "de", "he"] {
             assert_eq!(
                 fallback_order(lang),
-                [CJK_FALLBACK, CHINESE_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK],
+                [CJK_FALLBACK, CHINESE_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK],
                 "{lang} keeps the Japanese font first"
             );
         }
@@ -1283,7 +1337,10 @@ mod tests {
         for family in all_families() {
             let list = &fonts.families[&family];
             assert_eq!(list.first(), defaults.families[&family].first(), "the Latin UI font stays first");
-            assert_eq!(&list[list.len() - 6..], [CHINESE_FALLBACK, CJK_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK]);
+            assert_eq!(
+                &list[list.len() - 7..],
+                [CHINESE_FALLBACK, CJK_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK]
+            );
         }
     }
 
@@ -1330,6 +1387,35 @@ mod tests {
         assert!(!hebrew(base_font_definitions()), "the bundled faces have no Hebrew");
         let Some(bytes) = found.into_iter().next() else { return };
         assert!(hebrew(with_fallback(base_font_definitions(), HEBREW_FALLBACK, bytes).unwrap()), "Hebrew draws with the fallback");
+    }
+
+    /// Georgian: every Georgian candidate this machine has that passes the coverage check draws
+    /// Mkhedruli, and the fonts set up must then draw it.
+    #[test]
+    fn a_georgian_fallback_draws_georgian() {
+        let found: Vec<Vec<u8>> =
+            GEORGIAN_FONT_CANDIDATES.iter().filter_map(|path| try_read_font(std::path::Path::new(path))).filter(|bytes| covers(bytes, 'ა')).collect();
+        for bytes in &found {
+            let face = ttf_parser::Face::parse(bytes, 0).unwrap();
+            for c in "გამარჯობა მსოფლიო".chars().filter(|c| !c.is_whitespace()) {
+                assert!(face.glyph_index(c).is_some(), "{c:?} is in the Georgian font");
+            }
+        }
+        let georgian = |fonts: egui::FontDefinitions| {
+            let ctx = egui::Context::default();
+            ctx.set_fonts(fonts);
+            ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
+            ctx.fonts_mut(|f| f.has_glyphs(&egui::FontId::proportional(14.0), "გამარჯობა"))
+        };
+        // Hack draws Mkhedruli too, so the system face must come before it to be the one used.
+        let Some(bytes) = found.into_iter().next() else { return };
+        let fonts = georgian_before_symbols(with_fallback(base_font_definitions(), GEORGIAN_FALLBACK, bytes).unwrap());
+        for family in sans_families() {
+            let list = &fonts.families[&family];
+            let at = |name: &str| list.iter().position(|entry| entry == name).unwrap();
+            assert!(at(GEORGIAN_FALLBACK) < at(SYMBOL_FALLBACK), "the Georgian face comes before Hack");
+        }
+        assert!(georgian(fonts), "Georgian draws with the fallback");
     }
 
     /// What a Hebrew interface shows depends on egui's own shaping as much as on `bidi::visual`:
