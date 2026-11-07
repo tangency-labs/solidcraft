@@ -1639,6 +1639,10 @@ preference_settings! {
     /// A click on the ribbon button of the sketch tool that is running ends the tool, so clicks
     /// in the view select again (#10151). Off: the click starts the tool again, as before.
     ribbon_click_ends_tool: bool = true, PAGE_SKETCH;
+    /// The most instances, the original included, one sketch pattern may make (#7824). The
+    /// default keeps the earlier fixed cap; every open design's session follows it
+    /// (`sync_pattern_limit`).
+    sketch_pattern_limit: u32 = solidcraft_engine::sketch::DEFAULT_PATTERN_COPIES as u32, PAGE_SKETCH, accept(2..=solidcraft_engine::sketch::MAX_PATTERN_COPIES as u32);
     /// Opening or editing a sketch turns the view to face it (the default). Off: the view stays as
     /// it is, and Look At faces the sketch when asked.
     sketch_open_look_at: bool = true, PAGE_SKETCH;
@@ -1922,6 +1926,7 @@ impl Snapshot {
         let update = std::mem::take(&mut app.preferences.update);
         app.preferences = self.prefs;
         sync_surface_analysis(app);
+        sync_pattern_limit(app);
         app.preferences.update = update;
         if units_changed {
             default_units_changed(app);
@@ -2187,6 +2192,7 @@ fn defaults(app: &mut SolveApp, page: usize) {
     let units = app.preferences.default_units.clone();
     reset_preferences(&mut app.preferences, page);
     sync_surface_analysis(app);
+    sync_pattern_limit(app);
     if app.preferences.default_units != units {
         default_units_changed(app);
     }
@@ -2284,6 +2290,7 @@ fn sync_window_theme(app: &mut SolveApp, ctx: &egui::Context, follows_system: bo
 
 pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     sync_surface_analysis(app);
+    sync_pattern_limit(app);
     apply_network(&app.preferences);
     // The features computed from now on are checked as the preference says.
     app.session.set_validation(app.preferences.validation);
@@ -2360,6 +2367,16 @@ pub(crate) fn sync_surface_analysis(app: &mut SolveApp) {
     app.session.set_single_surface_analysis(single);
     for slot in app.docs.background_mut() {
         slot.session.set_single_surface_analysis(single);
+    }
+}
+
+/// The user's sketch pattern limit applies at once to every open design (#7824). A saved value
+/// out of range is brought into it, so the field shows the limit in force.
+pub(crate) fn sync_pattern_limit(app: &mut SolveApp) {
+    let limit = app.session.set_pattern_limit(app.preferences.sketch_pattern_limit as usize);
+    app.preferences.sketch_pattern_limit = u32::try_from(limit).unwrap_or(app.preferences.sketch_pattern_limit);
+    for slot in app.docs.background_mut() {
+        slot.session.set_pattern_limit(limit);
     }
 }
 
@@ -4094,6 +4111,9 @@ fn prepare_preferences(
     if !accepted::dimension_step_mm(&new) || !accepted::dimension_step_deg(&new) {
         return Err("`dimension_step_mm` must be 0.001…1000 and `dimension_step_deg` 0.001…180".into());
     }
+    if !accepted::sketch_pattern_limit(&new) {
+        return Err(format!("`sketch_pattern_limit` must be a whole number from 2 to {}", solidcraft_engine::sketch::MAX_PATTERN_COPIES));
+    }
     if solidcraft_engine::doc::display_quality::DisplayQuality::parse(&new.display_quality).is_none() {
         return Err("`display_quality` must be coarse, normal, fine or ultra".into());
     }
@@ -4131,6 +4151,7 @@ fn apply_preferences(app: &mut SolveApp, new: Prefs, p: &serde_json::Value) -> R
     }
     app.preferences = new;
     sync_surface_analysis(app);
+    sync_pattern_limit(app);
     apply_file_limits(&app.preferences);
     if units_changed {
         default_units_changed(app);
@@ -6335,6 +6356,7 @@ mod tests {
             ("ribbon_click_ends_tool", json!(false), PAGE_SKETCH),
             ("msaa", json!(8), PAGE_GRAPHICS),
             ("single_surface_analysis", json!(false), PAGE_GRAPHICS),
+            ("sketch_pattern_limit", json!(900), PAGE_SKETCH),
         ];
         let defaults = serde_json::to_value(Prefs::default()).unwrap();
         for (field, value, owner) in fields {
@@ -9892,6 +9914,71 @@ mod tests {
         let after: Vec<_> =
             std::iter::once(&app.session).chain(app.docs.background()).map(|s| (s.status_items(), s.revision, s.undo.len())).collect();
         assert_eq!(before, after, "a presentation preference never changes effects in any document");
+    }
+
+    /// #7824: the sketch pattern limit is 500 out of the box, and a saved value the session
+    /// can't take (hand-edited, or from another version) never stops the app starting.
+    #[test]
+    fn pattern_limit_preference_loads_hostile_values_safely() {
+        assert_eq!(Prefs::default().sketch_pattern_limit, 500);
+        assert_eq!(lenient(&json!({"sketch_pattern_limit":"many"})).sketch_pattern_limit, 500);
+        assert_eq!(lenient(&json!({"sketch_pattern_limit":-3})).sketch_pattern_limit, 500);
+        assert_eq!(lenient(&json!({"sketch_pattern_limit":1e12})).sketch_pattern_limit, 500);
+        for (saved, in_force) in [(json!(0), 2), (json!(4_000_000_000u64), 20_000), (json!(1200), 1200)] {
+            let mut app = SolveApp::new(Default::default(), Default::default());
+            app.load_prefs(&json!({"preferences": {"sketch_pattern_limit": saved}}).to_string());
+            assert_eq!(app.session.pattern_limit, in_force, "{saved}");
+            assert_eq!(app.preferences.sketch_pattern_limit as usize, in_force, "{saved}: the field shows the limit in force");
+        }
+    }
+
+    /// The limit is the user's, not a tab's: it applies to every open design and to one opened
+    /// later, and Cancel puts the old value back everywhere.
+    #[test]
+    fn pattern_limit_follows_every_tab_and_cancel() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        crate::documents::open_tab(&mut app, solidcraft_engine::Session::default()).unwrap();
+        let every = |app: &SolveApp| std::iter::once(&app.session).chain(app.docs.background()).map(|s| s.pattern_limit).collect::<Vec<_>>();
+        assert_eq!(every(&app), [500, 500]);
+        super::control(&mut app, &json!({"open":"Sketch","sketch_pattern_limit":1200})).unwrap();
+        assert_eq!(every(&app), [1200, 1200]);
+        super::control(&mut app, &json!({"button":"cancel"})).unwrap();
+        assert_eq!(app.preferences.sketch_pattern_limit, 500);
+        assert_eq!(every(&app), [500, 500]);
+        super::control(&mut app, &json!({"sketch_pattern_limit":1200})).unwrap();
+        crate::documents::open_tab(&mut app, solidcraft_engine::Session::default()).unwrap();
+        assert_eq!(app.session.pattern_limit, 1200, "a design opened later");
+        for refused in [json!(1), json!(20_001), json!("many")] {
+            assert!(super::set(&mut app, &json!({"sketch_pattern_limit":refused})).is_err(), "{refused}");
+            assert_eq!(app.preferences.sketch_pattern_limit, 1200);
+        }
+    }
+
+    /// `sketch.pattern_limit` from an agent, a script or the palette is the same setting as the
+    /// Preferences field: it reaches every tab and survives the frames after it.
+    #[test]
+    fn pattern_limit_command_sticks_in_the_running_app() {
+        let mut h = crate::scenario::Harness::new();
+        crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
+        h.app.run("sketch.pattern_limit", json!({"value": 1500})).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.preferences.sketch_pattern_limit, 1500);
+        assert!(std::iter::once(&h.app.session).chain(h.app.docs.background()).all(|s| s.pattern_limit == 1500));
+    }
+
+    /// The pattern limit is a full-width block with its note under the label, so its long label
+    /// is not cut to fit one of the Drawing columns (#7824).
+    #[test]
+    fn pattern_limit_row_spans_the_page_with_its_field() {
+        let mut h = crate::scenario::Harness::new();
+        super::control(&mut h.app, &json!({"open":"Sketch"})).unwrap();
+        h.frames(5);
+        let label = h.app.tr("prefs.sketch.pattern_limit").to_string();
+        let row = crate::scenario::rect_of(&format!("dialog:row:{label}")).expect("the pattern limit is a block row");
+        let field = crate::scenario::rect_of("prefs:sketch_pattern_limit").unwrap();
+        assert!(row.contains_rect(field), "{field:?} in {row:?}");
+        let body = crate::scenario::rect_of("dialog:page_body").unwrap();
+        assert!(row.width() > body.width() * 0.6, "{row:?} spans the page, not one column of {body:?}");
     }
 
     #[test]

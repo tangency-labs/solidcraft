@@ -4578,8 +4578,11 @@ impl Document {
                 };
                 let value = crate::eval::val(vals, expression, unit).map_err(|e| DocError::Expr(format!("pattern {} `{key}`: {e}", pattern.id)))?;
                 let count = || -> Result<usize> {
-                    if !(1.0..=500.0).contains(&value) || value.fract() != 0.0 {
-                        return Err(DocError::Invalid(format!("pattern `{key}` must be a positive integer from 1 to 500")));
+                    if !(1.0..=solidcraft_sketch::MAX_PATTERN_COPIES as f64).contains(&value) || value.fract() != 0.0 {
+                        return Err(DocError::Invalid(format!(
+                            "pattern `{key}` must be a positive integer from 1 to {}",
+                            solidcraft_sketch::MAX_PATTERN_COPIES
+                        )));
                     }
                     Ok(value as usize)
                 };

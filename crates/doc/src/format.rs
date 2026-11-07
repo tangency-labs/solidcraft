@@ -891,7 +891,9 @@ fn validate_sketch_sizes(value: &Value) -> Result<()> {
             for pattern in patterns {
                 let Some(entities) = pattern.get("entities").and_then(Value::as_array) else { return Err(invalid()) };
                 let Some(instances) = pattern.get("instances").and_then(Value::as_array) else { return Err(invalid()) };
-                if entities.len() > solidcraft_sketch::MAX_CURVES + solidcraft_sketch::MAX_POINTS || instances.len() >= 500 {
+                if entities.len() > solidcraft_sketch::MAX_CURVES + solidcraft_sketch::MAX_POINTS
+                    || instances.len() >= solidcraft_sketch::MAX_PATTERN_COPIES
+                {
                     return Err(invalid());
                 }
                 for instance in instances {
@@ -2481,6 +2483,26 @@ mod tests {
             let error = read(&value.to_string()).unwrap_err().to_string();
             assert!(error.contains("sketch too large"), "{key}: {error}");
         }
+    }
+
+    /// #7824: a stored pattern may hold more than the old 500 instances, up to the fixed
+    /// ceiling, which the raw size check still enforces before typed decoding.
+    #[test]
+    fn a_pattern_above_the_old_cap_passes_the_size_check() {
+        use solidcraft_sketch::Sketch;
+
+        let mut doc = Document::new("pattern sizes");
+        doc.add_feature(crate::FeatureKind::Sketch { plane: crate::PlaneRef::Origin { name: "XY".into() }, sketch: Sketch::new() }, None).unwrap();
+        let base: Value = serde_json::from_str(&doc.to_json()).unwrap();
+        let with_instances = |n: usize| {
+            let mut value = base.clone();
+            value["features"][0]["sketch"]["patterns"] =
+                serde_json::json!([{"id": "pt1", "entities": ["p1"], "instances": vec![serde_json::json!({}); n]}]);
+            validate_sketch_sizes(&value)
+        };
+        assert!(with_instances(599).is_ok(), "599 instances are within the ceiling");
+        let error = with_instances(solidcraft_sketch::MAX_PATTERN_COPIES).unwrap_err().to_string();
+        assert!(error.contains("sketch too large"), "{error}");
     }
 
     fn two_components_one_occurrence() -> Document {

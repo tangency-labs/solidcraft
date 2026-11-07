@@ -519,6 +519,10 @@ pub struct Session {
     pub(crate) followed: Option<cmd::inspect::Followed>,
     /// Project a face's edges into a sketch created on it (the default; `sketch.auto_project`).
     pub auto_project: bool,
+    /// The most instances, the original included, a sketch pattern command makes (#7824). The
+    /// user's, like `auto_project`: kept across opened and new designs, never saved in one.
+    /// Change it with [`Session::set_pattern_limit`] (`sketch.pattern_limit`).
+    pub pattern_limit: usize,
     /// How calls that break a command's parameter contract are treated (off by default). It
     /// belongs to the session, not the design, so it survives opening and starting designs.
     pub param_check: schema::ParamCheck,
@@ -827,6 +831,7 @@ impl Session {
             document_id: cmd::inspect::new_document_id(),
             followed: None,
             auto_project: true,
+            pattern_limit: solidcraft_sketch::DEFAULT_PATTERN_COPIES,
             param_check: schema::ParamCheck::Off,
             easyprint_upload: None,
             live_links: None,
@@ -883,6 +888,22 @@ impl Session {
     /// from the checkpoint it took before its first step, and that checkpoint belongs to the
     /// design before the batch, which is what the batch promised (#3242). The design is what a
     /// checkpoint keeps, not the replaced session's file path (docs/mcp.md).
+    /// Set the most instances, the original included, a sketch pattern command makes, kept
+    /// within `2..=MAX_PATTERN_COPIES` (a value from a hand-edited settings file is hostile).
+    /// Returns the limit now in force.
+    pub fn set_pattern_limit(&mut self, limit: usize) -> usize {
+        self.pattern_limit = limit.clamp(2, solidcraft_sketch::MAX_PATTERN_COPIES);
+        self.pattern_limit
+    }
+
+    /// The most instances a pattern command may give a pattern that has `existing` instances,
+    /// the original included (`None`: a new pattern): the user's limit, or the pattern's own size
+    /// when that is larger, so lowering the limit never locks a pattern made before. Never above
+    /// `MAX_PATTERN_COPIES`.
+    pub fn pattern_limit_for(&self, existing: Option<usize>) -> usize {
+        cmd::pattern_limit_for(self.pattern_limit, existing)
+    }
+
     pub fn replace_design(&mut self, fresh: Session) {
         // Nothing still computing for the design that leaves has anywhere to go. A copy leaves
         // the design it came from going, and its token with it.
@@ -890,6 +911,7 @@ impl Session {
             self.stop_computing();
         }
         let auto_project = self.auto_project;
+        let pattern_limit = self.pattern_limit;
         let validation = self.validation();
         let single_surface_analysis = self.single_surface_analysis;
         let param_check = self.param_check;
@@ -907,6 +929,7 @@ impl Session {
         self.crash_journal = crash_journal;
         self.command_check = command_check;
         self.auto_project = auto_project;
+        self.pattern_limit = pattern_limit;
         // The user's, like `auto_project`: the commands that open a design evaluate it under it
         // already (`Session::opened_validating`).
         self.set_validation(validation);
@@ -1600,7 +1623,20 @@ impl Session {
         if !updated.is_empty() {
             let (vals, _) = self.doc.param_values();
             for (_, sketch) in &mut updated {
+                let before: Vec<(String, usize)> = sketch.patterns.iter().map(|p| (p.id.clone(), p.total())).collect();
                 self.doc.apply_pattern_values(&vals, sketch)?;
+                // A value that drives a count follows the user's pattern limit, as a typed count
+                // does (#7824); a pattern made before under a higher limit may keep its size.
+                for pattern in &sketch.patterns {
+                    let allowed =
+                        cmd::pattern_limit_for(self.pattern_limit, before.iter().find(|(id, _)| *id == pattern.id).map(|(_, total)| *total));
+                    if pattern.total() > allowed {
+                        return Err(EngineError::Other(format!(
+                            "sketch pattern `{}`: its Quantity must be a whole number that makes at most {allowed} instances in total (the pattern limit, sketch.pattern_limit); the values were not changed",
+                            pattern.id
+                        )));
+                    }
+                }
             }
         }
         for (id, sketch) in updated {
@@ -1940,6 +1976,7 @@ impl Session {
             document_id: self.document_id.clone(),
             followed: None,
             auto_project: self.auto_project,
+            pattern_limit: self.pattern_limit,
             param_check: self.param_check,
             easyprint_upload: self.easyprint_upload.clone(),
             live_links: None,

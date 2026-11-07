@@ -1922,3 +1922,14 @@ fn a_mirrored_fillet_over_three_quarters_of_a_turn_stays_the_arc_its_lines_leave
     assert!((sweep_deg(&sk, arc) - 300.0).abs() < 1e-6, "sweep {}", sweep_deg(&sk, arc));
     assert!(lines_leave_the_arc(&sk, arc, [l1, l2]));
 }
+
+/// #7824: a circular Quantity is bounded by the fixed ceiling, not by the old 500 cap; the
+/// user's own limit is the engine's to apply.
+#[test]
+fn pattern_counts_are_bounded_by_the_ceiling_not_500() {
+    assert_eq!(SketchPattern::circular_quantity(600.0).ok(), Some(600));
+    assert_eq!(SketchPattern::circular_quantity(20_000.0).ok(), Some(20_000));
+    assert!(SketchPattern::circular_quantity(20_001.0).is_err());
+    assert!(SketchPattern::circular_quantity(f64::NAN).is_err());
+    assert!(SketchPattern::circular_quantity(1.0).is_err());
+}
