@@ -109,13 +109,62 @@ pub struct KindCount {
     pub count: usize,
 }
 
+/// Whether the drawing dimensions or notes a feature. A closed list, as [`FindingKind`] is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CoverageState {
+    /// A dimension or note points at a face it made.
+    Covered,
+    /// It made a face a view draws, named from exact history, and nothing points at one.
+    NotCovered,
+    /// The faces it made that a view draws aren't named from exact history.
+    Unknown,
+    /// It makes no face a view draws, or it is suppressed or rolled back.
+    NotApplicable,
+}
+
+impl CoverageState {
+    /// Every state, in the order the schema lists them.
+    pub const ALL: [CoverageState; 4] = [CoverageState::Covered, CoverageState::NotCovered, CoverageState::Unknown, CoverageState::NotApplicable];
+}
+
+/// One feature of the design, and whether the drawing dimensions or notes it. This is coverage:
+/// a dimension or a note points at it, not that it is fully dimensioned.
+#[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
+pub struct Coverage {
+    pub feature: u64,
+    /// Its name in the timeline.
+    pub name: String,
+    pub state: CoverageState,
+    /// The dimensions and notes that point at a face it made.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub by: Vec<CheckedObject>,
+    /// Why it is unknown or not applicable, in words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
+}
+
+/// How many features are in one state.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct StateCount {
+    pub state: CoverageState,
+    pub count: usize,
+}
+
 /// What `drawing.check` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct CheckResult {
+    /// The sheet checked, by id, when the request named one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sheet: Option<String>,
     /// In sheet order, then by the record each names.
     pub findings: Vec<Finding>,
     /// Each kind found, with how many, in the schema's order.
     pub counts: Vec<KindCount>,
+    /// Each feature of the design, in timeline order. Not findings: a script reads the two apart.
+    pub coverage: Vec<Coverage>,
+    /// Each state found, with how many, in the schema's order.
+    pub coverage_counts: Vec<StateCount>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
 }

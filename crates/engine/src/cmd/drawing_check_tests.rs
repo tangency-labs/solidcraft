@@ -113,7 +113,7 @@ fn with_model_changed(s: &mut Session, change: impl FnOnce(&mut Session)) {
 fn a_lost_dimension_and_an_empty_part_number_are_listed_and_nothing_else() {
     let (mut s, chamfer) = plate();
     let (sheet, view) = drawn(&mut s);
-    length(&mut s, view, [50.0, 0.0, 0.0]);
+    let width = length(&mut s, view, [50.0, 0.0, 0.0]);
     let on_chamfer = length(&mut s, view, [50.0, 0.0, 8.0]);
     let reply = checked(&mut s, json!({}));
     let block = ("empty_field".to_string(), "title_block".to_string(), ids::encode(sheet));
@@ -132,6 +132,11 @@ fn a_lost_dimension_and_an_empty_part_number_are_listed_and_nothing_else() {
     assert_eq!(found(&reply), both, "{reply}");
     assert_eq!(reply["counts"], json!([{"kind": "lost", "count": 1}, {"kind": "empty_field", "count": 1}]), "{reply}");
     assert!(reply["findings"].as_array().unwrap().iter().all(|f| !f["why"].as_str().unwrap().is_empty()), "{reply}");
+    // Coverage is its own list. The lost dimension named the chamfer, which is gone, so it covers
+    // nothing; the other covers the plate.
+    let plate = s.doc.features[0].id;
+    assert_eq!(coverage(&reply), [(plate, "covered".to_string(), vec![named("dimension", &width)])], "{reply}");
+    assert_eq!(reply["coverage_counts"], json!([{"state": "covered", "count": 1}]), "{reply}");
 }
 
 /// Typed text over a value hides it; typed into an empty field, it fills it and is no finding. A
@@ -363,4 +368,226 @@ fn hostile_check_params_never_panic() {
     }
     assert!(internal.is_empty(), "drawing.check panicked:\n{}", internal.join("\n"));
     assert!(s.execute(CHECK, &json!({"other": 1})).is_err());
+}
+
+/// Each feature's coverage as (feature, state, what points at it), in the reply's order.
+fn coverage(reply: &Value) -> Vec<(u64, String, Vec<(String, String)>)> {
+    let by = |c: &Value| c["by"].as_array().map(|by| by.iter().map(|o| named(o["kind"].as_str().unwrap(), &o["id"])).collect());
+    let one = |c: &Value| (c["feature"].as_u64().unwrap(), c["state"].as_str().unwrap().to_string(), by(c).unwrap_or_default());
+    reply["coverage"].as_array().unwrap().iter().map(one).collect()
+}
+
+/// The coverage entry of `feature`.
+fn coverage_of(reply: &Value, feature: u64) -> Value {
+    let entries = reply["coverage"].as_array().unwrap();
+    entries.iter().find(|c| c["feature"] == json!(feature)).cloned().unwrap_or_else(|| panic!("{feature}: {reply}"))
+}
+
+/// The plate of [`plate`] with a hole of radius 2 through it from the front at x 30, z 5, called
+/// Hole; its pattern of two, 40 mm apart along X, called Holes; and a sketch on XY that nothing is
+/// made from. The session and each feature's id in timeline order: the plate, the chamfer, the
+/// hole, the pattern, the sketch.
+fn holed() -> (Session, [u64; 5]) {
+    let (mut s, _) = plate();
+    let hole = json!({"radius": 2, "height": 62, "base": [30, -1, 5], "axis": "Y", "operation": "cut", "targets": ["Plate"], "name": "Hole"});
+    run(&mut s, "solid.cylinder", hole);
+    run(&mut s, "solid.pattern.rectangular", json!({"features": ["Hole"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 40, "name": "Holes"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Unused"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let features: Vec<u64> = s.doc.features.iter().map(|f| f.id).collect();
+    (s, features.try_into().unwrap())
+}
+
+/// A note on view `view`'s edge through `point`.
+fn note_on(s: &mut Session, view: u64, point: [f64; 3]) -> Value {
+    let edge = json!({"edge": {"view": ids::encode(view), "edge": point}});
+    run(s, "drawing.note.add", json!({"anchor": edge, "at": [60, 40], "content": "Note"}))["note"].clone()
+}
+
+/// The plate's bottom front edge covers the plate and leaves the chamfer, which made a face the
+/// view draws, not covered. A note on the hole's rim covers the hole, and a dimension on the
+/// second copy's rim covers the pattern. The sketch makes no face: not applicable. Once the
+/// bottom front edge is chamfered too, its dimension is lost and still covers the plate, and the
+/// new chamfer is not covered.
+#[test]
+fn each_feature_is_covered_by_what_points_at_a_face_it_made() {
+    let (mut s, [plate, chamfer, hole, holes, sketch]) = holed();
+    let (_, view) = drawn(&mut s);
+    let width = length(&mut s, view, [50.0, 0.0, 0.0]);
+    let rim = note_on(&mut s, view, [32.0, 0.0, 5.0]);
+    let radial = json!({"view": ids::encode(view), "kind": {"radial": {"edge": [72, 0, 5]}}});
+    let copy = run(&mut s, "drawing.dimension.add", radial)["dimension"].clone();
+    let reply = checked(&mut s, json!({}));
+    let by = |what: &str, id: &Value| vec![named(what, id)];
+    let mut expected = vec![
+        (plate, "covered".to_string(), by("dimension", &width)),
+        (chamfer, "not_covered".to_string(), vec![]),
+        (hole, "covered".to_string(), by("note", &rim)),
+        (holes, "covered".to_string(), by("dimension", &copy)),
+        (sketch, "not_applicable".to_string(), vec![]),
+    ];
+    assert_eq!(coverage(&reply), expected, "{reply}");
+    assert_eq!(coverage_of(&reply, sketch)["why"], json!("no view draws a face it made"), "{reply}");
+    assert!(coverage_of(&reply, chamfer).get("why").is_none(), "{reply}");
+    let counts = json!([{"state": "covered", "count": 3}, {"state": "not_covered", "count": 1}, {"state": "not_applicable", "count": 1}]);
+    assert_eq!(reply["coverage_counts"], counts, "{reply}");
+    assert!(reply.get("sheet").is_none(), "{reply}");
+    with_model_changed(&mut s, |s| {
+        run(s, "solid.chamfer", json!({"edges": [[50, 0, 0]], "distance": 1, "body": "Plate"}));
+    });
+    let reply = checked(&mut s, json!({}));
+    assert_eq!(of_kind(&reply, "lost"), [named("dimension", &width)], "{reply}");
+    let bottom = s.doc.features.last().unwrap().id;
+    expected.push((bottom, "not_covered".to_string(), vec![]));
+    assert_eq!(coverage(&reply), expected, "{reply}");
+}
+
+/// With `sheet`, coverage is of that sheet's views and annotations: the hole, which only the
+/// other sheet's note points at, is covered there and on the whole drawing, and not covered on
+/// the first sheet. A sheet with no view draws nothing. The reply echoes the sheet by id. A
+/// dimension between two corners of the plate covers it once.
+#[test]
+fn coverage_is_of_the_sheet_checked() {
+    let (mut s, [plate, _, hole, ..]) = holed();
+    let (sheet, first_view) = drawn(&mut s);
+    let across = json!({"view": ids::encode(first_view), "kind": {"linear": {"a": [0, 0, 0], "b": [100, 0, 0], "direction": "horizontal"}}});
+    let across = run(&mut s, "drawing.dimension.add", across)["dimension"].clone();
+    let other = run(&mut s, "drawing.sheet.add", json!({"name": "Other"}))["sheet"].clone();
+    let view = id(&run(&mut s, "drawing.view.base", json!({"sheet": other, "scale": "1:1"}))["view"]);
+    let rim = note_on(&mut s, view, [32.0, 0.0, 5.0]);
+    let state = |reply: &Value, feature: u64| coverage_of(reply, feature)["state"].clone();
+    let there = checked(&mut s, json!({"sheet": "Other"}));
+    assert_eq!((state(&there, hole), there["sheet"].clone()), (json!("covered"), other), "{there}");
+    assert_eq!(coverage_of(&there, hole)["by"], json!([{"kind": "note", "id": rim}]), "{there}");
+    assert_eq!(state(&there, plate), json!("not_covered"), "{there}");
+    let first = checked(&mut s, json!({"sheet": ids::encode(sheet)}));
+    assert_eq!((state(&first, hole), first["sheet"].clone()), (json!("not_covered"), json!(ids::encode(sheet))), "{first}");
+    assert_eq!(coverage_of(&first, plate)["by"], json!([{"kind": "dimension", "id": across}]), "{first}");
+    assert_eq!(state(&checked(&mut s, json!({})), hole), json!("covered"));
+    run(&mut s, "drawing.sheet.add", json!({"name": "Empty"}));
+    let empty = checked(&mut s, json!({"sheet": "Empty"}));
+    assert!(coverage(&empty).iter().all(|(_, state, _)| state == "not_applicable"), "{empty}");
+}
+
+/// The bolt's shank is not covered while the view draws it; hidden from the view it is not
+/// applicable, and so it is when the bolt is a reference part, each with why.
+#[test]
+fn a_hidden_part_and_a_reference_part_are_not_applicable() {
+    let (mut s, view, _, at) = assembly();
+    let shank = s.doc.features.last().unwrap().id;
+    // A plate at the root stays in the view: a view that would draw nothing can't be made.
+    with_model_changed(&mut s, |s| {
+        run(s, "solid.box", json!({"length": 30, "width": 30, "height": 5, "corner": [40, 0, 0], "body_name": "Base", "operation": "new"}));
+    });
+    let entry = |s: &mut Session| {
+        let entry = coverage_of(&checked(s, json!({})), shank);
+        (entry["state"].clone(), entry["why"].clone())
+    };
+    assert_eq!(entry(&mut s), (json!("not_covered"), Value::Null));
+    run(&mut s, "drawing.view.edit", json!({"view": view, "set": {"hide": [[at]]}}));
+    assert_eq!(entry(&mut s), (json!("not_applicable"), json!("no view draws a face it made")));
+    run(&mut s, "drawing.view.edit", json!({"view": view, "set": {"hide": null}}));
+    with_model_changed(&mut s, |s| {
+        run(s, "component.metadata.set", json!({"component": "Bolt", "bom_type": "reference"}));
+    });
+    assert_eq!(entry(&mut s), (json!("not_applicable"), json!("only reference parts draw it")));
+}
+
+/// A suppressed feature and a rolled back one are not applicable, each with why.
+#[test]
+fn suppressed_and_rolled_back_features_are_not_applicable() {
+    let (mut s, [_, _, _, holes, sketch]) = holed();
+    drawn(&mut s);
+    let why = |reply: &Value, feature: u64| {
+        let entry = coverage_of(reply, feature);
+        (entry["state"].clone(), entry["why"].clone())
+    };
+    with_model_changed(&mut s, |s| {
+        run(s, "timeline.suppress", json!({"feature": holes, "suppressed": true}));
+    });
+    assert_eq!(why(&checked(&mut s, json!({})), holes), (json!("not_applicable"), json!("it is suppressed")));
+    with_model_changed(&mut s, |s| {
+        run(s, "timeline.suppress", json!({"feature": holes, "suppressed": false}));
+        run(s, "timeline.rollback", json!({"position": 3}));
+    });
+    let reply = checked(&mut s, json!({}));
+    for feature in [holes, sketch] {
+        assert_eq!(why(&reply, feature), (json!("not_applicable"), json!("it is rolled back")), "{reply}");
+    }
+}
+
+/// A block lifted by an operation that reports no history has no face named from exact history:
+/// the block's coverage is unknown, with why, and no feature is not covered. A body imported from
+/// STEP is the other way: the import names the faces it made from its own history
+/// (`F<import>:face:<k>`), so they are exact, and an import nothing points at is not covered.
+#[test]
+fn faces_not_named_from_exact_history_give_unknown() {
+    let mut source = Session::default();
+    run(&mut source, "solid.box", json!({"length": 100, "width": 60, "height": 10, "body_name": "Plate"}));
+    let step = solidcraft_io::export(&source.model.state(), &[], solidcraft_io::Format::Step, "Plate").unwrap();
+    let imported = solidcraft_io::step_import_feature(&step, "plate.step").unwrap();
+    let mut doc = solidcraft_doc::Document::new("Imported plate");
+    let import = doc.add_feature(imported.kind, None).unwrap();
+    doc.feature_mut(import).unwrap().body_names = imported.body_names;
+    let mut s = Session::new(doc);
+    drawn(&mut s);
+    let reply = checked(&mut s, json!({}));
+    assert_eq!(coverage(&reply), [(import, "not_covered".to_string(), vec![])], "{reply}");
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 10, "body_name": "Plate"}));
+    run(&mut s, "solid.align", json!({"bodies": ["Plate"], "from": [0, 0, 0], "to": [0, 0, 2], "name": "Lift"}));
+    let block = s.doc.features[0].id;
+    drawn(&mut s);
+    let reply = checked(&mut s, json!({}));
+    let entry = coverage_of(&reply, block);
+    assert_eq!(entry["state"], json!("unknown"), "{reply}");
+    assert!(!entry["why"].as_str().unwrap().is_empty(), "{reply}");
+    assert!(coverage(&reply).iter().all(|(_, state, _)| state != "not_covered"), "{reply}");
+}
+
+/// A feature one body draws from exact history and another, moved since, from geometry: its exact
+/// faces can be dimensioned, so it is not covered, not unknown. The plate is split across X and one
+/// piece lifted.
+#[test]
+fn a_feature_drawn_both_exactly_and_from_geometry_is_not_covered() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 10, "body_name": "Plate"}));
+    run(&mut s, "solid.split_body", json!({"body": "Plate", "plane": {"origin": [50, 0, 0], "normal": [1, 0, 0]}}));
+    run(&mut s, "solid.align", json!({"bodies": ["Plate (1)"], "from": [0, 0, 0], "to": [0, 0, 2], "name": "Lift"}));
+    let block = s.doc.features[0].id;
+    let state = s.model.state();
+    let drawn_so = |exact: bool| {
+        state.bodies.iter().any(|b| {
+            let made_by_block = |name: &String| FaceName::parse(name).ok().and_then(|face| face.feature()).is_some_and(|f| f.0 == block);
+            naming::face_names(b).iter().enumerate().any(|(i, name)| made_by_block(name) && naming::face_name_exact(b, i) == exact)
+        })
+    };
+    assert!(drawn_so(true) && drawn_so(false), "the block is drawn both ways");
+    drawn(&mut s);
+    let reply = checked(&mut s, json!({}));
+    assert_eq!(coverage_of(&reply, block)["state"], json!("not_covered"), "{reply}");
+}
+
+/// A saved dimension whose edge name is hostile covers nothing and never panics; the note on the
+/// hole still covers it.
+#[test]
+fn hostile_saved_names_cover_nothing() {
+    let (mut s, [plate, _, hole, ..]) = holed();
+    let (_, view) = drawn(&mut s);
+    length(&mut s, view, [50.0, 0.0, 0.0]);
+    note_on(&mut s, view, [32.0, 0.0, 5.0]);
+    let deep = "F1:inner:".repeat(64);
+    let long = "x".repeat(2 << 20);
+    let wide = vec!["F1:-y|F99:-z"; 1000].join("|");
+    for name in ["", "|", "F1", "F99:top|F1:-y", "Plate:face:0|Plate:face:1", deep.as_str(), long.as_str(), wide.as_str()] {
+        let mut d = (**s.drawing("test").unwrap()).clone();
+        let dimension = d.dimensions.first_mut().map(Arc::make_mut).unwrap();
+        let solidcraft_doc::drawing::dimension::DimensionKind::Length { edge, .. } = &mut dimension.kind else { panic!("a length") };
+        edge.name = name.to_string();
+        s.doc_mut().put_drawing(Arc::new(d));
+        let reply = s.execute(CHECK, &json!({})).unwrap_or_else(|e| panic!("{}: {e}", name.len()));
+        assert_eq!(coverage_of(&reply, hole)["state"], json!("covered"), "{}", name.len());
+        assert_ne!(coverage_of(&reply, plate)["state"], json!("covered"), "{}", name.len());
+    }
 }

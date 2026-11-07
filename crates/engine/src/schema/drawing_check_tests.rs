@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use super::{CheckParams, CheckResult, FindingKind};
+use super::{CheckParams, CheckResult, CoverageState, FindingKind};
 use crate::schema::tests::assert_keys;
 use crate::schema::{input_schema_for, output_schema_for};
 
@@ -9,17 +9,22 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<CheckParams>(), &["sheet"]);
 }
 
-/// The reply's kinds are a closed list: the schema's kind names every kind, and nothing else.
+/// The reply's kinds and coverage states are closed lists: each schema node names every value of
+/// its list, and nothing else.
 #[test]
 fn the_kinds_are_a_closed_list() {
     let schema = output_schema_for::<CheckResult>();
-    let kind = &schema.as_value()["$defs"]["FindingKind"];
-    let mut named = Vec::new();
-    names(kind, &mut named);
-    named.sort();
-    let mut all: Vec<String> = FindingKind::ALL.iter().map(|k| serde_json::to_value(k).unwrap().as_str().unwrap().to_string()).collect();
-    all.sort();
-    assert_eq!(named, all, "{kind}");
+    let text = |v: Value| v.as_str().unwrap().to_string();
+    let kinds: Vec<String> = FindingKind::ALL.iter().map(|k| text(serde_json::to_value(k).unwrap())).collect();
+    let states: Vec<String> = CoverageState::ALL.iter().map(|k| text(serde_json::to_value(k).unwrap())).collect();
+    for (def, mut all) in [("FindingKind", kinds), ("CoverageState", states)] {
+        let node = &schema.as_value()["$defs"][def];
+        let mut named: Vec<String> = Vec::new();
+        names(node, &mut named);
+        named.sort();
+        all.sort();
+        assert_eq!(named, all, "{def}: {node}");
+    }
 }
 
 /// Every string a schema node allows by `enum` or `const`, however it nests them.

@@ -3,21 +3,29 @@
 //! export reads it ([`crate::drawing_scene::as_shown`]), each view's place ([`crate::drawing_view::outside`]),
 //! the balloons' and notes' references as the model has them now, the title blocks' text as the
 //! sheet shows it ([`title_block_text::shown`]), and each parts list's balloon counts as
-//! `drawing.inspect` gives them. Nothing is changed.
+//! `drawing.inspect` gives them. Beside the findings, each feature's coverage: whether a dimension
+//! or note points at a face it made, by the saved names ([`Timeline::covers`]), and whether a view
+//! draws one. Nothing is changed.
+
+use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
 use solidcore_record::Vec2;
 use solidcraft_doc::bom::Tree;
 use solidcraft_doc::drawing::Drawing;
+use solidcraft_doc::drawing::coverage::Timeline;
 use solidcraft_doc::drawing::dimension::Status;
-use solidcraft_doc::ids;
+use solidcraft_doc::persistent_name::FaceName;
+use solidcraft_doc::{ids, naming};
 use solidcraft_geom::paper::{Item, ObjectKind};
 use solidcraft_geom::{Aabb2, EPS};
 
 use super::CommandSpec;
 use crate::drawing_scene::{Status as ViewStatus, ViewState};
 use crate::params::bad;
-use crate::schema::drawing_check::{CheckParams, CheckResult, CheckedKind, CheckedObject, Finding, FindingKind, KindCount};
+use crate::schema::drawing_check::{
+    CheckParams, CheckResult, CheckedKind, CheckedObject, Coverage, CoverageState, Finding, FindingKind, KindCount, StateCount,
+};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::title_block_text;
 use crate::{EngineError, Result, Session};
@@ -32,7 +40,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CHECK, "Check Drawing",
     .doc_only()
     .contract(&CONTRACT)
     .output(output_schema_for::<CheckResult>)
-    .params("sheet?: id or name (default: every sheet) → {findings: [{kind, sheet, object: {kind: view|dimension|balloon|note|table|image|title_block, id}, cell?, field?, item?, why}], counts: [{kind, count}]}: what makes the drawing wrong or incomplete, in sheet order, then by the record each names. kind is one of a closed list: lost, ambiguous, unmeasurable, suppressed, failed (a dimension, balloon or note whose reference isn't found as one thing, can't be measured, or depends on a suppressed or failed feature; failed is also a view that can't be drawn), overridden (a dimension whose text is typed over its value, or a title block cell whose typed text hides a value), out_of_date (a view or dimension a deferred drawing shows as it last was), nothing_shown (a view with nothing to measure), empty_field (a title block field with no value, as source.key; a revision field only once the drawing has a revision row; a cell whose typed text fills it is none), not_ballooned (a row of a parts list on the sheet that no balloon points at, by item), outside_sheet (a view outside its sheet's drawing space or over its title block; a dimension, image or table off the paper). The sheet is read as an export reads it: a deferred drawing is checked as it shows the model, with what it shows as it last was listed. Read-only: nothing is drawn or saved, and the same drawing always gives the same answer.")];
+    .params("sheet?: id or name (default: every sheet) → {sheet?, findings: [{kind, sheet, object: {kind: view|dimension|balloon|note|table|image|title_block, id}, cell?, field?, item?, why}], counts: [{kind, count}], coverage: [{feature, name, state, by?: [{kind: dimension|note, id}], why?}], coverage_counts: [{state, count}]}: what makes the drawing wrong or incomplete, in sheet order, then by the record each names. kind is one of a closed list: lost, ambiguous, unmeasurable, suppressed, failed (a dimension, balloon or note whose reference isn't found as one thing, can't be measured, or depends on a suppressed or failed feature; failed is also a view that can't be drawn), overridden (a dimension whose text is typed over its value, or a title block cell whose typed text hides a value), out_of_date (a view or dimension a deferred drawing shows as it last was), nothing_shown (a view with nothing to measure), empty_field (a title block field with no value, as source.key; a revision field only once the drawing has a revision row; a cell whose typed text fills it is none), not_ballooned (a row of a parts list on the sheet that no balloon points at, by item), outside_sheet (a view outside its sheet's drawing space or over its title block; a dimension, image or table off the paper). coverage lists each feature of the design in timeline order, apart from the findings: covered (a dimension or note points at a face it made: an edge covers the latest feature among the faces it separates, a corner the latest among its edges' faces, a pattern's copy the pattern; by lists them), not_covered (a view draws a face it made, named from exact history, and nothing points at it), unknown (the faces a view draws of it aren't named from exact history), not_applicable (it is suppressed or rolled back, only reference parts draw it, or no view draws a face it made: a sketch, a plane). Coverage says a dimension or a note points at a feature, not that it is fully dimensioned. With sheet, the findings and the coverage are of that sheet only, and sheet echoes its id. The sheet is read as an export reads it: a deferred drawing is checked as it shows the model, with what it shows as it last was listed. Read-only: nothing is drawn or saved, and the same drawing always gives the same answer.")];
 
 fn check(s: &mut Session, p: &Value) -> Result<Value> {
     let request: CheckParams = crate::schema::read(CHECK, p)?;
@@ -57,7 +65,15 @@ fn check(s: &mut Session, p: &Value) -> Result<Value> {
         .map(|kind| KindCount { kind, count: findings.iter().filter(|f| f.kind == kind).count() })
         .filter(|count| count.count > 0)
         .collect();
-    serde_json::to_value(CheckResult { findings, counts, param_warnings: Vec::new() }).map_err(|e| EngineError::Other(e.to_string()))
+    let coverage = coverage(s, &d, &sheets);
+    let coverage_counts = CoverageState::ALL
+        .into_iter()
+        .map(|state| StateCount { state, count: coverage.iter().filter(|c| c.state == state).count() })
+        .filter(|count| count.count > 0)
+        .collect();
+    let sheet = request.sheet.as_ref().and(sheets.first()).map(|&id| ids::encode(id));
+    let result = CheckResult { sheet, findings, counts, coverage, coverage_counts, param_warnings: Vec::new() };
+    serde_json::to_value(result).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 fn finding(kind: FindingKind, sheet: u64, object: CheckedObject, why: String) -> Finding {
@@ -182,6 +198,87 @@ fn fields_and_rows(s: &Session, d: &Drawing, sheets: &[u64]) -> Vec<Finding> {
         for (item, _) in rows.into_iter().flatten().filter(|(_, balloons)| *balloons == 0) {
             let why = format!("no balloon points at row {item}");
             out.push(Finding { item: Some(item), ..finding(FindingKind::NotBallooned, sheet, object(CheckedKind::Table, table), why) });
+        }
+    }
+    out
+}
+
+/// Each feature of the design, in timeline order, and whether the dimensions and notes on `sheets`
+/// point at a face it made: covered, or else not covered or unknown by what the views on `sheets`
+/// draw of it. Each annotation's names are read once and each drawn body's faces once.
+fn coverage(s: &Session, d: &Drawing, sheets: &[u64]) -> Vec<Coverage> {
+    let timeline = Timeline::of(&s.doc);
+    let on = |view: u64| d.view(view).is_some_and(|v| sheets.contains(&v.sheet));
+    let dimensions = d.dimensions.iter().filter(|dim| on(dim.view)).map(|dim| (object(CheckedKind::Dimension, dim.id), dim.kind.references()));
+    let notes = d.notes.iter().filter(|n| n.anchor.view().is_some_and(on));
+    let notes = notes.map(|n| (object(CheckedKind::Note, n.id), n.anchor.reference().into_iter().collect::<Vec<_>>()));
+    let mut by: HashMap<u64, Vec<CheckedObject>> = HashMap::new();
+    for (object, references) in dimensions.chain(notes) {
+        let mut features: Vec<u64> = references.iter().filter_map(|r| timeline.covers(r)).collect();
+        features.sort_unstable();
+        features.dedup();
+        for feature in features {
+            by.entry(feature).or_default().push(object.clone());
+        }
+    }
+    let drawn = drawn(s, d, sheets);
+    let rolled_back = s.doc.marker.unwrap_or(usize::MAX);
+    let mut out = Vec::with_capacity(s.doc.features.len());
+    for (at, f) in s.doc.features.iter().enumerate() {
+        let by = by.remove(&f.id).unwrap_or_default();
+        let (state, why) = if f.suppressed {
+            (CoverageState::NotApplicable, Some("it is suppressed"))
+        } else if at >= rolled_back {
+            (CoverageState::NotApplicable, Some("it is rolled back"))
+        } else if !by.is_empty() {
+            (CoverageState::Covered, None)
+        } else if drawn.exact.contains(&f.id) {
+            (CoverageState::NotCovered, None)
+        } else if drawn.inexact.contains(&f.id) {
+            (CoverageState::Unknown, Some("the faces a view draws of it aren't named from exact history, so what it made can't be told"))
+        } else if drawn.reference.contains(&f.id) {
+            (CoverageState::NotApplicable, Some("only reference parts draw it"))
+        } else {
+            (CoverageState::NotApplicable, Some("no view draws a face it made"))
+        };
+        out.push(Coverage { feature: f.id, name: f.name.clone(), state, by, why: why.map(str::to_string) });
+    }
+    out
+}
+
+/// The features that made a face a view on given sheets draws, by how the face is named.
+#[derive(Default)]
+struct Drawn {
+    /// From exact history.
+    exact: HashSet<u64>,
+    /// Worked out from geometry, or with no feature in the name (the body's feature, then).
+    inexact: HashSet<u64>,
+    /// On a reference part only.
+    reference: HashSet<u64>,
+}
+
+/// What the views on `sheets` draw, each body once however many views draw it. A view that can't
+/// be worked out draws nothing here; its finding says why.
+fn drawn(s: &Session, d: &Drawing, sheets: &[u64]) -> Drawn {
+    let mut out = Drawn::default();
+    let Ok(all) = crate::drawing_view::shown(s) else { return out };
+    let mut seen = HashSet::new();
+    for view in d.views.iter().filter(|view| sheets.contains(&view.sheet)) {
+        let Ok(resolved) = d.resolve_view(view.id) else { continue };
+        for shown in &all.of_view(&resolved).bodies {
+            if !seen.insert(shown.index) {
+                continue;
+            }
+            let Some(body) = all.body(shown) else { continue };
+            for (i, name) in naming::face_names(body).iter().enumerate() {
+                let maker = FaceName::parse(name).ok().and_then(|face| face.feature()).map(|feature| feature.0);
+                let set = match maker {
+                    _ if shown.reference => &mut out.reference,
+                    Some(_) if naming::face_name_exact(body, i) => &mut out.exact,
+                    _ => &mut out.inexact,
+                };
+                set.insert(maker.unwrap_or(body.feature));
+            }
         }
     }
     out
