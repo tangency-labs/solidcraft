@@ -2145,19 +2145,24 @@ fn move_body_feature(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// A copy keeps the look and the material of the body it came from (#6423): the copy is the same
-/// part in another place, so it looks the same.
+/// part in another place, so it looks the same. A feature makes the same number of copies of each
+/// source (a Move copy one, a Pattern its count less one), the sources' copies together and in
+/// the sources' order.
 fn copy_keeps_appearance(s: &mut Session, reply: &Value, sources: &[String], cmd: &str) -> Result<()> {
     let id = reply.get("feature").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "the copy has no feature id"))?;
     let copies: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect();
-    if copies.len() != sources.len() {
-        return Err(bad(cmd, "the copy did not make one body per body it copied"));
-    }
-    for (source, copy) in sources.iter().zip(copies.iter()) {
-        if let Some(look) = s.doc.appearances.bodies.get(source).cloned() {
-            s.doc_mut().appearances.bodies.insert(copy.clone(), look);
-        }
-        if let Some(material) = s.doc.materials.get(source).cloned() {
-            s.doc_mut().materials.insert(copy.clone(), material);
+    let each = copies.len().checked_div(sources.len()).filter(|each| *each > 0 && each * sources.len() == copies.len());
+    let Some(each) = each else {
+        return Err(bad(cmd, "the copy did not make the same number of bodies for each body it copied"));
+    };
+    for (source, copies) in sources.iter().zip(copies.chunks(each)) {
+        for copy in copies {
+            if let Some(look) = s.doc.appearances.bodies.get(source).cloned() {
+                s.doc_mut().appearances.bodies.insert(copy.clone(), look);
+            }
+            if let Some(material) = s.doc.materials.get(source).cloned() {
+                s.doc_mut().materials.insert(copy.clone(), material);
+            }
         }
     }
     Ok(())
@@ -2229,7 +2234,15 @@ fn finish_pattern(
 ) -> Result<Value> {
     let comps = string_list(UNKNOWN_COMMAND, p, "components")?;
     if comps.is_empty() {
-        return add_feature(s, p, FeatureKind::Pattern { features, pattern, bodies: bodies.into_iter().map(BodyName).collect() });
+        let copied = bodies.clone();
+        let reply = add_feature(s, p, FeatureKind::Pattern { features, pattern, bodies: bodies.into_iter().map(BodyName).collect() })?;
+        // The pattern is added either way: when it made no copies (the feature failed to
+        // evaluate) or an uneven number of them, there is nothing to tell the copies apart by
+        // and they keep no look, as before.
+        if !copied.is_empty() {
+            let _ = copy_keeps_appearance(s, &reply, &copied, "pattern");
+        }
+        return Ok(reply);
     }
     let cmd = "pattern (components)";
     let mats = solidcraft_doc::pattern_matrices(&s.doc, &s.model.state(), &pattern)?;
