@@ -813,7 +813,7 @@ fn a_held_deferred_drawing_exports_the_same_from_a_scratch_copy() {
         here
     };
     // The front view's bottom edge, so a dimension's last reading is held too.
-    run(&mut s, "drawing.dimension.add", json!({"view": ids::encode(front), "kind": {"length": {"edge": [50, 0, 0]}}}));
+    front_edge(&mut s, front);
     same(&mut s, sheet);
     // A view edited after the sheet was drawn: the copy draws it and its dimension again.
     run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"scale": "1:4"}}));
@@ -845,15 +845,93 @@ fn a_held_deferred_drawing_exports_the_same_from_a_scratch_copy() {
     run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"scale": "1:2"}}));
     let here = same(&mut s, sheet);
     assert_eq!(here["out_of_date"].as_array().map_or(0, Vec::len), 0, "drawn: {here}");
-    // Held with the drawing open, every line drawn: closing it would keep only its views' lines.
+    // Held with the drawing open, every line drawn.
     run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": checkpoint}));
     settled(&mut s, sheet);
-    // Sheet 1: its two views and the dimension's last reading; the other sheet: its one view.
-    for (on, views, dimensions) in [(sheet, 2, 1), (other, 1, 0)] {
+    // Sheet 1: its two views and their dimension out of date, the dimension's last reading drawn; the
+    // other sheet: its one view.
+    for (on, listed, dimensions) in [(sheet, 3, 1), (other, 1, 0)] {
         let here = same(&mut s, on);
         let count = |key: &str| here[key].as_array().map(Vec::len);
-        assert_eq!((count("out_of_date"), count("dimensions")), (Some(views), Some(dimensions)), "held: {here}");
+        assert_eq!((count("out_of_date"), count("dimensions")), (Some(listed), Some(dimensions)), "held: {here}");
     }
+}
+
+/// The block's front bottom edge, 100 long, as a dimension on view `front`.
+fn front_edge(s: &mut Session, front: u64) -> u64 {
+    let added = run(s, "drawing.dimension.add", json!({"view": ids::encode(front), "kind": {"length": {"edge": [50, 0, 0]}}}));
+    ids::decode(added["dimension"].as_str().unwrap()).unwrap()
+}
+
+/// `drawing.export`'s `out_of_date` for `sheet`, views first.
+fn listed(s: &mut Session, sheet: u64) -> Vec<Value> {
+    let reply = run(s, "drawing.export", json!({"sheet": ids::encode(sheet)}));
+    reply["out_of_date"].as_array().cloned().unwrap_or_default()
+}
+
+/// A deferred drawing closed during a model change keeps its dimensions' last lines as it keeps its
+/// views': opened again, held, it shows both as they were and lists both out of date. Updated, the
+/// dimension is read again from the model as it is now. Held again with the drawing open, the
+/// dimension is listed with its view.
+#[test]
+fn a_deferred_drawing_closed_during_a_change_keeps_its_dimensions_until_it_is_updated() {
+    let (mut s, sheet, [front, top]) = front_and_top();
+    let id = front_edge(&mut s, front);
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    run(&mut s, "drawing.update", json!({}));
+    let before = settled(&mut s, sheet);
+    let checkpoint = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].clone();
+    let (was, open) = (s.world_state().unwrap(), s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    let kept = s.drawing_scenes.kept.of(open).unwrap();
+    assert!(kept.dimensions.values().all(|e| !Arc::ptr_eq(&e.state, &was)), "a closed drawing keeps no model");
+    let block = s.doc.features[0].id;
+    run(&mut s, "timeline.edit", json!({"feature": block.to_string(), "set": {"length": 120}}));
+    run(&mut s, "drawing.open", drawing);
+
+    let held = settled(&mut s, sheet);
+    assert_eq!(bytes(&held.scene), bytes(&before.scene), "its last views and dimension");
+    let sorted = |ids: &[Value]| {
+        let mut ids: Vec<String> = ids.iter().filter_map(|id| id.as_str().map(str::to_string)).collect();
+        ids.sort();
+        ids
+    };
+    let out = listed(&mut s, sheet);
+    assert_eq!(out.len(), 3, "the views, then the dimension: {out:?}");
+    assert_eq!((sorted(&out[..2]), &out[2]), (sorted(&[json!(ids::encode(front)), json!(ids::encode(top))]), &json!(ids::encode(id))));
+
+    run(&mut s, "drawing.update", json!({}));
+    let now = settled(&mut s, sheet);
+    assert_eq!(bytes(&now.scene), bytes(&built(&s, sheet).scene), "read again: 120 long");
+    assert_ne!(bytes_of(group_of(&now.scene, id)), bytes_of(group_of(&before.scene, id)));
+    assert!(listed(&mut s, sheet).is_empty());
+
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": checkpoint}));
+    let out = listed(&mut s, sheet);
+    assert_eq!(out.len(), 3, "the views and the dimension, held with the drawing open: {out:?}");
+    assert_eq!(out[2], json!(ids::encode(id)));
+}
+
+/// A dimension gone while its drawing was closed (a checkpoint from before it was added, restored) is
+/// not shown, listed or kept when the drawing opens again, held.
+#[test]
+fn a_dimension_gone_while_its_drawing_was_closed_is_not_shown_or_kept() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    run(&mut s, "drawing.update", json!({}));
+    let without = settled(&mut s, sheet);
+    let checkpoint = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].clone();
+    let id = front_edge(&mut s, front);
+    settled(&mut s, sheet);
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": checkpoint}));
+    run(&mut s, "drawing.open", drawing);
+    let reopened = settled(&mut s, sheet);
+    assert_eq!(bytes(&reopened.scene), bytes(&without.scene));
+    assert!(!listed(&mut s, sheet).contains(&json!(ids::encode(id))));
+    assert!(!s.drawing_scenes.dimensions.contains_key(&id));
 }
 
 /// `drawing.update` on a drawing that follows the model changes nothing, and draws nothing itself.
@@ -888,16 +966,18 @@ fn a_drawing_opened_after_a_change_shows_its_last_lines_until_drawn() {
     assert_eq!((bytes(&now.scene), s.drawing_scenes.projections), (bytes(&built(&s, sheet).scene), 2));
 }
 
-/// A drawing's kept lines go with it: deleted, nothing of it is kept.
+/// A drawing's kept lines go with it: deleted, nothing of it is kept, views or dimensions.
 #[test]
 fn a_deleted_drawings_lines_are_not_kept() {
-    let (mut s, sheet, _) = front_and_top();
+    let (mut s, sheet, [front, _]) = front_and_top();
     let drawing = s.open_drawing.unwrap();
+    front_edge(&mut s, front);
     settled(&mut s, sheet);
     run(&mut s, "drawing.close", json!({}));
-    assert_eq!(s.drawing_scenes.kept.of(drawing).count(), 2);
+    let kept = |s: &Session| s.drawing_scenes.kept.of(drawing).map(|kept| (kept.views.len(), kept.dimensions.len()));
+    assert_eq!(kept(&s), Some((2, 1)));
     run(&mut s, "drawing.delete", json!({"drawing": ids::encode(drawing)}));
-    assert_eq!(s.drawing_scenes.kept.of(drawing).count(), 0);
+    assert_eq!(kept(&s), None);
 }
 
 /// A set with nothing to show has no key, so a view drawn from it always draws again.
