@@ -633,3 +633,82 @@ fn a_dialog_field_does_not_keep_the_keyboard_once_the_dialog_closes() {
     }
     assert!(failed.is_empty(), "{failed:#?}");
 }
+
+/// What keeps the keyboard from the shortcuts now.
+fn keyboard_owners(h: &mut Harness) -> String {
+    format!(
+        "focused {:?}, popup {}, inline editor {}, chat {}, palette {}",
+        h.ctx.memory(|m| m.focused()),
+        egui::Popup::is_any_open(&h.ctx),
+        crate::dim_view::editing(),
+        crate::agent_chat::owns_keyboard_input(&mut h.app, &h.ctx),
+        h.app.ui.palette_open,
+    )
+}
+
+/// A dialog value retyped (select all, delete, type) and applied with Enter, the evaluation taking
+/// a few seconds beside the window: Ctrl+Z works once it closes. Also when another field is
+/// typed into and left with Tab meanwhile: with the fields disabled, Tab gave the keyboard to the
+/// app bar's Home button, which kept it, and no shortcut worked until a click.
+#[test]
+fn a_value_retyped_and_applied_with_enter_during_a_long_computation_leaves_ctrl_z_working() {
+    for typing_meanwhile in [false, true] {
+        retype_apply_then_undo(typing_meanwhile);
+    }
+}
+
+/// With `typing_meanwhile`, another field is clicked, typed into and left with Tab while OK
+/// computes, as a hurried hand does.
+fn retype_apply_then_undo(typing_meanwhile: bool) {
+    let mut h = square_on_a_block();
+    h.app.fit_view();
+    h.frames(2);
+    let fields = dialog_fields(&h);
+    let field = *fields.first().expect("a text field in the dialog");
+    h.app.apply_off_thread = Some(Duration::from_millis(150));
+    let (finish, gate) = std::sync::mpsc::channel();
+    h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
+    for step in
+        [json!({"click": field}), json!({"key": "A", "cmd": true}), json!({"key": "Backspace"}), json!({"text": "12"}), json!({"key": "Enter"})]
+    {
+        h.step(&step).unwrap();
+    }
+    let mut seen = vec![format!("typing meanwhile {typing_meanwhile}")];
+    seen.push(format!("after Enter: applying {}, {}", h.app.applying.is_some(), keyboard_owners(&mut h)));
+    if typing_meanwhile {
+        let other = *fields.last().expect("a text field in the dialog");
+        for step in
+            [json!({"click": other}), json!({"key": "A", "cmd": true}), json!({"key": "Backspace"}), json!({"text": "47.10"}), json!({"key": "Tab"})]
+        {
+            h.step(&step).unwrap();
+        }
+        let focused = h.ctx.memory(|m| m.focused());
+        let at = focused.and_then(|id| h.ctx.read_response(id)).map(|r| r.rect);
+        seen.push(format!("after Tab: {}, at {at:?}, dialog {:?}", keyboard_owners(&mut h), h.app.viewport.dialog_rect));
+    }
+    for i in 0..300 {
+        if i == 150 {
+            seen.push(format!("computing: {}", keyboard_owners(&mut h)));
+        }
+        if i > 150 {
+            let _ = finish.send(());
+        }
+        if h.app.dialog.is_none() {
+            break;
+        }
+        h.frames(1);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let focused = h.ctx.memory(|m| m.focused());
+    let at = focused.and_then(|id| h.ctx.read_response(id)).map(|r| r.rect);
+    seen.push(format!("closed {}: {}, at {at:?}", h.app.dialog.is_none(), keyboard_owners(&mut h)));
+    let undo = h.app.session.undo.len();
+    h.step(&json!({"key": "Z", "cmd": true})).unwrap();
+    let first = h.app.session.undo.len() < undo;
+    h.frames(30);
+    seen.push(format!("after Ctrl+Z (undid {first}) and 30 frames: {}", keyboard_owners(&mut h)));
+    let undo = h.app.session.undo.len();
+    h.step(&json!({"key": "Z", "cmd": true})).unwrap();
+    let second = h.app.session.undo.len() < undo;
+    assert!(first, "the first Ctrl+Z did nothing (second undid {second}): {seen:#?}");
+}

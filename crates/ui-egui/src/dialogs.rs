@@ -2996,9 +2996,9 @@ fn stored_revolve_axis(kind: &Kind) -> Option<&Value> {
 
 /// Give the keyboard back from whatever text editor holds it, so the pick field clicked into
 /// becomes the one field that looks active (#10066).
-fn surrender_keyboard_focus(ui: &egui::Ui) {
-    if let Some(id) = ui.ctx().memory(|memory| memory.focused()) {
-        ui.ctx().memory_mut(|memory| memory.surrender_focus(id));
+fn surrender_keyboard_focus(ctx: &egui::Context) {
+    if let Some(id) = ctx.memory(|memory| memory.focused()) {
+        ctx.memory_mut(|memory| memory.surrender_focus(id));
     }
 }
 
@@ -3009,17 +3009,6 @@ fn release_dialog_keyboard(ctx: &egui::Context, rect: egui::Rect) {
     let value_box = id == egui::Id::unique("sc_canvas_value") || id == egui::Id::unique("sc_canvas_value2");
     if value_box || ctx.read_response(id).is_some_and(|response| rect.contains(response.rect.center())) {
         ctx.memory_mut(|memory| memory.surrender_focus(id));
-    }
-}
-
-/// Before this frame's shortcuts: a dialog that closed last frame leaves none of its fields
-/// holding the keyboard, so Ctrl+Z and the other shortcuts work at once.
-pub(crate) fn release_closed_dialog_keyboard(app: &SolveApp, ctx: &egui::Context) {
-    if app.dialog.is_none()
-        && app.tree.redefine.is_none()
-        && let Some(rect) = app.viewport.dialog_rect
-    {
-        release_dialog_keyboard(ctx, rect);
     }
 }
 
@@ -3095,7 +3084,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                 };
                 if chip.backing_on_hover_text(tooltip).clicked() {
                     activate = Some(i);
-                    surrender_keyboard_focus(ui);
+                    surrender_keyboard_focus(ui.ctx());
                 }
                 if !inp.items.is_empty() || stored_reference.is_some() {
                     let rect = egui::Rect::from_center_size(
@@ -3106,7 +3095,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                     crate::scenario::publish_handle(&format!("dialog:clear:{}", inp.label), button.rect.center());
                     if button.clicked() {
                         clear = Some(i);
-                        surrender_keyboard_focus(ui);
+                        surrender_keyboard_focus(ui.ctx());
                     }
                     // Several picks: an arrow beside the clear button lists them, each with its
                     // own remove button (#3683). Drawn straight into the row, which is this field's
@@ -3996,12 +3985,16 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         crate::scenario::publish_rect("dialog:outer", r);
         crate::scenario::publish_target("dialog:card", r);
     }
-    // While OK computes the fields are disabled, and a click into one does not take the keyboard
-    // either: it would stay there once the dialog closes.
-    if app.applying.is_some()
-        && let Some(rect) = app.viewport.dialog_rect
-    {
-        release_dialog_keyboard(ctx, rect);
+    // While OK computes, the fields are disabled and none holds the keyboard. Tab then has no
+    // field to move to: egui gives the keyboard to the window's first button (the app bar's
+    // Home), which keeps it after the dialog closes, so Ctrl+Z and every other shortcut did
+    // nothing until a click.
+    if app.applying.is_some() {
+        if ctx.input(|input| input.key_pressed(egui::Key::Tab)) {
+            surrender_keyboard_focus(ctx);
+        } else if let Some(rect) = app.viewport.dialog_rect {
+            release_dialog_keyboard(ctx, rect);
+        }
     }
     if let Some(field) = crate::ui_kit::canvas_value_focus(ctx) {
         value_fields.push(field);
