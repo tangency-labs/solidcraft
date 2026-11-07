@@ -30,6 +30,8 @@
 //! (WR-563, #1556).
 //! Each span-wise iso-u piece is evaluated at its end from its own knot span, the
 //! one-sided limit from inside the piece (WR-670, #2091): upstream takes the span above.
+//! An edge's tube area, volume and moments each have an error scale of their own size
+//! (#2887): upstream's are `BIG_DOUBLE`, so only the edge's length was under error control.
 use super::{OdeIntegrator, OdeOptions};
 use crate::curve::curve::Curve;
 use crate::geom::attribute::{ids, AttributeStore, AttributeValue, ObjectKey};
@@ -147,6 +149,18 @@ pub fn edge_properties(
     curve_properties(k, curve, &edge::interval(b, e)?, accuracy, origin, radius)
 }
 /// The precise edge integration on an already-bound curve and interval.
+///
+/// Not upstream (#2887): each of the 27 components has an error scale of its own size,
+/// so each is held to the accuracy asked, or the integration is refused. Upstream sets
+/// the length's to a tenth of the approximate length `L` and every other to
+/// `BIG_DOUBLE`: their steps were the length's and their accuracy whatever that gave.
+/// Here, as the face's components (`boundary_properties`), a tenth of each measure: the
+/// length `L`, the tube's area `2 pi r L` and volume `pi r^2 L`, and a moment of power
+/// `n` its measure times `D^n`, where `D` is the start's distance from the origin of
+/// computation plus `L`: every point is within its arc length of the start, so `D` is
+/// the farthest point's distance or more, up to `L`'s estimate. A moment through zero is held to that size, not to its
+/// own value. Without a cross-section (`r = 0`) the tube's integrands are zero and
+/// their scales the integrator's floor.
 pub fn curve_properties(
     k: &Kernel,
     curve: &Curve,
@@ -155,12 +169,32 @@ pub fn curve_properties(
     origin: Point3,
     radius: f64,
 ) -> Result<EdgeProperties> {
+    // the moment groups' powers of length: area static, second, products, axial, then
+    // the same of the volume
+    const POWERS: [i32; 8] = [1, 2, 2, 2, 1, 2, 2, 2];
     let eval = edge::OdeEdgeLength::new(curve, origin, radius);
     let approx = curve.approximate_length(k, interval, 10, false)?.0;
+    let start = curve
+        .evaluate(k, interval.min(), 0, false, false)?
+        .first()
+        .copied()
+        .ok_or_else(|| SolidError::null_pointer(OP))?;
+    let reach = (start - origin).length() + approx;
+    let length_scale = approx / 10.0;
+    let area_scale = 2.0 * PI * radius.abs() * length_scale;
+    let volume_scale = PI * radius * radius * length_scale;
     let mut y = [0.0; 27];
-    let mut scale = [BIG_DOUBLE; 27];
-    if let Some(s) = scale.first_mut() {
-        *s = approx / 10.0;
+    let mut scale = [0.0; 27];
+    let mut slots = scale.iter_mut();
+    for (s, value) in slots.by_ref().zip([length_scale, area_scale, volume_scale]) {
+        *s = value;
+    }
+    for (group, power) in POWERS.iter().enumerate() {
+        let measure = if group < 4 { area_scale } else { volume_scale };
+        let moment_scale = measure * reach.powi(*power);
+        for s in slots.by_ref().take(3) {
+            *s = moment_scale;
+        }
     }
     let mut scratch = [0.0; 28];
     OdeIntegrator::default().integrate(
