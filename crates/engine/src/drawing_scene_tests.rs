@@ -882,10 +882,9 @@ fn a_deferred_drawing_closed_during_a_change_keeps_its_dimensions_until_it_is_up
     run(&mut s, "drawing.update", json!({}));
     let before = settled(&mut s, sheet);
     let checkpoint = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].clone();
-    let (was, open) = (s.world_state().unwrap(), s.open_drawing.unwrap());
+    let open = s.open_drawing.unwrap();
     run(&mut s, "drawing.close", json!({}));
-    let kept = s.drawing_scenes.kept.of(open).unwrap();
-    assert!(kept.dimensions.values().all(|e| !Arc::ptr_eq(&e.state, &was)), "a closed drawing keeps no model");
+    assert!(s.drawing_scenes.kept.of(open).is_some_and(|kept| kept.dimensions.contains_key(&id)), "kept at the close");
     let block = s.doc.features[0].id;
     run(&mut s, "timeline.edit", json!({"feature": block.to_string(), "set": {"length": 120}}));
     run(&mut s, "drawing.open", drawing);

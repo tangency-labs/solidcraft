@@ -74,7 +74,7 @@ use crate::{EngineError, Result, Session};
 
 #[path = "drawing_scene_kept.rs"]
 mod kept;
-use kept::{Kept, KeptLines, KeptView};
+use kept::{Kept, KeptDimension, KeptLines, KeptView};
 
 /// The command the sheet scene answers for, in its errors.
 pub const CMD: &str = "drawing.scene";
@@ -887,11 +887,12 @@ impl Cache {
             let entry = Entry { state: gone.clone(), shows: kept.shows, view: kept.view, drawn: kept.drawn, serial: self.serial };
             self.views.insert(id, entry);
         }
-        // Each kept with an empty world state ([`forget_closed`]), so read again: its `view_serial`,
-        // from before the close, never matches its view's new one either.
-        for (id, mut entry) in kept.dimensions {
+        // From the same gone state, so read again: its `view_serial`, from before the close, never
+        // matches its view's new one either.
+        for (id, kept) in kept.dimensions {
             self.serial += 1;
-            entry.serial = self.serial;
+            let KeptDimension { record, view_serial, lettering, drawn } = kept;
+            let entry = DimensionEntry { state: gone.clone(), record, view_serial, lettering, drawn, serial: self.serial };
             self.dimensions.insert(id, entry);
         }
     }
@@ -1304,9 +1305,9 @@ pub(crate) fn forget_closed(s: &mut Session) {
     if let Some(drawing) = cache.drawing.filter(|d| s.open_drawing != Some(*d)) {
         let mut kept = std::mem::take(&mut cache.kept);
         let views = std::mem::take(&mut cache.views).into_iter().map(|(id, e)| (id, KeptView { view: e.view, drawn: e.drawn, shows: e.shows }));
-        // Their world state is let go too: an empty one, which no state after the reopen is.
-        let gone: Arc<ModelState> = Arc::default();
-        let dimensions = std::mem::take(&mut cache.dimensions).into_iter().map(|(id, e)| (id, DimensionEntry { state: gone.clone(), ..e }));
+        let dimensions = std::mem::take(&mut cache.dimensions)
+            .into_iter()
+            .map(|(id, e)| (id, KeptDimension { record: e.record, view_serial: e.view_serial, lettering: e.lettering, drawn: e.drawn }));
         kept.keep(drawing, Kept { views: views.collect(), dimensions: dimensions.collect() });
         *cache = Cache { kept, ..Cache::default() };
     }
