@@ -4,7 +4,8 @@
 //! centred on its view, as a view's lines are, so moving the view moves it unchanged.
 //!
 //! Its text is set in the drawing font ([`paper_text`]) and measured there, so the arrows go inside
-//! or outside by its real length. A text the font can't set leaves the lines and says why.
+//! or outside by its real length. A text the font can't set leaves the lines and says why. An
+//! ordinate set has no dimension lines: [`ordinate`] lays out its leaders and numbers itself.
 
 use std::f64::consts::{FRAC_1_SQRT_2, PI, TAU};
 
@@ -30,8 +31,11 @@ const SAME_POINT_MM: f64 = 1e-6;
 /// How far apart a baseline set's dimension lines stand on paper: room for a 3.5 mm text and its
 /// gaps. Until the drafting profile (#4896, W09d) gives it.
 const STACK_MM: f64 = 7.0;
+/// How far short of the common line an ordinate leader whose number was moved turns towards it.
+const JOG_MM: f64 = 2.0;
 
 /// One laid-out piece of a dimension: a chain and a baseline set have one for each of their members.
+/// An ordinate set has none ([`ordinate`]).
 struct Piece {
     frame: DimFrame,
     /// Where the layout puts its text, from the frame's own origin.
@@ -120,11 +124,15 @@ pub fn paper_group(dimension: &Dimension, resolved: &Resolved, frame: &ViewFrame
     let on: Vec<Vec2> = resolved.points.iter().map(|p| frame.to_paper(*p)).collect();
     let set = |text: Option<&str>| Text::set(text, TEXT_MM, lettering);
     let mut drawn = Drawn::default();
-    for piece in pieces(dimension, resolved, &on, &set)? {
-        let layout = dim_layout_sized(&piece.frame, Some(piece.at), &SIZES, piece.text.half, [None, None]);
-        drawn.text(piece.text, layout.text, layout.text_dir);
-        layout.lines.into_iter().for_each(|line| drawn.line(line));
-        drawn.arrows.extend(layout.arrows);
+    if let DimensionKind::Ordinate { direction, .. } = &dimension.kind {
+        ordinate(&on, *direction, dimension.offset_mm, resolved, &set, &mut drawn)?;
+    } else {
+        for piece in pieces(dimension, resolved, &on, &set)? {
+            let layout = dim_layout_sized(&piece.frame, Some(piece.at), &SIZES, piece.text.half, [None, None]);
+            drawn.text(piece.text, layout.text, layout.text_dir);
+            layout.lines.into_iter().for_each(|line| drawn.line(line));
+            drawn.arrows.extend(layout.arrows);
+        }
     }
     let Drawn { mut lines, arrows, texts, fonts, why, pending } = drawn;
     for (tip, dir) in &arrows {
@@ -239,6 +247,64 @@ fn baseline(
         Some(linear(*origin, target, dir, line - ((*origin + target) * 0.5).dot(n), &TextPlace::Centred, set(text)))
     };
     nearest_first.into_iter().enumerate().map(member).collect()
+}
+
+/// An ordinate set: the origin (the first of `points`), shown as 0, and each target, each with a
+/// leader from a gap off its point out to one line `offset` past the outermost point on its side,
+/// and its number past the leader's end, reading along it. Numbers that would overlap along the
+/// set's line are moved apart as little as can be ([`spread`]); the leader of one that moved runs
+/// straight to [`JOG_MM`] short of the line, then on a slant to its number.
+fn ordinate(
+    points: &[Vec2],
+    direction: LinearDirection,
+    offset: f64,
+    resolved: &Resolved,
+    set: &impl Fn(Option<&str>) -> Text,
+    out: &mut Drawn,
+) -> Option<()> {
+    let (origin, targets) = points.split_first()?;
+    let dir = line_direction(direction, *targets.last()? - *origin)?;
+    let n = dir.perp();
+    let side = if offset < 0.0 { -1.0 } else { 1.0 };
+    let end = side * points.iter().map(|p| side * p.dot(n)).fold(f64::NEG_INFINITY, f64::max) + offset;
+    let numbers = std::iter::once(Some("0")).chain((0..targets.len()).map(|i| resolved.members.get(i).map(|m| m.text.as_str())));
+    let mut places: Vec<(Vec2, Text)> = points.iter().copied().zip(numbers.map(set)).collect();
+    places.sort_by(|(p, _), (q, _)| p.dot(dir).total_cmp(&q.dot(dir)));
+    // Each number's height lies along the set's line: the tallest one's, and a gap, apart.
+    let pitch = places.iter().map(|(_, text)| text.half.y * 2.0).fold(0.0, f64::max) + SIZES.gap;
+    let ideal: Vec<f64> = places.iter().map(|(p, _)| p.dot(dir)).collect();
+    let reading = line_direction(LinearDirection::Aligned, n)?;
+    let at = |along: f64, across: f64| dir * along + n * across;
+    for ((p, text), (&want, got)) in places.into_iter().zip(ideal.iter().zip(spread(&ideal, pitch))) {
+        let start = p + n * (side * SIZES.gap);
+        let leader =
+            if (got - want).abs() <= SAME_POINT_MM { vec![start, at(want, end)] } else { vec![start, at(want, end - side * JOG_MM), at(got, end)] };
+        out.line(leader);
+        let centre = at(got, end + side * (SIZES.gap + text.half.x));
+        out.text(text, centre, reading);
+    }
+    Some(())
+}
+
+/// Places along one line for texts whose ideal places are `ideal` (least first), at least `pitch`
+/// apart and moved as little as can be in all (least squares). Pool-adjacent-violators on the places
+/// less their spacing: texts that would overlap pool into blocks, each centred on its members' ideal
+/// places, and every other text stays where it is.
+fn spread(ideal: &[f64], pitch: f64) -> Vec<f64> {
+    // Each block: the sum of its members' places less their spacing, and how many they are.
+    let mut blocks: Vec<(f64, usize)> = Vec::with_capacity(ideal.len());
+    for (i, x) in ideal.iter().enumerate() {
+        blocks.push((x - pitch * i as f64, 1));
+        while let [.., (a, m), (b, k)] = blocks[..] {
+            if a / m as f64 <= b / k as f64 {
+                break;
+            }
+            blocks.truncate(blocks.len() - 2);
+            blocks.push((a + b, m + k));
+        }
+    }
+    let shifted = blocks.into_iter().flat_map(|(sum, k)| std::iter::repeat_n(sum / k as f64, k));
+    shifted.enumerate().map(|(i, place)| place + pitch * i as f64).collect()
 }
 
 /// A line between two silhouettes or faces, each from one end to the other, at the ends on the side `offset`

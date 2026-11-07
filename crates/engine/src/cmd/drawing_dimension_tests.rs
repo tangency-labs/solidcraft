@@ -519,6 +519,79 @@ fn a_baseline_set_reads_each_hole_from_its_origin() {
     assert_eq!(members(&most).len(), 64, "{most}");
 }
 
+/// An ordinate set from the box's bottom front corner to the box's top corner over it and holes at
+/// x = 10, 30 and 60 (z = 15), read horizontally: 0, 10, 30 and 60, in target order, its value the
+/// farthest, below the box as a chain from the origin to its last target would be. A target in line with its origin reads 0, as the origin shows. It follows a model
+/// edit: the hole at 30 moved to 40 reads 40. It keeps a set's rules, with 1 to 64 targets, so its
+/// last target can't be taken out.
+#[test]
+fn an_ordinate_set_reads_each_hole_and_follows_a_model_edit() {
+    let (mut s, view) = front_view();
+    let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
+    run(&mut s, "drawing.close", json!({}));
+    for x in [10, 30, 60] {
+        let cut =
+            json!({"radius": 3, "height": 42, "base": [x, -1, 15], "axis": "Y", "operation": "cut", "targets": ["Box"], "name": format!("H{x}")});
+        run(&mut s, "solid.cylinder", cut);
+    }
+    run(&mut s, "drawing.open", drawing.clone());
+    let hole = |x: f64| json!({"centre": {"body": "Box", "index": round_index(&s, [x, 0.0, 15.0], 3.0)}});
+    let (h10, h30, h60) = (hole(10.0), hole(30.0), hole(60.0));
+    let steps = s.undo.len();
+    let set = add(&mut s, view, json!({"ordinate": {"origin": [0, 0, 0], "targets": [[0, 0, 30], h10, h30, h60], "direction": "horizontal"}}));
+    assert_eq!(s.undo.len(), steps + 1, "one undo step");
+    assert_eq!((set["status"].as_str(), set.get("text")), (Some("ok"), None), "{set}");
+    assert!((set["value"].as_f64().unwrap() - 60.0).abs() < 1e-9, "{set}");
+    assert!(set["record"]["kind"]["ordinate"]["targets"].as_array().is_some_and(|t| t.len() == 4), "{set}");
+    let read = |reply: &Value| {
+        let listed = reply["members"].as_array().cloned().unwrap_or_default();
+        listed.iter().map(|m| m["text"].as_str().unwrap_or("").to_string()).collect::<Vec<_>>()
+    };
+    assert_eq!(read(&set), ["0.00", "10.00", "30.00", "60.00"]);
+    assert_eq!(set["record"]["offset_mm"], json!(-10.0), "{set}");
+    let id = set["dimension"].clone();
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "timeline.edit", json!({"feature": "H30", "set": {"base": [40, -1, 15]}}));
+    run(&mut s, "drawing.open", drawing);
+    // Picked again: the edit may number the edges anew.
+    let at = |s: &Session, x: f64| json!({"centre": {"body": "Box", "index": round_index(s, [x, 0.0, 15.0], 3.0)}});
+    let (h10, h40, far) = (at(&s, 10.0), at(&s, 40.0), at(&s, 60.0));
+    let moved = run(&mut s, INSPECT, json!({"dimension": id}));
+    assert_eq!((moved["status"].as_str(), read(&moved)), (Some("ok"), vec!["0.00".to_string(), "10.00".into(), "40.00".into(), "60.00".into()]));
+
+    assert_eq!(edit(&mut s, &id, json!({"targets": {"remove": [3, 0]}}))["changed"], json!(["targets"]));
+    assert_eq!(read(&run(&mut s, INSPECT, json!({"dimension": id}))), ["10.00", "40.00"]);
+    let before = s.drawing("test").unwrap().to_json().unwrap();
+    for (set, why) in [
+        (json!({"targets": {"remove": [0, 1]}}), "an ordinate set has 1 to 64 targets"),
+        (json!({"reading": "true"}), "a set has only `direction` and `targets`"),
+        (json!({"override_text": "60"}), "a set shows each target's number, never a text instead"),
+    ] {
+        let p = json!({"dimension": id, "set": set});
+        let e = s.execute(EDIT, &p).err().map(|e| e.to_string()).unwrap_or_else(|| panic!("accepted: {p}"));
+        assert!(e.contains(why), "{p}: {e}");
+    }
+    let v = ids::encode(view);
+    let ordinate =
+        |origin: &Value, targets: Value| json!({"view": v, "kind": {"ordinate": {"origin": origin, "targets": targets, "direction": "horizontal"}}});
+    let (corner, nowhere) = (json!([0, 0, 0]), json!([1e6, 1e6, 1e6]));
+    for (p, why) in [
+        (ordinate(&corner, json!([])), "an ordinate set has 1 to 64 targets"),
+        (ordinate(&corner, Value::Array(vec![nowhere.clone(); 65])), "an ordinate set has 1 to 64 targets"),
+        // The line runs toward the target farthest from the origin, so a set with targets on both sides of
+        // its origin has one before it, whatever their order.
+        (ordinate(&h40, json!([h10, far])), "a target lies before its origin along the line"),
+    ] {
+        let e = refused(&mut s, p.clone());
+        assert!(e.contains(why), "{p}: {e}");
+    }
+    assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
+    // One target is a set: beside its origin's 0.
+    assert_eq!(read(&run(&mut s, ADD, ordinate(&corner, json!([h10])))), ["10.00"]);
+    // Its line runs towards that target, whichever side of the origin it is on.
+    assert_eq!(read(&run(&mut s, ADD, ordinate(&far, json!([h10])))), ["50.00"]);
+}
+
 /// A model edit that moves a target before its origin, or into line with it, leaves the set in the
 /// drawing, unmeasurable and saying why, never a panic; moved on, it reads again.
 #[test]
@@ -995,6 +1068,7 @@ fn hostile_dimension_params_never_panic() {
             "direction": "horizontal"}}}),
         ),
         (EDIT, json!({"dimension": set, "set": {"direction": "vertical", "targets": {"remove": [0], "add": [[0, 0, 30], corner]}}})),
+        (ADD, json!({"view": v, "kind": {"ordinate": {"origin": [80, 0, 0], "targets": [corner, [0, 0, 0]], "direction": {"along": [-1, 0]}}}})),
         (ADD, json!({"view": v, "kind": {"cylinder": {"face": {"body": "Box", "index": 0, "path": [1]}}}})),
         (
             ADD,

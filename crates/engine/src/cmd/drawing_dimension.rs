@@ -13,7 +13,7 @@ use solidcore_record::{Vec2, Vec3};
 use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::drawing::dimension::{
     Candidate, Dimension, DimensionKind, MAX_SET_TARGETS, ModelEdge, ModelFace, ModelPoint, Reference, Resolved, Silhouette, Status, TextPlace,
-    check_baseline_targets, check_chain_length,
+    check_baseline_targets, check_chain_length, check_ordinate_targets, check_set_targets,
 };
 use solidcraft_doc::ids;
 use solidcraft_geom::drawing_measure::{LinearDirection, Reading};
@@ -68,11 +68,13 @@ pub static COMMANDS: &[CommandSpec] = &[
              {chain: {points: [3 to 64 corners, in order along one line], direction?: as a linear one's, aligned being first to \
              last}} or {baseline: {origin: a corner, targets: [2 to 64 corners, in any order], direction?: as a linear one's, aligned \
              being from the origin to the last target, the others running toward the target farthest from it}: a dimension from the origin to each target, stacked 7 mm apart on paper, the \
-             nearest first; a target before the origin along the line, or in line with it, can't be measured}; an edge is a point on it [x, y, z] in the design's frame, {point} or {body, index}, and a \
+             nearest first; a target before the origin along the line, or in line with it, can't be measured} or {ordinate: as a \
+             baseline's, with 1 to 64 targets: each target's distance at the end of a leader from it, the origin's as 0, numbers that \
+             would overlap moved apart; a target before the origin can't be measured}; an edge is a point on it [x, y, z] in the design's frame, {point} or {body, index}, and a \
              corner a point, {point}, {edges: [2 to 16 edges]} or {centre: an edge that is a circle or an arc}, and a face a point on \
              it, {point} or {body, index}, each with path?: the \
              occurrences its body is placed through, from the top; offset_mm?: the dimension line's distance on paper (default 10; \
-             a linear, length, chain or baseline one's on the side away from what it measures); \
+             a linear, length, chain or set one's on the side away from what it measures); \
              text?: centred (default) or {at: [x, y]} from the view's centre; decimals?: 0..6 (default 2); override_text? (not a \
              chain's or a set's) → what drawing.dimension.inspect answers for it. Saved by the edges' names, never the points picked; one the \
              view can't measure, or on a part it doesn't draw, is refused. One undo step; no model is evaluated.",
@@ -171,6 +173,11 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
             let targets = targets.iter().map(corner).collect::<Result<_>>()?;
             DimensionKind::Baseline { origin: corner(&origin)?, targets, direction: direction.unwrap_or(LinearDirection::Aligned) }
         }
+        KindParam::Ordinate { origin, targets, direction } => {
+            check_ordinate_targets(targets.len()).map_err(|why| bad(ADD, why.to_string()))?;
+            let targets = targets.iter().map(corner).collect::<Result<_>>()?;
+            DimensionKind::Ordinate { origin: corner(&origin)?, targets, direction: direction.unwrap_or(LinearDirection::Aligned) }
+        }
     };
     let new = NewDimension {
         view,
@@ -265,7 +272,8 @@ pub(crate) fn placed(
         && let DimensionKind::Linear { direction, .. }
         | DimensionKind::Length { direction, .. }
         | DimensionKind::Chain { direction, .. }
-        | DimensionKind::Baseline { direction, .. } = &dimension.kind
+        | DimensionKind::Baseline { direction, .. }
+        | DimensionKind::Ordinate { direction, .. } = &dimension.kind
         && let Some(r) = read.first()
     {
         dimension.offset_mm = DEFAULT_OFFSET_MM * side_by_default(s, record, new.view, *direction, &r.points);
@@ -366,7 +374,7 @@ fn slot(kind: &mut DimensionKind, slot: SlotParam) -> Result<Slot<'_>> {
             SlotParam::Point(k) => points.get_mut(k).map(Slot::Point),
             _ => None,
         },
-        DimensionKind::Baseline { origin, targets, .. } => match slot {
+        DimensionKind::Baseline { origin, targets, .. } | DimensionKind::Ordinate { origin, targets, .. } => match slot {
             SlotParam::Origin => Some(Slot::Point(origin)),
             SlotParam::Point(k) => targets.get_mut(k).map(Slot::Point),
             _ => None,
@@ -396,7 +404,9 @@ fn slots(kind: &DimensionKind) -> String {
         DimensionKind::Length { .. } | DimensionKind::Radial { .. } => "`edge`".into(),
         DimensionKind::Angle { .. } => "`a` and `b`, its edges".into(),
         DimensionKind::Chain { points, .. } => format!("its points, 0 to {}", points.len().saturating_sub(1)),
-        DimensionKind::Baseline { targets, .. } => format!("`origin`, and its targets, 0 to {}", targets.len().saturating_sub(1)),
+        DimensionKind::Baseline { targets, .. } | DimensionKind::Ordinate { targets, .. } => {
+            format!("`origin`, and its targets, 0 to {}", targets.len().saturating_sub(1))
+        }
         DimensionKind::Cylinder { .. } | DimensionKind::Sphere { .. } | DimensionKind::Cone { .. } => "`face`".into(),
         DimensionKind::Silhouettes { .. } | DimensionKind::Faces { .. } => "`a` and `b`, its faces".into(),
     }
@@ -496,7 +506,7 @@ fn change(d: &mut Drawing, id: u64, set: &DimensionSet, added: Vec<ModelPoint>) 
     if set.diameter.is_some() && !matches!(dimension.kind, DimensionKind::Radial { .. }) {
         return Err(bad(EDIT, "`diameter` is a radial dimension's"));
     }
-    if set.targets.is_some() && !matches!(dimension.kind, DimensionKind::Baseline { .. }) {
+    if set.targets.is_some() && !matches!(dimension.kind, DimensionKind::Baseline { .. } | DimensionKind::Ordinate { .. }) {
         return Err(bad(EDIT, "`targets` is a set's"));
     }
     match &mut dimension.kind {
@@ -526,14 +536,13 @@ fn change(d: &mut Drawing, id: u64, set: &DimensionSet, added: Vec<ModelPoint>) 
             }
             *direction = set.direction.unwrap_or(*direction);
         }
-        DimensionKind::Baseline { targets, direction, .. } => {
+        DimensionKind::Baseline { targets, direction, .. } | DimensionKind::Ordinate { targets, direction, .. } => {
             if set.reading.is_some() || set.other_side.is_some() {
                 return Err(bad(EDIT, "a set has only `direction` and `targets`: it reads as the view shows it"));
             }
             *direction = set.direction.unwrap_or(*direction);
             if let Some(edit) = &set.targets {
                 retarget(targets, &edit.remove, added)?;
-                check_baseline_targets(targets.len()).map_err(|why| bad(EDIT, why.to_string()))?;
             }
         }
         DimensionKind::Silhouettes { direction, .. } => {
@@ -564,6 +573,8 @@ fn change(d: &mut Drawing, id: u64, set: &DimensionSet, added: Vec<ModelPoint>) 
             }
         }
     }
+    // Before the set is read: one with no targets can't be.
+    check_set_targets(&dimension.kind, targets_of(&dimension.kind).len()).map_err(|why| bad(EDIT, why.to_string()))?;
     Ok(changed_fields(&before, dimension))
 }
 
@@ -593,6 +604,7 @@ fn kind_settings(kind: &DimensionKind) -> (Option<LinearDirection>, Option<Readi
         DimensionKind::Radial { diameter, .. } => (None, None, false, *diameter),
         DimensionKind::Chain { direction, .. }
         | DimensionKind::Baseline { direction, .. }
+        | DimensionKind::Ordinate { direction, .. }
         | DimensionKind::Silhouettes { direction, .. }
         | DimensionKind::Faces { direction, .. } => (Some(*direction), None, false, false),
         DimensionKind::Cylinder { .. } | DimensionKind::Sphere { .. } | DimensionKind::Cone { .. } => (None, None, false, false),
@@ -602,7 +614,7 @@ fn kind_settings(kind: &DimensionKind) -> (Option<LinearDirection>, Option<Readi
 /// A set's targets; none for other kinds.
 fn targets_of(kind: &DimensionKind) -> &[ModelPoint] {
     match kind {
-        DimensionKind::Baseline { targets, .. } => targets,
+        DimensionKind::Baseline { targets, .. } | DimensionKind::Ordinate { targets, .. } => targets,
         _ => &[],
     }
 }

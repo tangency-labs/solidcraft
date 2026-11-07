@@ -402,6 +402,44 @@ fn a_baseline_set_saves_its_origin_and_targets_and_keeps_its_rules() {
     assert!(unnamed.starts_with("damaged drawing: "), "{unnamed}");
 }
 
+/// An ordinate set saves as a baseline set does, as `ordinate`, and has 1 to [`MAX_SET_TARGETS`]
+/// targets: its origin shows 0 beside them. It keeps a set's other rules.
+#[test]
+fn an_ordinate_set_saves_its_origin_and_targets_and_keeps_its_rules() {
+    let (mut d, _) = measured();
+    let (view, id) = (d.views[0].id, d.allocate_id(&mut IdSource::seeded(SEED + 1)).unwrap());
+    let origin = corner(&["F1:front|F1:bottom", "F1:front|F1:left"]);
+    let target = ModelPoint { centre: true, ..corner(&["F3:hole|F1:front"]) };
+    let kind = DimensionKind::Ordinate { origin, targets: vec![target], direction: LinearDirection::Vertical };
+    let dimension =
+        Dimension { id, view, kind, offset_mm: 8.0, text: TextPlace::Centred, decimals: 1, override_text: None, last_good: None, from_model: None };
+    d.add_dimensions([Arc::new(dimension)]);
+    d.validate().unwrap();
+    let set_id = ids::encode(id);
+    let mut v = file(&d);
+    let first = json!({"body": "Box", "origin_feature": 7, "edges": ["F1:front|F1:bottom", "F1:front|F1:left"]});
+    let hole = json!({"body": "Box", "origin_feature": 7, "edges": ["F3:hole|F1:front"], "centre": true});
+    assert_eq!(dim(&mut v, &set_id)["kind"], json!({"ordinate": {"origin": first, "targets": [hole], "direction": "vertical"}}));
+    assert_eq!(Drawing::from_json(&v.to_string()).unwrap(), d);
+    let rule = |rule: &str| format!("damaged drawing: dimension {set_id}: {rule}");
+    let count = |n: usize| {
+        refused(&d, |v| {
+            let targets = &mut dim(v, &set_id)["kind"]["ordinate"]["targets"];
+            let one = targets[0].clone();
+            *targets = json!(vec![one; n]);
+        })
+    };
+    let one_to = rule(&format!("an ordinate set has 1 to {MAX_SET_TARGETS} targets"));
+    let counts = [count(0), count(1), count(MAX_SET_TARGETS), count(MAX_SET_TARGETS + 1)];
+    assert_eq!(counts, [one_to.clone(), "read".into(), "read".into(), one_to]);
+    let instead = refused(&d, |v| dim(v, &set_id)["override_text"] = json!("60"));
+    assert_eq!(instead, rule("a set shows each target's number, never a text instead"));
+    let zero = refused(&d, |v| dim(v, &set_id)["kind"]["ordinate"]["direction"] = json!({"along": [0.0, 0.0]}));
+    assert_eq!(zero, rule("the direction to measure along is zero or not finite"));
+    let no_origin = refused(&d, |v| dim(v, &set_id)["kind"]["ordinate"]["origin"]["edges"] = json!(["F1:front|F1:bottom"]));
+    assert_eq!(no_origin, rule(&format!("a corner is where 2 to {MAX_VERTEX_EDGES} named edges meet")));
+}
+
 /// A cylinder, a sphere or a cone dimension saves its face by name, and the face keeps a reference's rules.
 #[test]
 fn a_cylinder_sphere_or_cone_dimension_saves_its_face() {

@@ -397,6 +397,18 @@ pub enum KindParam {
         #[schemars(with = "Value")]
         direction: Option<LinearDirection>,
     },
+    /// A baseline set's distances, each shown at the end of a leader from its target, the origin's
+    /// as 0.
+    Ordinate {
+        /// A corner or a hole's centre to measure from.
+        origin: CornerParam,
+        /// 1 to 64 corners.
+        targets: Vec<CornerParam>,
+        /// As a linear dimension's; `aligned` (the default) is from the origin to the last target.
+        #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+        #[schemars(with = "Value")]
+        direction: Option<LinearDirection>,
+    },
 }
 
 /// What `drawing.dimension.add` takes.
