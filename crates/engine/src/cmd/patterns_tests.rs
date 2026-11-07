@@ -1239,3 +1239,25 @@ fn circular_pattern_of_a_moved_copy_adds_one_body_per_instance() {
     let far = s.world_state().unwrap().bodies.iter().map(|b| b.mesh().bounds().max.x).fold(f64::MIN, f64::max);
     assert!(far > 20.0, "the repeats follow the redefined Move: {far}");
 }
+
+/// #12585: a pattern or mirror of an Offset Face repeats it at the copied faces instead of
+/// failing with "cannot be patterned or mirrored yet". A 40 x 30 x 20 box whose top is split into
+/// strips at x = 10 and x = 30 has its left strip raised 5; the copy raises the right strip.
+#[test]
+fn pattern_and_mirror_of_an_offset_face_raise_the_copied_face() {
+    for (copy, params) in [
+        ("solid.mirror", json!({"features": ["Raise"], "plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}})),
+        ("solid.pattern.rectangular", json!({"features": ["Raise"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 30})),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Block"}));
+        run(&mut s, "solid.split_face", json!({"faces": [[20, 15, 20]], "plane": {"origin": [10, 0, 0], "normal": [1, 0, 0]}}));
+        run(&mut s, "solid.split_face", json!({"faces": [[20, 15, 20]], "plane": {"origin": [30, 0, 0], "normal": [1, 0, 0]}}));
+        run(&mut s, "solid.offset_face", json!({"faces": [[5, 15, 20]], "distance": 5, "name": "Raise"}));
+        let strip = 10.0 * 30.0 * 5.0;
+        assert!(rel(volume(&mut s), 24000.0 + strip) < 1e-6, "{copy}: the source raises one strip");
+        let r = run(&mut s, copy, params);
+        assert!(r["error"].is_null(), "{copy}: {r}");
+        assert!(rel(volume(&mut s), 24000.0 + 2.0 * strip) < 1e-6, "{copy}: {} vs {}", volume(&mut s), 24000.0 + 2.0 * strip);
+    }
+}

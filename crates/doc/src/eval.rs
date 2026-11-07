@@ -6852,6 +6852,21 @@ fn replay(
             }
             continue;
         }
+        // An Offset Face repeats at the copied faces of the body they lie on.
+        if let FeatureKind::OffsetFace { faces, distance, body } = &src.kind {
+            let d = val(vals, distance, Kind::Length)?;
+            let picked = crate::plain(faces);
+            for m in mats {
+                let moved: Vec<Vec3> = picked.iter().map(|p| crate::apply_point(m, *p)).collect();
+                let i = body_at(st, body, &moved)?;
+                let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
+                let nb = mb.traced().then(kernel::offset_faces(&mb.body, &moved, d)?);
+                if let Some(slot) = st.bodies.get_mut(i) {
+                    *slot = ModelBody::traced_new(mb.name, nb, mb.feature);
+                }
+            }
+            continue;
+        }
         // A moved copy is copied again as a body: each instance is the copy the Move made,
         // placed by the pattern (#5931).
         if let FeatureKind::Move { copy: true, .. } = &src.kind {
