@@ -14,7 +14,6 @@
 use solidcore_record::Vec2;
 use solidcraft_geom::prelude::*;
 
-use crate::curves::TANGENT_HANDLE_LENGTH_SCALE;
 use crate::model::{ConstraintKind, CurveKind, Result, Sketch, SketchError};
 
 /// Closer than this (relative to the spline's size) to one of its points, a new point would
@@ -53,7 +52,8 @@ impl Sketch {
         // A handle at the new point follows the curve's slope there, per unit chord as the
         // handles store it.
         let chord = pos.get(piece).zip(pos.get(piece + 1)).map_or(1.0, |(a, b)| a.dist(*b).max(1e-9));
-        let handle = new + slope * (TANGENT_HANDLE_LENGTH_SCALE / chord);
+        let unit = pos.get(piece).zip(pos.get(piece + 1)).map_or(1.0, |(a, b)| ((a.dist(new) + new.dist(*b)) / 2.0).max(1e-9));
+        let handle = new + slope * (unit / chord);
         let p = self.add_point(new, None)?;
         if let Some(CurveKind::Spline { pts, .. }) = self.curves.get_mut(ci).map(|c| &mut c.kind) {
             pts.insert(piece + 1, p);
@@ -123,7 +123,7 @@ impl Sketch {
             q.pos = old_end * 2.0 - q.pos;
         }
         let along = (to - old_end).normalized().unwrap_or(Vec2::new(1.0, 0.0));
-        let handle = to - along * TANGENT_HANDLE_LENGTH_SCALE;
+        let handle = to - along * old_end.dist(to).max(1e-9);
         let p = self.add_point(to, None)?;
         let count = if let Some(CurveKind::Spline { pts, .. }) = self.curves.get_mut(ci).map(|c| &mut c.kind) {
             if at_start {

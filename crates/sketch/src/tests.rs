@@ -1935,3 +1935,24 @@ fn a_mirrored_fillet_over_three_quarters_of_a_turn_stays_the_arc_its_lines_leave
     assert!((sweep_deg(&sk, arc) - 300.0).abs() < 1e-6, "sweep {}", sweep_deg(&sk, arc));
     assert!(lines_leave_the_arc(&sk, arc, [l1, l2]));
 }
+
+/// Scaling a fit spline's points and tangent handles scales its curve alike: a handle is measured
+/// against the chords beside its point, not an absolute length (#6502).
+#[test]
+fn scaling_a_spline_with_handles_scales_its_curve() {
+    let p = [Vec2::new(0.0, 0.0), Vec2::new(8.0, 6.0), Vec2::new(17.0, 2.0), Vec2::new(25.0, 10.0)];
+    let mut handles = crate::curves::fit_tangent_handles(&p, false).unwrap();
+    // A turned handle, so the curve is not the natural one.
+    handles[1] += Vec2::new(1.5, -2.0);
+    let before = crate::curves::fit_beziers_with_handles(&p, &handles, false).unwrap();
+    for f in [0.1, 3.0] {
+        let scaled: Vec<Vec2> = p.iter().map(|q| *q * f).collect();
+        let scaled_handles: Vec<Vec2> = handles.iter().map(|q| *q * f).collect();
+        let after = crate::curves::fit_beziers_with_handles(&scaled, &scaled_handles, false).unwrap();
+        for (a, b) in after.iter().zip(&before) {
+            for (x, y) in a.iter().zip(b) {
+                assert!(x.dist(*y * f) < 1e-9 * f.max(1.0), "scale {f}: {x:?} vs {:?}", *y * f);
+            }
+        }
+    }
+}

@@ -137,12 +137,15 @@ fn spline_tangent_guides_are_hidden_from_normal_sketch_drawing_and_extend_both_s
         let fit_point = sk.point(pts[index]).unwrap();
         let control_offset = if index == 0 { natural[0][1] - positions[index] } else { natural[index - 1][2] - positions[index] };
         let chord = if index == 0 { positions[1].dist(positions[0]) } else { positions[index - 1].dist(positions[index]) };
-        assert!(
-            (position.dist(fit_point) - control_offset.len() * (3.0 * 4.55 / chord)).abs() < 1e-9,
-            "handle {index}: arm {}, expected 1.3 times the previous handle length {}",
-            position.dist(fit_point),
-            control_offset.len() * (3.0 * 4.55 / chord)
-        );
+        // Measured against the mean of the chords beside the point: three times the control
+        // offset where they are equal, and scaling the spline scales its handles alike.
+        let unit = match index {
+            0 => chord,
+            i if i + 1 == positions.len() => chord,
+            i => (positions[i - 1].dist(positions[i]) + positions[i].dist(positions[i + 1])) / 2.0,
+        };
+        let expected = control_offset.len() * (3.0 * unit / chord);
+        assert!((position.dist(fit_point) - expected).abs() < 1e-9, "handle {index}: arm {}, expected {expected}", position.dist(fit_point));
     }
 
     let helper = sk.curves.iter().position(|curve| curve.spline_handle_of.as_deref() == Some("s1")).unwrap();

@@ -9,7 +9,28 @@ use solidcore_record::Vec2;
 
 /// Polyline samples per spline span / conic / ellipse quarter.
 const SPAN_SAMPLES: usize = 24;
-pub(crate) const TANGENT_HANDLE_LENGTH_SCALE: f64 = 4.55;
+/// The length a handle at fit point `i` is measured against: the mean of the chords on either
+/// side of it (the one chord at an open spline's end). A handle stores the curve's derivative per
+/// unit chord times this length, so scaling a spline's points and handles scales its curve alike
+/// (#6502), and a handle arm is three times its control offset where the chords are equal.
+pub(crate) fn handle_unit(p: &[Vec2], periodic: bool, i: usize) -> f64 {
+    let chord = |a: usize, b: usize| p.get(a).zip(p.get(b)).map(|(x, y)| x.dist(*y));
+    let count = if periodic { p.len().saturating_sub(1) } else { p.len() };
+    let before = if i > 0 {
+        chord(i - 1, i)
+    } else if periodic && count > 0 {
+        chord(count - 1, count)
+    } else {
+        None
+    };
+    let after = if i + 1 < p.len() { chord(i, i + 1) } else { None };
+    let unit = match (before, after) {
+        (Some(a), Some(b)) => (a + b) / 2.0,
+        (Some(a), None) | (None, Some(a)) => a,
+        (None, None) => 1.0,
+    };
+    if unit.is_finite() { unit.max(1e-9) } else { 1.0 }
+}
 /// Most points a spline may have.
 pub const MAX_SPLINE_POINTS: usize = 500;
 
@@ -246,9 +267,9 @@ pub fn fit_beziers(p: &[Vec2]) -> Vec<[Vec2; 4]> {
 pub fn fit_beziers_mode(p: &[Vec2], periodic: bool) -> crate::model::Result<Vec<[Vec2; 4]>> {
     if periodic { crate::periodic_beziers(p) } else { Ok(fit_beziers(p)) }
 }
-/// Tangent endpoints for one editable handle at each fit point. Each handle stores 4.55 times the
-/// natural tangent derivative per unit chord length; evaluation compensates to preserve the
-/// natural interpolant until a handle is moved.
+/// Tangent endpoints for one editable handle at each fit point. Each handle stores the natural
+/// tangent derivative per unit chord length times [`handle_unit`]; evaluation divides it back
+/// out, preserving the natural interpolant until a handle is moved.
 pub fn fit_tangent_handles(p: &[Vec2], periodic: bool) -> crate::model::Result<Vec<Vec2>> {
     let mut derivatives = Vec::new();
     if periodic {
@@ -262,8 +283,7 @@ pub fn fit_tangent_handles(p: &[Vec2], periodic: bool) -> crate::model::Result<V
             };
             derivatives.push((piece[1] - piece[0]) * (3.0 / chord));
         }
-        let mut handles: Vec<Vec2> =
-            p.iter().take(count).enumerate().map(|(i, point)| *point + derivatives[i] * TANGENT_HANDLE_LENGTH_SCALE).collect();
+        let mut handles: Vec<Vec2> = p.iter().take(count).enumerate().map(|(i, point)| *point + derivatives[i] * handle_unit(p, true, i)).collect();
         for i in 0..count {
             if handles[i].dist(p[i]) <= 1e-9 {
                 let next = p.get(i + 1).copied().unwrap_or(p[0]);
@@ -287,17 +307,13 @@ pub fn fit_tangent_handles(p: &[Vec2], periodic: bool) -> crate::model::Result<V
         let derivative = if tangent { span.2 } else { span.3 } / chord.max(1e-9);
         derivatives.push(derivative);
     }
-    let mut handles: Vec<Vec2> = p
-        .iter()
-        .enumerate()
-        .map(|(i, point)| {
-            if i + 1 == p.len() {
-                *point - derivatives[i] * TANGENT_HANDLE_LENGTH_SCALE
-            } else {
-                *point + derivatives[i] * TANGENT_HANDLE_LENGTH_SCALE
-            }
-        })
-        .collect();
+    let mut handles: Vec<Vec2> =
+        p.iter()
+            .enumerate()
+            .map(|(i, point)| {
+                if i + 1 == p.len() { *point - derivatives[i] * handle_unit(p, false, i) } else { *point + derivatives[i] * handle_unit(p, false, i) }
+            })
+            .collect();
     for i in 0..handles.len() {
         if handles[i].dist(p[i]) <= 1e-9 {
             let direction = if i + 1 < p.len() { (p[i + 1] - p[i]).normalized() } else { (p[i] - p[i - 1]).normalized() };
@@ -308,7 +324,7 @@ pub fn fit_tangent_handles(p: &[Vec2], periodic: bool) -> crate::model::Result<V
     Ok(handles)
 }
 
-/// Cubic pieces using tangent-handle positions. The inverse handle scale preserves the natural
+/// Cubic pieces using tangent-handle positions. Dividing by [`handle_unit`] preserves the natural
 /// interpolant; adjacent spans scale each derivative by their chord so the tangent remains smooth.
 pub fn fit_beziers_with_handles(p: &[Vec2], handles: &[Vec2], periodic: bool) -> crate::model::Result<Vec<[Vec2; 4]>> {
     if handles.is_empty() {
@@ -327,7 +343,7 @@ pub fn fit_beziers_with_handles(p: &[Vec2], handles: &[Vec2], periodic: bool) ->
         .map(|(i, handle)| {
             let point = p[i];
             let vector = if periodic || i + 1 < p.len() { *handle - point } else { point - *handle };
-            vector / TANGENT_HANDLE_LENGTH_SCALE
+            vector / handle_unit(p, periodic, i)
         })
         .collect();
     let spans = if periodic { count } else { p.len() - 1 };

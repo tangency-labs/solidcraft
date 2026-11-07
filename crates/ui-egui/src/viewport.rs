@@ -2960,7 +2960,9 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
                 }
             }
         }
-        for (index, mirror) in selected_spline_handle_mirrors(&ss.sketch, &s.selection) {
+        // A guide's mirrored end is only for dragging its handle: a tool or dialog never snaps to it.
+        let mirrors = if app.tool.is_none() && app.dialog.is_none() { selected_spline_handle_mirrors(&ss.sketch, &s.selection) } else { Vec::new() };
+        for (index, mirror) in mirrors {
             let Some(point) = ss.sketch.points.get(index) else { continue };
             if shown.as_ref().is_some_and(|f| !f.takes(point)) {
                 continue;
@@ -5525,12 +5527,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let pointer_at = on_plane(app, a).unwrap_or(at);
                     let grab = (!dragged_with(app, &id).is_empty()).then_some(pointer_at);
                     // The mirrored end of a guide moves opposite to its stored handle point.
-                    let (offset, mirrored) = app
-                        .session
-                        .doc
+                    // From the sketch as shown: projected geometry may have moved a fit point.
+                    let (offset, mirrored) = crate::open_meshing::shown_world(app)
                         .sketch(sketch)
-                        .ok()
-                        .map_or((Vec2::ZERO, false), |sk| point_drag_mapping(sk, &id, at, pointer_at, &app.session.selection));
+                        .map_or((Vec2::ZERO, false), |ss| point_drag_mapping(&ss.sketch, &id, at, pointer_at, &app.session.selection));
                     app.viewport.point_drag = Some((id, app.session.undo.len(), grab, offset, mirrored))
                 }
                 Some(Hit::SketchCurve { sketch, id, .. } | Hit::SketchMidpoint { sketch, id, .. }) if Some(sketch) == active => {

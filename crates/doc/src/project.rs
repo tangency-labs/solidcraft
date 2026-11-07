@@ -1248,15 +1248,12 @@ fn project_sketch_curve(sk: &Sketch, from: &Plane, ci: usize, to: &Plane) -> Vec
             (Some(c), Some(m)) => vec![LinkGeom::Ellipse { c: map(c), major: map(m), minor: *r }],
             _ => Vec::new(),
         },
-        Some(CurveKind::Spline { pts, control: false, degree, periodic, nurbs: None, handles }) if parallel && !handles.is_empty() => {
+        Some(CurveKind::Spline { pts, control: false, periodic, nurbs: None, handles, .. }) if parallel && !handles.is_empty() => {
             let p: Option<Vec<Vec2>> = pts.iter().map(|q| sk.point(*q).map(map)).collect();
             let tangent_handles: Option<Vec<Vec2>> = handles.iter().map(|q| sk.point(*q).map(map)).collect();
             let Some((p, tangent_handles)) = p.zip(tangent_handles) else { return Vec::new() };
-            if solidcraft_sketch::fit_tangent_handles(&p, *periodic)
-                .is_ok_and(|natural| natural.iter().zip(&tangent_handles).all(|(a, b)| a.dist(*b) <= 1e-9))
-            {
-                return vec![LinkGeom::Spline { pts: p, control: false, degree: *degree, periodic: *periodic, nurbs: None }];
-            }
+            // One curve per span whether or not a handle has been moved, so turning a handle keeps
+            // the projected layout and what is constrained to it (#6502).
             let Ok(pieces) = solidcraft_sketch::fit_beziers_with_handles(&p, &tangent_handles, *periodic) else { return Vec::new() };
             pieces.into_iter().map(|piece| LinkGeom::Spline { pts: piece.to_vec(), control: true, degree: 3, periodic: false, nurbs: None }).collect()
         }
