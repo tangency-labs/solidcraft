@@ -33,6 +33,13 @@ later pull requests, one topic at a time, each pointing at its entry here.
 
 ## Terms
 
+### abbe number
+
+Number measuring optical dispersion as `(nd - 1) / (nF - nC)` at the Fraunhofer d, F and C wavelengths.
+
+- **In SolidCraft:** Glass `model.dispersion.abbe_number`; larger values give less chromatic dispersion.
+- **For translators:** an optical material quantity, not a sample or photon count.
+
 ### appearance
 
 How a body, face or component looks on screen and in renders.
@@ -106,6 +113,18 @@ a tree.
 - **For translators:** not the web browser. A language with its own CAD word for the tree may use
   it (in French, *arborescence*), so that "browser" and "web browser" don't share a word. See
   *web browser*.
+
+### caustic
+
+A concentration or structured redistribution of light caused by reflection or refraction.
+
+- **In SolidCraft:** Render job `caustics` controls the photon estimate for point and hard directional sources; finite sources also have camera-path estimates.
+
+### chromatic dispersion
+
+Variation of refractive index with wavelength that can separate colours along refracted paths.
+
+- **In SolidCraft:** Glass `model.dispersion`; the current renderer uses three representative wavelength bands.
 
 ### component
 
@@ -245,6 +264,12 @@ makes is a *group*.
 - **Don't use:** folder for a group.
 - **Elsewhere:** folder, node.
 - **For translators:** not a group and not a folder on disk.
+
+### gather radius
+
+Radius of the surface neighbourhood used to estimate illumination from nearby photon hits.
+
+- **In SolidCraft:** Caustics `radius_mm`; smaller values preserve sharper details and require more photons to reduce noise.
 
 ### group
 
@@ -444,6 +469,12 @@ a standard size.
 - **Don't use:** library part, part (on its own), content.
 - **Elsewhere:** standard part, library part, fastener, catalogue part.
 - **For translators:** see *Words with more than one meaning*, "part".
+
+### thin-film interference
+
+Interference between coherent optical waves reflected at the interfaces of a thin layer.
+
+- **In SolidCraft:** Glass `model.thin_film`, with `ior` and `thickness_nm`; this differs from an incoherent ideal Glass sheet.
 
 ### timeline
 

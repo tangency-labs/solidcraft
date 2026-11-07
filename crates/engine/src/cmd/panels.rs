@@ -42,7 +42,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "Save Layout",
         wire::Save,
         wire::SaveReply,
-        "name, overwrite?: false, expected_revision?: save complete envelope in injected catalogue"
+        "name, replace?: false (overwrite accepted for compatibility), expected_revision?: save complete envelope in injected catalogue"
     ),
     command!(
         "layout.workspace.select",

@@ -6,9 +6,9 @@ use crate::model::{Integrator, MAX_MAGNITUDE, MAX_STEPS, Model, Settings};
 use crate::system::System;
 use crate::{DynamicsError, Result, Sample, Stats, Trajectory};
 
-/// Dormand–Prince 5(4) tableau (the system is autonomous, so the nodes are not needed): stage
-/// weights, fifth-order weights and the difference between the fifth- and fourth-order weights
-/// (the error estimate).
+/// Dormand–Prince 5(4) tableau: nodes, stage weights, fifth-order weights and the difference
+/// between the fifth- and fourth-order weights (the error estimate).
+const DP_C: [f64; 7] = [0.0, 1.0 / 5.0, 3.0 / 10.0, 4.0 / 5.0, 8.0 / 9.0, 1.0, 1.0];
 const DP_A: [[f64; 6]; 7] = [
     [0.0; 6],
     [1.0 / 5.0, 0.0, 0.0, 0.0, 0.0, 0.0],
@@ -58,17 +58,18 @@ struct Run<'a> {
 }
 
 impl Run<'_> {
-    fn deriv(&self, y: &[f64]) -> Result<Vec<f64>> {
-        self.sys.accelerations(y).map(|a| a.ydot)
+    fn deriv(&self, t: f64, y: &[f64]) -> Result<Vec<f64>> {
+        self.sys.accelerations(t, y).map(|a| a.ydot)
     }
 
     /// Normalise, project and check a new state.
     fn finish_step(&mut self, y: &mut [f64], t: f64) -> Result<()> {
         self.sys.normalize(y).map_err(|e| at_time(e, t))?;
         if self.settings.projection {
-            self.sys.project_positions(y, self.settings.projection_tol).map_err(|e| at_time(e, t))?;
-            self.sys.project_velocities(y).map_err(|e| at_time(e, t))?;
+            self.sys.project_positions(t, y, self.settings.projection_tol).map_err(|e| at_time(e, t))?;
+            self.sys.project_velocities(t, y).map_err(|e| at_time(e, t))?;
         }
+        self.sys.resync(y);
         if !y.iter().all(|x| x.is_finite() && x.abs() < MAX_MAGNITUDE) {
             return Err(DynamicsError::Diverged { time: t });
         }
@@ -82,23 +83,23 @@ impl Run<'_> {
         Ok(())
     }
 
-    fn rk4(&mut self, y: &[f64], h: f64) -> Result<Vec<f64>> {
-        let k1 = self.deriv(y)?;
-        let k2 = self.deriv(&combine(y, std::slice::from_ref(&k1), &[0.5], h))?;
-        let k3 = self.deriv(&combine(y, std::slice::from_ref(&k2), &[0.5], h))?;
-        let k4 = self.deriv(&combine(y, std::slice::from_ref(&k3), &[1.0], h))?;
+    fn rk4(&mut self, t: f64, y: &[f64], h: f64) -> Result<Vec<f64>> {
+        let k1 = self.deriv(t, y)?;
+        let k2 = self.deriv(t + 0.5 * h, &combine(y, std::slice::from_ref(&k1), &[0.5], h))?;
+        let k3 = self.deriv(t + 0.5 * h, &combine(y, std::slice::from_ref(&k2), &[0.5], h))?;
+        let k4 = self.deriv(t + h, &combine(y, std::slice::from_ref(&k3), &[1.0], h))?;
         Ok(combine(y, &[k1, k2, k3, k4], &[1.0 / 6.0, 1.0 / 3.0, 1.0 / 3.0, 1.0 / 6.0], h))
     }
 
     /// One Dormand–Prince step: the fifth-order state and the scaled error norm.
-    fn dopri(&mut self, y: &[f64], h: f64, rel_tol: f64, abs_tol: f64) -> Result<(Vec<f64>, f64)> {
+    fn dopri(&mut self, t: f64, y: &[f64], h: f64, rel_tol: f64, abs_tol: f64) -> Result<(Vec<f64>, f64)> {
         let mut ks: Vec<Vec<f64>> = Vec::with_capacity(7);
-        for a in DP_A.iter().take(6) {
+        for (a, c) in DP_A.iter().zip(DP_C).take(6) {
             let stage = combine(y, &ks, a, h);
-            ks.push(self.deriv(&stage)?);
+            ks.push(self.deriv(t + c * h, &stage)?);
         }
         let y5 = combine(y, &ks, &DP_B, h);
-        ks.push(self.deriv(&y5)?);
+        ks.push(self.deriv(t + h, &y5)?);
         let err = combine(&vec![0.0; y.len()], &ks, &DP_E, h);
         let n = y.len().max(1) as f64;
         let sum: f64 = err
@@ -123,7 +124,7 @@ impl Run<'_> {
                 let h = span / n;
                 for _ in 0..n as usize {
                     self.count_step(*t)?;
-                    let mut next = self.rk4(y, h).map_err(|e| at_time(e, *t))?;
+                    let mut next = self.rk4(*t, y, h).map_err(|e| at_time(e, *t))?;
                     *t += h;
                     self.finish_step(&mut next, *t)?;
                     *y = next;
@@ -136,7 +137,7 @@ impl Run<'_> {
                     self.count_step(*t)?;
                     let remaining = t_end - *t;
                     let h = h_next.clamp(min_step, max_step).min(remaining);
-                    let (mut next, err) = self.dopri(y, h, rel_tol, abs_tol).map_err(|e| at_time(e, *t))?;
+                    let (mut next, err) = self.dopri(*t, y, h, rel_tol, abs_tol).map_err(|e| at_time(e, *t))?;
                     // The usual controller: 0.9·err^(−1/5), within [0.2, 5].
                     let factor = if err > 0.0 { (0.9 * err.powf(-0.2)).clamp(0.2, 5.0) } else { 5.0 };
                     if err <= 1.0 {
@@ -164,11 +165,18 @@ impl Run<'_> {
     }
 
     fn sample(&mut self, y: &[f64], t: f64) -> Result<Sample> {
-        let acc = self.sys.accelerations(y).map_err(|e| at_time(e, t))?;
-        let constraint_error = self.sys.constraint_error(y);
+        let acc = self.sys.accelerations(t, y).map_err(|e| at_time(e, t))?;
+        let constraint_error = self.sys.constraint_error(t, y);
         self.stats.max_constraint_error = self.stats.max_constraint_error.max(constraint_error);
         self.stats.redundant_equations = self.stats.redundant_equations.max(acc.row_count().saturating_sub(acc.rank));
-        Ok(Sample { time: t, bodies: self.sys.body_states(y), joints: self.sys.joint_results(y, &acc), energy: self.sys.energy(y), constraint_error })
+        Ok(Sample {
+            time: t,
+            bodies: self.sys.body_states(y),
+            joints: self.sys.joint_results(y, &acc),
+            drives: self.sys.drive_efforts(&acc),
+            energy: self.sys.energy(y),
+            constraint_error,
+        })
     }
 }
 
@@ -177,11 +185,12 @@ impl Run<'_> {
 pub fn simulate(model: &Model, settings: &Settings) -> Result<Trajectory> {
     settings.validate()?;
     let sys = System::new(model, settings.baumgarte)?;
-    let mut y = System::initial_state(model)?;
-    // An inconsistent start (frames a little apart, velocities the joints don't allow) is
-    // brought onto the joints first, whether or not later steps project.
-    sys.project_positions(&mut y, settings.projection_tol).map_err(|e| at_time(e, 0.0))?;
-    sys.project_velocities(&mut y).map_err(|e| at_time(e, 0.0))?;
+    let mut y = sys.initial_state(model)?;
+    // An inconsistent start (frames a little apart, velocities the joints don't allow, drives
+    // starting elsewhere) is brought onto the joints first, whether or not later steps project.
+    sys.project_positions(0.0, &mut y, settings.projection_tol).map_err(|e| at_time(e, 0.0))?;
+    sys.project_velocities(0.0, &mut y).map_err(|e| at_time(e, 0.0))?;
+    sys.resync(&mut y);
     let mut run = Run { sys: &sys, settings, stats: Stats::default() };
     let count = (settings.duration / settings.output_interval).ceil() as usize;
     let mut samples = Vec::with_capacity(count + 1);
