@@ -27,5 +27,8 @@ Command icons are original SVG masters compiled through `crates/ui-egui/src/icon
 ## Text
 Every label, tooltip and message goes through the catalogs: `skills/solidcraft-ui-text/SKILL.md`. A new behaviour that is on by default: `skills/solidcraft-preferences/SKILL.md`.
 
+## Drawing workspace
+The Drawing UI follows `docs/design/drawing-ui/README.md` and its decision log `docs/design/drawing-ui/decisions.md`: where each piece lives, the ribbon contents, panel footers and the state words. Cite the boards and decision numbers you build from in the pull request, and say what differs and why.
+
 ## Look at the result
 Run the app, drive it and read the screenshot: `skills/solidcraft-agent-tools/SKILL.md`. A UI scenario (`crates/ui-egui/tests/scenarios/*.json`) covers the clicks; see `skills/solidcraft-tests/SKILL.md`. Work that takes long must not block the window: `skills/solidcraft-performance/SKILL.md`.
