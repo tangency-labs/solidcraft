@@ -118,6 +118,14 @@ proof. Existing GPU certification checks welded closed/oriented homogeneous
 connected topology and strict convex-parent nesting; it does not independently
 prove a nonconvex leaf free from every self-intersection.
 
+The current source also uses the captured root bounds to prove vacuum before
+classifying a future silhouette: an origin outside that box is in air when the
+existing padded box entry misses or lies beyond the existing launch minimum.
+This reuses the query's first box-entry calculation. Near-boundary and in-bounds
+origins retain the complete query and its refusal policy. No origin, tolerance or
+sample stream is changed. The material-model publication record separately
+qualifies this newer proof; the historical suite below predates it.
+
 The additional query runs only with explicit nested-media mode. It has a fixed
 32-entry node stack and 32-entry depth array (256 bytes of shader private array
 state), under the existing depth 30 host-built BVH. There is no new owned host
@@ -213,3 +221,35 @@ ray-origin-to-entry difference plus the remaining ray segment; it does not form
 a rounded world endpoint. Geometry crossings are tested up to the true endpoint,
 without applying the separate analytic-emitter self-intersection allowance.
 The scatter history used by area-light MIS carries its associated local offset.
+
+## Certificate for the uploaded optical geometry
+
+Closed GPU Glass now also validates the positions actually consumed by the
+shader: source positions minus the camera target, rounded to f32. The original
+source certificate remains, and the uploaded-position certificate must pass as
+well. The legacy treatment of source-degenerate triangles remains: redundant
+pole faces in a latitude/longitude sphere mesh are skipped for both thin sheets
+and closed bodies. A selected optical body with no retained boundary refuses.
+Every retained face must remain valid after conversion; a face that collapses or
+reverses orientation in uploaded f32 positions refuses before rendering. The
+remaining closed boundary must also pass its topology and orientation proofs.
+
+Closed topology additionally requires one circular connected face fan at every
+welded coordinate vertex. A pair of shells joined only at a pinched vertex cannot
+pass solely because each edge has an opposite partner. The vertex-link proof
+reuses the existing prepaid face/edge scratch without adding an allocation.
+
+Optical bounds, nesting hierarchy and BVH geometry use the actual uploaded
+positions. A valid original mesh therefore cannot supply a certificate for a
+different rounded boundary. The existing coordinate, tolerance, bounded-work and
+cancellation policies remain. This strengthens admission; it does not prove
+general absence of self-intersection or universal exact watertightness.
+
+See the [detailed Glass matrix](render-glass-complete.md) for supported geometry,
+material limits and the headless evidence example. These source changes have
+their own validation scope; earlier captured renders do not qualify them.
+The same geometric boundary certificate surrounds the optional
+[rough, dispersive and coated interface models](render-glass-material-models.md).
+Their authored response changes transport at a valid boundary; it does not relax
+topology, nesting or origin admission. Photon-medium ambiguities fail separately
+and do not use the camera-path failure-fraction allowance.

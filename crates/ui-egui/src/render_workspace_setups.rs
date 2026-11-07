@@ -108,6 +108,7 @@ pub(super) fn draft(app: &SolveApp) -> Result<RenderSetup, String> {
             RenderJob::CpuRaytrace {
                 transparent_background: view.transparent,
                 options: Box::new(CpuJob {
+                    caustics: view.studio.caustics,
                     volume: view.studio.volume,
                     sun: view.studio.sun_enabled.then_some(view.studio.sun),
                     sky: (view.cpu.environment == cpu::Environment::Sky).then_some(SkyEnvironment::Sky {
@@ -154,6 +155,7 @@ pub(super) fn draft(app: &SolveApp) -> Result<RenderSetup, String> {
             RenderJob::GpuPath {
                 transparent_background: view.transparent,
                 options: Box::new(GpuJob {
+                    caustics: studio.caustics,
                     samples: view.samples,
                     max_depth: view.max_depth,
                     seed: view.seed,
@@ -323,7 +325,9 @@ fn load_values(view: &mut super::ViewState, setup: RenderSetup) {
                 view.studio.sun = sun;
                 view.studio.lighting_enabled = true;
             }
+            view.studio.caustics = options.caustics;
             view.raytrace = RaytraceOptions {
+                caustics: options.caustics,
                 sun: options.sun.map(Box::new),
                 volume: options.volume,
                 adaptive: options.adaptive.map(Box::new),
@@ -380,6 +384,7 @@ fn load_values(view: &mut super::ViewState, setup: RenderSetup) {
             view.max_depth = options.max_depth;
             view.seed = options.seed;
             view.studio.aging = options.aging.clone();
+            view.studio.caustics = options.caustics;
             view.studio.nested_media = options.nested_media;
             view.studio.volume = options.volume;
             view.studio.adaptive = options.adaptive;
@@ -568,6 +573,7 @@ pub(super) fn sync_revision(app: &mut SolveApp) {
         raytrace.output,
         raytrace.lens,
         raytrace.path,
+        raytrace.caustics,
         raytrace.sun,
         raytrace.sky,
         raytrace.volume,
@@ -589,6 +595,7 @@ pub(super) fn sync_revision(app: &mut SolveApp) {
         cpu.samples,
         studio.aging,
         studio.nested_media,
+        studio.caustics,
         studio.volume,
         studio.adaptive,
         studio.transmission_samples,

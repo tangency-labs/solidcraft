@@ -51,6 +51,7 @@ impl Boundary {
 
 #[derive(Clone, Debug)]
 pub(super) struct Glass {
+    pub model: Option<solidcraft_engine::render::glass_model::GlassModel>,
     pub recipe: Option<&'static str>,
     pub ior: f64,
     pub absorption: [f64; 3],
@@ -61,7 +62,16 @@ pub(super) struct Glass {
 }
 impl Default for Glass {
     fn default() -> Self {
-        Self { recipe: None, ior: 1.5, absorption: [0.0; 3], boundary: Boundary::Closed, thickness: 1.0, shadows: false, subsurface: None }
+        Self {
+            model: None,
+            recipe: None,
+            ior: 1.5,
+            absorption: [0.0; 3],
+            boundary: Boundary::Closed,
+            thickness: 1.0,
+            shadows: false,
+            subsurface: None,
+        }
     }
 }
 impl Glass {
@@ -74,6 +84,7 @@ impl Glass {
             GlassBoundary::Closed => (Boundary::Closed, 1.0),
         };
         Ok(Self {
+            model: None,
             subsurface: None,
             recipe: Some(preset.id),
             ior: recipe.dielectric_ior,
@@ -164,6 +175,7 @@ impl Binding {
         binding.saved_source = Some(optics);
         binding.glass_enabled = true;
         binding.glass = Glass {
+            model: optics.model,
             recipe: None,
             ior: optics.ior,
             absorption: optics.absorption_per_mm,
@@ -200,6 +212,7 @@ impl Binding {
     }
     fn optics(&self) -> solidcraft_engine::doc::render_optics::OpticalMaterial {
         solidcraft_engine::doc::render_optics::OpticalMaterial {
+            model: self.glass.model,
             ior: self.glass.ior,
             absorption_per_mm: self.glass.absorption,
             boundary: match self.glass.boundary {
@@ -526,6 +539,10 @@ pub(super) fn params(app: &SolveApp, params: &mut Value) -> Result<(), String> {
             wire["boundary"] = json!(value.boundary.wire());
             wire["thickness_mm"] = json!(if value.boundary == Boundary::Thin { value.thickness } else { 0.0 });
             wire["shadow_transmission"] = json!(value.shadows);
+            if let Some(model) = value.model {
+                model.validate(value.ior).map_err(|e| e.to_string())?;
+                wire["model"] = json!(model);
+            }
             if let Some(subsurface) = value.subsurface {
                 Transmission::new(Vec3::new(r, g, b), (value.boundary == Boundary::Thin).then_some(value.thickness))
                     .map_err(|e| e.to_string())?
@@ -737,6 +754,7 @@ fn glass_controls(app: &mut SolveApp, ui: &mut egui::Ui, binding: &mut Binding) 
     let glass = &mut binding.glass;
     let mut changed = false;
     ui.add_enabled_ui(binding.glass_enabled, |ui| {
+        changed |= advanced_glass_controls(app, ui, glass);
         let mut boundary = match glass.boundary {
             Boundary::Closed => 0,
             Boundary::Thin => 1,
@@ -827,6 +845,57 @@ fn glass_controls(app: &mut SolveApp, ui: &mut egui::Ui, binding: &mut Binding) 
     }
     note(app, ui, "render.appearance_editor.glass_note");
     note(app, ui, if cpu { "render.cpu_material_certification" } else { "render.material_certification" });
+}
+
+fn advanced_glass_controls(app: &SolveApp, ui: &mut egui::Ui, glass: &mut Glass) -> bool {
+    use solidcraft_engine::render::glass_model::{Dispersion, GlassModel, ThinFilm};
+    let before = glass.model;
+    let mut enabled = before.is_some();
+    let toggle = ui_kit::checkbox(ui, app.tr("render.glass_model_enable"), &mut enabled);
+    crate::scenario::publish_target("render:glass:model-enable", toggle.rect);
+    if toggle.changed() {
+        glass.model = enabled.then(GlassModel::default);
+    }
+    if let Some(model) = &mut glass.model {
+        ui_kit::row(ui, app.tr("render.glass_roughness"), |ui| {
+            let field = ui_kit::number_field_preserving(ui, &mut model.roughness, 0.0..=1.0, 0.01, "");
+            crate::scenario::publish_target("render:glass:roughness", field.rect);
+            field
+        });
+        let mut dispersion = model.dispersion.is_some();
+        let toggle = ui_kit::checkbox(ui, app.tr("render.glass_dispersion"), &mut dispersion);
+        crate::scenario::publish_target("render:glass:dispersion-enable", toggle.rect);
+        if toggle.changed() {
+            model.dispersion = dispersion.then_some(Dispersion { abbe_number: 50.0 });
+        }
+        if let Some(dispersion) = &mut model.dispersion {
+            ui_kit::row(ui, app.tr("render.glass_abbe"), |ui| {
+                let field = ui_kit::number_field_preserving(ui, &mut dispersion.abbe_number, 5.0..=200.0, 0.5, "");
+                crate::scenario::publish_target("render:glass:abbe", field.rect);
+                field
+            });
+        }
+        let mut film = model.thin_film.is_some();
+        let toggle = ui_kit::checkbox(ui, app.tr("render.glass_film"), &mut film);
+        crate::scenario::publish_target("render:glass:film-enable", toggle.rect);
+        if toggle.changed() {
+            model.thin_film = film.then_some(ThinFilm { ior: 1.35, thickness_nm: 400.0 });
+        }
+        if let Some(film) = &mut model.thin_film {
+            ui_kit::row(ui, app.tr("render.glass_film_ior"), |ui| {
+                let field = ui_kit::number_field_preserving(ui, &mut film.ior, 1.0..=3.0, 0.01, "");
+                crate::scenario::publish_target("render:glass:film-ior", field.rect);
+                field
+            });
+            ui_kit::row(ui, app.tr("render.glass_film_thickness"), |ui| {
+                let field = ui_kit::number_field_preserving(ui, &mut film.thickness_nm, 0.0..=100000.0, 1.0, " nm");
+                crate::scenario::publish_target("render:glass:film-thickness", field.rect);
+                field
+            });
+        }
+        ui_kit::text(ui, app.tr("render.glass_model_help"), ui_kit::Text::Note("render.glass_model_help"));
+    }
+    before != glass.model
 }
 
 fn coat_controls(app: &mut SolveApp, ui: &mut egui::Ui, binding: &mut Binding) -> bool {
@@ -1176,7 +1245,7 @@ fn save_optics(app: &mut SolveApp, binding: &Binding) -> Result<(), String> {
         setup.camera = saved.camera;
     }
     let optics = json!({"ior":value.ior,"absorption_per_mm":value.absorption,"boundary":value.boundary.wire(),
-        "thickness_mm":if value.boundary==Boundary::Thin {value.thickness} else {0.0},"shadow_transmission":value.shadows,"subsurface":value.subsurface});
+        "thickness_mm":if value.boundary==Boundary::Thin {value.thickness} else {0.0},"shadow_transmission":value.shadows,"subsurface":value.subsurface,"model":value.model});
     app.run(
         "render.optics.bind",
         json!({"name":name,"set":setup,"body_index":binding.target.ordinal,"body_name":binding.target.name,

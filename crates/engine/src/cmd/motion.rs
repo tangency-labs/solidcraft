@@ -21,6 +21,9 @@ use crate::schema::motion::{
     FindLimitsResult, MotionListParams, MotionStudies, MotionStudyDeleteParams, MotionStudyDeleted, MotionStudyInfo, MotionStudyKeyInfo,
     MotionStudyParams, MotionStudySaved,
 };
+use crate::schema::motion_play::{
+    DriveReport, ExportParams, PartPose, PlayParams, Pose, StudyExport, StudyExported, StudyPlayed, StudySample, UnmovedJoint,
+};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
@@ -56,6 +59,8 @@ const EXPLODE_CREATE_CONTRACT: TypedContract<ExplodeCreateParams> = TypedContrac
 const EXPLODE_SHOW_CONTRACT: TypedContract<ExplodeShowParams> = TypedContract::new();
 const EXPLODE_LIST_CONTRACT: TypedContract<ExplodeListParams> = TypedContract::new();
 const EXPLODE_DELETE_CONTRACT: TypedContract<ExplodeDeleteParams> = TypedContract::new();
+const PLAY_CONTRACT: TypedContract<PlayParams> = TypedContract::new();
+const EXPORT_CONTRACT: TypedContract<ExportParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("contact.enable_sets", "Enable Contact Sets", crate::checked!("contact.enable_sets", enable_sets))
@@ -111,15 +116,21 @@ pub static COMMANDS: &[CommandSpec] = &[
             "name?; study? (edit an existing one); steps? (timeline length, default 100); keys: [{joint, index?, points: [[step, value], …]}] \
          (values: degrees for angles, mm for distances, or expressions)",
         ),
-    CommandSpec::new("motion.play", "Play Motion Study", play).icon("play").params(
-        "study: id|name; step (0…steps) — sets the joints to the study's values there (contact sets stop them); quiet?: bool \
+    CommandSpec::new("motion.play", "Play Motion Study", crate::checked!("motion.play", play))
+        .icon("play")
+        .contract(&PLAY_CONTRACT)
+        .output(output_schema_for::<StudyPlayed>)
+        .params(
+            "study: id|name; step (0…steps) — sets the joints to the study's values there (contact sets stop them); quiet?: bool \
          (positions of only the occurrences that moved) → values: [{joint, values: [{name, value, unit}]}], positions, moved: whether \
          any occurrence moved, unmoved: [{joint, name, reason}] (keyed joints that can move nothing, such as a chain joined to \
          nothing grounded)",
-    ),
-    CommandSpec::new("motion.export", "Export Motion Study", export)
+        ),
+    CommandSpec::new("motion.export", "Export Motion Study", crate::checked!("motion.export", export))
         .icon("export")
         .noundo()
+        .contract(&EXPORT_CONTRACT)
+        .output(output_schema_for::<StudyExported>)
         .params("study; samples? (default steps + 1); path? (.json or .csv) → occurrence positions per step (the design is not changed)"),
     CommandSpec::new("motion.export_animation", "Export Motion Animation", animation::export).icon("export").noundo().params(
         "study: id|name, or joint: id|name with from and to (degrees for angles, mm for distances, or expressions) and index?, or \
@@ -820,8 +831,15 @@ pub(super) fn moved<'a>(before: &'a [(String, Mat)], after: &'a [(String, Mat)])
     after.iter().zip(before).filter(|((_, a), (_, b))| a.iter().flatten().zip(b.iter().flatten()).any(|(x, y)| (x - y).abs() > 1e-9)).map(|(a, _)| a)
 }
 
-fn pose_json(m: &Mat) -> Value {
-    json!({"origin": [m[3][0], m[3][1], m[3][2]], "x": [m[0][0], m[0][1], m[0][2]], "y": [m[1][0], m[1][1], m[1][2]], "z": [m[2][0], m[2][1], m[2][2]]})
+/// Where occurrence `name` is placed by `m`: its origin and axes.
+fn part_pose(name: &str, m: &Mat) -> PartPose {
+    let row = |i: usize| m.get(i).map_or([0.0; 3], |r| [r[0], r[1], r[2]]);
+    PartPose { occurrence: name.to_string(), pose: Pose { origin: row(3), x: row(0), y: row(1), z: row(2) } }
+}
+
+/// `drive_with_contact`'s report, typed. Its other callers read it as JSON, so it stays JSON there.
+fn drive_report(cmd: &str, out: Value) -> Result<DriveReport> {
+    serde_json::from_value(out).map_err(|e| bad(cmd, e.to_string()))
 }
 
 fn play(s: &mut Session, p: &Value) -> Result<Value> {
@@ -831,22 +849,23 @@ fn play(s: &mut Session, p: &Value) -> Result<Value> {
     let step = p.get("step").and_then(Value::as_f64).filter(|x| x.is_finite()).ok_or_else(|| bad(cmd, "`step` must be a number"))?;
     let want = values_at(s, &m, step.clamp(0.0, f64::from(m.steps)));
     let before = positions(s);
-    let (mut out, sol) = drive_with_contact(s, &want, &keyed(&m))?;
+    let (out, sol) = drive_with_contact(s, &want, &keyed(&m))?;
+    let drive = drive_report(cmd, out)?;
     let after = positions(s);
     let moved: Vec<&(String, Mat)> = moved(&before, &after).collect();
-    out["moved"] = json!(!moved.is_empty());
+    let any_moved = !moved.is_empty();
     let shown: Vec<&(String, Mat)> = if bool_(p, "quiet").unwrap_or(false) { moved } else { after.iter().collect() };
-    out["positions"] = shown.iter().map(|(n, t)| json!({"occurrence": n, "pose": pose_json(t)})).collect();
+    let positions = shown.iter().map(|(n, t)| part_pose(n, t)).collect();
     let joints: BTreeSet<u64> = m.keys.iter().map(|k| k.joint).collect();
-    out["unmoved"] = joints
+    let unmoved = joints
         .iter()
         .filter_map(|id| {
-            let (why, _) = cannot_move(s, &sol, *id)?;
+            let (reason, _) = cannot_move(s, &sol, *id)?;
             let name = s.doc.assembly.joints.iter().find(|j| j.id == *id).map(|j| j.name.clone());
-            Some(json!({"joint": id, "name": name, "reason": why}))
+            Some(UnmovedJoint { joint: *id, name, reason })
         })
         .collect();
-    Ok(out)
+    typed_reply(cmd, StudyPlayed { drive, moved: any_moved, positions, unmoved, param_warnings: Vec::new() })
 }
 
 fn export(s: &mut Session, p: &Value) -> Result<Value> {
@@ -864,49 +883,55 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         let step = f64::from(m.steps) * k as f64 / (samples - 1) as f64;
         let want = values_at(&t, &m, step);
         let (r, _) = drive_with_contact(&mut t, &want, &keyed(&m))?;
-        rows.push(json!({
-            "step": step,
-            "stopped_by_contact": r["stopped_by_contact"],
-            "stopped_by_loop": r["stopped_by_loop"],
-            "positions": positions(&t).iter().map(|(n, x)| json!({"occurrence": n, "pose": pose_json(x)})).collect::<Vec<_>>(),
-        }));
+        let r = drive_report(cmd, r)?;
+        rows.push(StudySample {
+            step,
+            stopped_by_contact: r.stopped_by_contact,
+            stopped_by_loop: r.stopped_by_loop,
+            positions: positions(&t).iter().map(|(n, x)| part_pose(n, x)).collect(),
+        });
     }
-    let out = json!({"study": m.name, "steps": m.steps, "samples": rows});
     if let Some(path) = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096) {
+        let count = rows.len();
         let text = if path.to_ascii_lowercase().ends_with(".csv") {
             let mut c = String::from("step,occurrence,x,y,z,xx,xy,xz,yx,yy,yz,zx,zy,zz\n");
             for r in &rows {
-                for p in r["positions"].as_array().into_iter().flatten() {
-                    let pose = &p["pose"];
-                    let n = |k: &str, i: usize| pose[k][i].as_f64().unwrap_or(0.0);
+                for at in &r.positions {
+                    let [o, x, y, z] = [at.pose.origin, at.pose.x, at.pose.y, at.pose.z];
+                    // The step as JSON writes it (`0.0`, not `0`), as the file always had it.
                     c += &format!(
                         "{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
-                        r["step"],
-                        p["occurrence"].as_str().unwrap_or_default().replace(',', " "),
-                        n("origin", 0),
-                        n("origin", 1),
-                        n("origin", 2),
-                        n("x", 0),
-                        n("x", 1),
-                        n("x", 2),
-                        n("y", 0),
-                        n("y", 1),
-                        n("y", 2),
-                        n("z", 0),
-                        n("z", 1),
-                        n("z", 2)
+                        Value::from(r.step),
+                        at.occurrence.replace(',', " "),
+                        o[0],
+                        o[1],
+                        o[2],
+                        x[0],
+                        x[1],
+                        x[2],
+                        y[0],
+                        y[1],
+                        y[2],
+                        z[0],
+                        z[1],
+                        z[2]
                     );
                 }
             }
             c
         } else {
-            serde_json::to_string_pretty(&out).unwrap_or_default()
+            // Through a `Value`, whose keys are sorted, so the file reads as it always did.
+            let samples = StudyExport::Samples { study: m.name, steps: m.steps, samples: rows };
+            serde_json::to_value(&samples).and_then(|v| serde_json::to_string_pretty(&v)).unwrap_or_default()
         };
         solidcraft_io::vfs::check(path).map_err(|e| EngineError::Other(e.to_string()))?;
         solidcraft_io::write_atomic(std::path::Path::new(path), text.as_bytes(), false).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-        return Ok(json!({"path": path, "samples": rows.len()}));
+        return typed_reply(
+            cmd,
+            StudyExported { export: StudyExport::Written { path: path.to_string(), samples: count }, param_warnings: Vec::new() },
+        );
     }
-    Ok(out)
+    typed_reply(cmd, StudyExported { export: StudyExport::Samples { study: m.name, steps: m.steps, samples: rows }, param_warnings: Vec::new() })
 }
 
 /// Most samples of a motion trace: each is a solve, and a kept trace keeps every one as a fit
