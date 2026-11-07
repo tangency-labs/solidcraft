@@ -105,7 +105,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "CREATE")
         .icon("hole")
         .key("H")
-        .params("position: [x,y,z] on a face (numbers, or length expressions the hole follows) | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch, into the material on whichever side of the sketch plane it is) | sketch alone (every sketch point: standalone points and circle centres); flip?: bool (sketch points: drill to the other side); single?: bool (with one sketch point: a Single hole that follows the point, drilled into the face there); direction?: [x,y,z] (default: into the face, against its outward normal; where faces of several bodies meet there, the face of a body in `targets`; one that leaves the face is mirrored into it; ignored with sketch points unless single); diameter | thread (a tapped hole, drilled with the tap maker's tabulated drill: ISO metric (a custom metric size: major minus pitch), UNC/UNF, G, Rp, Rc 1/16 to 4, NPT 1/16 to 3; a `diameter` given with it chooses another drill, from the thread's minor diameter to 5% over the tap maker's) | clearance: \"M6\" with fit?: close|normal|loose (ISO 273); depth? (default through all) | to?: [x,y,z] (To Object: drill to that face or point); references?: [{edge: [x,y,z] on a straight edge of the face, distance: expr}] (at most two; the centre goes that far from each edge's line, in the face's plane, and follows the edges; with a numeric position only); type?: simple|drilled|counterbore|countersink; tip_angle?; cb_diameter?, cb_depth?, bridge?: length (counterbore: two 3D-printing bridge layers this thick below its floor, a slot along X then a square; e.g. 0.2 mm); cs_diameter?, cs_angle?; thread?: \"M6\", \"1/4-20 UNC\", \"G 1/4\", \"Rp 1/4\", \"Rc 1/4\" or \"1/4-18 NPT\" (cosmetic unless modeled); hand?: right|left (the tapped thread's hand; default right; needs thread); thread_depth?: positive length independent of drill depth (default: full useful cylindrical wall; must fit that wall); modeled?: bool (needs thread: the tapped thread cut into the wall, the groove between its teeth, as solid.thread's modelled one; default false: listed only); ease_out?: expr|standard|short (modelled tapped threads: the inner end, towards the bottom, fades out over this length, ISO 3508's runout, standard 2.5 P, short 1.25 P; without it the groove stops square at thread_depth, or clear of a blind hole's bottom); targets?: [body] (the bodies to drill; holes at the points of a sketch on a body's face default to that body, found along the holes' direction on it alone; explicit targets or participants override, [\"*\"] every body)"),
+        .params("position: [x,y,z] on a face (numbers, or length expressions the hole follows) | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch, into the material on whichever side of the sketch plane it is) | sketch alone (every sketch point: standalone points and circle centres); flip?: bool (sketch points: drill to the other side); single?: bool (with one sketch point: a Single hole that follows the point, drilled into the face there); direction?: [x,y,z] (default: into the face, against its outward normal; where faces of several bodies meet there, the face of a body in `targets`; one that leaves the face is mirrored into it; ignored with sketch points unless single); diameter | thread (a tapped hole, drilled with the tap maker's tabulated drill: ISO metric (a custom metric size: major minus pitch), UNC/UNF, G, Rp, Rc 1/16 to 4, NPT 1/16 to 3; a `diameter` given with it chooses another drill, from the thread's minor diameter to 5% over the tap maker's) | clearance: \"M6\" with fit?: close|normal|loose (ISO 273); head?: \"ISO 4762\" (socket head) | \"ISO 7380-1\" (button head) (with clearance: a counterbore the screw's head sits in, so type defaults to counterbore; its diameter is the head's dk plus head_gap each side, its depth the head's k plus head_gap; a cb_diameter or cb_depth given keeps its value); head_gap?: length (default 0.5 mm; an expression with parameters is kept, so the recess follows them); depth? (default through all) | to?: [x,y,z] (To Object: drill to that face or point); references?: [{edge: [x,y,z] on a straight edge of the face, distance: expr}] (at most two; the centre goes that far from each edge's line, in the face's plane, and follows the edges; with a numeric position only); type?: simple|drilled|counterbore|countersink; tip_angle?; cb_diameter?, cb_depth?, bridge?: length (counterbore: two 3D-printing bridge layers this thick below its floor, a slot along X then a square; e.g. 0.2 mm); cs_diameter?, cs_angle?; thread?: \"M6\", \"1/4-20 UNC\", \"G 1/4\", \"Rp 1/4\", \"Rc 1/4\" or \"1/4-18 NPT\" (cosmetic unless modeled); hand?: right|left (the tapped thread's hand; default right; needs thread); thread_depth?: positive length independent of drill depth (default: full useful cylindrical wall; must fit that wall); modeled?: bool (needs thread: the tapped thread cut into the wall, the groove between its teeth, as solid.thread's modelled one; default false: listed only); ease_out?: expr|standard|short (modelled tapped threads: the inner end, towards the bottom, fades out over this length, ISO 3508's runout, standard 2.5 P, short 1.25 P; without it the groove stops square at thread_depth, or clear of a blind hole's bottom); targets?: [body] (the bodies to drill; holes at the points of a sketch on a body's face default to that body, found along the holes' direction on it alone; explicit targets or participants override, [\"*\"] every body)"),
     CommandSpec::new("solid.pipe", "Pipe", crate::checked!("solid.pipe", pipe))
         .at("SOLID", "CREATE")
         .icon("pipe")
@@ -2646,7 +2646,7 @@ fn split_body(s: &mut Session, p: &Value) -> Result<Value> {
 const CLEARANCE_FITS: [&str; 6] = ["close", "fine", "normal", "medium", "loose", "coarse"];
 
 /// A value typed by the user, cut short for a message.
-fn brief(text: &str) -> String {
+pub(super) fn brief(text: &str) -> String {
     const MAX: usize = 32;
     match text.char_indices().nth(MAX) {
         Some((end, _)) => format!("{}…", &text[..end]),
@@ -2688,6 +2688,35 @@ fn clearance_diameter(size: &str, fit: &str) -> Option<f64> {
         "loose" | "coarse" => Some(row.3),
         _ => None,
     }
+}
+
+/// The counterbore a cap screw's head sits in (`head` with `clearance`): its diameter and depth.
+/// The head's dk and k come from the standard's table (ISO 4762 socket heads, ISO 7380-1 button
+/// heads, in `parts`), with `head_gap` (default 0.5 mm) added each side and below. A gap that
+/// names parameters is kept as an expression, so the recess follows them. `None` without `head`.
+fn head_recess(s: &Session, cmd: &str, p: &Value) -> Result<Option<(Expr, Expr)>> {
+    let head = match p.get("head") {
+        None | Some(Value::Null) => return Ok(None),
+        Some(Value::String(h)) => h.trim(),
+        Some(_) => return Err(bad(cmd, "`head` must be a text: `ISO 4762` (socket head) or `ISO 7380-1` (button head)")),
+    };
+    let size = str_(p, "clearance").ok_or_else(|| bad(cmd, "`head` needs `clearance`, the screw size the head belongs to (e.g. \"M4\")"))?;
+    let (dk, k) = super::parts::cap_screw_head(head, size).map_err(|e| bad(cmd, e))?;
+    let gap = match (expr(p, "head_gap"), p.get("head_gap")) {
+        (Some(g), _) => g,
+        (None, None | Some(Value::Null)) => Expr::new("0.5 mm"),
+        (None, v) => return Err(bad(cmd, format!("`head_gap` {}", expr_problem(v)))),
+    };
+    let g = s.doc.eval(gap.as_str(), Kind::Length).map_err(|e| bad(cmd, format!("head_gap: {e}")))?;
+    if !(0.0..=dk).contains(&g) {
+        return Err(bad(cmd, format!("`head_gap` must be 0 to {dk} mm (the head's diameter), not {g}")));
+    }
+    let mm = |x: f64| format!("{} mm", (x * 1e6).round() / 1e6);
+    Ok(Some(if solidcraft_doc::expr::references(gap.as_str()).is_empty() {
+        (Expr::new(mm(dk + 2.0 * g)), Expr::new(mm(k + g)))
+    } else {
+        (Expr::new(format!("{dk} mm + 2 * ({})", gap.as_str())), Expr::new(format!("{k} mm + ({})", gap.as_str())))
+    }))
 }
 
 /// The pitches to try for a plain `M<d>` that has no ISO coarse pitch, `None` for anything else.
@@ -2913,18 +2942,28 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
         (None, None | Some(Value::Null)) => None,
         (None, v) => return Err(bad(cmd, format!("`bridge` {}", expr_problem(v)))),
     };
-    let kind = match str_(p, "type").unwrap_or("simple") {
+    // A counterbore sized to the screw's head: `head` with `clearance`.
+    let head = head_recess(s, cmd, p)?;
+    if head.is_some() && str_(p, "type").is_some_and(|t| t != "counterbore") {
+        return Err(bad(cmd, "`head` needs `type: counterbore` (the default with `head`); a countersink for a flat head is not supported yet"));
+    }
+    let kind = match str_(p, "type").unwrap_or(if head.is_some() { "counterbore" } else { "simple" }) {
         "simple" => match expr(p, "tip_angle") {
             Some(t) if depth.is_some() => solidcraft_doc::HoleKind::Drilled { tip_angle: t },
             _ => solidcraft_doc::HoleKind::Simple,
         },
         "drilled" => solidcraft_doc::HoleKind::Drilled { tip_angle: expr(p, "tip_angle").unwrap_or_else(|| "118 deg".into()) },
-        "counterbore" => solidcraft_doc::HoleKind::Counterbore {
-            cb_diameter: get("cb_diameter")?,
-            cb_depth: get("cb_depth")?,
-            tip_angle: expr(p, "tip_angle"),
-            bridge: bridge.clone(),
-        },
+        "counterbore" => {
+            // Sized to the screw's head unless given; a value given, even a bad one, is checked.
+            let given = |k: &str| !matches!(p.get(k), None | Some(Value::Null));
+            let (cb_diameter, cb_depth) = match &head {
+                Some((d, h)) => {
+                    (if given("cb_diameter") { get("cb_diameter")? } else { d.clone() }, if given("cb_depth") { get("cb_depth")? } else { h.clone() })
+                }
+                None => (get("cb_diameter")?, get("cb_depth")?),
+            };
+            solidcraft_doc::HoleKind::Counterbore { cb_diameter, cb_depth, tip_angle: expr(p, "tip_angle"), bridge: bridge.clone() }
+        }
         "countersink" => solidcraft_doc::HoleKind::Countersink {
             cs_diameter: get("cs_diameter")?,
             // The default only when no angle is given: a supplied one out of range is refused (#9625).
