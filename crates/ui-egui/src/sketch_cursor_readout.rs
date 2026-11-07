@@ -11,7 +11,11 @@ use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
-use crate::viewport::{Hit, Proj};
+use crate::viewport::Proj;
+
+/// How near (screen points) the pointer reads a sketch point's exact place: the reach the
+/// viewport's picking gives sketch points.
+const POINT_REACH: f32 = 8.0;
 
 /// The sketch coordinates where the view ray `origin + t·direction` meets `plane`: None when
 /// the ray runs along the plane or the numbers are not finite.
@@ -40,11 +44,20 @@ pub(crate) fn idle_point(app: &SolveApp, proj: &Proj, pointer: Pos2) -> Option<V
     let world = crate::open_meshing::shown_world(app);
     // A 3D sketch's points leave its plane: X and Y on it would not say where the pointer is.
     let ss = world.sketch(sid).filter(|ss| !ss.sketch.view.three_d)?;
-    if let Some(Hit::SketchPoint { sketch, at, .. }) = &app.viewport.hover
-        && *sketch == sid
-        && at.is_finite()
-    {
-        return Some(*at);
+    // The nearest shown point under the pointer, from the sketch as drawn this frame: not the
+    // selection hover, which a selection filter can turn off and which can hold a dragged
+    // point's place from before the drag.
+    let visible = solidcraft_engine::view::SketchPointVisibility::new(&ss.sketch);
+    let near = ss
+        .sketch
+        .points
+        .iter()
+        .filter(|p| visible.takes(p) && p.pos.is_finite())
+        .filter_map(|p| Some((proj.to_screen(ss.plane.to_world(p.pos))?.distance(pointer), p.pos)))
+        .filter(|(d, _)| d.is_finite() && *d < POINT_REACH)
+        .min_by(|a, b| a.0.total_cmp(&b.0));
+    if let Some((_, at)) = near {
+        return Some(at);
     }
     let (origin, direction) = proj.ray(pointer);
     plane_point(&ss.plane, origin, direction)
@@ -141,6 +154,24 @@ mod tests {
         h.frames(2);
         assert!(rect_of("viewport:cursor_readout").is_none(), "one readout at a time");
         assert!(rect_of("viewport:readout").is_some(), "the tool's readout is drawn");
+    }
+
+    /// Over a sketch point the readout gives the point's exact place, also with sketch points
+    /// filtered out of selection (the selection hover is then empty).
+    #[test]
+    fn over_a_point_the_readout_is_the_points_place_whatever_the_selection_filter() {
+        let (mut h, at) = idle_sketch();
+        h.app.run("sketch.point", json!({"point": [10.04, 4.98]})).unwrap();
+        for off in [false, true] {
+            h.app.ui.pick_off.retain(|kind| kind != "sketch_points");
+            if off {
+                h.app.ui.pick_off.push("sketch_points".into());
+            }
+            h.frames(2);
+            let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+            let p = idle_point(&h.app, &proj, at).expect("a point under the pointer");
+            assert!((p.x - 10.04).abs() < 1e-9 && (p.y - 4.98).abs() < 1e-9, "filter off: {off}: {p:?}");
+        }
     }
 
     #[test]
