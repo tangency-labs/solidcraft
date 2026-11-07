@@ -982,9 +982,12 @@ enum Thing {
 /// down its left), and a faint bar on each row leading to it.
 #[derive(Default)]
 struct Lit {
-    /// Selected, or part of something selected: a body for its faces, edges and vertices, a
-    /// sketch for its curves, points and profiles.
+    /// Selected, or part of something selected: a sketch for its curves, points and profiles.
     selected: std::collections::HashSet<Thing>,
+    /// Bodies holding a selected face, edge or vertex. Each keeps the faint bar of a row with
+    /// something lit inside it, so the tree still shows where the selection is once the pointer
+    /// leaves the model (#11547), without lighting the body as if it were selected.
+    holding: std::collections::HashSet<Thing>,
     /// Under the pointer in the 3D view.
     hovered: Option<Thing>,
     /// The placements holding a lit body, and the components holding a lit sketch or plane.
@@ -996,6 +999,7 @@ impl Lit {
     fn of(app: &mut SolveApp) -> Lit {
         use crate::viewport::Hit;
         let mut selected = std::collections::HashSet::new();
+        let mut holding = std::collections::HashSet::new();
         // Bodies chosen in an open dialog light up even when the click was in the 3D view,
         // which does not rewrite the browser selection.
         let dialog_picks = app.dialog.as_ref().map(|d| d.items()).unwrap_or_default();
@@ -1003,8 +1007,14 @@ impl Lit {
             let thing = match s {
                 Sel::Body { name } => Thing::Body(name.clone()),
                 // A picked face, edge or vertex lights the feature it belongs to (see
-                // `browser::features`), not the whole body as if the body were selected.
-                Sel::Face { .. } | Sel::Edge { .. } | Sel::Vertex { .. } => continue,
+                // `browser::features`), not the whole body as if the body were selected; its body
+                // keeps a faint bar. The origin's vertex belongs to no body.
+                Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => {
+                    if !body.is_empty() {
+                        holding.insert(Thing::Body(body.clone()));
+                    }
+                    continue;
+                }
                 Sel::Feature { id } => Thing::Sketch(*id),
                 Sel::Profile { sketch, .. } | Sel::ExternalSketchCurve { sketch, .. } | Sel::ExternalSketchPoint { sketch, .. } => {
                     Thing::Sketch(*sketch)
@@ -1041,7 +1051,7 @@ impl Lit {
         }
         let doc = app.session.doc.clone();
         let (mut paths, mut components) = (Vec::new(), Vec::new());
-        for thing in selected.iter().chain(&hovered) {
+        for thing in selected.iter().chain(&holding).chain(&hovered) {
             match thing {
                 Thing::Body(b) if follows => {
                     if let Some(path) = app.tree.model.as_mut().and_then(|model| model.body_path(&app.session, b)) {
@@ -1070,11 +1080,11 @@ impl Lit {
                 ),
             }
         }
-        Lit { selected, hovered, paths, components }
+        Lit { selected, holding, hovered, paths, components }
     }
 
     fn any(&self) -> bool {
-        !self.selected.is_empty() || self.hovered.is_some()
+        !self.selected.is_empty() || !self.holding.is_empty() || self.hovered.is_some()
     }
 
     /// Whether `thing` is lit: (selected, under the pointer).
@@ -1089,9 +1099,18 @@ impl Lit {
         (e.is_selected(app) || selected, hovered)
     }
 
+    /// A folder entry's row: its selection flag and mark. A body holding a selected face, edge or
+    /// vertex, itself neither selected nor under the pointer, gets the faint bar.
+    fn row(&self, app: &SolveApp, e: &Entry) -> (bool, Mark) {
+        match lit_row(self.entry(app, e)) {
+            (false, Mark::None) if self.holding.contains(&e.thing) => (false, Mark::Branch),
+            row => row,
+        }
+    }
+
     /// The mark of a row holding these entries: a faint bar when any of them is lit.
     fn branch<'e>(&self, app: &SolveApp, entries: impl IntoIterator<Item = &'e Entry>) -> Mark {
-        if entries.into_iter().any(|e| self.entry(app, e) != (false, false)) { Mark::Branch } else { Mark::None }
+        if entries.into_iter().any(|e| self.row(app, e) != (false, Mark::None)) { Mark::Branch } else { Mark::None }
     }
 
     /// The mark of a placement row: a faint bar when a lit body is placed in it or below it, or
@@ -3145,7 +3164,7 @@ fn entry_row(
         ui.allocate_space(rect.size());
         return;
     }
-    let (selected, mark) = lit_row(acts.lit.entry(app, e));
+    let (selected, mark) = acts.lit.row(app, e);
     let visible = e.is_visible(app);
     let locked = match &e.sel {
         Some(Sel::Body { name }) => app.session.visibility.locked_bodies.contains(name),
