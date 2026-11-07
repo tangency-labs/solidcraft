@@ -915,6 +915,50 @@ fn multi_backend_point_mesh_distance_and_mass_properties_parity() {
     }
 }
 
+/// All 7 backend execution targets in [`BackendTarget`].
+#[cfg(not(target_arch = "wasm32"))]
+const ALL_BACKEND_TARGETS: [crate::dispatch::BackendTarget; 7] = [
+    crate::dispatch::BackendTarget::CpuScalar,
+    crate::dispatch::BackendTarget::CpuRayon,
+    crate::dispatch::BackendTarget::VulkanCompute,
+    crate::dispatch::BackendTarget::CudaGeneric,
+    crate::dispatch::BackendTarget::AmperePtx,
+    crate::dispatch::BackendTarget::AmpereTensorCore,
+    crate::dispatch::BackendTarget::RtCoreBvh,
+];
+
+/// Backend targets that implement bicubic patch evaluation (`f32` and `f64`).
+#[cfg(not(target_arch = "wasm32"))]
+const PATCH_TARGETS: [crate::dispatch::BackendTarget; 6] = [
+    crate::dispatch::BackendTarget::CpuScalar,
+    crate::dispatch::BackendTarget::CpuRayon,
+    crate::dispatch::BackendTarget::VulkanCompute,
+    crate::dispatch::BackendTarget::CudaGeneric,
+    crate::dispatch::BackendTarget::AmperePtx,
+    crate::dispatch::BackendTarget::AmpereTensorCore,
+];
+
+/// Backend targets that implement BVH queries (point-in-solid, raycast, AABB overlap).
+#[cfg(not(target_arch = "wasm32"))]
+const BVH_TARGETS: [crate::dispatch::BackendTarget; 6] = [
+    crate::dispatch::BackendTarget::CpuScalar,
+    crate::dispatch::BackendTarget::CpuRayon,
+    crate::dispatch::BackendTarget::VulkanCompute,
+    crate::dispatch::BackendTarget::CudaGeneric,
+    crate::dispatch::BackendTarget::AmperePtx,
+    crate::dispatch::BackendTarget::RtCoreBvh,
+];
+
+/// Backend targets that implement general compute kernels (point-mesh distance, mass properties, non-BVH queries).
+#[cfg(not(target_arch = "wasm32"))]
+const COMPUTE_TARGETS: [crate::dispatch::BackendTarget; 5] = [
+    crate::dispatch::BackendTarget::CpuScalar,
+    crate::dispatch::BackendTarget::CpuRayon,
+    crate::dispatch::BackendTarget::VulkanCompute,
+    crate::dispatch::BackendTarget::CudaGeneric,
+    crate::dispatch::BackendTarget::AmperePtx,
+];
+
 /// Verifies [`Dispatcher`] multi-sample rotated calibration, markdown reporting, and forced routing across all backend targets.
 #[test]
 fn dispatcher_auto_tuning_calibration_and_routing() {
@@ -956,15 +1000,7 @@ fn dispatcher_auto_tuning_calibration_and_routing() {
     let (_, ref_f64) = disp.with_forced_backend(Some(BackendTarget::CpuScalar)).eval_bicubic_f64(&patch_f64, &q_f64);
     let (_, ref_cls) = disp.with_forced_backend(Some(BackendTarget::CpuScalar)).classify_points(&pts, &tris, &bvh);
 
-    for target in [
-        BackendTarget::CpuScalar,
-        BackendTarget::CpuRayon,
-        BackendTarget::VulkanCompute,
-        BackendTarget::CudaGeneric,
-        BackendTarget::AmperePtx,
-        BackendTarget::AmpereTensorCore,
-        BackendTarget::RtCoreBvh,
-    ] {
+    for target in ALL_BACKEND_TARGETS {
         let d = disp.with_forced_backend(Some(target));
         let (_, out_f32) = d.eval_bicubic_f32(&patch_f32, &q_f32);
         assert_eq!(out_f32.len(), 32);
@@ -1032,7 +1068,7 @@ fn gpu_cargo_toml_lints_match_workspace() {
 fn bicubic_patch_common_and_edge_cases() {
     use crate::cuda::{CudaBackend, PatchUvQueryF32};
     use crate::dispatch::{
-        BackendTarget, Dispatcher, cpu_eval_bicubic_f32_rayon, cpu_eval_bicubic_f32_scalar, cpu_eval_bicubic_f64_rayon, cpu_eval_bicubic_f64_scalar,
+        Dispatcher, cpu_eval_bicubic_f32_rayon, cpu_eval_bicubic_f32_scalar, cpu_eval_bicubic_f64_rayon, cpu_eval_bicubic_f64_scalar,
         synthetic_bicubic_patch_f32, synthetic_bicubic_patch_f64,
     };
 
@@ -1048,14 +1084,7 @@ fn bicubic_patch_common_and_edge_cases() {
     let corner_queries_f32: Vec<PatchUvQueryF32> =
         corners.iter().map(|&(u, v, _, _)| PatchUvQueryF32 { u: u as f32, v: v as f32, patch_idx: 0, pad: 0 }).collect();
 
-    for target in [
-        BackendTarget::CpuScalar,
-        BackendTarget::CpuRayon,
-        BackendTarget::VulkanCompute,
-        BackendTarget::CudaGeneric,
-        BackendTarget::AmperePtx,
-        BackendTarget::AmpereTensorCore,
-    ] {
+    for target in PATCH_TARGETS {
         let d = disp.with_forced_backend(Some(target));
         let (_, evals_f64) = d.eval_bicubic_f64(&cpts_f64, &corner_queries_f64);
         let (_, evals_f32) = d.eval_bicubic_f32(&cpts_f32, &corner_queries_f32);
@@ -1101,14 +1130,7 @@ fn bicubic_patch_common_and_edge_cases() {
     let planar_q32: Vec<PatchUvQueryF32> =
         sample_uvs.iter().map(|&(u, v)| PatchUvQueryF32 { u: u as f32, v: v as f32, patch_idx: 0, pad: 0 }).collect();
 
-    for target in [
-        BackendTarget::CpuScalar,
-        BackendTarget::CpuRayon,
-        BackendTarget::VulkanCompute,
-        BackendTarget::CudaGeneric,
-        BackendTarget::AmperePtx,
-        BackendTarget::AmpereTensorCore,
-    ] {
+    for target in PATCH_TARGETS {
         let d = disp.with_forced_backend(Some(target));
         let (_, out64) = d.eval_bicubic_f64(&planar_f64, &planar_q64);
         let (_, out32) = d.eval_bicubic_f32(&planar_f32, &planar_q32);
@@ -1150,14 +1172,7 @@ fn bicubic_patch_common_and_edge_cases() {
         PatchUvQueryF32 { u: 0.4, v: 0.6, patch_idx: 2, pad: 0 },
         PatchUvQueryF32 { u: 0.4, v: 0.6, patch_idx: 999, pad: 0 },
     ];
-    for target in [
-        BackendTarget::CpuScalar,
-        BackendTarget::CpuRayon,
-        BackendTarget::VulkanCompute,
-        BackendTarget::CudaGeneric,
-        BackendTarget::AmperePtx,
-        BackendTarget::AmpereTensorCore,
-    ] {
+    for target in PATCH_TARGETS {
         let d = disp.with_forced_backend(Some(target));
         let (_, m64) = d.eval_bicubic_f64(&multi_f64, &multi_q64);
         let (_, m32) = d.eval_bicubic_f32(&multi_f32, &multi_q32);
@@ -1173,14 +1188,7 @@ fn bicubic_patch_common_and_edge_cases() {
     // Derivatives Su and Sv are zero, so Su x Sv = 0. Must not produce NaN; fallback normal is [0, 0, 1, 0].
     let singular_f64 = vec![[3.0f64, -4.0, 7.0, 1.0]; 16];
     let singular_f32 = vec![[3.0f32, -4.0, 7.0, 1.0]; 16];
-    for target in [
-        BackendTarget::CpuScalar,
-        BackendTarget::CpuRayon,
-        BackendTarget::VulkanCompute,
-        BackendTarget::CudaGeneric,
-        BackendTarget::AmperePtx,
-        BackendTarget::AmpereTensorCore,
-    ] {
+    for target in PATCH_TARGETS {
         let d = disp.with_forced_backend(Some(target));
         let (_, s64) = d.eval_bicubic_f64(&singular_f64, &[[0.5, 0.5, 0.0, 0.0]]);
         let (_, s32) = d.eval_bicubic_f32(&singular_f32, &[PatchUvQueryF32 { u: 0.5, v: 0.5, patch_idx: 0, pad: 0 }]);
@@ -1237,7 +1245,7 @@ fn bicubic_patch_common_and_edge_cases() {
 #[test]
 fn point_in_solid_common_and_edge_cases() {
     use crate::cuda::GpuTri;
-    use crate::dispatch::{BackendTarget, Dispatcher, build_gpu_bvh_from_mesh, cpu_classify_points_scalar};
+    use crate::dispatch::{Dispatcher, build_gpu_bvh_from_mesh, cpu_classify_points_scalar};
 
     let disp = Dispatcher::global();
 
@@ -1259,14 +1267,7 @@ fn point_in_solid_common_and_edge_cases() {
     ];
     let torus_pts: Vec<[f32; 4]> = torus_cases.iter().map(|&(p, _, _)| p).collect();
 
-    for target in [
-        BackendTarget::CpuScalar,
-        BackendTarget::CpuRayon,
-        BackendTarget::VulkanCompute,
-        BackendTarget::CudaGeneric,
-        BackendTarget::AmperePtx,
-        BackendTarget::RtCoreBvh,
-    ] {
+    for target in BVH_TARGETS {
         let d = disp.with_forced_backend(Some(target));
         let (_, cls_bvh) = d.classify_points(&torus_pts, &torus_tris, &torus_bvh);
         let (_, cls_raw) = d.classify_points(&torus_pts, &torus_tris, &[]);
@@ -1292,14 +1293,7 @@ fn point_in_solid_common_and_edge_cases() {
         ([5.0, 5.0, 11.0, 0.0], false, "above box +Z"),
     ];
     let hollow_pts: Vec<[f32; 4]> = hollow_cases.iter().map(|&(p, _, _)| p).collect();
-    for target in [
-        BackendTarget::CpuScalar,
-        BackendTarget::CpuRayon,
-        BackendTarget::VulkanCompute,
-        BackendTarget::CudaGeneric,
-        BackendTarget::AmperePtx,
-        BackendTarget::RtCoreBvh,
-    ] {
+    for target in BVH_TARGETS {
         let d = disp.with_forced_backend(Some(target));
         let (_, cls) = d.classify_points(&hollow_pts, &hollow_tris, &hollow_bvh);
         for (i, &(_, exp, label)) in hollow_cases.iter().enumerate() {
@@ -1320,22 +1314,13 @@ fn point_in_solid_common_and_edge_cases() {
         edge_pts.push([1.0 + t * 0.5, 1.0 + t * 0.5, 1.0 + t * 8.0, 0.0]);
     }
     let ref_edge = cpu_classify_points_scalar(&edge_pts, &tris_with_degen, &[]);
-    for target in
-        [BackendTarget::CpuScalar, BackendTarget::CpuRayon, BackendTarget::VulkanCompute, BackendTarget::CudaGeneric, BackendTarget::AmperePtx]
-    {
+    for target in COMPUTE_TARGETS {
         let (_, got) = disp.with_forced_backend(Some(target)).classify_points(&edge_pts, &tris_with_degen, &[]);
         assert_eq!(got, ref_edge, "degenerate-tri + 129-point classify parity failed on {target:?}");
     }
 
     // 4. Empty points / empty triangles edge cases:
-    for target in [
-        BackendTarget::CpuScalar,
-        BackendTarget::CpuRayon,
-        BackendTarget::VulkanCompute,
-        BackendTarget::CudaGeneric,
-        BackendTarget::AmperePtx,
-        BackendTarget::RtCoreBvh,
-    ] {
+    for target in BVH_TARGETS {
         let d = disp.with_forced_backend(Some(target));
         assert!(d.classify_points(&[], &hollow_tris, &hollow_bvh).1.is_empty());
         assert_eq!(d.classify_points(&hollow_pts, &[], &[]).1, vec![false; hollow_pts.len()]);
@@ -1385,14 +1370,7 @@ fn raycast_bvh_common_and_edge_cases() {
     assert!((ref_hits[5].t - 3.0).abs() < 0.15 && ref_hits[5].tri_idx != u32::MAX);
     assert_eq!(ref_hits[6].tri_idx, u32::MAX, "ray pointing away from torus must miss");
 
-    for target in [
-        BackendTarget::CpuScalar,
-        BackendTarget::CpuRayon,
-        BackendTarget::VulkanCompute,
-        BackendTarget::CudaGeneric,
-        BackendTarget::AmperePtx,
-        BackendTarget::RtCoreBvh,
-    ] {
+    for target in BVH_TARGETS {
         let d = disp.with_forced_backend(Some(target));
         let (_, hits_bvh) = d.raycast_mesh(&rays, &torus_tris, &torus_bvh);
         let (_, hits_raw) = d.raycast_mesh(&rays, &torus_tris, &[]);
@@ -1424,14 +1402,7 @@ fn raycast_bvh_common_and_edge_cases() {
         // Parallel coplanar ray -> must miss
         GpuRay { origin: [-5.0, 0.0, 0.0, 0.0], dir: [1.0, 0.0, 0.0, 0.0] },
     ];
-    for target in [
-        BackendTarget::CpuScalar,
-        BackendTarget::CpuRayon,
-        BackendTarget::VulkanCompute,
-        BackendTarget::CudaGeneric,
-        BackendTarget::AmperePtx,
-        BackendTarget::RtCoreBvh,
-    ] {
+    for target in BVH_TARGETS {
         let d = disp.with_forced_backend(Some(target));
         let (_, sh) = d.raycast_mesh(&single_rays, &single_tri, &single_bvh);
         assert_eq!(sh[0].tri_idx, 0, "single-tri hit failed on {target:?}");
@@ -1442,13 +1413,73 @@ fn raycast_bvh_common_and_edge_cases() {
         let (_, empty_mesh_hits) = d.raycast_mesh(&single_rays, &[], &[]);
         assert!(empty_mesh_hits.iter().all(|h| h.tri_idx == u32::MAX && h.t < 0.0));
     }
+
+    // 4. Caller-supplied deep BVH exceeding BVH_STACK_CAP (64) must be rejected by bvh_fits_traversal_stack
+    // and routed through the non-BVH fallback across Vulkan, CUDA, and CPU without missing hits or miscounting crossings:
+    assert!(crate::dispatch::bvh_fits_traversal_stack(&torus_bvh, torus_tris.len()));
+    let mut deep_bvh = Vec::with_capacity(141);
+    for d in 0..70u32 {
+        deep_bvh.push(crate::cuda::GpuBvhNode {
+            min_x: -20.0,
+            min_y: -20.0,
+            min_z: -20.0,
+            left_or_prim: d + 1,
+            max_x: 20.0,
+            max_y: 20.0,
+            max_z: 20.0,
+            right_or_count: 71 + d,
+        });
+    }
+    // Node 70 is the deep leaf referencing all torus_tris; nodes 71..141 are empty right-sibling leaves
+    deep_bvh.push(crate::cuda::GpuBvhNode {
+        min_x: -20.0,
+        min_y: -20.0,
+        min_z: -20.0,
+        left_or_prim: 0,
+        max_x: 20.0,
+        max_y: 20.0,
+        max_z: 20.0,
+        right_or_count: 0x8000_0000 | (torus_tris.len() as u32),
+    });
+    for _ in 0..70 {
+        deep_bvh.push(crate::cuda::GpuBvhNode {
+            min_x: -20.0,
+            min_y: -20.0,
+            min_z: -20.0,
+            left_or_prim: 0,
+            max_x: 20.0,
+            max_y: 20.0,
+            max_z: 20.0,
+            right_or_count: 0x8000_0000,
+        });
+    }
+    assert!(!crate::dispatch::bvh_fits_traversal_stack(&deep_bvh, torus_tris.len()), "70-deep BVH must exceed BVH_STACK_CAP");
+    if let Some(vk) = crate::dispatch::VulkanAccel::global() {
+        let vk_deep_rc = vk.raycast_bvh(&rays, &torus_tris, &deep_bvh).expect("vk deep BVH raycast fallback");
+        for (i, r) in ref_hits.iter().enumerate() {
+            assert_eq!(vk_deep_rc[i].tri_idx, r.tri_idx, "vk deep BVH ray {i} fallback mismatch");
+        }
+        let probe_pts = vec![[0.0f32, 0.0, 0.0, 0.0], [10.0, 0.0, 0.0, 0.0]];
+        let vk_deep_cls = vk.classify_points(&probe_pts, &torus_tris, &deep_bvh, true).expect("vk deep BVH classify fallback");
+        assert_eq!(vk_deep_cls, vec![false, true]);
+    }
+    for target in BVH_TARGETS {
+        let d = disp.with_forced_backend(Some(target));
+        let (_, deep_hits) = d.raycast_mesh(&rays, &torus_tris, &deep_bvh);
+        for (i, r) in ref_hits.iter().enumerate() {
+            assert_eq!(deep_hits[i].tri_idx, r.tri_idx, "deep BVH ray {i} mismatch on {target:?}");
+        }
+        let probe_pts = vec![[0.0f32, 0.0, 0.0, 0.0], [10.0, 0.0, 0.0, 0.0]];
+        let (_, deep_cls) = d.classify_points(&probe_pts, &torus_tris, &deep_bvh);
+        assert_eq!(deep_cls, vec![false, true], "deep BVH classify mismatch on {target:?}");
+    }
 }
 
 #[test]
 fn collision_lbvh_morton_and_ssi_edge_cases() {
     use crate::collision::{GpuAabb, OverlapPair, build_simple_lbvh, cpu_bipartite_overlap, cpu_self_overlap};
     use crate::cuda::CudaBackend;
-    use crate::dispatch::{BackendTarget, Dispatcher, VulkanAccel, cpu_bipartite_overlap_rayon};
+    use crate::dispatch::{Dispatcher, VulkanAccel, cpu_bipartite_overlap_rayon};
     use solidcraft_geom::Aabb3;
 
     let disp = Dispatcher::global();
@@ -1478,14 +1509,7 @@ fn collision_lbvh_morton_and_ssi_edge_cases() {
     let box_b = GpuAabb { min_x: 1.02, min_y: 0.0, min_z: 0.0, id: 1, max_x: 2.02, max_y: 1.0, max_z: 1.0, pad: 0 };
     let box_c = GpuAabb { min_x: 1.0, min_y: 0.0, min_z: 0.0, id: 2, max_x: 2.0, max_y: 1.0, max_z: 1.0, pad: 0 };
 
-    for target in [
-        BackendTarget::CpuScalar,
-        BackendTarget::CpuRayon,
-        BackendTarget::VulkanCompute,
-        BackendTarget::CudaGeneric,
-        BackendTarget::AmperePtx,
-        BackendTarget::RtCoreBvh,
-    ] {
+    for target in BVH_TARGETS {
         let d = disp.with_forced_backend(Some(target));
         assert!(d.bipartite_aabb_overlap(&[box_a], &[box_b], 0.015).1.pairs.is_empty(), "gap=0.02 with tol=0.015 must not overlap on {target:?}");
         assert_eq!(
@@ -1524,9 +1548,7 @@ fn collision_lbvh_morton_and_ssi_edge_cases() {
         for pair in &ref_self.pairs {
             assert!(pair.a < pair.b, "self-overlap must strictly emit upper-triangular pairs (a < b)");
         }
-        for target in
-            [BackendTarget::CpuScalar, BackendTarget::CpuRayon, BackendTarget::VulkanCompute, BackendTarget::CudaGeneric, BackendTarget::AmperePtx]
-        {
+        for target in COMPUTE_TARGETS {
             let (_, got_bi) = disp.with_forced_backend(Some(target)).bipartite_aabb_overlap(&set_a, &set_b, 1e-4);
             assert_eq!(got_bi.pairs, ref_bi.pairs, "bipartite tile boundary ({na}, {nb}) mismatch on {target:?}");
         }
@@ -1536,8 +1558,10 @@ fn collision_lbvh_morton_and_ssi_edge_cases() {
         }
     }
 
-    // 5. Coincident / zero-extent scene Morton codes & single-leaf LBVH traversal:
+    // 5. Coincident / zero-extent scene Morton codes, single-leaf LBVH traversal, & storage buffer limit validation:
     if let Some(vk) = VulkanAccel::global() {
+        assert!(vk.collision().fits_storage(1024));
+        assert!(!vk.collision().fits_storage(usize::MAX));
         let coincident_boxes = vec![box_a; 8];
         let morton = vk.collision().compute_morton(&coincident_boxes).expect("vk morton coincident");
         assert_eq!(morton.len(), 8);
@@ -1580,7 +1604,7 @@ fn collision_lbvh_morton_and_ssi_edge_cases() {
 #[test]
 fn point_mesh_distance_voronoi_and_edge_cases() {
     use crate::cuda::GpuTri;
-    use crate::dispatch::{BackendTarget, Dispatcher, cpu_point_mesh_distance_scalar};
+    use crate::dispatch::{Dispatcher, cpu_point_mesh_distance_scalar};
 
     let disp = Dispatcher::global();
 
@@ -1610,9 +1634,7 @@ fn point_mesh_distance_voronoi_and_edge_cases() {
     ];
     let pts: Vec<[f32; 4]> = voronoi_cases.iter().map(|&(p, _, _)| p).collect();
 
-    for target in
-        [BackendTarget::CpuScalar, BackendTarget::CpuRayon, BackendTarget::VulkanCompute, BackendTarget::CudaGeneric, BackendTarget::AmperePtx]
-    {
+    for target in COMPUTE_TARGETS {
         let (_, d2) = disp.with_forced_backend(Some(target)).point_mesh_distance(&pts, &[tri]);
         for (i, &(_, exp_d2, label)) in voronoi_cases.iter().enumerate() {
             assert!((d2[i] - exp_d2).abs() < 1e-4, "Voronoi distance mismatch for '{label}' on {target:?}: got {}, expected {exp_d2}", d2[i]);
@@ -1628,9 +1650,7 @@ fn point_mesh_distance_voronoi_and_edge_cases() {
         GpuTri { v0: [0.0, 0.0, 0.0, 0.0], v1: [2.0, 0.0, 0.0, 0.0], v2: [2.0, 0.0, 0.0, 0.0] },
         GpuTri { v0: [0.0, 0.0, 0.0, 0.0], v1: [1.0, 0.0, 0.0, 0.0], v2: [2.0, 0.0, 0.0, 0.0] },
     ];
-    for target in
-        [BackendTarget::CpuScalar, BackendTarget::CpuRayon, BackendTarget::VulkanCompute, BackendTarget::CudaGeneric, BackendTarget::AmperePtx]
-    {
+    for target in COMPUTE_TARGETS {
         let (_, d2) = disp.with_forced_backend(Some(target)).point_mesh_distance(&pts, &degen_tris);
         for (i, &val) in d2.iter().enumerate() {
             assert!(val.is_finite() && val >= 0.0, "degenerate triangle produced non-finite d2={val} at query {i} on {target:?}");
@@ -1648,9 +1668,7 @@ fn point_mesh_distance_voronoi_and_edge_cases() {
         many_pts.push([0.25, 0.25, i as f32 * 0.5 + 0.1, 0.0]);
     }
     let ref_many = cpu_point_mesh_distance_scalar(&many_pts, &many_tris);
-    for target in
-        [BackendTarget::CpuScalar, BackendTarget::CpuRayon, BackendTarget::VulkanCompute, BackendTarget::CudaGeneric, BackendTarget::AmperePtx]
-    {
+    for target in COMPUTE_TARGETS {
         let d = disp.with_forced_backend(Some(target));
         assert!(d.point_mesh_distance(&[], &many_tris).1.is_empty());
         let (_, empty_tri_d2) = d.point_mesh_distance(&pts, &[]);
@@ -1670,9 +1688,7 @@ fn mass_properties_common_and_edge_cases() {
     let disp = Dispatcher::global();
 
     // 1. Empty mesh -> all zeros without NaN:
-    for target in
-        [BackendTarget::CpuScalar, BackendTarget::CpuRayon, BackendTarget::VulkanCompute, BackendTarget::CudaGeneric, BackendTarget::AmperePtx]
-    {
+    for target in COMPUTE_TARGETS {
         let (_, mp) = disp.with_forced_backend(Some(target)).mass_properties(&[]);
         assert_eq!(mp.volume, 0.0);
         assert_eq!(mp.area, 0.0);
@@ -1685,9 +1701,7 @@ fn mass_properties_common_and_edge_cases() {
         GpuTri { v0: [0.0, 0.0, 0.0, 0.0], v1: [2.0, 0.0, 0.0, 0.0], v2: [2.0, 3.0, 0.0, 0.0] },
         GpuTri { v0: [0.0, 0.0, 0.0, 0.0], v1: [2.0, 3.0, 0.0, 0.0], v2: [0.0, 3.0, 0.0, 0.0] },
     ];
-    for target in
-        [BackendTarget::CpuScalar, BackendTarget::CpuRayon, BackendTarget::VulkanCompute, BackendTarget::CudaGeneric, BackendTarget::AmperePtx]
-    {
+    for target in COMPUTE_TARGETS {
         let (_, mp) = disp.with_forced_backend(Some(target)).mass_properties(&flat_sheet);
         assert!(mp.volume.abs() < 1e-12, "flat sheet volume must be 0 on {target:?}");
         assert!((mp.area - 6.0).abs() < 1e-5, "flat sheet area must be 6.0 on {target:?}");
@@ -1704,9 +1718,7 @@ fn mass_properties_common_and_edge_cases() {
     let (torus_tris, _) = build_gpu_bvh_from_mesh(&torus_mesh);
     assert!(torus_tris.len() > 512, "torus mesh must span multiple 256-thread reduction workgroups");
 
-    for target in
-        [BackendTarget::CpuScalar, BackendTarget::CpuRayon, BackendTarget::VulkanCompute, BackendTarget::CudaGeneric, BackendTarget::AmperePtx]
-    {
+    for target in COMPUTE_TARGETS {
         let (_, mp) = disp.with_forced_backend(Some(target)).mass_properties(&torus_tris);
         let rel_vol = (mp.volume - expected_mp.volume).abs() / expected_mp.volume;
         let rel_area = (mp.area - expected_mp.area).abs() / expected_mp.area;
@@ -1718,9 +1730,7 @@ fn mass_properties_common_and_edge_cases() {
 
     // 4. Inverted winding orientation: negates signed volume, preserves area and centroid:
     let inverted_tris: Vec<GpuTri> = torus_tris.iter().map(|t| GpuTri { v0: t.v0, v1: t.v2, v2: t.v1 }).collect();
-    for target in
-        [BackendTarget::CpuScalar, BackendTarget::CpuRayon, BackendTarget::VulkanCompute, BackendTarget::CudaGeneric, BackendTarget::AmperePtx]
-    {
+    for target in COMPUTE_TARGETS {
         let (_, mp_inv) = disp.with_forced_backend(Some(target)).mass_properties(&inverted_tris);
         let tol = if target == BackendTarget::VulkanCompute { 1e-4 } else { 1e-6 };
         assert!((mp_inv.volume + expected_mp.volume).abs() / expected_mp.volume < tol, "inverted volume must be -V on {target:?}");

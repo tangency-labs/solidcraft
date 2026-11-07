@@ -399,13 +399,14 @@ impl VulkanAccel {
         if use_bvh && bvh_nodes.is_empty() {
             return None;
         }
+        let effective_use_bvh = use_bvh && bvh_fits_traversal_stack(bvh_nodes, tris.len());
         let num_queries = u32::try_from(points.len()).ok()?;
         let num_tris = u32::try_from(tris.len()).ok()?;
-        let num_bvh_nodes = u32::try_from(bvh_nodes.len()).ok()?;
+        let num_bvh_nodes = if effective_use_bvh { u32::try_from(bvh_nodes.len()).ok()? } else { 0 };
         let params = MeshQueryParams { num_queries, num_tris, num_bvh_nodes, pad: 0 };
 
         let dummy_bvh = [GpuBvhNode::default()];
-        let bvh_slice = if bvh_nodes.is_empty() { &dummy_bvh[..] } else { bvh_nodes };
+        let bvh_slice = if effective_use_bvh { bvh_nodes } else { &dummy_bvh[..] };
 
         let _guard = self.collision.lock_device();
         let u_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -454,7 +455,7 @@ impl VulkanAccel {
             ],
         });
 
-        let pipeline = if use_bvh { &self.classify_bvh_pipeline } else { &self.classify_tiled_pipeline };
+        let pipeline = if effective_use_bvh { &self.classify_bvh_pipeline } else { &self.classify_tiled_pipeline };
 
         let mut enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("vk-cls-enc") });
         {
@@ -482,10 +483,14 @@ impl VulkanAccel {
         if bvh_nodes.is_empty() {
             return None;
         }
+        let effective_use_bvh = bvh_fits_traversal_stack(bvh_nodes, tris.len());
         let num_queries = u32::try_from(rays.len()).ok()?;
         let num_tris = u32::try_from(tris.len()).ok()?;
-        let num_bvh_nodes = u32::try_from(bvh_nodes.len()).ok()?;
+        let num_bvh_nodes = if effective_use_bvh { u32::try_from(bvh_nodes.len()).ok()? } else { 0 };
         let params = MeshQueryParams { num_queries, num_tris, num_bvh_nodes, pad: 0 };
+
+        let dummy_bvh = [GpuBvhNode::default()];
+        let bvh_slice = if effective_use_bvh { bvh_nodes } else { &dummy_bvh[..] };
 
         let _guard = self.collision.lock_device();
         let u_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -505,7 +510,7 @@ impl VulkanAccel {
         });
         let bvh_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("vk-rc-bvh"),
-            contents: &encode_pod_slice(bvh_nodes),
+            contents: &encode_pod_slice(bvh_slice),
             usage: wgpu::BufferUsages::STORAGE,
         });
         let out_size = (rays.len() * std::mem::size_of::<GpuRayHit>()) as u64;
@@ -715,6 +720,47 @@ pub fn build_gpu_bvh_from_mesh(mesh: &Mesh) -> (Vec<GpuTri>, Vec<GpuBvhNode>) {
     build_gpu_bvh(&raw_tris)
 }
 
+/// Fixed traversal stack capacity in the WGSL, CUDA PTX, and CPU BVH ray/classification kernels.
+pub const BVH_STACK_CAP: usize = 64;
+
+/// Validates that `bvh_nodes` forms a well-formed, acyclic tree whose worst-case traversal stack usage fits in [`BVH_STACK_CAP`].
+pub fn bvh_fits_traversal_stack(bvh_nodes: &[GpuBvhNode], num_tris: usize) -> bool {
+    if bvh_nodes.is_empty() {
+        return false;
+    }
+    let mut stack = Vec::with_capacity(BVH_STACK_CAP);
+    stack.push((0usize, 1usize));
+    let mut visited = 0usize;
+    while let Some((idx, needed)) = stack.pop() {
+        let Some(node) = bvh_nodes.get(idx) else {
+            return false;
+        };
+        visited += 1;
+        if visited > bvh_nodes.len() {
+            return false;
+        }
+        if (node.right_or_count & 0x8000_0000) != 0 {
+            let first = node.left_or_prim as usize;
+            let count = (node.right_or_count & 0x7FFF_FFFF) as usize;
+            if first.checked_add(count).is_none_or(|end| end > num_tris) {
+                return false;
+            }
+        } else {
+            if needed + 1 > BVH_STACK_CAP {
+                return false;
+            }
+            let left = node.left_or_prim as usize;
+            let right = node.right_or_count as usize;
+            if left >= bvh_nodes.len() || right >= bvh_nodes.len() {
+                return false;
+            }
+            stack.push((right, needed + 1));
+            stack.push((left, needed + 1));
+        }
+    }
+    true
+}
+
 /// Builds a flattened top-down median-split BVH over `tris`, returning `(ordered_tris, nodes)`.
 pub fn build_gpu_bvh(tris: &[GpuTri]) -> (Vec<GpuTri>, Vec<GpuBvhNode>) {
     if tris.is_empty() {
@@ -723,7 +769,7 @@ pub fn build_gpu_bvh(tris: &[GpuTri]) -> (Vec<GpuTri>, Vec<GpuBvhNode>) {
     let mut order: Vec<usize> = (0..tris.len()).collect();
     let mut ordered_tris = Vec::with_capacity(tris.len());
     let mut nodes = Vec::with_capacity(tris.len() * 2);
-    build_bvh_node(tris, &mut order, &mut ordered_tris, &mut nodes);
+    build_bvh_node(tris, &mut order, 0, &mut ordered_tris, &mut nodes);
     (ordered_tris, nodes)
 }
 
@@ -742,7 +788,7 @@ fn tri_bounds_center(t: &GpuTri) -> ([f32; 3], [f32; 3], [f32; 3]) {
 }
 
 /// Recursively partitions `span` along its longest centroid extent to populate `nodes` and `ordered_tris`.
-fn build_bvh_node(tris: &[GpuTri], span: &mut [usize], ordered_tris: &mut Vec<GpuTri>, nodes: &mut Vec<GpuBvhNode>) -> u32 {
+fn build_bvh_node(tris: &[GpuTri], span: &mut [usize], depth: usize, ordered_tris: &mut Vec<GpuTri>, nodes: &mut Vec<GpuBvhNode>) -> u32 {
     let node_idx = nodes.len() as u32;
     nodes.push(GpuBvhNode::default());
 
@@ -768,7 +814,7 @@ fn build_bvh_node(tris: &[GpuTri], span: &mut [usize], ordered_tris: &mut Vec<Gp
         2
     };
 
-    if span.len() <= 4 || extent[axis] <= 1e-7 {
+    if span.len() <= 4 || extent[axis] <= 1e-7 || depth + 2 > BVH_STACK_CAP {
         let first = ordered_tris.len() as u32;
         for &idx in span.iter() {
             if let Some(t) = tris.get(idx) {
@@ -798,8 +844,8 @@ fn build_bvh_node(tris: &[GpuTri], span: &mut [usize], ordered_tris: &mut Vec<Gp
         ca.total_cmp(&cb)
     });
     let (left_span, right_span) = span.split_at_mut(mid);
-    let left_child = build_bvh_node(tris, left_span, ordered_tris, nodes);
-    let right_child = build_bvh_node(tris, right_span, ordered_tris, nodes);
+    let left_child = build_bvh_node(tris, left_span, depth + 1, ordered_tris, nodes);
+    let right_child = build_bvh_node(tris, right_span, depth + 1, ordered_tris, nodes);
 
     if let Some(slot) = nodes.get_mut(node_idx as usize) {
         *slot = GpuBvhNode {
@@ -1042,14 +1088,16 @@ fn classify_one_point(p: [f32; 3], tris: &[GpuTri], bvh: &[GpuBvhNode]) -> bool 
 
 /// CPU scalar point-in-solid classification.
 pub fn cpu_classify_points_scalar(points: &[[f32; 4]], tris: &[GpuTri], bvh: &[GpuBvhNode]) -> Vec<bool> {
-    points.iter().map(|p| classify_one_point([p[0], p[1], p[2]], tris, bvh)).collect()
+    let valid_bvh = if bvh_fits_traversal_stack(bvh, tris.len()) { bvh } else { &[] };
+    points.iter().map(|p| classify_one_point([p[0], p[1], p[2]], tris, valid_bvh)).collect()
 }
 
 /// CPU `rayon` parallel point-in-solid classification.
 pub fn cpu_classify_points_rayon(points: &[[f32; 4]], tris: &[GpuTri], bvh: &[GpuBvhNode]) -> Vec<bool> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        points.par_iter().map(|p| classify_one_point([p[0], p[1], p[2]], tris, bvh)).collect()
+        let valid_bvh = if bvh_fits_traversal_stack(bvh, tris.len()) { bvh } else { &[] };
+        points.par_iter().map(|p| classify_one_point([p[0], p[1], p[2]], tris, valid_bvh)).collect()
     }
     #[cfg(target_arch = "wasm32")]
     {
@@ -1176,14 +1224,16 @@ fn raycast_one_bvh(ray: &GpuRay, tris: &[GpuTri], bvh: &[GpuBvhNode]) -> GpuRayH
 
 /// CPU scalar BVH raycast.
 pub fn cpu_raycast_bvh_scalar(rays: &[GpuRay], tris: &[GpuTri], bvh: &[GpuBvhNode]) -> Vec<GpuRayHit> {
-    rays.iter().map(|r| raycast_one_bvh(r, tris, bvh)).collect()
+    let valid_bvh = if bvh_fits_traversal_stack(bvh, tris.len()) { bvh } else { &[] };
+    rays.iter().map(|r| raycast_one_bvh(r, tris, valid_bvh)).collect()
 }
 
 /// CPU `rayon` parallel BVH raycast.
 pub fn cpu_raycast_bvh_rayon(rays: &[GpuRay], tris: &[GpuTri], bvh: &[GpuBvhNode]) -> Vec<GpuRayHit> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        rays.par_iter().map(|r| raycast_one_bvh(r, tris, bvh)).collect()
+        let valid_bvh = if bvh_fits_traversal_stack(bvh, tris.len()) { bvh } else { &[] };
+        rays.par_iter().map(|r| raycast_one_bvh(r, tris, valid_bvh)).collect()
     }
     #[cfg(target_arch = "wasm32")]
     {

@@ -479,8 +479,8 @@ impl CudaBackend {
             });
         }
 
-        // Select the highest-throughput GPU (by SM count, then compute capability).
-        let best = all_devices.iter().max_by_key(|d| (d.compute_capability, d.sm_count, d.total_vram_bytes))?.clone();
+        // Select the highest-throughput GPU (by SM count, then compute capability, then VRAM).
+        let best = all_devices.iter().max_by_key(|d| (d.sm_count, d.compute_capability, d.total_vram_bytes))?.clone();
 
         let mut dev: CUdevice = 0;
         // SAFETY: `best.ordinal` was validated above.
@@ -782,7 +782,7 @@ impl CudaBackend {
         if tris.is_empty() {
             return Some(vec![false; points.len()]);
         }
-        if bvh_nodes.is_empty() {
+        if !crate::dispatch::bvh_fits_traversal_stack(bvh_nodes, tris.len()) {
             return None;
         }
         let func = self.ampere.as_ref().map_or(self.generic.classify_points_rt_bvh, |a| a.classify_points_rt_bvh_sm86);
@@ -861,7 +861,7 @@ impl CudaBackend {
         if tris.is_empty() {
             return Some(vec![GpuRayHit { t: -1.0, tri_idx: u32::MAX, pad0: 0, pad1: 0 }; rays.len()]);
         }
-        if bvh_nodes.is_empty() {
+        if !crate::dispatch::bvh_fits_traversal_stack(bvh_nodes, tris.len()) {
             return None;
         }
         let func = self.ampere.as_ref().map_or(self.generic.raycast_rt_bvh, |a| a.raycast_rt_bvh_sm86);

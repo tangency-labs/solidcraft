@@ -447,6 +447,14 @@ impl CollisionGpu {
         }
     }
 
+    /// Returns `true` if a storage buffer of `bytes` bytes fits within the device's binding and buffer size limits.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn fits_storage(&self, bytes: usize) -> bool {
+        let limits = self.device.limits();
+        let bytes = bytes as u64;
+        bytes <= limits.max_storage_buffer_binding_size && bytes <= limits.max_buffer_size
+    }
+
     /// Creates a [`CollisionGpu`] sharing an existing `wgpu::Device` and `wgpu::Queue`.
     pub fn from_device(device: wgpu::Device, queue: wgpu::Queue) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -543,7 +551,8 @@ impl CollisionGpu {
         let wg_x = params.count_a.div_ceil(16);
         let wg_y = params.count_b.div_ceil(16);
         let max_wg = self.device.limits().max_compute_workgroups_per_dimension;
-        if wg_x > max_wg || wg_y > max_wg {
+        if wg_x > max_wg || wg_y > max_wg || !self.fits_storage(std::mem::size_of_val(aabbs_a)) || !self.fits_storage(std::mem::size_of_val(aabbs_b))
+        {
             return None;
         }
         self.run_overlap_kernel(&self.bipartite_pipeline, &params, &encode_pod_slice(aabbs_a), &encode_pod_slice(aabbs_b), (wg_x, wg_y, 1))
@@ -559,7 +568,7 @@ impl CollisionGpu {
         let count = u32::try_from(aabbs.len()).ok()?;
         let params = CollisionParams { count_a: count, count_b: count, max_pairs, tolerance: tolerance.max(0.0) };
         let wg = count.div_ceil(16);
-        if wg > self.device.limits().max_compute_workgroups_per_dimension {
+        if wg > self.device.limits().max_compute_workgroups_per_dimension || !self.fits_storage(std::mem::size_of_val(aabbs)) {
             return None;
         }
         let dummy = [GpuAabb::default()];
@@ -577,7 +586,10 @@ impl CollisionGpu {
         let count_b = u32::try_from(nodes.len()).ok()?;
         let params = CollisionParams { count_a, count_b, max_pairs, tolerance: tolerance.max(0.0) };
         let wg_x = count_a.div_ceil(256);
-        if wg_x > self.device.limits().max_compute_workgroups_per_dimension {
+        if wg_x > self.device.limits().max_compute_workgroups_per_dimension
+            || !self.fits_storage(std::mem::size_of_val(query_aabbs))
+            || !self.fits_storage(std::mem::size_of_val(nodes))
+        {
             return None;
         }
         self.run_overlap_kernel(&self.lbvh_pipeline, &params, &encode_pod_slice(query_aabbs), &encode_pod_slice(nodes), (wg_x, 1, 1))
@@ -591,7 +603,11 @@ impl CollisionGpu {
         }
         let count = u32::try_from(aabbs.len()).ok()?;
         let wg_x = count.div_ceil(256);
-        if wg_x > self.device.limits().max_compute_workgroups_per_dimension {
+        let out_bytes = aabbs.len().checked_mul(std::mem::size_of::<GpuMortonItem>())?;
+        if wg_x > self.device.limits().max_compute_workgroups_per_dimension
+            || !self.fits_storage(std::mem::size_of_val(aabbs))
+            || !self.fits_storage(out_bytes)
+        {
             return None;
         }
         let (mut min_x, mut min_y, mut min_z) = (f32::INFINITY, f32::INFINITY, f32::INFINITY);
@@ -833,6 +849,10 @@ impl CollisionGpu {
         bytes_b: &[u8],
         workgroups: (u32, u32, u32),
     ) -> Option<CollisionResult> {
+        let pairs_bytes = (params.max_pairs as usize).checked_mul(std::mem::size_of::<OverlapPair>())?;
+        if !self.fits_storage(bytes_a.len()) || !self.fits_storage(bytes_b.len()) || !self.fits_storage(pairs_bytes) {
+            return None;
+        }
         let _guard = self.lock_device();
         let u_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("overlap-params"),
@@ -849,7 +869,7 @@ impl CollisionGpu {
             contents: bytes_b,
             usage: wgpu::BufferUsages::STORAGE,
         });
-        let pairs_bytes = (params.max_pairs as usize * std::mem::size_of::<OverlapPair>()) as u64;
+        let pairs_bytes = pairs_bytes as u64;
         let pairs_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("overlap-pairs"),
             size: pairs_bytes,
