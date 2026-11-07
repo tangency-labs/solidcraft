@@ -11,11 +11,15 @@ SolidCraft MCP server:
 
 | | Plain SolidCraft MCP (21 tools) | scx v13 (3 tools) |
 |---|---:|---:|
-| Parts built correctly | 69 / 69 | 69 / 69 |
+| Parts passing the check | 69 / 69 | 69 / 69 |
 | Tool calls per task | 6.8 | 2.8 (**-58%**) |
 | Input tokens per task | 269k | 125k (**-54%**) |
 | Cost per task | 45.7 cents | 18.6 cents (**-59%**) |
 | Wall time | 100% | about 70% |
+
+The check compares every expected body's volume and bounding box with a reference build (see [How we tuned
+it](#how-we-tuned-it), point 2); it does not check where each feature sits, so a hole of the right size in
+the wrong place would still pass.
 
 Same model, same tasks, same checker; only the MCP server changed. Edits to an existing design gained the
 most: 12.6 calls and 74 cents per task on the plain MCP, 23 cents on v13.
@@ -83,7 +87,8 @@ already expects, one observed failure at a time:
 - **Defaults match the words people use.** `hollow(3, open='top')` instead of box-minus-box. `op='cut'`
   acts on the last body made or changed, so a cut does not slice every body it touches. `slot` takes the
   overall length, not the distance between arc centres.
-- **Forgiving inputs.** The script is accepted as `code`, `script`, `command`, `source` or `python`.
+- **Forgiving inputs.** The script is accepted as `code` (the name in the tool's schema) or, from a client
+  that does not check arguments against the schema, as `script`, `command`, `source` or `python`.
   Feature objects work wherever a body name does. `import math` works.
 - **Errors keep the work.** Steps before an error stay built, the reply says so, and the hint names the fix
   (for example "Block is a body name, so quote it: 'Block'").
@@ -139,8 +144,10 @@ We tuned it like a small training loop, with a person in the loop and one change
 5. **Measure with repeats.** Three runs per task. Run-to-run spread was 2-12%, so one run cannot separate a
    10% change from noise.
 6. **Stopping rule.** Keep a change only if the 3-run average improves cost or tokens by at least 5% with no
-   lost pass. Stop after two changes in a row miss that bar. For Haiku 5.5 that happened at v12 (a
-   regression, reverted) and v13 (flat), so v13 is the final Haiku version.
+   lost pass. Stop after two changes in a row miss that bar. For Haiku 5.5, v10 and v11 each gained under
+   5% but were kept anyway (v10 was harmless, v11 removed 22 repeated errors), and tuning went on; v12 was
+   a regression and was reverted; v13 fixed the cut-off instructions with flat efficiency. Tuning stopped
+   there, so v13 is the final Haiku version (the [change log](CHANGELOG.md) has each step).
 
 What we learned:
 

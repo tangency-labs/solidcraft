@@ -57,7 +57,11 @@ class Bridge:
                 return m
 
     def tool(self, name, args):
-        r = self.rpc("tools/call", {"name": name, "arguments": args}).get("result", {})
+        resp = self.rpc("tools/call", {"name": name, "arguments": args})
+        if "error" in resp:
+            err = resp["error"]
+            raise SCError(f"{name}: {err.get('message', err) if isinstance(err, dict) else err}")
+        r = resp.get("result", {})
         return r.get("content", []), r.get("isError", False)
 
     def text(self, name, args):
@@ -773,8 +777,7 @@ def main():
             name = m["params"]["name"]
             try:
                 if name not in HANDLERS:
-                    r = bridge().rpc("tools/call", m["params"]).get("result", {})
-                    content, is_err = r.get("content", []), r.get("isError", False)
+                    content, is_err = bridge().tool(name, m["params"].get("arguments") or {})
                 else:
                     content, is_err = HANDLERS[name](m["params"].get("arguments") or {})
             except Exception as e:
