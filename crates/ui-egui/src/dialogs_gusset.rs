@@ -6,6 +6,7 @@ use crate::{
     ui_kit::{IconSegment, choice_row, expr_row, row, segmented_icons},
 };
 use serde_json::{Map, Value, json};
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::{
     Sel,
     doc::{FeatureKind, expr::Kind as ValueKind, gusset::Placement},
@@ -97,7 +98,12 @@ pub fn commands(app: &SolveApp, g: &Gusset, inputs: &[SelInput], extra: &Map<Str
     }
     Ok(vec![("frame.gusset".into(), args)])
 }
-pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelInput>, Map<String, Value>)> {
+pub fn for_feature(
+    app: &SolveApp,
+    kind: &FeatureKind,
+    component: u64,
+    frame: &solidcraft_engine::doc::Mat,
+) -> Option<(Kind, Vec<SelInput>, Map<String, Value>)> {
     let FeatureKind::FrameGusset { supports, leg1, leg2, thickness, relief, clip, offset, placement } = kind else { return None };
     let (_, mut inputs) = start(app, "frame.gusset")?;
     let length = |e: &solidcraft_engine::doc::Expr| shown_expr(e, ValueKind::Length);
@@ -115,23 +121,21 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
         },
         profile: usize::from(clip.as_str() != "0 mm"),
     };
+    // The point picked on each face, moved onto the face's exact plane as it is now: it stays on
+    // the material when an edit moves the face along its normal. (The anchor plane's origin is
+    // the foot of the plane from the origin, which can lie off the face.)
     let state = app.session.model.state();
-    let world = app.session.world_state().ok();
     for (support, input) in supports.iter().zip(&mut inputs) {
-        if let Some(anchor) = solidcraft_engine::doc::face_anchor::plane_face_anchor(&support.plane)
+        if let solidcraft_engine::doc::PlaneRef::Face { at, .. } = &support.plane
+            && let Some(anchor) = solidcraft_engine::doc::face_anchor::plane_face_anchor(&support.plane)
             && let Some(body) = state.body(&anchor.target.body)
+            && let Ok(plane) = app.session.doc.resolve_face_anchor(anchor, component, &state)
+            && let Some(index) = app.session.doc.configuration_face_indices(body, &anchor.target).ok().and_then(|is| is.first().copied())
         {
+            let n = plane.normal();
+            let on_face = *at - n * (*at - plane.origin).dot(n);
             let name = app.session.doc.world_body_name(&state, &body.name, anchor.component, &anchor.path);
-            let indices = app.session.doc.configuration_face_indices(body, &anchor.target).ok();
-            if let Some(body) = world.as_ref().and_then(|w| w.body(&name)) {
-                let mesh = body.mesh();
-                if let Some((tri, index)) =
-                    mesh.triangles.iter().zip(&mesh.tri_face).find(|(_, i)| indices.as_ref().is_some_and(|is| is.contains(&(**i as usize))))
-                    && let Some([a, b, c]) = mesh.tri(tri)
-                {
-                    input.items = vec![Sel::Face { body: name, index: *index as usize, point: (a + b + c) / 3. }];
-                }
-            }
+            input.items = vec![Sel::Face { body: name, index, point: solidcraft_engine::doc::apply_point(frame, on_face) }];
         }
     }
     Some((Kind::Gusset(g), inputs, Map::new()))

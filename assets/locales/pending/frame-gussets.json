@@ -2,6 +2,7 @@
   "ar": {
     "cmd.frame.gusset": "صفيحة تقوية",
     "error.gusset_support": "حدد سطحَي دعم مستويين.",
+    "help.frame.gusset": "يضيف صفيحة مستوية عبر الزاوية التي يلتقي فيها عنصرا إطار، مثبتة على سطح من كل منهما. استخدمه لتقوية وصلة في إطار ملحوم.",
     "ui.gusset.center": "في المنتصف",
     "ui.gusset.clip": "قص الأطراف الخارجية",
     "ui.gusset.clipped": "أطراف مقصوصة",
@@ -21,6 +22,7 @@
   "de": {
     "cmd.frame.gusset": "Knotenblech",
     "error.gusset_support": "Wählen Sie zwei ebene Stützflächen.",
+    "help.frame.gusset": "Setzt ein flaches Blech über die Ecke, an der zwei Rahmenprofile zusammentreffen, befestigt an je einer Fläche. Damit versteifen Sie eine Verbindung in einem geschweißten Rahmen.",
     "ui.gusset.center": "Mittig",
     "ui.gusset.clip": "Äußere Spitzen kürzen",
     "ui.gusset.clipped": "Gekürzte Spitzen",
@@ -40,6 +42,7 @@
   "en": {
     "cmd.frame.gusset": "Gusset",
     "error.gusset_support": "Select two planar support faces.",
+    "help.frame.gusset": "Adds a flat plate across the corner where two frame members meet, attached to a face of each. Use it to stiffen a joint in a welded frame.",
     "ui.gusset.center": "Centered",
     "ui.gusset.clip": "Outer Tip Clip",
     "ui.gusset.clipped": "Clipped Tips",
@@ -57,11 +60,13 @@
     "ui.gusset_title": "GUSSET"
   },
   "en-GB": {
+    "help.frame.gusset": "Adds a flat plate across the corner where two frame members meet, attached to a face of each. Use it to stiffen a joint in a welded frame.",
     "ui.gusset.center": "Centred"
   },
   "he": {
     "cmd.frame.gusset": "לוחית חיזוק",
     "error.gusset_support": "בחרו שתי פאות תמיכה מישוריות.",
+    "help.frame.gusset": "מוסיף לוח שטוח לרוחב הפינה שבה נפגשים שני רכיבי מסגרת, מחובר לפאה של כל אחד מהם. השתמשו בו כדי לחזק חיבור במסגרת מרותכת.",
     "ui.gusset.center": "ממורכז",
     "ui.gusset.clip": "קיטום קצוות חיצוניים",
     "ui.gusset.clipped": "קצוות קטומים",
@@ -81,6 +86,7 @@
   "ja": {
     "cmd.frame.gusset": "ガセット",
     "error.gusset_support": "平面の支持面を2つ選択してください。",
+    "help.frame.gusset": "2本のフレーム部材が交わる角に、それぞれの面に取り付けた平板を追加します。溶接フレームの接合部を補強するときに使います。",
     "ui.gusset.center": "中央",
     "ui.gusset.clip": "外側先端の切落し",
     "ui.gusset.clipped": "先端切落し",
@@ -100,6 +106,7 @@
   "ko": {
     "cmd.frame.gusset": "보강판",
     "error.gusset_support": "평평한 지지 면 두 개를 선택하세요.",
+    "help.frame.gusset": "두 프레임 부재가 만나는 모서리에 각 부재의 면에 붙는 평판을 추가합니다. 용접 프레임의 접합부를 보강할 때 사용합니다.",
     "ui.gusset.center": "중앙",
     "ui.gusset.clip": "바깥 끝 자르기",
     "ui.gusset.clipped": "끝 자르기",
@@ -119,6 +126,7 @@
   "vi": {
     "cmd.frame.gusset": "Tấm gia cường",
     "error.gusset_support": "Chọn hai mặt tựa phẳng.",
+    "help.frame.gusset": "Thêm một tấm phẳng ngang góc nơi hai thanh khung gặp nhau, gắn vào một mặt của mỗi thanh. Dùng để gia cố mối nối trong khung hàn.",
     "ui.gusset.center": "Ở giữa",
     "ui.gusset.clip": "Cắt vát đầu ngoài",
     "ui.gusset.clipped": "Cắt vát các đầu",
@@ -138,6 +146,7 @@
   "zh": {
     "cmd.frame.gusset": "加强板",
     "error.gusset_support": "请选择两个平面支承面。",
+    "help.frame.gusset": "在两根框架构件相交的角部添加一块平板，分别贴合在两根构件的一个面上。用于加强焊接框架的连接处。",
     "ui.gusset.center": "居中",
     "ui.gusset.clip": "外端切角",
     "ui.gusset.clipped": "切角端部",

@@ -7656,7 +7656,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             let (kind, inputs, extra) = crate::dialogs_sheet::for_feature(app, other)
                 .or_else(|| crate::dialogs_plastic::for_feature(app, other))
                 .or_else(|| crate::dialogs_frame::for_feature(app, other))
-                .or_else(|| crate::dialogs_gusset::for_feature(app, other))
+                .or_else(|| crate::dialogs_gusset::for_feature(app, other, f.component, &feature_frame(s, f.component)))
                 .or_else(|| crate::dialogs_surface::for_feature(app, other, &feature_frame(s, f.component)))?;
             let mut d = Dialog::new(kind, inputs);
             d.extra = extra;
