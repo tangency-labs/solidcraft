@@ -29,11 +29,11 @@ departs from a decided row says so.
 |---|---|---|---|
 | D12 | Base View stays on after the first view and places projected views. The cursor's side of the placed view picks the view (the drawing's first- or third-angle setting decides); a diagonal gives a pictorial view; Esc or Finish ends. The preview asks `drawing.view.projection_for` ([#13044](https://github.com/tangency-labs/solidcraft/issues/13044)) | decided | placing-views |
 | D13 | No separate Projected View button. A selected view offers Add projected view | decided | view-selected |
-| D14 | "Standard views" places front, top and right in one go | check | base-view-first, placing-views |
+| D14 | "Standard views" places the front view, the right view and an isometric view up and to the right of the front, in one go. The top view is added with Add projected view when a part needs it (confirmed by the drawings team) | decided | base-view-first, placing-views |
 | D15 | A selection card sits above a selected view or dimension (Edit, Add projected view, Section, Delete); a selected view has a drag handle on three sides | decided | view-selected |
 | D16 | Moving a view shows alignment and spacing guides, the distance moved and where it snaps; Alt moves freely; an aligned view moves only along its line; moves, deletes and similar end with an Undo toast. The snap values are a first set | decided | moving-views, picking |
 | D17 | Picking: a view's boundary appears near its edge and a view is dragged by that band only; inside, a click picks by the Pick mode; the smallest boundary wins, then the topmost; box select starts on empty paper only; the sheet border, drawing border and title block are locked | decided | picking |
-| D18 | Face picking on the 3D model in the first Base View panel is planned; the orientation chips (Front, Top, Right, Left, Bottom, Back, Iso) work first | planned | base-view-first |
+| D18 | Face picking on the 3D model in the first Base View panel is planned (confirmed by the drawings team: it shares the engine side with auxiliary views, #13044); the orientation chips (Front, Top, Right, Left, Bottom, Back, Iso) work first | planned | base-view-first |
 | D19 | Entry points: an empty drawing offers Standard views, Blank sheet and From a template; "Make drawing" is in the model's right-click menu and the File menu | decided | first-drawing, make-drawing |
 | D20 | The Views section promotes Flat Pattern View only for a sheet-metal part | decided | views-by-part-type |
 
@@ -52,8 +52,8 @@ departs from a decided row says so.
 
 | # | Decision | Status | Boards |
 |---|---|---|---|
-| D27 | ISO 5457 frame with a 20 mm binding margin and the reference grid; ISO 7200 title block no wider than 180 mm; ISO 7573 parts list right-aligned above the title block; ISO 128 line weights; general notes at the lower left | check | layout, paper-presets |
-| D28 | The third-angle projection symbol shows the frustum on the left and its circles on the right | check | layout |
+| D27 | The paper follows the engine's settled designs (#3875, #3874) and the standards. Title block 180 × 54 mm at the lower right of the border, cells from the top row down: Legal owner (room for a logo), General tolerances, Projection; Material, Finish, Mass; Created by, Approved by, Date of issue, Sheet; Title, Identification number. No Scale box: each view states its own scale. Revision table at the lower left (REV, DESCRIPTION, DRAWN, CHECKED, DATE); parts list at the top right, growing down (ITEM, QTY, NAME, DESCRIPTION, MATERIAL, MASS); both snap to the title block, the border and other tables. General notes just above the revision table. Rows 7 mm, text 3.5 mm, outline 0.7 mm, grid 0.35 mm. ISO 5457 frame with a 20 mm binding margin and the reference grid | decided | layout, paper-presets |
+| D28 | The projection symbol follows the drawing's setting. In third angle the circles are on the left and the frustum on the right, its narrow end towards the circles; first angle swaps them (ISO 5456-2) | decided | layout |
 | D29 | A very slight rounded corner on the paper, on screen only; an export is square-cornered | decided | layout |
 
 ## Shortcuts
@@ -64,7 +64,7 @@ departs from a decided row says so.
 
 ## Open or still to design
 
-- Which of D06, D14, D27, D28 and D30 hold up when checked (the drawings team, and the existing shortcut map).
-- Whether the view window can pick a face of the part (D18).
+- Whether D06 (the Sheets section default) and D30 (shortcuts, against the existing shortcut map) hold up when checked.
 - Drawing Settings and Properties, Create Drawing options, Replace Model, the Check Drawing coverage list, the "not drawn" status and refusal messages, Section views, assembly views, and the later slices listed in the README.
 - Real icons for the commands that have none.
+- Engine plans that need a board when their slice is handed out: Check Drawing with its separate coverage list (#13054), `drawing.dimension.from_model` for Model Dimensions, filtered by sketch, feature or body, whose reply lists what was added and skipped (#13054), note fields that read shown, empty or lost, and leaders with branches (#13059).

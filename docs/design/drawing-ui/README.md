@@ -69,12 +69,13 @@ Status is the status pill. Automatic centre marks is a Drawing Settings option.
 
 ## The paper
 
-The sheet follows the standards so a drawing can be used as one: an ISO 5457 frame with a 20 mm
-binding margin and the reference grid, an ISO 7200 title block no wider than 180 mm, an ISO 7573
-parts list right-aligned above the title block, ISO 128 line weights and line types, a
-third-angle projection symbol and general notes at the lower left. The paper has a very slight
-rounded corner on screen only; an export is square-cornered. The standards references have not
-yet been checked by the drawings team (see the log).
+The sheet follows the engine's settled designs and the standards, so a drawing can be used as one.
+The title block is 180 × 54 mm at the lower right of the border, with no Scale box (each view states
+its own scale). The revision table is at the lower left and the parts list at the top right, growing
+down; both snap to the title block, the border and other tables, and general notes go just above the
+revision table. The projection symbol follows the drawing's setting. The frame is an ISO 5457 frame
+with a 20 mm binding margin and the reference grid. The paper has a very slight rounded corner on
+screen only; an export is square-cornered. The details are in decisions D27 to D29.
 
 ## Boards
 
