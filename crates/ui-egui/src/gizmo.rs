@@ -283,8 +283,21 @@ pub fn handles_region(proj: &Proj, t: &Triad) -> Option<egui::Rect> {
 }
 
 /// Draw the triad and run a drag on it. `step` is the distance snap step.
+/// The handle a press landed on this frame without starting a drag, if any: a click, or a press
+/// and release that arrived in one frame, which no drag ever begins from. Read it once per frame
+/// after [`show`], with the same `id`; it moves nothing.
+pub fn take_click(ui: &egui::Ui, id: egui::Id) -> Option<Handle> {
+    ui.data_mut(|d| {
+        let key = id.with("click");
+        let handle = d.get_temp::<Handle>(key);
+        d.remove::<Handle>(key);
+        handle
+    })
+}
+
 pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::Id, t: &Triad, step: f64) -> Option<Drag> {
     let tk = Tokens::get();
+    ui.data_mut(|d| d.remove::<Handle>(id.with("click")));
     let l = mm_per_px(proj, t.center)? * LEN_PX;
     LAST.with(|x| *x.borrow_mut() = Some((t.center, l)));
     let sh = shapes(proj, t, l)?;
@@ -331,6 +344,12 @@ pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::I
         Some(s) => s,
         None => {
             if !r.drag_started() {
+                let pressed = ui.input(|i| {
+                    i.events.iter().any(|e| matches!(e, egui::Event::PointerButton { button: egui::PointerButton::Primary, pressed: true, .. }))
+                });
+                if let (Some(h), true) = (hovered, pressed) {
+                    ui.data_mut(|d| d.insert_temp(id.with("click"), h));
+                }
                 return None;
             }
             let h = hovered?;

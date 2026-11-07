@@ -541,11 +541,10 @@ pub fn step_value_field(d: &mut Dialog, step: i64) {
     d.extra.insert("value_field".into(), json!(next));
 }
 
-pub fn drag(app: &SolveApp, d: &mut Dialog, g: Drag) {
-    // The box shows the value the handle drives: the distance along a dragged arrow, the angle
-    // of a dragged ring (#4776). A plane square or the ball moves along two or three axes and
-    // leaves it as it is.
-    let field = match g.handle {
+/// Show the value `handle` drives in the box: the distance along an arrow, the angle of a ring
+/// (#4776). A plane square or the ball moves along two or three axes and leaves it as it is.
+pub fn show_handle_value(d: &mut Dialog, handle: crate::gizmo::Handle) {
+    let field = match handle {
         crate::gizmo::Handle::Axis(i) => Some(i.min(2)),
         crate::gizmo::Handle::Ring(i) => Some(3 + i.min(2)),
         _ => None,
@@ -555,6 +554,10 @@ pub fn drag(app: &SolveApp, d: &mut Dialog, g: Drag) {
     {
         d.extra.insert("value_field".into(), json!(f));
     }
+}
+
+pub fn drag(app: &SolveApp, d: &mut Dialog, g: Drag) {
+    show_handle_value(d, g.handle);
     let Kind::Move { x, y, z, rx, ry, rz, .. } = &d.kind else { return };
     if g.started || !d.extra.contains_key("drag0") {
         let v = [len(app, x), len(app, y), len(app, z), ang(app, rx), ang(app, ry), ang(app, rz)].map(|r| r.unwrap_or(0.0));

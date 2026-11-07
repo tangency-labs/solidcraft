@@ -375,11 +375,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
     // every other dialog's value gets (`dir` is None below).
     if matches!(d.kind, Kind::Move { .. }) {
         let mut dragging = false;
-        if let Some(t) = crate::dialogs_move::triad(app, &d)
-            && let Some(g) = crate::gizmo::show(ui, painter, proj, egui::Id::unique("sc_move_triad"), &t, snap_step(app.cam.half_height()))
-        {
-            crate::dialogs_move::drag(app, &mut d, g);
-            dragging = true;
+        let triad_id = egui::Id::unique("sc_move_triad");
+        if let Some(t) = crate::dialogs_move::triad(app, &d) {
+            if let Some(g) = crate::gizmo::show(ui, painter, proj, triad_id, &t, snap_step(app.cam.half_height())) {
+                crate::dialogs_move::drag(app, &mut d, g);
+                dragging = true;
+            } else if let Some(handle) = crate::gizmo::take_click(ui, triad_id) {
+                // A click on a handle, with no drag, still shows the value it drives.
+                crate::dialogs_move::show_handle_value(&mut d, handle);
+            }
         }
         // Read the triad again after the drag, so the box follows it in the same frame. Move
         // types with no triad put the box on the picked bodies, or beside Rotate's handle
