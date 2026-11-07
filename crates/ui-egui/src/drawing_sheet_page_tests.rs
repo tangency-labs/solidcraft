@@ -158,6 +158,14 @@ fn fit_sheet_shows_the_whole_sheet_and_zoom_stays_in_range() {
     assert!(h.call("ui.view", json!({"view": "front"}))["ok"] == false, "a sheet has no 3D views");
 }
 
+/// The card shows whole percent, and tenths below 10 %; typing a shown value back keeps it.
+#[test]
+fn the_zoom_readout_is_rounded() {
+    for (zoom, shown) in [(0.72996, 73.0), (1.0, 100.0), (0.0549, 5.5), (0.05, 5.0), (0.0996, 10.0), (31.99, 3199.0)] {
+        assert_eq!(shown_percent(zoom), shown, "{zoom}");
+    }
+}
+
 /// The pan tool drags the sheet with the pointer on the page's own camera: the Design camera, the
 /// design and its undo steps stay as they were.
 #[test]

@@ -500,7 +500,7 @@ fn zoom_card(app: &mut SolveApp, ui: &mut egui::Ui, canvas: Rect, zoom: f64) {
     let size = app.drawing_workspace.page.card.map_or(vec2(t.space_24 * 10.0, t.space_24 + 10.0), |r| r.size());
     let bar = app.viewport.layout.as_ref().map_or(0.0, |l| if l.navigation.is_positive() { l.navigation.height() + t.space_8 } else { 0.0 });
     let position = pos2(area.right() - size.x - t.space_8, area.bottom() - size.y - t.space_8 - bar).max(area.min);
-    let mut percent = (zoom * 100.0) as f32;
+    let mut percent = shown_percent(zoom);
     let mut chosen = None;
     let card = container.area(egui::Id::new("sc_sheet_zoom")).fixed_pos(position).show(ui.ctx(), |ui| {
         container.show_frame(ui, frame, area, |ui| {
@@ -531,6 +531,13 @@ fn zoom_card(app: &mut SolveApp, ui: &mut egui::Ui, canvas: Rect, zoom: f64) {
         Some("fit") => fit(app),
         _ => {}
     }
+}
+
+/// The zoom as the card shows it, in percent: whole above 10 %, to a tenth below.
+pub(crate) fn shown_percent(zoom: f64) -> f32 {
+    let percent = zoom * 100.0;
+    let shown = if percent < 10.0 { (percent * 10.0).round() / 10.0 } else { percent.round() };
+    shown as f32
 }
 
 /// Preferences' Sheet colour choice.
