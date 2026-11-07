@@ -1035,10 +1035,15 @@ impl<'t, O: SolutionObject + 't> CpGlobalSolver<'t, O> {
 
         // when BezierInterval extends beyond TotalProblemInterval - mark this range
         // ends as discontinuous
-        if bez_ivl.min() <= interval.min() {
+        // (not upstream, #2656, WR-757) The next span is skipped below when what is left of it in the
+        // interval is a zero length (`are_same`), so an interval ending that close to a span's end
+        // ends there: with the exact test alone, an end a rounding past a knot leaves this span
+        // thinking the answer lies in a next span that never looks, and a point whose foot is at
+        // the end has no solution at all.
+        if bez_ivl.min() <= interval.min() || are_same(bez_ivl.min(), interval.min()) {
             conts[0] = ContinuityType::Discontinuous;
         }
-        if bez_ivl.max() >= interval.max() {
+        if bez_ivl.max() >= interval.max() || are_same(bez_ivl.max(), interval.max()) {
             conts[1] = ContinuityType::Discontinuous;
         }
 
