@@ -23,13 +23,16 @@ fn preset(value: &str) -> PanelResult<()> {
 /// The caller explicitly opts into original synthetic content at the actual
 /// workspace composition point. An existing runtime is never replaced.
 pub fn enable_host_specimen(app: &mut crate::SolveApp, name: &str) -> PanelResult<()> {
+    enable_host_specimen_remembered(app, name, false)
+}
+
+fn enable_host_specimen_remembered(app: &mut crate::SolveApp, name: &str, remember: bool) -> PanelResult<()> {
     preset(name)?;
     if app.panel_runtime().is_some() {
         return Err(error(Rule::Lifecycle, "panel specimen cannot take over an existing runtime"));
     }
     let (layout, registry) = specimen_layout(name)?;
-    let instances = layout.instances.clone();
-    let service = LayoutService::new(registry, layout, HostCapabilities::default())?;
+    let service = LayoutService::new(registry, layout, HostCapabilities { persistence: remember, ..Default::default() })?;
     let mut runtime = PanelRuntime::new(
         service,
         RuntimeEnvironment {
@@ -82,9 +85,10 @@ pub fn enable_host_specimen(app: &mut crate::SolveApp, name: &str) -> PanelResul
     }
     let calls = Rc::new(Cell::new(0));
     let services = SpecimenServices {
-        models: SpecimenModels { name: name.into(), probe, identities, instances, calls: calls.clone() },
+        models: SpecimenModels { name: name.into(), probe, identities, calls: calls.clone() },
         commands: SpecimenCommands { calls },
         local: FakeLocalServices::default(),
+        workspace: WorkspaceId::new(WORKSPACE)?,
     };
     // Stage the complete integration before publishing it. Factories, the first
     // service tick and host option validation may all fail without taking over
@@ -92,8 +96,43 @@ pub fn enable_host_specimen(app: &mut crate::SolveApp, name: &str) -> PanelResul
     let mut integration = AppPanelRuntime::new(runtime, Box::new(services))?;
     integration.tick(&app.session)?;
     integration.enable_host(HostOptions::default())?;
+    let repaired = if remember {
+        let mut catalogue = specimen_catalogue(name)?;
+        super::preferences::configure_preferences(&mut integration, &app.panel_layout_preferences, &mut catalogue)?
+    } else {
+        false
+    };
     app.panel_runtime = Some(integration);
+    if repaired {
+        super::preferences::report_notice(app);
+    }
     Ok(())
+}
+
+fn specimen_catalogue(current: &str) -> PanelResult<commands::InMemoryCatalogue> {
+    let mut catalogue = commands::InMemoryCatalogue::default();
+    for (name, preset, suffix, title) in [
+        ("Classic", current, "", "classic"),
+        ("Modelling", "docks", ".modelling", "modelling"),
+        ("Sketch", "tabs", ".sketch", "sketch"),
+        ("Render", "columns", ".render", "render"),
+        ("Review", "floating", ".review", "review"),
+    ] {
+        let (mut layout, registry) = specimen_layout(preset)?;
+        layout.workspace = WorkspaceId::new(format!("{WORKSPACE}{suffix}"))?;
+        let workspace = layout.workspace.clone();
+        catalogue.register_builtin(name, &LayoutEnvelope::new(layout), &registry)?;
+        catalogue.register_workspace(commands::WorkspaceDescriptor {
+            id: workspace,
+            title_key: format!("ui.panel_layout.workspace.{title}"),
+            default_preset: name.into(),
+        })?;
+    }
+    Ok(catalogue)
+}
+
+fn specimen_workspace(workspace: &WorkspaceId) -> bool {
+    ["", ".modelling", ".sketch", ".render", ".review"].iter().any(|suffix| workspace.0 == format!("{WORKSPACE}{suffix}"))
 }
 
 fn specimen_layout(name: &str) -> PanelResult<(Layout, PanelRegistry)> {
@@ -403,7 +442,6 @@ struct SpecimenModels {
     name: String,
     probe: FixtureProbe,
     identities: SpecimenIdentities,
-    instances: Vec<PanelInstance>,
     calls: Rc<Cell<u64>>,
 }
 impl PanelModels for SpecimenModels {
@@ -452,14 +490,23 @@ struct SpecimenServices {
     models: SpecimenModels,
     commands: SpecimenCommands,
     local: FakeLocalServices,
+    workspace: WorkspaceId,
 }
 impl AppPanelServices for SpecimenServices {
+    fn refresh_workspace(&mut self, workspace: &WorkspaceId) -> PanelResult<()> {
+        if !specimen_workspace(workspace) {
+            return Err(error(Rule::Placement, "not a registered specimen workspace"));
+        }
+        self.workspace = workspace.clone();
+        Ok(())
+    }
     fn refresh_read_only(&mut self, session: &Session) -> PanelResult<()> {
         let document = DocumentId::new(session.document_id.clone())?;
-        let scope =
-            LocalScope { workspace: WorkspaceId::new(WORKSPACE)?, document: Some(document), viewport: ViewportId::new("panel_fixture.viewport")? };
-        for instance in &self.models.instances {
-            self.local.bind(instance.id.clone(), scope.clone())?;
+        let scope = LocalScope { workspace: self.workspace.clone(), document: Some(document), viewport: ViewportId::new("panel_fixture.viewport")? };
+        // The bounded registered presets contain at most 24 stable identities.
+        // Scope bindings are input services, not panel registrations or bodies.
+        for index in 0..24 {
+            self.local.bind(InstanceId::new(format!("specimen-{index}"))?, scope.clone())?;
         }
         Ok(())
     }
@@ -491,21 +538,25 @@ fn session_observation(app: &crate::SolveApp) -> Value {
 /// An empty object inspects without ticking services or dispatching layout/model actions.
 pub(crate) fn control_specimen(app: &mut crate::SolveApp, params: &Value) -> Result<Value, String> {
     let object = params.as_object().ok_or("panel_fixture params must be an object")?;
-    if object.keys().any(|key| !matches!(key.as_str(), "enabled" | "preset")) {
+    if object.keys().any(|key| !matches!(key.as_str(), "enabled" | "preset" | "remember")) {
         return Err("unknown panel_fixture parameter".into());
     }
     let enabled = object.get("enabled").map(|v| v.as_bool().ok_or("enabled must be a boolean")).transpose()?;
     let name = object.get("preset").map(|v| v.as_str().ok_or("preset must be a string")).transpose()?;
+    let remember = object.get("remember").map(|v| v.as_bool().ok_or("remember must be a boolean")).transpose()?;
     if let Some(name) = name {
         preset(name).map_err(|e| e.to_string())?;
     }
-    if enabled == Some(false) && name.is_some() {
-        return Err("preset cannot be combined with enabled=false".into());
+    if enabled == Some(false) && (name.is_some() || remember.is_some()) {
+        return Err("preset or remember cannot be combined with enabled=false".into());
+    }
+    if remember.is_some() && enabled != Some(true) && name.is_none() {
+        return Err("remember requires enabling a panel specimen".into());
     }
     if enabled == Some(true) || name.is_some() {
-        enable_host_specimen(app, name.unwrap_or("docks")).map_err(|e| e.to_string())?;
+        enable_host_specimen_remembered(app, name.unwrap_or("docks"), remember.unwrap_or(false)).map_err(|e| e.to_string())?;
     }
-    let owns_runtime = app.panel_runtime().is_some_and(|runtime| runtime.environment().workspace.0 == WORKSPACE);
+    let owns_runtime = app.panel_runtime().is_some_and(|runtime| specimen_workspace(&runtime.environment().workspace));
     if enabled == Some(false) && app.panel_runtime().is_some() {
         if !owns_runtime {
             return Err("panel specimen cannot tear down another runtime".into());
@@ -526,7 +577,7 @@ pub(crate) fn control_specimen(app: &mut crate::SolveApp, params: &Value) -> Res
 /// Observe the current host, synthetic probe and actual Session without a tick,
 /// action dispatch, geometry evaluation or cold mesh creation.
 pub fn inspect_host_specimen(app: &mut crate::SolveApp) -> PanelResult<Value> {
-    let owns_runtime = app.panel_runtime().is_some_and(|runtime| runtime.environment().workspace.0 == WORKSPACE);
+    let owns_runtime = app.panel_runtime().is_some_and(|runtime| specimen_workspace(&runtime.environment().workspace));
     let mut reply = json!({"enabled":false,"session":session_observation(app),"host":host_observation(app),
         "effective_usable":app.viewport.layout.as_ref().and_then(|layout| layout.usable.as_ref()).map(|usable|
             json!({"domain":&usable.domain,"obstacles":&usable.obstacles,"free":&usable.free}))});
