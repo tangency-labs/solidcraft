@@ -264,6 +264,22 @@ impl Surface {
         how: Continuity,
         distance: f64,
     ) -> Result<Option<Extended>> {
+        self.extended_by_distance_at(k, dom, dom, side, how, distance)
+    }
+
+    /// [`Surface::extended_by_distance`] with the length across measured at the middle of
+    /// `at`'s side (the same side coordinate as `dom`'s) rather than `dom`'s: where earlier
+    /// sides grew the box, `at` is the face's own extent along the side, so the distance is
+    /// met at the face, not where the surface has grown ([`Surface::extended_sides`]).
+    pub(super) fn extended_by_distance_at(
+        &self,
+        k: &Kernel,
+        dom: &Extent2d,
+        at: &Extent2d,
+        side: BoxSide,
+        how: Continuity,
+        distance: f64,
+    ) -> Result<Option<Extended>> {
         if !(distance.is_finite() && distance > 0.0) {
             return Err(SolidError::invalid_input(
                 OP,
@@ -271,10 +287,10 @@ impl Surface {
             ));
         }
         if let SurfaceKind::OffsetSurface(o) = self.kind() {
-            return offset_extended(k, o, dom, side, how, distance);
+            return offset_extended(k, o, dom, at, side, how, distance);
         }
         if let SurfaceKind::ProceduralBlend(pb) = self.kind() {
-            return blend::blend_extended(k, pb, dom, side, distance);
+            return blend::blend_extended(k, pb, dom, at, side, distance);
         }
         let analytic = AnalyticSupport::of(self).is_some();
         let form = crate::blend::fillet_section::station::as_b_spline(k, self)?.ok_or(
@@ -285,14 +301,9 @@ impl Surface {
         )?;
         let net = form.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
         let degree = if side.is_u() { net.p() } else { net.q() };
-        let source = Local::of(net, side)?;
+        let local = Local::of(net, side);
         let fixed = side.at(dom);
-        let end = if side.is_high() {
-            source.end()?
-        } else {
-            -source.end()?
-        };
-        let made = |product: bool, e: f64| -> Result<Option<Made>> {
+        let made = |source: &Local, product: bool, e: f64| -> Result<Option<Made>> {
             let grown = if product {
                 Some(source.ruled_product(e)?).filter(Local::is_positive)
             } else {
@@ -313,24 +324,42 @@ impl Surface {
             )))
         };
         // a length past the measure's leaf budget is no measurement, as a leaf not converged
-        let across =
-            |m: &Option<Surface>| match m.as_ref().map(|s| s.length_across_side(k, dom, side, REL))
-            {
-                None | Some(Err(SolidError::NotConverged { .. })) => Ok(None),
-                Some(Ok(a)) => Ok(Some(a)),
-                Some(Err(e)) => Err(e),
-            };
+        let across = |m: &Option<Surface>| match m
+            .as_ref()
+            .map(|s| s.length_across_side(k, at, side, REL))
+        {
+            None | Some(Err(SolidError::NotConverged { .. })) => Ok(None),
+            Some(Ok(a)) => Ok(Some(a)),
+            Some(Err(e)) => Err(e),
+        };
         if analytic && (how == Continuity::Natural || degree == 1) {
             // the one rule on every path: a distance the side's least step is proved past
             // is below its resolution, the side left as it is (where the face box ends at
             // the form's end, the step its knot can carry; inside the form the widening
-            // moves the box alone and has no such step)
-            if fixed == end && below_least_step(&|e| made(false, e), &across, &source, distance)? {
-                return Ok(None);
+            // moves the box alone and has no such step). Where the form gives no local
+            // view of the side (not clamped there), there is no such step to test, and the
+            // widening needs none.
+            if let Ok(source) = &local {
+                let end = if side.is_high() {
+                    source.end()?
+                } else {
+                    -source.end()?
+                };
+                if fixed == end
+                    && below_least_step(&|e| made(source, false, e), &across, source, distance)?
+                {
+                    return Ok(None);
+                }
             }
             // proved once, by the continuation
             return widened(k, self, dom, side, distance).map(Some);
         }
+        let source = local?;
+        let end = if side.is_high() {
+            source.end()?
+        } else {
+            -source.end()?
+        };
         if analytic {
             AnalyticSupport::check(k, self)?;
         }
@@ -340,7 +369,7 @@ impl Surface {
                 "the side is not the end of the surface's B-spline form",
             ));
         }
-        let solved = match solve(&|e| made(false, e), &across, &source, distance) {
+        let solved = match solve(&|e| made(&source, false, e), &across, &source, distance) {
             // past the rows' reach: the ruled surface itself (#2878), or the refusal naming
             // the longer of the two forms' distances
             Err(SolidError::ExtendRefused {
@@ -348,7 +377,7 @@ impl Surface {
                 distance: named,
                 ..
             }) if how == Continuity::Ruled && source.has_product_form() => {
-                match solve(&|e| made(true, e), &across, &source, distance) {
+                match solve(&|e| made(&source, true, e), &across, &source, distance) {
                     Err(SolidError::ExtendRefused {
                         refusal: ExtendRefusal::NotExact,
                         distance: reached,
@@ -418,13 +447,14 @@ fn offset_extended(
     k: &Kernel,
     o: &OffsetSurface,
     dom: &Extent2d,
+    at: &Extent2d,
     side: BoxSide,
     how: Continuity,
     distance: f64,
 ) -> Result<Option<Extended>> {
     let Some(base) = o
         .base_surface()
-        .extended_by_distance(k, dom, side, how, distance)?
+        .extended_by_distance_at(k, dom, at, side, how, distance)?
     else {
         return Ok(None);
     };

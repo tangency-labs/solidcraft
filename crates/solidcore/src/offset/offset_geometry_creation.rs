@@ -43,7 +43,7 @@
 //! - **Four faces at a vertex (WR-666, opt-in).** With `Kernel::fixes.offset_four_face_vertex_split`
 //!   and `offset_closes_loop_gaps`, the fork's tangency-labs/smlib@2e1bb8c: the tangency
 //!   tolerance is half a degree, `trim_extended_edge` keeps a near-tangent trim point where
-//!   the curve crosses the surface, and at an all-convex or all-concave vertex takes the cut
+//!   the curve passes through the surface by more than the tolerance, and at an all-convex or all-concave vertex takes the cut
 //!   reached first from the edge's other end. That choice also skips, on an open edge's
 //!   second end, a cut at the first trim point again (the fork's `bFirstAgain`, used there
 //!   only; the main candidate search is upstream's, WR-463's opt-in covers closed curves).
@@ -1538,6 +1538,49 @@ pub(crate) fn four_face_vertex_split(fixes: &crate::kernel::UpstreamFixes) -> bo
     fixes.offset_four_face_vertex_split && fixes.offset_closes_loop_gaps
 }
 
+/// Whether `curve` at `t` passes through `surface` at `uv` (where they meet) by more than
+/// `tol`. To second order in arc length s the curve's height over the surface is
+/// `g1 s + g2 s^2 / 2`, `g1` the sine of the angle between them and `g2` the curve's
+/// curvature towards the surface's normal less the surface's normal curvature along the
+/// curve: it is back on the surface at `-2 g1 / g2` and between the two it reaches
+/// `g1^2 / (2 |g2|)` from the surface. Within `tol` that is a touch: a curve exact to `tol`
+/// that touches the surface meets it twice, close together, wherever the error leaves it.
+///
+/// # Errors
+///
+/// `SM_ERR` where the curve stops or the surface is singular (no tangent plane); those of
+/// the evaluations.
+fn passes_through(
+    k: &Kernel,
+    curve: &Curve,
+    t: f64,
+    surface: &Surface,
+    uv: Point2,
+    tol: f64,
+) -> Result<bool> {
+    let err = || sm_err("offset_geometry_creation::passes_through");
+    let pv = curve.evaluate(k, t, 2, true, true)?;
+    let (d1, d2) = (*pv.get(1).ok_or_else(err)?, *pv.get(2).ok_or_else(err)?);
+    let s = surface.evaluate(k, uv, 2, 2, EvaluateFlags::default())?;
+    let at = |i: usize, j: usize| s.get(i).and_then(|r| r.get(j)).copied().ok_or_else(err);
+    let (du, dv, duu, duv, dvv) = (at(1, 0)?, at(0, 1)?, at(2, 0)?, at(1, 1)?, at(0, 2)?);
+    let n = du.cross(dv).unitize().map_err(|_| err())?;
+    let speed2 = d1.length_squared();
+    let tangent = d1.unitize().map_err(|_| err())?;
+    // the tangent's components along du and dv
+    let (e, f, g) = (du.dot(du), du.dot(dv), dv.dot(dv));
+    let det = e * g - f * f;
+    if det <= EFF_ZERO * e * g {
+        return Err(err());
+    }
+    let (tu, tv) = (tangent.dot(du), tangent.dot(dv));
+    let (a, b) = ((g * tu - f * tv) / det, (e * tv - f * tu) / det);
+    let normal_curvature = n.dot(duu) * a * a + 2.0 * n.dot(duv) * a * b + n.dot(dvv) * b * b;
+    let g1 = n.dot(tangent);
+    let g2 = n.dot(d2 - tangent * d2.dot(tangent)) / speed2 - normal_curvature;
+    Ok(g1 * g1 > 2.0 * g2.abs() * tol)
+}
+
 /// The offset geometry creator (`SmOffsetGeometryCreation`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct OffsetGeometryCreation {
@@ -2819,26 +2862,21 @@ impl OffsetGeometryCreation {
                     // shallow angle crosses it all the same (a trough's floor facets falling
                     // 1 degree, whose offsets cut the offset edges along the walls 0.6
                     // degrees off them): only a touch, the curve meeting the surface without
-                    // passing through it, is no trim point. The curve crosses where it lies
-                    // on either side of the surface just before and just after the point.
-                    let mut crosses = false;
-                    if four_face && !(angle_deg < 85.0 || angle_deg > 95.0) {
-                        let c_ivl = curve_of(brep, curve_3d)?.natural_interval();
-                        let step = 1.0e-3 * c_ivl.length();
-                        let t = sol.start.param(0)?;
-                        let (before, after) = (t - step, t + step);
-                        if before >= c_ivl.min() && after <= c_ivl.max() {
-                            let on = surface_of(brep, ext_surface)?.evaluate_point(k, uv)?;
-                            let curve = curve_of(brep, curve_3d)?;
-                            let b_pnt = curve.evaluate_point(k, before)?;
-                            let a_pnt = curve.evaluate_point(k, after)?;
-                            let d_b = (b_pnt - on).dot(normal);
-                            let d_a = (a_pnt - on).dot(normal);
-                            let least =
-                                10.0 * EFF_ZERO * (1.0 + distance(on, Point3::new(0.0, 0.0, 0.0)));
-                            crosses = d_b * d_a < 0.0 && d_b.abs() > least && d_a.abs() > least;
-                        }
-                    }
+                    // passing through it, is no trim point. A curve exact to the tolerance
+                    // that touches the surface (the drafted end of a round, cut where the
+                    // round meets the top face tangentially) crosses it twice within the
+                    // tolerance, so it crosses only where it passes through by more than
+                    // the tolerance ([`passes_through`]).
+                    let crosses = four_face
+                        && !(angle_deg < 85.0 || angle_deg > 95.0)
+                        && passes_through(
+                            k,
+                            curve_of(brep, curve_3d)?,
+                            sol.start.param(0)?,
+                            surface_of(brep, ext_surface)?,
+                            uv,
+                            tol_3d,
+                        )?;
                     if angle_deg < 85.0 || angle_deg > 95.0 || crosses {
                         // save solution as possible trimPoint
                         solutions.add(sol);
@@ -5281,6 +5319,46 @@ mod tests {
             .unwrap();
             assert_eq!(gap, !skip);
         }
+    }
+
+    /// A quadratic in the plane y = 0 over the plane z = 0, from x = -1 to 1 (t = 0 to 1):
+    /// `z = e - k x^2 / 2` when `curved`, else the line `z = e x`.
+    fn over_the_plane(e: f64, k: f64, curved: bool) -> Curve {
+        use crate::nurbs::crv_basic::Curve as NlCurve;
+        use crate::nurbs::math::CPoint;
+        let (z0, z1, z2) = if curved {
+            (e - k / 2.0, e + k / 2.0, e - k / 2.0)
+        } else {
+            (-e, 0.0, e)
+        };
+        let pw = vec![
+            CPoint::new(-1.0, 0.0, z0, NOW),
+            CPoint::new(0.0, 0.0, z1, NOW),
+            CPoint::new(1.0, 0.0, z2, NOW),
+        ];
+        let nl = NlCurve::new(pw, 2, vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0]).unwrap();
+        Curve::from(BSplineCurve::from_nurb(nl, 3, false))
+    }
+
+    /// A curve that touches a surface, exact to the tolerance, meets it where its error
+    /// lifts it: the curve of radius 3 lifted 1e-6 over the plane meets it 2.4e-3 from the
+    /// touch, 0.05 degrees off it, and does not pass through it by more than the 1e-5
+    /// tolerance. Lifted 1e-3, or a line 0.6 degrees off the plane, it does.
+    #[test]
+    fn a_curve_passes_through_a_surface_only_by_more_than_the_tolerance() {
+        use crate::surface::plane::Plane;
+        let k = Kernel::default();
+        let plane = Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::Z));
+        let uv = Point2::new(0.0, 0.0);
+        let tol = 1e-5;
+        let at = |e: f64| (1.0 + (6.0 * e).sqrt()) / 2.0;
+        let touching = over_the_plane(1e-6, 1.0 / 3.0, true);
+        assert!(touching.evaluate_point(&k, at(1e-6)).unwrap().z.abs() < 1e-15);
+        assert!(!passes_through(&k, &touching, at(1e-6), &plane, uv, tol).unwrap());
+        let lifted = over_the_plane(1e-3, 1.0 / 3.0, true);
+        assert!(passes_through(&k, &lifted, at(1e-3), &plane, uv, tol).unwrap());
+        let shallow = over_the_plane(0.6_f64.to_radians().tan(), 0.0, false);
+        assert!(passes_through(&k, &shallow, 0.5, &plane, uv, tol).unwrap());
     }
 
     #[test]

@@ -143,7 +143,7 @@ fn local_operation_on(
     // is in the list to be replaced (turned to the original's side), else a copy of its own.
     let all_faces = bp1::faces(b, None)?;
     let mut given: Vec<Option<Surface>> = surfaces.into_iter().map(Some).collect();
-    let mut new_list = Vec::with_capacity(all_faces.len());
+    let mut new_list = Vec::new();
     // (WR-534) where each given surface went in the new list
     let mut placed: Vec<Option<usize>> = vec![None; given.len()];
     // (not upstream) the faces whose surfaces move: a face given its own surface again keeps
@@ -509,7 +509,7 @@ fn uv_line(k: &Kernel, curve: &crate::curve::curve::Curve) -> Result<Option<UvLi
     let Some(nurb) = nurb else {
         return Ok(None);
     };
-    let mut points = Vec::with_capacity(nurb.cpts().len());
+    let mut points = Vec::new();
     for c in nurb.cpts() {
         if c.w == NOW {
             points.push(Point2::new(c.x, c.y));
@@ -639,7 +639,7 @@ fn seam_gap(
         };
         a.iter().copied().zip(b.iter().copied()).collect()
     } else {
-        let mut pairs = Vec::with_capacity(rows.len());
+        let mut pairs = Vec::new();
         for row in &rows {
             let (Some(&a), Some(&b)) = (row.first(), row.last()) else {
                 return Ok(None);
@@ -763,7 +763,7 @@ fn keeps_seams(k: &Kernel, b: &mut Brep, face: FaceId, surface: &Surface) -> Res
         if uses.len() <= 2 {
             continue;
         }
-        let mut lines = Vec::with_capacity(uses.len());
+        let mut lines = Vec::new();
         for &u in &uses {
             let line = if let Some(c) = eu1::uv_trim_curve(b, u)?.0 {
                 uv_line(k, c)?
@@ -1534,7 +1534,7 @@ mod tests {
         assert_eq!(b.tolerance(), tolerance);
     }
 
-    /// Review finding 1: a cylinder's side given the same cylinder (another surface of
+    /// A cylinder's side given the same cylinder (another surface of
     /// it, over another extent) keeps its surface and edges: the body is unchanged.
     #[test]
     fn a_cylinder_given_its_own_cylinder_is_unchanged() {
@@ -1628,7 +1628,7 @@ mod tests {
         let (v, manifold) = volume_and_manifold(&k, &mut b);
         assert!(manifold);
         // no edge is kept (each touches the side), and the body keeps the input's tolerance
-        // all the same (review finding 7)
+        // all the same
         assert_eq!(b.tolerance(), tolerance);
         // the new caps' edges are re-intersected B-splines within the body's tolerance of
         // the circles (as for any moved cylinder side), so the volume is within the
@@ -1637,7 +1637,7 @@ mod tests {
         assert!((v - input).abs() <= bound, "{v} vs {input}");
     }
 
-    /// Review findings 7 and 8: a box's top raised, its bottom's four edges kept (their
+    /// A box's top raised, its bottom's four edges kept (their
     /// faces and their vertices' faces all stay). Each is the original edge in the result:
     /// the same curve over the same interval, its tolerance and its vertices' not below
     /// the input's; the body's tolerance is the input's; the result is a manifold solid.
@@ -2113,7 +2113,7 @@ mod tests {
         );
     }
 
-    /// Review finding 5: a torus face meets itself across seams both ways round; a cylinder
+    /// A torus face meets itself across seams both ways round; a cylinder
     /// is closed one way only, so one seam would have no edge: refused before anything
     /// changes.
     #[test]
@@ -2132,7 +2132,7 @@ mod tests {
         );
     }
 
-    /// Review finding 5, then the second review's 6: a cylinder's side given a coaxial
+    /// A cylinder's side given a coaxial
     /// cylinder of another radius. A cylinder's u is its arc length, of period `2π r`: the
     /// side's UV loops, copied onto the new surface, run u over `[0, 2π]` (radius 1), which
     /// on radius 1.5 is two thirds of the way round and on 0.5 twice round, so its seam
@@ -2303,7 +2303,7 @@ mod tests {
         );
     }
 
-    /// Review finding 5: a 10 mm cube's vertical edge rounded r 2, the round given a
+    /// A 10 mm cube's vertical edge rounded r 2, the round given a
     /// coaxial cylinder of another radius: the wider r 2.3 and r 2.05 refused as not sound
     /// (the first new failure an edge's curve owner, #61); the narrower
     /// r 1.8 no longer reaches the side planes it was tangent to (it ends 0.2 short of
@@ -2636,7 +2636,7 @@ mod tests {
         (b, why)
     }
 
-    /// Review finding 6: the round moved out. The side planes, tangent to the round, are
+    /// The round moved out. The side planes, tangent to the round, are
     /// extended to meet it 1.005 past their old edges (`reach`'s tests), but the tangent
     /// edge across from the moved face is extended and trimmed, not met again: it keeps
     /// its old line, the merge closes the gap by growing tolerances, and the check fails

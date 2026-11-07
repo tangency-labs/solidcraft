@@ -1966,6 +1966,21 @@ impl Curve {
         }
     }
 
+    /// A B-spline curve reparametrised linearly onto `ivl` (every point of it kept);
+    /// `false`, the curve unchanged, for any other kind.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`BSplineCurve::reparam_to`].
+    pub(crate) fn reparam_bspline_to(&mut self, ivl: &Extent1d) -> Result<bool> {
+        let CurveKind::BSpline(c) = &mut self.kind else {
+            return Ok(false);
+        };
+        self.memo = CurveMemo::new();
+        c.reparam_to(ivl)?;
+        Ok(true)
+    }
+
     /// `Copy` (base: `SM_ERR`): an exact copy without owner.
     ///
     /// # Errors

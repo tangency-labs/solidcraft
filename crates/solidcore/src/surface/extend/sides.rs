@@ -40,6 +40,7 @@
 
 use super::{Continuity, ExtendRefusal, Extended};
 use crate::error::{Result, SolidError};
+use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
 use crate::math::INFINITE_PARAMETER;
 use crate::nurbs::b_spline_surface::SurfParamType;
@@ -185,8 +186,14 @@ impl Surface {
                 let mut named = None;
                 for _ in 0..NAMING_HALVINGS {
                     tried *= 0.5;
-                    if self.extended_in_turn(k, asked, how, tried).is_ok() {
-                        named = Some(tried);
+                    // a distance works when some side extends at it: one below every side's
+                    // resolution leaves them all unchanged and extends nothing
+                    if let Ok(e) = self.extended_in_turn(k, asked, how, tried) {
+                        if e.sides.iter().any(|s| {
+                            matches!(s, SideExtension::Extended(_) | SideExtension::UpToLimit(_))
+                        }) {
+                            named = Some(tried);
+                        }
                         break;
                     }
                 }
@@ -210,6 +217,15 @@ impl Surface {
         distance: f64,
     ) -> Result<ExtendedSides> {
         let mut current: Option<Extended> = None;
+        // the face: the source's own box. Every extension keeps the source's net bit for bit,
+        // so each side of the face is the source's side whatever the sides before it grew:
+        // what a side is (closed, collapsed, unbounded, round an axis) is decided there, on
+        // the source's net and at its size, and each extended side is measured there too
+        let face = self.natural_uv_domain_with_nurb(k)?;
+        let mut own = self;
+        while let SurfaceKind::OffsetSurface(o) = own.kind() {
+            own = o.base_surface();
+        }
         // the side of the current result each side of the source's box is on
         let mut on = BoxSide::ALL;
         let mut sides = [SideExtension::NotAsked; 4];
@@ -221,26 +237,22 @@ impl Surface {
             let side = *on.get(at).ok_or_else(|| SolidError::sm_err(OP))?;
             let surface = current.as_ref().map_or(self, |e| &e.surface);
             let dom = surface.natural_uv_domain_with_nurb(k)?;
-            let param = if side.is_u() {
+            let param = if source_side.is_u() {
                 SurfParamType::U
             } else {
                 SurfParamType::V
             };
             // an offset surface closes and collapses where its base does
-            let mut carrier = surface;
-            while let SurfaceKind::OffsetSurface(o) = carrier.kind() {
-                carrier = o.base_surface();
-            }
-            if carrier.is_closed(k, &dom, param, None, false)?.0 {
+            if own.is_closed(k, &face, param, None, false)?.0 {
                 *done = SideExtension::Closed;
                 continue;
             }
-            if carrier.side_diameter(k, &dom, side)?.lower <= 0.0 {
+            if own.side_diameter(k, &face, source_side)?.lower <= 0.0 {
                 *done = SideExtension::Collapsed;
                 continue;
             }
-            if matches!(carrier.kind(), SurfaceKind::Plane(_))
-                && side.at(&dom).abs() >= INFINITE_PARAMETER
+            if matches!(own.kind(), SurfaceKind::Plane(_))
+                && source_side.at(&face).abs() >= INFINITE_PARAMETER
             {
                 *done = SideExtension::Unbounded;
                 continue;
@@ -248,11 +260,19 @@ impl Surface {
             // a revolution's side round its axis is left; along it, its B-spline form row by
             // row as asked, which is again a revolution (its rows are one generator turned
             // and weighted, and every construction commutes with both)
-            if round_the_axis(carrier, side) == Some(true) {
+            if round_the_axis(own, source_side) == Some(true) {
                 *done = SideExtension::AroundAxis;
                 continue;
             }
-            let Some(grown) = surface.extended_by_distance(k, &dom, side, how, distance)? else {
+            // measured at the face: the grown box with its extent along the side cut back to
+            // the face's (the side's own coordinate is the grown box's)
+            let at = if side.is_u() {
+                Extent2d::from_bounds(dom.min().x, face.min().y, dom.max().x, face.max().y)
+            } else {
+                Extent2d::from_bounds(face.min().x, dom.min().y, face.max().x, dom.max().y)
+            };
+            let Some(grown) = surface.extended_by_distance_at(k, &dom, &at, side, how, distance)?
+            else {
                 *done = SideExtension::Unchanged;
                 continue;
             };
@@ -263,6 +283,38 @@ impl Surface {
             extension = extension.max(grown.extension);
             *done = SideExtension::Extended(grown.across);
             current = Some(grown);
+        }
+        // each side extended is measured again at the face: a side extended after another
+        // was measured at the middle of the box the others grew, where the surface may be
+        // far larger than at the face; one short of the distance at the face is not met (a
+        // blend's net bounds no length of its definition: it keeps its own measure; an
+        // offset surface's is its base's)
+        if let Some(e) = &current {
+            // an offset surface is measured on its base, as its extension was
+            let mut measured = &e.surface;
+            while let SurfaceKind::OffsetSurface(o) = measured.kind() {
+                measured = o.base_surface();
+            }
+            if !matches!(measured.kind(), SurfaceKind::ProceduralBlend(_)) {
+                for (done, at) in sides.iter_mut().zip(0..) {
+                    if !matches!(done, SideExtension::Extended(_)) {
+                        continue;
+                    }
+                    let side = *on.get(at).ok_or_else(|| SolidError::sm_err(OP))?;
+                    let across = measured.length_across_side(k, &face, side, super::REL)?;
+                    if !across.converged
+                        || across.enclosure.lower
+                            < distance - super::stop_allowance(&across, distance)
+                    {
+                        return Err(SolidError::ExtendRefused {
+                            operation: OP,
+                            refusal: ExtendRefusal::NotExact,
+                            distance: None,
+                        });
+                    }
+                    *done = SideExtension::Extended(across);
+                }
+            }
         }
         let surface = match current {
             // a Natural continuation of the net is still on an exact round's S (#2487)

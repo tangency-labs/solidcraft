@@ -83,13 +83,14 @@ pub(super) fn blend_extended(
     k: &Kernel,
     pb: &ProceduralBlend,
     dom: &Extent2d,
+    at: &Extent2d,
     side: BoxSide,
     distance: f64,
 ) -> Result<Option<Extended>> {
     let (a, b, swapped) = pb.definition_map();
     // the definition's s is the net's u, its t the net's v (the other way round swapped)
     if side.is_u() != swapped {
-        return along(k, pb, dom, side, distance);
+        return along(k, pb, dom, at, side, distance);
     }
     let order = pb.order();
     let n = order as usize;
@@ -301,6 +302,7 @@ fn along(
     k: &Kernel,
     pb: &ProceduralBlend,
     dom: &Extent2d,
+    at: &Extent2d,
     side: BoxSide,
     distance: f64,
 ) -> Result<Option<Extended>> {
@@ -344,6 +346,8 @@ fn along(
     }
     let target = pb.bound();
     let rate = b[0].abs();
+    // the shortest span the net's knot fixup keeps where two pieces join, as at the side
+    let least = source.least_step()?;
     // the definition and its spans from the side to s_new for the ask e (in the net's
     // parameter), outward, each with its part `[x, y]` in s
     let pieces_of = |e: f64| -> Result<Option<(ProceduralBlend, Vec<Piece>)>> {
@@ -373,10 +377,17 @@ fn along(
                 }
                 Err(e) => return Err(e),
             };
+            let length = (y - x) / rate;
+            // a piece clipped shorter than a span the knot fixup keeps (the side just before a
+            // station, or the ask just past one) would join on a knot it merges or spreads
+            // (the source's net not kept): an ask that does not work, as a weight not positive
+            if length < least {
+                return Ok(None);
+            }
             pieces.push(Piece {
                 span,
                 part: [(x - sa) / (sb - sa), (y - sa) / (sb - sa)],
-                length: (y - x) / rate,
+                length,
             });
         }
         if !up {
@@ -411,7 +422,7 @@ fn along(
         )))
     };
     let across =
-        |m: &Option<Surface>| match m.as_ref().map(|s| s.length_across_side(k, dom, side, REL)) {
+        |m: &Option<Surface>| match m.as_ref().map(|s| s.length_across_side(k, at, side, REL)) {
             None | Some(Err(SolidError::NotConverged { .. })) => Ok(None),
             Some(Ok(a)) => Ok(Some(a)),
             Some(Err(e)) => Err(e),

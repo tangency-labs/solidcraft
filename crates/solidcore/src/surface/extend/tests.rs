@@ -2136,7 +2136,7 @@ fn a_rounding_sized_distance_leaves_a_widened_cylinder_unchanged() {
     }
     // a distance the widened's measure certifies is still widened (1e-7 and 1e-6 are past
     // the least step but refused `NotExact`: the measure's rounding, 4.6e-12, is above
-    // 1e-6 d there; notes-localop/HANDOFF-review2.md)
+    // 1e-6 d there; tangency-labs/solidcore#2980)
     let e = c
         .extended_by_distance(&kk, &dom(&c), BoxSide::VMax, Continuity::Natural, 1e-5)
         .unwrap();
@@ -2564,13 +2564,12 @@ fn a_pyramid_side_extends_by_its_tolerance_past_its_base_after_its_ends() {
     assert!(e.extension <= 1e-6 * d, "{}", e.extension);
 }
 
-/// Second review, finding 8 (open, notes-localop/HANDOFF-review2.md): the cone of the test
-/// above, a quarter turn, moved off the origin and extended round its axis by a
-/// tolerance-sized distance. At the origin and at 1e3 it is certified (rounding about 2e-12
+/// tangency-labs/solidcore#2980 (open): the cone of the test above, a quarter turn, moved
+/// off the origin and extended round its axis by a tolerance-sized distance. At the origin and at 1e3 it is certified (rounding about 2e-12
 /// and 5e-12); at 1e5 the closed form's rounding is sized on the part's position
 /// (`gamma(64) (length + size)`, 2.8e-10) and 1e-5 and 1e-4 are refused `NotExact`.
 #[test]
-#[ignore = "second review finding 8: the analytic closed forms' rounding is position-sized"]
+#[ignore = "tangency-labs/solidcore#2980: the analytic closed forms' rounding is position-sized"]
 fn a_far_cone_extends_round_its_axis_by_a_tolerance_as_at_the_origin() {
     let kk = k();
     for o in [0.0, 1e3, 1e5] {
@@ -2754,5 +2753,56 @@ fn a_huge_bilinear_sheet_extends_as_its_closed_form() {
     ];
     for l in across {
         assert!((l - d).abs() <= 1e-9 * d, "across {l} vs {d}");
+    }
+}
+
+/// A round's face box ending 1e-11 short of its definition's end station, extended along
+/// the spine: the first piece of spine is far shorter than a span the net's knot fixup keeps,
+/// so no ask joins on it. The extension is refused with a typed reason, never built on a
+/// sliver span merged or spread away.
+#[test]
+fn a_round_side_just_before_a_station_is_not_joined_on_a_sliver() {
+    let (kk, pb) = round_blend(1, true);
+    let s = Surface::from(pb);
+    let d0 = s.natural_uv_domain_with_nurb(&kk).unwrap();
+    let short = Extent2d::from_bounds(d0.min().x, d0.min().y, d0.max().x - 1e-11, d0.max().y);
+    let r = s.extended_by_distance(&kk, &short, BoxSide::UMax, Continuity::Tangent, 3.0);
+    match r {
+        Err(SolidError::ExtendRefused { .. }) => {}
+        other => panic!("{other:?}"),
+    }
+}
+
+/// Sides extended in turn each meet the distance at the face, not where the sides before
+/// them grew the surface. The triangle `(x, y) -> (x, y + x v)`, its corner at u = 0, widens
+/// along u, so after `UMax` is extended its v sides are wider at the grown box's middle than at
+/// the face's. Its v isos are straight, so each v side's reach at the face's middle (u = 0.5)
+/// is a plain distance: the 0.5 asked.
+#[test]
+fn sides_extended_in_turn_each_meet_the_distance_at_the_face() {
+    let kk = k();
+    let row = |x: f64, y: f64| vec![[x, y, 0.0, 1.0], [x, y + x, 0.0, 1.0]];
+    let t = spline(
+        &[row(0.0, 0.0), row(1.0, 0.0), row(2.0, 0.0)],
+        2,
+        1,
+        &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        &[0.0, 0.0, 1.0, 1.0],
+        false,
+    );
+    let d = 0.5;
+    let e = t
+        .extended_sides(&kk, &BoxSide::ALL, Continuity::Natural, d)
+        .unwrap();
+    assert!(
+        matches!(e.sides[1], SideExtension::Extended(_)),
+        "{:?}",
+        e.sides
+    );
+    let nd = dom(&e.surface);
+    let at = |u: f64, v: f64| e.surface.evaluate_point(&kk, Vec2::new(u, v)).unwrap();
+    for (v_face, v_end) in [(0.0, nd.min().y), (1.0, nd.max().y)] {
+        let reach = at(0.5, v_end).distance(at(0.5, v_face));
+        assert!((reach - d).abs() <= 1e-9 * d, "{v_face}: {reach}");
     }
 }

@@ -38,6 +38,7 @@ use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::solution_array::SolutionObject;
+use crate::geom::tol::ScaledZero as _;
 use crate::intersect::surface_drop_lib::p3::DropSolveContext;
 use crate::kernel::Kernel;
 use crate::math::{EFF_ZERO, EFF_ZERO_SQRT};
@@ -208,26 +209,37 @@ pub(crate) fn common_trim_interval(
 ) -> Result<Extent1d> {
     let mut ivl = ivl;
     for _ in 0..TRIM_SNAP_ROUNDS {
-        let start = ivl;
+        // a round in which no curve snaps the interval: every one of them accepts it
+        let mut snapped = false;
         for &c in curves {
+            let before = ivl;
             c.copy(k)?.trim(k, &mut ivl, TrimMode::IntervalOnly)?;
+            snapped |= ivl != before;
         }
-        if ivl == start {
+        if !snapped {
             return Ok(ivl);
         }
     }
-    Err(SolidError::port_invariant(
-        op,
-        "the trims of a piece and its UV curves snap its interval to different knots",
-    ))
+    // the curves' snaps disagree: knots of theirs at one parameter a few ulps apart, each
+    // snapping the end to its own. The first curve's snap is the interval; each other one
+    // is reparametrised onto it ([`trim_unsnapped`])
+    let first = curves
+        .first()
+        .ok_or_else(|| SolidError::port_invariant(op, "a common trim interval of no curves"))?;
+    first.copy(k)?.trim(k, &mut ivl, TrimMode::IntervalOnly)?;
+    Ok(ivl)
 }
 
 /// `curve` trimmed ([`TrimMode::Notify`]) to `ivl`, an interval [`common_trim_interval`]
-/// gave for it: its trim snaps nothing.
+/// gave for it. Where its own trim snaps an end to a knot of its own within the trim's snap
+/// tolerance of `ivl` (100 scaled zeros, the same parameter as the other curves' knot there,
+/// a few ulps apart), a B-spline curve is reparametrised linearly onto `ivl`, every point of
+/// it kept, so it ends at the same parameters as the others.
 ///
 /// # Errors
 ///
-/// Those of the trim; a port invariant when the trim snaps `ivl` all the same.
+/// Those of the trim and the reparametrisation; a port invariant when the trim snaps `ivl`
+/// farther than that, or the curve is no B-spline.
 pub(crate) fn trim_unsnapped(
     k: &Kernel,
     curve: &mut Curve,
@@ -236,13 +248,20 @@ pub(crate) fn trim_unsnapped(
 ) -> Result<()> {
     let mut trimmed = ivl;
     curve.trim(k, &mut trimmed, TrimMode::Notify)?;
-    if trimmed != ivl {
-        return Err(SolidError::port_invariant(
-            op,
-            "a trim snapped the interval its snap left unchanged",
-        ));
+    if trimmed == ivl {
+        return Ok(());
     }
-    Ok(())
+    let near = |a: f64, b: f64| (a - b).abs() < 100.0 * b.scaled_zero();
+    if near(trimmed.min(), ivl.min())
+        && near(trimmed.max(), ivl.max())
+        && curve.reparam_bspline_to(&ivl)?
+    {
+        return Ok(());
+    }
+    Err(SolidError::port_invariant(
+        op,
+        "a trim snapped the interval its snap left unchanged",
+    ))
 }
 
 /// The two surfaces of [`SurfaceIntersection::clip_exact_curves`] over their domains.
@@ -905,11 +924,14 @@ mod tests {
             trim_unsnapped(&k, &mut c, common, OP).unwrap();
             assert_eq!(c.natural_interval(), common);
         }
+        // a curve whose own trim snaps an end within the snap tolerance (its knot 2 ulps
+        // past 0.5) is reparametrised onto the interval asked: it ends there, at the point
+        // of its own knot, every point of it kept
         let mut snapping = uv2.copy(&k).unwrap();
-        assert!(matches!(
-            trim_unsnapped(&k, &mut snapping, ivl, OP),
-            Err(SolidError::PortInvariant { .. })
-        ));
+        trim_unsnapped(&k, &mut snapping, ivl, OP).unwrap();
+        assert_eq!(snapping.natural_interval(), ivl);
+        let at = |c: &Curve, t: f64| c.evaluate_point(&k, t).unwrap();
+        assert_eq!(at(&snapping, 0.5), at(&uv2, end));
     }
     use crate::geom::axis2_placement::Axis2Placement;
     use crate::geom::vector2d::Vec2;

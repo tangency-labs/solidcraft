@@ -539,6 +539,20 @@ impl BSplineCurve {
         self.nurb = tmp.nurb;
     }
 
+    /// The curve reparametrised linearly onto `ivl`: its knots rescaled, its control points
+    /// as they are, so every point of it stays (`N_CrvReparam`).
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` without a NURB; those of the reparametrisation.
+    pub(crate) fn reparam_to(&mut self, ivl: &Extent1d) -> Result<()> {
+        let mut cur = self.nurb_mut(OP_TRIM)?.clone();
+        cur.reparam(ivl.min(), ivl.max())
+            .map_err(SolidError::nl_ser(OP_TRIM))?;
+        self.swap_in_nurb(&cur);
+        Ok(())
+    }
+
     /// The NURB, mutable (`GetOrCreateGwNurbPointer`).
     fn nurb_mut(&mut self, operation: &'static str) -> Result<&mut Curve> {
         self.nurb
