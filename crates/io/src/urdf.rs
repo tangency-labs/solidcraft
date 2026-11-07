@@ -12,6 +12,7 @@
 use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 
+use crate::hull3::{convex_hull, fit_box, fit_cylinder, fit_sphere};
 use solidcore_record::Vec3;
 use solidcraft_doc::joints::{self, Joint, JointDynamics, JointKind};
 use solidcraft_doc::{
@@ -19,7 +20,6 @@ use solidcraft_doc::{
     mat_mul,
 };
 use solidcraft_geom::Mesh;
-use solidcraft_geom::hull3::{convex_hull, fit_box, fit_cylinder, fit_sphere};
 use solidcraft_geom::inertia::principal;
 
 use crate::{IoError, Result, export_mesh, stl_binary, weld, weld_eps};
