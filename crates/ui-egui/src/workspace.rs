@@ -144,19 +144,9 @@ pub const SECTIONS: &[Section] = &[
         tab: "ASSEMBLE",
         panel: "JOINTS",
         promoted: 4,
-        ids: &[
-            "joint.create",
-            "joint.as_built",
-            "joint.origin",
-            "joint.rigid_group",
-            "joint.limits",
-            "joint.gear",
-            "joint.rack_pinion",
-            "joint.screw",
-            "joint.cam",
-            "joint.reach",
-        ],
+        ids: &["joint.create", "joint.as_built", "joint.origin", "joint.rigid_group", "joint.limits", "joint.screw", "joint.cam", "joint.reach"],
     },
+    Section { tab: "ASSEMBLE", panel: "POWER TRANSMISSION", promoted: 2, ids: &["joint.gear", "joint.rack_pinion"] },
     Section {
         tab: "ASSEMBLE",
         panel: "POSITION",
@@ -426,6 +416,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("inspect.isocurve", "Isocurve"),
     ("inspect.section", "Section"),
     ("inspect.zebra", "Zebra"),
+    ("joint.rack_pinion", "Rack"),
     ("joint.as_built", "As-Built"),
     ("material.assign", "Material"),
     ("occurrence.move", "Move"),
@@ -919,6 +910,21 @@ mod tests {
             ("SKETCH", "REFERENCE", "canvas.insert"),
         ] {
             assert!(layout(tab, panel, &specs).unwrap().0.iter().any(|c| c.id == id));
+        }
+    }
+
+    #[test]
+    fn gear_links_have_their_own_power_transmission_section() {
+        let specs = solidcraft_engine::command_specs();
+        let (commands, promoted) = layout("ASSEMBLE", "POWER TRANSMISSION", &specs).unwrap();
+        assert_eq!(promoted, 2);
+        assert_eq!(commands.iter().map(|command| command.id).collect::<Vec<_>>(), ["joint.gear", "joint.rack_pinion"]);
+        assert!(!layout("ASSEMBLE", "JOINTS", &specs).unwrap().0.iter().any(|command| matches!(command.id, "joint.gear" | "joint.rack_pinion")));
+
+        for id in ["joint.gear", "joint.rack_pinion"] {
+            let command = solidcraft_engine::find_command(id).unwrap();
+            assert_eq!(destination(command), Some(("ASSEMBLE", "POWER TRANSMISSION")));
+            assert_eq!(legacy_destination("SOLID", "ASSEMBLE", id), Some(("ASSEMBLE", "POWER TRANSMISSION")));
         }
     }
 
