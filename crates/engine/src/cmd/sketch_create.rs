@@ -4,12 +4,12 @@
 use serde_json::{Value, json};
 use solidcore_record::Vec2;
 use solidcraft_geom::prelude::*;
-use solidcraft_sketch::{ConstraintKind, CurveKind, LinkKind, LinkSource, Shape, Sketch, TextAlign, TextExprs, TextStyle};
+use solidcraft_sketch::{ConstraintKind, CurveKind, LinkKind, LinkSource, Shape, Sketch, TextAlign, TextExprs, TextStyle, TextVerticalAlign};
 
 /// The style parameters of `sketch.text` and `sketch.edit_text`.
 macro_rules! text_style_doc {
     () => {
-        "bold?, italic?: bool (an installed family's bold or italic face; italic without one is slanted), align?: left|center|right (the lines against `at`, or along the path), letter_spacing?: extra mm between letters, line_spacing?: times the font's line distance (default 1), path?: a curve id of the sketch the baseline follows (\"\": none; `at` and `angle` then do not place the text; the curve becomes construction, a guide the letters stand on), reverse?: bool (the other way along the path)"
+        "bold?, italic?: bool (an installed family's bold or italic face; italic without one is slanted), align?: left|center|right (the lines against `at`, or along the path), vertical_align?: baseline|top|middle|bottom (the block of lines against `at` or the path: the first line's baseline (default), its capitals' tops, halfway between those and the last line's baseline, or the bottom of the last line's descenders), letter_spacing?: extra mm between letters, line_spacing?: times the font's line distance (default 1), path?: a curve id of the sketch the baseline follows (\"\": none; `at` and `angle` then do not place the text; the curve becomes construction, a guide the letters stand on), reverse?: bool (the other way along the path)"
     };
 }
 
@@ -162,6 +162,20 @@ fn text_style(p: &Value, cmd: &str, old: TextStyle) -> Result<TextStyle> {
             }
         }
         Some(_) => return Err(bad(cmd, "`align` must be left, center or right")),
+    }
+    const VERTICAL_MUST: &str = "`vertical_align` must be baseline, top, middle or bottom";
+    match p.get("vertical_align") {
+        None | Some(Value::Null) => {}
+        Some(Value::String(a)) => {
+            style.vertical_align = match a.trim().to_ascii_lowercase().as_str() {
+                "baseline" => TextVerticalAlign::Baseline,
+                "top" => TextVerticalAlign::Top,
+                "middle" | "center" | "centre" => TextVerticalAlign::Middle,
+                "bottom" => TextVerticalAlign::Bottom,
+                _ => return Err(bad(cmd, VERTICAL_MUST)),
+            }
+        }
+        Some(_) => return Err(bad(cmd, VERTICAL_MUST)),
     }
     if p.get("letter_spacing").is_some_and(|v| !v.is_null()) {
         style.letter_spacing =

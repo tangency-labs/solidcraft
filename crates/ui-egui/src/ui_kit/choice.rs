@@ -33,6 +33,9 @@ pub(crate) struct Segments<'a> {
     pub primary: bool,
     pub intrinsic: bool,
     pub proportional: bool,
+    /// Draws each segment's symbol (painter, segment rect, index, ink) in place of its label. The
+    /// labels stay the hover text, the accessible names and the handles.
+    pub glyphs: Option<&'a dyn Fn(&egui::Painter, egui::Rect, usize, egui::Color32)>,
 }
 
 pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], config: Segments<'_>) -> bool {
@@ -58,6 +61,7 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
         primary,
         intrinsic,
         proportional,
+        glyphs,
     } = config;
     let accent = crate::theme::TabAccent::current(ui.ctx());
     let t = Tokens::get();
@@ -174,24 +178,21 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
             crate::icons::paint_ink(ui.painter(), icon_rect, icon, if on && workspace_accent { accent.ink } else { t.form_ink });
         }
         let text_rect = if compact { text_rect.intersect(segment.shrink2(vec2(t.space_4, 0.0))) } else { text_rect };
-        paint_text(
-            ui,
-            text_rect,
-            text,
-            font,
-            if !segment_enabled {
-                t.form_dim
-            } else if on && primary {
-                t.on_accent
-            } else if on && workspace_accent {
-                accent.ink
-            } else if on {
-                t.selected_ink
-            } else {
-                t.form_ink
-            },
-            false,
-        );
+        let ink = if !segment_enabled {
+            t.form_dim
+        } else if on && primary {
+            t.on_accent
+        } else if on && workspace_accent {
+            accent.ink
+        } else if on {
+            t.selected_ink
+        } else {
+            t.form_ink
+        };
+        match glyphs {
+            Some(glyph) => glyph(ui.painter(), segment.shrink2(vec2(t.space_4, t.space_2)), index, ink),
+            None => paint_text(ui, text_rect, text, font, ink, false),
+        }
         t.button_bevel_with_radius(ui, &response, on, rounding);
         response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, segment_enabled, on, *text));
         scenario::publish_target(&format!("dialog:{}:{option}", label(ui)), segment);

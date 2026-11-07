@@ -1,0 +1,240 @@
+{
+  "en": {
+    "Vertical": "Vertical",
+    "sketch_text.valign_baseline": "Baseline",
+    "sketch_text.valign_top": "Top",
+    "sketch_text.valign_middle": "Middle",
+    "sketch_text.valign_bottom": "Bottom"
+  },
+  "ar": {
+    "Vertical": "عمودي",
+    "sketch_text.valign_baseline": "خط الأساس",
+    "sketch_text.valign_top": "أعلى",
+    "sketch_text.valign_middle": "وسط",
+    "sketch_text.valign_bottom": "أسفل"
+  },
+  "bg": {
+    "Vertical": "Вертикално",
+    "sketch_text.valign_baseline": "Базова линия",
+    "sketch_text.valign_top": "Горе",
+    "sketch_text.valign_middle": "Среда",
+    "sketch_text.valign_bottom": "Долу"
+  },
+  "bs": {
+    "Vertical": "Vertikalno",
+    "sketch_text.valign_baseline": "Osnovna linija",
+    "sketch_text.valign_top": "Vrh",
+    "sketch_text.valign_middle": "Sredina",
+    "sketch_text.valign_bottom": "Dno"
+  },
+  "ca": {
+    "Vertical": "Vertical",
+    "sketch_text.valign_baseline": "Línia base",
+    "sketch_text.valign_top": "Dalt",
+    "sketch_text.valign_middle": "Mig",
+    "sketch_text.valign_bottom": "Baix"
+  },
+  "cs": {
+    "Vertical": "Svisle",
+    "sketch_text.valign_baseline": "Účaří",
+    "sketch_text.valign_top": "Nahoře",
+    "sketch_text.valign_middle": "Uprostřed",
+    "sketch_text.valign_bottom": "Dole"
+  },
+  "da": {
+    "Vertical": "Lodret",
+    "sketch_text.valign_baseline": "Grundlinje",
+    "sketch_text.valign_top": "Top",
+    "sketch_text.valign_middle": "Midte",
+    "sketch_text.valign_bottom": "Bund"
+  },
+  "de": {
+    "Vertical": "Vertikal",
+    "sketch_text.valign_baseline": "Grundlinie",
+    "sketch_text.valign_top": "Oben",
+    "sketch_text.valign_middle": "Mitte",
+    "sketch_text.valign_bottom": "Unten"
+  },
+  "es": {
+    "Vertical": "Vertical",
+    "sketch_text.valign_baseline": "Línea base",
+    "sketch_text.valign_top": "Arriba",
+    "sketch_text.valign_middle": "Centro",
+    "sketch_text.valign_bottom": "Abajo"
+  },
+  "fi": {
+    "Vertical": "Pystysuunta",
+    "sketch_text.valign_baseline": "Perusviiva",
+    "sketch_text.valign_top": "Ylä",
+    "sketch_text.valign_middle": "Keski",
+    "sketch_text.valign_bottom": "Ala"
+  },
+  "fr": {
+    "Vertical": "Vertical",
+    "sketch_text.valign_baseline": "Ligne de base",
+    "sketch_text.valign_top": "Haut",
+    "sketch_text.valign_middle": "Milieu",
+    "sketch_text.valign_bottom": "Bas"
+  },
+  "gl": {
+    "Vertical": "Vertical",
+    "sketch_text.valign_baseline": "Liña base",
+    "sketch_text.valign_top": "Arriba",
+    "sketch_text.valign_middle": "Medio",
+    "sketch_text.valign_bottom": "Abaixo"
+  },
+  "he": {
+    "Vertical": "אנכי",
+    "sketch_text.valign_baseline": "קו בסיס",
+    "sketch_text.valign_top": "למעלה",
+    "sketch_text.valign_middle": "אמצע",
+    "sketch_text.valign_bottom": "למטה"
+  },
+  "hr": {
+    "Vertical": "Okomito",
+    "sketch_text.valign_baseline": "Osnovna linija",
+    "sketch_text.valign_top": "Vrh",
+    "sketch_text.valign_middle": "Sredina",
+    "sketch_text.valign_bottom": "Dno"
+  },
+  "hu": {
+    "Vertical": "Függőleges",
+    "sketch_text.valign_baseline": "Alapvonal",
+    "sketch_text.valign_top": "Fent",
+    "sketch_text.valign_middle": "Középen",
+    "sketch_text.valign_bottom": "Lent"
+  },
+  "id": {
+    "Vertical": "Vertikal",
+    "sketch_text.valign_baseline": "Garis dasar",
+    "sketch_text.valign_top": "Atas",
+    "sketch_text.valign_middle": "Tengah",
+    "sketch_text.valign_bottom": "Bawah"
+  },
+  "it": {
+    "Vertical": "Verticale",
+    "sketch_text.valign_baseline": "Linea di base",
+    "sketch_text.valign_top": "Alto",
+    "sketch_text.valign_middle": "Centro",
+    "sketch_text.valign_bottom": "Basso"
+  },
+  "ja": {
+    "Vertical": "垂直",
+    "sketch_text.valign_baseline": "ベースライン",
+    "sketch_text.valign_top": "上",
+    "sketch_text.valign_middle": "中央",
+    "sketch_text.valign_bottom": "下"
+  },
+  "ka": {
+    "Vertical": "ვერტიკალური",
+    "sketch_text.valign_baseline": "საბაზისო ხაზი",
+    "sketch_text.valign_top": "ზემოთ",
+    "sketch_text.valign_middle": "შუა",
+    "sketch_text.valign_bottom": "ქვემოთ"
+  },
+  "ko": {
+    "Vertical": "수직",
+    "sketch_text.valign_baseline": "기준선",
+    "sketch_text.valign_top": "위",
+    "sketch_text.valign_middle": "가운데",
+    "sketch_text.valign_bottom": "아래"
+  },
+  "ms": {
+    "Vertical": "Menegak",
+    "sketch_text.valign_baseline": "Garis dasar",
+    "sketch_text.valign_top": "Atas",
+    "sketch_text.valign_middle": "Tengah",
+    "sketch_text.valign_bottom": "Bawah"
+  },
+  "nb": {
+    "Vertical": "Loddrett",
+    "sketch_text.valign_baseline": "Grunnlinje",
+    "sketch_text.valign_top": "Topp",
+    "sketch_text.valign_middle": "Midt",
+    "sketch_text.valign_bottom": "Bunn"
+  },
+  "nl": {
+    "Vertical": "Verticaal",
+    "sketch_text.valign_baseline": "Basislijn",
+    "sketch_text.valign_top": "Boven",
+    "sketch_text.valign_middle": "Midden",
+    "sketch_text.valign_bottom": "Onder"
+  },
+  "pl": {
+    "Vertical": "Pionowo",
+    "sketch_text.valign_baseline": "Linia bazowa",
+    "sketch_text.valign_top": "Góra",
+    "sketch_text.valign_middle": "Środek",
+    "sketch_text.valign_bottom": "Dół"
+  },
+  "pt-BR": {
+    "Vertical": "Vertical",
+    "sketch_text.valign_baseline": "Linha de base",
+    "sketch_text.valign_top": "Topo",
+    "sketch_text.valign_middle": "Meio",
+    "sketch_text.valign_bottom": "Base"
+  },
+  "ro": {
+    "Vertical": "Vertical",
+    "sketch_text.valign_baseline": "Linie de bază",
+    "sketch_text.valign_top": "Sus",
+    "sketch_text.valign_middle": "Mijloc",
+    "sketch_text.valign_bottom": "Jos"
+  },
+  "ru": {
+    "Vertical": "По вертикали",
+    "sketch_text.valign_baseline": "Базовая линия",
+    "sketch_text.valign_top": "Верх",
+    "sketch_text.valign_middle": "Середина",
+    "sketch_text.valign_bottom": "Низ"
+  },
+  "sr": {
+    "Vertical": "Вертикално",
+    "sketch_text.valign_baseline": "Основна линија",
+    "sketch_text.valign_top": "Врх",
+    "sketch_text.valign_middle": "Средина",
+    "sketch_text.valign_bottom": "Дно"
+  },
+  "sv": {
+    "Vertical": "Lodrät",
+    "sketch_text.valign_baseline": "Baslinje",
+    "sketch_text.valign_top": "Överkant",
+    "sketch_text.valign_middle": "Mitten",
+    "sketch_text.valign_bottom": "Nederkant"
+  },
+  "tr": {
+    "Vertical": "Dikey",
+    "sketch_text.valign_baseline": "Taban çizgisi",
+    "sketch_text.valign_top": "Üst",
+    "sketch_text.valign_middle": "Orta",
+    "sketch_text.valign_bottom": "Alt"
+  },
+  "uk": {
+    "Vertical": "По вертикалі",
+    "sketch_text.valign_baseline": "Базова лінія",
+    "sketch_text.valign_top": "Верх",
+    "sketch_text.valign_middle": "Середина",
+    "sketch_text.valign_bottom": "Низ"
+  },
+  "vi": {
+    "Vertical": "Dọc",
+    "sketch_text.valign_baseline": "Đường cơ sở",
+    "sketch_text.valign_top": "Trên",
+    "sketch_text.valign_middle": "Giữa",
+    "sketch_text.valign_bottom": "Dưới"
+  },
+  "zh-TW": {
+    "Vertical": "垂直",
+    "sketch_text.valign_baseline": "基線",
+    "sketch_text.valign_top": "頂端",
+    "sketch_text.valign_middle": "置中",
+    "sketch_text.valign_bottom": "底端"
+  },
+  "zh": {
+    "Vertical": "垂直",
+    "sketch_text.valign_baseline": "基线",
+    "sketch_text.valign_top": "顶端",
+    "sketch_text.valign_middle": "居中",
+    "sketch_text.valign_bottom": "底端"
+  }
+}

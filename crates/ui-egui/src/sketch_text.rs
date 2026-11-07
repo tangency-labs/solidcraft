@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use solidcraft_engine::{
     Sel,
     doc::expr::Kind as ValueKind,
-    sketch::{LinkKind, LinkSource, TextAlign, TextStyle},
+    sketch::{LinkKind, LinkSource, TextAlign, TextStyle, TextVerticalAlign},
 };
 
 use crate::SolveApp;
@@ -533,7 +533,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
             TextAlign::Right => 2,
         };
         let labels = ["sketch_text.align_left", "sketch_text.align_center", "sketch_text.align_right"].map(crate::i18n::tr);
-        ui_kit::segmented(ui, &mut selected, &labels, ui_kit::Segments { compact: true, ..Default::default() });
+        ui_kit::segmented(ui, &mut selected, &labels, ui_kit::Segments { compact: true, glyphs: Some(&paragraph_glyph), ..Default::default() });
         k.style.align = match selected {
             1 => TextAlign::Center,
             2 => TextAlign::Right,
@@ -541,6 +541,26 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
         };
         for (label, handle) in labels.iter().zip(["dialog:Align left", "dialog:Align center", "dialog:Align right"]) {
             if let Some(at) = crate::scenario::handle_at(&format!("dialog:Alignment:{label}")) {
+                crate::scenario::publish_handle(handle, at);
+            }
+        }
+    });
+    ui_kit::row(ui, "Vertical", |ui| {
+        const ORDER: [TextVerticalAlign; 4] =
+            [TextVerticalAlign::Baseline, TextVerticalAlign::Top, TextVerticalAlign::Middle, TextVerticalAlign::Bottom];
+        let mut selected = ORDER.iter().position(|v| *v == k.style.vertical_align).unwrap_or(0);
+        let labels =
+            ["sketch_text.valign_baseline", "sketch_text.valign_top", "sketch_text.valign_middle", "sketch_text.valign_bottom"].map(crate::i18n::tr);
+        // Four worded segments do not fit the dialog's width: each shows "Ag" with a line where the anchor is.
+        let glyph = |p: &egui::Painter, r: egui::Rect, i: usize, ink: egui::Color32| {
+            vertical_glyph(p, r, ORDER.get(i).copied().unwrap_or_default(), ink);
+        };
+        ui_kit::segmented(ui, &mut selected, &labels, ui_kit::Segments { compact: true, glyphs: Some(&glyph), ..Default::default() });
+        k.style.vertical_align = ORDER.get(selected).copied().unwrap_or_default();
+        for (label, handle) in
+            labels.iter().zip(["dialog:Vertical baseline", "dialog:Vertical top", "dialog:Vertical middle", "dialog:Vertical bottom"])
+        {
+            if let Some(at) = crate::scenario::handle_at(&format!("dialog:Vertical:{label}")) {
                 crate::scenario::publish_handle(handle, at);
             }
         }
@@ -636,6 +656,44 @@ fn is_font_file(s: &str) -> bool {
 }
 
 /// The application supplies families/file recognition; the kit owns search and list widgets.
+/// The symbol of a horizontal alignment (0 left, 1 centre, 2 right): three lines of a paragraph set that way.
+fn paragraph_glyph(p: &egui::Painter, r: egui::Rect, align: usize, ink: egui::Color32) {
+    let t = crate::theme::Tokens::get();
+    let width = r.width().min(t.space_16 + t.space_2);
+    let stroke = egui::Stroke::new(1.5, ink);
+    for (row, share) in [1.0_f32, 0.6, 0.8].into_iter().enumerate() {
+        let length = width * share;
+        let left = match align {
+            0 => r.center().x - width / 2.0,
+            1 => r.center().x - length / 2.0,
+            _ => r.center().x + width / 2.0 - length,
+        };
+        p.hline(left..=left + length, r.center().y + (row as f32 - 1.0) * t.space_4, stroke);
+    }
+}
+
+/// The symbol of a vertical alignment: "Ag" with an accent line where the text's anchor is, at the
+/// capitals' tops, halfway down them, on the baseline or under the g's tail.
+fn vertical_glyph(p: &egui::Painter, r: egui::Rect, align: TextVerticalAlign, ink: egui::Color32) {
+    let t = crate::theme::Tokens::get();
+    let size = t.font_label;
+    let galley = p.layout_no_wrap("Ag".to_owned(), crate::fonts::semibold(size), ink);
+    let at = r.center() - galley.size() / 2.0;
+    // The baseline: where the first row's glyphs stand, else an estimate from the font size.
+    let baseline = galley.rows.first().and_then(|row| row.row.glyphs.first().map(|g| row.pos.y + g.pos.y)).unwrap_or(galley.size().y * 0.8);
+    let base = at.y + baseline;
+    let cap = size * 0.72;
+    let y = match align {
+        TextVerticalAlign::Top => base - cap,
+        TextVerticalAlign::Middle => base - cap / 2.0,
+        TextVerticalAlign::Baseline => base,
+        TextVerticalAlign::Bottom => base + size * 0.24,
+    };
+    let half = (galley.size().x / 2.0 + t.space_3).min(r.width() / 2.0);
+    p.galley(at, galley, ink);
+    p.hline(r.center().x - half..=r.center().x + half, y, egui::Stroke::new(1.5, t.accent));
+}
+
 fn font_row(ui: &mut egui::Ui, k: &mut Tx) {
     let builtin = crate::i18n::format("sketch_text.builtin_font", &[("family", solidcraft_engine::sketch::DEFAULT_FONT_FAMILY)]);
     let current = if k.font.trim().is_empty() { builtin.clone() } else { k.font.clone() };
@@ -705,10 +763,17 @@ fn edit_params(app: &SolveApp, k: &Tx) -> Result<Value, String> {
         TextAlign::Center => "center",
         TextAlign::Right => "right",
     };
+    let vertical_align = match k.style.vertical_align {
+        TextVerticalAlign::Baseline => "baseline",
+        TextVerticalAlign::Top => "top",
+        TextVerticalAlign::Middle => "middle",
+        TextVerticalAlign::Bottom => "bottom",
+    };
     let bold = k.style.bold && font_has_bold_face(&k.font);
     let mut params = json!({
         "link": k.link, "at": [sent_x, sent_y], "height": sent_height,
         "bold": bold, "italic": k.style.italic, "align": align,
+        "vertical_align": vertical_align,
         "letter_spacing": letter_spacing, "line_spacing": line_spacing,
         "path": k.style.path.clone().unwrap_or_default(), "reverse": k.style.reverse,
     });
@@ -1521,12 +1586,14 @@ mod tests {
         h.frames(3);
         h.step(&json!({"click":{"handle":"dialog:Italic"}})).unwrap();
         h.step(&json!({"click":{"handle":"dialog:Align center"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:Vertical middle"}})).unwrap();
         replace(&mut h, "dialog:Letter Spacing", "1.5");
         replace(&mut h, "dialog:Line Spacing", "1.25");
         h.frames(2);
         // On the canvas before OK.
         let live = style_of(&h, &link);
         assert!(live.italic && !live.bold && live.align == TextAlign::Center, "{live:?}");
+        assert_eq!(live.vertical_align, TextVerticalAlign::Middle, "{live:?}");
         assert_eq!((live.letter_spacing, live.line_spacing), (1.5, 1.25));
         ok(&mut h);
         assert!(!editing(&h.app));
