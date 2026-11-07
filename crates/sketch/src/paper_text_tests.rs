@@ -436,6 +436,39 @@ fn the_windows_lines_wait_for_no_search() {
     assert_eq!(answer.unwrap().lines, waited.lines);
 }
 
+/// A search that stops part-way (a panic on its thread) leaves nothing waiting: what it held is
+/// answered as a miss, and a character asked for while it ran is searched next, not missed.
+#[test]
+fn a_search_that_stops_part_way_leaves_nothing_waiting() {
+    use crate::fonts::fallback::{Running, answers};
+    let folder = Folder::new("stopped", &["a.ttf"]);
+    let dirs = folder.dirs();
+    let held = Query::new(&dirs, Han::Japanese, false, false, '\u{30c6}');
+    let next = Query::new(&dirs, Han::Japanese, false, false, '\u{30b9}');
+    let stopped = std::thread::spawn({
+        let (held, next) = (held.clone(), next.clone());
+        move || {
+            let mut running = Running::start();
+            running.held = vec![held];
+            // Asked while the search runs, so it waits for it (the stop below is this thread's end, so
+            // nothing here is asserted).
+            let _ = answers(std::slice::from_ref(&next), false);
+            std::panic::panic_any("a search stopped part-way")
+        }
+    });
+    assert!(stopped.join().is_err());
+    assert_eq!(answers(std::slice::from_ref(&held), false), Some(vec![None]), "a miss, not waiting");
+    let started = std::time::Instant::now();
+    let found = loop {
+        match answers(std::slice::from_ref(&next), false) {
+            Some(found) => break found,
+            None => assert!(started.elapsed().as_secs() < 120, "nothing searched again"),
+        }
+        std::thread::yield_now();
+    };
+    assert_eq!(found[0].as_ref().and_then(|(path, _)| path.file_name()).map(|name| name.to_string_lossy().into_owned()).as_deref(), Some("a.ttf"));
+}
+
 /// The window's way in never searches: it says the fonts are being looked for until they are found.
 #[test]
 fn the_windows_way_in_waits_for_no_search() {
