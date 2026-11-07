@@ -1629,12 +1629,15 @@ struct PlacementReads {
     unlisted: bool,
     components: std::collections::BTreeSet<u64>,
     paths: Vec<Vec<u64>>,
+    /// Links that follow one placement: (the sketch's placement, the source's), read relative
+    /// to each other as `placement_relative` reads them.
+    placed: Vec<(Vec<u64>, Vec<u64>)>,
     bodies: std::collections::BTreeSet<String>,
 }
 
 impl PlacementReads {
     fn is_empty(&self) -> bool {
-        !self.all && self.components.is_empty() && self.paths.is_empty() && self.bodies.is_empty()
+        !self.all && self.components.is_empty() && self.paths.is_empty() && self.placed.is_empty() && self.bodies.is_empty()
     }
 
     /// A body's complete placement in the feature's input state, including its offset. Later
@@ -1872,7 +1875,11 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
                 None => {}
             }
             for link in &sketch.links {
-                reads.link(doc, st, &link.source);
+                match &link.placement {
+                    // Read at that placement, not at its component's first one.
+                    Some(p) => reads.placed.push((p.author.clone(), p.source.clone())),
+                    None => reads.link(doc, st, &link.source),
+                }
             }
         }
         _ => {}
@@ -1910,13 +1917,22 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
             None => u8::MAX.hash(&mut h),
         }
     }
+    for (author, source) in &reads.placed {
+        author.hash(&mut h);
+        source.hash(&mut h);
+        let relative = path_frame(doc, author).and_then(|a| crate::mat_inverse(&a)).zip(path_frame(doc, source));
+        match relative {
+            Some((inverse, m)) => hash_placement(&crate::mat_mul(&inverse, &m), &mut h),
+            None => u8::MAX.hash(&mut h),
+        }
+    }
     hash_placed_bodies(doc, st, &reads.bodies, &inverse, &mut h);
     if reads.unlisted {
         placements_hash(doc).hash(&mut h);
     }
     // Legacy and component-wide reads still need the conservative offset dependency. Body
     // reads above already include just their own offsets, in the frame that evaluates them.
-    if reads.all || !reads.components.is_empty() || !reads.paths.is_empty() {
+    if reads.all || !reads.components.is_empty() || !reads.paths.is_empty() || !reads.placed.is_empty() {
         serde_json::to_string(&doc.body_offsets).unwrap_or_default().hash(&mut h);
     }
     // Never 0: the feature reads placements.
@@ -7387,7 +7403,8 @@ fn eval_feature(
                 // A sketch that reads no geometry (a fixed plane, no projections) needs no other
                 // component's bodies moved into its frame: placing every body of a large
                 // assembly again is what made each sketch edit as slow as the design is big.
-                None if !plane_reads_geometry(plane) && sketch.links.is_empty() => std::borrow::Cow::Borrowed(st),
+                // Links to an exact placement read the model in its own frames.
+                None if !plane_reads_geometry(plane) && sketch.links.iter().all(link_reads_own_frames) => std::borrow::Cow::Borrowed(st),
                 None => state_in_frame(doc, st, f.component)?,
             };
             // A further placement a link reads is placed in its frame too (#9957).
@@ -7411,10 +7428,8 @@ fn eval_feature(
             // A text's outlines are rebuilt from its numbers when the links are refreshed: the
             // ones its expressions give come first.
             doc.apply_text_values(vals, &mut sk)?;
-            let mut warns = match anchor {
-                Some(anchor) => crate::project::refresh_face_anchor_links(doc, vals, &fst, &plane, &mut sk, anchor)?,
-                None => crate::project::refresh_links(doc, vals, &fst, &plane, &mut sk)?,
-            };
+            let placed = crate::project::Placed { raw: st, component: f.component };
+            let mut warns = crate::project::refresh_sketch_links(doc, vals, placed, &fst, &plane, &mut sk, anchor)?;
             drop(fst);
             sk.refresh_offsets()?;
             if let Some(w) = face_warning {
@@ -8383,6 +8398,15 @@ fn move_constructions_with(doc: &Document, st: &mut ModelState, moved: &[crate::
             c.geom = geom;
         }
     }
+}
+
+/// Whether a link needs nothing of other components moved into its sketch's frame: it reads an
+/// exact placement itself, is frozen, or reads nothing outside its sketch and the origin.
+fn link_reads_own_frames(link: &solidcraft_sketch::Link) -> bool {
+    use solidcraft_sketch::LinkSource;
+    link.frozen
+        || link.placement.is_some()
+        || matches!(link.source, LinkSource::Text { .. } | LinkSource::SketchAxis { .. } | LinkSource::Origin | LinkSource::Axis { .. })
 }
 
 /// Whether `plane` is given by the origin planes and numbers alone.

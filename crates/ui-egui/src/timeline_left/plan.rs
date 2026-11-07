@@ -74,7 +74,7 @@ pub(super) struct RowPlan {
     index_of: HashMap<u64, usize>,
     /// The folder each feature is in (`group_for`), by timeline position.
     pub group_of: Vec<Option<u64>>,
-    /// Whether the sketch at each timeline position has patterns.
+    /// Whether the sketch at each timeline position has patterns or projections to fold.
     pub has_patterns: Vec<bool>,
     /// The first folder with each id: the one `groups.iter().find` would give.
     by_id: HashMap<u64, usize>,
@@ -163,7 +163,7 @@ impl RowPlan {
             .iter()
             .map(|feature| {
                 index_of.get(&feature.0).and_then(|index| doc.features.get(*index)).is_some_and(
-                    |feature| matches!(&feature.kind, solidcraft_engine::doc::FeatureKind::Sketch { sketch, .. } if !sketch.patterns.is_empty()),
+                    |feature| matches!(&feature.kind, solidcraft_engine::doc::FeatureKind::Sketch { sketch, .. } if !sketch.patterns.is_empty() || sketch.links.iter().any(crate::sketch_link_tree::listed)),
                 )
             })
             .collect();

@@ -277,12 +277,14 @@ sketch.export_dxf                 2D sketch only (the sketch solver and engine t
 sketch.extend                     2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.fillet                     2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.finish_auto_constrain      2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.freeze_link                projection links: engine tests in crates/engine/src/cmd/sketch_link_manage_tests.rs
 sketch.glyphs                     2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.infinite                   2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.insert_dxf                 2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.insert_svg                 2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.inspect                    2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.line.midpoint              2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.link_visibility            projection links: engine tests in crates/engine/src/cmd/sketch_link_manage_tests.rs
 sketch.loose_ends                 2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.loose_ends.tie             2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.mirror                     2D sketch only (the sketch solver and engine tests); no kernel operation
@@ -298,6 +300,10 @@ sketch.point3d                    2D sketch only (the sketch solver and engine t
 sketch.polygon.edge               2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.rectangle.three_point      2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.redefine                   2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.references                 projection links: engine tests in crates/engine/src/cmd/sketch_link_manage_tests.rs
+sketch.remove_link                projection links: engine tests in crates/engine/src/cmd/sketch_link_manage_tests.rs
+sketch.repair_link                projection links: engine tests in crates/engine/src/cmd/sketch_link_manage_tests.rs
+sketch.resume_link                projection links: engine tests in crates/engine/src/cmd/sketch_link_manage_tests.rs
 sketch.scale                      2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.slot.arc_center            2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.slot.arc_three_point       2D sketch only (the sketch solver and engine tests); no kernel operation
@@ -312,6 +318,7 @@ sketch.toggle_driven              2D sketch only (the sketch solver and engine t
 sketch.transform                  2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.trim                       2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.trim.path                  2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.update_references          projection links: engine tests in crates/engine/src/cmd/sketch_link_manage_tests.rs
 timeline.dependents               a listing of dependents
 timeline.export_script            writes the history as a script
 timeline.inspect                  a listing of the timeline

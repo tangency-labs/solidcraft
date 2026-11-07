@@ -215,7 +215,16 @@ fn regularized_shell_keeps_legacy_and_explicit_single_face_projections_closed() 
             let source = solidcraft_sketch::LinkSource::Face { body: "Case".into(), at: point };
             let (values, _) = doc.param_values();
             let legacy = crate::project::resolve(&doc, &values, &state, &plane, solidcraft_sketch::LinkKind::Project, &source).unwrap();
-            let explicit = crate::project::resolve_face_indices(&state, &plane, solidcraft_sketch::LinkKind::Project, "Case", &[index]).unwrap();
+            let explicit = crate::project::resolve_face_indices(
+                &state,
+                &plane,
+                solidcraft_sketch::LinkKind::Project,
+                "Case",
+                &[index],
+                &Default::default(),
+                None,
+            )
+            .unwrap();
             assert_eq!(legacy.geom, explicit.geom);
             assert_eq!(explicit.geom.len(), 4, "raw planar piece keeps all four edges");
             let mut sketch = solidcraft_sketch::Sketch::new();
