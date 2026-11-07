@@ -99,12 +99,24 @@ adapter while native placements exist. The default adapter truthfully supplies n
 native Window service. Host cards reuse adaptive Container styling, title fonts,
 the six-dot grip and header separator. Shared shell gaps are allocation space.
 Captured frame alpha is reported separately from declarative surface intent;
-unsupported effective translucency still refuses. Native windows, contrast proof, comprehensive accessibility/keyboard
+the opt-in surface renderer reports contrast outcomes and raises opacity to retain
+readable primary and muted text. An invalid authored pair uses an opaque accessible
+fallback and reports its reason rather than claiming the original pair complies.
+Native windows, comprehensive accessibility/keyboard
 bindings, saved workspace rollout and real content migrations remain peer work.
 
 The authenticated `ui.panel_fixture` seam is off by default and rejects replacing
 an existing runtime. Presets are `docks`, `tabs`, `collapsed`, `floating`, `overflow`
-(24 instances), `pinned`, `columns`, `stack_tabs`, `content_fill` and `inline`.
+(24 instances), `pinned`, `columns`, `stack_tabs`, `content_fill`, `inline` and `surfaces`.
+Only `surfaces` opts out of the compatibility opaque host policy. Its optional
+`translucency_percent` request (finite 0–100) converts to opacity as
+`1 - percent / 100`; readability protection may increase effective opacity.
+This fixture override changes no saved preference. Inspection reports each
+section's declared `surface`, actual `paint_alpha` and optional `contrast` outcome,
+including fallback reasons. See [the surface specimen contract](panel-foundation.md#surface-review-specimen).
+An enabled specimen accepts `translucency_percent` alone to update presentation
+in place, retaining its controllers, drafts, layout and model. A missing/disabled
+specimen host or a runtime owned by another provider refuses this update.
 Drafts, controller identities and lifecycle/service/action counters are inspectable.
 The native specimen exposes editor Apply/Finish/Cancel actions. Separate
 action-binding fixtures retain their declared test actions.

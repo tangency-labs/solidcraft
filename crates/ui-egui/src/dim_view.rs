@@ -114,6 +114,9 @@ struct DimensionDraft {
     driven: bool,
     /// Draw ellipses with their axes, when the draft was made (see [`ellipse_as_before`]).
     half_axes: bool,
+    /// The first dimension of a sketch scales it rather than distorting it (#1365), unless the
+    /// Sketch preference is off (#4109).
+    scale_sketch: bool,
 }
 
 impl DimensionDraft {
@@ -125,8 +128,9 @@ impl DimensionDraft {
             && app.session.pending_moves == self.pending
     }
     fn params(&self, expr: &str) -> serde_json::Value {
-        // The first dimension of a sketch scales it rather than distorting it (#1365).
-        let mut params = json!({"entities": entities_value(&self.entities), "value": expr, "scale_sketch": true});
+        // The first dimension of a sketch scales it rather than distorting it (#1365), unless the
+        // Sketch preference is off (#4109).
+        let mut params = json!({"entities": entities_value(&self.entities), "value": expr, "scale_sketch": self.scale_sketch});
         if let Some(at) = self.at {
             params["text_at"] = json!([at.x, at.y]);
         }
@@ -404,6 +408,7 @@ fn draft_of(app: &SolveApp, sketch: u64, entities: &[String], at: Option<Vec2>, 
         error: None,
         driven,
         half_axes: app.preferences.ellipse_axes,
+        scale_sketch: app.preferences.first_dimension_scales,
     };
     if !draft.preview.sketch(sketch).is_some_and(|solved| solved.report.ok()) {
         return Err("That dimension conflicts with the sketch constraints".into());

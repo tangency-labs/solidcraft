@@ -1462,7 +1462,7 @@ mod tests {
             ("nl", "Nederlands", "Voorkeuren", "Extruderen", "Schets1", "Wijzigingen in My {design} opslaan?"),
             ("ro", "Română", "Preferințe", "Extrudare", "Schița1", "Salvați modificările în My {design}?"),
             ("sv", "Svenska", "Inställningar", "Extrudera", "Skiss1", "Spara ändringar i My {design}?"),
-            ("zh-TW", "繁體中文", "偏好設定", "擠出", "草圖1", "儲存對 My {design} 的變更？"),
+            ("zh-TW", "繁體中文", "首選項", "拉伸", "草圖1", "儲存對 My {design} 的更改？"),
         ] {
             let locale = Locale::for_language(id);
             assert_eq!(locale.name(), name);
