@@ -50,6 +50,16 @@ impl Deferred {
         }
         self.evaluated.is_some()
     }
+
+    /// Keep this job computing until the returned sender sends or is dropped (tests holding the
+    /// history busy); what it computed meanwhile is set aside, so it then runs on the window thread.
+    #[cfg(test)]
+    pub(crate) fn hold(&mut self) -> std::sync::mpsc::Sender<Option<solidcraft_engine::Evaluated>> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.done = rx;
+        self.evaluated = None;
+        tx
+    }
 }
 
 #[cfg(test)]

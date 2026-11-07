@@ -228,6 +228,21 @@ pub(crate) fn group(app: &mut SolveApp, features: &[u64], parent: Option<u64>, a
     Some(folder)
 }
 
+/// How many items a folder's chip counts. While the bar shows one component's features, a folder
+/// counts those and its own joints.
+fn count(folder: &Folder, history: &History) -> usize {
+    let own_joints = history.folders.joints.get(&folder.id).map_or(0, Vec::len);
+    match history.within {
+        Some(_) => folder.end - folder.start + own_joints,
+        None => history.folders.count.get(&folder.id).copied().unwrap_or(folder.end - folder.start),
+    }
+}
+
+/// The width of a folder's chip (`folder_chip`).
+pub(crate) fn folder_chip_width(p: &egui::Painter, folder: &Folder, history: &History) -> f32 {
+    HistoryGroupChip::width_of(p, history.folders.name(folder.id), count(folder, history))
+}
+
 /// Draws a folder's chip with its top left at `at`; a click shows what it holds or folds it, and
 /// its menu also renames, ungroups or selects it, or rolls the marker after it. Returns its width.
 pub(crate) fn folder_chip(
@@ -240,12 +255,7 @@ pub(crate) fn folder_chip(
     strip: &Strip,
 ) -> f32 {
     let name = history.folders.name(folder.id).to_string();
-    // While the bar shows one component's features, a folder counts those and its own joints.
-    let own_joints = history.folders.joints.get(&folder.id).map_or(0, Vec::len);
-    let count = match history.within {
-        Some(_) => folder.end - folder.start + own_joints,
-        None => history.folders.count.get(&folder.id).copied().unwrap_or(folder.end - folder.start),
-    };
+    let count = count(folder, history);
     let joints = count.saturating_sub(folder.end - folder.start);
     let state = history.inside(folder.start, folder.end, folder.open);
     let picked = app.tree.picked_timeline_groups.contains(&folder.id)
