@@ -401,7 +401,7 @@ fn theme_option_switch(ui: &mut Ui, label: &str, on: &mut bool) {
     if response.has_focus() {
         ui.painter().rect_stroke(rect, t.control_radius, Stroke::new(t.space_2, t.form_primary), egui::StrokeKind::Inside);
     }
-    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), *on, label));
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), *on, label));
     scenario::publish_target(&format!("prefs:theme_option_switch:{label}"), response.rect);
 }
 
@@ -460,7 +460,7 @@ pub(crate) fn settings_heading_with_tag(ui: &mut Ui, title: &str, description: &
         ui.spacing_mut().item_spacing.y = t.space_3;
         let (rect, response) =
             ui.allocate_exact_size(vec2(dimension(ui.available_width()), if page { t.space_24 } else { t.space_16 + t.space_3 }), Sense::hover());
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), title));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), title));
         paint_text(ui, rect, title, crate::fonts::semibold(if page { t.font_page_heading } else { t.font_intro }), t.form_ink, false);
         if let Some(tag) = tag {
             let width = ui
@@ -566,13 +566,16 @@ fn settings_section_count_spaced<R>(
 pub(crate) fn settings_card<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<R> {
     let t = Tokens::get();
     let container = super::Container::new(ui.ctx(), super::Surface::Navigation);
-    let frame = container
-        .frame(ui.ctx(), t.dialog_footer, crate::frame::Side::Left)
-        .inner_margin(egui::Margin::symmetric(t.space_12 as i8, t.space_10 as i8));
+    let frame = settings_card_frame(ui).inner_margin(egui::Margin::symmetric(t.space_12 as i8, t.space_10 as i8));
     container.show_frame(ui, frame, ui.max_rect(), |ui| {
         ui.set_min_width(dimension(ui.available_width()));
         add(ui)
     })
+}
+
+/// The theme browser and its options panel share exactly the same themed backing.
+pub(super) fn settings_card_frame(ui: &Ui) -> egui::Frame {
+    super::Container::new(ui.ctx(), super::Surface::Navigation).frame(ui.ctx(), Tokens::get().dialog_footer, crate::frame::Side::Left)
 }
 
 /// Controls and one explanatory specimen side by side, stacked on narrow viewports.
@@ -600,44 +603,6 @@ pub(crate) fn settings_pair<R>(ui: &mut Ui, controls: impl FnOnce(&mut Ui) -> R,
             ui.allocate_ui_with_layout(vec2(preview_width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| preview(ui, state));
         });
     }
-}
-
-/// Dashed import tile, bounded by its carousel cell.
-pub(crate) fn theme_import_tile(ui: &mut Ui, label: &str, note: &str) -> Response {
-    if crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, &[label, note]) {
-        return crate::prefs_search::hidden_response(ui);
-    }
-    let t = Tokens::get();
-    let width = t.space_24 * 3.0 + t.space_16;
-    let height = t.space_24 * 4.0;
-    let (r, response) = ui.allocate_exact_size(vec2(width.min(dimension(ui.available_width())), height), Sense::click());
-    if response.hovered() {
-        ui.painter().rect_filled(r, t.radius_lg, t.hover);
-    }
-    let mut outline = rounded_perimeter(r.shrink(t.space_2 / 2.0), f32::from(t.radius_lg));
-    if let Some(first) = outline.first().copied() {
-        outline.push(first);
-    }
-    ui.painter().extend(egui::Shape::dashed_line(&outline, Stroke::new(t.space_3 / 2.0, t.control_border), t.space_3, t.space_3));
-    let icon = Rect::from_center_size(pos2(r.center().x, r.top() + t.space_16), vec2(t.space_16, t.space_16));
-    crate::icons::paint_ink(ui.painter(), icon, "import_tray", t.form_dim);
-    centred_text(
-        ui.painter(),
-        Rect::from_min_size(pos2(r.left(), r.top() + t.space_24 + t.space_4), vec2(r.width(), t.space_16)),
-        label,
-        FontId::proportional(t.font_label),
-        t.form_dim,
-    );
-    centred_text(
-        ui.painter(),
-        Rect::from_min_size(pos2(r.left(), r.top() + t.space_24 + t.space_4 + t.space_16), vec2(r.width(), t.space_16)),
-        note,
-        FontId::proportional(t.font_small),
-        t.form_dim,
-    );
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
-    scenario::publish_target(&format!("dialog:{label}"), r);
-    response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 /// Compact informational state badge for settings; never an interactive control.
@@ -759,7 +724,7 @@ pub(crate) fn option_card(ui: &mut Ui, label: &str, note: Option<&str>, selected
         ui.painter().line_segment([centre + vec2(-t.space_4, 0.0), centre + vec2(-t.space_2, t.space_2)], Stroke::new(2.0, ink));
         ui.painter().line_segment([centre + vec2(-t.space_2, t.space_2), centre + vec2(t.space_4, -t.space_3)], Stroke::new(2.0, ink));
     }
-    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, enabled, selected, label));
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::RadioButton, enabled, selected, label));
     scenario::publish_target(&format!("prefs:option:{label}"), rect);
     let response = response.backing_on_hover_text(label);
     if enabled { response.on_hover_cursor(egui::CursorIcon::PointingHand) } else { response }
@@ -970,7 +935,7 @@ pub(crate) fn settings_inline_note(ui: &mut Ui, text: &str) {
         ui.painter().layout_no_wrap(text.to_owned(), FontId::proportional(t.font_body), t.form_dim)
     };
     let (r, response) = ui.allocate_exact_size(galley.size(), Sense::hover());
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), text));
     ui.painter().galley(r.min, galley, t.form_dim);
 }
 

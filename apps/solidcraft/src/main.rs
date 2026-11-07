@@ -282,13 +282,20 @@ impl eframe::App for App {
         let now = std::time::Instant::now();
         if self.prefs_writer.due(ui.input(|i| i.events.iter().any(changes_settings)), now)
             && let Some(storage) = frame.storage_mut()
-            && let Some(wait) = self.prefs_writer.store(storage, self.solve.prefs(), now)
+            && let Ok(prefs) = self.prefs_for_storage(storage)
+            && let Some(wait) = self.prefs_writer.store(storage, prefs, now)
         {
             ui.ctx().request_repaint_after(wait);
         }
     }
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        let prefs = self.solve.prefs();
+        let prefs = match self.prefs_for_storage(storage) {
+            Ok(prefs) => prefs,
+            Err(reason) => {
+                log::warn!("Settings were not written: {reason}");
+                return;
+            }
+        };
         storage.set_string(solidcraft_ui_egui::prefs::STORAGE_KEY, prefs.clone());
         self.prefs_writer.written = Some(prefs);
     }
@@ -361,6 +368,14 @@ struct LostWatch {
 }
 
 impl App {
+    fn prefs_for_storage(&self, storage: &dyn eframe::Storage) -> Result<String, String> {
+        self.solve.try_prefs().or_else(|reason| {
+            log::warn!("Panel layout changes were not saved: {reason}");
+            let previous = solidcraft_ui_egui::prefs::stored(|key| storage.get_string(key));
+            self.solve.prefs_with_stored_panel_layout(previous.as_deref())
+        })
+    }
+
     /// The graphics device was lost (#4172): the window can't draw again, so close, keeping
     /// unsaved changes for recovery as a forced quit does (the window can't ask about them), and
     /// start again once closed ([`device_lost::restart`]).
@@ -1792,7 +1807,7 @@ mod viewport_tests {
                 viewport.fullscreen = Some(fullscreen);
                 viewport.native_pixels_per_point = Some(retina);
                 super::fullscreen_content_insets(&mut raw, 32.0, zoom);
-                let _ = ctx.run_ui(raw, |ui| super::content_ui(app, ui));
+                ctx.run_ui(raw, |ui| super::content_ui(app, ui)).textures_delta.clear();
             };
             // Enter, leave, and enter again: no stale inset when returning to a normal window.
             for fullscreen in [false, true, false, true] {

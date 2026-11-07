@@ -376,6 +376,7 @@ mod web {
         wheel_gestures: solidcraft_ui_egui::WebWheelGestures,
         /// The settings this tab wrote or loaded last, and those another tab wrote since (#8644).
         prefs_writer: crate::PrefsWriter,
+        prefs_warning: Option<String>,
         other_tab_prefs: PrefsInbox,
         /// The open designs followed for their kept copy, by `Session::uid` (#10220).
         keep_track: std::collections::HashMap<u64, Track>,
@@ -386,12 +387,31 @@ mod web {
     impl Shell {
         /// The settings as they are kept between visits: with the user's own language, not a
         /// session-only English fallback.
-        fn persisted_prefs(&mut self) -> String {
+        fn persisted_prefs(&mut self, previous: impl FnOnce() -> Result<Option<String>, String>) -> Option<String> {
             let saved = self.font.persisted_language(&self.app.preferences.language).to_owned();
             let live = std::mem::replace(&mut self.app.preferences.language, saved);
-            let prefs = self.app.prefs();
+            let (prefs, warning) = match self.app.try_prefs() {
+                Ok(prefs) => (Some(prefs), None),
+                Err(reason) => match previous().and_then(|previous| self.app.prefs_with_stored_panel_layout(previous.as_deref())) {
+                    Ok(prefs) => (Some(prefs), Some(format!("Panel layout changes were not saved: {reason}"))),
+                    Err(error) => (None, Some(format!("Settings were not written: {error}; panel layout: {reason}"))),
+                },
+            };
+            if self.prefs_warning != warning {
+                if let Some(warning) = &warning {
+                    log::warn!("{warning}");
+                }
+                self.prefs_warning = warning;
+            }
             self.app.preferences.language = live;
             prefs
+        }
+
+        fn stored_prefs() -> Result<Option<String>, String> {
+            let storage = web_sys::window()
+                .and_then(|window| window.local_storage().ok().flatten())
+                .ok_or_else(|| "browser settings storage is unavailable".to_owned())?;
+            storage.get_item(&crate::prefs_key()).map_err(|_| "browser settings could not be read".to_owned())
         }
 
         /// A settings change goes to the browser's storage in the frame it is made, and from
@@ -401,7 +421,7 @@ mod web {
             if !self.launch.persists() || ctx.input(|i| i.events.is_empty()) {
                 return;
             }
-            let prefs = self.persisted_prefs();
+            let Some(prefs) = self.persisted_prefs(Self::stored_prefs) else { return };
             let Some(prefs) = self.prefs_writer.take(prefs) else { return };
             let stored = web_sys::window().and_then(|w| w.local_storage().ok().flatten()).map(|s| s.set_item(&crate::prefs_key(), &prefs));
             if !matches!(stored, Some(Ok(()))) {
@@ -415,8 +435,9 @@ mod web {
         fn load_other_tabs_prefs(&mut self) {
             let Some(prefs) = self.other_tab_prefs.take() else { return };
             self.app.load_prefs(&prefs);
-            let held = self.persisted_prefs();
-            self.prefs_writer.loaded(held);
+            if let Some(held) = self.persisted_prefs(Self::stored_prefs) {
+                self.prefs_writer.loaded(held);
+            }
         }
 
         /// Files from the computer, writes to store, messages and the autosave.
@@ -726,7 +747,7 @@ mod web {
                 return;
             }
             let mut act: Option<(&'static str, String)> = None;
-            let closed = solidcraft_ui_egui::ui_kit::Window::new(egui::Id::new("sc_browser_files"), "folder", "Files in this browser")
+            let closed = solidcraft_ui_egui::ui_kit::Window::new(egui::Id::unique("sc_browser_files"), "folder", "Files in this browser")
                 // Room for long names; the kit still caps the window at the browser's width.
                 .cards(4.0)
                 .show_body(ctx, |ui| {
@@ -828,7 +849,9 @@ mod web {
                     self.files.panel.set(false);
                 }
                 "insert" => {
-                    self.app.insert_path(&path);
+                    if !solidcraft_ui_egui::mesh_units::ask(&mut self.app, &path, true) {
+                        self.app.insert_path(&path);
+                    }
                     self.files.panel.set(false);
                 }
                 "download" => match vfs::read(&path, solidcraft_engine::io::MAX_DESIGN_BYTES) {
@@ -873,10 +896,16 @@ mod web {
                                         *r = new.clone();
                                     }
                                 }
+                                if let Some(at) = self.app.home.opened_at.remove(&old) {
+                                    self.app.home.opened_at.insert(new.clone(), at);
+                                }
                                 // A forgotten design follows its new name.
                                 if self.app.home.forgotten.remove(&old) {
-                                    self.app.home.forgotten.insert(new);
+                                    self.app.home.forgotten.insert(new.clone());
                                 }
+                                // An open tab of that file keeps its path and, when the name came
+                                // from the file, the title that matches the file list (#11375).
+                                solidcraft_ui_egui::documents::follow_file_rename(&mut self.app, &old, &new);
                             }
                             Err(e) => self.app.set_status(e, true),
                         }
@@ -890,7 +919,7 @@ mod web {
         fn recovery_prompt(&mut self, ctx: &egui::Context) {
             let Some((name, path)) = self.files.recovery.borrow().clone() else { return };
             let mut answer = None;
-            let _ = solidcraft_ui_egui::ui_kit::Window::new(egui::Id::new("sc_browser_recovery"), "restore", "Recover unsaved work?")
+            let _ = solidcraft_ui_egui::ui_kit::Window::new(egui::Id::unique("sc_browser_recovery"), "restore", "Recover unsaved work?")
                 .required()
                 .show_body(ctx, |ui| {
                     ui.label(format!("“{name}” had unsaved changes when this page last closed."));
@@ -1096,7 +1125,7 @@ mod web {
             if !self.launch.persists() {
                 return;
             }
-            let prefs = self.persisted_prefs();
+            let Some(prefs) = self.persisted_prefs(|| Ok(storage.get_string(&crate::prefs_key()))) else { return };
             storage.set_string(&crate::prefs_key(), prefs);
         }
     }
@@ -1273,6 +1302,7 @@ mod web {
                             space_mouse: SpaceMouse::default(),
                             wheel_gestures: solidcraft_ui_egui::WebWheelGestures::default(),
                             prefs_writer: crate::PrefsWriter::default(),
+                            prefs_warning: None,
                             other_tab_prefs,
                             keep_track: Default::default(),
                             all_kept: false,

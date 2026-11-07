@@ -399,7 +399,7 @@ fn selected_row_paints_tab_soft_fill_and_accent_text_in_both_layouts() {
                 let mut row_rect = Rect::NOTHING;
                 let out = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
                     let row = Row { selected: true, label: "Selected body", dim: true, color: Some(Tokens::get().error), ..Default::default() };
-                    row_rect = draw_row(ui, egui::Id::new("selected-row"), &row).rect.unwrap();
+                    row_rect = draw_row(ui, egui::Id::unique("selected-row"), &row).rect.unwrap();
                 });
                 assert_eq!(row_rect.height(), 26.0);
                 assert!(out.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.rect == row_rect && r.fill == accent.soft)));
@@ -1180,7 +1180,7 @@ fn semantic_frame_transitions(
             semantic_content::finalize(&mut h.app, ui.ctx());
             // App paths may converge after an early return; finalization must be idempotent.
             semantic_content::finalize(&mut h.app, ui.ctx());
-            if ui.ctx().data_mut(|data| data.remove_temp::<bool>(egui::Id::new("semantic-test-discard"))).unwrap_or(false) {
+            if ui.ctx().data_mut(|data| data.remove_temp::<bool>(egui::Id::unique("semantic-test-discard"))).unwrap_or(false) {
                 ui.ctx().request_discard("repeat semantic layout after input");
             }
         })
@@ -1592,7 +1592,7 @@ fn semantic_row_commands_are_consumed_once_across_layout_repeats() {
     let undo = h.app.session.undo.len();
     semantic_frame(&mut h, &owners, vec![egui::Event::PointerMoved(at)], egui::Modifiers::NONE);
     semantic_frame(&mut h, &owners, vec![semantic_button(at, egui::PointerButton::Primary, true, egui::Modifiers::NONE)], egui::Modifiers::NONE);
-    h.ctx.data_mut(|data| data.insert_temp(egui::Id::new("semantic-test-discard"), true));
+    h.ctx.data_mut(|data| data.insert_temp(egui::Id::unique("semantic-test-discard"), true));
     semantic_frame(&mut h, &owners, vec![semantic_button(at, egui::PointerButton::Primary, false, egui::Modifiers::NONE)], egui::Modifiers::NONE);
     assert!(body_hidden(&h, "One"), "a repeated layout cannot toggle the eye back on");
     assert_eq!(h.app.session.undo.len(), undo + 1);
@@ -1878,7 +1878,7 @@ fn switching_semantic_documents_preserves_unrelated_payload_and_capture() {
     }
     let from = semantic_at(ContentOwner::BROWSER, "One");
     semantic_drag_start(&mut h, &owners, from);
-    let external = egui::Id::new("external capture");
+    let external = egui::Id::unique("external capture");
     egui::DragAndDrop::set_payload(&h.ctx, "external payload".to_string());
     h.ctx.set_dragged_id(external);
     crate::documents::switch(&mut h.app, tab);
