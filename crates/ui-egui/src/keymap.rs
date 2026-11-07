@@ -12,6 +12,8 @@ use solidcraft_engine::{CommandSpec, command_specs};
 use crate::SolveApp;
 use crate::ui_kit;
 
+pub(crate) const DRAG_ZOOM: &str = "view.tool.zoom";
+
 /// Keys the application handles before any command shortcut.
 pub const RESERVED: &[&str] = &[
     "Escape",
@@ -32,6 +34,7 @@ pub const RESERVED: &[&str] = &[
     "Ctrl+C",
     "Ctrl+X",
     "Ctrl+V",
+    "Ctrl+Shift+V",
     // View keys (`navigation::view_key`).
     "Left",
     "Right",
@@ -342,6 +345,16 @@ pub fn keys(app: &SolveApp, id: &str) -> Vec<String> {
     }
 }
 
+/// Drag to Zoom has no default binding. Compare the keys and current modifiers using the
+/// same chord names as the shortcut recorder.
+pub(crate) fn drag_zoom_key(app: &SolveApp, key: egui::Key, modifiers: egui::Modifiers) -> bool {
+    app.keymap.custom.get(DRAG_ZOOM).is_some_and(|keys| !keys.is_empty() && keys.contains(&key_name(key, modifiers)))
+}
+
+pub(crate) fn drag_zoom_held(app: &SolveApp, input: &egui::InputState) -> bool {
+    input.focused && input.keys_down.iter().any(|key| drag_zoom_key(app, *key, input.modifiers))
+}
+
 /// Use the spec already available when walking the command list.
 fn keys_for_spec<'a>(app: &'a SolveApp, command: &CommandSpec) -> Vec<&'a str> {
     match app.keymap.custom.get(command.id) {
@@ -446,6 +459,10 @@ pub fn command_for(app: &SolveApp, key: &str) -> Option<&'static str> {
 /// starts in the new sketch.
 pub fn press(app: &mut SolveApp, key: &str, repeat: bool) {
     if let Some(id) = command_for(app, key) {
+        if id == DRAG_ZOOM {
+            // The viewport reads the held chord. A key press must not latch Zoom.
+            return;
+        }
         // Pressed again while a tool of the same family is out, with Preferences › Sketch asking
         // for it (#2459): before its first point, the family's next mode (wrapping round); once a
         // point is placed, the tool keeps it. A held key's repeats change nothing.

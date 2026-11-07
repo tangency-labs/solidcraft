@@ -5,7 +5,7 @@ use std::borrow::Cow;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use super::check::whole;
 
@@ -278,7 +278,7 @@ fn contact_set_schema(_: &mut SchemaGenerator) -> Schema {
 
 /// Adds `key` to the schema's `required` list: for a key the type has optional so that the
 /// handler, not the check, refuses it when it's left out.
-fn require(schema: &mut Schema, key: &str) {
+pub(super) fn require(schema: &mut Schema, key: &str) {
     match schema.get_mut("required") {
         Some(Value::Array(required)) => {
             if !required.iter().any(|k| k == key) {
@@ -399,6 +399,230 @@ pub struct ContactCollision {
     pub b: String,
     /// How deep (mm).
     pub depth_mm: f64,
+}
+
+// ---- Motion studies (#12155) ----
+//
+// `motion.study` reads its parameters from the raw JSON, so each key here reads as the handler
+// reads it and fails with its message. Whether the study and each key's joint exist, whether the
+// joint has that value, and whether an expression evaluates stay the handler's to check.
+
+/// The most keys a motion study takes, and the most points one key takes.
+const MAX_STUDY_KEYS: usize = 1000;
+const MAX_KEY_POINTS: usize = 10_000;
+/// A point's step, and a value given as a number, are read only while smaller than this in size.
+const MAX_POINT_MAGNITUDE: f64 = 1e9;
+
+/// Make a motion study, which drives joints along a timeline of steps: each key gives one value of
+/// one joint at some steps, linear in between and held before the first and after the last. With
+/// `study`, change that study instead. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct MotionStudyParams {
+    /// A study to change, by id (a number) or name; left out, a new one is made.
+    #[serde(default, deserialize_with = "some_study", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "study_ref_schema")]
+    pub study: Option<Value>,
+    /// The study's name; blank text keeps it. Default for a new one: "Motion Study" and the first
+    /// number no study's name has.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// How many steps the timeline has: 1 to 100 000 (a fraction rounds). Default for a new one: 100.
+    #[serde(default, deserialize_with = "study_steps", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "f64", range(min = 1, max = 100_000))]
+    pub steps: Option<f64>,
+    #[serde(default, deserialize_with = "study_keys", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "study_keys_schema")]
+    pub keys: Option<Vec<Value>>,
+}
+
+/// List the design's motion studies, each with its keys in the units `motion.study` takes, and its
+/// associative traces. Nothing is changed.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct MotionListParams {}
+
+/// Delete a motion study. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = study_required)]
+pub struct MotionStudyDeleteParams {
+    // Required in the schema (`study_required`), optional in the type: left out, the handler
+    // refuses it with its own message, not the check's "is required".
+    #[serde(default, deserialize_with = "some_study", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "study_ref_schema")]
+    pub study: Option<Value>,
+}
+
+/// `study`: an id or a name, with the handler's message for anything else, `null` included.
+pub(super) fn some_study<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
+    match Value::deserialize(d)? {
+        v @ (Value::Number(_) | Value::String(_)) => Ok(Some(v)),
+        _ => Err(D::Error::custom(whole("`study` must be an id or a name"))),
+    }
+}
+
+pub(super) fn study_ref_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "The motion study, by id (a number) or name. A number is looked up as an id first, text as a name first.",
+        "type": ["number", "string"]
+    })
+}
+
+fn study_required(schema: &mut Schema) {
+    require(schema, "study");
+}
+
+/// `steps`: a number from 1 to 100 000, with the handler's message for anything else, `null`
+/// included.
+fn study_steps<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    Value::deserialize(d)?
+        .as_f64()
+        .filter(|n| n.is_finite() && (1.0..=100_000.0).contains(n))
+        .map(Some)
+        .ok_or_else(|| D::Error::custom(whole("`steps` must be 1…100000")))
+}
+
+/// Why the handler refuses `key`'s shape before looking at the design: its joint, value index,
+/// points and values, with the handler's messages.
+fn study_key_problem(key: &Value) -> Option<String> {
+    if !matches!(key.get("joint"), Some(Value::Number(_) | Value::String(_))) {
+        return Some("`joint` must be an id or a name".into());
+    }
+    // The handler reads an index that isn't a whole number as 0; the contract refuses it.
+    if key.get("index").is_some_and(|i| i.as_u64().is_none()) {
+        return Some("a key's `index` must be a whole number of 0 or more".into());
+    }
+    let Some(points) = key.get("points").and_then(Value::as_array) else {
+        return Some("each key needs `points`: [[step, value], …]".into());
+    };
+    if points.is_empty() || points.len() > MAX_KEY_POINTS {
+        return Some("a key needs 1…10000 points".into());
+    }
+    for point in points {
+        let step = point.get(0).and_then(Value::as_f64).filter(|x| x.is_finite() && x.abs() < MAX_POINT_MAGNITUDE);
+        let Some(value) = point.get(1).filter(|_| step.is_some()) else {
+            return Some("points are [step, value]".into());
+        };
+        let readable = match value {
+            Value::Number(n) => n.as_f64().is_some_and(|x| x.is_finite() && x.abs() < MAX_POINT_MAGNITUDE),
+            Value::String(_) => true,
+            _ => false,
+        };
+        if !readable {
+            return Some(format!("a joint value {}", crate::params::expr_problem(Some(value))));
+        }
+    }
+    None
+}
+
+/// `keys`: a list of at most 1000 keys, each checked as [`study_key_problem`] says. Given, `null`
+/// included, it must be a list, as the handler reads it.
+fn study_keys<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<Value>>, D::Error> {
+    let Value::Array(keys) = Value::deserialize(d)? else {
+        return Err(D::Error::custom(whole("`keys` must be a list")));
+    };
+    if keys.len() > MAX_STUDY_KEYS {
+        return Err(D::Error::custom(whole("too many keys")));
+    }
+    if let Some(problem) = keys.iter().find_map(study_key_problem) {
+        return Err(D::Error::custom(whole(problem)));
+    }
+    Ok(Some(keys))
+}
+
+/// The schema of `motion.study`'s `keys`. A point's two elements are typed apart
+/// (`prefixItems`): the step must be a number, while the value may be a number or an
+/// expression. Elements after those two are ignored by the handler, so they are left free.
+fn study_keys_schema(_: &mut SchemaGenerator) -> Schema {
+    let number = json!({"type": "number", "exclusiveMinimum": -MAX_POINT_MAGNITUDE, "exclusiveMaximum": MAX_POINT_MAGNITUDE});
+    json_schema!({
+        "description": "The study's keys, replacing any it has (at most 1000). Each drives one value of one joint: `joint` by id or name, `index` the value (0 for a revolute's angle; default 0), and `points` as [step, value] pairs (1 to 10 000), a value being degrees for an angle and mm for a distance, or an expression.",
+        "type": "array",
+        "maxItems": MAX_STUDY_KEYS,
+        "items": {
+            "type": "object",
+            "required": ["joint", "points"],
+            "properties": {
+                "joint": {"type": ["number", "string"]},
+                "index": {"type": "integer", "minimum": 0},
+                "points": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": MAX_KEY_POINTS,
+                    "items": {
+                        "type": "array",
+                        "minItems": 2,
+                        "prefixItems": [
+                            number.clone(),
+                            {"anyOf": [number, {"type": "string"}]}
+                        ]
+                    }
+                }
+            }
+        }
+    })
+}
+
+/// What `motion.study` returns: the study made or changed.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MotionStudySaved {
+    /// The study's id.
+    pub study: u64,
+    pub name: String,
+    pub steps: u32,
+    /// How many keys it has.
+    pub keys: usize,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// What `motion.list` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MotionStudies {
+    pub studies: Vec<MotionStudyInfo>,
+    /// The design's associative traces, each `{sketch, motion, samples, error}`: the sketch
+    /// (by id) the trace draws into, the motion it follows (a joint's range or a study), how many
+    /// samples it takes (`null`: automatic), and why it last failed (`null` when it didn't).
+    #[schemars(with = "Vec<serde_json::Map<String, Value>>")]
+    pub traces: Vec<Value>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// A motion study, in the form `motion.study` takes it back unchanged.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MotionStudyInfo {
+    pub id: u64,
+    pub name: String,
+    pub steps: u32,
+    pub keys: Vec<MotionStudyKeyInfo>,
+}
+
+/// One key of a study.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MotionStudyKeyInfo {
+    /// The joint's id.
+    pub joint: u64,
+    /// Its name; its id, as text, when the joint is gone.
+    pub joint_name: String,
+    /// Which of its values.
+    pub index: usize,
+    /// `deg` for an angle, `mm` for a distance: the unit of the points' values.
+    pub unit: String,
+    /// [step, value] pairs.
+    pub points: Vec<[f64; 2]>,
+}
+
+/// What `motion.delete` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MotionStudyDeleted {
+    /// The deleted study's name.
+    pub deleted: String,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 #[cfg(test)]

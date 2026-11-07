@@ -224,6 +224,7 @@ pub const DOCUMENTED: &[&str] = &[
     "sketch.pattern.circular",
     "sketch.pattern.rectangular",
     "sketch.point",
+    "sketch.point.divide",
     "sketch.point3d",
     "sketch.polygon.circumscribed",
     "sketch.polygon.edge",

@@ -42,7 +42,7 @@ pub(crate) const WHITESPACE: [(char, char); 10] = [
 ];
 
 /// [`WHITESPACE`] as the inside of a regex character class.
-fn whitespace_class() -> String {
+pub(crate) fn whitespace_class() -> String {
     let u = |c: char| format!("\\u{:04x}", c as u32);
     WHITESPACE.iter().map(|&(a, b)| if a == b { u(a) } else { format!("{}-{}", u(a), u(b)) }).collect()
 }
@@ -492,6 +492,14 @@ macro_rules! keyword_param {
 }
 
 keyword_param!(
+    /// `solid.rib`'s and `solid.web`'s `direction`.
+    RibDirectionParam,
+    "direction",
+    &["in_plane", "plane", "normal"],
+    "in_plane or normal",
+    "Which way the wall grows from the curves: in_plane (the default; plane is an alias), across the sketch plane, or normal, along the sketch plane's normal. Matching ignores case."
+);
+keyword_param!(
     /// `solid.fillet`'s `type`.
     FilletTypeParam,
     "fillet type",
@@ -522,6 +530,22 @@ keyword_param!(
     &["mitre", "swept"],
     "mitre or swept",
     "How two rounds turn round a sharp, straight, convex side edge square to both on a plane (the rounds along a boss's base, at its upright edges): mitre (the default) runs them on to meet in a mitre; swept ends them at the side edge and fills the corner with their section revolved about it, a torus. swept takes type: constant, corner: rolling, no setbacks and fit: exact or reduce, and is refused with the reason where the rounds are unequal or the side edge is concave, curved or tangent. Matching ignores case."
+);
+keyword_param!(
+    /// `plastic.lip`'s `type`.
+    LipTypeParam,
+    "type",
+    &["lip", "groove"],
+    "lip or groove",
+    "What the feature makes along the rim: lip (the default), a raised band, or groove, a band cut into the rim for another part's lip. Matching ignores case."
+);
+keyword_param!(
+    /// `plastic.lip`'s `side`.
+    LipSideParam,
+    "side",
+    &["inside", "outside"],
+    "inside or outside",
+    "Which edge of the rim face the band runs along: inside (the default) or outside. Matching ignores case."
 );
 
 /// How a feature combines with existing bodies, as `features::operation` reads it.
@@ -597,6 +621,41 @@ impl JsonSchema for ExtrudeOperation {
         enum_schema(
             &values,
             "How the extrusion combines with existing bodies: auto (cut into a body, otherwise join; new in an empty component), new, join, cut or intersect. The others are aliases. Matching ignores case, spaces, '_' and '-' (only case for auto).",
+        )
+    }
+}
+
+/// What Combine's tools do to its target, as `features::combine` reads `operation`: a spelling
+/// of join, cut or intersect that `Operation::parse` accepts. A spelling of new, or any other
+/// word, gets the handler's message.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CombineOperation(pub Operation);
+
+/// The handler's message for an operation Combine doesn't take.
+const COMBINE_OPERATION_MESSAGE: &str = "operation must be join, cut or intersect";
+
+/// Combine's operation for `s`: `Operation::parse`'s, but not new.
+fn combine_operation(s: &str) -> Option<Operation> {
+    Operation::parse(s).filter(|o| *o != Operation::NewBody)
+}
+
+impl<'de> Deserialize<'de> for CombineOperation {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let ok = |s: &str| combine_operation(s).is_some();
+        let s = string_matching(d, ok, "join, cut or intersect", |_| whole(COMBINE_OPERATION_MESSAGE))?;
+        combine_operation(&s).map(CombineOperation).ok_or_else(|| D::Error::custom(whole(COMBINE_OPERATION_MESSAGE)))
+    }
+}
+
+impl JsonSchema for CombineOperation {
+    fn schema_name() -> Cow<'static, str> {
+        "CombineOperation".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let values: Vec<&str> = OPERATIONS.iter().copied().filter(|s| combine_operation(s).is_some()).collect();
+        enum_schema(
+            &values,
+            "What the tools do to the target: join (the default), cut or intersect. The others are aliases. Matching ignores case, spaces, '_' and '-'.",
         )
     }
 }

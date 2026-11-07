@@ -67,6 +67,9 @@ fn run_rejects_invalid_options_before_script_execution_or_output_writes() {
         (&["--out", "--quiet"][..], "--out needs a value"),
         (&["--ouut", "part.step"][..], "doesn't take --ouut"),
         (&["--unknown"][..], "doesn't take --unknown"),
+        (&["--quality"][..], "--quality needs a value"),
+        (&["--quality", "best"][..], "--quality must be standard, fine or finest, not `best`"),
+        (&["--quality", "standard", "--quality", "best"][..], "--quality is given more than once"),
     ];
     for existing in [false, true] {
         let saved = dir.0.join(format!("{existing}.solidcraft"));
@@ -286,6 +289,38 @@ fn results_still_save_and_export_the_script_once() {
         assert!(std::fs::metadata(exported).unwrap().len() > 0);
         assert_eq!(body_count(exported), 1);
     }
+}
+
+/// The triangles of a binary STL: the count after its 80-byte header.
+fn stl_triangles(path: &Path) -> u32 {
+    let bytes = std::fs::read(path).unwrap();
+    u32::from_le_bytes(bytes[80..84].try_into().unwrap())
+}
+
+/// #12270: `run --out part.stl --quality fine` writes the mesh at that quality, as
+/// `file.export`'s `quality` does, without a script to say so.
+#[test]
+fn run_exports_meshes_at_the_quality_asked_for() {
+    let dir = Scratch::new();
+    let script = dir.0.join("cylinder.json");
+    std::fs::write(&script, json!({"commands": [{"command": "solid.cylinder", "params": {"diameter": 40, "height": 10}}]}).to_string()).unwrap();
+    let export = |name: &str, quality: Option<&str>| {
+        let stl = dir.0.join(name);
+        let mut command = cli();
+        command.arg("run").arg(&script).arg("--quiet").arg("--out").arg(&stl);
+        if let Some(q) = quality {
+            command.args(["--quality", q]);
+        }
+        let output = command.output().unwrap();
+        assert!(output.status.success(), "{quality:?}: {}", String::from_utf8_lossy(&output.stderr));
+        stl_triangles(&stl)
+    };
+    let default = export("default.stl", None);
+    let standard = export("standard.stl", Some("standard"));
+    let fine = export("fine.stl", Some("fine"));
+    let finest = export("finest.stl", Some("finest"));
+    assert_eq!(default, standard);
+    assert!(standard < fine && fine < finest, "standard {standard}, fine {fine}, finest {finest}");
 }
 
 #[test]

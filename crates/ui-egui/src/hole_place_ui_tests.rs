@@ -2,7 +2,8 @@
 //! default), a pick near the middle of a face or on a round edge snaps there, and Alt held places
 //! it where it was clicked. With Move holes by clicking or dragging on (also off by default), the
 //! handle drags a placed hole (also one being edited) and a second pick on its face moves it.
-//! Both off, picks behave as before. Either way the dialog shows the hole's sizes beside a
+//! With Several holes on one face on, a pick elsewhere on its face adds a hole instead. All off,
+//! picks behave as before. Either way the dialog shows the hole's sizes beside a
 //! section of it.
 
 use serde_json::json;
@@ -286,7 +287,10 @@ fn editing_a_hole_drags_it_to_a_new_place() {
 #[test]
 fn snaps_and_moves_are_off_by_default_and_picks_behave_as_before() {
     let mut h = block_as_installed();
-    assert!(!h.app.preferences.hole_snaps && !h.app.preferences.hole_moves, "a new installation places holes as it always did");
+    assert!(
+        !h.app.preferences.hole_snaps && !h.app.preferences.hole_moves && !h.app.preferences.hole_several,
+        "a new installation places holes as it always did"
+    );
     h.step(&json!({"start": "solid.hole"})).unwrap();
     // Beside the middle: no snap.
     let at = off(&mut h, MIDDLE, 5.0, -4.0);
@@ -334,6 +338,70 @@ fn moving_holes_is_its_own_setting() {
     let at = screen(&mut h, elsewhere);
     h.step(&json!({"click": at})).unwrap();
     assert!(places(&h).is_empty(), "{:?}", places(&h));
+}
+
+#[test]
+fn with_several_holes_on_a_face_a_pick_adds_one_and_a_pick_on_a_hole_takes_it_out() {
+    // Several holes on one face (Preferences, off by default): each pick elsewhere on the face
+    // adds a hole, even with moves on; a pick on a hole takes that one out; the handles drag them
+    // one by one; OK drills them all.
+    let mut h = block_as_installed();
+    crate::prefs::set(&mut h.app, &json!({"hole_several": true, "hole_moves": true})).unwrap();
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    let spots = [Vec3::new(30.0, 8.0, 20.0), Vec3::new(32.0, 24.0, 20.0), Vec3::new(20.0, 22.0, 20.0)];
+    for p in spots {
+        let at = screen(&mut h, p);
+        h.step(&json!({"click": at})).unwrap();
+    }
+    let near = |got: &[Vec3], want: &[Vec3]| got.len() == want.len() && got.iter().zip(want).all(|(g, w)| g.dist(*w) < 0.2);
+    assert!(near(&places(&h), &spots), "three holes on the one face: {:?}", places(&h));
+    // On the second hole itself (inside its radius): that one goes, the others stay.
+    let at = off(&mut h, spots[1], 2.0, 0.0);
+    h.step(&json!({"click": at})).unwrap();
+    assert!(near(&places(&h), &[spots[0], spots[2]]), "{:?}", places(&h));
+    // The second handle drags the second hole only.
+    h.frames(2);
+    assert!(handle_at("hole:1").is_some() && handle_at("hole:2").is_none(), "a handle per hole");
+    let moved = Vec3::new(22.0, 6.0, 20.0);
+    let to = screen(&mut h, moved);
+    h.step(&json!({"drag": [{"handle": "hole:1"}, to]})).unwrap();
+    assert!(near(&places(&h), &[spots[0], moved]), "{:?}", places(&h));
+    let before = h.app.session.doc.features.len();
+    h.step(&json!({"key": "Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().map(|d| &d.error));
+    let holes = &h.app.session.doc.features[before..];
+    assert_eq!(holes.len(), 2, "one Hole feature per hole");
+    let down = Vec3::new(0.0, 0.0, 3.0);
+    assert!(!solid_at(&h, spots[0] - down) && !solid_at(&h, moved - down), "both drilled");
+    assert!(solid_at(&h, spots[1] - down) && solid_at(&h, spots[2] - down), "not where they were taken out or moved from");
+}
+
+#[test]
+fn several_holes_on_a_round_face_are_one_per_pick() {
+    // A round face split at its seam is picked whole (both halves), but each pick is one hole.
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    h.app.run("solid.cylinder", json!({"radius": 10, "height": 40})).unwrap();
+    crate::prefs::set(&mut h.app, &json!({"hole_several": true})).unwrap();
+    h.step(&json!({"call": "ui.view", "params": {"view": "front"}})).unwrap();
+    h.settle();
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    for z in [12.0, 28.0] {
+        let at = screen(&mut h, Vec3::new(0.0, -10.0, z));
+        h.step(&json!({"click": at})).unwrap();
+    }
+    if let Some(Kind::Hole { depth, diameter, opts, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *depth = "5 mm".into();
+        *diameter = "4 mm".into();
+        opts.all = false;
+        opts.angled = false;
+    }
+    h.step(&json!({"key": "Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().map(|d| &d.error));
+    let holes = h.app.session.doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::Hole { .. })).count();
+    assert_eq!(holes, 2, "a hole per pick, none for the other half of the face");
+    assert!(!solid_at(&h, Vec3::new(0.0, -8.0, 12.0)) && !solid_at(&h, Vec3::new(0.0, -8.0, 28.0)), "both drilled");
+    assert!(solid_at(&h, Vec3::new(0.0, -8.0, 20.0)), "solid between them");
 }
 
 #[test]
@@ -465,4 +533,39 @@ fn editing_a_hole_replaces_its_face_instead_of_adding_one() {
     let (again, position) = last_hole(&h);
     assert_eq!(again, hole, "the same feature");
     assert!(position.dist(on_top) < 1e-3, "OK uses the new face: {position:?}");
+}
+
+/// Single holes on two faces with the depth typed as `ScrewDepth = 5`: OK runs one command per
+/// hole, the first defines `ScrewDepth` and both holes use it, instead of the second hole being
+/// refused because the parameter already exists.
+#[test]
+fn single_holes_on_two_faces_share_a_parameter_typed_in_the_dialog() {
+    let mut h = block_as_installed();
+    h.step(&json!({"call": "ui.view", "params": {"view": "iso"}})).unwrap();
+    h.settle();
+    let before = h.app.session.doc.features.len();
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    for p in [Vec3::new(30.0, 20.0, 20.0), Vec3::new(25.0, 0.0, 10.0)] {
+        let at = screen(&mut h, p);
+        h.step(&json!({"click": at})).unwrap();
+    }
+    assert_eq!(places(&h).len(), 2, "a place on the top and one on the front: {:?}", places(&h));
+    match h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        Some(Kind::Hole { depth, .. }) => *depth = "ScrewDepth = 5".into(),
+        _ => panic!("the Hole dialog is open"),
+    }
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().map(|d| &d.error));
+    let param = h.app.session.doc.param("ScrewDepth").expect("the first hole defines ScrewDepth");
+    assert_eq!(param.unit, "mm");
+    let depths: Vec<String> = h.app.session.doc.features[before..]
+        .iter()
+        .filter_map(|f| match &f.kind {
+            FeatureKind::Hole { depth, .. } => depth.as_ref().map(|d| d.as_str().to_string()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(depths, ["ScrewDepth", "ScrewDepth"]);
+    assert!(!solid_at(&h, Vec3::new(30.0, 20.0, 17.0)) && !solid_at(&h, Vec3::new(25.0, 3.0, 10.0)), "both holes are drilled");
+    assert!(solid_at(&h, Vec3::new(30.0, 20.0, 8.0)), "5 mm deep (and its drill point), not through");
 }

@@ -82,7 +82,6 @@ Editable drawing code, native projects and shipped exports are collected under `
 | assets/fonts/ibm-plex-mono/IBMPlexMono-Regular.ttf | IBM Corp. (IBM Plex Mono) | https://github.com/IBM/plex (via google/fonts), unmodified; licence text in assets/fonts/ibm-plex-mono/OFL.txt; the interface monospace font | SIL OFL 1.1 |
 | assets/fonts/ibm-plex-sans/IBMPlexSans-Variable.ttf | IBM Corp. (IBM Plex Sans, variable wdth and wght) | https://github.com/IBM/plex (via google/fonts), unmodified; licence text in assets/fonts/ibm-plex-sans/OFL.txt; the default interface font | SIL OFL 1.1 |
 | docs/book/src/generated/tool-preview.png | SolidCraft contributors | rendered by `cargo xtask book` (`solidcraft-cli snapshot docs/book/scripts/tool-preview.json`; gitignored) | MIT OR Apache-2.0 |
-| assets/fonts/liberation-sans/LiberationSans-Regular.ttf | Red Hat, Inc. (Liberation Fonts 2.x; digitized data Google) | https://github.com/liberationfonts (Debian fonts-liberation), unmodified; licence text in assets/fonts/liberation-sans/OFL.txt; used for sketch Text outlines | SIL OFL 1.1 |
 | assets/fonts/biz-udp-gothic/BIZUDPGothic-Regular.ttf | The BIZ UDGothic Project Authors | https://github.com/googlefonts/morisawa-biz-ud-gothic (Google Fonts), unmodified; licence text in assets/fonts/biz-udp-gothic/OFL.txt; used for web UI Japanese font | SIL OFL 1.1 |
 | assets/fonts/craft-ui-sc/CraftUI-SC.otf | Adobe / Google Inc. (Noto Sans SC); SolidCraft subset | https://github.com/notofonts/noto-cjk Sans/SubsetOTF/SC Regular, glyph-subset for assets/locales/zh.json and renamed Craft UI SC (OFL reserved-name); licence text in assets/fonts/craft-ui-sc/OFL.txt; web UI Simplified Chinese | SIL OFL 1.1 |
 | assets/fonts/craft-ui-tc/CraftUI-TC.otf | Adobe / Google Inc. (Noto Sans TC); SolidCraft subset | https://github.com/notofonts/noto-cjk Sans/SubsetOTF/TC Regular, glyph-subset for assets/locales/zh-TW.json and renamed Craft UI TC (OFL reserved-name); licence text in assets/fonts/craft-ui-tc/OFL.txt; web UI Traditional Chinese | SIL OFL 1.1 |
@@ -147,7 +146,6 @@ Editable drawing code, native projects and shipped exports are collected under `
 | assets/fonts/craft-ui-tc/OFL.txt | Adobe / Google Inc. (Noto CJK); SolidCraft header | Accompanying OFL for CraftUI-TC.otf | SIL OFL 1.1 |
 | assets/fonts/ibm-plex-mono/OFL.txt | IBM Corp. | Unmodified accompanying font licence | SIL OFL 1.1 |
 | assets/fonts/ibm-plex-sans/OFL.txt | IBM Corp. | Unmodified accompanying font licence | SIL OFL 1.1 |
-| assets/fonts/liberation-sans/OFL.txt | Red Hat, Inc.; Liberation Fonts contributors | Unmodified accompanying font licence | SIL OFL 1.1 |
 | assets/icons/app/linux/exports/hicolor/128x128/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
 | assets/icons/app/linux/exports/hicolor/16x16/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
 | assets/icons/app/linux/exports/hicolor/24x24/apps/io.tangencylabs.solidcraft.png | SolidCraft contributors | Generated from assets/icons/app/shared/source/app_icon.rs with the original CLI/ICO encoders | MIT OR Apache-2.0 |
@@ -215,6 +213,7 @@ Editable drawing code, native projects and shipped exports are collected under `
 | assets/styles/ui/themes/one-dark.json | SolidCraft contributors | original SolidCraft theme file with colours adapted from the One Dark palette (Atom One Dark by GitHub Atom, https://github.com/atom/atom, MIT) | MIT OR Apache-2.0 |
 | assets/styles/ui/themes/tokyo-night.json | SolidCraft contributors | original SolidCraft theme file adapting the colours of a published palette (Tokyo Night by enkia, https://github.com/enkia/tokyo-night-vscode-theme, MIT) | MIT OR Apache-2.0 |
 | assets/styles/ui/themes/solarized-light.json | SolidCraft contributors | original SolidCraft theme file adapting the colours of a published palette (Solarized by Ethan Schoonover, https://github.com/altercation/solarized, MIT) | MIT OR Apache-2.0 |
+| assets/styles/ui/themes/solarized-dark.json | SolidCraft contributors | original SolidCraft theme file adapting the colours of a published palette (Solarized by Ethan Schoonover, https://github.com/altercation/solarized, MIT) | MIT OR Apache-2.0 |
 | assets/styles/ui/themes/nord.json | SolidCraft contributors | original SolidCraft theme file adapting the colours of a published palette (Nord by Sven Greb and the Nord contributors, https://github.com/nordtheme/nord, MIT) | MIT OR Apache-2.0 |
 | assets/styles/ui/themes/high-contrast.json | SolidCraft contributors | original SolidCraft theme file | MIT OR Apache-2.0 |
 | assets/styles/ui/themes/graphite.json | SolidCraft contributors | original SolidCraft theme file | MIT OR Apache-2.0 |
@@ -840,6 +839,9 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | docs/screenshots/7452/demo-15-surface-result.png | SamD98 | screenshot of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
 | docs/screenshots/7452/revolve-selected-edge.mp4 | SamD98 | screen recording of the actual SolidCraft desktop UI showing the revolve axis pick on the Cat Post Topper repro design (docs/screenshots/7452/revolve-edge-frame.solidcraft), for #7452 | MIT OR Apache-2.0 |
 | assets/locales/bg.json | Yasen-55 | Original translation | MIT OR Apache-2.0 |
+| crates/sketch/assets/fonts/liberation-sans/LiberationSans-Regular.ttf | Red Hat, Inc. (Liberation Fonts 2.x; digitized data Google) | https://github.com/liberationfonts (Debian fonts-liberation), unmodified; licence text in crates/sketch/assets/fonts/liberation-sans/OFL.txt; used for sketch Text outlines | SIL OFL 1.1 |
+| crates/sketch/assets/fonts/liberation-sans/OFL.txt | Red Hat, Inc.; Liberation Fonts contributors | Unmodified accompanying font licence | SIL OFL 1.1 |
+| assets/locales/pending/drag-to-zoom.json | SolidCraft contributors | Original drag-to-zoom labels and translations | MIT OR Apache-2.0 |
 
 ## Code adapted from sibling projects
 
