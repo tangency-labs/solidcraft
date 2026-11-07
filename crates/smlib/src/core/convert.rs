@@ -290,6 +290,29 @@ fn bspline_surface_part<'s>(k: &Kernel, s: &'s Surface) -> Result<Option<&'s BSp
 
 // ---- export: FlatFromBrep ----------------------------------------------------------------------
 
+/// A round's blend surface as the torus it is exactly: SMLib's own test finds one and only a net
+/// that is the torus's own NURBS counts ([`analytic_of_nurbs`]), so a round that is only nearly
+/// one (a curvature-continuous or variable-radius round) stays free-form. The record's torus is
+/// a ring torus, so a horn or spindle one stays free-form too.
+fn round_torus(k: &Kernel, nurbs: &BSplineSurface) -> Result<Option<Surface>> {
+    let torus = answer(Torus::is_nurb_surface_torus(k, nurbs, 1.0)).map_err(sc("SmTorus::IsNurbSurfaceTorus"))?.flatten();
+    let Some(t) = torus else {
+        return Ok(None);
+    };
+    let ring = t.major_radius() > t.minor_radius();
+    Ok(ring.then_some(Surface::from(t)))
+}
+
+/// A torus face's arrays (`FACE_TORUS_*`).
+fn torus_arrays(o: &mut Out, t: &Torus) {
+    let pos = t.base().position();
+    o.r3(FACE_TORUS_ORIGIN, pos.origin());
+    o.r3(FACE_TORUS_AXIS, pos.z_axis());
+    o.r3(FACE_TORUS_REF_DIRECTION, pos.x_axis());
+    o.r(FACE_TORUS_MAJOR_RADIUS).push(t.major_radius());
+    o.r(FACE_TORUS_MINOR_RADIUS).push(t.minor_radius());
+}
+
 /// `body` as the flat arrays the C API exports (`FlatFromBrep`).
 pub(crate) fn to_arrays(body: &Body) -> Result<Arrays> {
     with_body("FlatFromBrep", body, |k, b| Ok(flat_from_brep(k, b)))?
@@ -882,14 +905,33 @@ fn flat_from_brep(k: &mut Kernel, b: &mut Brep) -> Result<Arrays> {
             return Err(bad("a face whose surface its B-rep does not hold"));
         }
         let trim_type = i64::from(fd.rectangular_trim == 1);
-        let ty = match surface.kind() {
-            SurfaceKind::Sphere(_) => SURFACE_SPHERE_I,
-            SurfaceKind::Plane(_) => SURFACE_PLANE_I,
-            SurfaceKind::Cone(c) if c.is_cylinder_class() => SURFACE_CYLINDER_I,
-            SurfaceKind::Cone(_) => SURFACE_CONE_I,
-            SurfaceKind::Torus(_) => SURFACE_TORUS_I,
-            SurfaceKind::BallPatch(_) => SURFACE_BALL_PATCH_I,
-            _ => SURFACE_NURBS_I,
+        // A constant-radius round's face (#11876): SMLib keeps the round as a blend definition
+        // whose NURBS is the torus the ball rolls, where the C++ kernel gave the face an
+        // SmSrfTorus. Exported as that torus the face keeps an analytic surface (Measure's
+        // radius), its trims still on its form; a G2 or variable-radius round is no torus and
+        // stays a free-form face.
+        let round = match surface.kind() {
+            SurfaceKind::Torus(_) => None,
+            _ => {
+                if let Some(nurbs) = bspline_surface_part(k, surface)? {
+                    round_torus(k, nurbs)?
+                } else {
+                    None
+                }
+            }
+        };
+        let ty = if round.is_some() {
+            SURFACE_TORUS_I
+        } else {
+            match surface.kind() {
+                SurfaceKind::Sphere(_) => SURFACE_SPHERE_I,
+                SurfaceKind::Plane(_) => SURFACE_PLANE_I,
+                SurfaceKind::Cone(c) if c.is_cylinder_class() => SURFACE_CYLINDER_I,
+                SurfaceKind::Cone(_) => SURFACE_CONE_I,
+                SurfaceKind::Torus(_) => SURFACE_TORUS_I,
+                SurfaceKind::BallPatch(_) => SURFACE_BALL_PATCH_I,
+                _ => SURFACE_NURBS_I,
+            }
         };
         // A ball patch is a NURBS face (its net, range and trims) with its sphere as its
         // definition.
@@ -978,13 +1020,15 @@ fn flat_from_brep(k: &mut Kernel, b: &mut Brep) -> Result<Arrays> {
                 o.r(FACE_CONE_RADIUS).push(can.radius);
                 o.r(FACE_CONE_SEMI_ANGLE).push(deg2rad(can.semi_angle_deg));
             }
-            SurfaceKind::Torus(t) => {
-                let pos = t.base().position();
-                o.r3(FACE_TORUS_ORIGIN, pos.origin());
-                o.r3(FACE_TORUS_AXIS, pos.z_axis());
-                o.r3(FACE_TORUS_REF_DIRECTION, pos.x_axis());
-                o.r(FACE_TORUS_MAJOR_RADIUS).push(t.major_radius());
-                o.r(FACE_TORUS_MINOR_RADIUS).push(t.minor_radius());
+            SurfaceKind::Torus(t) => torus_arrays(&mut o, t),
+            // The round's torus, in place of the blend definition or NURBS.
+            _ if round.is_some() => {
+                if let Some(t) = round.as_ref().and_then(|s| match s.kind() {
+                    SurfaceKind::Torus(t) => Some(t),
+                    _ => None,
+                }) {
+                    torus_arrays(&mut o, t);
+                }
             }
             SurfaceKind::BallPatch(bp) => {
                 o.i(FACE_DEFINITION_REAL_COUNT).push(4);
