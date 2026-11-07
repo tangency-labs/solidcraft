@@ -2,19 +2,11 @@
 # (coverage_tests.rs). This list only shrinks: when you give a command its contract and output
 # type, remove its line. Never add one: a new command comes with both schemas. Sorted, one id
 # per line.
-component.activate
 component.capture_position
-component.create
-component.delete
-component.from_bodies
-component.list
 component.move_bodies
 component.move_sketches
 component.paste_new
-component.properties
-component.rename
 component.revert_position
-component.unlock
 doc.open
 doc.recover
 doc.recovery_discard
