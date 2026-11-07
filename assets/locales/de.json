@@ -2334,6 +2334,8 @@
   "prefs.dark_parts_shading": "Form dunkler Teile erhalten",
   "prefs.dark_parts_shading_help": "Die Ansicht in linearem Licht mit sanftem Himmelslicht schattieren, damit dunkle Flächen einen Verlauf behalten statt schwarz zu werden",
   "prefs.dead_zone_note": "Der schraffierte Bereich kennzeichnet die Totzone. Bewegungen innerhalb dieses Bereichs werden ignoriert.",
+  "prefs.delete_empty_sketch": "Neue leere Skizze beim Beenden entfernen",
+  "prefs.delete_empty_sketch_help": "Skizze beenden entfernt eine in dieser Sitzung erstellte Skizze, die noch keine Kurven, Punkte oder Abhängigkeiten hat. Eine bearbeitete Skizze bleibt. Aus: die leere Skizze bleibt im Verlauf.",
   "prefs.default": "Standard",
   "prefs.design": "Konstruktion",
   "prefs.design_note": "Womit neue Konstruktionen beginnen.",

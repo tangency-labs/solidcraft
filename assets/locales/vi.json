@@ -2547,6 +2547,8 @@
   "prefs.dark_parts_shading": "Giữ hình dạng của chi tiết tối",
   "prefs.dark_parts_shading_help": "Tô bóng khung nhìn bằng ánh sáng tuyến tính với ánh sáng bầu trời dịu, để các mặt tối giữ được dải chuyển màu thay vì thành màu đen",
   "prefs.dead_zone_note": "Dải sọc chéo là vùng chết: các chuyển động bên trong vùng này sẽ bị bỏ qua.",
+  "prefs.delete_empty_sketch": "Xóa phác thảo mới trống khi kết thúc",
+  "prefs.delete_empty_sketch_help": "Kết thúc phác thảo sẽ bỏ một phác thảo tạo trong lần này khi chưa có đường cong, điểm hay ràng buộc. Phác thảo đang sửa vẫn giữ. Tắt: phác thảo trống ở lại dòng thời gian.",
   "prefs.default": "mặc định",
   "prefs.design": "Thiết kế",
   "prefs.design_note": "Thiết lập ban đầu cho thiết kế mới.",

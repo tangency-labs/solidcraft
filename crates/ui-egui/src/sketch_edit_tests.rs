@@ -163,6 +163,82 @@ fn toolbar_finish_and_other_feature_edit_leave_the_sketch() {
     assert_eq!(app.session.active_sketch, None);
 }
 
+fn sketch_count(app: &SolveApp) -> usize {
+    app.session.doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::Sketch { .. })).count()
+}
+
+#[test]
+fn finishing_a_new_empty_sketch_removes_it_and_undo_brings_it_back() {
+    use serde_json::json;
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    let before = sketch_count(&h.app);
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Empty"})).unwrap();
+    assert!(h.app.session.active_sketch_is_new_and_empty());
+    h.app.finish_sketch();
+    assert!(h.app.session.active_sketch.is_none());
+    assert_eq!(sketch_count(&h.app), before);
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(sketch_count(&h.app), before + 1);
+}
+
+#[test]
+fn finishing_a_new_sketch_that_has_a_line_keeps_it() {
+    use serde_json::json;
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    let before = sketch_count(&h.app);
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Drawn"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 8]})).unwrap();
+    assert!(!h.app.session.active_sketch_is_new_and_empty());
+    h.app.finish_sketch();
+    assert_eq!(sketch_count(&h.app), before + 1);
+    assert!(h.app.session.active_sketch.is_none());
+}
+
+#[test]
+fn finishing_an_edited_sketch_keeps_it_after_its_curves_are_deleted() {
+    use serde_json::json;
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Edited"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 8]})).unwrap();
+    h.app.finish_sketch();
+    let id = h.app.session.doc.features.iter().find(|f| f.name == "Edited").map(|f| f.id).unwrap();
+    h.app.edit_sketch(id);
+    let entities = h.app.session.doc.feature(id).and_then(|f| match &f.kind {
+        FeatureKind::Sketch { sketch, .. } => Some(
+            sketch
+                .curves
+                .iter()
+                .map(|c| c.id.clone())
+                .chain(sketch.constraints.iter().map(|c| c.id.clone()))
+                .chain(sketch.points.iter().filter(|p| p.id != "origin").map(|p| p.id.clone()))
+                .collect::<Vec<_>>(),
+        ),
+        _ => None,
+    });
+    h.app.run("sketch.delete", json!({"entities": entities.unwrap()})).unwrap();
+    assert!(!h.app.session.active_sketch_is_new_and_empty());
+    h.app.finish_sketch();
+    assert!(h.app.session.active_sketch.is_none());
+    assert!(h.app.session.doc.feature(id).is_some());
+}
+
+#[test]
+fn the_preference_keeps_a_new_empty_sketch() {
+    use serde_json::json;
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.delete_empty_sketch = false;
+    let before = sketch_count(&h.app);
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Kept"})).unwrap();
+    h.app.finish_sketch();
+    assert_eq!(sketch_count(&h.app), before + 1);
+    assert!(h.app.session.active_sketch.is_none());
+    assert!(h.app.session.doc.features.iter().any(|f| f.name == "Kept"));
+}
+
 fn two_finished_sketches() -> (crate::scenario::Harness, Vec<u64>) {
     use serde_json::json;
     let mut h = crate::scenario::Harness::new();

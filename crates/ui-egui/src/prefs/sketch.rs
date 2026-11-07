@@ -205,6 +205,13 @@ fn opening(app: &mut SolveApp, ui: &mut egui::Ui) {
             Some("prefs.sketch_open_look_at_note"),
             &mut app.preferences.sketch_open_look_at,
         );
+        check(
+            ui,
+            "delete_empty_sketch",
+            "prefs.delete_empty_sketch",
+            Some("prefs.delete_empty_sketch_help"),
+            &mut app.preferences.delete_empty_sketch,
+        );
         picture_group(ui, app.tr("prefs.sketch_exit_view"), |ui| {
             let label = app.tr("prefs.sketch_exit_view");
             let mut indexed = crate::prefs_search::texts_hit(ui, &[label]);
