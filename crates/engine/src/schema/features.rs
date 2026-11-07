@@ -584,6 +584,38 @@ pub struct SetbackParam {
     pub distance: LengthExpr,
 }
 
+/// Bevel edges of a body with a flat face: `distance` back from each edge along both faces, or
+/// along the first face with `distance2` along the second, or with the bevel at `angle` from the
+/// first. Giving both `distance2` and `angle` is the handler's to refuse.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ChamferParams {
+    /// The edges to bevel: a point on each, or `{body, index}`.
+    pub edges: EdgeRefs,
+    /// How far the bevel cuts back from the edge: along both faces, or along the first face when
+    /// `distance2` or `angle` is given.
+    pub distance: LengthExpr,
+    /// How far the bevel cuts back along the second face. Not with `angle`.
+    #[serde(default)]
+    pub distance2: Option<LengthExpr>,
+    /// The bevel's angle from the first face. Not with `distance2`.
+    #[serde(default)]
+    pub angle: Option<AngleExpr>,
+    /// Which face is first: by default the one facing up most; true takes the other. Default:
+    /// false.
+    #[serde(default)]
+    pub flip: Option<bool>,
+    /// The body whose edges the points pick. Default: whichever body has an edge there.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// Cut each picked edge's tangent chain with it. Default: true; false cuts exactly the picked
+    /// edges.
+    #[serde(default)]
+    pub tangent_chain: Option<bool>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
 /// The radius `fit: reduce` gave one edge.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct AppliedRadius {
