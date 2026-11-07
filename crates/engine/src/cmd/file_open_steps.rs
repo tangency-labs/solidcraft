@@ -69,7 +69,14 @@ impl OpenSteps {
             next: if adopted.is_some() { stop } else { 0 },
             stop,
             adopted: adopted.is_some(),
-            model: adopted.unwrap_or_else(|| under(validation)),
+            model: adopted.unwrap_or_else(|| {
+                let mut model = under(validation);
+                // The STEP imports the file keeps, as `Session::opened` takes them (#9456).
+                if let Some(saved) = &saved {
+                    model.take_imports(saved);
+                }
+                model
+            }),
         };
         Ok(Some(steps))
     }
@@ -117,7 +124,10 @@ impl OpenSteps {
         Arc::make_mut(&mut self.doc).marker = self.marker;
         // The results so far hold another mode's checks: evaluated again, as `Session::opened` would.
         if self.model.validation() != s.validation() {
+            // The imports read so far are the same in any check mode: kept (#9456).
+            let imports = self.model.imports.clone();
             self.model = under(s.validation());
+            self.model.imports = imports;
             self.adopted = false;
         }
         if !self.adopted {

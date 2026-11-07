@@ -92,6 +92,9 @@ fn a_cancelled_preview_import_leaves_no_failure_in_the_shared_cache() {
     // A new length for the box: the import after it is evaluated again on new inputs.
     let redefine =
         json!({"feature": s.doc.features[0].id, "command": "solid.box", "params": {"length": 20, "width": 10, "height": 10, "body_name": "first"}});
+    // The model keeps the import it read (#9456), so evaluating the feature again would not read
+    // the file again: drop it, so the preview reads it and is cancelled part way.
+    s.model.imports = Default::default();
     let mut scratch = s.scratch();
     let progress = Arc::new(Progress::default());
     let canceller = {

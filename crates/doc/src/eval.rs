@@ -1161,6 +1161,8 @@ pub struct Model {
     placement_inputs: Option<placement_reuse::Inputs>,
     /// All evaluated features use supported local inputs; computed with the existing owner index.
     placement_local: bool,
+    /// The STEP imports the features read, and those the design file kept (#9456).
+    pub imports: Arc<crate::ImportResults>,
 }
 
 /// Parameters a feature uses directly (inputs, sketch dimensions and the expressions of a
@@ -2369,8 +2371,9 @@ impl Model {
                 Some(e) => Err(kernel::KernelError::Failed(e)),
                 None => kernel::guard(&f.name, || {
                     let _val_guard = EvalValidationGuard(EVAL_VALIDATION.replace(validation));
-                    let (r, deferred) =
-                        kernel::validating(validation, || eval_feature(doc, &vals, f, &mut next, &mut warning, &mut import_report, &mut repair));
+                    let (r, deferred) = kernel::validating(validation, || {
+                        eval_feature(doc, &vals, f, &mut next, &mut warning, &mut import_report, &mut repair, &self.imports)
+                    });
                     r.map_err(|e| match e {
                         // A panic the kernel caught stays one.
                         crate::DocError::Kernel(kernel::KernelError::Internal(m)) => kernel::KernelError::Internal(m),
@@ -7328,6 +7331,7 @@ fn chamfer_with(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn eval_feature(
     doc: &Document,
     vals: &BTreeMap<String, Value>,
@@ -7336,6 +7340,7 @@ fn eval_feature(
     warning: &mut Option<String>,
     import_report: &mut Option<Arc<kernel::ImportReport>>,
     repair: &mut Option<Arc<kernel::RepairReport>>,
+    imports: &crate::ImportResults,
 ) -> Result<()> {
     // Its tools meet bodies in other placements where those are shown (#3383).
     let _frames = ToolFrames::install(doc, f, st);
@@ -8243,8 +8248,8 @@ fn eval_feature(
             Ok(())
         }
         FeatureKind::Import { step, skip, .. } => {
-            let imp = kernel::step_import_shared(step)?;
             let digest = crate::config::payload_digest(step);
+            let imp = imports.import(&digest, step)?;
             let names = import_body_names(st, &f.body_names, &imp, skip);
             for (k, (b, name)) in imp.bodies.iter().zip(names).enumerate() {
                 let Some(name) = name else { continue };
