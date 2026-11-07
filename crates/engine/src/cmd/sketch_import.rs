@@ -110,7 +110,15 @@ pub(super) fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> 
             Geom2::Ellipse { c, major, minor } => Some(CurveKind::Ellipse { c: pt(sk, *c)?, m: pt(sk, *major)?, r: minor * k }),
             Geom2::Spline { pts, control, degree } => {
                 let mut idx = Vec::new();
-                for p in pts.iter().take(solidcraft_sketch::MAX_SPLINE_POINTS) {
+                // A spline past the cap keeps every n-th point and always its last, so a loop stays
+                // closed (taking the first ones only cut its tail off, #11119).
+                let cap = solidcraft_sketch::MAX_SPLINE_POINTS;
+                let keep: Vec<&Vec2> = if pts.len() > cap {
+                    (0..cap).map(|k| &pts[(k * (pts.len() - 1) + (cap - 1) / 2) / (cap - 1)]).collect()
+                } else {
+                    pts.iter().collect()
+                };
+                for p in keep {
                     let i = pt(sk, *p)?;
                     if idx.last() != Some(&i) {
                         idx.push(i);
