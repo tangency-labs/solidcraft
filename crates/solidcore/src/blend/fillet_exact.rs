@@ -2423,8 +2423,7 @@ pub fn calc_exact_fillet_geom(
 /// faces the class was read off), the ball's radius, the ball's circle as its section and
 /// the centre line as its leader. Its net is its exact surface, re-certified at once
 /// ([`ExactRound::recertify`]: the class read again from the supports, the net on the
-/// class's surface). A round of a linear section (a chamfer) or of a nodal quartic (its
-/// spine on its offsets only to 2e-9 of the radius) keeps none here.
+/// class's surface). A round of a linear section (a chamfer) keeps none here.
 ///
 /// # Errors
 ///
@@ -2442,11 +2441,6 @@ fn keep_definition(
     let (Some(class), Some(inputs)) = (ExactClass::of_spine(blend.spine), blend.inputs) else {
         return Ok(());
     };
-    // a nodal quartic's spine is on its offsets only to 2e-9 of the ball's radius (its
-    // construction's; the fork's own bar is 1e-9): no bound of 0, so it keeps no definition
-    if class == ExactClass::NodalQuartic {
-        return Ok(());
-    }
     let s = ops.solver();
     let circular = s
         .fsg
@@ -2495,7 +2489,7 @@ fn keep_definition(
 /// was. The class is read within `tol`, the body's tolerance, and the certificate to rounding.
 /// Supports only that close to the class (a cylinder's axis 1e-13 off square to a plane, as
 /// read from a record) make a net that is the round but not provably on the class's surface:
-/// no bound of 0, so it keeps no definition, as a nodal quartic does. A net further off the
+/// no bound of 0, so it keeps no definition. A net further off the
 /// class than `tol` ([`ExactRound::miss`]) is built wrongly, and stays an error.
 ///
 /// # Errors
