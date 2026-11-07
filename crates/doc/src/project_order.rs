@@ -418,6 +418,35 @@ mod tests {
     }
 
     #[test]
+    fn a_round_beside_another_arc_is_refitted_when_their_joint_stays_put() {
+        use solidcore_record::Vec2;
+        use solidcraft_sketch::LinkGeom;
+        let v = Vec2::new;
+        // The R2 round of a 10 x 10 square misses its circle (centre (8, 8)) by only 1e-8, and an
+        // arc of radius 10 runs on from its end. The refit moves that joint by 1e-8, far less
+        // than the fit's own join distance, so the round is refitted as before the fix for
+        // tangency-labs/solidcore#2908, and the joint stays within a profile's 1e-4.
+        let c = v(8., 8. + 1e-8);
+        let (p, q) = (v(10., c.y), v(8., 10. + 1e-8));
+        let exact: Vec<Vec2> =
+            (0..=8).map(|k| f64::from(k) * std::f64::consts::FRAC_PI_8 / 2.).map(|t| v(8. + 2. * t.cos(), 8. + 2. * t.sin())).collect();
+        let bulge = v(8., 20. + 1e-8);
+        let from = bulge + v(-(10f64.to_radians().sin()), -(10f64.to_radians().cos())) * 10.;
+        let fitted = vec![
+            LinkGeom::Line(v(0., 0.), v(10., 0.)),
+            LinkGeom::Line(v(10., 0.), p),
+            LinkGeom::Arc { c, a: p, b: q },
+            LinkGeom::Arc { c: bulge, a: from, b: q },
+            LinkGeom::Line(from, v(0., 10.)),
+            LinkGeom::Line(v(0., 10.), v(0., 0.)),
+        ];
+        let out = super::super::refine_rounds(fitted, &exact, 200f64.sqrt());
+        let (Some(LinkGeom::Arc { c, b, .. }), Some(LinkGeom::Arc { b: joint, .. })) = (out.get(2), out.get(3)) else { panic!("{out:?}") };
+        assert!(c.dist(v(8., 8.)) < 1e-12, "the round is refitted: {out:?}");
+        assert!(b.dist(*joint) < 1e-4, "{out:?}");
+    }
+
+    #[test]
     fn boundaries_touching_at_a_vertex_project() {
         // Two squares of one face family meet only at the corner (1, 1): four boundary edges meet
         // there (a pinch), and the walk keeps each square's loop on its own face.
