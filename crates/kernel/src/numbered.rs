@@ -86,13 +86,17 @@ impl NumberedLoop {
         NumberedLoop { lp: pieces, from }
     }
 
-    /// Re-split into exactly `n` segments, other loops split their longest segments in half. A
-    /// full circle is split once round (one turn, every arc a positive sweep) to follow a lead
-    /// loop: at the lead's vertex directions `angles` when they go round in order (counter-
+    /// Re-split into exactly `n` segments to follow a loop of `n` vertices whose directions from
+    /// its centre, seen in this loop's plane, are `angles`. A full circle is split once round (one
+    /// turn, every arc a positive sweep): at `angles` when they go round in order (counter-
     /// clockwise, or clockwise when `clockwise`), otherwise from the first of them at the lead's
     /// perimeter `fractions` (the share of the lead's length before each vertex; evenly when
-    /// those are unusable).
-    pub(crate) fn resample(&self, n: usize, angles: &[f64], fractions: &[f64], clockwise: bool) -> NumberedLoop {
+    /// those are unusable). Any other loop keeps its vertices, each paired with the followed
+    /// vertex it lines up with ([`NumberedLoop::matched`]); the followed vertices left over split
+    /// its segments, at their shares of the followed loop's perimeter `shares` (as `fractions`,
+    /// for the loop followed). When that matching cannot be made, the longest segments are split
+    /// in half.
+    pub(crate) fn resample(&self, n: usize, angles: &[f64], fractions: &[f64], shares: &[f64], clockwise: bool) -> NumberedLoop {
         let lp = &self.lp;
         let circle = lp.segs.iter().all(|s| matches!(s, Seg2::Arc { .. }))
             && lp.segs.windows(2).all(|w| match (w.first(), w.get(1)) {
@@ -115,12 +119,125 @@ impl NumberedLoop {
                 .collect();
             return self.resplit_circle(Loop2 { segs });
         }
+        if let Some(out) = self.matched(n, angles, shares) {
+            return out;
+        }
         let mut out = self.clone();
         while out.lp.segs.len() < n {
             let Some((k, _)) = out.lp.segs.iter().enumerate().max_by(|a, b| a.1.length().total_cmp(&b.1.length())) else { break };
             out.split_half(k);
         }
         out
+    }
+
+    /// Re-split into `n` segments by pairing each of this loop's vertices with one of the `n`
+    /// vertices of the loop it follows (their directions from its centre `angles`, its perimeter
+    /// shares `shares`), in order round both loops, so that the directions from the centres agree
+    /// best (the least sum of `1 - cos` of the angles between them); the followed vertices left
+    /// between two paired ones split the segment between those, at their shares of the followed
+    /// loop's length between them. Splitting the longest segments in half instead paired a
+    /// symmetric loop asymmetrically when its longest segment was not on the axis (a slot lofted
+    /// to a pointed shape: its long side split, not its round end, twisting the loft, #11849).
+    /// None when there is nothing to add, the inputs are unusable or the matching is too big.
+    fn matched(&self, n: usize, angles: &[f64], shares: &[f64]) -> Option<NumberedLoop> {
+        let m = self.lp.segs.len();
+        // The pairing tries every start and fills an m by n table for each.
+        const BUDGET: usize = 4_000_000;
+        if m == 0 || m >= n || angles.len() != n || shares.len() != n || self.from.len() != m || n.saturating_mul(n).saturating_mul(m) > BUDGET {
+            return None;
+        }
+        if !angles.iter().chain(shares).all(|a| a.is_finite()) || shares.windows(2).any(|w| matches!(w, [a, b] if b <= a)) {
+            return None;
+        }
+        let c = self.lp.centroid();
+        let own: Vec<f64> = self.lp.segs.iter().map(|s| (s.start() - c).angle()).collect();
+        if !own.iter().all(|a| a.is_finite()) {
+            return None;
+        }
+        let cost = |i: usize, j: usize| own.get(i).zip(angles.get(j)).map_or(f64::INFINITY, |(a, b)| 1.0 - (a - b).cos());
+        // For a start `s` (vertex 0 paired with followed vertex s), the least cost of pairing
+        // vertices 0..=i with i at position p (followed vertex (s + p) mod n, 0 < p < n for i > 0),
+        // and where vertex i - 1 was for it.
+        let table = |s: usize, keep: bool| -> (Vec<f64>, Vec<Vec<usize>>) {
+            let mut best = vec![f64::INFINITY; n];
+            if let Some(b) = best.first_mut() {
+                *b = cost(0, s);
+            }
+            let mut back: Vec<Vec<usize>> = Vec::new();
+            for i in 1..m {
+                let mut next = vec![f64::INFINITY; n];
+                let mut came = vec![0usize; if keep { n } else { 0 }];
+                // The best of the positions before p.
+                let (mut low, mut at) = (f64::INFINITY, 0usize);
+                for p in 1..n {
+                    if let Some(&b) = best.get(p - 1)
+                        && b < low
+                    {
+                        (low, at) = (b, p - 1);
+                    }
+                    if let Some(x) = next.get_mut(p) {
+                        *x = low + cost(i, (s + p) % n);
+                    }
+                    if let Some(x) = came.get_mut(p) {
+                        *x = at;
+                    }
+                }
+                best = next;
+                if keep {
+                    back.push(came);
+                }
+            }
+            (best, back)
+        };
+        let least = |row: &[f64]| row.iter().copied().enumerate().fold((0usize, f64::INFINITY), |(k, b), (p, x)| if x < b { (p, x) } else { (k, b) });
+        // The first start that pairs best (a later one must be better by more than rounding).
+        let mut start: Option<(usize, f64)> = None;
+        for s in 0..n {
+            let (_, total) = least(&table(s, false).0);
+            if total.is_finite() && start.is_none_or(|(_, b)| total < b - 1e-12) {
+                start = Some((s, total));
+            }
+        }
+        let (s, _) = start?;
+        let (row, back) = table(s, true);
+        // Walk back from the best last position (followed positions in increasing order).
+        let mut positions = vec![0usize; m];
+        let mut p = least(&row).0;
+        for i in (0..m).rev() {
+            *positions.get_mut(i)? = p;
+            if i > 0 {
+                p = *back.get(i - 1)?.get(p)?;
+            }
+        }
+        if positions.windows(2).any(|w| matches!(w, [a, b] if b <= a)) {
+            return None;
+        }
+        // A position's share of the followed perimeter, unwrapped past the end.
+        let share = |p: usize| shares.get((s + p) % n).map(|f| f + ((s + p) / n) as f64);
+        let mut out = NumberedLoop { lp: Loop2 { segs: Vec::with_capacity(n) }, from: Vec::with_capacity(n) };
+        for i in 0..m {
+            let (a, b) = (*positions.get(i)?, positions.get(i + 1).copied().unwrap_or(n));
+            let (fa, fb) = (share(a)?, share(b)?);
+            let from = self.from.get(i)?;
+            let mut rest = *self.lp.segs.get(i)?;
+            // Where the remaining piece starts, as a share of this segment.
+            let mut done = 0.0;
+            for q in a + 1..b {
+                let t = (share(q)? - fa) / (fb - fa);
+                // Even shares when the followed loop's are unusable here.
+                let t = if t.is_finite() && t > done && t < 1.0 { t } else { done + (1.0 - done) / (b - q + 1) as f64 };
+                let (piece, after) = rest.split_at((t - done) / (1.0 - done));
+                out.lp.segs.push(piece);
+                out.from.push(from.clone());
+                rest = after;
+                done = t;
+            }
+            out.lp.segs.push(rest);
+            out.from.push(from.clone());
+        }
+        // Start at the piece paired with the followed loop's first vertex.
+        out.rotate_left((n - s) % n);
+        (out.lp.segs.len() == n).then_some(out)
     }
 
     /// Each run of lines that `joins` says continue one another as a single line, over what
