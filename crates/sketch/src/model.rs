@@ -1926,10 +1926,14 @@ impl Sketch {
     /// Put the handles of `curves` back where their fit points now put them, so that moving a fit
     /// point of a spline whose handles nobody turned keeps it the natural interpolant (#6502).
     pub fn renew_natural_handles(&mut self, curves: &[usize]) {
+        // A handle held in place (fixed, or by a Fix constraint) stays where it is.
+        let locked = self.locked_points();
         for &curve in curves {
             let Some((ids, natural)) = self.natural_handles(curve) else { continue };
             for (id, at) in ids.iter().zip(natural) {
-                if let Some(point) = self.points.get_mut(*id).filter(|point| !point.fixed) {
+                if locked.get(*id).copied() == Some(false)
+                    && let Some(point) = self.points.get_mut(*id)
+                {
                     point.pos = at;
                 }
             }
@@ -2263,13 +2267,31 @@ impl Sketch {
             return;
         }
         let gone = |p: usize| p != 0 && which.contains(&p);
-        let dead_curves: Vec<usize> =
+        let mut dead_curves: Vec<usize> =
             self.curves.iter().enumerate().filter(|(_, c)| c.kind.point_ids().into_iter().any(gone)).map(|(i, _)| i).collect();
+        // A spline that goes takes its tangent lines (#6502): none is left without its spline.
+        let dead_splines: std::collections::BTreeSet<String> = dead_curves
+            .iter()
+            .filter_map(|i| self.curves.get(*i))
+            .filter(|c| matches!(&c.kind, CurveKind::Spline { handles, .. } if !handles.is_empty()))
+            .map(|c| c.id.clone())
+            .collect();
+        for (i, c) in self.curves.iter().enumerate() {
+            if c.spline_handle_of.as_ref().is_some_and(|parent| dead_splines.contains(parent)) && !dead_curves.contains(&i) {
+                dead_curves.push(i);
+            }
+        }
+        dead_curves.sort_unstable();
+        // Points only a removed curve owned go too when nothing else uses them: an offset's
+        // generated points, and a removed spline's handle points.
         let private = dead_curves
             .iter()
             .filter_map(|i| self.curves.get(*i))
-            .filter(|c| self.freeform_offsets.iter().any(|r| r.output == c.id))
-            .flat_map(|c| c.kind.point_ids())
+            .flat_map(|c| match &c.kind {
+                _ if self.freeform_offsets.iter().any(|r| r.output == c.id) => c.kind.point_ids(),
+                CurveKind::Spline { handles, .. } => handles.clone(),
+                _ => Vec::new(),
+            })
             .collect::<std::collections::BTreeSet<_>>();
         self.drop_curves(&dead_curves);
         let mut removed = which.iter().copied().filter(|i| *i != 0).collect::<std::collections::BTreeSet<_>>();

@@ -1956,3 +1956,20 @@ fn scaling_a_spline_with_handles_scales_its_curve() {
         }
     }
 }
+
+/// Deleting a point a spline with tangent handles needs removes the spline, its tangent lines
+/// and its handle points: the sketch stays valid (#6502).
+#[test]
+fn deleting_a_fit_point_takes_the_splines_tangent_lines() {
+    let mut sk = Sketch::new();
+    let pts: Vec<usize> = [v(0.0, 0.0), v(8.0, 6.0), v(17.0, 2.0), v(25.0, 10.0)].iter().map(|p| sk.add_point(*p, None).unwrap()).collect();
+    let fit = pts[1];
+    let spline = sk.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: false, nurbs: None, handles: Vec::new() }, None).unwrap();
+    sk.add_spline_handles(spline).unwrap();
+    let before = sk.points.len();
+    sk.remove_points(&[fit]);
+    assert!(sk.curves.iter().all(|c| c.spline_handle_of.is_none()), "no tangent line is left without its spline");
+    assert!(!sk.curves.iter().any(|c| matches!(c.kind, CurveKind::Spline { .. })));
+    assert_eq!(sk.points.len(), before - 1 - 4, "the point and the four handle points go");
+    sk.validate_spline_handles().unwrap();
+}
