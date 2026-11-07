@@ -679,7 +679,10 @@ fn map_local(s: &Session, world: &solidcraft_doc::ModelState, id: &str, params: 
                 Axis => {
                     if let Some(axis) = v.as_object() {
                         let mut axis = axis.clone();
-                        if let Some(origin) = axis.get("origin").and_then(|o| m.make(o)) {
+                        // An `{origin, dir}` axis without its origin passes through the world's,
+                        // which the component may have moved.
+                        let origin = axis.get("origin").cloned().or_else(|| axis.contains_key("dir").then(|| pt(Vec3::ZERO)));
+                        if let Some(origin) = origin.and_then(|o| m.make(&o)) {
                             axis.insert("origin".into(), origin);
                         }
                         if let Some(dir) = axis.get("dir").and_then(vec3)
