@@ -3,7 +3,7 @@
 //! ```text
 //! solidcraft-cli run <script.json|design.sc|part.step|mesh.3mf> [--in design|part.step|mesh.3mf] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--json-out FILE] [--allow-errors]
 //!                    [--param-check off|warn|strict]
-//! solidcraft-cli eval <script.json|design.sc|part.step> [--in design.sc|part.step] [--json-out FILE] (alias: inspect) measurements as JSON
+//! solidcraft-cli eval <script.json|design.sc|part.step> [--in design.sc|part.step] [--json-out FILE] [--allow-errors] (alias: inspect) measurements as JSON
 //! solidcraft-cli script <design.sc> [--out script.json]     the design's history as a command script
 //! solidcraft-cli bench-open <design.sc | part.step> [--parse-only] [--save OUT.sc] [--display LEVEL [--edit NAME EXPR]] [--ops script.json] loading timings as JSON lines
 //! solidcraft-cli bench-agent [--scale F] [--save F] [--script-out F] a ~1,300-body design built command by command, timed
@@ -64,7 +64,7 @@ struct Command {
 /// `run`'s lines in the usage.
 const USAGE_RUN: &str = "  solidcraft-cli run <script.json|design.sc|part.step> [--in design.sc|part.step] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--profile-out trace.json] [--json-out FILE] [--allow-errors] [--validation each_step|each_feature|off]\n                     [--param-check off|warn|strict] [--quality standard|fine|finest]\n  solidcraft-cli run --in <design.sc|part.step> [--out FILE]...\n      (a timeline feature that fails fails the run and nothing is written; --allow-errors writes anyway)\n      (--quality: how closely an STL, OBJ or 3MF --out follows curved faces, as file.export's quality: a chord of\n       2e-4, 5e-5 or 1e-5 of each body's size, never under 1 µm, default standard)\n      (--validation: when SMLib's full check runs on the features computed (diagnostics.validation), default each_feature)\n      (--param-check checks each step against its command's contract: warn reports on stderr, strict stops the run)\n      (--timings prints {timings: [{index, command, ms}], total_ms} for a script, with --results its results too;\n       --profile adds each command's profile: {boolean_ms, tessellate_ms, other_ms}, the kernel's share)\n      (--profile also records where the time goes, SMLib's calls, kernel operations, features, commands and import stages,\n       and prints the table to stderr: count, total, self time and longest per span; --profile-out FILE writes the spans\n       as a Chrome trace for chrome://tracing or ui.perfetto.dev; SOLIDCRAFT_PROFILE=1 does the same for any command)\n";
 /// `eval`'s lines in the usage.
-const USAGE_EVAL: &str = "  solidcraft-cli eval <script.json|design.sc|part.step> [--in design.sc|part.step] [--json-out FILE] [--profile] [--profile-out trace.json] [--validation each_step|each_feature|off]     (alias: inspect)\n  solidcraft-cli eval --in <script.json|design.sc|part.step> [--json-out FILE]\n      (with both inputs, runs the positional script on --in before measuring; does not automatically save the modified design)\n      (--json-out FILE writes the JSON that run (with --results, else the measurement) and eval print to FILE instead of stdout,\n       as plain UTF-8: a shell's > can re-encode it, e.g. Windows PowerShell adds a byte-order mark)\n      (--profile, --profile-out and --validation as for run)\n";
+const USAGE_EVAL: &str = "  solidcraft-cli eval <script.json|design.sc|part.step> [--in design.sc|part.step] [--json-out FILE] [--allow-errors] [--profile] [--profile-out trace.json] [--validation each_step|each_feature|off]     (alias: inspect)\n  solidcraft-cli eval --in <script.json|design.sc|part.step> [--json-out FILE]\n      (with both inputs, runs the positional script on --in before measuring; does not automatically save the modified design)\n      (--json-out FILE writes the JSON that run (with --results, else the measurement) and eval print to FILE instead of stdout,\n       as plain UTF-8: a shell's > can re-encode it, e.g. Windows PowerShell adds a byte-order mark)\n      (--profile, --profile-out and --validation as for run)\n";
 /// `script`'s lines in the usage.
 const USAGE_SCRIPT: &str = "  solidcraft-cli script <design.sc|script.json> [--out script.json]\n      (the design's history as a command script that eval and run replay)\n";
 /// `bench-open`'s lines in the usage.
@@ -501,7 +501,7 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
     // A feature only a newer SolidCraft can build isn't a broken design: saving the design keeps it
     // and hands out no part. Exporting bodies without it would, so that still stops.
     if !args.iter().any(|a| a == "--allow-errors") {
-        timeline_ok(&s, flags(args, "--out").is_empty())?;
+        timeline_ok(&s, flags(args, "--out").is_empty(), "so nothing was written (--allow-errors writes the bodies anyway)")?;
     }
     for out in flags(args, "--out") {
         let mut params = json!({"path": out});
@@ -594,8 +594,11 @@ fn known_args(cmd: &str, args: &[String], valued: &[&str], switches: &[&str], po
     Ok(())
 }
 
-/// Every failing timeline feature, one per line, as an error; Ok when none fails.
-fn timeline_ok(s: &Session, skip_newer_features: bool) -> Result<(), String> {
+/// Every failing timeline feature, one per line, as an error that says `what_now` (what the
+/// command did about it); Ok when none fails. `run` and `eval` fail on this one rule (#11225).
+/// With `skip_newer_features`, a feature from a newer SolidCraft that this build can't rebuild
+/// doesn't count.
+fn timeline_ok(s: &Session, skip_newer_features: bool, what_now: &str) -> Result<(), String> {
     let newer = |id: u64| {
         skip_newer_features && s.doc.feature(id).is_some_and(|f| matches!(f.kind, solidcraft_engine::doc::FeatureKind::NewerFileFeature { .. }))
     };
@@ -604,17 +607,13 @@ fn timeline_ok(s: &Session, skip_newer_features: bool) -> Result<(), String> {
     if failed.is_empty() {
         return Ok(());
     }
-    Err(format!(
-        "{} timeline feature(s) failed, so nothing was written (--allow-errors writes the bodies anyway):\n{}",
-        failed.len(),
-        failed.join("\n")
-    ))
+    Err(format!("{} timeline feature(s) failed, {what_now}:\n{}", failed.len(), failed.join("\n")))
 }
 
 /// Runs `solidcraft-cli eval` (and its `inspect` alias), opening the input design or script with the requested `--validation` mode and reporting both `inspect.measure` and `document.inspect`.
 fn cmd_eval(args: &[String]) -> Result<(), String> {
     let json_out = json_out(args)?;
-    known_args("eval", args, &["--in", "--json-out", "--profile-out", "--validation"], &["--profile"], true)?;
+    known_args("eval", args, &["--in", "--json-out", "--profile-out", "--validation"], &["--profile", "--allow-errors"], true)?;
     let validation = validation_flag("eval", args)?;
     let mut s = open_validating(flag(args, "--in"), positional(args), solidcraft_engine::schema::ParamCheck::Off, validation)?;
     let m = s.execute("inspect.measure", &json!({})).map_err(|e| e.to_string())?;
@@ -631,7 +630,15 @@ fn cmd_eval(args: &[String]) -> Result<(), String> {
         out["newer_file"] = file.report();
         out["warnings"] = json!(file.warnings());
     }
-    print_json(&out, json_out)
+    print_json(&out, json_out)?;
+    // The report shows a failing feature in `timeline[].error`; the exit status says so too, as
+    // `run`'s does, so a script that checks only the status doesn't take a broken rebuild for a
+    // good one. `--allow-errors` keeps status 0 for a design inspected on purpose. A newer
+    // file's features are reported under `newer_file`, not counted as failures.
+    if !args.iter().any(|a| a == "--allow-errors") {
+        timeline_ok(&s, true, "so eval exits with status 1 (the report lists them; --allow-errors exits 0)")?;
+    }
+    Ok(())
 }
 
 /// A design's history as a command script (`timeline.export_script`): printed, or written to
