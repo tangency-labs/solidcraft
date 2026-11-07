@@ -2,7 +2,7 @@
 //! Keep wire details here until the CPU contract is published. Never save them.
 use crate::{Result, params::bad};
 use serde::Deserialize;
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 use solidcraft_render::{
     ProductScene,
     surface::{OpaqueSurface, srgb8_to_linear},
@@ -41,6 +41,8 @@ fn bounded_dielectrics<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::R
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Override {
+    #[serde(default)]
+    model: Option<solidcraft_render::glass_model::GlassModel>,
     body_index: usize,
     body_name: String,
     ior: f64,
@@ -92,6 +94,10 @@ pub(super) fn apply(scene: &mut ProductScene, overrides: &[Override], command: &
         }
         let [r, g, b] = input.absorption_per_mm;
         let mut transmission = Transmission::new(Vec3::new(r, g, b), thickness).map_err(|e| bad(command, e.to_string()))?;
+        if let Some(model) = input.model {
+            model.validate(input.ior).map_err(|e| bad(command, e.to_string()))?;
+            transmission = transmission.with_model(model).map_err(|e| bad(command, e.to_string()))?;
+        }
         if let Some(enabled) = input.shadow_transmission {
             transmission = transmission.with_shadow_transmission(enabled);
         }

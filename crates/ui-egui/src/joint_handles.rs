@@ -1,5 +1,7 @@
 //! Explicit assembly Move: only the selected part's allowed joint axes are shown. Distances
 //! and angles are relative to the current drag, and each drag is one cancellable undo step.
+use solidcore_record::Vec3;
+use solidcraft_engine::geom::prelude::*;
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
@@ -10,7 +12,6 @@ use serde_json::json;
 use solidcraft_engine::{
     Sel,
     doc::{Document, apply_point, joints, mat_inverse, mat_mul},
-    geom::Vec3,
 };
 
 use crate::{
@@ -142,7 +143,7 @@ impl Mode {
             .filter(|(_, _, _, path, _)| path.last() == Some(&self.occurrence))
             .map(|(name, ..)| name)
             .collect();
-        let world = app.session.world_state();
+        let world = crate::open_meshing::session_world(&app.session);
         self.radii = self
             .axes
             .iter()
@@ -202,30 +203,77 @@ pub(crate) fn start(app: &mut SolveApp) {
     {
         crate::context_menu::run_item(app, &item, Pos2::ZERO);
     } else {
-        app.set_status(app.tr("joint_move.fixed").to_string(), false);
-        let part = app.session.doc.occurrences.iter().find(|o| o.id == occurrence).map(|o| o.name.clone()).unwrap_or_default();
-        app.menu.joint_move_warning = Some(part);
+        let blocked = Blocked::of(app, occurrence);
+        app.set_status(blocked.reason(app), false);
+        app.menu.joint_move_warning = Some(blocked);
+    }
+}
+
+/// Why Move found no axis to show for a part, kept for the warning until it is acknowledged.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Blocked {
+    pub(crate) part: String,
+    /// Names of this part's joints the solver reports as conflicting (it can't close their
+    /// loop). Empty when the part simply has no free joint value.
+    pub(crate) conflicts: Vec<String>,
+}
+
+impl Blocked {
+    /// A conflicting joint also leaves no axis, but "no movable joint axis" would send the user
+    /// to the joint types and limits instead of to the joint that disagrees (#10331). Only
+    /// joints on this part count: a conflict elsewhere in the design is not why it is blocked.
+    fn of(app: &SolveApp, occurrence: u64) -> Self {
+        let doc = &app.session.doc;
+        let part = doc.occurrences.iter().find(|o| o.id == occurrence).map(|o| o.name.clone()).unwrap_or_default();
+        let on_part: BTreeSet<u64> = doc
+            .assembly
+            .joints
+            .iter()
+            .filter(|j| !j.suppressed && (j.a.occurrence == occurrence || j.b.occurrence == occurrence))
+            .map(|j| j.id)
+            .collect();
+        let mut conflicts = Vec::new();
+        if !on_part.is_empty() {
+            let solution = joints::solve_holding_with_analysis(doc, &app.session.model.state(), &joints::Held::new(), joints::Analysis::Placement);
+            for (id, name, _) in solution.conflicts {
+                if on_part.contains(&id) && !conflicts.contains(&name) {
+                    conflicts.push(name);
+                }
+            }
+        }
+        Self { part, conflicts }
+    }
+
+    fn reason(&self, app: &SolveApp) -> String {
+        if self.conflicts.is_empty() {
+            app.tr("joint_move.fixed").to_string()
+        } else {
+            crate::i18n::format("joint_move.conflict", &[("joint", &self.conflicts.join(", "))])
+        }
     }
 }
 
 /// A blocked Move is a persistent warning, acknowledged with OK, Enter, Escape or Close.
 /// It never changes the joint type, grounding, limits or the selected geometry.
 pub(crate) fn show_warning(app: &mut SolveApp, ctx: &egui::Context) {
-    let Some(part) = app.menu.joint_move_warning.clone() else { return };
+    let Some(blocked) = app.menu.joint_move_warning.clone() else { return };
+    let reason = blocked.reason(app);
+    let hint = if blocked.conflicts.is_empty() { "joint_move.blocked_hint" } else { "joint_move.conflict_hint" };
     if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
         app.menu.joint_move_warning = None;
         return;
     }
-    let (closed, action) = crate::ui_kit::Confirm::new(egui::Id::new("sc_joint_move_blocked"), "status_warning", app.tr("joint_move.blocked_title"))
-        .tone(crate::ui_kit::Tone::Warning)
-        .actions(app.tr("ui.heading_ok"), "", None)
-        .show(ctx, true, |ui| {
-            if !part.is_empty() {
-                crate::ui_kit::text(ui, &part, crate::ui_kit::Text::Report("part", false));
-            }
-            crate::ui_kit::text(ui, app.tr("joint_move.fixed"), crate::ui_kit::Text::Report("reason", false));
-            crate::ui_kit::text(ui, app.tr("joint_move.blocked_hint"), crate::ui_kit::Text::Hint("remedy"));
-        });
+    let (closed, action) =
+        crate::ui_kit::Confirm::new(egui::Id::unique("sc_joint_move_blocked"), "status_warning", app.tr("joint_move.blocked_title"))
+            .tone(crate::ui_kit::Tone::Warning)
+            .actions(app.tr("ui.heading_ok"), "", None)
+            .show(ctx, true, |ui| {
+                if !blocked.part.is_empty() {
+                    crate::ui_kit::text(ui, &blocked.part, crate::ui_kit::Text::Report("part", false));
+                }
+                crate::ui_kit::text(ui, &reason, crate::ui_kit::Text::Report("reason", false));
+                crate::ui_kit::text(ui, app.tr(hint), crate::ui_kit::Text::Hint("remedy"));
+            });
     app.viewport.dialog_rect = crate::scenario::rect_of("dialog:window");
     if closed || action != crate::ui_kit::Action::None {
         app.menu.joint_move_warning = None;
@@ -597,8 +645,9 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
         if let Some(p) = pointer {
             let at = (p + vec2(20.0, 22.0)).clamp(proj.rect.min, proj.rect.max - vec2(260.0, 82.0).min(proj.rect.size()));
             let host = Container::new(ui.ctx(), Surface::Canvas);
-            host.area(egui::Id::new("joint_move_readout")).interactable(false).fixed_pos(at).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
-                host.frame(ui.ctx(), tk.overlay, crate::frame::Side::Right).inner_margin(tk.space_8).show(ui, |ui| {
+            host.area(egui::Id::unique("joint_move_readout")).interactable(false).fixed_pos(at).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
+                let frame = host.frame(ui.ctx(), tk.overlay, crate::frame::Side::Right).inner_margin(tk.space_8);
+                Container::show_backing(ui, frame, |ui| {
                     let value = if d.axis.angular {
                         format!(
                             "{}{:.precision$}°",
@@ -630,8 +679,9 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     }
     let host = Container::new(ui.ctx(), Surface::Canvas);
     let mut done = false;
-    host.area(egui::Id::new("joint_move_help")).fixed_pos(proj.rect.left_bottom() + vec2(16.0, -148.0)).show(ui.ctx(), |ui| {
-        host.frame(ui.ctx(), tk.overlay, crate::frame::Side::Right).inner_margin(tk.space_8).show(ui, |ui| {
+    host.area(egui::Id::unique("joint_move_help")).fixed_pos(proj.rect.left_bottom() + vec2(16.0, -148.0)).show(ui.ctx(), |ui| {
+        let frame = host.frame(ui.ctx(), tk.overlay, crate::frame::Side::Right).inner_margin(tk.space_8);
+        Container::show_backing(ui, frame, |ui| {
             ui.label(app.tr("joint_move.help"));
             if mode.axes.iter().any(|a| a.angular) {
                 ui.label(app.tr("joint_move.precision"));
@@ -664,7 +714,7 @@ mod tests {
         let joint =
             h.app.run("joint.create", json!({"type":kind,"a":a,"b":b,"flip":true,"angle":0,"name":"Guide"})).unwrap()["joint"].as_u64().unwrap();
         let component = h.app.session.doc.find_component("Arm").unwrap();
-        let world = h.app.session.world_state();
+        let world = crate::open_meshing::session_world(&h.app.session);
         let body = world.bodies.iter().find(|b| h.app.session.doc.model_body_component(b) == component).unwrap().name.clone();
         h.app.session.selection = vec![Sel::Face { body, index: 0, point: Vec3::new(30., 0., 10.) }];
         h.call("ui.view", json!({"view":"top"}));
@@ -958,6 +1008,33 @@ mod tests {
     }
 
     #[test]
+    fn tools_near_and_far_fields_edit_coarse_and_fine_without_ordering_them() {
+        for theme in ["light", "dark"] {
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            h.call("ui.prefs", json!({"language":"en","theme":theme,"open":"Tools"}));
+            for (query, key, text, expected) in
+                [("Near-axis step", "joint_rotation_coarse", "0.025", (0.025, 0.1)), ("Far-axis step", "joint_rotation_fine", "12.5", (0.025, 12.5))]
+            {
+                h.app.prefs_window.filter = query.into();
+                h.frames(5);
+                let target = format!("prefs:{key}");
+                crate::prefs::reveal_preference(&mut h, &target);
+                h.step(&json!({"click":{"handle":target},"double":true})).unwrap();
+                h.step(&json!({"key":"A","cmd":true})).unwrap();
+                h.step(&json!({"text":text})).unwrap();
+                h.step(&json!({"key":"Enter"})).unwrap();
+                assert_eq!((h.app.preferences.joint_rotation_coarse, h.app.preferences.joint_rotation_fine), expected, "{theme}: {query}");
+            }
+            h.call("ui.prefs", json!({"button":"apply"}));
+            h.call("ui.prefs", json!({"button":"defaults"}));
+            assert_eq!((h.app.preferences.joint_rotation_coarse, h.app.preferences.joint_rotation_fine), (10.0, 0.1));
+            h.call("ui.prefs", json!({"button":"cancel"}));
+            assert_eq!((h.app.preferences.joint_rotation_coarse, h.app.preferences.joint_rotation_fine), (0.025, 12.5));
+        }
+    }
+
+    #[test]
     fn precision_settings_persist_validate_and_read_old_preferences() {
         let mut app = SolveApp::new(Default::default(), Default::default());
         for key in ["joint_rotation_coarse", "joint_rotation_fine"] {
@@ -977,6 +1054,56 @@ mod tests {
         let invalid = crate::prefs::lenient(&json!({"joint_rotation_coarse":0,"joint_rotation_fine":-3}));
         assert_eq!((invalid.joint_rotation_coarse, invalid.joint_rotation_fine), (10., 0.1));
     }
+    /// Two boards held by two planar joints whose faces can never meet (the yellow front against
+    /// the red top, #10331): the second joint can't close its loop, so Move names it instead of
+    /// saying the part has no movable axis.
+    #[test]
+    fn blocked_move_names_a_conflicting_joint_of_the_part() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        for (name, y) in [("Yellow", 0), ("Red", 300)] {
+            h.app.run("component.activate", json!({"component":"root"})).unwrap();
+            h.app.run("component.create", json!({"name":name,"grounded":false})).unwrap();
+            h.app.run("solid.box", json!({"length":400,"width":100,"height":20,"corner":[0,y,0]})).unwrap();
+        }
+        h.app.run("component.activate", json!({"component":"root"})).unwrap();
+        h.app.run("occurrence.ground", json!({"occurrence":"Yellow:1","grounded":true})).unwrap();
+        let planar = |name: &str, a: [i32; 3], b: [i32; 3]| json!({"type":"planar","a":{"occurrence":"Yellow","face":a},"b":{"occurrence":"Red","face":b},"name":name});
+        h.app.run("joint.create", planar("Top", [200, 50, 20], [200, 350, 0])).unwrap();
+        h.app.run("joint.create", planar("Front", [200, 0, 10], [200, 50, 40])).unwrap();
+        let solved = joints::solve(&h.app.session.doc, &h.app.session.model.state());
+        let conflicting: Vec<_> = solved.conflicts.iter().map(|(_, name, _)| name.as_str()).collect();
+        assert!(!conflicting.is_empty(), "the scenario must conflict: {:?}", solved.conflicts);
+        let component = h.app.session.doc.find_component("Red").unwrap();
+        let world = h.app.session.world_state().unwrap();
+        let body = world.bodies.iter().find(|b| h.app.session.doc.model_body_component(b) == component).unwrap().name.clone();
+        h.app.session.selection = vec![Sel::Body { name: body }];
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"tab:ASSEMBLE"}})).unwrap();
+        h.step(&json!({"click":{"handle":"button:occurrence.move"}})).unwrap();
+        h.frames(3);
+        let blocked = h.app.menu.joint_move_warning.clone().expect("Move must be blocked");
+        assert_eq!(blocked.part, "Red:1");
+        assert_eq!(blocked.conflicts, conflicting);
+        let reason = blocked.reason(&h.app);
+        assert!(reason.contains("conflicts") && conflicting.iter().all(|n| reason.contains(n)), "{reason}");
+        assert_ne!(reason, h.app.tr("joint_move.fixed"));
+        assert!(crate::scenario::rect_of("dialog:window").is_some());
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        h.frames(2);
+        assert!(h.app.menu.joint_move_warning.is_none());
+        // Without the conflicting joint the part moves again.
+        for name in conflicting {
+            let id = h.app.session.doc.assembly.joints.iter().find(|j| j.name == name).unwrap().id;
+            h.app.run("joint.delete", json!({"joint":id})).unwrap();
+        }
+        h.frames(2);
+        h.step(&json!({"click":{"handle":"button:occurrence.move"}})).unwrap();
+        h.frames(3);
+        assert!(h.app.menu.joint_move_warning.is_none());
+        assert!(visible(&h.app));
+    }
+
     #[test]
     fn blocked_move_warns_from_both_entry_points_and_dismisses_without_editing() {
         for reason in ["rigid", "grounded", "limited", "parameter"] {
@@ -1005,7 +1132,7 @@ mod tests {
             h.step(&json!({"click":{"handle":"tab:ASSEMBLE"}})).unwrap();
             h.step(&json!({"click":{"handle":"button:occurrence.move"}})).unwrap();
             h.frames(3);
-            assert_eq!(h.app.menu.joint_move_warning.as_deref(), Some("Arm:1"), "{reason}");
+            assert_eq!(h.app.menu.joint_move_warning.as_ref().map(|b| (b.part.as_str(), b.conflicts.len())), Some(("Arm:1", 0)), "{reason}");
             assert!(crate::scenario::rect_of("dialog:window").is_some(), "a modal must be visible: {reason}");
             assert!(!visible(&h.app));
             h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();

@@ -1,9 +1,10 @@
 //! Bounded opaque metallic/roughness surfaces in linear sRGB.
 //! This numerical contract does not enable a renderer or persist appearances.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::PI;
 
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 
 /// Lowest admitted perceptual roughness. Perfect delta mirrors need another integrator.
 pub const MIN_ROUGHNESS: f64 = 0.045;
@@ -62,6 +63,27 @@ impl OpaqueSurface {
             return Err(SurfaceError::DielectricIor);
         }
         Ok(Self { base_color, metallic, roughness, dielectric_ior, clear_coat: None })
+    }
+
+    /// Bounded runtime optical finish, matching authored aging's 0.02..1 domain.
+    /// The public appearance constructor keeps its historical 0.045 minimum. This
+    /// explicit internal route preserves authored values without a clamp, retains
+    /// IOR/coat identity and validates every newly supplied component.
+    #[cfg(any(feature = "raytrace-cpu", test))]
+    pub(crate) fn with_authored_finish(mut self, base_color: Vec3, metallic: f64, roughness: f64) -> Result<Self, SurfaceError> {
+        if !base_color.is_finite() || ![base_color.x, base_color.y, base_color.z].into_iter().all(|c| (0.0..=1.0).contains(&c)) {
+            return Err(SurfaceError::BaseColor);
+        }
+        if !metallic.is_finite() || !(0.0..=1.0).contains(&metallic) {
+            return Err(SurfaceError::Metallic);
+        }
+        if !roughness.is_finite() || !(0.02..=1.0).contains(&roughness) {
+            return Err(SurfaceError::Roughness);
+        }
+        self.base_color = base_color;
+        self.metallic = metallic;
+        self.roughness = roughness;
+        Ok(self)
     }
 
     /// Runtime optical layer; never serialized into a document appearance.

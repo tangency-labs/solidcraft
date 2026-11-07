@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "plastic.snap_fit whose catch is as long as its arm (15)",
+ "source": "invariants",
+ "method": "the catch sits at the arm's end and must be shorter than it (catch_length < length); a catch the whole arm long leaves no arm: a clean refusal",
+ "outcome": "refused",
+ "refusal": "the snap fit's catch must be shorter than its arm"
+}

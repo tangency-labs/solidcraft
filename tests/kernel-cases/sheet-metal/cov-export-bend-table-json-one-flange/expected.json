@@ -1,0 +1,33 @@
+{
+ "sources": [],
+ "what": "sheet.export_bend_table as JSON of an 80 x 40 x 2 base with one 90 degree flange 20 high",
+ "source": "analytic",
+ "method": "the rule: T = 2, K = 0.5, R = 2. One bend: 90 degrees (included 180 - 90 = 90), up, radius 2, allowance BA = theta(R + K*T) = (pi/2)(2 + 1) = 4.712388980, as long as the edge, 80; flat 80 x 56.712389 x 2",
+ "body_count": 1,
+ "files": [
+  {
+   "path": "bends.json",
+   "json": {
+    "rule": "Steel 2",
+    "thickness": 2.0,
+    "k_factor": 0.5,
+    "flat_size_mm": [
+     80.0,
+     56.71238898038469,
+     2.0
+    ],
+    "bends": [
+     {
+      "bend": 1,
+      "angle_deg": 90.0,
+      "included_angle_deg": 90.0,
+      "radius": 2.0,
+      "direction": "up",
+      "allowance": 4.71238898038469,
+      "length": 80.0
+     }
+    ]
+   }
+  }
+ ]
+}

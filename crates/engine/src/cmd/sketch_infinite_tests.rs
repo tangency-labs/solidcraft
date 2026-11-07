@@ -3,7 +3,8 @@
 //! profile.
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{CurveKind, Sketch};
 
 use crate::Session;
@@ -27,6 +28,44 @@ fn new_sketch() -> Session {
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
     s
+}
+
+#[test]
+fn a_short_horizontal_reference_holds_through_dimension_edits_drag_and_reopen() {
+    let mut s = new_sketch();
+    let id = s.active_sketch.unwrap();
+    // A saved infinite line may have very close defining points (#11001).
+    let sk = s.doc_mut().sketch_mut(id).unwrap();
+    let end = sk.add_point(Vec2::new(6.36e-8, 0.0), Some("axis.end")).unwrap();
+    let arm_end = sk.add_point(Vec2::new(12.0, 10.0), Some("arm.end")).unwrap();
+    let axis = sk.add_line_pts(0, end, Some("axis")).unwrap();
+    sk.curves[axis].infinite = true;
+    sk.curves[axis].construction = true;
+    sk.add_line_pts(0, arm_end, Some("arm")).unwrap();
+    sk.add_constraint(solidcraft_sketch::ConstraintKind::Horizontal { l: axis }, None).unwrap();
+    s.refresh();
+
+    let check = |s: &Session, degrees: f64| {
+        let state = s.model.state();
+        let solved = state.sketch(id).unwrap();
+        assert!(solved.report.ok(), "{:?}", solved.report);
+        let axis = solved.sketch.points[end].pos.normalized().unwrap();
+        let arm = solved.sketch.points[arm_end].pos.normalized().unwrap();
+        assert!(axis.dist(Vec2::X) < 1e-6, "the horizontal reference rotated: {axis:?}");
+        assert!((arm.y.atan2(arm.x) - degrees.to_radians()).abs() < 1e-6, "the free line has the wrong angle: {arm:?}");
+    };
+    let out = run(&mut s, "sketch.dimension", json!({"entities": ["axis", "arm"], "type": "angle", "value": "30 deg"}));
+    check(&s, 30.0);
+    run(&mut s, "parameters.change", json!({"name": out["param"], "expression": "15 deg"}));
+    check(&s, 15.0);
+    let at = sketch(&s).points[arm_end].pos;
+    run(&mut s, "sketch.drag", json!({"entity": "arm.end", "from": [at.x, at.y], "to": [14, 10]}));
+    run(&mut s, "sketch.drag_end", json!({}));
+    check(&s, 15.0);
+    let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    *s.doc_mut() = doc;
+    s.refresh();
+    check(&s, 15.0);
 }
 
 fn profiles(s: &Session) -> usize {
@@ -110,6 +149,30 @@ fn construction_lines_with_a_length_are_segments_held_by_a_dimension() {
     ] {
         let before = s.doc.to_json();
         assert!(s.execute("sketch.construction_line", &p).is_err(), "{p}");
+        assert_eq!(s.doc.to_json(), before, "{p}");
+    }
+}
+
+#[test]
+fn a_construction_line_with_a_length_can_be_a_normal_line() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]}));
+    let p = json!({"at": [20, -10], "length": 40, "near": [20, 30]});
+    let guide = run(&mut s, "sketch.construction_line.vertical", p.clone());
+    assert!(curve(&sketch(&s), guide["curves"][0].as_str().unwrap()).construction);
+    assert_eq!(profiles(&s), 1, "by default it is construction geometry: no profile");
+    let mut p = p;
+    p["construction"] = json!(false);
+    let out = run(&mut s, "sketch.construction_line.vertical", p);
+    let sk = sketch(&s);
+    let c = curve(&sk, out["curves"][0].as_str().unwrap());
+    assert!(!c.construction && !c.infinite);
+    assert_eq!(profiles(&s), 2, "a normal line cuts the rectangle in two");
+    let back = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    assert!(!curve(back.sketch(s.active_sketch.unwrap()).unwrap(), out["curves"][0].as_str().unwrap()).construction);
+    for p in [json!({"at": [0, 0], "construction": false}), json!({"at": [0, 0], "length": 5, "construction": "no"})] {
+        let before = s.doc.to_json();
+        assert!(s.execute("sketch.construction_line.horizontal", &p).is_err(), "{p}");
         assert_eq!(s.doc.to_json(), before, "{p}");
     }
 }
@@ -261,6 +324,25 @@ fn construction_tangents_respect_arc_sweeps_and_invalid_inputs_are_atomic() {
         assert!(s.execute("sketch.construction_line", &p).is_err(), "{p}");
         assert_eq!(s.doc.to_json(), before, "{p}");
     }
+}
+
+#[test]
+fn a_second_point_next_to_the_first_is_refused() {
+    // #11001: a through-point 0.0000001 mm from the start made an infinite line whose direction
+    // Horizontal no longer held, and a line that short collapsed onto the origin.
+    let mut s = new_sketch();
+    for (id, p) in [
+        ("sketch.construction_line", json!({"at":[0,0],"through":[0.0000001,0]})),
+        ("sketch.construction_line", json!({"at":[5,5],"through":[5,5.0000005]})),
+        ("sketch.line", json!({"points":[[0,0],[0.0000001,0]]})),
+        ("sketch.line", json!({"points":[[5,5],[10,5],[10,5.0000005]]})),
+    ] {
+        let before = s.doc.to_json();
+        assert!(s.execute(id, &p).is_err(), "{id} {p}");
+        assert_eq!(s.doc.to_json(), before, "{id} {p}");
+    }
+    run(&mut s, "sketch.construction_line", json!({"at":[0,0],"through":[0.00001,0]}));
+    run(&mut s, "sketch.line", json!({"points":[[5,5],[5.00001,5]]}));
 }
 
 #[test]

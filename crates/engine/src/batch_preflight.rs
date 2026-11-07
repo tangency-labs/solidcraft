@@ -33,7 +33,7 @@ impl Refusal {
     /// The batch reply for a batch refused before its first step: as a failed step's reply,
     /// with nothing completed, nothing undone and every step not run.
     pub fn reply(&self, steps: usize) -> Value {
-        json!({
+        let mut reply = json!({
             "completed": 0,
             "results": [],
             "failed": {"index": self.index, "command": self.command, "error": self.error},
@@ -41,7 +41,11 @@ impl Refusal {
             "rolled_back": false,
             "not_run": (0..steps).collect::<Vec<_>>(),
             "note": "nothing was run: the batch was checked before its first step",
-        })
+        });
+        if let Some(reason) = crate::panels::commands::structured_error(&self.error) {
+            reply["failed"]["panel_error"] = reason;
+        }
+        reply
     }
 }
 
@@ -82,6 +86,15 @@ pub fn contracts(steps: &[Value]) -> Option<Refusal> {
 
 /// Step `index`'s refusal when its parameters break the typed contract of its command `id`.
 fn contract_refusal(index: usize, id: &str, step: &Value) -> Option<Refusal> {
+    if crate::panels::commands::is_command(id) {
+        let empty = json!({});
+        let params = step.get("params").filter(|p| !p.is_null()).unwrap_or(&empty);
+        return crate::panels::commands::parse_command(id, params).err().map(|reason| Refusal {
+            index,
+            command: Some(id.into()),
+            error: crate::panels::commands::error_text(reason),
+        });
+    }
     let first = crate::schema::issues(id, step.get("params").unwrap_or(&Value::Null)).into_iter().next()?;
     Some(Refusal { index, command: Some(id.to_string()), error: crate::params::bad(id, first.message).to_string() })
 }

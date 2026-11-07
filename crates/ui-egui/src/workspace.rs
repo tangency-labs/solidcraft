@@ -247,6 +247,7 @@ pub const SECTIONS: &[Section] = &[
             "view.grid",
             "view.ground_shadow",
             "view.navigation_bar",
+            "view.ribbon_tabs_only",
         ],
     },
     Section { tab: "VIEW", panel: "SELECT", promoted: 0, ids: &[] },
@@ -1353,16 +1354,16 @@ mod tests {
         h.frames(3);
         let links = h.app.session.execute("component.links", &json!({})).unwrap();
         assert_eq!(links["links"][0]["name"], "part1", "{links}");
-        assert_eq!(h.app.session.world_state().bodies.len(), 1);
+        assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 1);
         h.step(&json!({"choose_file": "part2.step"})).unwrap();
         h.step(&json!({"start": "component.insert_design"})).unwrap();
         for _ in 0..600 {
-            if h.app.session.world_state().bodies.len() == 2 {
+            if h.app.session.world_state().unwrap().bodies.len() == 2 {
                 break;
             }
             h.frames(1);
         }
-        assert_eq!(h.app.session.world_state().bodies.len(), 2, "the STEP file's body is inserted");
+        assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 2, "the STEP file's body is inserted");
     }
 
     /// Every way into a sketch (New Sketch on the ribbon then a plane, a double-click in the

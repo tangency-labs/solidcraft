@@ -36,6 +36,19 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
         .and_then(Value::as_object)
         .ok_or_else(|| bad(cmd, "`feature` must be a feature object, as a design file or timeline.inspect has it"))?;
     let mut raw = raw.clone();
+    if let Some(Value::Object(def)) = raw.remove("definition") {
+        for (k, v) in def {
+            raw.entry(k).or_insert(v);
+        }
+    }
+    for meta in ["omitted", "inputs", "error", "warning", "boolean_diagnostics", "rolled_back", "type_name"] {
+        raw.remove(meta);
+    }
+    if let Some(kind_str) = raw.get("type").and_then(Value::as_str)
+        && let Some(canonical) = FeatureKind::type_name_to_kind_key(kind_str)
+    {
+        raw.insert("type".into(), json!(canonical));
+    }
     resolve_legacy_names(&mut raw, &s.doc);
     let feature = recorded_feature(cmd, &raw)?;
     let params = step_params(cmd, p.get("params"))?;

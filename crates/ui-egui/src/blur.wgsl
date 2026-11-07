@@ -1,4 +1,4 @@
-// Original SolidCraft viewport-only dual-Kawase and rounded panel composition.
+// Original SolidCraft backdrop dual-Kawase and rounded surface composition.
 struct Params { a: vec4<f32>, rect: vec4<f32>, corners: vec4<f32>, top: vec4<f32>, bottom: vec4<f32>, outside: vec4<f32> }
 @group(0) @binding(0) var image: texture_2d<f32>;
 @group(0) @binding(1) var filtering: sampler;
@@ -16,7 +16,7 @@ fn gamma(c: vec3<f32>) -> vec3<f32> {
 }
 fn load_linear(at: vec2<i32>) -> vec4<f32> {
     let c = textureLoad(image, clamp(at, vec2<i32>(0), vec2<i32>(textureDimensions(image)) - vec2<i32>(1)), 0);
-    // Only the source is gamma encoded on unorm targets. It is opaque, so decoding
+    // Only the scene/composition input is gamma encoded on unorm targets. Decoding
     // each texel BEFORE bilinear interpolation avoids filtering encoded colors.
     return vec4<f32>(linear(c.rgb), c.a);
 }
@@ -60,7 +60,7 @@ fn sample_at(uv: vec2<f32>) -> vec4<f32> {
     let alpha = clamp(0.5 - distance, 0.0, 1.0) * p.a.w;
     let c = textureSample(image, filtering, v.position.xy / vec2<f32>(textureDimensions(image)));
     // Match egui: coverage/opacity multiply gamma-premultiplied RGB BEFORE the
-    // framebuffer conversion. B itself remains linear, opaque viewport color.
+    // framebuffer conversion. The sampled backdrop remains linear color.
     let premultiplied_gamma = gamma(c.rgb) * alpha;
     let rgb = select(premultiplied_gamma, linear(premultiplied_gamma), p.a.z > 0.5);
     return vec4<f32>(rgb, alpha);

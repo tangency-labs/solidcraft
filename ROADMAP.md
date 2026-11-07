@@ -225,6 +225,12 @@ completed drawings publish atomically. The browser still exports synchronously.
 
 ## Render foundation
 
+- Wood surface images (#1345): native CPU and GPU opaque rendering share physical
+  repeat frames and filtered mip chains. Imported maps retain exact bytes and
+  declared provenance in the design, reopen offline, and expose grain-angle
+  controls. Scalar face appearances suppress body maps. Planar projection and
+  CPU encoding/optical limits remain explicit; see [portable surfaces](docs/render-portable-surfaces-and-stages.md).
+
 - Original starter appearances (#1722): 34 opaque recipes through existing commands, with six explicitly unavailable glass recipes and preserved legacy looks; see [the contract](docs/render-starter-appearances.md).
 
 - Bounded linear film accumulation (#1696) supplies caller-admitted mean/variance storage and complete-pass views; actual progressive consumers remain separate. See [the film contract](docs/render-film.md).
@@ -662,7 +668,9 @@ completed drawings publish atomically. The browser still exports synchronously.
   pieces survive unfold/refold as one logical sheet group, including split flanged sheets.
   Cut-outs made in the flat pattern cross bends at any angle or curved: their edges fold to
   helices and curves on the bend, their walls square to the sheet. Free-form bases use bounded
-  sampling.
+  sampling. A fold crosses the sheet's own outer edges the same way, slanted or on any curve,
+  with the outline exact in the flat pattern and its DXF, and flanges and other folds still go
+  on the panels.
   Parallel prismatic partial-depth cuts retain pocket side and depth through transfer and
   unfold/refold, with separate pocket contours in preview and DXF. Planar Intersect preserves
   exact holes and retained islands, including the union of multiple selected profiles, and

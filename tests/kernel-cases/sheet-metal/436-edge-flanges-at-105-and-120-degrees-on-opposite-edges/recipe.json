@@ -1,0 +1,77 @@
+{
+ "commands": [
+  {
+   "command": "sheet.manage_rules",
+   "params": {
+    "name": "AL2",
+    "thickness": "2 mm",
+    "active": true,
+    "bend_radius": "1 mm",
+    "k_factor": 0.5
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Base"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     120,
+     90
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sheet.flange",
+   "params": {
+    "type": "base",
+    "sketch": "Base"
+   }
+  },
+  {
+   "command": "sheet.flange",
+   "params": {
+    "type": "edge",
+    "height": 20,
+    "angle": "90 deg",
+    "edges": [
+     {
+      "point": [
+       60,
+       0,
+       2
+      ],
+      "angle": "105 deg",
+      "height": "30 mm"
+     },
+     {
+      "point": [
+       60,
+       90,
+       2
+      ],
+      "angle": "120 deg",
+      "height": "25 mm"
+     }
+    ]
+   }
+  },
+  {
+   "command": "inspect.measure",
+   "params": {}
+  }
+ ]
+}

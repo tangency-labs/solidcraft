@@ -1,0 +1,14 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4265"
+ ],
+ "what": "the top and bottom edges of a 5 mm tall face chamfered 2.5 mm each, so the two chamfers meet along the face's middle and use it up: truck refused it ('the blend is larger than the neighbouring faces'; the fillet worked)",
+ "source": "analytic",
+ "method": "each chamfer removes 2.5^2/2 x 40 = 125: V = 4000 - 250 = 3750. The y = 0 face is gone; the chamfers meet along a ridge at z = 2.5: faces top, bottom, back, two ends, two chamfers = 7",
+ "body_count": 1,
+ "faces": 7,
+ "volume_mm3": 3750.0,
+ "continuity": {
+  "order": "g0"
+ }
+}

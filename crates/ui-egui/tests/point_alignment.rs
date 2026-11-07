@@ -4,10 +4,11 @@
 mod raster;
 
 use serde_json::json;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::sketch::ConstraintKind;
 use solidcraft_ui_egui::scenario::Harness;
 
-fn line_midpoint(sk: &solidcraft_engine::sketch::Sketch, id: &str) -> solidcraft_engine::geom::Vec2 {
+fn line_midpoint(sk: &solidcraft_engine::sketch::Sketch, id: &str) -> solidcore_record::Vec2 {
     let a = sk.point(sk.resolve_point(&format!("{id}.start")).unwrap()).unwrap();
     let b = sk.point(sk.resolve_point(&format!("{id}.end")).unwrap()).unwrap();
     (a + b) * 0.5
@@ -325,7 +326,7 @@ fn midpoint_aligns_to_the_fixed_origin_without_straightening_the_line() {
         let b = sk.point(sk.resolve_point("l1.end").unwrap()).unwrap();
         assert!(((a + b) * 0.5).x.abs() < 1e-6);
         assert!((b.x - a.x).abs() > 1. && (b.y - a.y).abs() > 1., "only the midpoint is aligned");
-        assert_eq!(sk.point(0).unwrap(), solidcraft_engine::geom::Vec2::ZERO);
+        assert_eq!(sk.point(0).unwrap(), solidcore_record::Vec2::ZERO);
     }
 }
 
@@ -480,7 +481,7 @@ fn context_menu_alignment_review_images() {
             h.app.run("sketch.point", json!({"point":point,"id":id})).unwrap();
         }
         h.call("ui.view", json!({"view":"top"}));
-        h.app.cam.target = solidcraft_engine::geom::Vec3::new(40.0, 22.0, 0.0);
+        h.app.cam.target = solidcore_record::Vec3::new(40.0, 22.0, 0.0);
         h.app.cam.distance = 180.0;
         h.app.cam_anim = None;
         h.frames(3);
@@ -727,7 +728,7 @@ fn midpoint_selection_review_images() {
             h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[80,70]})).unwrap();
             h.app.run("sketch.rectangle.two_point", json!({"p0":[15,18],"p1":[50,58]})).unwrap();
             h.call("ui.view", json!({"view":"top"}));
-            h.app.cam.target = solidcraft_engine::geom::Vec3::new(40., 35., 0.);
+            h.app.cam.target = solidcore_record::Vec3::new(40., 35., 0.);
             h.app.cam.distance = 180.;
             h.app.cam_anim = None;
             h.frames(3);

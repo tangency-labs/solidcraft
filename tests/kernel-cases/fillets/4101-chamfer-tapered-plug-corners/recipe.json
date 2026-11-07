@@ -1,0 +1,75 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Plan"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "closed": true,
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      14.8,
+      0
+     ],
+     [
+      14.6,
+      12
+     ],
+     [
+      0.2,
+      12
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 6.5,
+    "body_name": "Plug"
+   }
+  },
+  {
+   "command": "solid.chamfer",
+   "params": {
+    "body": "Plug",
+    "edges": [
+     [
+      7.4,
+      12,
+      6.5
+     ],
+     [
+      7.4,
+      12,
+      0
+     ],
+     [
+      0.2,
+      12,
+      3.25
+     ],
+     [
+      14.6,
+      12,
+      3.25
+     ]
+    ],
+    "distance": 0.8
+   }
+  }
+ ]
+}

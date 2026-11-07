@@ -1,0 +1,20 @@
+{
+ "sources": [],
+ "body_count": 1,
+ "what": "two planes meeting at a right angle: the seam is a crease, G0 and not G1",
+ "source": "analytic",
+ "method": "box 20x20x20: its edge at x=20, y=0 joins the planes y=0 and x=20 with a 90 degree normal angle, so it is position continuous only. V = 8000, 6 faces.",
+ "volume_mm3": 8000.0,
+ "faces": 6,
+ "continuity": {
+  "order": "g0",
+  "exact": true,
+  "edges": [
+   [
+    20,
+    0,
+    10
+   ]
+  ]
+ }
+}

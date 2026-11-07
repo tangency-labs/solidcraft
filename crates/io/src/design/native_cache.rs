@@ -1,13 +1,13 @@
 //! The model cache: a design's evaluated timeline (every feature's result and the state after
 //! it, [`SavedModel`]), saved with it so opening need not evaluate it again. Bodies use
 //! SolidCraft's exact native B-rep encoding (a mesh body, its own triangles); the key ties the
-//! cache to the exact document, and to the source and platform that computed it
+//! cache to the exact document, and to the source, platform and geometry kernel that computed it
 //! (docs/design-container.md).
 use super::*;
 use solidcraft_doc::{ModelState, SavedModel};
 
-const FORMAT: &str = "solidcraft-model-cache/5";
-const PRODUCER: &str = "solidcraft-truck-adapter/3";
+const FORMAT: &str = "solidcraft-model-cache/9";
+const PRODUCER: &str = "solidcraft-truck-adapter/4";
 const MANIFEST: &str = "cache/model.json";
 const PAYLOAD: &str = "cache/bodies.bin";
 /// Body records (a placed copy is one record; its part is stored once).
@@ -28,6 +28,11 @@ fn build() -> String {
 fn evaluation() -> String {
     format!("{}/{}-{}", env!("SOLIDCRAFT_EVALUATION_SOURCE"), std::env::consts::ARCH, std::env::consts::OS)
 }
+
+/// The geometry kernel that computed a cache. A cache another kernel wrote (the C++ SMLib, which
+/// earlier builds could run on) is not this build's result: the kernels differ in tolerances and in
+/// what they refuse, so a design opened from it evaluates again.
+pub(super) const KERNEL: &str = "solidcore";
 
 /// A 4 x 4 matrix as its 16 numbers, in storage order.
 fn matrix(t: &[[f64; 4]; 4]) -> Vec<f64> {
@@ -170,11 +175,11 @@ fn decode_mesh_body(bytes: &[u8]) -> Option<solidcraft_kernel::Body> {
     let (coordinates, corners) = data.split_at_checked(split)?;
     let f64_at = |c: &[u8], at: usize| c.get(at..at + 8)?.try_into().ok().map(f64::from_le_bytes);
     let u32_at = |c: &[u8], at: usize| c.get(at..at + 4)?.try_into().ok().map(u32::from_le_bytes);
-    let positions: Vec<solidcraft_geom::Vec3> = coordinates
+    let positions: Vec<solidcore_record::Vec3> = coordinates
         .as_chunks::<24>()
         .0
         .iter()
-        .map(|c| Some(solidcraft_geom::Vec3::new(f64_at(c, 0)?, f64_at(c, 8)?, f64_at(c, 16)?)))
+        .map(|c| Some(solidcore_record::Vec3::new(f64_at(c, 0)?, f64_at(c, 8)?, f64_at(c, 16)?)))
         .collect::<Option<_>>()?;
     let triangles: Vec<[u32; 3]> =
         corners.as_chunks::<12>().0.iter().map(|c| Some([u32_at(c, 0)?, u32_at(c, 4)?, u32_at(c, 8)?])).collect::<Option<_>>()?;
@@ -190,7 +195,7 @@ fn decode_mesh_body(bytes: &[u8]) -> Option<solidcraft_kernel::Body> {
 /// colour and paint.
 fn same_mesh(a: &solidcraft_kernel::Body, b: &solidcraft_kernel::Body) -> bool {
     let (Some((pa, ta)), Some((pb, tb))) = (a.triangle_mesh(), b.triangle_mesh()) else { return false };
-    let bits = |p: &[solidcraft_geom::Vec3]| p.iter().map(|v| [v.x.to_bits(), v.y.to_bits(), v.z.to_bits()]).collect::<Vec<_>>();
+    let bits = |p: &[solidcore_record::Vec3]| p.iter().map(|v| [v.x.to_bits(), v.y.to_bits(), v.z.to_bits()]).collect::<Vec<_>>();
     ta == tb && bits(pa) == bits(pb) && a.color() == b.color() && a.paint() == b.paint()
 }
 
@@ -296,6 +301,7 @@ impl Encoded {
             document: digest(document),
             evaluation: evaluation(),
             format: FORMAT,
+            kernel: KERNEL,
             model: records,
             payload: digest(&data),
             producer: PRODUCER,
@@ -320,6 +326,7 @@ struct Manifest<'a> {
     document: String,
     evaluation: String,
     format: &'a str,
+    kernel: &'a str,
     model: &'a Value,
     payload: String,
     producer: &'a str,
@@ -336,14 +343,15 @@ pub fn read_design_geometry(bytes: &[u8]) -> Option<std::sync::Arc<ModelState>> 
     DesignContainerReader::new(Cursor::new(bytes)).ok()?.geometry()?.final_state().ok()
 }
 
-/// Whether `manifest` is a model cache of this build's evaluation source for `document`. The
-/// application version and commit that wrote it are not asked: another version of the same
+/// Whether `manifest` is a model cache of this build's evaluation source and kernel for `document`.
+/// The application version and commit that wrote it are not asked: another version of the same
 /// evaluation source computed the same model.
 fn current(manifest: &Value, document: &[u8]) -> bool {
     let is = |key: &str, value: &str| manifest.get(key).and_then(Value::as_str) == Some(value);
     is("format", FORMAT)
         && is("producer", PRODUCER)
         && is("evaluation", &evaluation())
+        && is("kernel", KERNEL)
         && is("document", &digest(document))
         && source_trusted(env!("SOLIDCRAFT_EVALUATION_SOURCE"), cfg!(any(test, feature = "trust-unknown-source")))
 }
@@ -454,7 +462,7 @@ fn matrix_of(numbers: &[f64]) -> Result<[[f64; 4]; 4]> {
 
 pub(super) fn geometry_preview(document: &[u8], model: &SavedModel) -> Result<DesignPreview> {
     let doc = Document::from_json(std::str::from_utf8(document).map_err(invalid)?)?;
-    let world = solidcraft_doc::world_state(&doc, &*model.final_state()?);
+    let world = solidcraft_doc::world_state(&doc, &*model.final_state()?)?;
     let mut preview = DesignPreview::default();
     let mut triangles = 0usize;
     let mut display_bytes = 0usize;

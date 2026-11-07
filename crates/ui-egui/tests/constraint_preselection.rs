@@ -3,6 +3,7 @@
 mod support;
 
 use serde_json::json;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::{Sel, sketch::ConstraintKind};
 use solidcraft_ui_egui::scenario::Harness;
 
@@ -202,7 +203,7 @@ fn curvature_polygon_and_fix_consume_clicked_operands_atomically() {
         };
         h.call("ui.view", json!({"view":"top"}));
         h.app.cam.distance = 80.0;
-        h.app.cam.target = solidcraft_engine::geom::Vec3::new(30.0, 15.0, 0.0);
+        h.app.cam.target = solidcore_record::Vec3::new(30.0, 15.0, 0.0);
         h.settle();
         for (i, p) in picks.iter().enumerate() {
             h.step(&json!({"click":{"sketch":p},"shift":i>0})).unwrap();
@@ -215,7 +216,7 @@ fn curvature_polygon_and_fix_consume_clicked_operands_atomically() {
         assert!(h.app.tool.is_none());
         assert!(h.app.session.selection.is_empty());
         assert_eq!(h.app.session.undo.len(), undo + 1);
-        let st = h.app.session.world_state();
+        let st = h.app.session.world_state().unwrap();
         let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         assert!(sk.constraints.iter().any(|c| match command {
             "fix" => matches!(c.kind, ConstraintKind::Fix { .. }),

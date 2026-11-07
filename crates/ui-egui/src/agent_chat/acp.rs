@@ -160,6 +160,19 @@ pub fn initialize_params(version: &str) -> Value {
 /// keeps its own entry on a clash) can't shadow the bridge with a headless session.
 pub const BRIDGE_NAME: &str = "solidcraft-app";
 
+/// Whether a permission question is about a tool of the chat's own MCP server, whose calls
+/// SolidCraft's gate checks. The agent writes both values and ACP has nothing better to go on, so
+/// the test is strict: the whole title is the tool's name as the Claude adapter forms it
+/// (`mcp__solidcraft-app__batch`), one word with no room for a command line, a path or other free
+/// text, and the kind is `other` (the kind an MCP tool has) or not given. Any other title goes
+/// through the user's mode and remembered answers: agents that word their MCP tools differently,
+/// and a user's own MCP server, which the gate doesn't see.
+pub fn is_bridge_tool(title: &str, kind: Option<&str>) -> bool {
+    let tool = title.strip_prefix("mcp__").and_then(|t| t.strip_prefix(BRIDGE_NAME)).and_then(|t| t.strip_prefix("__"));
+    let named = tool.is_some_and(|t| !t.is_empty() && t.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_'));
+    named && matches!(kind, None | Some("other"))
+}
+
 /// The MCP server the agent starts to reach the design: `solidcraft-cli mcp --connect` bridged to
 /// this app's control port. The server finds the port's token in the token file the app wrote
 /// (docs/control-protocol.md), so the token never travels through the agent, and it keeps its
@@ -222,6 +235,21 @@ each stage compare `measure` with them. Prefer one `batch` over many small calls
 the chat, and each message allows a limited number of changes. Don't use shell or file tools: work through the SolidCraft tools. \
 Keep answers short.";
 
+/// The most of the user's custom instructions (#8220) a session gets, in characters: the
+/// Preferences field takes no more, and a longer text from an edited settings file is cut here.
+pub const INSTRUCTIONS_LIMIT: usize = 4000;
+
+/// [`SYSTEM_NOTE`] with the user's custom instructions (#8220) after it. Blank instructions leave
+/// the note as it is.
+pub fn system_note(instructions: &str) -> String {
+    let text: String = instructions.trim().chars().take(INSTRUCTIONS_LIMIT).collect();
+    let text = text.trim_end();
+    if text.is_empty() {
+        return SYSTEM_NOTE.to_string();
+    }
+    format!("{SYSTEM_NOTE}\n\nThe user's custom instructions, set in SolidCraft's preferences:\n{text}")
+}
+
 /// The Claude Code adapter's own tools that reach the computer rather than the design: turned off
 /// for the session (`_meta.claudeCode.options.disallowedTools`), so it works through SolidCraft's.
 pub const CLAUDE_DISALLOWED_TOOLS: &[&str] =
@@ -229,11 +257,12 @@ pub const CLAUDE_DISALLOWED_TOOLS: &[&str] =
 
 /// The `session/new` parameters. `init` is the agent's `initialize` reply: agents read the system
 /// note from different places (#9811), and the standard field may only go to an agent offering it.
-pub fn session_new_params(cwd: &std::path::Path, bridge: Option<&McpBridge>, init: &Value) -> Value {
+/// `note` is the system note ([`system_note`]).
+pub fn session_new_params(cwd: &std::path::Path, bridge: Option<&McpBridge>, init: &Value, note: &str) -> Value {
     let servers: Vec<Value> = bridge.map(McpBridge::to_json).into_iter().collect();
     let mut meta = json!({
         // The Claude adapter's own key, for its versions without the standard field.
-        "systemPrompt": {"append": SYSTEM_NOTE},
+        "systemPrompt": {"append": note},
         // Hosts may opt a session out of "bypass permissions" (the Claude adapter reads it):
         // every tool call the agent asks about reaches the panel.
         // Its own shell and file tools are off: the agent works through SolidCraft's tools.
@@ -242,7 +271,7 @@ pub fn session_new_params(cwd: &std::path::Path, bridge: Option<&McpBridge>, ini
     if takes_antigravity_note(init)
         && let Some(meta) = meta.as_object_mut()
     {
-        meta.insert("antigravity".into(), json!({"systemPrompt": {"append": SYSTEM_NOTE}}));
+        meta.insert("antigravity".into(), json!({"systemPrompt": {"append": note}}));
     }
     let mut params = json!({
         "cwd": cwd.to_string_lossy(),
@@ -252,7 +281,7 @@ pub fn session_new_params(cwd: &std::path::Path, bridge: Option<&McpBridge>, ini
     if takes_standard_note(init)
         && let Some(params) = params.as_object_mut()
     {
-        params.insert("systemPrompt".into(), json!({"mode": "append", "content": [{"type": "text", "text": SYSTEM_NOTE}]}));
+        params.insert("systemPrompt".into(), json!({"mode": "append", "content": [{"type": "text", "text": note}]}));
     }
     params
 }
@@ -374,8 +403,15 @@ pub fn auth_methods(init: &Value) -> Vec<AuthMethod> {
                     let kind = match m.get("type").and_then(Value::as_str) {
                         Some("terminal") => {
                             let meta = m.get("_meta").and_then(|x| x.get("terminal-auth"));
-                            let command = meta.and_then(|t| Some((t.get("command")?.as_str()?.to_string(), strings(t.get("args")))));
-                            AuthKind::Terminal { args: strings(m.get("args")), command }
+                            let mut command = meta.and_then(|t| Some((t.get("command")?.as_str()?.to_string(), strings(t.get("args")))));
+                            let mut args = strings(m.get("args"));
+                            // Vibe's Python launcher can advertise its own path as an argument.
+                            // The configured ACP command already starts Vibe and accepts --setup.
+                            if id == "vibe-setup" && init.pointer("/agentInfo/name").and_then(Value::as_str) == Some("@mistralai/mistral-vibe") {
+                                args = vec!["--setup".into()];
+                                command = None;
+                            }
+                            AuthKind::Terminal { args, command }
                         }
                         Some("env_var") => AuthKind::EnvVar {
                             vars: m
@@ -473,6 +509,8 @@ pub enum Incoming {
     Permission {
         rpc: Value,
         title: String,
+        /// The tool call's kind (`execute`, `edit`, `other`, …), as the agent gives it.
+        kind: Option<String>,
         options: Vec<PermissionOption>,
     },
     /// The agent says whether it is logged in (an extension both adapters send).
@@ -546,6 +584,7 @@ pub fn parse(line: &str) -> Option<Incoming> {
         (Some("session/request_permission"), Some(id)) => {
             let call = params.get("toolCall");
             let title = call.and_then(|c| c.get("title")).and_then(Value::as_str).unwrap_or("").to_string();
+            let kind = call.and_then(|c| c.get("kind")).and_then(Value::as_str).map(str::to_string);
             let options = params
                 .get("options")
                 .and_then(Value::as_array)
@@ -562,7 +601,7 @@ pub fn parse(line: &str) -> Option<Incoming> {
                         .collect()
                 })
                 .unwrap_or_default();
-            Some(Incoming::Permission { rpc: id.clone(), title, options })
+            Some(Incoming::Permission { rpc: id.clone(), title, kind, options })
         }
         (Some(m), Some(id)) => Some(Incoming::Unsupported { rpc: id.clone(), method: m.to_string() }),
         (Some("session/update"), None) => Some(update(params.get("update")?, params.get("sessionId").and_then(Value::as_str).unwrap_or(""))),
@@ -700,34 +739,78 @@ mod tests {
         // The panel still recognises the bridge's tools as SolidCraft's (agents name them after
         // their server, e.g. `mcp__solidcraft-app__batch`).
         assert!(BRIDGE_NAME.contains("solidcraft"));
+        assert!(is_bridge_tool(&format!("mcp__{BRIDGE_NAME}__batch"), Some("other")));
+    }
+
+    /// Only the whole name of a tool of the chat's own server counts, whatever else a title holds.
+    #[test]
+    fn only_the_bridges_exact_tool_names_are_its_tools() {
+        for tool in ["batch", "inspect_design", "set_parameter"] {
+            assert!(is_bridge_tool(&format!("mcp__solidcraft-app__{tool}"), None), "{tool}");
+            assert!(is_bridge_tool(&format!("mcp__solidcraft-app__{tool}"), Some("other")), "{tool}");
+        }
+        for title in [
+            "",
+            "solidcraft",
+            "SolidCraft",
+            "run solidcraft-cli; ls",
+            "solidcraft-cli --version",
+            "Edit ~/.local/share/solidcraft/agent-chat/work/notes.txt",
+            // A user's own MCP server (docs/mcp.md), which SolidCraft's gate doesn't see.
+            "mcp__solidcraft__batch",
+            "mcp__solidcraft-live__batch",
+            "mcp__other__solidcraft-app",
+            "mcp__solidcraft-app__",
+            "mcp__solidcraft-app",
+            "solidcraft-app__batch",
+            "solidcraft-app: batch",
+            "Tool: solidcraft-app/batch",
+            "mcp.solidcraft-app.batch",
+            " mcp__solidcraft-app__batch",
+            "mcp__solidcraft-app__batch ",
+            "mcp__solidcraft-app__batch; ls",
+            "mcp__solidcraft-app__batch && ls",
+            "mcp__solidcraft-app__batch\nls",
+            "mcp__solidcraft-app__../../tool",
+            "mcp__SOLIDCRAFT-APP__batch",
+            "MCP__solidcraft-app__batch",
+            "mcp__solidcraft-app__Batch",
+        ] {
+            assert!(!is_bridge_tool(title, None), "{title:?}");
+        }
+        for kind in ["execute", "edit", "delete", "move", "read", "search", "fetch", "think", ""] {
+            assert!(!is_bridge_tool("mcp__solidcraft-app__batch", Some(kind)), "{kind:?}");
+        }
     }
 
     #[test]
     fn the_session_gets_the_bridged_mcp_server_without_a_token_or_any_path() {
         let b = McpBridge { cli: "/opt/solidcraft/solidcraft-cli".into(), port: 41234 };
-        let p = session_new_params(std::path::Path::new("/home/u/designs"), Some(&b), &json!({}));
+        let p = session_new_params(std::path::Path::new("/home/u/designs"), Some(&b), &json!({}), SYSTEM_NOTE);
         let s = &p["mcpServers"][0];
         assert_eq!(s["name"], BRIDGE_NAME);
         assert_eq!(s["args"], json!(["mcp", "--connect", "127.0.0.1:41234"]));
         let text = p.to_string();
         assert!(!text.contains("allow-any-path") && !text.contains("TOKEN") && !text.contains("token"), "{text}");
         assert!(p["_meta"]["claudeCode"]["options"]["disallowedTools"].as_array().is_some_and(|t| t.iter().any(|x| x == "Bash")));
-        assert_eq!(session_new_params(std::path::Path::new("/tmp"), None, &json!({}))["mcpServers"], json!([]));
+        assert_eq!(session_new_params(std::path::Path::new("/tmp"), None, &json!({}), SYSTEM_NOTE)["mcpServers"], json!([]));
     }
 
     /// #9811: the note goes by the routes an agent's `initialize` reply offers, and the standard
     /// field never goes to an agent that doesn't offer it, as the protocol asks.
     #[test]
     fn the_system_note_takes_every_route_the_agent_offers() {
-        let params = |init: Value| session_new_params(std::path::Path::new("/tmp"), None, &init);
-        let standard = json!({"mode": "append", "content": [{"type": "text", "text": SYSTEM_NOTE}]});
+        // With the user's custom instructions (#8220), which go wherever the note goes.
+        let note = system_note("Sketch on XZ with explicit plane vectors.");
+        let params = |init: Value| session_new_params(std::path::Path::new("/tmp"), None, &init, &note);
+        let standard = json!({"mode": "append", "content": [{"type": "text", "text": note}]});
 
         let offers_standard = params(json!({"agentCapabilities": {"sessionCapabilities": {"systemPrompt": {}}}}));
         assert_eq!(offers_standard["systemPrompt"], standard);
         assert!(offers_standard["_meta"].get("antigravity").is_none());
 
         let offers_antigravity = params(json!({"agentCapabilities": {"_meta": {"antigravity": {"systemPrompt": {"append": true}}}}}));
-        assert_eq!(offers_antigravity["_meta"]["antigravity"]["systemPrompt"]["append"], SYSTEM_NOTE);
+        assert_eq!(offers_antigravity["_meta"]["antigravity"]["systemPrompt"]["append"], note);
         assert!(offers_antigravity.get("systemPrompt").is_none());
 
         for none in [
@@ -743,9 +826,22 @@ mod tests {
         // Every session keeps the key older Claude adapters read, and the tools they turn off.
         for init in [json!({}), json!({"agentCapabilities": {"sessionCapabilities": {"systemPrompt": {}}}})] {
             let p = params(init);
-            assert_eq!(p["_meta"]["systemPrompt"]["append"], SYSTEM_NOTE);
+            assert_eq!(p["_meta"]["systemPrompt"]["append"], note);
             assert!(p["_meta"]["claudeCode"]["options"]["disallowedTools"].is_array());
         }
+    }
+
+    /// #8220: the user's custom instructions follow the note, trimmed and cut at the limit; blank
+    /// ones leave the note as it is.
+    #[test]
+    fn custom_instructions_follow_the_note_trimmed_and_capped() {
+        assert_eq!(system_note(""), SYSTEM_NOTE);
+        assert_eq!(system_note(" \n\t "), SYSTEM_NOTE);
+        let note = system_note("\n  Use M3 screws.\nPrint flat side down.  \n");
+        assert!(note.starts_with(SYSTEM_NOTE), "{note}");
+        assert!(note.ends_with("preferences:\nUse M3 screws.\nPrint flat side down."), "{note}");
+        let note = system_note(&"ż".repeat(INSTRUCTIONS_LIMIT + 10));
+        assert_eq!(note.chars().filter(|c| *c == 'ż').count(), INSTRUCTIONS_LIMIT);
     }
 
     /// #5546: an agent started through `wsl.exe` gets the session's paths as WSL shows them.
@@ -768,10 +864,30 @@ mod tests {
         assert_eq!(wsl(r"\\server\share\x"), r"\\server\share\x");
 
         let b = McpBridge { cli: r"C:\Program Files\SolidCraft\solidcraft-cli.exe".into(), port: 41234 };
-        let p = session_new_params(&wsl_path(std::path::Path::new(r"C:\Users\u\work")), Some(&b.in_wsl()), &json!({}));
+        let p = session_new_params(&wsl_path(std::path::Path::new(r"C:\Users\u\work")), Some(&b.in_wsl()), &json!({}), SYSTEM_NOTE);
         assert_eq!(p["cwd"], "/mnt/c/Users/u/work");
         assert_eq!(p["mcpServers"][0]["command"], "/mnt/c/Program Files/SolidCraft/solidcraft-cli.exe");
         assert_eq!(p["mcpServers"][0]["args"], json!(["mcp", "--connect", "127.0.0.1:41234"]));
+    }
+
+    #[test]
+    fn vibe_terminal_setup_uses_the_configured_acp_launcher() {
+        let mut init = json!({
+            "agentInfo": {"name": "@mistralai/mistral-vibe"},
+            "authMethods": [{
+                "id": "vibe-setup", "type": "terminal", "name": "Register your API Key",
+                "args": [r"C:\Program Files\Vibe\vibe-acp", "--setup"],
+                "_meta": {"terminal-auth": {"command": "python.exe", "args": [r"C:\Program Files\Vibe\vibe-acp", "--setup"]}}
+            }]
+        });
+        let methods = auth_methods(&init);
+        assert_eq!(methods[0].kind, AuthKind::Terminal { args: vec!["--setup".into()], command: None });
+
+        init["agentInfo"]["name"] = json!("another-agent");
+        let methods = auth_methods(&init);
+        let AuthKind::Terminal { args, command } = &methods[0].kind else { panic!("terminal method expected") };
+        assert_eq!(args, &[r"C:\Program Files\Vibe\vibe-acp", "--setup"]);
+        assert!(command.is_some());
     }
 
     #[test]
@@ -813,8 +929,9 @@ mod tests {
             })
         );
         let perm = r#"{"jsonrpc":"2.0","id":7,"method":"session/request_permission","params":{"sessionId":"s","toolCall":{"toolCallId":"t1","title":"batch"},"options":[{"optionId":"allow","name":"Allow","kind":"allow_once"},{"optionId":"reject","name":"Reject","kind":"reject_once"}]}}"#;
-        let Some(Incoming::Permission { rpc, title, options }) = parse(perm) else { panic!() };
+        let Some(Incoming::Permission { rpc, title, kind, options }) = parse(perm) else { panic!() };
         assert_eq!((title.as_str(), options.len(), options[1].kind.as_str()), ("batch", 2, "reject_once"));
+        assert_eq!(kind, None);
         assert_eq!(permission_reply(rpc.clone(), Some("allow"))["result"]["outcome"], json!({"outcome": "selected", "optionId": "allow"}));
         assert_eq!(permission_reply(rpc, None)["result"]["outcome"]["outcome"], "cancelled");
         let fs = r#"{"jsonrpc":"2.0","id":8,"method":"fs/read_text_file","params":{}}"#;
