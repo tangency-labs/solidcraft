@@ -27,7 +27,7 @@
 //!   section the viewport shows (no window needed); the ground grid and the origin's axes as the
 //!   window shows them, unless `grid` or `axes` says
 //! - `ui.icon_audit {reset?, stop?}`: collect/drain requested icon names, resolved masters and placeholder flags;
-//! - `ui.panel_fixture {enabled?, preset?}`: opt-in synthetic content in the real panel host;
+//! - `ui.panel_fixture {enabled?, preset?, translucency_percent?}`: opt-in synthetic content in the real panel host;
 //!   `{}` observes the current host, probe and Session without ticking or model commands
 //! - `ui.menu {x?, y?, target?, close?}`: open a context menu at a point (the viewport's marking
 //!   menu, or a browser menu with `target: {type: body|sketch|component, …}`); without a point,
@@ -1890,6 +1890,12 @@ mod tests {
             json!({"preset":"x".repeat(4096)}),
             json!({"enabled":false,"preset":"docks"}),
             json!({"enabled":true,"unknown":0}),
+            json!({"preset":"surfaces","translucency_percent":-1}),
+            json!({"preset":"surfaces","translucency_percent":101}),
+            json!({"preset":"surfaces","translucency_percent":"50"}),
+            json!({"preset":"surfaces","translucency_percent":null}),
+            json!({"translucency_percent":50}),
+            json!({"enabled":false,"translucency_percent":50}),
         ] {
             assert!(crate::panel_runtime::control_specimen(&mut app, &params).is_err(), "{params}");
             assert!(app.panel_runtime().is_none());
@@ -1917,6 +1923,7 @@ mod tests {
             ("stack_tabs", 4),
             ("content_fill", 2),
             ("inline", 1),
+            ("surfaces", 6),
         ] {
             let before = crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap()["session"].clone();
             h.step(&json!({"panel_fixture":{"enabled":true,"preset":name}})).unwrap();
@@ -1937,6 +1944,84 @@ mod tests {
             assert!(h.app.panel_runtime().is_none());
             assert!(!h.app.universal_panel_host_enabled());
         }
+    }
+
+    #[test]
+    fn panel_surface_fixture_converts_translucency_without_saving_preferences() {
+        for percent in [0, 50, 100] {
+            let mut h = crate::scenario::Harness::new();
+            let preferences = serde_json::to_value(&h.app.preferences).unwrap();
+            crate::panel_runtime::control_specimen(&mut h.app, &json!({"preset":"surfaces","translucency_percent":percent})).unwrap();
+            h.frames(4);
+            let reply = crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap();
+            let sections = reply["host"]["sections"].as_array().unwrap();
+            assert!(!sections.is_empty());
+            for section in sections {
+                let alpha = section["paint_alpha"].as_u64().unwrap();
+                assert!(
+                    alpha >= ((100 - percent) as f64 * 255.0 / 100.0).ceil() as u64,
+                    "readability protection can only increase the requested opacity: {section}"
+                );
+                assert!(!section["contrast"].is_null(), "every painted surface reports its contrast decision");
+            }
+            assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), preferences);
+        }
+    }
+
+    #[test]
+    fn panel_fixture_live_opacity_updates_retain_controllers_layout_and_document() {
+        let mut h = crate::scenario::Harness::new();
+        crate::panel_runtime::control_specimen(&mut h.app, &json!({"preset":"surfaces","translucency_percent":0})).unwrap();
+        h.frames(4);
+        let document = h.app.session.doc.clone();
+        let model = h.app.session.model.state();
+        let camera = h.app.cam;
+        let preferences = serde_json::to_value(&h.app.preferences).unwrap();
+        let before = crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap();
+        let sections = h
+            .app
+            .universal_panel_frame()
+            .unwrap()
+            .layout
+            .sections
+            .iter()
+            .map(|section| (section.section.clone(), section.outer, section.body, section.surface))
+            .collect::<Vec<_>>();
+        for percent in [50, 100, 0] {
+            let prior = crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap();
+            let updated = crate::panel_runtime::control_specimen(&mut h.app, &json!({"translucency_percent":percent})).unwrap();
+            assert_eq!(updated["runtime"], prior["runtime"], "updating opacity does not tick, dispatch or replace content");
+            h.frames(4);
+            let after = crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap();
+            assert_eq!(after["runtime"]["layout"], before["runtime"]["layout"]);
+            for (old, new) in
+                before["runtime"]["probe"]["controllers"].as_array().unwrap().iter().zip(after["runtime"]["probe"]["controllers"].as_array().unwrap())
+            {
+                assert_eq!(new["controller_identity"], old["controller_identity"]);
+                assert_eq!(new["draft"], old["draft"]);
+                assert_eq!(new["transaction_live"], old["transaction_live"]);
+            }
+            assert_eq!(
+                h.app
+                    .universal_panel_frame()
+                    .unwrap()
+                    .layout
+                    .sections
+                    .iter()
+                    .map(|section| (section.section.clone(), section.outer, section.body, section.surface))
+                    .collect::<Vec<_>>(),
+                sections
+            );
+            assert!(std::sync::Arc::ptr_eq(&document, &h.app.session.doc));
+            assert!(std::sync::Arc::ptr_eq(&model, &h.app.session.model.state()));
+            assert_eq!(h.app.cam, camera);
+            assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), preferences);
+            if percent == 0 {
+                assert!(h.app.universal_panel_frame().unwrap().layout.sections.iter().all(|section| section.paint_alpha == Some(255)));
+            }
+        }
+        h.app.disable_universal_panel_host().unwrap();
+        assert!(crate::panel_runtime::control_specimen(&mut h.app, &json!({"translucency_percent":50})).is_err());
     }
 
     #[test]
