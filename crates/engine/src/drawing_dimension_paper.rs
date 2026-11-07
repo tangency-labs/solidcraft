@@ -94,6 +94,45 @@ pub struct Layout {
     pub text_boxes: Vec<[Vec2; 4]>,
 }
 
+/// A dimension's lines, arrowheads and texts as its layout gives them, before its lines are stroked,
+/// and where they sit ([`Layout`]).
+#[derive(Default)]
+struct Drawn {
+    lines: Vec<Vec<Vec2>>,
+    /// Each one's tip and the unit direction it points in.
+    arrows: Vec<(Vec2, Vec2)>,
+    texts: Vec<Item>,
+    fonts: Vec<Font>,
+    why: Option<String>,
+    pending: bool,
+    laid: Layout,
+}
+
+impl Drawn {
+    /// `line`, a `role` one, unless a line already drawn covers it; a line it covers goes, in the
+    /// layout as in the group. A chain's neighbours share an extension line, and a set's lines from
+    /// its origin lie along each other.
+    fn line(&mut self, role: LineRole, line: Vec<Vec2>) {
+        if !self.lines.iter().any(|other| covered(&line, other)) {
+            self.lines.retain(|other| !covered(other, &line));
+            self.laid.lines.retain(|(_, other)| !covered(other, &line));
+            self.laid.lines.push((role, line.clone()));
+            self.lines.push(line);
+        }
+    }
+
+    /// `text` centred on `centre`, running along `dir`, with its box when it is set.
+    fn text(&mut self, text: Text, centre: Vec2, dir: Vec2) {
+        if !text.runs.is_empty() {
+            self.laid.text_boxes.push(text_box(centre, dir, text.half));
+        }
+        self.texts.extend(placed(text.runs, text.half, TEXT_MM, centre, dir));
+        self.fonts.extend(text.fonts);
+        self.why = self.why.take().or(text.why);
+        self.pending |= text.pending;
+    }
+}
+
 /// A dimension on paper.
 pub struct OnPaper {
     pub group: Group,
@@ -113,34 +152,18 @@ pub struct OnPaper {
 pub fn paper_group(dimension: &Dimension, resolved: &Resolved, frame: &ViewFrame, group: LineGroup, lettering: &PaperFonts) -> Option<OnPaper> {
     let line_mm = LineKind::Thin.width_mm(group);
     let on: Vec<Vec2> = resolved.points.iter().map(|p| frame.to_paper(*p)).collect();
-    let mut lines: Vec<Vec<Vec2>> = Vec::new();
-    let mut arrows = Vec::new();
-    let (mut texts, mut fonts, mut why, mut pending) = (Vec::new(), Vec::new(), None, false);
-    let mut laid = Layout::default();
     let set = |text: Option<&str>| Text::set(text, TEXT_MM, lettering);
+    let mut drawn = Drawn::default();
     for piece in pieces(dimension, resolved, &on, &set)? {
         let layout = dim_layout_sized(&piece.frame, piece.at, &SIZES, piece.text.half, [None, None]);
-        if !piece.text.runs.is_empty() {
-            laid.text_boxes.push(text_box(layout.text, layout.text_dir, piece.text.half));
-        }
-        texts.extend(placed(piece.text.runs, piece.text.half, TEXT_MM, layout.text, layout.text_dir));
-        fonts.extend(piece.text.fonts);
-        why = why.or(piece.text.why);
-        pending |= piece.text.pending;
-        // A chain's neighbours share an extension line, and one line inside a longer one along it is
-        // drawn once, as the longer one: in the layout as in the group.
+        drawn.text(piece.text, layout.text, layout.text_dir);
         for (i, line) in layout.lines.into_iter().enumerate() {
-            if !lines.iter().any(|other| covered(&line, other)) {
-                lines.retain(|other| !covered(other, &line));
-                laid.lines.retain(|(_, other)| !covered(other, &line));
-                let role = if i < layout.extensions { LineRole::Extension } else { LineRole::Dimension };
-                laid.lines.push((role, line.clone()));
-                lines.push(line);
-            }
+            drawn.line(if i < layout.extensions { LineRole::Extension } else { LineRole::Dimension }, line);
         }
-        laid.arrows.extend(&layout.arrows);
-        arrows.extend(layout.arrows);
+        drawn.arrows.extend(layout.arrows);
     }
+    let Drawn { mut lines, arrows, texts, fonts, why, pending, mut laid } = drawn;
+    laid.arrows.clone_from(&arrows);
     for (tip, dir) in &arrows {
         lines.iter_mut().for_each(|line| stop_at_base(line, *tip, *dir));
     }
