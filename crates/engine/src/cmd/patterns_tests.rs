@@ -1239,3 +1239,25 @@ fn circular_pattern_of_a_moved_copy_adds_one_body_per_instance() {
     let far = s.world_state().unwrap().bodies.iter().map(|b| b.mesh().bounds().max.x).fold(f64::MIN, f64::max);
     assert!(far > 20.0, "the repeats follow the redefined Move: {far}");
 }
+
+/// A pattern of bodies makes copies that look and weigh like their sources (#12115): the same
+/// part in another place. Two bodies, three along X: each source's two copies take its own
+/// appearance or material, not the other source's and not the default.
+#[test]
+fn a_body_pattern_keeps_each_sources_appearance_and_material() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"center":[0,0,5],"operation":"new","body_name":"Base"}));
+    run(&mut s, "solid.cylinder", json!({"diameter":6,"height":20,"base":[0,0,10],"operation":"new","body_name":"Post"}));
+    run(&mut s, "appearance.assign", json!({"bodies":["Post"],"color":[200,30,30]}));
+    run(&mut s, "material.assign", json!({"bodies":["Base"],"material":"Steel"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies":["Base","Post"],"dir1":[1,0,0],"count1":3,"spacing1":30}));
+    let red = s.doc.appearances.bodies.get("Post").cloned().expect("Post is red");
+    for copy in ["Base (2)", "Base (3)"] {
+        assert_eq!(s.doc.materials.get(copy).map(String::as_str), Some("Steel"), "{copy}");
+        assert!(!s.doc.appearances.bodies.contains_key(copy), "{copy} was not painted");
+    }
+    for copy in ["Post (2)", "Post (3)"] {
+        assert_eq!(s.doc.appearances.bodies.get(copy), Some(&red), "{copy}");
+        assert!(!s.doc.materials.contains_key(copy), "{copy} has no material of its own");
+    }
+}
