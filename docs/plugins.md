@@ -2,8 +2,7 @@
 
 Design companion to [#1221](https://github.com/bherbruck/solidcraft/issues/1221): sandboxed
 WebAssembly plugins with a WIT interface, the same `run(command, args)` JSON as
-[MCP](mcp.md) and the [control protocol](control-protocol.md). Browser hosting is in
-[web-runtime.md](web-runtime.md).
+[MCP](mcp.md) and the [control protocol](control-protocol.md).
 
 This document adds **parametric timeline features**: a generic host-owned feature shell that
 plugins fill with parameters, display metadata, and rebuild logic, without a second timeline
@@ -123,12 +122,9 @@ header carries `PluginDisplay` metadata while children are ordinary native featu
 not need the plugin until the user edits plugin-owned params on the header. Migrates cleanly to
 full `FeatureKind::Plugin` when `evaluate` lands.
 
-## Relationship to craft-libs
+## Where the code lives
 
-Plugin **document model and eval** stay in SolidCraft (`crates/doc`, `crates/engine`). craft-libs
-provides worker/broker hosting only ([web-runtime.md](web-runtime.md)). Neutral serde types
-(`VersionedParams`, `PluginDisplay`) may move to a shared crate later if multiple apps need them;
-CAD plugins remain SolidCraft-specific.
+Plugin **document model and eval** stay in SolidCraft (`crates/doc`, `crates/engine`).
 
 ## Phasing
 
