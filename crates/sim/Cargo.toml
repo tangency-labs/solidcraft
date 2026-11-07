@@ -13,3 +13,6 @@ solidcraft-geom = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 log = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

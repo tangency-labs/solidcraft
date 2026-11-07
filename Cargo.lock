@@ -4540,6 +4540,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcraft-sim"
+version = "0.40.0-rc.3"
+dependencies = [
+ "log",
+ "serde",
+ "serde_json",
+ "solidcraft-geom",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "solidcraft-sketch"
 version = "0.40.0-rc.3"
 dependencies = [

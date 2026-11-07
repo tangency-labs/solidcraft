@@ -20,9 +20,13 @@ a result viewable in the SolidCraft viewport (and `.vtu` export).
 - **Outputs:** WGSL assembly/matvec/dot/axpy kernels, host PCG loop,
   GPU-resident solution, CPU fallback.
 - **Benchmark:** 500k DOF vs CPU PCG, identical mesh; PCIe transfers
-  counted.
-- **Pass:** matches CPU reference within precision policy; 1 H2D +
-  1 D2H per solve; speedup reported with hardware named.
+  counted separately as (a) bulk field transfers and (b)
+  per-iteration scalar `dot` readbacks required by the host PCG loop.
+- **Pass:** matches CPU reference within precision policy (WGSL is
+  FP32-only; see CONTEXT precision section); bulk transfers are
+  1 H2D + 1 D2H per solve, with per-iteration scalar readbacks
+  reported (not hidden in the bulk count); speedup reported with
+  hardware named.
 
 ## Phase 2 — Linear elasticity (static stress)
 
@@ -48,4 +52,5 @@ plasticity in MVP · ANSYS/Fusion code never enters this repo.
 
 ## Open questions
 
-See `CONTEXT.md` (volume meshing, WGSL FP64, result-to-viewport mapping).
+See `CONTEXT.md` (volume meshing, native-FP64 backend, Gmsh licence
+route, result-to-viewport mapping).
