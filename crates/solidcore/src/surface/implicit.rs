@@ -11,6 +11,7 @@
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent2d::Extent2d;
+use crate::geom::vector2d::Point2;
 use crate::kernel::Kernel;
 use crate::math::{Vec2, Vec3, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -66,6 +67,42 @@ pub enum Implicit {
         /// The minor radius r.
         minor: f64,
     },
+}
+
+impl Implicit {
+    /// How far `x` is from this surface.
+    #[must_use]
+    pub fn distance(&self, x: Vec3) -> f64 {
+        // the axial and radial parts of `x` about an axis through `o`
+        let about = |o: Vec3, axis: Vec3| {
+            let v = x - o;
+            let h = v.dot(axis);
+            (h, (v - axis * h).length())
+        };
+        match *self {
+            Self::Plane { origin, normal } => (x - origin).dot(normal).abs(),
+            Self::Cone {
+                origin,
+                axis,
+                radius,
+                tan_angle,
+            } => {
+                let (h, rho) = about(origin, axis);
+                (rho - (radius + tan_angle * h)).abs() / (1.0 + tan_angle * tan_angle).sqrt()
+            }
+            Self::Sphere { centre, radius } => ((x - centre).length() - radius).abs(),
+            Self::Torus {
+                centre,
+                axis,
+                major,
+                minor,
+            } => {
+                let (h, rho) = about(centre, axis);
+                let (a, b) = (rho - major, h);
+                ((a * a + b * b).sqrt() - minor).abs()
+            }
+        }
+    }
 }
 
 /// A polynomial in Bernstein form over a patch, degrees `(p, q)`, `c[i (q + 1) + j]`.
@@ -240,7 +277,7 @@ pub fn lies_on(form: &BSplineSurface, a: &Implicit) -> Result<bool> {
     Ok(true)
 }
 
-const OP_EXACT: &str = "surface::implicit::check_exact_net";
+pub(crate) const OP_EXACT: &str = "surface::implicit::check_exact_net";
 
 /// A quadric `x.A.x + 2 b.x + c = 0` as `(A, b, c)`.
 pub type QuadricEquation = ([[f64; 3]; 3], [f64; 3], f64);
@@ -334,6 +371,46 @@ pub fn check_exact_net(k: &Kernel, net: &Surface, check: &ExactNetCheck) -> Resu
         ));
     }
     Ok(())
+}
+
+/// The number of intervals [`net_miss`] samples a net at, each way.
+const MISS_SAMPLES: u32 = 16;
+
+/// How far `net` strays from the class's `surface`, sampled over its domain. A guard, not a
+/// certificate: [`check_exact_net`] is the proof, and a net that passes only this keeps no
+/// definition. It tells a net that the class's rounding leaves off the surface from one
+/// built wrongly.
+///
+/// # Errors
+///
+/// Those of the evaluations.
+pub fn net_miss(k: &Kernel, net: &Surface, surface: &ClassSurface) -> Result<f64> {
+    let dom = net.natural_uv_domain_with_nurb(k)?;
+    let (lo, hi) = (dom.min(), dom.max());
+    let mut worst = 0.0_f64;
+    for i in 0..=MISS_SAMPLES {
+        for j in 0..=MISS_SAMPLES {
+            let (fu, fv) = (
+                f64::from(i) / f64::from(MISS_SAMPLES),
+                f64::from(j) / f64::from(MISS_SAMPLES),
+            );
+            let uv = Point2::new(lo.x + (hi.x - lo.x) * fu, lo.y + (hi.y - lo.y) * fv);
+            let x = net.evaluate_point(k, uv)?;
+            let miss = match surface {
+                ClassSurface::Implicit(a) => a.distance(x),
+                ClassSurface::Canal {
+                    spine, map, radius, ..
+                } => {
+                    let w = if map.along_v { uv.y } else { uv.x };
+                    let ivl = spine.natural_interval();
+                    let s = (map.a + map.b * w).max(ivl.min()).min(ivl.max());
+                    ((x - spine.evaluate_point(s)?).length() - *radius).abs()
+                }
+            };
+            worst = worst.max(miss);
+        }
+    }
+    Ok(worst)
 }
 
 /// A Bezier segment of a rational curve, Bernstein polynomials of degree `(p, 0)`: the

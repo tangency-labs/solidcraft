@@ -2487,9 +2487,44 @@ fn keep_definition(
     let Some(surface) = pseudo.geom_mut(g)?.fillet_surface_mut(None)? else {
         return Err(SolidError::null_pointer(OP));
     };
-    round.recertify(k, surface)?;
-    surface.set_exact_round(Some(round));
+    keep_round_if_proved(k, surface, round, inputs.tol)?;
     Ok(())
+}
+
+/// `round` kept on `net` where it is proved ([`ExactRound::recertify`]), returning whether it
+/// was. The class is read within `tol`, the body's tolerance, and the certificate to rounding.
+/// Supports only that close to the class (a cylinder's axis 1e-13 off square to a plane, as
+/// read from a record) make a net that is the round but not provably on the class's surface:
+/// no bound of 0, so it keeps no definition, as a nodal quartic does. A net further off the
+/// class than `tol` ([`ExactRound::miss`]) is built wrongly, and stays an error.
+///
+/// # Errors
+///
+/// The certificate's refusal of a net more than `tol` off the class, or of supports that
+/// give the class no surface; those of the certificate and of [`ExactRound::miss`].
+pub fn keep_round_if_proved(
+    k: &Kernel,
+    net: &mut Surface,
+    round: ExactRound,
+    tol: f64,
+) -> Result<bool> {
+    match round.recertify(k, net) {
+        Ok(_) => {
+            net.set_exact_round(Some(round));
+            Ok(true)
+        }
+        Err(e) => {
+            let off = matches!(
+                &e,
+                SolidError::InvalidInput { operation, .. }
+                    if *operation == crate::surface::implicit::OP_EXACT
+            );
+            match off.then(|| round.miss(k, net)).transpose()?.flatten() {
+                Some(miss) if miss <= tol => Ok(false),
+                _ => Err(e),
+            }
+        }
+    }
 }
 
 /// [`calc_exact_fillet_geom`]'s build by the class (`CalcExactFilletGeom`), without the
@@ -2649,6 +2684,79 @@ fn exact_fillet_geom_of_class(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A box's edge rounded 2: the round's net, without its definition, and the definition.
+    fn kept_round() -> (Kernel, Surface, ExactRound) {
+        use crate::blend::fillet_executive::session::FilletSession;
+        use crate::kernel::UpstreamFixes;
+        use crate::surface::procedural_blend::BlendRef;
+        use crate::topology::face::p2 as face;
+        let mut k = Kernel {
+            fixes: UpstreamFixes::all(),
+            ..Kernel::default()
+        };
+        let mut b = crate::primitive::api_primitives::create_box(
+            &mut k,
+            Point3::new(0.0, 0.0, 0.0),
+            30.0,
+            20.0,
+            10.0,
+        )
+        .unwrap();
+        let edge = b.edge_list()[0];
+        {
+            let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+            s.prepare_constant_radius_edges(&mut k, &[edge], 2.0, 1, 1, 1.0)
+                .unwrap();
+            s.do_fillet(&mut k).unwrap();
+        }
+        for &f in b.face_list() {
+            let s = face::surface(&b, f).unwrap().unwrap();
+            if let Some(BlendRef::Exact { round, .. }) = s.procedural_blend() {
+                let round = round.clone();
+                let mut net = s.clone();
+                net.set_exact_round(None);
+                return (k, net, round);
+            }
+        }
+        panic!("no face keeps an exact definition");
+    }
+
+    /// `net` moved `by` along every axis: its own axis is along one, the others take it off
+    /// the class.
+    fn moved(k: &Kernel, net: &Surface, by: f64) -> Surface {
+        let mut net = net.clone();
+        let shift = crate::geom::axis2_placement::Axis2Placement::new(
+            Point3::new(by, by, by),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        );
+        net.transform(k, &shift, None).unwrap();
+        net
+    }
+
+    /// The class is read within 2e-5 here. A net on it keeps its definition; one off it by
+    /// less keeps none (the round of supports that close to the class); one further off is
+    /// built wrongly, and stays an error.
+    #[test]
+    fn a_net_off_its_class_keeps_no_definition_within_the_tolerance_only() {
+        let tol = 2e-5;
+        let (k, net, round) = kept_round();
+        let mut on = net.clone();
+        assert!(keep_round_if_proved(&k, &mut on, round.clone(), tol).unwrap());
+        assert!(on.procedural_blend().is_some());
+
+        let mut near = moved(&k, &net, 1e-7);
+        assert!(!keep_round_if_proved(&k, &mut near, round.clone(), tol).unwrap());
+        assert!(near.procedural_blend().is_none());
+
+        let mut far = moved(&k, &net, 1e-3);
+        let refused = keep_round_if_proved(&k, &mut far, round, tol);
+        assert!(
+            matches!(refused, Err(SolidError::InvalidInput { .. })),
+            "{refused:?}"
+        );
+    }
 
     fn plane(point: Point3, normal: Vec3) -> BlendQuadric {
         BlendQuadric {

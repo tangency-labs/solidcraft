@@ -39,7 +39,7 @@ use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::EFF_ZERO;
 use crate::nurbs::b_spline_curve::BSplineCurve;
-use crate::surface::implicit::{check_exact_net, ClassSurface, ExactNetCheck, LeaderMap};
+use crate::surface::implicit::{check_exact_net, net_miss, ClassSurface, ExactNetCheck, LeaderMap};
 use crate::surface::procedural_blend::chamfer::ChamferDefinition;
 use crate::surface::surface::Surface;
 
@@ -300,6 +300,21 @@ impl ExactRound {
             },
         )?;
         Ok(0.0)
+    }
+
+    /// How far `net` strays from the surface of the class its supports give
+    /// ([`net_miss`]); `None` where they give it none.
+    ///
+    /// # Errors
+    ///
+    /// Those of reading the supports' quadrics and of the evaluations.
+    pub fn miss(&self, k: &Kernel, net: &Surface) -> Result<Option<f64>> {
+        let [a, b] = &self.supports;
+        let blend = classify_supports(k, [a, b], &self.inputs)?;
+        match class_surface(&blend, self.leader.as_ref(), &self.map) {
+            Some(surface) => net_miss(k, net, &surface).map(Some),
+            None => Ok(None),
+        }
     }
 
     /// Moves the definition with its net (`Transform`): the supports, the leader and the
