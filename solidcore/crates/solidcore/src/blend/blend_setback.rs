@@ -2071,11 +2071,12 @@ pub fn fill_hole_counted(
 /// G1 fill at degree 9: whether its conditions can be met (`feasible`), and the least
 /// uniform violation of its normalized sector conditions over the heights (`margin_value`:
 /// `<= 0` where met; `margin` asks it), one quadratic programme each; or (`fill`) the fill as
-/// [`fill_hole`]'s, its degrees tried from the least up only.
+/// [`fill_hole`]'s, its degrees tried in the same order.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 #[allow(clippy::struct_excessive_bools)] // the fork's three switches and solidcore's margin
 pub struct Probe {
-    /// `m_bFill`: the fill itself, from the least degree up (no degree-9 proof first).
+    /// `m_bFill`: the fill itself, its degrees in [`fill_hole`]'s order: between planes 9
+    /// first, and where 9 proves the conditions unmet no other (the fork's 3843ddb).
     pub fill: bool,
     /// `m_bMargin`.
     pub margin: bool,
