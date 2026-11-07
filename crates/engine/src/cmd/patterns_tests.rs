@@ -1239,3 +1239,35 @@ fn circular_pattern_of_a_moved_copy_adds_one_body_per_instance() {
     let far = s.world_state().unwrap().bodies.iter().map(|b| b.mesh().bounds().max.x).fold(f64::MIN, f64::max);
     assert!(far > 20.0, "the repeats follow the redefined Move: {far}");
 }
+
+/// #12199: a path whose curves are listed out of chain order is the same path as in chain order.
+#[test]
+fn pattern_on_path_orders_the_curves_into_one_chain() {
+    // Four lines: (10,10) → (30,10) → (30,30) → (60,30) → (60,10); 90 mm long.
+    let copies = |order: [&str; 4]| {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [9, 9, 0], "body_name": "Pin"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Path"}));
+        for (id, a, b) in
+            [("l1", [10, 10], [30, 10]), ("l2", [30, 10], [30, 30]), ("l3", [30, 30], [60, 30]), ("l4", [60, 30], [60, 10])]
+        {
+            run(&mut s, "sketch.line", json!({"points": [a, b], "connect": false, "ids": [id]}));
+        }
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.pattern.path", json!({"bodies": ["Pin"], "path_sketch": "Path", "path": order, "count": 4, "spacing": 25}));
+        let m = run(&mut s, "inspect.measure", json!({}));
+        let mut at: Vec<(i64, i64)> = m["bodies"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|b| ((b["bbox"]["min"][0].as_f64().unwrap() * 1e3).round() as i64, (b["bbox"]["min"][1].as_f64().unwrap() * 1e3).round() as i64))
+            .collect();
+        at.sort();
+        at
+    };
+    // The copies sit 0, 25, 50 and 75 mm along the path, as displacements from its start.
+    let want = vec![(9_000, 9_000), (29_000, 14_000), (39_000, 29_000), (59_000, 24_000)];
+    assert_eq!(copies(["l1", "l2", "l3", "l4"]), want);
+    assert_eq!(copies(["l1", "l3", "l2", "l4"]), want);
+    assert_eq!(copies(["l4", "l3", "l2", "l1"]), copies(["l4", "l2", "l3", "l1"]));
+}
