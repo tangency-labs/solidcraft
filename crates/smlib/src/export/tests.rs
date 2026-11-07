@@ -515,6 +515,29 @@ mod mapped_tests {
         same_curve_on(&out, &want, [1.0, 3.0]);
     }
 
+    /// The same dead span on an edgeuse that runs against its edge: `mapped` reverses the trim
+    /// about its own ends first, so the dead span is at the start (`3 x4, 3.00000000003 x4`, a
+    /// run that is a rounding inside the edge's start), and the start-side drop runs. The dead
+    /// span's control points are distinct here, so a drop at the wrong end would show.
+    #[test]
+    fn a_reversed_trim_with_a_dead_span_is_cut_at_the_edges_start() {
+        let e = 3e-11;
+        let trim = b::Curve2::Spline {
+            knots: vec![3.0, 3.0, 3.0, 3.0, 4.0, 5.0, 5.0, 5.0, 5.0, 5.0 + e, 5.0 + e, 5.0 + e, 5.0 + e],
+            points: vec![[0.0, 0.0], [1.0, 2.0], [2.0, -1.0], [3.5, 1.0], [5.0, 0.5], [6.0, 1.0], [7.0, 2.0], [8.0, 3.0], [9.0, 4.0]],
+        };
+        let out = mapped(&trim, false, [1.0, 0.0], [3.0, 5.0]).unwrap();
+        check_curve2(&out, &mut Budget::input()).unwrap();
+        assert_eq!(out.interval(), Some([3.0, 5.0]));
+        let want = b::Curve2::Spline {
+            knots: vec![3.0, 3.0, 3.0, 3.0, 4.0, 5.0, 5.0, 5.0, 5.0],
+            points: vec![[5.0, 0.5], [3.5, 1.0], [2.0, -1.0], [1.0, 2.0], [0.0, 0.0]],
+        };
+        let b::Curve2::Spline { points, .. } = &out else { panic!("{out:?}") };
+        assert_eq!(points, &vec![[5.0, 0.5], [3.5, 1.0], [2.0, -1.0], [1.0, 2.0], [0.0, 0.0]]);
+        same_curve_on(&out, &want, [3.0, 5.0]);
+    }
+
     /// A trim already on its edge is left as it is.
     #[test]
     fn a_trim_on_its_edge_is_unchanged() {
