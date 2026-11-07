@@ -9,6 +9,11 @@ This document adds **parametric timeline features**: a generic host-owned featur
 plugins fill with parameters, display metadata, and rebuild logic, without a second timeline
 model or a private geometry API.
 
+The companion [Utilities command contribution proposal](plugin-toolbar-actions.md)
+describes declarative toolbar actions, host-rendered parameters and the runtime
+decision needed for uncompiled scripts. It is a design for discussion, not a
+supported manifest or an implemented execution API.
+
 ## Goals (unchanged from #1221)
 
 - Sandboxed by default: manifest permissions, fuel/memory limits on desktop, broker enforcement on web.
