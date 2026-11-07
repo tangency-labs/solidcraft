@@ -2704,3 +2704,22 @@ fn an_emboss_that_works_has_no_warning() {
         run(&mut s, "edit.undo", json!({}));
     }
 }
+
+/// #12560: a cut To Object on an inclined face. A wedge (flat bottom at z -20, the top rises
+/// from z -10 to z 0 across 30), a circle on the bottom, cut to a point on the incline.
+#[test]
+fn cut_to_object_up_to_an_inclined_face_removes_the_hole() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "W"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 20], [40, 20], [40, 0], [0, 10]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "W", "distance": 30}));
+    let before = run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": "-20", "name": "C"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [20, 15], "radius": 4}));
+    run(&mut s, "sketch.finish", json!({}));
+    let params = json!({"sketch": "C", "operation": "cut", "direction": "negative", "distance": "10 mm", "exact_regions": true, "profiles": [0], "to": [20, 11, -5]});
+    run(&mut s, "solid.extrude", params);
+    let after = run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
+    assert!(before - after > 100.0, "{before} -> {after}");
+}
