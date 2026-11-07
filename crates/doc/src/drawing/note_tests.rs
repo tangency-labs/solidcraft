@@ -41,7 +41,7 @@ fn noted() -> (Drawing, [u64; 3]) {
     let mut added = [0; 3];
     for (anchor, id) in anchors.into_iter().zip(&mut added) {
         *id = d.allocate_id(&mut id_source).unwrap();
-        d.notes.add([Arc::new(Note { id: *id, anchor, at: [40.0, 25.0], content: text("Break all edges"), cap_mm: None })]);
+        d.notes.add([Arc::new(Note { id: *id, anchor, at: [40.0, 25.0], content: text("Break all edges"), cap_mm: None, branches: Vec::new() })]);
     }
     d.validate().unwrap();
     (d, added)
@@ -98,6 +98,32 @@ fn notes_save_what_they_say_and_read_back_as_saved() {
     assert!(Drawing::from_json(&older.to_string()).unwrap().notes.is_empty());
 }
 
+/// An edge branch as a file saves it.
+fn edge_branch() -> Value {
+    json!({"edge": {"body": "Bolt", "origin_feature": 4, "name": "F1:side|F2:head", "path": [3]}})
+}
+
+/// A note on a view saves its branches by name, in order, after its anchor, and reads back as saved;
+/// a note without them saves none, so an older note reads as it was.
+#[test]
+fn a_notes_branches_save_by_name_and_read_back() {
+    let (mut d, [_, on_view, on_edge]) = noted();
+    let edge = ModelEdge { body: "Bolt".into(), origin_feature: 4, name: "F1:side|F2:head".into(), path: vec![3] };
+    let point = ModelPoint { body: "Bolt".into(), origin_feature: 4, edges: vec!["a".into(), "b".into()], centre: false, path: vec![] };
+    let at = d.notes.index_of(on_edge).unwrap();
+    Arc::make_mut(d.notes.get_mut(at).unwrap()).branches = vec![Branch::Corner(point), Branch::Edge(edge)];
+    d.validate().unwrap();
+    let mut v = file(&d);
+    let corner = json!({"corner": {"body": "Bolt", "origin_feature": 4, "edges": ["a", "b"]}});
+    assert_eq!(note(&mut v, &ids::encode(on_edge))["branches"], json!([corner, edge_branch()]));
+    assert_eq!(note(&mut v, &ids::encode(on_view)).get("branches"), None);
+    let reopened = Drawing::from_json(&d.to_json().unwrap()).unwrap();
+    assert_eq!(reopened, d);
+    let noted = reopened.notes.by_id(on_edge).unwrap();
+    let paths: Vec<Vec<u64>> = noted.paths().map(<[u64]>::to_vec).collect();
+    assert_eq!(paths, [vec![3], vec![], vec![3]], "the anchor's, then each branch's");
+}
+
 /// What reading refuses, on both sides of every cap.
 #[test]
 fn the_notes_rules_are_kept_on_reading() {
@@ -125,6 +151,15 @@ fn the_notes_rules_are_kept_on_reading() {
     assert_eq!(content(json!([{"text": "Sheet "}, {"field": {"source": "sheet", "key": "number"}}])), "read");
     // A field its source doesn't have is refused when given, never on opening: the note opens.
     assert_eq!(content(json!([{"field": {"source": "component", "key": "weight"}}])), "read");
+    // Branches: only on a view, 16 leaders in all, the anchor's included, each keeping a reference's rules.
+    let branches = |id: &str, n: usize| refused(&d, |v| note(v, id)["branches"] = json!(vec![edge_branch(); n]));
+    let most = "a note has at most 16 leaders, its anchor's included";
+    assert_eq!(branches(&on_sheet, 1), rule(&on_sheet, "a note on a sheet has no branches: it points at no model"));
+    assert_eq!([branches(&on_edge, 15), branches(&on_edge, 16)], ["read".to_string(), rule(&on_edge, most)]);
+    assert_eq!([branches(&on_view, 16), branches(&on_view, 17)], ["read".to_string(), rule(&on_view, most)]);
+    let unnamed = json!([{"edge": {"body": "", "origin_feature": 4, "name": "e", "path": []}}]);
+    assert_eq!(refused(&d, |v| note(v, &on_view)["branches"] = unnamed), rule(&on_view, names));
+    assert!(refused(&d, |v| note(v, &on_view)["branches"] = json!([{"face": {}}])).starts_with("damaged drawing: "));
     // Its place and height are on paper.
     let paper = rule(&on_sheet, "its place is at most 5000 mm on paper");
     let at = |at: [f64; 2]| refused(&d, |v| note(v, &on_sheet)["at"] = json!(at));

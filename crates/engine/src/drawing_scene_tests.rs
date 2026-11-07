@@ -2773,6 +2773,28 @@ fn a_views_notes_move_with_it_and_read_their_fields_again() {
     assert_eq!(bytes(&counted.scene), bytes(&built(&s, sheet).scene));
 }
 
+/// A note on a view with branches draws a leader to each, its first branch as its first leader. A
+/// branch whose edge is lost draws nothing, and the note stays drawn and ok, its other leader kept.
+#[test]
+fn a_notes_branches_are_drawn_and_a_lost_one_draws_nothing() {
+    let (mut s, sheet, front, _, drawing) = holed();
+    let branches = json!([{"edge": [56, 0, 10]}, {"edge": [50, 0, 0]}]);
+    let added =
+        run(&mut s, "drawing.note.add", json!({"anchor": {"view": ids::encode(front)}, "at": [60.0, 40.0], "content": "Ream", "branches": branches}));
+    let id = ids::decode(added["note"].as_str().unwrap()).unwrap();
+    let before = settled(&mut s, sheet);
+    let tips = text_and_tips(group_of(&before.scene, id)).1;
+    // The bottom edge's middle (50, 0, 0) at 1:2 from the block's middle (50, 10) round (150, 150).
+    assert!(tips.len() == 2 && tips[1].dist(Vec2::new(150.0, 145.0)) < 1e-9, "{tips:?}");
+    delete_hole(&mut s, &drawing);
+    let lost = settled(&mut s, sheet);
+    let state = lost.notes.iter().find(|n| n.note == id).unwrap();
+    assert!(state.drawn && state.status == solidcraft_doc::drawing::dimension::Status::Ok, "{state:?}");
+    let tips = text_and_tips(group_of(&lost.scene, id)).1;
+    assert!(tips.len() == 1 && tips[0].dist(Vec2::new(150.0, 145.0)) < 1e-9, "{tips:?}");
+    assert_eq!(bytes(&lost.scene), bytes(&built(&s, sheet).scene));
+}
+
 /// A note whose edge is lost keeps its text where it was, with no leader, drawn and listed lost;
 /// the rest of the sheet is drawn. Undone, its leader is back, the same bytes.
 #[test]

@@ -87,6 +87,16 @@ pub enum AnchorParam {
     },
 }
 
+/// Another leader of a note on a view, picked as its anchor's edge or corner is.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum BranchParam {
+    /// Its leader ends on the edge's middle.
+    Edge(EdgeParam),
+    /// Its leader ends on the corner or the centre.
+    Corner(CornerParam),
+}
+
 /// What `drawing.note.add` takes.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -100,6 +110,9 @@ pub struct AddParams {
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "f64")]
     pub cap_mm: Option<f64>,
+    /// More leaders, for a note on a view: 16 leaders in all, its anchor's included.
+    #[serde(default)]
+    pub branches: Vec<BranchParam>,
 }
 
 /// What `drawing.note.inspect` takes.
@@ -135,6 +148,20 @@ pub struct NoteSet {
     #[serde(deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<f64>")]
     pub cap_mm: Option<Option<f64>>,
+    #[serde(deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "BranchesSet")]
+    pub branches: Option<BranchesSet>,
+}
+
+/// The branches an edit takes out and adds, as a dimension set's targets edit does.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct BranchesSet {
+    /// Branches taken out, by their numbers from 0 as the list is now; each once.
+    pub remove: Vec<usize>,
+    /// Branches added after those that stay.
+    pub add: Vec<BranchParam>,
 }
 
 /// What `drawing.note.edit` returns.
@@ -165,6 +192,9 @@ pub struct NoteResult {
     pub exact: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub candidates: Vec<CandidateResult>,
+    /// Each branch, in order, as the model has it now: one lost loses only its own leader.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub branches: Vec<BranchResult>,
     /// What it says now, each field read for its sheet: a field with no value says nothing.
     pub text: String,
     /// Each field it reads, in order, as its sheet reads it now.
@@ -176,6 +206,23 @@ pub struct NoteResult {
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// One branch of a note, as the model has it now.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct BranchResult {
+    /// `ok`, `ambiguous`, `suppressed` or `lost`.
+    pub status: String,
+    /// Why it is lost.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
+    /// Where its leader ends, in the design's frame.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub point: Option<[f64; 3]>,
+    /// What it points at was found by exact history.
+    pub exact: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub candidates: Vec<CandidateResult>,
 }
 
 /// One field a note reads.

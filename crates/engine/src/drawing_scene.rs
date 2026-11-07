@@ -640,7 +640,7 @@ fn drawn_notes(
         let view = note.anchor.view().unwrap_or_default();
         let unread = || dimension::Status::Unmeasurable(format!("note {} can't be read", ids::encode(note.id)));
         let resolved = read.as_ref().ok().and_then(|all| all.get(at));
-        let status = resolved.map_or_else(unread, |r| r.status.clone());
+        let status = resolved.map_or_else(unread, |r| r.anchor.status.clone());
         let base =
             DrawnDimension { dimension: note.id, view, kind: ObjectKind::Note, status, group: None, fonts: Vec::new(), why: None, pending: false };
         let (Some(resolved), Some((frame, group))) = (resolved, frame(view)) else { return base };
@@ -648,9 +648,10 @@ fn drawn_notes(
             .sheet_of(&note.anchor)
             .and_then(|at| title_block_text::read(&s.doc, tree, d, at, std::iter::once(&note.content)).pop())
             .unwrap_or_default();
-        let tip = resolved.point.map(|p| frame.to_paper(p));
+        let tips: Vec<Vec2> =
+            std::iter::once(&resolved.anchor).chain(&resolved.branches).filter_map(|end| end.point).map(|p| frame.to_paper(p)).collect();
         // Centred on the view, as its frame is: the scene moves it to the view's centre.
-        let paper = crate::drawing_note_paper::note_group(note, &text, tip, LineKind::Thin.width_mm(group), lettering);
+        let paper = crate::drawing_note_paper::note_group(note, &text, &tips, LineKind::Thin.width_mm(group), lettering);
         DrawnDimension { group: Some(paper.group), fonts: paper.fonts, why: paper.why, pending: paper.pending, ..base }
     };
     notes.iter().enumerate().map(|(at, note)| one(at, note, &mut tree)).collect()
@@ -678,7 +679,7 @@ fn sheet_notes(s: &Session, d: &Drawing, sheet: u64, lettering: &Lettering, wait
     let fonts = PaperFonts::new(&lettering.font, &lettering.language, wait);
     let mut pending = false;
     let mut set = |(note, text): (&&Arc<Note>, String)| {
-        let paper = crate::drawing_note_paper::note_group(note, &text, None, line_mm, &fonts);
+        let paper = crate::drawing_note_paper::note_group(note, &text, &[], line_mm, &fonts);
         pending |= paper.pending;
         SheetNote { note: note.id, group: paper.group, fonts: paper.fonts, why: paper.why }
     };
