@@ -323,6 +323,77 @@ pub struct ExportDxfParams {
     /// The file to write. Default (also when blank): none, and the DXF text is returned.
     #[serde(default)]
     pub path: Option<String>,
+    /// The drawing's units (any case): `design` (the design's length unit), `mm`, `in` or
+    /// `inch`, `cm`, `m` or `ft`. Default: mm.
+    #[serde(default, deserialize_with = "dxf_units")]
+    #[schemars(schema_with = "dxf_units_schema")]
+    pub units: Option<String>,
+    /// The layer of the profiles (blank: the default). Default: `0`.
+    #[serde(default, deserialize_with = "dxf_layer")]
+    #[schemars(schema_with = "dxf_layer_schema")]
+    pub layer: Option<String>,
+    /// `single` (any case, the default): everything on `layer`; `roles`: outer loops on
+    /// `OUTLINE` and holes on `CUT`.
+    #[serde(default, deserialize_with = "dxf_layers")]
+    #[schemars(schema_with = "dxf_layers_schema")]
+    pub layers: Option<String>,
+    /// `true` writes closed loops as LWPOLYLINE with arc bulges. Default: false (LINE and ARC).
+    #[serde(default, deserialize_with = "dxf_join")]
+    pub join: Option<bool>,
+}
+
+/// The units `sketch.export_dxf` takes, in lower case (the handler reads them in any case).
+const DXF_UNITS: [&str; 7] = ["design", "mm", "in", "inch", "cm", "m", "ft"];
+
+fn dxf_units<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    match Option::<Value>::deserialize(d)? {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(units)) => {
+            let lower = units.to_ascii_lowercase();
+            if DXF_UNITS.contains(&lower.as_str()) {
+                Ok(Some(lower))
+            } else {
+                Err(D::Error::custom(whole(format!("unsupported unit `{lower}` (use \"design\", \"mm\", \"in\", \"cm\", \"m\", or \"ft\")"))))
+            }
+        }
+        Some(_) => Err(D::Error::custom(whole("`units` must be a string"))),
+    }
+}
+
+fn dxf_units_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"type": ["string", "null"], "description": "design, mm, in, inch, cm, m or ft, in any case. Default: mm."})
+}
+
+fn dxf_layer<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    match Option::<Value>::deserialize(d)? {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(layer)) => Ok(Some(layer)),
+        Some(_) => Err(D::Error::custom(whole("`layer` must be a string"))),
+    }
+}
+
+fn dxf_layer_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"type": ["string", "null"], "description": "The profiles' layer (blank: the default). Default: 0."})
+}
+
+fn dxf_layers<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    match Option::<Value>::deserialize(d)? {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(layers)) if ["single", "roles"].contains(&layers.to_ascii_lowercase().as_str()) => Ok(Some(layers.to_ascii_lowercase())),
+        Some(_) => Err(D::Error::custom(whole("`layers` must be \"single\" or \"roles\""))),
+    }
+}
+
+fn dxf_layers_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({"type": ["string", "null"], "description": "single or roles, in any case. Default: single."})
+}
+
+fn dxf_join<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    match Option::<Value>::deserialize(d)? {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Bool(join)) => Ok(Some(join)),
+        Some(_) => Err(D::Error::custom(whole("`join` must be true or false"))),
+    }
 }
 
 /// What `sketch.export_dxf` returns.

@@ -22,7 +22,7 @@ fn schemas_and_the_key_check_agree() {
     let insert = ["align", "angle", "at", "height", "name", "path", "plane", "scale", "sketch", "text", "tolerance", "width"];
     assert_keys(input_schema_for::<InsertDxfParams>(), &insert);
     assert_keys(input_schema_for::<InsertSvgParams>(), &insert);
-    assert_keys(input_schema_for::<ExportDxfParams>(), &["path", "sketch"]);
+    assert_keys(input_schema_for::<ExportDxfParams>(), &["join", "layer", "layers", "path", "sketch", "units"]);
 }
 
 /// Strict gives the handlers' messages for the calls they refuse for a key (a missing `path` and
@@ -75,8 +75,9 @@ fn strict_keeps_todays_errors() {
     assert_strict_keeps_todays_errors(&cases);
 }
 
-/// The same refusals for a sketch that is named but doesn't exist, and a width the drawing can't
-/// give (a drawing with no width to size is refused by the handler alone).
+/// The same refusals for a sketch that is named but doesn't exist, a width the drawing can't
+/// give (a drawing with no width to size is refused by the handler alone), and the export's
+/// options, which the handler reads only once a sketch is being edited.
 #[test]
 fn strict_keeps_the_handlers_own_refusals() {
     // A vertical line has no width to size.
@@ -88,6 +89,12 @@ fn strict_keeps_the_handlers_own_refusals() {
         ("sketch.insert_dxf", json!({"text": "0\nEOF\n"})),
         ("sketch.export_dxf", json!({"sketch": "Nope"})),
         ("sketch.export_dxf", json!({"sketch": 9999})),
+        ("sketch.export_dxf", json!({"units": 5})),
+        ("sketch.export_dxf", json!({"units": "Yard"})),
+        ("sketch.export_dxf", json!({"layer": 1})),
+        ("sketch.export_dxf", json!({"layers": "all"})),
+        ("sketch.export_dxf", json!({"layers": true})),
+        ("sketch.export_dxf", json!({"join": "yes"})),
     ] {
         let error = |level: ParamCheck| {
             let mut s = Session { param_check: level, ..Session::default() };
@@ -269,6 +276,17 @@ fn replies_match_the_output_schema() {
     let r = run(&mut s, "sketch.export_dxf", json!({"sketch": null, "path": "  "}));
     assert!(r.get("dxf").is_some(), "{r}");
     matches(output_schema_for::<ExportDxfResult>(), &r);
+    // The units and layer options, in any case; null and a blank layer read as left out.
+    for p in [
+        json!({"units": "IN", "layer": "PART"}),
+        json!({"units": "design", "layers": "Roles"}),
+        json!({"join": true, "layer": "  "}),
+        json!({"units": null, "layer": null, "layers": null, "join": null}),
+    ] {
+        let r = run(&mut s, "sketch.export_dxf", p);
+        matches(output_schema_for::<ExportDxfResult>(), &r);
+        assert_eq!(keys(&r), ["dxf", "entities"].map(String::from).into(), "{r}");
+    }
     let _ = std::fs::remove_dir_all(&dir);
 
     // A misspelt key runs in warn and says so; the reply still matches. Strict refuses it.
