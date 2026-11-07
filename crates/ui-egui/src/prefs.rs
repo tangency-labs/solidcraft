@@ -10085,6 +10085,32 @@ mod tests {
     }
 
     #[test]
+    fn window_file_menu_preference_uses_layout_and_preserves_apply_cancel_and_reset() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"open":"Layout"}));
+        h.app.prefs_window.filter = "Also show the File menu in the app window".into();
+        h.frames(5);
+        assert!(crate::scenario::handle_at("prefs:window_file_menu").is_none(), "only hosts with a native menu offer the option");
+        h.app.native_file_menu = true;
+        h.frames(5);
+        super::reveal_preference(&mut h, "prefs:window_file_menu");
+        let checkbox = crate::scenario::handle_at("prefs:window_file_menu").unwrap();
+        h.call("ui.click", json!({"x":checkbox.x,"y":checkbox.y}));
+        assert!(h.app.preferences.window_file_menu);
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(!h.app.preferences.window_file_menu);
+        h.call("ui.prefs", json!({"open":"Layout","window_file_menu":true,"button":"apply"}));
+        let mut restored = SolveApp::new(Default::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert!(restored.preferences.window_file_menu, "Apply saves the optional menu");
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(!h.app.preferences.window_file_menu, "Layout defaults restore the native-only menu");
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(h.app.preferences.window_file_menu, "Cancel restores the applied choice");
+    }
+
+    #[test]
     fn persistent_ribbon_pressed_preference_checkbox_control_persists_cancels_and_resets() {
         assert!(Prefs::default().persistent_ribbon_pressed);
         assert!(lenient(&json!({"theme":"light"})).persistent_ribbon_pressed);

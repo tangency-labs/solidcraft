@@ -3,9 +3,17 @@
     "prefs.window_file_menu": "إظهار قائمة «ملف» أيضًا في نافذة التطبيق",
     "prefs.window_file_menu_note": "إظهار قائمة «ملف» في شريط التطبيق أيضًا. تظل جميع إجراءات الملفات متاحة في شريط قوائم macOS."
   },
+  "bg": {
+    "prefs.window_file_menu": "Показване на менюто „Файл“ и в прозореца на приложението",
+    "prefs.window_file_menu_note": "Показва менюто „Файл“ и в лентата на приложението. Всички действия с файлове остават достъпни в лентата с менюта на macOS."
+  },
   "bs": {
     "prefs.window_file_menu": "Prikaži meni Datoteka i u prozoru aplikacije",
     "prefs.window_file_menu_note": "Prikazuje meni Datoteka i u traci aplikacije. Sve radnje s datotekama ostaju dostupne u traci menija sistema macOS."
+  },
+  "ca": {
+    "prefs.window_file_menu": "Mostra també el menú Fitxer a la finestra de l’aplicació",
+    "prefs.window_file_menu_note": "Mostra el menú Fitxer també a la barra de l’aplicació. Totes les accions amb fitxers continuen disponibles a la barra de menús del macOS."
   },
   "cs": {
     "prefs.window_file_menu": "Zobrazovat nabídku Soubor také v okně aplikace",
@@ -66,6 +74,10 @@
   "ja": {
     "prefs.window_file_menu": "アプリのウィンドウにもファイルメニューを表示",
     "prefs.window_file_menu_note": "アプリケーションバーにもファイルメニューを表示します。すべてのファイル操作は macOS のメニューバーから引き続き利用できます。"
+  },
+  "ka": {
+    "prefs.window_file_menu": "„ფაილის“ მენიუს ჩვენება აპლიკაციის ფანჯარაშიც",
+    "prefs.window_file_menu_note": "„ფაილის“ მენიუს აჩვენებს აპლიკაციის ზოლშიც. ფაილებთან დაკავშირებული ყველა მოქმედება კვლავ ხელმისაწვდომია macOS-ის მენიუს ზოლში."
   },
   "ko": {
     "prefs.window_file_menu": "앱 창에도 파일 메뉴 표시",
