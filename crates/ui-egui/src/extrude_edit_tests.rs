@@ -387,8 +387,11 @@ fn dragging_to_update_value_reselects_whole_value_box_text() {
     assert_eq!(selection(&h), (0, 4), "the pick selects all of \"4 mm\"");
     h.step(&json!({"drag":[{"handle":"arrow"},{"world":[5,5,15]}]})).unwrap();
     let Some(crate::dialogs::Dialog { kind: crate::dialogs::Kind::Extrude { distance, .. }, .. }) = &h.app.dialog else { panic!("extrude dialog") };
-    assert_eq!(distance, "15 mm");
-    assert_eq!(selection(&h), (0, 5), "the drag grew the text length; the selection must cover all of it");
+    // Snapped drag writes Length decimals (and enough places for the snap step) (#9035).
+    assert!(distance.starts_with("15"), "{distance}");
+    assert!(distance.ends_with(" mm"), "{distance}");
+    assert_ne!(distance, "15 mm", "snapped drag pads to Length decimals: {distance}");
+    assert_eq!(selection(&h), (0, distance.len()), "the drag grew the text length; the selection must cover all of it ({distance})");
 }
 
 #[test]
