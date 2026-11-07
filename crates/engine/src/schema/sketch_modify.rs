@@ -1438,6 +1438,10 @@ pub struct OffsetResult {
     /// or several instances each side of `sides` has its own.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub association: Option<String>,
+    /// Set when a distance that names a parameter drives nothing, because the offset was trimmed
+    /// and so is not linked to its source (#12294).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
