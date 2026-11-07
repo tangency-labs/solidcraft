@@ -364,7 +364,7 @@ fn offset_curve_reads_and_round_trips() {
 }
 
 /// A CURVE_REPLICA's operator: x' = +Y, z' = +Z (so y' = z' x x' = -X), origin (5, 0, 0), scale 2.
-const TURNED: &str = "#20=CARTESIAN_POINT('',(5.,0.,0.));#21=CARTESIAN_TRANSFORMATION_OPERATOR_3D('',#5,$,#20,2.,#2);";
+const TURNED: &str = "#20=CARTESIAN_POINT('',(5.,0.,0.));#21=CARTESIAN_TRANSFORMATION_OPERATOR_3D('','',#5,$,#20,2.,#2);";
 
 #[test]
 fn curve_replica_is_its_parent_moved_and_scaled() {
@@ -382,7 +382,7 @@ fn curve_replica_is_its_parent_moved_and_scaled() {
 fn curve_replica_scales_its_placement_with_the_file_units() {
     let inches = Units { len: 25.4, ang: 1.0 };
     let c = curve(
-        "#20=CARTESIAN_POINT('',(1.,0.,0.));#21=CARTESIAN_TRANSFORMATION_OPERATOR_3D('',$,$,#20,$,$);#10=LINE('',#1,#12);#12=VECTOR('',#3,1.);#11=CURVE_REPLICA('',#10,#21);",
+        "#20=CARTESIAN_POINT('',(1.,0.,0.));#21=CARTESIAN_TRANSFORMATION_OPERATOR_3D('','',$,$,#20,$,$);#10=LINE('',#1,#12);#12=VECTOR('',#3,1.);#11=CURVE_REPLICA('',#10,#21);",
         11,
         inches,
     );

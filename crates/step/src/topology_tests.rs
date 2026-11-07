@@ -787,7 +787,7 @@ fn replica_edge(t: &str) -> String {
     let xyz: Vec<f64> = pt.split_once(')').unwrap().0.split(',').map(|v| v.parse().unwrap()).collect();
     let replaced = t.replacen(&format!("#{line_id}=LINE('',#{point},#{vector})"), &format!("#{line_id}=CURVE_REPLICA('',#9003,#9004)"), 1);
     format!(
-        "{replaced}#9001=CARTESIAN_POINT('',({},{},{}));#9002=CARTESIAN_POINT('',(0.,0.,7.));#9003=LINE('',#9001,#{vector});#9004=CARTESIAN_TRANSFORMATION_OPERATOR_3D('',$,$,#9002,$,$);",
+        "{replaced}#9001=CARTESIAN_POINT('',({},{},{}));#9002=CARTESIAN_POINT('',(0.,0.,7.));#9003=LINE('',#9001,#{vector});#9004=CARTESIAN_TRANSFORMATION_OPERATOR_3D('','',$,$,#9002,$,$);",
         real(xyz[0]),
         real(xyz[1]),
         real(xyz[2] - 7.0)
