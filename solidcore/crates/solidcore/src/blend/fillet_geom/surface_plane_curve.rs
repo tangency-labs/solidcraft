@@ -302,9 +302,8 @@ pub fn surface_plane_curve(
     let [start_uv, stop_uv] = end_uv;
     let [start_x, stop_x] = end_x;
     // the curve stays on the surface: within its domain, but across a seam it is closed over
-    let closed = |param| -> Result<bool> {
-        Ok(surf.is_closed(k, &dom, param, Some(tol), false)?.0)
-    };
+    let closed =
+        |param| -> Result<bool> { Ok(surf.is_closed(k, &dom, param, Some(tol), false)?.0) };
     let (closed_u, closed_v) = (closed(SurfParamType::U)?, closed(SurfParamType::V)?);
     let on_domain = |uv: Point2| {
         let (lo, hi) = (dom.min(), dom.max());

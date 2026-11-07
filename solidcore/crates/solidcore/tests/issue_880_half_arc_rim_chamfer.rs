@@ -169,6 +169,8 @@ fn issue_880_one_half_chamfers() {
     let u = edge::blend_edgeuse(&k, &mut b, e).unwrap().unwrap();
     chamfer(&mut k, &mut b, &[(e, u)], (1.0, 2.0)).unwrap();
     assert_eq!(finish(&mut k, &mut b, before), (4, 7, true));
-    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap().lines();
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
     assert!(lines.is_empty(), "{lines:?}");
 }
