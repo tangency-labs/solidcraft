@@ -965,6 +965,17 @@ fn script_runs_commands() {
     assert!(s.run_script(&json!([{"command": "Nope"}])).is_err());
 }
 
+/// Every place in `v`, as JSON pointers from `at` (`/kind/length/edge/0`): the whole value, and
+/// each member and element at every depth, for a hostile test to put its values in.
+pub(crate) fn json_places(v: &Value, at: String, out: &mut Vec<String>) {
+    out.push(at.clone());
+    match v {
+        Value::Object(o) => o.iter().for_each(|(k, x)| json_places(x, format!("{at}/{k}"), out)),
+        Value::Array(l) => l.iter().enumerate().for_each(|(i, x)| json_places(x, format!("{at}/{i}"), out)),
+        _ => {}
+    }
+}
+
 pub(crate) fn hostile_values() -> Vec<Value> {
     vec![
         Value::Null,

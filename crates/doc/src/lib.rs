@@ -34,6 +34,7 @@ mod eval;
 pub mod expr;
 pub mod face_anchor;
 mod feature_geometry;
+pub mod feature_pairs;
 mod feature_refs;
 pub use face_anchor::{FaceAnchor, FaceAttachmentStatus};
 pub mod format;

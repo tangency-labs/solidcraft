@@ -125,6 +125,7 @@ drawing.sketch.create             sheet sketch lifecycle: its tests in crates/en
 drawing.sketch.edit               sheet sketch lifecycle: its tests in crates/engine/src/cmd/drawing_tests.rs
 drawing.sketch.fill               a drawing fill: crates/engine/src/cmd/drawing_tests.rs and solidcore hatch tests
 drawing.sketch.inspect            sheet sketch lifecycle: its tests in crates/engine/src/cmd/drawing_tests.rs
+drawing.source.replace            a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.status                    a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.symbol.define             a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.symbol.delete             a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
