@@ -781,15 +781,21 @@ fn box_label(h: &mut crate::scenario::Harness) -> Option<&'static str> {
 /// and moves nothing.
 #[test]
 fn a_click_on_an_arrow_puts_the_box_on_its_axis() {
-    for (handle, label) in [("y", "Y"), ("z", "Z"), ("x", "X")] {
+    // The press and the release in frames of their own, and both in one frame (input queued while
+    // the window is busy arrives together, #8265).
+    for (handle, label, one_frame) in [("y", "Y", false), ("z", "Z", false), ("x", "X", false), ("y", "Y", true), ("z", "Z", true)] {
         let mut h = move_triad_fixture();
         assert_eq!(box_label(&mut h), Some("X"), "the box starts on X");
         let at = h.at(&json!({"gizmo": handle})).unwrap();
         h.frame_with(vec![pointer_at(at)]);
-        h.frame_with(vec![pointer_button(at, true)]);
-        h.frame_with(vec![pointer_button(at, false)]);
+        if one_frame {
+            h.frame_with(vec![pointer_button(at, true), pointer_button(at, false)]);
+        } else {
+            h.frame_with(vec![pointer_button(at, true)]);
+            h.frame_with(vec![pointer_button(at, false)]);
+        }
         h.frames(2);
-        assert_eq!(box_label(&mut h), Some(label), "a click on the {label} arrow");
+        assert_eq!(box_label(&mut h), Some(label), "a click on the {label} arrow (one frame: {one_frame})");
         let Kind::Move { x, y, z, .. } = &h.app.dialog.as_ref().unwrap().kind else { panic!("not a move") };
         assert_eq!((x.as_str(), y.as_str(), z.as_str()), ("0 mm", "0 mm", "0 mm"), "a click moves nothing");
     }
@@ -801,7 +807,7 @@ fn a_click_on_an_arrow_puts_the_box_on_its_axis() {
 fn the_box_reads_the_total_from_the_start() {
     let mut h = move_triad_fixture();
     let grip = h.at(&json!({"gizmo": "x"})).unwrap();
-    let mut drag_by = |h: &mut crate::scenario::Harness, mm: f64| {
+    let drag_by = |h: &mut crate::scenario::Harness, mm: f64| {
         let from = h.at(&json!({"gizmo": "x"})).unwrap();
         let to = h.at(&json!({"gizmo": "x", "by": [mm, 0.0, 0.0]})).unwrap();
         h.frame_with(vec![pointer_at(from)]);
