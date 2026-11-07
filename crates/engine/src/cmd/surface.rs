@@ -48,7 +48,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("surface.sweep", "Surface Sweep", surface_sweep)
         .at("SURFACE", "CREATE")
         .icon("surface_sweep")
-        .params("sketch?: id|name; curves?: [curve ids] and/or profiles? (as surface.extrude); path_sketch: sketch; path: [curve ids in order] (a path with corners, or 3D curves, gives ruled walls mitred at the corners); orientation?, twist?, scale?, rails?, rail_fit? (as solid.sweep); name?, body_name? (a surface body, no caps)"),
+        .params("sketch?: id|name; curves?: [curve ids] and/or profiles? (as surface.extrude); path_sketch: sketch; path: [curve ids in order] (a path with corners, or 3D curves, gives ruled walls mitred at the corners); path_body?: body name; path_edges?: [points on its edges] (the path is a chain of that body's edges, instead of a sketch's curves); orientation?, twist?, scale?, rails?, rail_fit? (as solid.sweep); name?, body_name? (a surface body, no caps)"),
     CommandSpec::new("surface.loft", "Surface Loft", surface_loft)
         .at("SURFACE", "CREATE")
         .icon("surface_loft")
@@ -349,13 +349,12 @@ fn surface_sweep(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "surface.sweep";
     let sketch = feature_sketch(s, p, cmd)?;
     let (profiles, curves) = sheet_inputs(p, cmd)?;
-    let path_sketch = sketch_id(s, p.get("path_sketch"), cmd, "path_sketch")?;
-    let path = string_list(cmd, p, "path")?;
-    if path.is_empty() || path.len() > 1000 {
+    let (path_sketch, path, path_body, path_edges) = super::features::sweep_path(s, p, cmd)?;
+    if path_body.is_none() && (path.is_empty() || path.len() > 1000) {
         return Err(bad(cmd, "`path` must list 1…1000 curve ids"));
     }
     let (orientation, twist, scale) = super::features::sweep_options(s, p, cmd)?;
-    let (rails, rail_fit) = super::features::sweep_rails(s, p, cmd, path_sketch)?;
+    let (rails, rail_fit) = super::features::sweep_rails(s, p, cmd, path_body.is_none().then_some(path_sketch))?;
     add_feature(
         s,
         p,
@@ -365,6 +364,8 @@ fn surface_sweep(s: &mut Session, p: &Value) -> Result<Value> {
             curves,
             path_sketch: SketchId(path_sketch),
             path,
+            path_body,
+            path_edges,
             orientation,
             twist,
             scale,
