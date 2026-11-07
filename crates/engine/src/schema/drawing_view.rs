@@ -12,6 +12,7 @@ use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use solidcore_record::Seg2;
+use solidcraft_doc::drawing::view::ViewPlace;
 use solidcraft_doc::drawing_view::{MAX_JOINT_VALUES, MAX_POSE_JOINTS, TangentEdges, ViewDirection, ViewSettings};
 use solidcraft_geom::drawing_sheet::{Orientation, PaperSize, SheetSize};
 use solidcraft_geom::drawing_view::{NamedView, ProjectedSide, Scale};
@@ -510,6 +511,15 @@ pub enum PlaceParam {
     Aligned(f64),
 }
 
+impl From<ViewPlace> for PlaceParam {
+    fn from(place: ViewPlace) -> PlaceParam {
+        match place {
+            ViewPlace::At(at) => PlaceParam::At(at),
+            ViewPlace::Aligned(along) => PlaceParam::Aligned(along),
+        }
+    }
+}
+
 /// What `drawing.view.inspect` takes.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -759,6 +769,35 @@ pub struct MoveParams {
     /// A view lined up with its parent moves only when this is true, and is then placed apart.
     #[serde(default)]
     pub break_alignment: bool,
+}
+
+/// What `drawing.view.move` takes.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct ViewMoveParams {
+    pub view: ViewIdParam,
+    /// Where its centre is dragged to, in paper millimetres from the sheet's lower-left corner.
+    pub to_mm: Point2,
+    /// A view lined up with its parent stays on its line unless this is true, and is then placed apart.
+    #[serde(default)]
+    pub break_alignment: bool,
+}
+
+/// What `drawing.view.move` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ViewMoveResult {
+    pub view: String,
+    /// Its place now.
+    pub place: PlaceParam,
+    /// Where its centre sits now.
+    pub centre_mm: [f64; 2],
+    /// The views lined up with it that went with it.
+    pub followers: Vec<String>,
+    /// Those of them, and it, now outside the sheet's drawing space.
+    pub outside: Vec<OutsideResult>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 /// What `drawing.view.copy_to_sheet` takes.
