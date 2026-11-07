@@ -1758,6 +1758,21 @@ impl Dialog {
         true
     }
 
+    /// Clear the active input's picks (the selection chip's ×, or an empty Measure click).
+    pub fn clear_active_selection(&mut self, s: &Session) {
+        let i = self.active;
+        if let Some(key) = stored_input_reference_key(self, i) {
+            self.extra.remove(key);
+        }
+        let Some(inp) = self.inputs.get_mut(i) else { return };
+        inp.items.clear();
+        if i == 0 {
+            self.profile_selection_changed = true;
+            self.picked_edges.clear();
+        }
+        self.sync_thread(s);
+    }
+
     /// A pick in the viewport (already accepted by the active input).
     pub fn pick(&mut self, s: &Session, sel: Sel) {
         self.awaiting_pick = false;
@@ -3143,22 +3158,15 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
         d.pick_refused = None;
     }
     if let Some(i) = clear {
-        if let Some(key) = stored_input_reference_key(d, i) {
-            d.extra.remove(key);
-        }
         if d.listed == Some(i) {
             d.listed = None;
             d.list_hover = None;
         }
-        let Some(inp) = d.inputs.get_mut(i) else { return };
-        inp.items.clear();
-        if i == 0 {
-            d.profile_selection_changed = true;
-            d.picked_edges.clear();
-        }
         d.active = i;
         d.awaiting_pick = true;
         d.pick_refused = None;
+        d.clear_active_selection(s);
+        return;
     }
     d.sync_thread(s);
 }
