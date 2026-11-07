@@ -200,9 +200,18 @@ fn a_sketch_that_lost_its_projected_edge_opens_with_its_curves_and_the_link_mark
     assert!(link(&s).lost);
     assert_line(&s, 100.0, (0.0, 50.0), "kept where it was");
     assert_eq!(curves(&mut s), 2, "the circle and the lost projection");
-    // Another edit keeps it shown.
+    // Another edit keeps it shown, with what the edit added: the sketch and the extrude after it
+    // fail again, so the design ends in the same state as before the edit.
+    let has_point = |s: &Session| {
+        let st = s.model.state();
+        let sk = &st.sketch(top).unwrap().sketch;
+        (0..sk.points.len()).filter_map(|i| sk.point(i)).any(|p| (p.x - 10.0).abs() < 1e-6 && (p.y - 10.0).abs() < 1e-6)
+    };
+    assert!(!has_point(&s));
     run(&mut s, "sketch.point", json!({"point": [10, 10]}));
     assert!(link(&s).lost);
+    assert!(has_point(&s), "the held sketch shows the new point");
+    assert_eq!(curves(&mut s), 2);
     run(&mut s, "sketch.finish", json!({}));
     assert!(s.model.state().sketch(top).is_none(), "finished, it is not shown");
 

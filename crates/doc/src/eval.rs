@@ -2203,6 +2203,10 @@ impl Model {
 
     /// Re-evaluate the document, reusing results up to the first changed feature.
     pub fn evaluate(&mut self, doc: &Document) {
+        // A failed sketch held for its editor is built again from the evaluated design: when the
+        // sketch and every feature after it fail, the results end in the state they ended in
+        // before, which would keep showing the sketch as it was before the edit.
+        self.held = None;
         let _span = solidcraft_profile::span("doc", "evaluate");
         self.placement_inputs = None;
         self.fingerprinted = None;
