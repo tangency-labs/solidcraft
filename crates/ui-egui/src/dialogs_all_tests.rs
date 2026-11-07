@@ -1255,6 +1255,45 @@ fn path_pattern_dialog_sends_the_start_point_orientation_and_flip_and_reopens_wi
     }
 }
 
+/// A Pattern on Path saved before the rotation-minimising frame (no `follow_frame`), opened in
+/// its dialog and OK'd unchanged, keeps building what it built: the edit does not give it the
+/// frame. Choosing Identical there is a new choice, and gives it.
+#[test]
+fn path_pattern_dialog_edit_keeps_an_older_designs_orientation() {
+    let mut h = fixture();
+    let mut d = representative(&h, "solid.pattern.path");
+    if let Kind::PathPattern { count, spacing, .. } = &mut d.kind {
+        (*count, *spacing) = ("2".into(), "5 mm".into());
+    }
+    d.extra.insert("orientation".into(), json!("path"));
+    let (_, p) = apply_commands(&h.app, &d).unwrap().first().cloned().unwrap();
+    h.app.run("solid.pattern.path", p).unwrap();
+    let id = h.app.session.doc.features.last().map(|f| f.id).unwrap();
+    let follows = |app: &SolveApp| match app.session.doc.feature(id).map(|f| &f.kind) {
+        Some(FeatureKind::Pattern { pattern: PatternKind::Path { follow_frame, .. }, .. }) => *follow_frame,
+        other => panic!("not a path pattern: {other:?}"),
+    };
+    assert!(follows(&h.app), "a pattern made now follows the frame");
+    if let Some(FeatureKind::Pattern { pattern: PatternKind::Path { follow_frame, .. }, .. }) =
+        h.app.session.doc_mut().feature_mut(id).map(|f| &mut f.kind)
+    {
+        *follow_frame = false;
+    }
+    h.app.session.refresh();
+    let ok = |app: &mut SolveApp, orientation: &str| {
+        let mut d = crate::dialogs::for_feature(app, id, None).unwrap();
+        d.extra.insert("orientation".into(), json!(orientation));
+        for (command, p) in apply_commands(app, &d).unwrap() {
+            assert_eq!(command, "timeline.redefine");
+            app.run(&command, p).unwrap();
+        }
+    };
+    ok(&mut h.app, "path");
+    assert!(!follows(&h.app), "OK on the older pattern kept its orientation");
+    ok(&mut h.app, "identical");
+    assert!(follows(&h.app), "a newly chosen orientation is the one patterns get now");
+}
+
 #[test]
 fn coil_from_a_profile_hides_the_primitive_section() {
     let h = fixture();

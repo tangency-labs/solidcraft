@@ -668,20 +668,9 @@ fn path_pattern_orientation_follows_a_3d_path() {
     // from the outward direction about the path by the helix's torsion times the length run:
     // a·h / √(r² + h²) at angle a. The turn about the sketch's normal alone left it about 2 mm
     // along the path, 4.5 mm from it.
-    let mut s = Session::default();
-    run(&mut s, "solid.sphere", json!({"radius": 1, "center": [25, 0, 0], "body_name": "Ball"}));
-    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Helix"}));
-    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
-    let (r, h) = (20.0f64, 100.0 / (2.0 * PI));
-    let points: Vec<[f64; 3]> = (0..=12).map(|i| f64::from(i) * PI / 12.0).map(|a| [r * a.cos(), r * a.sin(), h * a]).collect();
-    let helix = run(&mut s, "sketch.spline3d", json!({"points": points}))["curves"].clone();
-    run(&mut s, "sketch.finish", json!({}));
-    let n = (r * r + h * h).sqrt();
-    run(
-        &mut s,
-        "solid.pattern.path",
-        json!({"bodies": ["Ball"], "path_sketch": "Helix", "path": helix, "count": 2, "spacing": 0.5 * PI * n, "orientation": "path"}),
-    );
+    let (mut s, _) = ball_on_helix();
+    let (r, h) = HELIX;
+    let n = r.hypot(h);
     let c = copy_centres(&mut s, "Ball").first().copied().unwrap_or([f64::NAN; 3]);
     // The nearest point of the helix, and the copy's offset from it.
     let at = |a: f64| [r * a.cos(), r * a.sin(), h * a];
@@ -716,6 +705,77 @@ fn path_pattern_orientation_follows_a_3d_path() {
     let level = old[0].hypot(old[1] - r);
     assert!((old[2] - h * 0.5 * PI).abs() < 0.05 && (level - 5.0).abs() < 0.05, "the older design's copy is at {old:?}");
     assert!((c[2] - h * 0.5 * PI).abs() > 0.5, "the frame tilts the offset with the path: {c:?}");
+}
+
+/// The 3D helix of [`path_pattern_orientation_follows_a_3d_path`]: radius 20, rising 100 mm a
+/// turn, as (radius, rise per radian).
+const HELIX: (f64, f64) = (20.0, 50.0 / PI);
+
+/// A ball 5 mm outward of the start of [`HELIX`] (half a turn, a 3D spline through points on
+/// it), patterned a quarter turn along it with Path direction; with the command's parameters.
+fn ball_on_helix() -> (Session, Value) {
+    let mut s = Session::default();
+    run(&mut s, "solid.sphere", json!({"radius": 1, "center": [25, 0, 0], "body_name": "Ball"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Helix"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    let (r, h) = HELIX;
+    let points: Vec<[f64; 3]> = (0..=12).map(|i| f64::from(i) * PI / 12.0).map(|a| [r * a.cos(), r * a.sin(), h * a]).collect();
+    let helix = run(&mut s, "sketch.spline3d", json!({"points": points}))["curves"].clone();
+    run(&mut s, "sketch.finish", json!({}));
+    let params =
+        json!({"bodies": ["Ball"], "path_sketch": "Helix", "path": helix, "count": 2, "spacing": 0.5 * PI * r.hypot(h), "orientation": "path"});
+    run(&mut s, "solid.pattern.path", params.clone());
+    (s, params)
+}
+
+/// The path pattern's `follow_frame`, for the one Pattern on Path in `s`.
+fn follows_frame(s: &Session) -> bool {
+    s.doc.features.iter().any(|f| {
+        matches!(&f.kind, solidcraft_doc::FeatureKind::Pattern { pattern: solidcraft_doc::PatternKind::Path { follow_frame: true, .. }, .. })
+    })
+}
+
+/// Editing a Pattern on Path saved before the rotation-minimising frame does not move its
+/// copies: OK in its dialog sends `timeline.redefine` with the same parameters, and the copies
+/// stay where the older design built them. Choosing the orientation again is a new choice, and
+/// then the copies follow the frame, as in a pattern made now.
+#[test]
+fn editing_an_older_path_pattern_keeps_its_copies_where_they_were() {
+    let (mut s, params) = ball_on_helix();
+    let id = s.doc.features.last().map(|f| f.id).unwrap_or_default();
+    let framed = copy_centres(&mut s, "Ball");
+    // As the design was saved before the frame: no `follow_frame`.
+    let mut doc = (*s.doc).clone();
+    for f in &mut doc.features {
+        if let solidcraft_doc::FeatureKind::Pattern { pattern: solidcraft_doc::PatternKind::Path { follow_frame, .. }, .. } = &mut f.kind {
+            *follow_frame = false;
+        }
+    }
+    s.doc = std::sync::Arc::new(doc);
+    s.refresh();
+    let older = copy_centres(&mut s, "Ball");
+    assert!(older.iter().zip(&framed).any(|(a, b)| (0..3).any(|k| (a[k] - b[k]).abs() > 0.5)), "{older:?} vs {framed:?}");
+
+    let edit = |s: &mut Session, params: Value| {
+        run(s, "timeline.redefine", json!({"feature": id, "command": "solid.pattern.path", "params": params}));
+    };
+    edit(&mut s, params.clone());
+    assert!(!follows_frame(&s), "the edit kept the older design's orientation");
+    assert_centres(&copy_centres(&mut s, "Ball"), &older, "the older design, edited");
+    // Another option changed, here a start point given at the path's start, keeps it too.
+    let mut started = params.clone();
+    started["start_fraction"] = json!("0");
+    edit(&mut s, started);
+    assert!(!follows_frame(&s), "a start point keeps the older orientation");
+    assert_centres(&copy_centres(&mut s, "Ball"), &older, "the older design, given a start point");
+
+    // Orientation picked again: Identical, then Path direction, as a pattern made now.
+    let mut identical = params.clone();
+    identical["orientation"] = json!("identical");
+    edit(&mut s, identical);
+    edit(&mut s, params);
+    assert!(follows_frame(&s), "a newly chosen orientation follows the frame");
+    assert_centres(&copy_centres(&mut s, "Ball"), &framed, "orientation chosen again");
 }
 
 /// Patterns of a blind hole drill every copy to the full depth from the face at the copy
