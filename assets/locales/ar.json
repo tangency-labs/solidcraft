@@ -2520,7 +2520,7 @@
   "prefs.bottom_right": "أسفل اليمين",
   "prefs.browser": "المستعرض",
   "prefs.browser_body_features": "الميزات تحت الأجسام",
-  "prefs.browser_body_features_note": "يمكن فتح كل جسم في المستعرض لعرض ميزات المخطط الزمني التي بنته، بترتيب المخطط الزمني.",
+  "prefs.browser_body_features_note": "يمكن فتح كل جسم في المستعرض لعرض ميزات الخط الزمني التي بنته، بترتيب الخط الزمني.",
   "prefs.browser_components_open": "المكوّنات مفتوحة من البداية",
   "prefs.browser_components_open_note": "يبدأ كل مكوّن في المستعرض مفتوحًا كما كان من قبل، بدلًا من أن يبقى مغلقًا حتى تفتحه.",
   "prefs.browser_eye_left": "أيقونة الإظهار بجانب سهم الطي",
