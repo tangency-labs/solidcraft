@@ -113,6 +113,7 @@ fn construction_offset_is_a_driving_constraint_on_the_chosen_side() {
 
     let parallel = run(&mut s, "sketch.construction_line.parallel", json!({"curve":"a","at":[4, 1],"offset":"gap"}));
     let id = parallel["curves"][0].as_str().unwrap();
+    assert!(curve(&sketch(&s), id).infinite, "an offset stays infinite");
     assert!((line_anchor(&s, id).y - 5.0).abs() < 1e-6);
     let distance = sketch(&s).constraints.iter().find(|c| matches!(c.kind, ConstraintKind::PointLineDistance { .. })).unwrap().clone();
     assert!((distance.kind.value().unwrap() - 5.0).abs() < 1e-6);
@@ -132,12 +133,14 @@ fn construction_offset_is_a_driving_constraint_on_the_chosen_side() {
 
     let horizontal = run(&mut s, "sketch.construction_line.horizontal", json!({"at":[2, -4],"offset":6}));
     let hid = horizontal["curves"][0].as_str().unwrap();
+    assert!(curve(&sketch(&s), hid).infinite && curve(&sketch(&s), hid).construction, "a horizontal offset stays an infinite construction line");
     assert!((line_anchor(&s, hid).y + 6.0).abs() < 1e-6);
     assert!((line_anchor(&s, hid).x - 2.0).abs() < 1e-6);
     assert!(sketch(&s).constraints.iter().any(|c| matches!(c.kind, ConstraintKind::DistanceY { value, .. } if (value - 6.0).abs() < 1e-6)));
 
     let vertical = run(&mut s, "sketch.construction_line.vertical", json!({"at":[-1, 3],"offset":"span = 4"}));
     let vid = vertical["curves"][0].as_str().unwrap();
+    assert!(curve(&sketch(&s), vid).infinite, "a vertical offset stays infinite");
     assert!((line_anchor(&s, vid).x + 4.0).abs() < 1e-6);
     assert!(s.doc.param("span").is_some());
     assert!(sketch(&s).constraints.iter().any(|c| matches!(c.kind, ConstraintKind::DistanceX { value, .. } if (value - 4.0).abs() < 1e-6)));
@@ -154,6 +157,22 @@ fn construction_offset_is_a_driving_constraint_on_the_chosen_side() {
         assert!(s.execute("sketch.construction_line", &p).is_err(), "{p}");
         assert_eq!(s.doc.to_json(), before, "{p}");
     }
+}
+
+#[test]
+fn an_offset_and_a_length_shift_a_segment_off_the_click() {
+    let mut s = new_sketch();
+    let out = run(&mut s, "sketch.construction_line.horizontal", json!({"at":[2, -4], "offset": 6, "length": 10, "near": [12, -4]}));
+    let sk = sketch(&s);
+    let c = curve(&sk, out["curves"][0].as_str().unwrap());
+    assert!(c.construction && !c.infinite, "length still makes a segment");
+    let CurveKind::Line { a, b } = c.kind else { panic!("a line") };
+    let (a, b) = (sk.point(a).unwrap(), sk.point(b).unwrap());
+    assert!((a.y + 6.0).abs() < 1e-6 && (b.y + 6.0).abs() < 1e-6, "the offset shifts it: {a:?} {b:?}");
+    assert!((a.dist(b) - 10.0).abs() < 1e-6, "{a:?} {b:?}");
+    assert!(a.dist(Vec2::new(2.0, -4.0)) > 1.0, "the click is not the segment start: {a:?}");
+    assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::DistanceY { .. })));
+    assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Length { .. })));
 }
 
 #[test]

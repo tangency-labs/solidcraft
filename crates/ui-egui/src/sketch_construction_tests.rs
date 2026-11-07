@@ -122,13 +122,16 @@ fn typed_offset_places_the_line_and_its_dimension() {
     dim.locked = true;
     dim.value = "8".into();
     let mut tool = h.app.tool.take().unwrap();
-    super::place_point(&mut h.app, &mut tool, (solidcraft_engine::geom::Vec2::new(5., 10.), None));
+    super::place_point(&mut h.app, &mut tool, (solidcore_record::Vec2::new(5., 10.), None));
     let sid = h.app.session.active_sketch.unwrap();
     let sk = h.app.session.doc.sketch(sid).unwrap();
     let curve = sk.curves.last().unwrap();
+    assert!(curve.infinite && curve.construction, "an offset stays an infinite construction line: {curve:?}");
     let CurveKind::Line { a, b } = curve.kind else { panic!("line") };
-    assert!((sk.point(a).unwrap().y - 8.).abs() < 1e-6);
-    assert!((sk.point(b).unwrap().y - 8.).abs() < 1e-6);
+    let (pa, pb) = (sk.point(a).unwrap(), sk.point(b).unwrap());
+    assert!((pa.y - 8.).abs() < 1e-6 && (pb.y - 8.).abs() < 1e-6, "{pa:?} {pb:?}");
+    assert!(pa.dist(solidcore_record::Vec2::new(5., 10.)) > 1.0, "the click is not the segment start: {pa:?}");
+    assert!(!sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Length { .. })));
     let distance = sk.constraints.iter().find(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::PointLineDistance { .. })).unwrap();
     assert!((distance.kind.value().unwrap() - 8.).abs() < 1e-6);
     assert_eq!(h.app.session.doc.param(distance.param.as_deref().unwrap()).unwrap().expr, "8");
@@ -144,12 +147,103 @@ fn typed_offset_places_the_line_and_its_dimension() {
     dim.locked = true;
     dim.value = "6".into();
     let mut tool = h.app.tool.take().unwrap();
-    super::place_point(&mut h.app, &mut tool, (solidcraft_engine::geom::Vec2::new(2., -4.), None));
+    super::place_point(&mut h.app, &mut tool, (solidcore_record::Vec2::new(2., -4.), None));
     let sid = h.app.session.active_sketch.unwrap();
     let sk = h.app.session.doc.sketch(sid).unwrap();
-    let CurveKind::Line { a, .. } = sk.curves.last().unwrap().kind else { panic!("line") };
-    assert!((sk.point(a).unwrap().y + 6.).abs() < 1e-6);
+    let curve = sk.curves.last().unwrap();
+    assert!(curve.infinite && curve.construction, "{curve:?}");
+    let CurveKind::Line { a, .. } = curve.kind else { panic!("line") };
+    let start = sk.point(a).unwrap();
+    assert!((start.y + 6.).abs() < 1e-6);
+    assert!(start.dist(solidcore_record::Vec2::new(2., -4.)) > 1.0, "the click is not pinned as the line start: {start:?}");
     assert!(sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::DistanceY { .. })));
+    assert!(!sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Length { .. })));
+}
+
+/// A digit in the field beside the pointer is the offset. One click places an infinite construction
+/// line at that distance; it does not start a finite segment.
+#[test]
+fn a_digit_beside_the_pointer_sets_the_offset_and_keeps_the_line_infinite() {
+    let cases: &[(&str, &[[f64; 2]], [f64; 2])] = &[
+        ("sketch.construction_line.horizontal", &[], [2., -4.]),
+        ("sketch.construction_line.vertical", &[], [-3., 4.]),
+        ("sketch.construction_line.parallel", &[[10., 0.]], [5., 10.]),
+    ];
+    for (id, picks, at) in cases {
+        let mut h = sketch();
+        let sid = h.app.session.active_sketch.unwrap();
+        let before = h.app.session.doc.sketch(sid).unwrap().curves.len();
+        steps(&mut h, id, picks);
+        h.step(&json!({"move":{"sketch":at}})).unwrap();
+        h.settle();
+        digit(&mut h, '8');
+        h.frames(30);
+        h.step(&json!({"click":{"sketch":at}})).unwrap();
+        h.settle();
+        let sk = h.app.session.doc.sketch(sid).unwrap();
+        assert_eq!(sk.curves.len(), before + 1, "{id}: one click places the line, {:?}", h.app.status);
+        let curve = sk.curves.last().unwrap();
+        assert!(curve.infinite && curve.construction, "{id}: {curve:?}");
+        let CurveKind::Line { a, b } = curve.kind else { panic!("{id}: a line") };
+        let (pa, pb) = (sk.point(a).unwrap(), sk.point(b).unwrap());
+        let click = solidcore_record::Vec2::new(at[0], at[1]);
+        assert!(pa.dist(click) > 1.0 && pb.dist(click) > 1.0, "{id}: the click is not a segment end {pa:?} {pb:?}");
+        match *id {
+            "sketch.construction_line.horizontal" => assert!((pa.y + 8.0).abs() < 1e-6 && (pb.y + 8.0).abs() < 1e-6, "{pa:?} {pb:?}"),
+            "sketch.construction_line.vertical" => assert!((pa.x + 8.0).abs() < 1e-6 && (pb.x + 8.0).abs() < 1e-6, "{pa:?} {pb:?}"),
+            _ => assert!((pa.y - 8.0).abs() < 1e-6 && (pb.y - 8.0).abs() < 1e-6, "{pa:?} {pb:?}"),
+        }
+        assert!(
+            sk.constraints.iter().any(|c| {
+                matches!(
+                    c.kind,
+                    solidcraft_engine::sketch::ConstraintKind::PointLineDistance { .. }
+                        | solidcraft_engine::sketch::ConstraintKind::DistanceX { .. }
+                        | solidcraft_engine::sketch::ConstraintKind::DistanceY { .. }
+                )
+            }),
+            "{id}"
+        );
+        assert!(!sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Length { .. })), "{id}");
+        let tool = h.app.tool.as_ref().unwrap();
+        assert!(tool.pts.is_empty(), "{id}: the click was not kept as a segment start");
+        let count = sk.curves.len();
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(h.app.session.doc.sketch(sid).unwrap().curves.len(), count - 1, "{id}: one undo step");
+    }
+}
+
+/// Length still limits the line. With an offset as well, the segment is shifted and the click is not its start.
+#[test]
+fn a_typed_length_and_offset_shift_a_segment() {
+    let mut h = sketch();
+    let sid = h.app.session.active_sketch.unwrap();
+    let before = h.app.session.doc.sketch(sid).unwrap().curves.len();
+    h.step(&json!({"start":"sketch.construction_line.horizontal"})).unwrap();
+    let tool = h.app.tool.as_mut().unwrap();
+    tool.dims = crate::sketch_dims::boxes_for(tool.cmd, 0);
+    for (label, value) in [("Length", "10"), ("Offset", "6")] {
+        let dim = tool.dims.iter_mut().find(|d| d.label == label).unwrap();
+        dim.locked = true;
+        dim.value = value.into();
+    }
+    let mut tool = h.app.tool.take().unwrap();
+    let click = solidcore_record::Vec2::new(2., -4.);
+    super::place_point(&mut h.app, &mut tool, (click, None));
+    assert_eq!(tool.pts.len(), 1, "a length still waits for the side");
+    assert_eq!(h.app.session.doc.sketch(sid).unwrap().curves.len(), before);
+    super::place_point(&mut h.app, &mut tool, (solidcore_record::Vec2::new(12., -4.), None));
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    assert_eq!(sk.curves.len(), before + 1, "{:?}", h.app.status);
+    let curve = sk.curves.last().unwrap();
+    assert!(!curve.infinite && curve.construction, "{curve:?}");
+    let CurveKind::Line { a, b } = curve.kind else { panic!("a line") };
+    let (pa, pb) = (sk.point(a).unwrap(), sk.point(b).unwrap());
+    assert!((pa.y + 6.0).abs() < 1e-6 && (pb.y + 6.0).abs() < 1e-6, "{pa:?} {pb:?}");
+    assert!((pa.dist(pb) - 10.0).abs() < 1e-6, "{pa:?} {pb:?}");
+    assert!(pa.dist(click) > 1.0, "the click is not the segment start: {pa:?}");
+    assert!(sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::DistanceY { .. })));
+    assert!(sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Length { .. })));
 }
 
 #[test]
@@ -184,6 +278,18 @@ fn length_box_focused(h: &Harness) -> bool {
     h.ctx.memory(|m| m.focused()) == Some(crate::sketch_dims::box_id(0))
 }
 
+fn box_focused(h: &Harness, label: &str) -> bool {
+    let Some(i) = h.app.tool.as_ref().and_then(|t| t.dims.iter().position(|b| b.label == label)) else { return false };
+    h.ctx.memory(|m| m.focused()) == Some(crate::sketch_dims::box_id(i))
+}
+
+/// Give the Length box the keyboard. A bare digit goes to the offset box when that field is beside the pointer.
+fn focus_length(h: &mut Harness) {
+    let i = h.app.tool.as_ref().unwrap().dims.iter().position(|b| b.label == "Length").expect("Length box");
+    h.ctx.memory_mut(|m| m.request_focus(crate::sketch_dims::box_id(i)));
+    h.frames(2);
+}
+
 /// The one-click tools show their Length box at once, but it takes the keyboard only for a digit:
 /// a letter still reaches the shortcuts (#10258).
 #[test]
@@ -214,10 +320,17 @@ fn a_waiting_length_box_leaves_letters_to_the_shortcuts_and_takes_a_digit() {
         digit(&mut h, '2');
         digit(&mut h, '5');
         h.frames(2);
-        assert!(length_box_focused(&h), "{id}: a digit gives the box the keyboard");
-        let b = &h.app.tool.as_ref().unwrap().dims[0];
-        assert_eq!((b.value.as_str(), b.locked), ("25", true), "{id}");
-        assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some(id), "{id}: digits are not shortcuts");
+        let tool = h.app.tool.as_ref().unwrap();
+        if id.ends_with("horizontal") {
+            assert!(box_focused(&h, "Offset"), "{id}: a digit fills the offset beside the pointer");
+            let offset = tool.dims.iter().find(|b| b.label == "Offset").unwrap();
+            assert_eq!((offset.value.as_str(), offset.locked), ("25", true), "{id}");
+            assert_eq!((tool.dims[0].value.as_str(), tool.dims[0].locked), ("\u{221e}", false), "{id}: the length box is a different control");
+        } else {
+            assert!(length_box_focused(&h), "{id}: a digit gives the length box the keyboard");
+            assert_eq!((tool.dims[0].value.as_str(), tool.dims[0].locked), ("25", true), "{id}");
+        }
+        assert_eq!(Some(tool.cmd), Some(id), "{id}: digits are not shortcuts");
     }
 }
 
@@ -238,6 +351,11 @@ fn a_typed_length_makes_two_clicks_draw_a_dimensioned_segment() {
         steps(&mut h, id, picks);
         h.step(&json!({"move":{"sketch":start}})).unwrap();
         h.settle();
+        // The field beside the pointer is the offset once that distance has a reference. A length
+        // is typed into the length box.
+        if h.app.tool.as_ref().unwrap().dims.iter().any(|b| b.label == "Offset") {
+            focus_length(&mut h);
+        }
         digit(&mut h, '8');
         // Apart from the reference pick, so the two clicks are not one double click.
         h.frames(30);
@@ -311,6 +429,7 @@ fn the_normal_switch_needs_a_length_and_draws_a_normal_line() {
 
     h.step(&json!({"move":{"sketch":[20,0]}})).unwrap();
     h.settle();
+    focus_length(&mut h);
     digit(&mut h, '8');
     h.frames(2);
     click_switch(&mut h, "normal");

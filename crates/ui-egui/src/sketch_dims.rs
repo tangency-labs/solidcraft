@@ -285,17 +285,17 @@ fn line_boxes(a: Vec2, e: Vec2, px: f64, off: f64) -> Vec<(f64, Vec2)> {
 /// measure so they don't cover it.
 fn live(app: &SolveApp, t: &Tool, e: Vec2, px: f64) -> Vec<(f64, Vec2)> {
     let off = 20.0 * px;
-    // A one-click construction line's Length box waits beside the pointer before any click.
-    // Offset sits further along, clear of the pointer: on the axis the measured distance is
-    // zero and a box there would take the click that places the line.
-    if t.pts.is_empty() && t.dims.first().is_some_and(|b| construction_length(t, b)) {
-        let length_at = e + Vec2::new(2.5 * off, -1.5 * off);
-        let mut rows = vec![(0.0, length_at)];
-        if t.dims.iter().any(|b| b.label == "Offset") {
-            let distance = construction_offset_live(app, t, e, px).map(|v| v[0].0).unwrap_or(0.0);
-            rows.push((distance, length_at + Vec2::new(6.0 * off, 0.0)));
-        }
-        return rows;
+    // Before any click the field beside the pointer is the offset: the distance from the
+    // reference. Typing it shifts an infinite construction line. The length box (#10258) is the
+    // other control, further along and clear of that click, and only a value typed there makes
+    // a segment. With no offset (perpendicular, or parallel before the reference) the length
+    // box keeps the place beside the pointer.
+    if t.pts.is_empty() && t.dims.iter().any(|b| construction_length(t, b)) {
+        let beside = e + Vec2::new(2.5 * off, -1.5 * off);
+        let has_offset = t.dims.iter().any(|b| b.label == "Offset");
+        let distance = construction_offset_live(app, t, e, px).map(|v| v[0].0).unwrap_or(0.0);
+        let length_at = if has_offset { beside + Vec2::new(6.0 * off, 0.0) } else { beside };
+        return t.dims.iter().map(|b| if b.label == "Offset" { (distance, beside) } else { (0.0, length_at) }).collect();
     }
     let Some(a) = t.pts.last().map(|p| p.0) else { return Vec::new() };
     let first = t.pts.first().map(|p| p.0).unwrap_or(a);
@@ -420,7 +420,7 @@ fn input_stage(t: &Tool) -> usize {
 
 /// The straight line a parallel construction offset is measured from.
 fn reference_line(app: &SolveApp, id: &str) -> Option<(Vec2, Vec2)> {
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let sketch = &state.sketch(app.session.active_sketch?)?.sketch;
     let index = sketch.curve_index(id)?;
     let solidcraft_engine::sketch::CurveKind::Line { a, b } = sketch.curves.get(index)?.kind else { return None };
@@ -499,6 +499,13 @@ pub fn sync(t: &mut Tool) {
             for b in &mut t.dims {
                 if let Some(kept) = before.iter().find(|old| old.label == b.label && old.locked) {
                     *b = kept.clone();
+                }
+            }
+            // The offset box steps aside while a length waits for its side click, so that click
+            // is not swallowed. The typed distance still shifts the segment.
+            for old in before.iter().filter(|b| b.locked && b.label == "Offset") {
+                if t.dims.iter().all(|b| b.label != "Offset") && t.dim_history.iter().all(|b| b.label != "Offset") {
+                    t.dim_history.push(old.clone());
                 }
             }
         }

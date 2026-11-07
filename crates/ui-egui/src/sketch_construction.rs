@@ -29,24 +29,29 @@ pub(crate) fn typed_length(t: &Tool) -> Option<&str> {
     crate::sketch_dims::locked_expression(t, "Length").map(str::trim).filter(|text| !text.is_empty())
 }
 
-/// A digit typed while a one-click tool's Length box waits gives that box the keyboard, so the
-/// digit is its first character. Anything else (a tool's shortcut letter) still reaches the
-/// shortcuts: the box only takes the keyboard once a number is being typed.
+/// A digit typed while a one-click tool's value box waits gives that box the keyboard, so the
+/// digit is its first character. The box beside the pointer is the offset when the line has
+/// one: that digit is the distance from the reference, and the line stays infinite. The length
+/// box takes the digit only when it is the box waiting (a perpendicular line, or a parallel
+/// line before its reference is picked). A letter still reaches the shortcuts.
 pub fn claim_typed_length(app: &SolveApp, ctx: &egui::Context) {
     let Some(t) = app.tool.as_ref() else { return };
     if !construction_line_mode(t.cmd).is_some_and(length_box_at_start) || !t.pts.is_empty() || t.hover.is_none() {
         return;
     }
-    if t.dims.first().is_none_or(|b| b.label != "Length") || ctx.memory(|m| m.focused().is_some()) {
+    if ctx.memory(|m| m.focused().is_some()) {
         return;
     }
+    let Some(index) = t.dims.iter().position(|b| b.label == "Offset").or_else(|| t.dims.iter().position(|b| b.label == "Length")) else {
+        return;
+    };
     let digit = ctx.input(|i| {
         !i.modifiers.command
             && !i.modifiers.alt
             && i.events.iter().any(|e| matches!(e, egui::Event::Text(text) if text.chars().next().is_some_and(|c| c.is_ascii_digit())))
     });
     if digit {
-        ctx.memory_mut(|m| m.request_focus(crate::sketch_dims::box_id(0)));
+        ctx.memory_mut(|m| m.request_focus(crate::sketch_dims::box_id(index)));
     }
 }
 
@@ -205,6 +210,8 @@ pub fn place_point(app: &mut SolveApp, t: &mut Tool, at: (Vec2, Option<String>))
         return;
     }
     let at = crate::sketch_dims::placed(app, t, &at);
+    // Only a typed length waits for a second click and pins this one as the segment's start.
+    // A typed offset places the infinite line on this click, on the cursor's side of the reference.
     let picks_side = length_box_at_start(mode) && typed_length(t).is_some();
     if (matches!(mode, "free" | "angle" | "tangent_external") || picks_side) && t.pts.is_empty() {
         t.pts.push(at);
