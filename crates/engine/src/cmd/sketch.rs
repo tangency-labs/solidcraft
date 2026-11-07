@@ -576,7 +576,7 @@ pub(super) fn parg(sk: &mut Sketch, doc: &solidcraft_doc::Document, v: &Value, c
     if let Some(at) = v.get("at").and_then(vec2) {
         return Ok(PArg::At(at));
     }
-    Err(bad(cmd, "a point must be [x, y], a point id like \"l1.end\", or {at, ref}"))
+    Err(bad(cmd, POINT_ARG_MUST))
 }
 
 pub(super) fn req_parg(sk: &mut Sketch, doc: &solidcraft_doc::Document, p: &Value, k: &str, cmd: &str) -> Result<PArg> {
@@ -584,6 +584,39 @@ pub(super) fn req_parg(sk: &mut Sketch, doc: &solidcraft_doc::Document, p: &Valu
 }
 
 const POINT_MUST: &str = "a point's coordinates must be numbers or expressions over the design's parameters";
+
+/// What a point argument must be, when it is none of the forms [`parg`] reads.
+const POINT_ARG_MUST: &str = "a point must be [x, y], a point id like \"l1.end\", or {at, ref}";
+
+/// Whether `v` is a point argument [`parg`] reads, looking only at the JSON: what the design
+/// decides (an unknown point id, an expression naming no parameter) stays the handler's. `snaps`:
+/// the command also reads the forms `sketch_project::snap_points` rewrites first (`{vertex}`,
+/// `{on_edge}`). The error is the handler's message.
+pub(crate) fn point_arg_form(v: &Value, snaps: bool) -> std::result::Result<(), &'static str> {
+    if snaps && (v.get("vertex").and_then(vec3).is_some() || v.get("on_edge").and_then(vec3).is_some()) {
+        return Ok(());
+    }
+    if vec2(v).is_some() {
+        return Ok(());
+    }
+    if let Some([x, y]) = v.as_array().map(Vec::as_slice)
+        && (x.is_string() || y.is_string())
+    {
+        // The coordinates `expr_point` reads: a finite number, or text that isn't blank.
+        let coordinate = |c: &Value| match c {
+            Value::Number(n) => n.as_f64().and_then(crate::params::finite).is_some(),
+            Value::String(e) => !e.trim().is_empty() && e.len() <= 4096,
+            _ => false,
+        };
+        return if coordinate(x) && coordinate(y) { Ok(()) } else { Err(POINT_MUST) };
+    }
+    let named = match v {
+        Value::String(_) => true,
+        Value::Object(o) => o.get("ref").is_some_and(Value::is_string),
+        _ => false,
+    };
+    if named || v.get("at").and_then(vec2).is_some() { Ok(()) } else { Err(POINT_ARG_MUST) }
+}
 
 /// A point given as `[x, y]` with a coordinate typed as text: where it is now and, when a
 /// coordinate names a parameter, the expressions that place it (none: a plain point).
@@ -1857,6 +1890,12 @@ fn polygon_edge(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 pub(super) fn slot(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w: f64) -> Result<Value> {
+    let (out, info) = slot_parts(s, p, cmd, c0, c1, w)?;
+    Ok(result(out, info))
+}
+
+/// What [`slot`] adds: the curve and constraint ids, and the sketch's solve.
+pub(super) fn slot_parts(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w: f64) -> Result<((Vec<String>, Vec<String>), Value)> {
     let h = w / 2.0;
     let d = (c1 - c0).normalized().ok_or_else(|| bad(cmd, "the slot ends must differ"))?;
     let n = d.perp();
@@ -1875,7 +1914,7 @@ pub(super) fn slot(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w:
         cons.push(add_c(sk, ConstraintKind::Equal { a: a0, b: a1 })?);
         Ok((ids_of(sk, &[l1, a1, l2, a0]), cons))
     })?;
-    Ok(result(out, info))
+    Ok((out, info))
 }
 
 fn slot_c2c(s: &mut Session, p: &Value) -> Result<Value> {
