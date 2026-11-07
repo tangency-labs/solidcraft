@@ -948,6 +948,10 @@ impl<'b, 'a> Builder<'b, 'a> {
         // (a sphere's frame put on the slit), before anything is measured on the frame or split
         // at its poles.
         self.complete_slits()?;
+        let slits = self.drop_inner_slits();
+        if slits > 0 {
+            notes.push(format!("{slits} slits of no area left out of the faces they lie in"));
+        }
         let at_poles = self.split_at_poles()?;
         if at_poles > 0 {
             notes.push(format!("{at_poles} edges split where they pass through a face's pole"));
