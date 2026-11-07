@@ -762,6 +762,27 @@ fn surface_precedence_and_truthful_contrast_fallback_have_wire_contracts() {
     let mut opaque = spec.clone();
     opaque.surface = PanelSurface::Opaque;
     assert_eq!(group_surface(Zone::Left, [&spec, &opaque]), PanelSurface::Opaque);
+    let mut follow = spec.clone();
+    follow.surface = PanelSurface::FollowZone;
+    follow.text_heavy = false;
+    let mut text_heavy = follow.clone();
+    text_heavy.text_heavy = true;
+    for zone in [Zone::Left, Zone::Right, Zone::Floating, Zone::Bottom, Zone::Window] {
+        assert_eq!(group_surface(zone, [&spec, &opaque]), PanelSurface::Opaque);
+        assert_eq!(group_surface(zone, [&opaque, &spec]), PanelSurface::Opaque);
+        assert_eq!(group_surface(zone, [&follow, &text_heavy]), PanelSurface::Opaque);
+        assert_eq!(group_surface(zone, [&text_heavy, &follow]), PanelSurface::Opaque, "inactive metadata cannot depend on tab order");
+        assert_eq!(
+            group_surface(zone, [&text_heavy, &spec]),
+            PanelSurface::Translucent,
+            "explicit translucency overrides both text-heavy and zone defaults"
+        );
+        assert_eq!(group_surface(zone, [&spec, &text_heavy]), PanelSurface::Translucent);
+        assert_eq!(
+            group_surface(zone, [&follow]),
+            if matches!(zone, Zone::Bottom | Zone::Window) { PanelSurface::Opaque } else { PanelSurface::Translucent }
+        );
+    }
     let outcome = ContrastOutcome::RetainReadableFallback { reason: ContrastFailure::UnreadableAtFullOpacity };
     let roundtrip: ContrastOutcome = serde_json::from_value(serde_json::to_value(&outcome).unwrap()).unwrap();
     assert_eq!(roundtrip, outcome);

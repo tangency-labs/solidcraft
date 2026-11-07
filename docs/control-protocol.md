@@ -263,7 +263,7 @@ actual current Session without another service tick. Runtime inspection remains
 read-only. The shared host adds no production command registration beyond the
 application-layout commands above.
 
-For native host evidence, `ui.panel_fixture {enabled?, preset?, remember?}` installs bounded
+For native host evidence, `ui.panel_fixture {enabled?, preset?, remember?, translucency_percent?}` installs bounded
 synthetic content in the real `SolveApp` workspace host. The normal connection
 authentication applies. It is off by default and ephemeral unless explicitly
 enabled with `remember:true`. It adds no design change, production content
@@ -275,12 +275,14 @@ registration or native panel window.
 | `{"enabled":true}` | Enable the `docks` specimen if no runtime exists. |
 | `{"preset":"tabs"}` | Enable the named specimen if no runtime exists. |
 | `{"preset":"tabs","remember":true}` | Enable the specimen and its application preference catalogue. Restore a saved record after valid host dimensions are available. |
+| `{"preset":"surfaces","translucency_percent":50}` | Enable declared surface-policy specimens with a runtime-only translucency request (finite 0–100 percent). Readability may raise effective opacity. |
+| `{"translucency_percent":100}` | Change the enabled specimen's request without replacing controllers, drafts or layout. Refuse if no specimen owns the host. |
 | `{"enabled":false}` | Preflight and tear down only the specimen runtime; refusal leaves it intact. |
 
 Presets are `docks` (Left/Right/Bottom, with two Left sections), `tabs` (two groups
 of two), `collapsed` (four full-width collapsed headers), `floating` (four in-app floating
 sections), `overflow` (24 instances), and `pinned` (an outer pinned Right section
-plus ordinary docks), `columns` (three independent Left columns), `stack_tabs`, `content_fill` (sole Content versus Fill), and `inline` (one editable total row). The retired `rails` preset is rejected. Original synthetic content retains editable drafts and
+plus ordinary docks), `columns` (three independent Left columns), `stack_tabs`, `content_fill` (sole Content versus Fill), `inline` (one editable total row), and `surfaces` (mixed tab and explicit surface policies). Only `surfaces` opts out of compatibility opaque presentation. Requested opacity is `1 - translucency_percent / 100`; the override never changes saved preferences. The retired `rails` preset is rejected. Original synthetic content retains editable drafts and
 controller state across hiding and moves. Services keep ticking while content is
 hidden. Apply/Finish/Cancel are synthetic actions; the Session is never passed to
 their command sink. The editor's cancellation guard checkbox can refuse explicit
