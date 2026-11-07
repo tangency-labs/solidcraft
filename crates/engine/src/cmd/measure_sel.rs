@@ -458,8 +458,10 @@ fn axis_named(s: &Session, name: &str) -> Option<(Vec3, Vec3)> {
 }
 
 /// The closest points of two exact shapes, where the sampled points would be wrong: a plane or
-/// an axis runs on, so a point set of it is not the object.
-fn exact_min(a: &Shape, b: &Shape) -> Option<(f64, Vec3, Vec3)> {
+/// an axis runs on, so a point set of it is not the object. `anchor` is a point of `a` to
+/// measure from where any point would do (two parallel planes); `unbounded` says whether `a`
+/// and `b` run on for ever (datum planes and axes) rather than ending (faces and edges).
+fn exact_min(a: &Shape, b: &Shape, anchor: Option<Vec3>, unbounded: (bool, bool)) -> Option<(f64, Vec3, Vec3)> {
     use Shape::*;
     let to_plane = |p: Vec3, point: Vec3, normal: UnitVec3| {
         let n = normal.vec();
@@ -485,17 +487,7 @@ fn exact_min(a: &Shape, b: &Shape) -> Option<(f64, Vec3, Vec3)> {
         }
         (Point(p), Point(q)) => Some((p.dist(*q), *p, *q)),
         (Plane { point: p1, normal: n1 }, Plane { point: p2, normal: n2 }) => {
-            let (v1, v2) = (n1.vec(), n2.vec());
-            if v1.cross(v2).len() < 1e-9 {
-                let h = (*p2 - *p1).dot(v1);
-                Some((h.abs(), *p1, *p2 - v1 * h))
-            } else {
-                // They meet: a point on the line of intersection has distance zero.
-                let dir = v1.cross(v2);
-                let t = -(*p1 - *p2).dot(v2) / dir.dot(v2);
-                let p = *p1 + dir * t;
-                Some((0.0, p, p))
-            }
+            super::measure_shape::plane_plane(*p1, *n1, *p2, *n2, anchor.unwrap_or(*p1), unbounded.0 && unbounded.1)
         }
         (Plane { point, normal }, Line { a: la, b: lb }) => {
             let d = *lb - *la;
@@ -713,7 +705,10 @@ pub(crate) fn measure_items(s: &Session, items: &Value) -> Result<Value> {
         if let (Some((p, q)), Some(d)) = (near, min) {
             out.set_closest(d, p, q);
         }
-        if let Some((d, p, q)) = exact_min(&a.shape, &b.shape) {
+        let unbounded = |i: usize| matches!(sels.get(i), Some(Sel::Plane { .. } | Sel::Axis { .. }));
+        if let Some((d, p, q)) = exact_min(&a.shape, &b.shape, near.map(|(p, _)| p), (unbounded(0), unbounded(1)))
+            .filter(|(d, p, q)| d.is_finite() && p.is_finite() && q.is_finite())
+        {
             out.set_closest(d, p, q);
         }
         if let (Some((p, q)), Some(d)) = (far, max) {

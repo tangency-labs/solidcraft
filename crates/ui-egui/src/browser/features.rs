@@ -339,10 +339,9 @@ fn feature_row(
         }
     }
     if r.double {
-        if !path.is_empty() {
-            let _ = app.run("component.activate", json!({"component":component,"occurrence":path.last(),"path":path}));
-        }
-        app.edit_feature(id);
+        // Inside a placement, the feature's component is active while it is edited, and the one
+        // active before comes back when the editor ends (#12720).
+        app.edit_feature_in(id, Some((component, path)));
     } else if r.clicked {
         click_select(app, ui, format!("f:{id}"), Some(Sel::Feature { id }));
     }
@@ -1006,6 +1005,87 @@ mod tests {
         assert_eq!(h.app.session.doc.marker, Some(pad_index + 1), "the marker goes right after the feature");
         let labels: Vec<_> = drawn_rows().into_iter().map(|(label, ..)| label).collect();
         assert!(labels.contains(&block_name), "a rolled-back feature stays listed: {labels:?}");
+    }
+
+    /// #12720: a feature inside a placed component, double-clicked in its Features folder, is
+    /// edited with its component active, in its placement; OK and Cancel make the component active
+    /// before the double-click active again, as Finish Sketch does for a sketch row (#8127). A
+    /// component activated while the editor is open stays active, and a feature of the design
+    /// itself activates nothing.
+    #[test]
+    fn a_feature_edited_from_a_placed_components_folder_gives_the_active_component_back() {
+        let mut h = Harness::new();
+        let plate = h.app.run("solid.box", json!({"length":60,"width":40,"height":8,"body_name":"Plate"})).unwrap()["feature"].as_u64().unwrap();
+        let bracket = h.app.run("component.create", json!({"name":"Bracket","grounded":false})).unwrap();
+        let pad = h.app.run("solid.box", json!({"length":20,"width":20,"height":20,"body_name":"Block"})).unwrap()["feature"].as_u64().unwrap();
+        let comp = bracket["component"].as_u64().unwrap();
+        let path = vec![bracket["occurrence"].as_u64().unwrap()];
+        h.app.run("component.activate", json!({"component":0})).unwrap();
+        h.app.run("occurrence.move", json!({"occurrence":path[0],"translate":[0,0,8]})).unwrap();
+        // Find in Timeline opens the placement's rows down to the feature (and the root's folder).
+        let block = h.app.session.occurrence_bodies(&path, false).unwrap()[0].clone();
+        reveal(&mut h.app, pad, &block);
+        h.app.tree.expanded.insert("c0/features".into());
+        h.frames(2);
+        let row = json!({"handle": format!("row:browser-feature:{}:{pad}", occurrence_key(&path))});
+        let closed = |h: &mut Harness| {
+            for _ in 0..500 {
+                if h.app.dialog.is_none() && h.app.applying.is_none() && h.app.deferred.is_none() && h.app.deferred_queue.is_empty() {
+                    break;
+                }
+                h.frame();
+            }
+            assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+            // Long enough that the next click is not a double or triple click.
+            h.frames(40);
+        };
+        let active = |h: &Harness| (h.app.session.active_component, h.app.session.active_occurrence_path.clone());
+        for close in ["dialog:OK", "dialog:Cancel"] {
+            h.step(&json!({"click": row, "double": true})).unwrap();
+            h.frames(2);
+            assert!(h.app.dialog.as_ref().is_some_and(|d| d.editing.is_some_and(|(id, _)| id == pad)), "{close}: the editor opened");
+            assert_eq!(active(&h), (comp, Some(path.clone())), "{close}: the bracket is active while its feature is edited");
+            h.step(&json!({"click": {"handle": close}})).unwrap();
+            closed(&mut h);
+            assert_eq!(active(&h), (0, None), "{close}: the design is active again");
+        }
+        // Another command taking over ends the editor the same way.
+        h.step(&json!({"click": row, "double": true})).unwrap();
+        h.frames(2);
+        assert_eq!(active(&h).0, comp);
+        h.step(&json!({"start": "solid.box"})).unwrap();
+        h.frames(2);
+        assert_eq!(active(&h), (0, None), "the design is active again once another command took over");
+        crate::dialogs::cancel(&mut h.app);
+        h.frames(40);
+        // A component activated while the editor is open stays active.
+        let other = h.app.run("component.create", json!({"name":"Other"})).unwrap()["component"].as_u64().unwrap();
+        h.app.run("component.activate", json!({"component":0})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click": row, "double": true})).unwrap();
+        h.frames(2);
+        h.app.run("component.activate", json!({"component":other})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:Cancel"}})).unwrap();
+        closed(&mut h);
+        assert_eq!(active(&h).0, other, "the component activated meanwhile stays active");
+        // The bracket already active: editing its feature leaves it active.
+        h.app.run("component.activate", json!({"component":comp,"occurrence":path[0],"path":path})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click": row, "double": true})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click": {"handle": "dialog:Cancel"}})).unwrap();
+        closed(&mut h);
+        assert_eq!(active(&h), (comp, Some(path.clone())), "a component active already stays active");
+        // A feature of the design itself, edited from the root Features folder, activates nothing.
+        h.app.run("component.activate", json!({"component":0})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click": {"handle": format!("row:browser-feature:c0:{plate}")}, "double": true})).unwrap();
+        h.frames(2);
+        assert!(h.app.dialog.as_ref().is_some_and(|d| d.editing.is_some_and(|(id, _)| id == plate)));
+        assert!(h.app.pre_edit_component.is_none());
+        h.step(&json!({"click": {"handle": "dialog:Cancel"}})).unwrap();
+        closed(&mut h);
+        assert_eq!(active(&h), (0, None));
     }
 
     /// #10079: three extrusions of one visible sketch, the first renamed. A click just past the end
