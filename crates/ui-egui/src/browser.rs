@@ -3330,14 +3330,17 @@ fn entry_row(
         return;
     }
     app.tree.remember(&e.row_key);
-    // A search lists what it found and what holds it. A sketch's patterns aren't searched, so a
-    // found sketch shows neither them nor their fold until the search ends.
-    let pattern_key = e.patterns.as_deref().filter(|_| !app.tree.search.on());
+    // A search lists what it found and what holds it. The rows a row folds open on that aren't
+    // searched (a sketch's patterns, a body's features) show neither them nor their fold until the
+    // search ends.
+    let unsearched = !app.tree.search.on();
+    let pattern_key = e.patterns.as_deref().filter(|_| unsearched);
     let start_open = rows_start_open(app);
     let patterns_open = pattern_key.is_some_and(|key| is_open(app, key, start_open));
     let revealed = folder == "bodies" && body_reveal(app).is_some_and(|b| e.row_key.strip_prefix("b:") == Some(b));
     // Features under bodies (#11945): the body row folds open on the features that built it.
     let built_key = (folder == "bodies"
+        && unsearched
         && app.preferences.browser_body_features
         && !crate::render_workspace::active(app)
         && matches!(e.sel, Some(Sel::Body { .. })))
