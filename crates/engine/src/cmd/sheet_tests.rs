@@ -1058,7 +1058,10 @@ fn a_cut_out_with_a_corner_on_a_bend_line_refolds() {
     // The base (10, -20) (-5, 0) (-100, 0) (-100, -20): 2050; the bend 25 x 3π/2; the flange 25 x 16.
     let area = 2450.0 + 37.5 * PI;
     let cases = [
-        ([[-5.0, 0.0], [-3.0, -1.0], [-3.0, 1.0]], 2.0),
+        // The bend's free end follows the plate's edge y = 0 through the zone (option B), so the
+        // half of the triangle past it is off the sheet: it cuts (-5, 0) (-3, -1) (-3, 0), all in
+        // the zone (0.8 x + 0.6 y ≥ -4 there), ½ · 1 · 2 = 1 mm². (2 where the end ran square across.)
+        ([[-5.0, 0.0], [-3.0, -1.0], [-3.0, 1.0]], 1.0),
         ([[-5.0, 0.0], [-7.0, -1.0], [-6.0, -3.0]], 2.5),
         ([[2.5, -10.0], [2.1, -12.8], [-0.3, -9.6]], 4.0),
         ([[2.5, -10.0], [4.7, -9.6], [3.5, -8.0]], 2.0),

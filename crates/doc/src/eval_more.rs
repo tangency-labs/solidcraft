@@ -1563,9 +1563,12 @@ pub(super) fn surface_hole_cut(st: &mut ModelState, tools: &[(Traced, Option<Pri
                     z0 <= tol && z1 >= t - tol && crate::sheet_surface::holds_clear(own, &circle)
                 } else if a.z.abs() <= 1e-9 {
                     // Along the panel: its line through the panel's material, inside its thickness.
+                    // A drill clear of the panel's slab meets nothing of it: one square across
+                    // the base, beside a flange standing on it, runs along the flange's plane.
                     let (b2, a2) = (Vec2::new(b.x, b.y), Vec2::new(a.x, a.y));
+                    let clear = b.z - radius > t + tol || b.z + radius < -tol;
                     let inside = crate::sheet_surface_convert::extent_across(own, (b2, a2)).map(|(s0, s1)| (s0.max(span.0), s1.min(span.1)));
-                    let through = inside.is_some_and(|(u0, u1)| u0 < u1);
+                    let through = !clear && inside.is_some_and(|(u0, u1)| u0 < u1);
                     if let Some(inside) = inside.filter(|_| through) {
                         span = inside;
                     }
