@@ -1344,9 +1344,9 @@ mod tests {
         ids.sort_unstable();
         assert_eq!(ids, ["chitubox", "chitubox", "creatware", "lychee", "qidi"], "{found:?}");
         let exe_of = |id: &str| found.iter().filter(|f| f.base_id() == id).map(|f| f.command[0].clone()).collect::<Vec<_>>();
-        assert_eq!(exe_of("lychee"), [prog.join("LycheeSlicer/LycheeSlicer.exe").to_string_lossy()]);
-        assert_eq!(exe_of("qidi"), [prog.join("QIDIStudio/qidi-studio.exe").to_string_lossy()]);
-        assert_eq!(exe_of("creatware"), [prog.join("CreatBot/CreatWare/CreatWare-slicer.exe").to_string_lossy()]);
+        assert_eq!(exe_of("lychee"), [prog.join("LycheeSlicer").join("LycheeSlicer.exe").to_string_lossy()]);
+        assert_eq!(exe_of("qidi"), [prog.join("QIDIStudio").join("qidi-studio.exe").to_string_lossy()]);
+        assert_eq!(exe_of("creatware"), [prog.join("CreatBot").join("CreatWare").join("CreatWare-slicer.exe").to_string_lossy()]);
         assert_eq!(exe_of("chitubox").len(), 2);
         // The resin slicers take STL.
         let chitubox = found.iter().find(|f| f.base_id() == "chitubox").unwrap();
