@@ -191,7 +191,7 @@ command), which the server instructions list. Every `run` reply ends with what c
 created, changed (volume before and after, bounding box) and removed, so the agent checks its work
 without extra calls. Measured against the usual tools on the same tasks, it cut the cost of a
 modelling session by 20-59 % at about the same accuracy; the tasks, the harness and the results are in
-[the scx write-up](https://github.com/dudedagger42/solidcraft/tree/all/scx-hybrid/docs/scx-hybrid).
+[the scx write-up (#12522)](https://github.com/tangency-labs/solidcraft/pull/12522).
 
 It is off by default and turned on like compact output, with no change to the client
 configuration:
@@ -213,9 +213,10 @@ starting programs and importing modules other than `json` and `math` all fail wi
 `PermissionError` or `NameError`. A script reaches SolidCraft only through `execute`, `measure`,
 `list_commands` and `new_design`, answered exactly as when the agent calls them, under the same
 [path rules](#which-files-the-agent-can-reach). Each script runs in its own `solidcraft-cli
-scx-worker` process, which the operating system caps at 1 GiB of memory (a Job Object on Windows,
-`RLIMIT_AS` on Linux and the BSDs) and which may start no other process. Each step may compute for
-30 seconds. A script that goes past a limit ends with `MemoryError`, `TimeoutError` or
+scx-worker` process. On Windows a Job Object caps its memory at 1 GiB and lets it start no other
+process; on Linux and the BSDs `RLIMIT_AS` caps its address space at 1 GiB; macOS does not enforce
+`RLIMIT_AS`, so there the worker has no memory cap and the time limit is the backstop. Monty
+itself refuses to start processes on every platform. Each step may compute for 30 seconds. A script that goes past a limit ends with `MemoryError`, `TimeoutError` or
 `RecursionError`; the server and the design go on.
 
 The language is a subset of Python 3: functions, loops, comprehensions, f-strings, `dict`, `list`,

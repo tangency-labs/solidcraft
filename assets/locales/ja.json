@@ -5642,8 +5642,6 @@
   "ui.mcp_agents": "MCP 経由のエージェント",
   "ui.mcp_compact": "コンパクトな出力",
   "ui.mcp_compact_note": "MCP サーバー (solidcraft-cli mcp) 経由で接続したエージェント向け: inspect_design はスケッチを要約し、ツールの結果は整形されないため、トークンが少なくて済みます。変更後に開始したエージェントのセッションから適用されます。--compact または SOLIDCRAFT_MCP_COMPACT=1 でも有効になります。",
-  "ui.mcp_scx": "スクリプトモード (scx)",
-  "ui.mcp_scx_note": "MCP サーバー (solidcraft-cli mcp) 経由で接続するエージェント向け: 通常のツールの代わりに run、design、look を使い、CAD 用語の短い Python スクリプトでモデルを作成します。スクリプトはファイル、ネットワーク、他のプログラムにアクセスできないサンドボックスで実行されます。テストではモデリングセッションのコストを 20～59 % 削減しました。変更後に開始したエージェントセッションに適用されます。--scx または SOLIDCRAFT_MCP_SCX=1 でも有効になります。",
   "ui.measure": "計測",
   "ui.mesh_format_3mf": "3MF",
   "ui.mesh_format_3mf_tagged": "面タグ付き 3MF",

@@ -3922,3 +3922,23 @@ fn compact_output_follows_the_apps_preference() {
     let mut s = Server::new(app(vec![not_running])).with_options(crate::Options { compact: true, ..Default::default() });
     assert!(inspect_design_is_compact(&mut s));
 }
+
+/// Script mode is fixed when the agent is first told its tools: an app that answers only later
+/// with script mode on does not swap `execute` for `run` under a running session.
+#[test]
+fn script_mode_stays_as_the_agent_was_first_told() {
+    let asked = std::rc::Rc::new(std::cell::Cell::new(0));
+    let not_running = Err(format!("{} 127.0.0.1:7878 (refused)", crate::backend::NOT_RUNNING));
+    let replies = vec![not_running, Ok(Some(json!({"scx": true})))];
+    let mut s = Server::new(Box::new(AppWithPrefs { inner: Headless::default(), replies, asked: asked.clone() }));
+    let names = |s: &mut Server| -> Vec<String> {
+        let listed = call(s, 1, "tools/list", json!({}));
+        listed["result"]["tools"].as_array().unwrap().iter().map(|d| d["name"].as_str().unwrap().to_owned()).collect()
+    };
+    let first = names(&mut s);
+    assert!(first.iter().any(|n| n == "execute") && !first.iter().any(|n| n == "run"), "{first:?}");
+    assert_eq!(names(&mut s), first, "the app's later answer does not change the tools");
+    assert!(asked.get() >= 2, "the app was asked again and answered");
+    let r = raw_tool(&mut s, "measure", json!({}));
+    assert_ne!(r["result"]["isError"], json!(true), "the usual tools still answer: {r}");
+}

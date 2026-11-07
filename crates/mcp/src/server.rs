@@ -68,6 +68,9 @@ pub struct Server {
     app_options: Option<Options>,
     /// Where script mode runs scripts (`solidcraft-cli mcp` sets a worker process).
     scx_runner: crate::scx::Runner,
+    /// Script mode as the agent was first told (its instructions or its tool list): kept for the
+    /// session, so an app that answers `mcp.options` later does not swap the tools under it.
+    scx_served: Option<bool>,
 }
 
 /// The design files a call opens or saves (#7181): `open` and `save`, and the commands they run
@@ -102,7 +105,15 @@ fn error(id: Value, code: i64, message: impl Into<String>) -> Value {
 
 impl Server {
     pub fn new(backend: Box<dyn Backend>) -> Self {
-        Self { backend, initialized: false, scope: None, options: Options::default(), app_options: None, scx_runner: crate::scx::Runner::default() }
+        Self {
+            backend,
+            initialized: false,
+            scope: None,
+            options: Options::default(),
+            app_options: None,
+            scx_runner: crate::scx::Runner::default(),
+            scx_served: None,
+        }
     }
     /// Confine the files tool calls may reach to `scope` (`None`: anywhere). `solidcraft-cli mcp`
     /// always sets one unless started with `--allow-any-path` (docs/mcp.md).
@@ -133,6 +144,16 @@ impl Server {
             self.app_options = Some(reply.as_ref().map(Options::from_app).unwrap_or_default());
         }
         self.options.or(self.app_options.unwrap_or_default())
+    }
+    /// [`Server::options`], with script mode as the agent was first told once it has been told
+    /// (`serve`: the instructions or the tool list fix it for the session).
+    fn session_options(&mut self, serve: bool) -> Options {
+        let mut o = self.options();
+        if serve && self.scx_served.is_none() {
+            self.scx_served = Some(o.scx);
+        }
+        o.scx = self.scx_served.unwrap_or(o.scx);
+        o
     }
     pub fn backend(&mut self) -> &mut dyn Backend {
         self.backend.as_mut()
@@ -247,7 +268,7 @@ impl Server {
                     "protocolVersion": version,
                     "capabilities": {"tools": {"listChanged": false}, "resources": {"listChanged": false}},
                     "serverInfo": {"name": "solidcraft", "title": "SolidCraft", "version": env!("CARGO_PKG_VERSION")},
-                    "instructions": if self.options().scx {
+                    "instructions": if self.session_options(true).scx {
                         format!("{}Backend: {}.", crate::scx::INSTRUCTIONS, self.backend.describe())
                     } else {
                         format!("{INSTRUCTIONS} Backend: {}.", self.backend.describe())
@@ -255,14 +276,14 @@ impl Server {
                 }))
             }
             "ping" => Ok(json!({})),
-            "tools/list" => Ok(json!({"tools": tool_definitions_with(self.options())})),
+            "tools/list" => Ok(json!({"tools": tool_definitions_with(self.session_options(true))})),
             "tools/call" => {
                 let name = params.get("name").and_then(Value::as_str).ok_or((INVALID_PARAMS, "missing tool `name`".to_string()))?;
                 let args = match params.get("arguments") {
                     None | Some(Value::Null) => json!({}),
                     Some(a) => a.clone(),
                 };
-                let options = self.options();
+                let options = self.session_options(false);
                 check_arguments_with(name, &args, options).map_err(|e| (INVALID_PARAMS, e))?;
                 // The open design's folder counts, and goes on counting for the rest of this run
                 // when a save-as or open moves the design elsewhere (#7181).

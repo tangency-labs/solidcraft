@@ -154,3 +154,49 @@ fn a_design_job_needs_no_script() {
     assert!(!o.error, "{}", o.text);
     assert!(o.text.starts_with("1 bodies, 0 parts, total volume 8"), "{}", o.text);
 }
+
+/// A worker's line past the limit stops the script with a `fail`, read in bounded memory; the
+/// lines before it pass through.
+#[test]
+fn a_worker_line_past_the_limit_stops_the_script() {
+    let (tx, rx) = std::sync::mpsc::channel();
+    sandbox::forward_lines(
+        std::io::Cursor::new(
+            b"{\"call\":1}
+0123456789012345678901234
+{}
+"
+            .to_vec(),
+        ),
+        &tx,
+        16,
+    );
+    assert_eq!(
+        rx.recv().unwrap().as_deref(),
+        Some(
+            "{\"call\":1}
+"
+        )
+    );
+    let fail: Value = serde_json::from_str(&rx.recv().unwrap().unwrap()).unwrap();
+    assert!(fail["fail"].as_str().is_some_and(|f| f.contains("longer than 16 bytes")), "{fail}");
+    assert!(rx.try_recv().is_err(), "nothing is read after it");
+    let (tx, rx) = std::sync::mpsc::channel();
+    sandbox::forward_lines(
+        std::io::Cursor::new(
+            b"{}
+"
+            .to_vec(),
+        ),
+        &tx,
+        16,
+    );
+    assert_eq!(
+        rx.recv().unwrap().as_deref(),
+        Some(
+            "{}
+"
+        )
+    );
+    assert_eq!(rx.recv().unwrap(), None, "the end of the output");
+}

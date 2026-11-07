@@ -309,23 +309,7 @@ pub fn in_worker(program: &Path, job: &Job, host: &mut Host<'_>) -> Outcome {
         return Outcome { text: "scx: the script worker has no pipes".into(), error: true };
     };
     let (tx, rx) = mpsc::channel::<Option<String>>();
-    std::thread::spawn(move || {
-        let mut r = BufReader::new(stdout);
-        loop {
-            let mut line = String::new();
-            match r.read_line(&mut line) {
-                Ok(n) if n > 0 => {
-                    if tx.send(Some(line)).is_err() {
-                        return;
-                    }
-                }
-                _ => {
-                    let _ = tx.send(None);
-                    return;
-                }
-            }
-        }
-    });
+    std::thread::spawn(move || forward_lines(stdout, &tx, MAX_WORKER_LINE));
     // The last of what the worker said on stderr, for a death to name its cause.
     let err_tail = std::thread::spawn(move || {
         let mut buf = Vec::new();
@@ -355,6 +339,34 @@ pub fn in_worker(program: &Path, job: &Job, host: &mut Host<'_>) -> Outcome {
     };
     let _ = child.wait();
     outcome
+}
+
+/// The longest line the server reads from a worker (a tool call with its arguments, or the
+/// script's output): the worker's memory cap does not cover what the server buffers for it.
+const MAX_WORKER_LINE: u64 = 32 << 20;
+
+/// Send `from`'s lines to `tx` until it ends (then `None`). A line longer than `max` bytes ends
+/// it with a `fail` message instead, which stops the script.
+pub(super) fn forward_lines(from: impl Read, tx: &mpsc::Sender<Option<String>>, max: u64) {
+    let mut r = BufReader::new(from);
+    loop {
+        let mut line = String::new();
+        match r.by_ref().take(max + 1).read_line(&mut line) {
+            Ok(n) if n as u64 > max => {
+                let _ = tx.send(Some(json!({"fail": format!("it sent a line longer than {} bytes", max)}).to_string()));
+                return;
+            }
+            Ok(n) if n > 0 => {
+                if tx.send(Some(line)).is_err() {
+                    return;
+                }
+            }
+            _ => {
+                let _ = tx.send(None);
+                return;
+            }
+        }
+    }
 }
 
 fn converse(stdin: &mut impl Write, rx: &mpsc::Receiver<Option<String>>, job: &Job, host: &mut Host<'_>) -> Result<Outcome, String> {
