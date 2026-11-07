@@ -3432,6 +3432,50 @@ fn extrude_takes_every_profile_of_a_sketch_clicked_in_the_browser() {
     );
 }
 
+/// #7381: Sweep and Loft take a sketch from the Browser the way Extrude does. Sweep replaces its
+/// profile. Loft keeps every sketch that is clicked.
+#[test]
+fn sweep_and_loft_take_a_sketch_clicked_in_the_browser() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Profile"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [40, 0], "p1": [50, 10]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sketch.create", json!({"plane": "XZ", "name": "Other"})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center": [0, 40], "radius": 5})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let profile = h.app.session.doc.find_feature("Profile").expect("profile sketch").id;
+    let other = h.app.session.doc.find_feature("Other").expect("other sketch").id;
+    h.app.session.selection.clear();
+
+    h.app.start("solid.sweep");
+    h.frames(2);
+    h.step(&json!({"click": {"browser": "Profile"}})).unwrap();
+    h.frames(2);
+    let sweep = h.app.dialog.as_ref().expect("Sweep stays open");
+    assert_eq!(
+        sweep.inputs[0].items,
+        vec![Sel::Profile { sketch: profile, index: 0 }, Sel::Profile { sketch: profile, index: 1 }],
+        "both rectangles of the clicked sketch"
+    );
+    assert!(sweep.inputs[1].items.is_empty(), "the path field is left empty");
+
+    h.app.start("solid.loft");
+    h.frames(2);
+    h.step(&json!({"click": {"browser": "Profile"}})).unwrap();
+    h.frames(1);
+    h.step(&json!({"click": {"browser": "Other"}})).unwrap();
+    h.frames(1);
+    h.step(&json!({"click": {"browser": "Other"}})).unwrap();
+    h.frames(1);
+    let loft = h.app.dialog.as_ref().expect("Loft stays open");
+    assert_eq!(
+        loft.inputs[0].items,
+        vec![Sel::Profile { sketch: profile, index: 0 }, Sel::Profile { sketch: profile, index: 1 }, Sel::Profile { sketch: other, index: 0 },],
+        "each clicked sketch is kept, and a second click does not repeat it"
+    );
+}
+
 /// #10311: a selected line midpoint and another line, either way round, go to Coincident from the
 /// toolbar and from the context menu: the line's middle lands on the other line.
 #[test]
