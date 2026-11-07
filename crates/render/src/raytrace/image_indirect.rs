@@ -1,6 +1,10 @@
 //! One prepaid opaque path continuation. No ray queue, recursion or image storage.
 use super::*;
 use crate::raytrace::indirect::{self, Rectangle, multiply, power_weight};
+#[path = "image_glass_model.rs"]
+mod advanced;
+#[path = "image_glass_lighting.rs"]
+mod glass_lighting;
 #[path = "image_scattering.rs"]
 mod scattering;
 #[path = "image_volume.rs"]
@@ -21,12 +25,15 @@ enum Stage {
     Emitters,
     Resolve,
     Glass,
+    GlassSheet,
+    GlassLighting,
     ShadowBeer,
     ShadowGlass,
     Effects,
     Maps,
     Aging,
     Emission,
+    Caustics,
     Directional,
     Punctual,
     Area,
@@ -63,6 +70,9 @@ pub(super) struct State {
     shadow_ray: Option<Ray>,
     shadow_emitter: usize,
     shadow_excluded: Option<usize>,
+    caustic_gather: super::caustics::Gather,
+    glass_lighting: Option<glass_lighting::Context>,
+    sampled_continuous: bool,
 }
 impl Default for State {
     fn default() -> Self {
@@ -91,6 +101,9 @@ impl Default for State {
             shadow_ray: None,
             shadow_emitter: 0,
             shadow_excluded: None,
+            caustic_gather: Default::default(),
+            glass_lighting: None,
+            sampled_continuous: false,
         }
     }
 }
@@ -129,6 +142,12 @@ pub(super) struct MediumProbe {
 }
 #[cfg(test)]
 impl State {
+    pub(super) fn hard_light_probe(&self) -> Option<(u8, u8, Vec3, Vec3)> {
+        self.glass_lighting.as_ref()?.pending_probe().map(|(kind, pending)| (self.depth, kind, pending, self.radiance))
+    }
+    pub(super) fn continuous_sampled(&self) -> bool {
+        self.sampled_continuous
+    }
     pub(super) fn volume_probe(&self) -> Option<VolumeProbe> {
         self.volume.as_ref().map(|v| VolumeProbe {
             source: v.source,
@@ -189,12 +208,15 @@ impl State {
             Stage::Emitters => "emitters",
             Stage::Resolve => "resolve",
             Stage::Glass => "glass",
+            Stage::GlassSheet => "glass_sheet",
+            Stage::GlassLighting => "glass_lighting",
             Stage::ShadowBeer => "shadow_beer",
             Stage::ShadowGlass => "shadow_glass",
             Stage::Effects => "effects",
             Stage::Maps => "maps",
             Stage::Aging => "aging",
             Stage::Emission => "emission",
+            Stage::Caustics => "caustics",
             Stage::Directional => "directional",
             Stage::Punctual => "punctual",
             Stage::Area => "area",
@@ -214,6 +236,15 @@ fn variates(task: &ImageTask, state: &State, domain: u64) -> job::Result<[f64; 2
 }
 fn continuing(task: &ImageTask, state: &State) -> job::Result<bool> {
     Ok(state.depth + 1 < task.options.path.ok_or_else(|| invalid("CPU path settings disappeared"))?.max_depth)
+}
+pub(super) fn advanced_normals(task: &ImageTask) -> bool {
+    // An HG collision adds phase transport inside the medium. Its closure does
+    // not use a boundary normal, so HG alone keeps the smooth interface policy.
+    task.options.caustics.is_some()
+        || task.options.dielectrics.iter().any(|input| input.model.is_some_and(|model| model.roughness > 0.0 || model.spectral()))
+}
+fn vertex_lighting(task: &ImageTask, state: &State) -> bool {
+    task.options.caustics.is_none() || !state.sampled_continuous
 }
 fn shared<'a>(task: &'a ImageTask, state: &State) -> job::Result<super::super::prepared::SharedHit<'a>> {
     let mut hit = unaged(task, state)?;
@@ -335,6 +366,9 @@ pub(super) fn step(task: &mut ImageTask) -> job::Result<()> {
     result
 }
 fn advance(task: &mut ImageTask, state: &mut State) -> job::Result<()> {
+    if state.stage == Stage::GlassLighting {
+        return glass_lighting::step(task, state);
+    }
     if matches!(state.stage, Stage::Origin | Stage::MediumOrigin) {
         let origin = state.origins.first_mut().ok_or_else(|| invalid("CPU primary-origin certificate missing"))?;
         if origin.ready() {
@@ -595,6 +629,7 @@ fn advance(task: &mut ImageTask, state: &mut State) -> job::Result<()> {
         Stage::Glass => {
             glass_one(task, state)?;
         }
+        Stage::GlassSheet => advanced::sheet_step(task, state)?,
         Stage::ShadowBeer => {
             shadow_beer(task, state)?;
         }
@@ -688,6 +723,17 @@ fn advance(task: &mut ImageTask, state: &mut State) -> job::Result<()> {
                 super::super::lighting::validate_radiance(state.radiance).map_err(error)?;
             } else {
                 state.light = 0;
+                state.caustic_gather = Default::default();
+                state.stage = if task.caustics.is_empty() { Stage::Directional } else { Stage::Caustics };
+            }
+        }
+        Stage::Caustics => {
+            let hit = shared(task, state)?;
+            let view = -state.ray.ok_or_else(|| invalid("CPU caustic receiver ray missing"))?.direction();
+            if let Some(contribution) = super::caustics::gather(task, &mut state.caustic_gather, hit, view)? {
+                state.radiance += multiply(state.throughput, contribution);
+                super::super::lighting::validate_radiance(state.radiance).map_err(error)?;
+            } else {
                 state.stage = Stage::Directional;
             }
         }
@@ -901,6 +947,7 @@ fn advance(task: &mut ImageTask, state: &mut State) -> job::Result<()> {
                 state.throughput = multiply(state.throughput, sample.weight);
                 super::super::lighting::validate_radiance(state.throughput).map_err(error)?;
                 if state.throughput != Vec3::ZERO {
+                    state.sampled_continuous = true;
                     state.previous_pdf = sample.pdf;
                     state.previous_position = hit.position;
                     if let Some(optical) = &mut state.optical {
@@ -928,7 +975,7 @@ fn advance(task: &mut ImageTask, state: &mut State) -> job::Result<()> {
             }
             state.stage = Stage::Commit;
         }
-        Stage::Trace | Stage::Shadow | Stage::Commit | Stage::Origin | Stage::MediumOrigin => {
+        Stage::Trace | Stage::Shadow | Stage::Commit | Stage::Origin | Stage::MediumOrigin | Stage::GlassLighting => {
             return Err(invalid("CPU path phase bypassed its continuation"));
         }
     }
@@ -944,6 +991,8 @@ struct GlassPath {
     segment_start: Vec3,
     source_plane: Option<[Vec3; 3]>,
     collision: Option<scattering::Collision>,
+    spectral_channel: Option<u8>,
+    sheet: Option<advanced::SheetWalk>,
     surface_range: Option<[usize; 2]>,
     surface_forward: bool,
     shadow_exact: bool,
@@ -1050,6 +1099,9 @@ fn glass_one(task: &mut ImageTask, state: &mut State) -> job::Result<()> {
         }
         return Ok(());
     };
+    if advanced::required(task, state, index)? {
+        return advanced::surface(task, state, index);
+    }
     if !continuing(task, state)? {
         state.stage = Stage::Commit;
         return Ok(());
@@ -1060,8 +1112,12 @@ fn glass_one(task: &mut ImageTask, state: &mut State) -> job::Result<()> {
     let [draw, _] = variates(task, state, 0x4000)?;
     let mut preserve_pdf = false;
     let (outgoing, weight, entering) = if input.boundary == job::DielectricBoundary::ThinSheet {
-        let (_, normal) = dielectric::shaded_interface(direction, normal, hit.shading_normal, 1.0, input.ior).map_err(error)?;
-        let (interface, r, t) = dielectric::thin_sheet(direction, normal, input).map_err(error)?;
+        let normal = if advanced_normals(task) {
+            normal
+        } else {
+            dielectric::shaded_interface(direction, normal, hit.shading_normal, 1.0, input.ior).map_err(error)?.1
+        };
+        let (interface, r, t) = dielectric::modeled_sheet(direction, normal, input).map_err(error)?;
         let p = thin_probability(r, t)?;
         if draw < p {
             (interface.reflected, r / p, None)
@@ -1097,7 +1153,11 @@ fn glass_one(task: &mut ImageTask, state: &mut State) -> job::Result<()> {
         };
         let ni = ior(current)?;
         let nt = ior(next)?;
-        let (interface, _) = dielectric::shaded_interface(direction, normal, hit.shading_normal, ni, nt).map_err(error)?;
+        let interface = if advanced_normals(task) {
+            dielectric::interface(direction, normal, ni, nt).map_err(error)?
+        } else {
+            dielectric::shaded_interface(direction, normal, hit.shading_normal, ni, nt).map_err(error)?.0
+        };
         if draw < interface.reflectance || interface.transmitted.is_none() {
             (interface.reflected, Vec3::new(1.0, 1.0, 1.0), None)
         } else {
@@ -1218,9 +1278,12 @@ fn shadow_glass(task: &ImageTask, state: &mut State) -> job::Result<()> {
     if input.boundary != job::DielectricBoundary::ThinSheet {
         return Err(invalid("CPU refractive closed-medium light connections require an unsupported caustic solver"));
     }
-    let (_, normal) =
-        dielectric::shaded_interface(ray.direction(), hit.oriented_geometric_normal(), hit.shading_normal, 1.0, input.ior).map_err(error)?;
-    let (_, r, t) = dielectric::thin_sheet(ray.direction(), normal, input).map_err(error)?;
+    let normal = if advanced_normals(task) {
+        hit.oriented_geometric_normal()
+    } else {
+        dielectric::shaded_interface(ray.direction(), hit.oriented_geometric_normal(), hit.shading_normal, 1.0, input.ior).map_err(error)?.1
+    };
+    let (_, r, t) = dielectric::modeled_sheet(ray.direction(), normal, input).map_err(error)?;
     optical.shadow_probability *= 1.0 - thin_probability(r, t)?;
     optical.shadow_interfaces = optical
         .shadow_interfaces

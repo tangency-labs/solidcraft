@@ -28,6 +28,7 @@ pub(in crate::raytrace) fn scene(body: ProductMesh) -> ProductScene {
 }
 pub(in crate::raytrace) fn input(boundary: DielectricBoundary) -> DielectricOptions {
     DielectricOptions {
+        model: None,
         shadow_transmission: false,
         subsurface: None,
         body_index: 0,
@@ -1067,5 +1068,118 @@ fn general_box_axis_planes_undo_only_single_ulp_padding_and_keep_raw_zero_endpoi
         assert_eq!(complete.region(0).unwrap().bounds.max().z, raw.max().z.next_up());
         let bits = if negative { (-0.0_f64).to_bits() } else { 0.0_f64.to_bits() };
         assert!(captured.meshes[0].mesh.positions.iter().filter(|point| point.z == 0.0).all(|point| point.z.to_bits() == bits));
+    }
+}
+
+// Independent unit-square cell tilings: duplicate vertex indices deliberately
+// retain exact coordinates so certification cannot assume indexed welding.
+fn tiled_path_sheet(cells: &[(i32, i32)]) -> ProductMesh {
+    let mut body = box_body(1.0);
+    let mut mesh = Mesh::default();
+    for &(x, y) in cells {
+        let (x, y) = (f64::from(x), f64::from(y));
+        let begin = mesh.positions.len() as u32;
+        mesh.positions.extend([Vec3::new(x, y, 0.0), Vec3::new(x + 1.0, y, 0.0), Vec3::new(x + 1.0, y + 1.0, 0.0), Vec3::new(x, y + 1.0, 0.0)]);
+        mesh.triangles.extend([[begin, begin + 1, begin + 2], [begin, begin + 2, begin + 3]]);
+    }
+    body.mesh = Arc::new(mesh);
+    body
+}
+fn path_sheet_options() -> RaytraceOptions {
+    let mut options = general_options();
+    options.dielectrics[0].boundary = DielectricBoundary::ThinSheet;
+    options.dielectrics[0].thickness_mm = 0.7;
+    options
+}
+#[test]
+fn general_path_sheets_accept_exact_tilings_concavity_holes_and_either_global_winding() {
+    let rectangle = [(0, 0), (1, 0), (2, 0), (0, 1), (1, 1), (2, 1)];
+    let concave = [(0, 0), (1, 0), (0, 1)];
+    let ring = [(0, 0), (1, 0), (2, 0), (0, 1), (2, 1), (0, 2), (1, 2), (2, 2)];
+    let options = path_sheet_options();
+    for cells in [&rectangle[..], &concave[..], &ring[..]] {
+        for reverse in [false, true] {
+            let mut body = tiled_path_sheet(cells);
+            let mesh = Arc::make_mut(&mut body.mesh);
+            for p in &mut mesh.positions {
+                // Integer oblique plane: exact coplanarity does not depend on a
+                // normalized floating normal or on alignment with a world axis.
+                p.z = p.x + p.y;
+                if p.x == 0.0 {
+                    p.x = -0.0;
+                }
+            }
+            if reverse {
+                for triangle in &mut mesh.triangles {
+                    triangle.swap(1, 2);
+                }
+            }
+            let expected = mesh.triangles.len();
+            let captured = scene(body.clone());
+            let proof = general_certificate(&captured, &options).unwrap();
+            let region = proof.region(0).unwrap();
+            assert_eq!(region.primitive_end - region.primitive_begin, expected);
+            assert_eq!(region.parent, None);
+            assert!(certify(&captured, &input(DielectricBoundary::ThinSheet)).is_err(), "legacy optics retain their original two-triangle domain");
+        }
+    }
+}
+#[test]
+fn general_path_sheets_refuse_folded_disconnected_overlapping_and_ambiguous_tilings() {
+    let cells = [(0, 0), (1, 0), (0, 1), (1, 1)];
+    let options = path_sheet_options();
+    let mut cases = vec![tiled_path_sheet(&[]), tiled_path_sheet(&[(0, 0), (2, 0)]), tiled_path_sheet(&[(0, 0), (1, 1)])];
+    let mut folded = tiled_path_sheet(&cells);
+    Arc::make_mut(&mut folded.mesh).positions[0].z = 0.125;
+    cases.push(folded);
+    let mut reversed = tiled_path_sheet(&cells);
+    Arc::make_mut(&mut reversed.mesh).triangles[2].swap(1, 2);
+    cases.push(reversed);
+    let mut duplicated = tiled_path_sheet(&cells);
+    let duplicate = duplicated.mesh.triangles[0];
+    Arc::make_mut(&mut duplicated.mesh).triangles.push(duplicate);
+    cases.push(duplicated);
+    let mut overlap = tiled_path_sheet(&cells);
+    let mesh = Arc::make_mut(&mut overlap.mesh);
+    let begin = mesh.positions.len() as u32;
+    mesh.positions.extend([Vec3::new(0.25, 0.25, 0.0), Vec3::new(1.5, 0.25, 0.0), Vec3::new(0.25, 1.5, 0.0)]);
+    mesh.triangles.push([begin, begin + 1, begin + 2]);
+    cases.push(overlap);
+    // One cell ends with a complete edge, the adjacent cell has a vertex in its
+    // interior. Geometric coincidence is never used to repair that T-junction.
+    let mut junction = tiled_path_sheet(&[(0, 0)]);
+    let mesh = Arc::make_mut(&mut junction.mesh);
+    mesh.positions.extend([Vec3::new(1.0, 0.5, 0.0), Vec3::new(2.0, 0.0, 0.0), Vec3::new(2.0, 1.0, 0.0)]);
+    mesh.triangles.extend([[1, 5, 4], [4, 5, 6], [4, 6, 2]]);
+    cases.push(junction);
+    for body in cases {
+        assert!(general_certificate(&scene(body), &options).is_err(), "a valid sheet needs exact topology and nonoverlapping planar triangles");
+    }
+}
+#[test]
+fn general_path_sheet_preparation_is_prepaid_charged_and_cancellable_without_a_partial_proof() {
+    let cells = [(0, 0), (1, 0), (2, 0), (0, 1), (2, 1), (0, 2), (1, 2), (2, 2)];
+    let captured = scene(tiled_path_sheet(&cells));
+    let options = path_sheet_options();
+    let charged = super::super::glass_mesh::Task::required_bytes(&captured, &options).unwrap();
+    let empty = RaytraceOptions { dielectrics: Vec::new(), ..options.clone() };
+    let fixed = super::super::glass_mesh::Task::required_bytes(&captured, &empty).unwrap();
+    assert!(charged > fixed, "sheet faces and edge/link scratch are included in exact admission");
+    for prefix in [1, 17, 61, 127, 509] {
+        let cancel = CancelToken::default();
+        let mut task = super::super::glass_mesh::Task::new(&captured, &options).unwrap();
+        let mut work = super::super::WorkBudget::new(prefix).unwrap();
+        for _ in 0..prefix {
+            let before = work.used();
+            task.step(&captured, &options, &mut work, &cancel).unwrap();
+            assert_eq!(work.used(), before + 1);
+            assert!(!task.ready());
+        }
+        assert_eq!(task.step(&captured, &options, &mut work, &cancel).unwrap_err().code, job::ErrorCode::LimitExceeded);
+        assert!(!task.ready());
+        assert!(task.region(0).is_err());
+        cancel.cancel();
+        assert_eq!(task.step(&captured, &options, &mut work, &cancel).unwrap_err().code, job::ErrorCode::Cancelled);
+        assert!(!task.ready());
     }
 }

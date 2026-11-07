@@ -38,6 +38,37 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<OpticsUnbindParams>(), &["expected_revision", "name", "target"]);
 }
 
+#[test]
+fn advanced_glass_optics_matches_the_schema_and_the_saved_binding() {
+    let input = input_schema_for::<OpticsBindParams>();
+    let input = input.as_value();
+    let optics = &input["properties"]["optics"];
+    for (value, expected) in [
+        (json!({}), true),
+        (json!({"model": null}), true),
+        (json!({"model": {}}), true),
+        (json!({"model": {"dispersion": null, "thin_film": null}}), true),
+        (json!({"model": {"roughness": 1.01}}), false),
+        (json!({"model": {"dispersion": {}}}), false),
+        (json!({"model": {"dispersion": {"abbe_number": 4.99}}}), false),
+        (json!({"model": {"thin_film": {"ior": 1.37}}}), false),
+        (json!({"model": {"thin_film": {"ior": 3.01, "thickness_nm": 263}}}), false),
+        (json!({"model": {"thin_film": {"ior": 1.37, "thickness_nm": 100001}}}), false),
+        (json!({"model": {"thin_film": {"ior": 1.37, "thickness_nm": 263, "extra": true}}}), false),
+    ] {
+        assert_eq!(conforms(input, optics, &value), expected, "{value}");
+    }
+
+    let mut session = with_a_studio(ParamCheck::Strict);
+    let mut request = optics_on_the_lens(session.revision);
+    let model = json!({"roughness": 0.43, "dispersion": {"abbe_number": 57.0}, "thin_film": {"ior": 1.37, "thickness_nm": 263.0}});
+    request["optics"] = json!({"ior": 1.45, "model": &model});
+    assert!(conforms(input, input, &request), "{request}");
+    let reply = session.execute("render.optics.bind", &request).unwrap();
+    assert_eq!(reply["setup"]["optics"][0]["optics"]["model"], model);
+    assert_eq!(reply["geometry_and_engineering_unchanged"], true);
+}
+
 /// The handlers refuse these calls after reading them; strict refuses them with their message.
 /// They need a body, a saved setup and the design's revision, so the shared helper, which has
 /// a sketch only, doesn't fit.

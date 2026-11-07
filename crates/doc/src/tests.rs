@@ -871,6 +871,86 @@ fn a_join_keeps_blocks_apart_in_one_body() {
     assert_eq!(kept, None);
 }
 
+/// A body of two pieces joined apart, split by a plane through both pieces: the split gives the
+/// halves of every piece, not the halves of one of them (#6738).
+#[test]
+fn a_split_of_a_body_of_two_pieces_gives_the_halves_of_both() {
+    let mut doc = Document::new("split two pieces");
+    // One sketch, two squares 20 mm across and 30 mm apart.
+    let mut sk = Sketch::new();
+    let mut corners = Vec::new();
+    for x in [0.0, 50.0] {
+        let p: Vec<usize> = [Vec2::new(x, 10.0), Vec2::new(x + 20.0, 10.0), Vec2::new(x + 20.0, 30.0), Vec2::new(x, 30.0)]
+            .iter()
+            .map(|c| sk.add_point(*c, None).unwrap())
+            .collect();
+        for i in 0..4 {
+            sk.add_line_pts(p[i], p[(i + 1) % 4], None).unwrap();
+        }
+        corners.extend(p);
+    }
+    for p in corners {
+        sk.add_constraint(ConstraintKind::Fix { p }, None).unwrap();
+    }
+    let s = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, None).unwrap();
+    doc.add_feature(
+        FeatureKind::Extrude {
+            thin: None,
+            sketch: crate::SketchId(s),
+            profiles: ProfileSel::All,
+            extent: Extent {
+                convention: crate::ExtrudeConvention::LegacyPerSide,
+                distance: "10".into(),
+                direction: Direction::Positive,
+                distance2: None,
+                start_offset: None,
+                through_all: false,
+                second_follows_first: false,
+                taper: None,
+                corner: Default::default(),
+                to: None,
+                to_offset: None,
+                from: None,
+                to_body_apart: false,
+            },
+            operation: Operation::NewBody,
+            targets: vec![],
+        },
+        None,
+    )
+    .unwrap();
+    doc.add_feature(
+        FeatureKind::Combine { target: "Body1".into(), tools: vec!["Body2".into()], operation: Operation::Join, keep_tools: false },
+        None,
+    )
+    .unwrap();
+    // A plane through the middle of both squares (the extrusion is 10 mm tall).
+    let split = doc
+        .add_feature(
+            FeatureKind::Split {
+                body: "Body1".into(),
+                plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: "5".into() },
+                tool: None,
+                sketch: None,
+                line: None,
+            },
+            None,
+        )
+        .unwrap();
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    let error = m.result(split).unwrap().error.clone();
+    assert!(error.is_none(), "the split of a body of two pieces: {error:?}");
+    let bodies: Vec<(String, f64, usize)> =
+        m.state().bodies.iter().map(|b| (b.name.clone(), measure(&b.body).unwrap().volume, b.body.lumps().unwrap().len())).collect();
+    assert_eq!(bodies.len(), 2, "{bodies:?}");
+    for (name, volume, lumps) in &bodies {
+        // Each half holds the half of both squares: two pieces, half the body each.
+        assert!(rel(*volume, 4000.0) < 1e-6, "{name}: {bodies:?}");
+        assert_eq!(*lumps, 2, "{name}: {bodies:?}");
+    }
+}
+
 /// A square ring joined with an arm touching its outer corner along an edge and a hub apart in
 /// its hole: the ring and the hub stay one body under the ring's name, the arm is split off, and
 /// the join says it touched along an edge.
