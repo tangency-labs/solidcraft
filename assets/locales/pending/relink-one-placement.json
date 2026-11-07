@@ -1,0 +1,30 @@
+{
+  "en": {
+    "ui.relink_one_done": "Source relinked for this instance.",
+    "ui.relink_source_one": "Relink Source…"
+  },
+  "ar": {
+    "ui.relink_one_done": "أُعيد ربط المصدر لهذه النسخة.",
+    "ui.relink_source_one": "إعادة ربط المصدر…"
+  },
+  "de": {
+    "ui.relink_one_done": "Quelle für diese Instanz neu verknüpft.",
+    "ui.relink_source_one": "Quelle neu verknüpfen…"
+  },
+  "he": {
+    "ui.relink_one_done": "המקור קושר מחדש למופע זה.",
+    "ui.relink_source_one": "קישור מחדש למקור…"
+  },
+  "ja": {
+    "ui.relink_one_done": "このインスタンスの参照元を再リンクしました。",
+    "ui.relink_source_one": "参照元を再リンク…"
+  },
+  "vi": {
+    "ui.relink_one_done": "Đã liên kết lại nguồn cho thể hiện này.",
+    "ui.relink_source_one": "Liên kết lại nguồn…"
+  },
+  "zh": {
+    "ui.relink_one_done": "已为此实例重新链接源文件。",
+    "ui.relink_source_one": "重新链接源文件…"
+  }
+}
