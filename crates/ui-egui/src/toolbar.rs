@@ -211,11 +211,14 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let idle = !app.file_load.busy();
             // Save, Undo and Redo use the same actions as the File menu and shortcuts.
             let shown = design_shown(app) && idle;
-            let tip = |id: &str, key: &str| {
+            // The keys as the platform names them (Cmd on macOS); Redo has two (#12902).
+            let tip = |id: &str, keys: &[&str]| {
                 let label = app.tr(id);
-                if shown { format!("{label} ({key})") } else { solidcraft_ui_text::format("ui.needs_design", &[("command", label)]) }
+                let keys = keys.iter().map(|key| crate::keymap::display(key)).collect::<Vec<_>>().join(", ");
+                if shown { format!("{label} ({keys})") } else { solidcraft_ui_text::format("ui.needs_design", &[("command", label)]) }
             };
-            let (save_tip, undo_tip, redo_tip) = (tip("ui.save", "Ctrl+S"), tip("ui.undo", "Ctrl+Z"), tip("ui.redo", "Ctrl+Y, Ctrl+Shift+Z"));
+            let (save_tip, undo_tip, redo_tip) =
+                (tip("ui.save", &["Ctrl+S"]), tip("ui.undo", &["Ctrl+Z"]), tip("ui.redo", &["Ctrl+Y", "Ctrl+Shift+Z"]));
             let prefs_tip = if cfg!(target_os = "macos") {
                 format!("{} (Cmd+,)", app.tr("ui.preferences"))
             } else {
@@ -2352,13 +2355,13 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 // shows the start page (#5366).
                 Key::W if !mods.shift && !mods.alt => crate::documents::close(app, app.docs.active, false),
                 // Ctrl+Shift+Z redoes like Ctrl+Y (#12902): it used to fall into Undo, Shift ignored.
-                Key::Z if mods.shift && !mods.alt => drop(app.run("edit.redo", json!({}))),
-                Key::Z if !mods.alt => {
+                Key::Z if mods.shift => drop(app.run("edit.redo", json!({}))),
+                Key::Z => {
                     if !crate::tools::undo_spline_point(app) {
                         drop(app.run("edit.undo", json!({})));
                     }
                 }
-                Key::Y if !mods.shift && !mods.alt => drop(app.run("edit.redo", json!({}))),
+                Key::Y => drop(app.run("edit.redo", json!({}))),
                 // Copy, Cut and Paste, and Paste New with Shift (`edit_clipboard::handle`).
                 Key::C | Key::X if !mods.shift && !mods.alt => {}
                 Key::V if !mods.alt => {}
