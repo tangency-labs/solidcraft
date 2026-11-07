@@ -49,7 +49,7 @@ These are computed today in an app or in ops-shaped code. Each becomes a kernel 
 - **Classification of a face's surface for offsetting, distances, and sheet-metal bounds** (SolidCraft's `crates/kernel`), each where it is a computation and not a recipe.
 - **Evaluation and exact NURBS forms of analytic surfaces** (SolidCraft's record, `solidcraft_geom::brep::{eval, form}`).
 
-## 2. Owner decisions (2026-11-02)
+## 2. Meshing and Importers
 
 - **Meshing is solidcore's.** There is one mesher, `solidcore-tess`, and it is SolidCraft's tess. That tess meshes every face in its own (u, v): structured grids, Coons blends and cut grids first, with constrained Delaunay plus refinement as the general fallback. The `nurbs-grid-mesh` crate is a second (u, v) grid mesher, so it is a duplicate. Its ideas (grid lines sized from the second-derivative control points, refinement checked at edge and diagonal midpoints, row-at-a-time evaluation, the `deviation` measure) are taken into `solidcore-tess` only where they measure better than its own grid paths on the same faces. Then the crate is deleted. A comparison against SMLib's tessellator doesn't decide this, because SMLib's is constrained Delaunay only.
 - **Importers are solidcore's.** There is one STEP implementation. Its plain-data model is in `solidcore-record`, and building bodies from it is in `solidcore-ops`. SolidCraft's `crates/step` and solidcore's `step-*` crates merge into it; the others are deleted. Every other importer (IGES, STL and so on) follows the same split.
