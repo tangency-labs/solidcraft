@@ -137,7 +137,7 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
             .filter_map(|(i, f)| (f.component == component && (compact || !matches!(f.kind, FeatureKind::Sketch { .. }))).then_some(i))
             .collect(),
     };
-    let here = Here { component, path, scope: &scope };
+    let here = Here { component, path, scope: &scope, body_row: None };
     // The feature that made what is under the cursor or picked in the viewport, as the history
     // lights it, and in the history layout what a selected history row lights.
     let from_view = [crate::timeline::hovered_feature(app), crate::timeline::picked_feature(app)];
@@ -220,7 +220,7 @@ pub(super) fn body_rows(
     depth: usize,
 ) {
     let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(path) };
-    let here = Here { component, path, scope: &scope };
+    let here = Here { component, path, scope: &scope, body_row: Some(body_row) };
     let from_view = [crate::timeline::hovered_feature(app), crate::timeline::picked_feature(app)];
     // A feature that built several bodies is listed under each: its rows need ids of their own.
     ui.push_id(("body_features", body_row), |ui| {
@@ -246,6 +246,9 @@ struct Here<'a> {
     component: u64,
     path: &'a [u64],
     scope: &'a str,
+    /// The body row a feature row is listed under (#11945): its row-order key is then its own,
+    /// `<body row>/s:<id>`, so a feature listed under two bodies is a range end at each row.
+    body_row: Option<&'a str>,
 }
 
 /// The component's history rows, `indices` its features' timeline positions: with Sketches:
@@ -303,7 +306,8 @@ fn feature_row(
     // stays the face or edge.
     let by_geometry = !app.session.selection.contains(&Sel::Feature { id }) && crate::timeline::picked_feature(app) == Some(id);
     let selected = app.session.selection.contains(&Sel::Feature { id }) || by_geometry;
-    app.tree.remember(&format!("f:{id}"));
+    let order_key = here.body_row.map_or_else(|| format!("f:{id}"), |row| format!("{row}/s:{id}"));
+    app.tree.remember(&order_key);
     let action = sketch.map(|_| ("sketch", "Edit Profile Sketch"));
     // A sketch row has the eye its Sketches folder row has. A feature's eye shows and hides the
     // bodies it made (#5099); a component listed on its own stands for all of its placements.
@@ -370,7 +374,7 @@ fn feature_row(
         }
         app.edit_feature(id);
     } else if r.clicked {
-        click_select(app, ui, format!("f:{id}"), Some(Sel::Feature { id }));
+        click_select(app, ui, order_key, Some(Sel::Feature { id }));
     }
     if let Some(at) = r.secondary {
         acts.menu = Some((at, if is_sketch { Target::Sketch { id } } else { Target::Feature { id } }));
@@ -1323,5 +1327,46 @@ mod tests {
         h.call("ui.prefs", json!({"browser_body_features": false}));
         h.frames(2);
         assert_eq!((fold_of("Plate"), count("Round")), (None, 0), "off again: as before");
+    }
+
+    /// #11945: a feature that changed two bodies is listed under each; Shift-clicking its second
+    /// row takes the range from the anchor to that row, not to its first row under the other body.
+    #[test]
+    fn a_feature_under_two_bodies_is_a_range_end_at_each_row() {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":20,"width":20,"height":10,"name":"Base","body_name":"Plate"})).unwrap();
+        let block = h
+            .app
+            .run("solid.box", json!({"length":5,"width":5,"height":10,"corner":[50,0,0],"operation":"new","name":"Block","body_name":"Other"}))
+            .unwrap()["feature"]
+            .as_u64()
+            .unwrap();
+        // A groove along the top of both bodies, splitting neither.
+        let groove = h
+            .app
+            .run(
+                "solid.box",
+                json!({"length":70,"width":2,"height":10,"corner":[-5,1,5],"operation":"cut","targets":["Plate","Other"],"name":"Groove"}),
+            )
+            .unwrap()["feature"]
+            .as_u64()
+            .unwrap();
+        assert_eq!(h.call("ui.prefs", json!({"browser_body_features": true}))["ok"], true);
+        h.frames(2);
+        for body in ["Plate", "Other"] {
+            h.step(&json!({"click": {"handle": format!("fold:{body}")}})).unwrap();
+            h.frames(2);
+        }
+        assert_eq!(count("Groove"), 2, "listed under both bodies");
+        let rows = drawn_rows();
+        let at = |label: &str, last: bool| {
+            let mut hits = rows.iter().filter(|(l, ..)| l == label);
+            let hit = if last { hits.next_back() } else { hits.next() };
+            hit.map(|row| row.1.center()).unwrap()
+        };
+        let (block_at, groove_at) = (at("Block", false), at("Groove", true));
+        h.step(&json!({"click": [block_at.x, block_at.y]})).unwrap();
+        h.step(&json!({"click": [groove_at.x, groove_at.y], "shift": true})).unwrap();
+        assert_eq!(h.app.session.selection, [Sel::Feature { id: block }, Sel::Feature { id: groove }], "only the rows under Other");
     }
 }
