@@ -1918,7 +1918,12 @@ fn meet_lines(sk: &mut Sketch, p: &Value, cmd: &str) -> Result<()> {
     // The end on the shorter side of the meeting point moves (the nearer end, for a line that
     // stops short of it).
     let (na, nb) = (if t >= 0.5 { a1 } else { a0 }, if u >= 0.5 { b1 } else { b0 });
+    // An end already at the meeting point does not move, so what holds it does not matter.
+    let at_meet = |sk: &Sketch, e: usize| sk.point(e).is_some_and(|q| q.dist(meet) <= 1e-9 * (1.0 + meet.len()));
     for (l, e) in [(la, na), (lb, nb)] {
+        if at_meet(sk, e) {
+            continue;
+        }
         let id = sk.curves.get(l).map(|c| c.id.clone()).unwrap_or_default();
         let other_curve = sk.curves.iter().enumerate().any(|(i, c)| i != l && c.kind.uses(e));
         let positioned = sk.points.get(e).is_some_and(|q| q.fixed || q.exprs.is_some() || q.link.is_some());
@@ -1938,10 +1943,30 @@ fn meet_lines(sk: &mut Sketch, p: &Value, cmd: &str) -> Result<()> {
             q.pos = meet;
         }
     }
-    // One corner point: b's moved end becomes a's.
+    // One corner point: b's moved end becomes a's, and what held b's end holds the corner.
+    if let Some(held) = sk.points.get(nb).map(|q| (q.fixed, q.exprs.clone(), q.link.clone()))
+        && let Some(q) = sk.points.get_mut(na)
+    {
+        q.fixed |= held.0;
+        if q.exprs.is_none() {
+            q.exprs = held.1;
+        }
+        if q.link.is_none() {
+            q.link = held.2;
+        }
+    }
     for c in sk.curves.iter_mut() {
         c.kind.map_points(&|x| if x == nb { na } else { x });
     }
+    let mut kept: Vec<solidcraft_sketch::Constraint> = Vec::with_capacity(sk.constraints.len());
+    for mut k in std::mem::take(&mut sk.constraints) {
+        k.kind.remap(&|x| Some(if x == nb { na } else { x }), &Some);
+        // Two of the same constraint on the one corner say it once.
+        if !kept.iter().any(|x| x.kind == k.kind && x.param == k.param) {
+            kept.push(k);
+        }
+    }
+    sk.constraints = kept;
     sk.remove_points(&[nb]);
     Ok(())
 }
