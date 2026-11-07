@@ -410,10 +410,11 @@ fn raycast_mesh_bvh(@builtin(global_invocation_id) gid: vec3<u32>) {
     } else {
         for (var i: u32 = 0u; i < rc_params.num_tris; i = i + 1u) {
             let tri = rc_tris[i];
+            let orig_idx = bitcast<u32>(tri.v0.w);
             let t_hit = ray_hit_tri(tri.v0.xyz, tri.v1.xyz, tri.v2.xyz, o, d);
-            if t_hit > 0.0 && t_hit < best_t {
+            if t_hit > 0.0 && (t_hit < best_t || (t_hit == best_t && orig_idx < best_tri)) {
                 best_t = t_hit;
-                best_tri = i;
+                best_tri = orig_idx;
             }
         }
     }
@@ -445,7 +446,8 @@ fn closest_point_on_tri_dist_sq(p: vec3<f32>, a: vec3<f32>, b: vec3<f32>, c: vec
     }
     let vc = d1 * d4 - d3 * d2;
     if vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0 {
-        let v = d1 / (d1 - d3);
+        let den = d1 - d3;
+        let v = select(0.0, d1, den > 0.0) / select(1.0, den, den > 0.0);
         let diff = p - (a + ab * v);
         return dot(diff, diff);
     }
@@ -457,17 +459,23 @@ fn closest_point_on_tri_dist_sq(p: vec3<f32>, a: vec3<f32>, b: vec3<f32>, c: vec
     }
     let vb = d5 * d2 - d1 * d6;
     if vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0 {
-        let w = d2 / (d2 - d6);
+        let den = d2 - d6;
+        let w = select(0.0, d2, den > 0.0) / select(1.0, den, den > 0.0);
         let diff = p - (a + ac * w);
         return dot(diff, diff);
     }
     let va = d3 * d6 - d5 * d4;
     if va <= 0.0 && (d4 - d3) >= 0.0 && (d5 - d6) >= 0.0 {
-        let w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+        let den = (d4 - d3) + (d5 - d6);
+        let w = select(0.0, d4 - d3, den > 0.0) / select(1.0, den, den > 0.0);
         let diff = p - (b + (c - b) * w);
         return dot(diff, diff);
     }
-    let denom = 1.0 / (va + vb + vc);
+    let den = va + vb + vc;
+    if abs(den) <= 1e-30 {
+        return dot(ap, ap);
+    }
+    let denom = 1.0 / den;
     let v = vb * denom;
     let w = vc * denom;
     let diff = p - (a + ab * v + ac * w);

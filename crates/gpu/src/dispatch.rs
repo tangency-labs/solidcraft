@@ -333,6 +333,7 @@ impl VulkanAccel {
         let num_patches = u32::try_from(patch_cpts.len() / 16).ok()?;
         let params = PatchEvalParams { num_evals, num_patches, pad0: 0, pad1: 0 };
 
+        let _guard = self.collision.lock_device();
         let u_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("vk-patch-params"),
             contents: &encode_pod(&params),
@@ -406,6 +407,7 @@ impl VulkanAccel {
         let dummy_bvh = [GpuBvhNode::default()];
         let bvh_slice = if bvh_nodes.is_empty() { &dummy_bvh[..] } else { bvh_nodes };
 
+        let _guard = self.collision.lock_device();
         let u_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("vk-cls-params"),
             contents: &encode_pod(&params),
@@ -485,6 +487,7 @@ impl VulkanAccel {
         let num_bvh_nodes = u32::try_from(bvh_nodes.len()).ok()?;
         let params = MeshQueryParams { num_queries, num_tris, num_bvh_nodes, pad: 0 };
 
+        let _guard = self.collision.lock_device();
         let u_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("vk-rc-params"),
             contents: &encode_pod(&params),
@@ -556,6 +559,7 @@ impl VulkanAccel {
         let num_tris = u32::try_from(tris.len()).ok()?;
         let params = MeshQueryParams { num_queries, num_tris, num_bvh_nodes: 0, pad: 0 };
 
+        let _guard = self.collision.lock_device();
         let u_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("vk-dist-params"),
             contents: &encode_pod(&params),
@@ -618,6 +622,7 @@ impl VulkanAccel {
         let num_groups = num_tris.div_ceil(256);
         let params = MeshQueryParams { num_queries: 0, num_tris, num_bvh_nodes: 0, pad: 0 };
 
+        let _guard = self.collision.lock_device();
         let u_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("vk-mass-params"),
             contents: &encode_pod(&params),
@@ -862,12 +867,18 @@ fn eval_one_bicubic_f32(patch_cpts: &[[f32; 4]], num_patches: u32, q: PatchUvQue
 
 /// CPU scalar evaluation of `f32` bicubic patches.
 pub fn cpu_eval_bicubic_f32_scalar(patch_cpts: &[[f32; 4]], queries: &[PatchUvQueryF32]) -> Vec<PatchEvalOutF32> {
+    if queries.is_empty() || patch_cpts.len() < 16 {
+        return Vec::new();
+    }
     let num_patches = (patch_cpts.len() / 16) as u32;
     queries.iter().map(|&q| eval_one_bicubic_f32(patch_cpts, num_patches, q)).collect()
 }
 
 /// CPU `rayon` parallel evaluation of `f32` bicubic patches.
 pub fn cpu_eval_bicubic_f32_rayon(patch_cpts: &[[f32; 4]], queries: &[PatchUvQueryF32]) -> Vec<PatchEvalOutF32> {
+    if queries.is_empty() || patch_cpts.len() < 16 {
+        return Vec::new();
+    }
     let num_patches = (patch_cpts.len() / 16) as u32;
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -928,12 +939,18 @@ fn eval_one_bicubic_f64(patch_cpts: &[[f64; 4]], num_patches: usize, q: [f64; 4]
 
 /// CPU scalar evaluation of `f64` double-precision bicubic patches.
 pub fn cpu_eval_bicubic_f64_scalar(patch_cpts: &[[f64; 4]], queries: &[[f64; 4]]) -> Vec<PatchEvalOutF64> {
+    if queries.is_empty() || patch_cpts.len() < 16 {
+        return Vec::new();
+    }
     let num_patches = patch_cpts.len() / 16;
     queries.iter().map(|&q| eval_one_bicubic_f64(patch_cpts, num_patches, q)).collect()
 }
 
 /// CPU `rayon` parallel evaluation of `f64` double-precision bicubic patches.
 pub fn cpu_eval_bicubic_f64_rayon(patch_cpts: &[[f64; 4]], queries: &[[f64; 4]]) -> Vec<PatchEvalOutF64> {
+    if queries.is_empty() || patch_cpts.len() < 16 {
+        return Vec::new();
+    }
     let num_patches = patch_cpts.len() / 16;
     #[cfg(not(target_arch = "wasm32"))]
     {

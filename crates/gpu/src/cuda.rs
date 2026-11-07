@@ -585,10 +585,14 @@ impl CudaBackend {
         self.ampere.is_some() && self.device_info.supports_fp64_tensor_core
     }
 
-    /// Binds this backend's retained primary CUDA context to the calling OS thread.
-    fn bind_ctx(&self) -> Option<()> {
+    /// Acquires the scratch pool lock and binds this backend's retained primary CUDA context to the calling OS thread.
+    fn lock_and_bind(&self) -> Option<std::sync::MutexGuard<'_, ScratchPool>> {
+        let guard = match self.scratch.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
         // SAFETY: `self.ctx` is a retained primary context valid for the lifetime of the process.
-        if unsafe { (self.api.cu_ctx_set_current)(self.ctx) } == CUDA_SUCCESS { Some(()) } else { None }
+        if unsafe { (self.api.cu_ctx_set_current)(self.ctx) } == CUDA_SUCCESS { Some(guard) } else { None }
     }
 
     /// Evaluates a batch of `f32` bicubic Bezier/B-spline patches (`use_ampere_sm86` selects `cp.async` PTX).
@@ -596,7 +600,6 @@ impl CudaBackend {
         if queries.is_empty() || patch_cpts.len() < 16 {
             return Some(Vec::new());
         }
-        self.bind_ctx()?;
         let func = if use_ampere_sm86 { self.ampere.as_ref()?.eval_patch_f32_sm86 } else { self.generic.eval_patch_f32 };
 
         let num_patches = u32::try_from(patch_cpts.len() / 16).ok()?;
@@ -605,7 +608,7 @@ impl CudaBackend {
         let q_bytes = std::mem::size_of_val(queries);
         let out_bytes = queries.len() * std::mem::size_of::<PatchEvalOutF32>();
 
-        let mut pool = self.scratch.lock().ok()?;
+        let mut pool = self.lock_and_bind()?;
         let d_cpts = pool.ensure(&self.api, 0, cpts_bytes)?;
         let d_q = pool.ensure(&self.api, 1, q_bytes)?;
         let d_out = pool.ensure(&self.api, 2, out_bytes)?;
@@ -656,7 +659,6 @@ impl CudaBackend {
         if queries.is_empty() || patch_cpts.len() < 16 {
             return Some(Vec::new());
         }
-        self.bind_ctx()?;
         let func = if use_tensor_core_dmma { self.ampere.as_ref()?.eval_patch_dmma_f64_sm86 } else { self.generic.eval_patch_f64 };
 
         let num_patches = u32::try_from(patch_cpts.len() / 16).ok()?;
@@ -665,7 +667,7 @@ impl CudaBackend {
         let q_bytes = std::mem::size_of_val(queries);
         let out_bytes = queries.len() * std::mem::size_of::<PatchEvalOutF64>();
 
-        let mut pool = self.scratch.lock().ok()?;
+        let mut pool = self.lock_and_bind()?;
         let d_cpts = pool.ensure(&self.api, 0, cpts_bytes)?;
         let d_q = pool.ensure(&self.api, 1, q_bytes)?;
         let d_out = pool.ensure(&self.api, 2, out_bytes)?;
@@ -719,7 +721,6 @@ impl CudaBackend {
         if tris.is_empty() {
             return Some(vec![false; points.len()]);
         }
-        self.bind_ctx()?;
         let func = if use_ampere_sm86 { self.ampere.as_ref()?.classify_points_sm86 } else { self.generic.classify_points };
 
         let num_queries = u32::try_from(points.len()).ok()?;
@@ -728,7 +729,7 @@ impl CudaBackend {
         let tris_bytes = std::mem::size_of_val(tris);
         let out_bytes = points.len() * std::mem::size_of::<u32>();
 
-        let mut pool = self.scratch.lock().ok()?;
+        let mut pool = self.lock_and_bind()?;
         let d_pts = pool.ensure(&self.api, 0, pts_bytes)?;
         let d_tris = pool.ensure(&self.api, 1, tris_bytes)?;
         let d_out = pool.ensure(&self.api, 2, out_bytes)?;
@@ -784,7 +785,6 @@ impl CudaBackend {
         if bvh_nodes.is_empty() {
             return None;
         }
-        self.bind_ctx()?;
         let func = self.ampere.as_ref().map_or(self.generic.classify_points_rt_bvh, |a| a.classify_points_rt_bvh_sm86);
 
         let num_queries = u32::try_from(points.len()).ok()?;
@@ -795,7 +795,7 @@ impl CudaBackend {
         let bvh_bytes = std::mem::size_of_val(bvh_nodes);
         let out_bytes = points.len() * std::mem::size_of::<u32>();
 
-        let mut pool = self.scratch.lock().ok()?;
+        let mut pool = self.lock_and_bind()?;
         let d_pts = pool.ensure(&self.api, 0, pts_bytes)?;
         let d_tris = pool.ensure(&self.api, 1, tris_bytes)?;
         let d_bvh = pool.ensure(&self.api, 2, bvh_bytes)?;
@@ -864,7 +864,6 @@ impl CudaBackend {
         if bvh_nodes.is_empty() {
             return None;
         }
-        self.bind_ctx()?;
         let func = self.ampere.as_ref().map_or(self.generic.raycast_rt_bvh, |a| a.raycast_rt_bvh_sm86);
 
         let num_queries = u32::try_from(rays.len()).ok()?;
@@ -875,7 +874,7 @@ impl CudaBackend {
         let bvh_bytes = std::mem::size_of_val(bvh_nodes);
         let out_bytes = rays.len() * std::mem::size_of::<GpuRayHit>();
 
-        let mut pool = self.scratch.lock().ok()?;
+        let mut pool = self.lock_and_bind()?;
         let d_rays = pool.ensure(&self.api, 0, rays_bytes)?;
         let d_tris = pool.ensure(&self.api, 1, tris_bytes)?;
         let d_bvh = pool.ensure(&self.api, 2, bvh_bytes)?;
@@ -938,7 +937,6 @@ impl CudaBackend {
         if aabbs_a.is_empty() || aabbs_b.is_empty() {
             return Some(CollisionResult::default());
         }
-        self.bind_ctx()?;
         let func = if use_ampere_sm86 { self.ampere.as_ref()?.bipartite_aabb_sm86 } else { self.generic.bipartite_aabb };
 
         let count_a = u32::try_from(aabbs_a.len()).ok()?;
@@ -950,7 +948,7 @@ impl CudaBackend {
         let b_bytes = std::mem::size_of_val(aabbs_b);
         let pairs_bytes = (max_pairs as usize) * std::mem::size_of::<OverlapPair>();
 
-        let mut pool = self.scratch.lock().ok()?;
+        let mut pool = self.lock_and_bind()?;
         let d_a = pool.ensure(&self.api, 0, a_bytes)?;
         let d_b = pool.ensure(&self.api, 1, b_bytes)?;
         let d_pairs = pool.ensure(&self.api, 2, pairs_bytes)?;
@@ -1032,7 +1030,6 @@ impl CudaBackend {
         if tris.is_empty() {
             return Some(vec![f32::INFINITY; points.len()]);
         }
-        self.bind_ctx()?;
         let func = if use_ampere_sm86 { self.ampere.as_ref()?.point_mesh_dist_sm86 } else { self.generic.point_mesh_dist };
 
         let num_queries = u32::try_from(points.len()).ok()?;
@@ -1041,7 +1038,7 @@ impl CudaBackend {
         let tris_bytes = std::mem::size_of_val(tris);
         let out_bytes = points.len() * std::mem::size_of::<f32>();
 
-        let mut pool = self.scratch.lock().ok()?;
+        let mut pool = self.lock_and_bind()?;
         let d_pts = pool.ensure(&self.api, 0, pts_bytes)?;
         let d_tris = pool.ensure(&self.api, 1, tris_bytes)?;
         let d_out = pool.ensure(&self.api, 2, out_bytes)?;
@@ -1093,7 +1090,6 @@ impl CudaBackend {
         if tris.is_empty() {
             return Some(MeshMeasure::default());
         }
-        self.bind_ctx()?;
         let func = if use_ampere_sm86 { self.ampere.as_ref()?.mass_properties_sm86 } else { self.generic.mass_properties };
 
         let num_tris = u32::try_from(tris.len()).ok()?;
@@ -1103,7 +1099,7 @@ impl CudaBackend {
         let partials_len = (num_blocks as usize) * 5;
         let partials_bytes = partials_len * std::mem::size_of::<f64>();
 
-        let mut pool = self.scratch.lock().ok()?;
+        let mut pool = self.lock_and_bind()?;
         let d_tris = pool.ensure(&self.api, 0, tris_bytes)?;
         let d_partials = pool.ensure(&self.api, 1, partials_bytes)?;
 

@@ -420,6 +420,7 @@ impl GpuPod for SeedCandidate {
 pub struct CollisionGpu {
     device: wgpu::Device,
     queue: wgpu::Queue,
+    dispatch_lock: std::sync::Arc<std::sync::Mutex<()>>,
     bipartite_pipeline: wgpu::ComputePipeline,
     self_pipeline: wgpu::ComputePipeline,
     lbvh_pipeline: wgpu::ComputePipeline,
@@ -436,6 +437,14 @@ impl CollisionGpu {
     pub fn new() -> Option<Self> {
         let (_, device, queue) = crate::open_headless().ok()?;
         Some(Self::from_device(device, queue))
+    }
+
+    /// Acquires the device-level dispatch lock serializing concurrent host command submissions and polls.
+    pub(crate) fn lock_device(&self) -> std::sync::MutexGuard<'_, ()> {
+        match self.dispatch_lock.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        }
     }
 
     /// Creates a [`CollisionGpu`] sharing an existing `wgpu::Device` and `wgpu::Queue`.
@@ -503,7 +512,19 @@ impl CollisionGpu {
         });
         let ssi_pipeline = make_pipeline(&ssi_pl, "evaluate_surface_residuals");
 
-        Self { device, queue, bipartite_pipeline, self_pipeline, lbvh_pipeline, overlap_bgl, morton_pipeline, morton_bgl, ssi_pipeline, ssi_bgl }
+        Self {
+            device,
+            queue,
+            dispatch_lock: std::sync::Arc::new(std::sync::Mutex::new(())),
+            bipartite_pipeline,
+            self_pipeline,
+            lbvh_pipeline,
+            overlap_bgl,
+            morton_pipeline,
+            morton_bgl,
+            ssi_pipeline,
+            ssi_bgl,
+        }
     }
 
     /// Finds all overlapping pairs `(a.id, b.id)` between `aabbs_a` and `aabbs_b` within `tolerance`.
@@ -599,6 +620,7 @@ impl CollisionGpu {
             scene_inv_extent: [inv(min_x, max_x), inv(min_y, max_y), inv(min_z, max_z), 0.0],
         };
 
+        let _guard = self.lock_device();
         let u_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("morton-params"),
             contents: &encode_pod(&params),
@@ -697,6 +719,7 @@ impl CollisionGpu {
         let max_seeds = MAX_SSI_SEEDS;
         let params = SsiSeedParams { count_a, count_b, max_seeds, threshold_sq: distance_threshold * distance_threshold };
 
+        let _guard = self.lock_device();
         let u_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("ssi-params"),
             contents: &encode_pod(&params),
@@ -810,6 +833,7 @@ impl CollisionGpu {
         bytes_b: &[u8],
         workgroups: (u32, u32, u32),
     ) -> Option<CollisionResult> {
+        let _guard = self.lock_device();
         let u_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("overlap-params"),
             contents: &encode_pod(params),
