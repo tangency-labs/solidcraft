@@ -623,6 +623,7 @@ and why the approximation tolerance is half of it.
 | curve across a pole | the UV coordinate along a collapsed edge names no point | `ssi_pole_point_keeps_its_tangent` | split at the pole; placed by its approach; the pole divided out of the field | |
 | empty trace reversed (#17 gap 4) | `SM_ERR_NULL_POINTER` | not traced back: a trace that produced no points is not reversed (WR-80, `surface_intersector/p4.rs`, `p5.rs`) | | `adv_surface_intersector.rs`'s own trace-back is unchecked; no known case reaches it (WR-80 addendum 2026-11-05) |
 | trace that never ends | 5000 points, or a creeping boundary trace | an error at 5000; `ssi_start_loop_trace_budget` bounds all start points | `Error::Unfinished` at 100,000 steps; pair budget 2,000,000 | |
+| loop touching a face's edge (#3091) | a boundary start point where the boundary curve is tangent to the other surface: the curve touches the boundary and stays inside; the march lands exactly on the next touch point (predictor clipped to the boundary) and `sm_IsPointOnCurve` refuses a same-direction landing, and no start point is set for a boundary trace to close on | traced round the loop to the point limit; fixed: a span ending on a point is on it, and such a start point closes its own trace (WR-753) | the loop is seeded where it crosses a piece boundary and closed by linking | |
 
 **Refusals.** `ssi` refuses by name: `BOOLEAN_TANGENT` (a contact it cannot prove), `BAD_PATCH`,
 `MARCHING_STALLED`, `EXIT_DIVERGED`, `ARC_UNFINISHED` (`ssi/src/lib.rs`). A refusal names where. The

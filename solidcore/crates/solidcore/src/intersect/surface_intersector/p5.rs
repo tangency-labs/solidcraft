@@ -709,6 +709,24 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
             // Remove Last StartPoint from m_vStartPoint array
             self.base.start_points.pop();
 
+            // Not upstream: a start point whose direction runs along every domain
+            // boundary it lies on is where the curve touches a boundary, not where it
+            // crosses one. The curve stays inside, so its trace can come back to this
+            // point: let it close on it, as an interior seed's trace does. Upstream
+            // never sets the start point here, so a loop touching a face's edge
+            // (#12858's boss) is traced round and round to the point limit.
+            let along_both = {
+                let sp = self.base.point(start)?;
+                let along = |srf: SrfIndex| {
+                    (sp.u_param_type(srf) == ExtentPointType::Inside
+                        || is_zero_to_tol(sp.uv_deriv(srf).x, EFF_ZERO))
+                        && (sp.v_param_type(srf) == ExtentPointType::Inside
+                            || is_zero_to_tol(sp.uv_deriv(srf).y, EFF_ZERO))
+                };
+                along(SrfIndex::First) && along(SrfIndex::Second)
+            };
+            self.base.start_point = if along_both { Some(start) } else { None };
+
             // Trace an intersection curve onto m_vCurvePoints.
             let input_trace_direction = self.base.curve_trace_direction;
             let traced_ok = ignored(self.base.trace_curve(k, start, &out.curves_3d))?;
@@ -748,6 +766,7 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
             if num_curves == out.curves_3d.len() {
                 self.base.through_points.push(tmp_id);
             }
+            self.base.start_point = None;
         }
 
         self.base.set_trace_budget(false);

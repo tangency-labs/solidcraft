@@ -2137,6 +2137,15 @@ pub fn is_point_on_tsect_curve(
             if point_to_test.crv_deriv().dot(tangent) < 0.0 {
                 return Ok(true);
             }
+            // Not upstream: the span ends on the point. The march landed on it, as it
+            // does when the predictor was clipped to a domain boundary the curve
+            // touches there (#12858's boss), so the point is on the span whichever
+            // way its direction runs. Upstream reads a same-direction end as "not
+            // passed yet", and a trace that keeps landing on its start, or on the
+            // other touch point, never ends.
+            if t >= hermite_domain.max() - EFF_ZERO {
+                return Ok(true);
+            }
         }
 
         // Check value on interior.  (Pass negative tol: just excludes end points.)
@@ -3001,9 +3010,11 @@ mod tests {
                 is_point_on_tsect_curve(&k, &end_back, &prev, &next, 1.0e-3),
                 Ok(true)
             );
+            // the span ends on the point: on it whichever way it points (not
+            // upstream, which answers false here; see `is_point_on_tsect_curve`)
             assert_eq!(
                 is_point_on_tsect_curve(&k, &end_forward, &prev, &next, 1.0e-3),
-                Ok(false)
+                Ok(true)
             );
             assert_eq!(
                 is_point_on_tsect_curve(&k, &interior, &prev, &next, 1.0e-3),
