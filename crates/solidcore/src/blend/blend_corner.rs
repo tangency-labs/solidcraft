@@ -224,14 +224,24 @@ impl BlendCorner {
 /// `SmBlendCorner::Classify` without the Swept turn's checks
 /// (`SmFilletExecutive::GetSweptTurns()` FALSE): the event at a filleted vertex with two
 /// blended edge uses of one convexity among three or four (`all_eus`, the corner's ring).
-/// A Join where their edges continue each other (G1 within `tangency_tol_deg`), or meet at
-/// 5 degrees or less at a face corner of the other convexity; else a Turn, Mitred. Not two
-/// solver edge uses among three or four: no event ([`BlendCornerEvent::None`]).
+/// A Join where their edges continue each other (G1 within `tangency_tol_deg`) and every
+/// other edge of the ring is a tangent edge (`IsTangentEdge` within the same tolerance), or
+/// where their edges meet at 5 degrees or less at a face corner of the other convexity; else
+/// a Turn, Mitred. Not two solver edge uses among three or four: no event
+/// ([`BlendCornerEvent::None`]).
+///
+/// Not the fork's: a Join is one section both blends reach. Where an edge stands
+/// between their faces on a side, that section ends where the rails cross it, and the two
+/// balls there are one only where the faces meet tangentially: their centres stand a radius
+/// off each face, so they lie the radius times the faces' angle apart. A sharp side edge
+/// whose faces are tangent only at the vertex (a ruled loft's side edge at its circular rim)
+/// is the Turn of `docs/generic-blend.md` §3.2: the blends meet on their crossing, a crease
+/// running on from the side edge.
 ///
 /// # Errors
 ///
-/// [`SolidError::null_pointer`] without a vertex (`NER`); those of the continuity and
-/// concavity tests.
+/// [`SolidError::null_pointer`] without a vertex (`NER`) or for a ring edge use without
+/// an edge; those of the continuity, concavity and tangency tests.
 pub fn classify(
     k: &Kernel,
     b: &mut Brep,
@@ -258,11 +268,48 @@ pub fn classify(
         || (angle_deg <= 5.0
             && check_face_complimentary_corner_concavity(k, b, vertex, eu1_, eu2_, None)?)
     {
+        // edges continuing each other with a sharp edge between their faces: the blends'
+        // balls where their rails cross it are two, so they turn there
+        if g1 && !side_edges_tangent(k, b, solver_eus, all_eus, tangency_tol_deg)? {
+            out.event = BlendCornerEvent::Turn;
+            return Ok(out);
+        }
         out.event = BlendCornerEvent::Join;
         return Ok(out);
     }
     out.event = BlendCornerEvent::Turn;
     Ok(out)
+}
+
+/// Whether every edge of the corner's ring (`all_eus`) other than the blended ones
+/// (`solver_eus`) has faces tangent along it within `tol_deg` (`IsTangentEdge`).
+///
+/// # Errors
+///
+/// [`SolidError::null_pointer`] for a ring edge use without an edge; those of the tangency
+/// test.
+fn side_edges_tangent(
+    k: &Kernel,
+    b: &mut Brep,
+    solver_eus: &[EdgeuseId],
+    all_eus: &[EdgeuseId],
+    tol_deg: f64,
+) -> Result<bool> {
+    let mut blended = Vec::new();
+    for &eu in solver_eus {
+        blended.push(eu1::edge(b, eu)?);
+    }
+    for &eu in all_eus {
+        let e = eu1::edge(b, eu)?;
+        if blended.contains(&e) {
+            continue;
+        }
+        let e = e.ok_or_else(|| SolidError::null_pointer(OP_CLASSIFY))?;
+        if !edge::is_tangent_edge(k, b, e, tol_deg, false)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// The fillet solvers [`exact_mitre_curve`] classifies the rounds with

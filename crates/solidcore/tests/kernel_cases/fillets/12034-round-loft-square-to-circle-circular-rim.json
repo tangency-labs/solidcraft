@@ -8,11 +8,13 @@
   },
   "calls": [
     {
-      "error": "the result is not a closed solid",
       "inputs": [
         "b1"
       ],
       "op": "blend_dropping",
+      "outputs": [
+        "b2"
+      ],
       "params": {
         "edges": {
           "kind": "edge",
@@ -122,18 +124,22 @@
       "tangency-labs/solidcraft#12034",
       "tangency-labs/solidcore#2844"
     ],
-    "what": "a ruled loft (degree 1) from the square of side 30 at z = 0 (four lines) to the circle r10 at z = 30 (four quarter arcs centred on the square's sides' directions): six faces, the top a plane disc. Its circular top rim, the four arcs as one tangent chain, rounded R2 must give one closed solid; it gives a body that is not closed (r1 the same)"
+    "what": "a ruled loft (degree 1) from the square of side 30 at z = 0 (four lines) to the circle r10 at z = 30 (four quarter arcs centred on the square's sides' directions): six faces, the top a plane disc. Its circular top rim, the four arcs as one tangent chain, rounded R2 must give one closed solid"
   },
   "expressible": true,
-  "gallery_note": "the top disc's rim (highlighted) rounded R2 leaves a body that is not closed",
+  "gallery_note": "the top disc's rim (highlighted) rounded R2: at each joint of its arcs the loft's side edge stands between the walls, tangent to them only at the joint, so the two rounds turn there, mitred on their crossing",
   "operation_expressible": true,
   "records": "12034-round-loft-square-to-circle-circular-rim.bodies.json.gz",
-  "result": [],
+  "result": [
+    {
+      "made": "b2"
+    }
+  ],
   "sources": [
     "tangency-labs/solidcraft#12034",
     "tangency-labs/solidcore#2844"
   ],
   "ungraded": [],
-  "what": "a ruled loft (degree 1) from the square of side 30 at z = 0 (four lines) to the circle r10 at z = 30 (four quarter arcs centred on the square's sides' directions): six faces, the top a plane disc. Its circular top rim, the four arcs as one tangent chain, rounded R2 must give one closed solid; it gives a body that is not closed (r1 the same)",
+  "what": "a ruled loft (degree 1) from the square of side 30 at z = 0 (four lines) to the circle r10 at z = 30 (four quarter arcs centred on the square's sides' directions): six faces, the top a plane disc. Its circular top rim, the four arcs as one tangent chain, rounded R2 must give one closed solid",
   "why_not": []
 }
