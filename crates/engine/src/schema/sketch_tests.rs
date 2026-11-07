@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use super::{
     CoincidentParams, CoincidentResult, CollinearParams, ConcentricParams, ConstraintResult, EqualParams, EqualResult, FixParams, FixResult,
     HorizontalVerticalParams, MidpointParams, Operand, ParallelParams, PerpendicularParams, PointOperand, SketchKey, SymmetryParams, SymmetryResult,
-    TangentParams,
+    TangentParams, TangentResult,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -342,9 +342,16 @@ fn replies_match_the_output_schemas_and_real_calls_get_no_warnings() {
     let r = assert_clean::<CoincidentResult>(&mut s, "sketch.constraint.coincident", json!({"a": "c3", "b": "c4"}));
     assert!(r["constraints"].as_array().is_some_and(|c| c.len() == 2) && r.get("constraint").is_some(), "{r}");
 
-    // Tangent, parallel, perpendicular, collinear.
+    // Tangent: two curves, and a line's end point and a circle (#12092), which adds two
+    // constraints.
     let mut s = new();
-    assert_clean::<ConstraintResult>(&mut s, "sketch.constraint.tangent", json!({"a": "l1", "b": "c1"}));
+    let r = assert_clean::<TangentResult>(&mut s, "sketch.constraint.tangent", json!({"a": "l1", "b": "c1"}));
+    assert!(r.get("constraints").is_none(), "{r}");
+    let r = assert_clean::<TangentResult>(&mut s, "sketch.constraint.tangent", json!({"a": "l3.end", "b": "c2"}));
+    assert!(r["constraints"].as_array().is_some_and(|c| c.len() == 2) && r.get("constraint").is_some(), "{r}");
+
+    // Parallel, perpendicular, collinear.
+    let mut s = new();
     assert_clean::<ConstraintResult>(&mut s, "sketch.constraint.parallel", json!({"a": "l2", "b": "l3"}));
     assert_clean::<ConstraintResult>(&mut s, "sketch.constraint.parallel", json!({"a": "l4", "b": "x"}));
     assert_clean::<ConstraintResult>(&mut s, "sketch.constraint.perpendicular", json!({"a": "l5", "b": "l6"}));
