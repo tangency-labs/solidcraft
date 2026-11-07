@@ -82,7 +82,7 @@ impl<'a> EnclosedCurve<'a> {
                     let nurb = line.natural_interval();
                     let domain = line.step_interval();
                     let length = Ivl::from(nurb.max()) - Ivl::from(nurb.min());
-                    if !(length.lo > 0.0) {
+                    if !(length.lo > 0.0) || crate::geom::tol::is_zero(nurb.length()) {
                         return Ok(None);
                     }
                     let along = if line.inside_out() {
