@@ -3805,14 +3805,23 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     // Command dialogs share the last dragged offset on this side until the application
     // exits, kept inside the viewport. In the left column a dialog stays in its place.
+    // At the view's edge, a remembered browser snap parks the card beside the column (#8168).
     let (drag_key, moved, docked, drag_bounds, anchor) = if let Some(column) = column {
         crate::scenario::publish_rect("dialog:column", column);
         ("", egui::Vec2::ZERO, column.min, crate::dialog_column::bounds(app, column, vp), column.min)
     } else {
         let drag_key = side.dialog_offset_key();
-        let moved = crate::frame::dock_offset(ctx, drag_key);
+        let mut moved = crate::frame::dock_offset(ctx, drag_key);
         let docked = egui::pos2(side.anchor_x(vp), top);
         let drag_bounds = crate::shell::tool_drag_rect(app, vp);
+        if app.preferences.dialog_snap_browser
+            && !crate::frame::dock_dragging(ctx)
+            && let Some(edge) = crate::dialog_column::snap_x(app, vp)
+        {
+            // Card width is enough for the first paint; `follow_browser_snap` refines from the
+            // measured rect so a label-grown card still sits on the edge.
+            moved.x = crate::dialog_column::snap_offset_x(side, docked.x, card_width(&d), edge);
+        }
         (drag_key, moved, docked, drag_bounds, crate::frame::offset_anchor(docked, moved, drag_bounds, side))
     };
     let mut keep = true;
@@ -3974,6 +3983,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if let Some(r) = app.viewport.dialog_rect {
         crate::scenario::publish_rect("dialog:outer", r);
         crate::scenario::publish_target("dialog:card", r);
+        if column.is_none() && docks(&d) && !drag_key.is_empty() {
+            crate::dialog_column::follow_browser_snap(app, ctx, side, drag_key, vp, r, r.width());
+        }
     }
     if let Some(field) = crate::ui_kit::canvas_value_focus(ctx) {
         value_fields.push(field);

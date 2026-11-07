@@ -2251,6 +2251,71 @@ fn the_view_corner_answers_a_dialog_in_the_left_column() {
     }
 }
 
+/// At the view's edge (#8168): dragging a dialog onto the browser locks it there; widening the
+/// browser moves it; dragging clear of the edge unlocks so a free left place does not follow.
+#[test]
+fn an_edge_dialog_snaps_to_the_browser_and_follows_its_width() {
+    let mut h = Harness::new();
+    h.call("ui.resize", json!({"width":1400,"height":900}));
+    h.call("ui.prefs", json!({"dialog_place":"edge"}));
+    sketched(&mut h);
+    h.settle();
+    let browser = h.app.shell.browser.expect("browser");
+    let gap = Container::for_layout(h.app.ui.layout, Surface::Panel).gap();
+    let edge = browser.right() + gap;
+    h.step(&json!({"start":"solid.extrude"})).unwrap();
+    h.settle();
+    let dialog = h.app.viewport.dialog_rect.expect("dialog");
+    let title = crate::scenario::handle_at("dialog:title").unwrap();
+    // Park the card's left edge on the browser: move by the delta the title band needs.
+    let dx = edge - dialog.left();
+    h.call("ui.drag", json!({"x0":title.x,"y0":title.y,"x1":title.x + dx,"y1":title.y,"steps":12}));
+    h.frames(6);
+    let snapped = h.app.viewport.dialog_rect.expect("dialog");
+    assert!((snapped.left() - edge).abs() <= SNAP_TOLERANCE, "dialog should snap beside the browser: left {} edge {edge}", snapped.left());
+    assert!(h.app.preferences.dialog_snap_browser, "the snap is remembered");
+    let before = snapped.left();
+    let width = h.app.preferences.browser_width;
+    let rail = crate::scenario::handle_at("left-browser-rail").unwrap();
+    h.call("ui.drag", json!({"x0":rail.x,"y0":rail.y,"x1":rail.x + 80.0,"y1":rail.y,"steps":8}));
+    h.frames(6);
+    assert!(h.app.preferences.browser_width > width + 40.0, "browser widened");
+    let followed = h.app.viewport.dialog_rect.expect("dialog");
+    let new_edge = h.app.shell.browser.expect("browser").right() + gap;
+    assert!(
+        (followed.left() - new_edge).abs() <= SNAP_TOLERANCE,
+        "snapped dialog follows the browser: left {} edge {new_edge} (was {before})",
+        followed.left()
+    );
+    assert!(followed.left() > before + 30.0, "dialog moved right with the browser");
+    let title = crate::scenario::handle_at("dialog:title").unwrap();
+    h.call(
+        "ui.drag",
+        json!({
+            "x0": title.x,
+            "y0": title.y,
+            "x1": title.x + 220.0,
+            "y1": title.y,
+            "steps": 10
+        }),
+    );
+    h.frames(6);
+    assert!(!h.app.preferences.dialog_snap_browser, "dragging clear of the edge unlocks");
+    let free = h.app.viewport.dialog_rect.expect("dialog").left();
+    let rail = crate::scenario::handle_at("left-browser-rail").unwrap();
+    let width = h.app.preferences.browser_width;
+    h.call("ui.drag", json!({"x0":rail.x,"y0":rail.y,"x1":rail.x - 70.0,"y1":rail.y,"steps":8}));
+    h.frames(6);
+    assert!(h.app.preferences.browser_width < width - 30.0, "browser narrowed");
+    let stayed = h.app.viewport.dialog_rect.expect("dialog").left();
+    assert!((stayed - free).abs() <= SNAP_TOLERANCE, "an unlocked dialog keeps its place: {stayed} vs {free}");
+    let mut restored = crate::SolveApp::new(Default::default(), Default::default());
+    restored.load_prefs(&h.app.prefs());
+    assert!(!restored.preferences.dialog_snap_browser, "unlock is what was saved");
+}
+
+const SNAP_TOLERANCE: f32 = 2.5;
+
 /// Dialogs is a Layout preference: set from the page or the control channel, saved,
 /// refused when unknown, and Cancel and Restore Defaults put it back. A dialog already open
 /// moves with it.
