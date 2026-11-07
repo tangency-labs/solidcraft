@@ -15,10 +15,8 @@ pub fn step(v: &mut Value) -> crate::Result<()> {
         if feature.get("type").and_then(Value::as_str) != Some("hole") {
             continue;
         }
-        let at_points = feature
-            .get("points")
-            .and_then(Value::as_object)
-            .is_some_and(|points| !points.get("single").and_then(Value::as_bool).unwrap_or(false));
+        let at_points =
+            feature.get("points").and_then(Value::as_object).is_some_and(|points| !points.get("single").and_then(Value::as_bool).unwrap_or(false));
         if let (true, Some(object)) = (at_points, feature.as_object_mut()) {
             object.insert("old_surface_start".into(), Value::Bool(true));
         }
