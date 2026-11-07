@@ -17,7 +17,7 @@ fn error(h: &mut Harness, id: &str, params: Value) -> String {
 #[test]
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
-    assert_eq!(keys.len(), 102, "Appearance includes its two system-theme slots");
+    assert_eq!(keys.len(), 103, "Appearance includes its two system-theme slots");
     for key in [
         "nav",
         "mouse_gestures",
@@ -746,6 +746,7 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
         "browser_bodies_folders",
         "browser_collapsed",
         "browser_eye_left",
+        "browser_feature_drag",
         "browser_float",
         "browser_share",
         "browser_show",
@@ -848,7 +849,7 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
     ];
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
-    assert_eq!(expected.len(), 102);
+    assert_eq!(expected.len(), 103);
     assert_eq!(actual, expected);
 }
 
@@ -861,6 +862,7 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
         let homes: Vec<_> = crate::prefs::FIELD_PAGES.iter().filter_map(|(field, page)| (*field == key).then_some(*page)).collect();
         assert_eq!(homes, [Some(page)], "{key} keeps its new page home");
     }
+    h.app.preferences.browser_feature_drag = false;
     h.app.preferences.nav_bridge_enabled = true;
     h.app.preferences.nav_bridge_port = 9876;
     h.app.preferences.origin_plane_names = crate::prefs::OriginPlaneNames::TopFrontRight;
@@ -877,7 +879,9 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
     h.app.preferences.sketch_face_activates_part = true;
     run(&mut h, "settings.profile.save", json!({"name":"Moved"}));
     let saved = h.app.settings_profiles.prefs();
+    assert_eq!(saved["profiles"][0]["preferences"]["browser_feature_drag"], false);
     let doc = h.app.settings_profiles.list[0].clone();
+    assert_eq!(doc["preferences"]["browser_feature_drag"], false);
     assert_eq!(doc["preferences"]["keep_work_on_tab_switch"], true);
     assert_eq!(doc["preferences"]["line_hover_tangent_arc"], true);
     for (key, value) in [
@@ -897,17 +901,21 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
     let path = h.dir.join("moved.solidcraft-profile.json");
     let exported = run(&mut h, "settings.profile.export", json!({"name":"Moved", "path":path}));
     assert_eq!(exported["profile"], doc);
+    assert_eq!(exported["profile"]["preferences"]["browser_feature_drag"], false);
     let written: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(written, doc);
+    assert_eq!(written["preferences"]["browser_feature_drag"], false);
     run(&mut h, "settings.profile.delete", json!({"name":"Moved"}));
     assert_eq!(run(&mut h, "settings.profile.import", json!({"path":path})), json!({"name":"Moved"}));
     assert_eq!(h.app.settings_profiles.list[0], doc, "file import retains the complete profile");
+    assert_eq!(h.app.settings_profiles.list[0]["preferences"]["browser_feature_drag"], false);
     h.app.preferences.nav_bridge_enabled = false;
     h.app.preferences.nav_bridge_port = 8765;
     h.app.preferences.origin_plane_names = crate::prefs::OriginPlaneNames::Xyz;
     h.app.preferences.direct_interaction = false;
     h.app.preferences.quick_measure = false;
     h.app.preferences.viewport_analysis_status = true;
+    h.app.preferences.browser_feature_drag = true;
     h.app.preferences.keep_work_on_tab_switch = false;
     h.app.preferences.line_hover_tangent_arc = false;
     h.app.preferences.navigator_fit = defaults.navigator_fit;
@@ -918,6 +926,7 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
     h.app.preferences.sketch_face_activates_part = defaults.sketch_face_activates_part;
     let out = run(&mut h, "settings.profile.apply", json!({"name":"Moved"}));
     assert_eq!(out["skipped"], json!([]));
+    assert!(!h.app.preferences.browser_feature_drag, "applying the profile restores its saved opt-out");
     assert!(h.app.preferences.keep_work_on_tab_switch && h.app.preferences.line_hover_tangent_arc && h.app.preferences.ribbon_menus_follow_hover);
     assert_eq!(capture(&h.app, "Moved"), doc);
     for value in [0.05, 1.1] {
