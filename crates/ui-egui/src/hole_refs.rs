@@ -2,8 +2,9 @@
 //! dialog takes up to two straight edges of that face (Reference 1 and 2), each with the hole
 //! centre's distance from it (Distance 1 and 2). Picking an edge measures its distance from where
 //! the hole is; typing a distance (in the dialog or in its box on the canvas) moves the hole
-//! there; moving the hole (another pick, or dragging its handle) measures the distances again.
-//! The canvas shows each distance as a dimension from its edge to the hole's centre. OK sends the
+//! there; moving the hole by a pick or its marker with one edge picked keeps its distance and goes
+//! along the edge, with two edges it goes anywhere and both distances follow (#6818). The canvas
+//! shows each distance as a dimension from its edge to the hole's centre. OK sends the
 //! edges and distances as `solid.hole`'s `references`, so the hole follows its edges when the
 //! part changes; Edit Feature picks the edges again where they are now. A Cylinder takes the same
 //! references for its base centre (#6380): its window picks the face it stands on (or takes the
@@ -20,6 +21,7 @@ use solidcraft_engine::{Sel, Session};
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
+use crate::place_gizmo::Freedom;
 use crate::selection::{EDGES, FACES, PLANAR_FACES, SelInput, VERTICES};
 use crate::theme::Tokens;
 use crate::viewport::Proj;
@@ -187,15 +189,87 @@ fn frame(s: &Session, d: &mut Dialog) -> Option<(ReferenceFrame, Vec<usize>)> {
     {
         return f.frame.clone();
     }
-    let picked: Vec<(usize, Vec3)> = edges.iter().enumerate().filter_map(|(k, e)| e.map(|p| (k, p))).collect();
-    let found = direction(s, d, at).and_then(|dir| {
-        let pts: Vec<(Vec3, Option<&str>)> = picked.iter().map(|(_, p)| (*p, None)).collect();
-        reference_frame(&crate::open_meshing::session_world(s), at, dir, &pts, true).ok().map(|f| (f, picked.iter().map(|(k, _)| *k).collect()))
-    });
+    let found = framed(s, d, at, edges);
     if let Some(refs) = refs_mut(d) {
         refs.frame = Some(Framed { revision: s.revision, place: at, edges, frame: found.clone() });
     }
     found
+}
+
+/// The face's frame at `at` for `edges`, found from the model as it is now.
+fn framed(s: &Session, d: &Dialog, at: Vec3, edges: [Option<Vec3>; 2]) -> Option<(ReferenceFrame, Vec<usize>)> {
+    let picked: Vec<(usize, Vec3)> = edges.iter().enumerate().filter_map(|(k, e)| e.map(|p| (k, p))).collect();
+    direction(s, d, at).and_then(|dir| {
+        let pts: Vec<(Vec3, Option<&str>)> = picked.iter().map(|(_, p)| (*p, None)).collect();
+        reference_frame(&crate::open_meshing::session_world(s), at, dir, &pts, true).ok().map(|f| (f, picked.iter().map(|(k, _)| *k).collect()))
+    })
+}
+
+/// The face input's item the reference edges place: the first face pick (see [`place`]). The
+/// edges place that one hole only; OK refuses them with more than one.
+fn place_item(d: &Dialog) -> Option<usize> {
+    d.inputs.first()?.items.iter().position(|x| matches!(x, Sel::Face { .. }))
+}
+
+/// What the picked reference edges leave the hole at item `i` of the face input free to do: with
+/// one edge, along it at its distance; with two, anywhere again, a move then setting both
+/// distances (as it did before any edge was picked); with none, anywhere. Only the hole the edges
+/// place (see [`place_item`]) is held; another hole in the same dialog moves anywhere. Read from
+/// the frame last found for these edges (`sync` keeps it current), or found again when the design
+/// changed since; an edge picked but not framed yet, or a frame that failed, leaves the hole free.
+pub(crate) fn freedom(s: &Session, d: &Dialog, i: usize) -> Freedom {
+    let Kind::Hole { opts, .. } = &d.kind else { return Freedom::Plane };
+    if place_item(d) != Some(i) {
+        return Freedom::Plane;
+    }
+    let edges = edges(d);
+    let Some(f) = opts.refs.frame.as_ref().filter(|f| f.edges == edges) else { return Freedom::Plane };
+    let fresh = if f.revision == s.revision { None } else { Some(place(d).and_then(|at| framed(s, d, at, edges))) };
+    match fresh.as_ref().unwrap_or(&f.frame).as_ref().map(|(fr, _)| fr.lines.as_slice()) {
+        Some([a]) => Freedom::Line(a.along),
+        _ => Freedom::Plane,
+    }
+}
+
+/// Why [`drag_to`] left the hole where it was.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Stuck {
+    /// The line the edge holds the hole on leaves the face before the point asked for.
+    OffFace,
+    /// Anything else: not the hole the edges place, no frame, not exactly one edge, or a distance
+    /// that does not evaluate (which shows its own error).
+    Not,
+}
+
+/// Move the hole at item `i` of the face input toward `near` as far as its one reference edge
+/// lets it: onto the line at the typed distance from it, nearest `near`. The typed distance
+/// stays as it is, an expression included, so a drag never rewrites it.
+pub(crate) fn drag_to(s: &Session, d: &mut Dialog, i: usize, near: Vec3) -> Result<(), Stuck> {
+    if place_item(d) != Some(i) {
+        return Err(Stuck::Not);
+    }
+    let Some((f, picked)) = frame(s, d) else { return Err(Stuck::Not) };
+    if picked.len() != 1 {
+        return Err(Stuck::Not);
+    }
+    let Kind::Hole { opts, .. } = &d.kind else { return Err(Stuck::Not) };
+    let values: Option<Vec<f64>> = picked.iter().map(|k| model_text(&opts.refs, *k).and_then(|e| s.doc.eval(e, ValueKind::Length).ok())).collect();
+    let Some(to) = values.and_then(|v| f.place(near, &v).ok()) else { return Err(Stuck::Not) };
+    if !on_reference_face(&crate::open_meshing::session_world(s), &f, to) {
+        return Err(Stuck::OffFace);
+    }
+    let Some(Sel::Face { point, .. }) = d.inputs.first_mut().and_then(|inp| inp.items.get_mut(i)) else { return Err(Stuck::Not) };
+    *point = to;
+    // In step already: the place moved by its distances, so there is nothing to measure again.
+    let edges = edges(d);
+    if let Kind::Hole { opts, .. } = &mut d.kind
+        && let Some(sn) = opts.refs.seen.as_mut()
+    {
+        sn.place = to;
+        sn.edges = edges;
+    }
+    d.error = None;
+    Ok(())
 }
 
 /// Keep the distances and the hole's place in step: a new place or a new edge is measured, a
