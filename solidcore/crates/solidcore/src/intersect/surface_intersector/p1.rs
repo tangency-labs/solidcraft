@@ -2137,13 +2137,18 @@ pub fn is_point_on_tsect_curve(
             if point_to_test.crv_deriv().dot(tangent) < 0.0 {
                 return Ok(true);
             }
-            // Not upstream: the span ends on the point. The march landed on it, as it
-            // does when the predictor was clipped to a domain boundary the curve
-            // touches there (#12858's boss), so the point is on the span whichever
-            // way its direction runs. Upstream reads a same-direction end as "not
-            // passed yet", and a trace that keeps landing on its start, or on the
-            // other touch point, never ends.
-            if t >= hermite_domain.max() - EFF_ZERO {
+            // Not upstream: the span ends on a crossing point. The march landed on it,
+            // as it does when the predictor was clipped to a domain boundary the curve
+            // touches there (#12858's boss), so the point is on the span whichever way
+            // its direction runs. Upstream reads a same-direction end as "not passed
+            // yet", and a trace that keeps landing on its crossing start, or on the
+            // other touch point, never ends. A tangent point keeps the direction test:
+            // a trace runs through a tangent start point lying on its curve (the seam
+            // point of a sphere's equator on a coaxial cylinder) and ends on the
+            // crossing point beyond it, as upstream's does.
+            if t >= hermite_domain.max() - EFF_ZERO
+                && point_to_test.point_type == IntersectionPointType::Crossing
+            {
                 return Ok(true);
             }
         }
@@ -3010,10 +3015,16 @@ mod tests {
                 is_point_on_tsect_curve(&k, &end_back, &prev, &next, 1.0e-3),
                 Ok(true)
             );
-            // the span ends on the point: on it whichever way it points (not
-            // upstream, which answers false here; see `is_point_on_tsect_curve`)
             assert_eq!(
                 is_point_on_tsect_curve(&k, &end_forward, &prev, &next, 1.0e-3),
+                Ok(false)
+            );
+            // the span ends on a crossing point: on it whichever way it points (not
+            // upstream, which answers false here; see `is_point_on_tsect_curve`)
+            let mut end_forward_crossing = end_forward.clone();
+            end_forward_crossing.point_type = IntersectionPointType::Crossing;
+            assert_eq!(
+                is_point_on_tsect_curve(&k, &end_forward_crossing, &prev, &next, 1.0e-3),
                 Ok(true)
             );
             assert_eq!(
