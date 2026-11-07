@@ -31,7 +31,8 @@ fn the_setup_fields_are_render_setups_fields() {
 }
 
 /// #12783: calls that fail today get the same message in strict: serde's for a name or patch of
-/// the wrong type or one left out, the setup name rules', `patched_settings`' and a missing setup.
+/// the wrong type, the setup name rules', `patched_settings`' and a missing setup. (A key left out
+/// is in `a_key_left_out_is_refused_by_the_check`.)
 #[test]
 fn strict_keeps_todays_errors() {
     let too_many: serde_json::Map<String, Value> = (0..16).map(|i| (format!("field{i}"), json!(1))).collect();
@@ -40,9 +41,6 @@ fn strict_keeps_todays_errors() {
         ("render.settings.get", json!({"name": ""})),
         ("render.settings.get", json!({"name": " Studio"})),
         ("render.settings.get", json!({"name": "Nope"})),
-        ("render.settings.set", json!({})),
-        ("render.settings.set", json!({"name": "Studio"})),
-        ("render.settings.set", json!({"set": {}})),
         ("render.settings.set", json!({"name": null, "set": {}})),
         ("render.settings.set", json!({"name": 5, "set": {}})),
         ("render.settings.set", json!({"name": "", "set": {}})),
@@ -53,6 +51,20 @@ fn strict_keeps_todays_errors() {
         ("render.settings.set", json!({"name": "Studio", "set": {"width": "wide"}})),
         ("render.settings.set", json!({"name": "Studio", "set": {"width": 0}})),
     ]);
+}
+
+/// #12783: Save Render Settings without `name` or `set` is refused by the check itself, before
+/// the handler runs: in strict with the check's "is required", where the handler says serde's
+/// "missing field". The first key left out, in the struct's order, is the one named either way.
+#[test]
+fn a_key_left_out_is_refused_by_the_check() {
+    for (p, key) in [(json!({}), "name"), (json!({"set": {}}), "name"), (json!({"name": "Studio"}), "set")] {
+        let messages: Vec<String> = crate::schema::issues("render.settings.set", &p).into_iter().map(|i| i.message).collect();
+        assert_eq!(messages, [format!("`{key}` is required")], "{p}");
+        let error = |level: ParamCheck| studio(level).execute("render.settings.set", &p).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(error(ParamCheck::Off).ends_with(&format!("missing field `{key}`")), "{p}: {}", error(ParamCheck::Off));
+        assert!(error(ParamCheck::Strict).ends_with(&format!("`{key}` is required")), "{p}: {}", error(ParamCheck::Strict));
+    }
 }
 
 /// #12783: the schemas take what the handlers take. Each call is checked against both the schema

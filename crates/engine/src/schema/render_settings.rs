@@ -15,8 +15,7 @@ use serde_json::{Map, Value};
 use solidcraft_doc::render_settings::RenderSettings;
 
 use super::check::whole;
-use super::motion::require;
-use super::render_camera::{drop_default, setup_name, setup_name_schema};
+use super::render_camera::{setup_name, setup_name_schema};
 
 /// The fields of a render setup (`solidcraft_doc::render_settings::RenderSetup`), as the render
 /// settings commands give and take them. `cmd/render.rs`'s `patched_settings` takes a patch of at
@@ -75,42 +74,37 @@ fn optional_setup_name_schema(generator: &mut SchemaGenerator) -> Schema {
     json_schema!({"anyOf": [setup_name_schema(generator), {"type": "null"}]})
 }
 
-fn name_and_set_required(schema: &mut Schema) {
-    require(schema, "name");
-    require(schema, "set");
-}
-
 /// Change a render setup's fields, or make a new setup from the defaults with them; the fields
 /// left out keep their values. One undo step, none when nothing changes.
 #[derive(Debug, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields, transform = name_and_set_required)]
+#[schemars(deny_unknown_fields)]
 pub struct SetParams {
-    // `name` and `set` are optional in the types and required in the schema: left out, the
-    // handler refuses the call with its own message (serde's "missing field"). schemars would
-    // publish `"default": null` for them, which their schemas refuse, so it is dropped.
+    // Both keys are required, so the check refuses a call without one ("`name` is required")
+    // before the handler runs, as for the other required keys. The handler's own words for it are
+    // serde's ("missing field `name`").
     /// The setup, by name: trimmed, at most 128 bytes, with no control characters.
-    #[serde(default, deserialize_with = "saved_name")]
-    #[schemars(schema_with = "setup_name_schema", transform = drop_default)]
-    pub name: Option<String>,
-    #[serde(default, deserialize_with = "setup_patch")]
-    #[schemars(schema_with = "set_schema", transform = drop_default)]
-    pub set: Option<Value>,
+    #[serde(deserialize_with = "saved_name")]
+    #[schemars(schema_with = "setup_name_schema")]
+    pub name: String,
+    #[serde(deserialize_with = "setup_patch")]
+    #[schemars(schema_with = "set_schema")]
+    pub set: Value,
 }
 
 /// Save Render Settings' `name`: text, as the handler's serde struct reads it (its message for
 /// anything else, `null` included), and a valid setup name.
-fn saved_name<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+fn saved_name<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
     let name = String::deserialize(Value::deserialize(d)?).map_err(|e| D::Error::custom(whole(e)))?;
     RenderSettings::validate_name(&name).map_err(|e| D::Error::custom(whole(e)))?;
-    Ok(Some(name))
+    Ok(name)
 }
 
 /// `set`: an object of at most [`SETUP_FIELDS`] keys, with `patched_settings`' message for
 /// anything else, `null` included. Which keys and values a setup takes stays the handler's to
 /// check, with serde's messages.
-fn setup_patch<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
+fn setup_patch<'de, D: Deserializer<'de>>(d: D) -> Result<Value, D::Error> {
     match Value::deserialize(d)? {
-        Value::Object(patch) if patch.len() <= SETUP_FIELDS.len() => Ok(Some(Value::Object(patch))),
+        Value::Object(patch) if patch.len() <= SETUP_FIELDS.len() => Ok(Value::Object(patch)),
         _ => Err(D::Error::custom(whole(set_message()))),
     }
 }

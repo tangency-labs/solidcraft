@@ -90,7 +90,7 @@ impl JsonSchema for RenderCamera {
 
 /// `serde(default)` makes schemars publish `"default": null` on a key; drop it from a key the
 /// schema requires.
-pub(super) fn drop_default(schema: &mut Schema) {
+fn drop_default(schema: &mut Schema) {
     schema.remove("default");
 }
 
