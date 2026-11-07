@@ -519,6 +519,10 @@ pub struct Session {
     pub(crate) followed: Option<cmd::inspect::Followed>,
     /// Project a face's edges into a sketch created on it (the default; `sketch.auto_project`).
     pub auto_project: bool,
+    /// Project, Intersect, Include 3D Geometry and the face edges projected into a new sketch
+    /// make construction geometry rather than normal geometry (off by default; #13142). A
+    /// preference, kept like `auto_project` when another design is opened or started.
+    pub project_construction: bool,
     /// How calls that break a command's parameter contract are treated (off by default). It
     /// belongs to the session, not the design, so it survives opening and starting designs.
     pub param_check: schema::ParamCheck,
@@ -827,6 +831,7 @@ impl Session {
             document_id: cmd::inspect::new_document_id(),
             followed: None,
             auto_project: true,
+            project_construction: false,
             param_check: schema::ParamCheck::Off,
             easyprint_upload: None,
             live_links: None,
@@ -890,6 +895,7 @@ impl Session {
             self.stop_computing();
         }
         let auto_project = self.auto_project;
+        let project_construction = self.project_construction;
         let validation = self.validation();
         let single_surface_analysis = self.single_surface_analysis;
         let param_check = self.param_check;
@@ -907,6 +913,7 @@ impl Session {
         self.crash_journal = crash_journal;
         self.command_check = command_check;
         self.auto_project = auto_project;
+        self.project_construction = project_construction;
         // The user's, like `auto_project`: the commands that open a design evaluate it under it
         // already (`Session::opened_validating`).
         self.set_validation(validation);
@@ -1945,6 +1952,7 @@ impl Session {
             document_id: self.document_id.clone(),
             followed: None,
             auto_project: self.auto_project,
+            project_construction: self.project_construction,
             param_check: self.param_check,
             easyprint_upload: self.easyprint_upload.clone(),
             live_links: None,

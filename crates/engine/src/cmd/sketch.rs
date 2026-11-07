@@ -1053,6 +1053,11 @@ pub(super) fn create_sketch_with_plane(s: &mut Session, p: &Value, plane: PlaneR
         {
             link = Some(super::sketch_project::project_internal_face(s, id, body, index)?);
         }
+        if s.project_construction
+            && let Some(link) = &link
+        {
+            super::sketch_project::construct_link(s, id, link)?;
+        }
     }
     let attachment = s.doc.feature(id).and_then(|feature| match &feature.kind {
         FeatureKind::Sketch { plane, .. } => Some(if face::anchor(plane).is_some() {

@@ -1,0 +1,34 @@
+{
+  "en": {
+    "ui.project_references_construction": "Project references as construction geometry",
+    "ui.project_references_construction_note": "Project, Intersect, Include 3D Geometry and the face edges of a new sketch on a face make construction geometry: references to draw against, left out of profiles. They stay linked to the model."
+  },
+  "de": {
+    "ui.project_references_construction": "Referenzen als Konstruktionsgeometrie projizieren",
+    "ui.project_references_construction_note": "Projizieren, Schneiden, 3D-Geometrie einbeziehen und die Flächenkanten einer neuen Skizze auf einer Fläche erzeugen Konstruktionsgeometrie: Bezüge zum Zeichnen, die nicht zu Profilen gehören. Sie bleiben mit dem Modell verknüpft."
+  },
+  "ko": {
+    "ui.project_references_construction": "참조를 구성선으로 투영",
+    "ui.project_references_construction_note": "투영, 교차, 3D 형상 포함과 면 위 새 스케치의 면 모서리가 구성선으로 만들어집니다. 프로파일에 포함되지 않는 그리기용 참조이며, 모델과의 연결은 유지됩니다."
+  },
+  "ar": {
+    "ui.project_references_construction": "إسقاط المراجع كهندسة مساعدة",
+    "ui.project_references_construction_note": "ينشئ الإسقاط والتقاطع وتضمين الهندسة ثلاثية الأبعاد وحواف الوجه لرسم جديد على وجه هندسةً مساعدة: مراجع للرسم عليها لا تدخل في المقاطع. وتبقى مرتبطة بالنموذج."
+  },
+  "he": {
+    "ui.project_references_construction": "הטלת הפניות כגאומטריית עזר",
+    "ui.project_references_construction_note": "הטלה, חיתוך, הכללת גאומטריה תלת־ממדית ומקצועות הפאה של סקיצה חדשה על פאה יוצרים גאומטריית עזר: הפניות לשרטוט שאינן נכללות בפרופילים. הן נשארות מקושרות למודל."
+  },
+  "ja": {
+    "ui.project_references_construction": "参照をコンストラクションジオメトリとして投影",
+    "ui.project_references_construction_note": "投影、交差、3D ジオメトリを含める、および面上の新規スケッチの面のエッジは、コンストラクションジオメトリになります。描画の参照用で、プロファイルには含まれません。モデルとのリンクは保たれます。"
+  },
+  "vi": {
+    "ui.project_references_construction": "Chiếu tham chiếu thành đường dựng hình",
+    "ui.project_references_construction_note": "Chiếu, Giao, Đưa vào hình học 3D và các cạnh bề mặt của phác thảo mới trên một bề mặt tạo ra đường dựng hình: tham chiếu để vẽ theo, không thuộc biên dạng. Chúng vẫn liên kết với mô hình."
+  },
+  "zh": {
+    "ui.project_references_construction": "将参考投影为构造几何",
+    "ui.project_references_construction_note": "投影、相交、包含三维几何以及在面上新建草图时投影的面边，都会生成构造几何：用于绘图参考，不计入轮廓。它们仍与模型保持关联。"
+  }
+}
