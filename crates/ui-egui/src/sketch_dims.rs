@@ -64,6 +64,8 @@ pub fn boxes_for(cmd: &str, n: usize) -> Vec<DimBox> {
         ("sketch.arc.center_point" | "sketch.slot.arc_center", 1) => vec![b("Radius", Length)],
         ("sketch.arc.center_point" | "sketch.slot.arc_center", 2) => vec![b("Sweep", Angle)],
         ("sketch.polygon.inscribed" | "sketch.polygon.circumscribed", 1) => vec![b("Radius", Length), b("Sides", Unitless)],
+        // By side: the side from the first click to the second (#11271).
+        ("sketch.polygon.edge", 1) => vec![b("Length", Length), b("Sides", Unitless)],
         ("sketch.slot.center_to_center" | "sketch.slot.overall" | "sketch.slot.center_point", 1) => vec![b("Length", Length)],
         ("sketch.conic", 2) => vec![b("Rho", Unitless)],
         ("sketch.slot.center_to_center" | "sketch.slot.overall" | "sketch.slot.center_point", 2)
@@ -148,6 +150,7 @@ pub fn effective(app: &SolveApp, t: &Tool, h: Vec2) -> Vec2 {
             c + Vec2::from_angle(a0 + sweep) * r
         }
         ("sketch.polygon.inscribed" | "sketch.polygon.circumscribed", 1) => a + dir_or_x(h - a) * lk("Radius").unwrap_or((h - a).len()),
+        ("sketch.polygon.edge", 1) => a + dir_or_x(h - a) * lk("Length").unwrap_or((h - a).len()),
         ("sketch.slot.center_to_center" | "sketch.slot.overall" | "sketch.slot.center_point", 2) => match lk("Width") {
             Some(w) => {
                 let c0 = t.pts.first().map(|p| p.0).unwrap_or(a);
@@ -203,7 +206,7 @@ fn construction_length(t: &Tool, b: &DimBox) -> bool {
 
 /// The id of the `i`th value box of the tool being drawn.
 pub(crate) fn box_id(i: usize) -> egui::Id {
-    egui::Id::new(("sc_dim", i))
+    egui::Id::unique(("sc_dim", i))
 }
 
 /// Where the preview and the value boxes put the tool's next point for the hover `p`: for a
@@ -338,7 +341,11 @@ fn live(app: &SolveApp, t: &Tool, e: Vec2, px: f64) -> Vec<(f64, Vec2)> {
         ("sketch.circle.two_tangent", 2) => {
             vec![(crate::sketch_tools::two_tangent_default_radius(app, t), (first + a) * 0.5 + dir_or_x(a - first).perp() * off)]
         }
-        ("sketch.arc.center_point" | "sketch.slot.arc_center", 1) | ("sketch.polygon.inscribed" | "sketch.polygon.circumscribed", 1) => {
+        // Out along the radius, beyond the cursor, as the sweep box: at the radius's middle the
+        // box covered the cursor of a short radius and took the click meant for the start point,
+        // so the arc waited for Enter (#12208).
+        ("sketch.arc.center_point" | "sketch.slot.arc_center", 1) => vec![((e - a).len(), e + dir_or_x(e - a) * (2.5 * off))],
+        ("sketch.polygon.inscribed" | "sketch.polygon.circumscribed" | "sketch.polygon.edge", 1) => {
             vec![((e - a).len(), (a + e) * 0.5), (6.0, a + (e - a) * 0.5 + (e - a).perp() * 0.3)]
         }
         ("sketch.arc.center_point" | "sketch.slot.arc_center", 2) => {
@@ -539,7 +546,7 @@ pub(crate) fn locked_expression<'a>(t: &'a Tool, label: &str) -> Option<&'a str>
 /// still show its boxes, so a finished or restarted shape is left alone.
 pub fn restore_box_focus(app: &SolveApp, ctx: &egui::Context) {
     let Some(count) = app.tool.as_ref().map(|t| t.dims.len()) else { return };
-    let holder = ctx.memory(|memory| (0..count).map(|i| egui::Id::new(("sc_dim", i))).find(|id| memory.had_focus_last_frame(*id)));
+    let holder = ctx.memory(|memory| (0..count).map(|i| egui::Id::unique(("sc_dim", i))).find(|id| memory.had_focus_last_frame(*id)));
     if let Some(id) = holder {
         ctx.memory_mut(|memory| memory.request_focus(id));
     }
@@ -549,7 +556,7 @@ pub fn restore_box_focus(app: &SolveApp, ctx: &egui::Context) {
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
     // Esc in a box ends the shape (the box had the keyboard, so the shortcut didn't see it).
     let in_box =
-        app.tool.as_ref().is_some_and(|t| (0..t.dims.len()).any(|i| ui.ctx().memory(|m| m.had_focus_last_frame(egui::Id::new(("sc_dim", i))))));
+        app.tool.as_ref().is_some_and(|t| (0..t.dims.len()).any(|i| ui.ctx().memory(|m| m.had_focus_last_frame(egui::Id::unique(("sc_dim", i))))));
     if in_box && !app.esc_handled && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
         app.esc_handled = true;
         crate::tools::finish(app);
@@ -591,8 +598,8 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
     let source = tab.and_then(|_| {
         ui.ctx().memory(|memory| {
             (0..t.dims.len())
-                .find(|i| memory.had_focus_last_frame(egui::Id::new(("sc_dim", i))))
-                .or_else(|| (0..t.dims.len()).find(|i| memory.has_focus(egui::Id::new(("sc_dim", i)))))
+                .find(|i| memory.had_focus_last_frame(egui::Id::unique(("sc_dim", i))))
+                .or_else(|| (0..t.dims.len()).find(|i| memory.has_focus(egui::Id::unique(("sc_dim", i)))))
         })
     });
     if source.is_some() {
@@ -614,7 +621,7 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
     // Polygon values used to sit inside the radius, so both boxes covered a small polygon
     // and each other. Place them together outside its projected outline, in screen space:
     // their separation must not shrink with the shape or a tilted sketch plane.
-    let polygon_positions = if matches!(t.cmd, "sketch.polygon.inscribed" | "sketch.polygon.circumscribed") {
+    let polygon_positions = if matches!(t.cmd, "sketch.polygon.inscribed" | "sketch.polygon.circumscribed" | "sketch.polygon.edge") {
         let corners = crate::tools::polygon_outline(t, e, locked(app, t, "Sides").unwrap_or(6.0))
             .unwrap_or_else(|| t.pts.iter().map(|p| p.0).chain(std::iter::once(e)).collect());
         let points: Vec<_> = corners.iter().filter_map(|p| proj.to_screen(plane.to_world(*p))).collect();
@@ -631,7 +638,7 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
     for (i, b) in t.dims.iter_mut().enumerate() {
         let Some((_, at)) = lv.get(i).copied() else { continue };
         let Some(sp) = proj.to_screen(plane.to_world(at)) else { continue };
-        let id = egui::Id::new(("sc_dim", i));
+        let id = egui::Id::unique(("sc_dim", i));
         let has_focus = ui.ctx().memory(|m| m.has_focus(id));
         // While a box follows the cursor its whole text is selected, so typing replaces it.
         if (has_focus || (focus && i == 0)) && !b.locked {
@@ -645,11 +652,11 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
             .and_then(|positions| positions.get(i).copied())
             .unwrap_or_else(|| in_view(sp + vec2(-34.0, -11.0), view, ui.ctx().pointer_latest_pos()));
         // Background: under Preferences and Report a bug (#9016), like canvas value boxes.
-        Container::new(ui.ctx(), Surface::Canvas).area(egui::Id::new(("sc_dim_area", i))).fixed_pos(pos).order(egui::Order::Background).show(
+        Container::new(ui.ctx(), Surface::Canvas).area(egui::Id::unique(("sc_dim_area", i))).fixed_pos(pos).order(egui::Order::Background).show(
             ui.ctx(),
             |ui| {
                 let fill = if b.locked { tk.accent_soft } else { tk.panel };
-                field_frame.fill(fill).show(ui, |ui| {
+                Container::show_backing(ui, field_frame.fill(fill), |ui| {
                     let r = crate::ui_kit::placement_field(ui, id, &mut b.value, b.label);
                     // A completion gets first use of forward Tab. Shift+Tab always moves back;
                     // the box reached by egui's generic traversal must not complete its text.
@@ -671,7 +678,7 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
         && !completed
     {
         let next = if tab == Some(true) { (source + t.dims.len() - 1) % t.dims.len() } else { (source + 1) % t.dims.len() };
-        let id = egui::Id::new(("sc_dim", next));
+        let id = egui::Id::unique(("sc_dim", next));
         if let Some(dimension) = t.dims.get(next) {
             let mut state = egui::TextEdit::load_state(ui.ctx(), id).unwrap_or_default();
             state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
@@ -724,27 +731,52 @@ pub(crate) const BOX: egui::Vec2 = egui::vec2(76.0, 24.0);
 /// sketch point, so the viewport asks before letting one take the click.
 pub(crate) fn over_tool_boxes(app: &SolveApp, ctx: &egui::Context, p: egui::Pos2) -> bool {
     let Some(t) = app.tool.as_ref() else { return false };
-    (0..t.dims.len()).any(|i| ctx.memory(|m| m.area_rect(egui::Id::new(("sc_dim_area", i)))).is_some_and(|r| r.contains(p)))
-        || ctx.memory(|m| m.area_rect(egui::Id::new("sc_construction_switch"))).is_some_and(|r| r.contains(p))
+    (0..t.dims.len()).any(|i| ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i)))).is_some_and(|r| r.contains(p)))
+        || ctx.memory(|m| m.area_rect(egui::Id::unique("sc_construction_switch"))).is_some_and(|r| r.contains(p))
 }
 
 /// Where a value box whose top left would be `pos` goes so it stays in the drawing area `view`:
 /// as it is when it fits; else mirrored through the pointer (a box set off the cursor, past the
 /// view's edge, goes to the cursor's other side, still clear of it, #2201); else pushed inside.
+/// A box that would still sit on the pointer moves beside it: there it would take the click meant
+/// for the next point, and the shape would wait for Enter (#12208).
 fn in_view(pos: Pos2, view: Option<egui::Rect>, pointer: Option<Pos2>) -> Pos2 {
     let Some(view) = view else { return pos };
     let fits = |p: Pos2| view.contains_rect(egui::Rect::from_min_size(p, BOX));
-    if fits(pos) {
+    let placed = if fits(pos) {
+        pos
+    } else if let Some(mirrored) = pointer.map(|c| c + (c - (pos + BOX * 0.5)) - BOX * 0.5).filter(|p| fits(*p)) {
+        mirrored
+    } else {
+        let max = (view.max - BOX).max(view.min);
+        pos.clamp(view.min, max)
+    };
+    off_pointer(placed, pointer, fits)
+}
+
+/// Gap between the pointer and a value box moved off it.
+const POINTER_GAP: f32 = 12.0;
+
+/// The most a value box spans from its top left: wider than `BOX`, as a box grows with its label
+/// and value ("Radius 12.345").
+const REACH: egui::Vec2 = egui::vec2(110.0, BOX.y);
+
+/// `pos` when the box there is clear of the pointer; else the box beside the pointer (right,
+/// left, below, above, the first that `fits`), keeping its other coordinate.
+fn off_pointer(pos: Pos2, pointer: Option<Pos2>, fits: impl Fn(Pos2) -> bool) -> Pos2 {
+    let Some(c) = pointer else { return pos };
+    if !egui::Rect::from_min_size(pos, REACH).expand(2.0).contains(c) {
         return pos;
     }
-    if let Some(c) = pointer {
-        let mirrored = c + (c - (pos + BOX * 0.5)) - BOX * 0.5;
-        if fits(mirrored) {
-            return mirrored;
-        }
-    }
-    let max = (view.max - BOX).max(view.min);
-    pos.clamp(view.min, max)
+    [
+        egui::pos2(c.x + POINTER_GAP, pos.y),
+        egui::pos2(c.x - POINTER_GAP - REACH.x, pos.y),
+        egui::pos2(pos.x, c.y + POINTER_GAP),
+        egui::pos2(pos.x, c.y - POINTER_GAP - REACH.y),
+    ]
+    .into_iter()
+    .find(|p| fits(*p))
+    .unwrap_or(pos)
 }
 
 #[cfg(test)]

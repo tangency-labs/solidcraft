@@ -1,5 +1,6 @@
 //! Shared labelled settings blocks and compact explanatory specimens.
 use crate::theme::Tokens;
+use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Align, FontId, Layout, Rect, Sense, Stroke, Ui, pos2, vec2};
 
 const SETTINGS_PAGE: &str = "sc_settings_page";
@@ -54,8 +55,8 @@ pub(crate) fn settings_change_dot(ui: &mut Ui, label: &str) -> egui::Response {
     let t = Tokens::get();
     let (rect, response) = ui.allocate_exact_size(vec2(t.space_8, t.space_8), Sense::hover());
     ui.painter().circle_filled(rect.center(), (t.space_8 - t.space_2 / 2.0) / 2.0, t.pref_note);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label));
-    response.on_hover_text(label)
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), label));
+    response.backing_on_hover_text(label)
 }
 
 /// One compact card trigger for the pinned profile menu, without a nested input frame.
@@ -99,9 +100,9 @@ pub(crate) fn settings_profile_button(ui: &mut Ui, label: &str, name: &str, edit
     if response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), name));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), name));
     crate::scenario::publish_rect("prefs:profile:sidebar_card", response.rect);
-    response.on_hover_text(label)
+    response.backing_on_hover_text(label)
 }
 
 /// Compact 18 pt informational badge, with semantic foreground/background pairs.
@@ -124,8 +125,8 @@ pub(crate) fn settings_state_badge(ui: &mut Ui, label: &str, tone: SettingsBadge
     } else {
         ui.painter().galley(rect.center() - galley.size() / 2.0, galley, ink);
     }
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label));
-    if clipped { response.on_hover_text(label) } else { response }
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), label));
+    if clipped { response.backing_on_hover_text(label) } else { response }
 }
 
 #[derive(Default)]
@@ -181,17 +182,17 @@ pub(crate) fn settings_chip(ui: &mut Ui, label: &str, chip: SettingsChip<'_>) ->
     let text_left = (rect.left() + t.space_8 + icon_width).min(rect.right());
     let text_rect = Rect::from_min_max(pos2(text_left, rect.top()), pos2((rect.right() - t.space_8 - remove_width).max(text_left), rect.bottom()));
     super::text::paint_text(ui, text_rect, label, font, ink, false);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), label));
     if let Some(remove) = chip.remove {
         let target = Rect::from_min_max(pos2((rect.right() - t.space_24).max(rect.left()), rect.top()), rect.max);
         if let Some(key) = chip.key {
             // Allocate the pill in the wrapping parent before giving its action a unique identity.
             let mut action_ui = ui.new_child(egui::UiBuilder::new().id_salt(key).max_rect(target));
-            return super::quiet_icon_button_at(&mut action_ui, target, "close", remove).on_hover_text(label);
+            return super::quiet_icon_button_at(&mut action_ui, target, "close", remove).backing_on_hover_text(label);
         }
-        return super::quiet_icon_button_at(ui, target, "close", remove).on_hover_text(label);
+        return super::quiet_icon_button_at(ui, target, "close", remove).backing_on_hover_text(label);
     }
-    response.on_hover_text(label)
+    response.backing_on_hover_text(label)
 }
 
 /// A labelled form block whose control column can contain several natural-height rows.
@@ -352,8 +353,7 @@ pub(crate) fn settings_bindings(ui: &mut Ui, bindings: &[(&[&str], &str)]) {
         let action = ui.painter().layout((*action).to_owned(), FontId::proportional(t.font_label), t.form_ink, (width - action_left).max(0.0));
         let height = (action_top + action.size().y + t.space_4).max(keys_bottom).max(t.control_height + t.space_2);
         let (r, response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
-        response
-            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), format!("{}: {}", keys.join(" + "), action.text())));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), format!("{}: {}", keys.join(" + "), action.text())));
         t.secondary_hline(ui.painter(), r.x_range(), r.bottom(), t.dialog_rule);
         for (key, cap) in caps {
             let cap = cap.translate(r.min.to_vec2());
@@ -369,6 +369,6 @@ pub(crate) fn settings_precision_sample(ui: &mut Ui, text: &str) {
     let t = Tokens::get();
     let galley = ui.painter().layout_no_wrap(text.to_owned(), FontId::monospace(t.font_body), t.form_dim);
     let (r, response) = ui.allocate_exact_size(galley.size(), Sense::hover());
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), text));
     ui.painter().galley(r.min, galley, t.form_dim);
 }

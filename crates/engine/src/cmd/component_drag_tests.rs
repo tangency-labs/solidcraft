@@ -287,3 +287,66 @@ fn a_unique_part_can_drag_a_chain_through_a_shared_peer() {
     run(&mut s, "joint.solve", json!({}));
     assert_eq!(s.doc.to_json(), before);
 }
+
+/// #11723: Move Occurrence on a part that rigid joints hold to something grounded is put back by
+/// the joint solve after it. The move still succeeds, but its reply says it was put back, gives
+/// where the part is, and names the joint. A free chain follows the move, as before, and says
+/// nothing.
+#[test]
+fn a_move_its_joints_undo_says_so() {
+    let setups: [(&str, fn(&mut Session, u64, u64, u64)); 4] = [
+        ("free chain", |_, _, _, _| {}),
+        ("plate held to base", |s, base, plate, _| {
+            run(s, "joint.as_built", json!({"type": "rigid", "a": base, "b": plate, "name": "Mount"}));
+        }),
+        ("motor held to base", |s, base, _, motor| {
+            run(s, "joint.as_built", json!({"type": "rigid", "a": base, "b": motor, "name": "Mount"}));
+        }),
+        ("motor grounded", |s, _, _, motor| {
+            run(s, "occurrence.ground", json!({"occurrence": motor, "grounded": true}));
+        }),
+    ];
+    for (case, setup) in setups {
+        let mut s = Session::default();
+        let (_, base) = part(&mut s, "Base", [0.0, 0.0, 0.0]);
+        let (_, plate) = part(&mut s, "Plate", [20.0, 0.0, 0.0]);
+        let (_, motor) = part(&mut s, "Motor", [20.0, 0.0, 10.0]);
+        run(&mut s, "joint.as_built", json!({"type": "rigid", "a": plate, "b": motor, "name": "Bolted"}));
+        setup(&mut s, base, plate, motor);
+        let (plate_at, motor_at) = (origin(&s, &[plate]), origin(&s, &[motor]));
+        let r = run(&mut s, "occurrence.move", json!({"occurrence": plate, "space": "world", "translate": [0, 0, 30]}));
+        let reply_at = [r["transform"][3][0].as_f64().unwrap(), r["transform"][3][1].as_f64().unwrap(), r["transform"][3][2].as_f64().unwrap()];
+        near(reply_at, origin(&s, &[plate]));
+        if case == "free chain" {
+            near(origin(&s, &[plate]), [plate_at[0], plate_at[1], plate_at[2] + 30.0]);
+            near(origin(&s, &[motor]), [motor_at[0], motor_at[1], motor_at[2] + 30.0]);
+            assert!(r.get("reverted").is_none() && r.get("warning").is_none(), "{case}: {r}");
+            continue;
+        }
+        near(origin(&s, &[plate]), plate_at);
+        assert_eq!(r["reverted"], json!(true), "{case}: {r}");
+        let warning = r["warning"].as_str().unwrap_or_default();
+        let holder = if case == "motor grounded" { "Bolted" } else { "Mount" };
+        assert!(warning.contains(holder) && warning.contains("joint.reach") && warning.contains("joint.edit"), "{case}: {warning}");
+    }
+}
+
+/// #11723: a part inside an assembly placed twice has no path of its own. When its joints put it
+/// back, the warning still names the joint that holds it.
+#[test]
+fn a_move_its_joints_undo_names_the_joint_in_a_repeated_assembly() {
+    let mut s = Session::default();
+    let (_, base) = part(&mut s, "Base", [0.0, 0.0, 0.0]);
+    let arm = run(&mut s, "component.create", json!({"name": "Arm"}));
+    let (arm_component, arm_at) = (arm["component"].as_u64().unwrap(), arm["occurrence"].as_u64().unwrap());
+    run(&mut s, "component.activate", json!({"component": arm_component}));
+    let plate = run(&mut s, "component.create", json!({"name": "Plate"}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "joint.as_built", json!({"type": "rigid", "a": base, "b": plate, "name": "Mount"}));
+    run(&mut s, "occurrence.copy", json!({"occurrence": arm_at, "translate": [0, 50, 0]}));
+    let r = run(&mut s, "occurrence.move", json!({"occurrence": plate, "translate": [0, 0, 30]}));
+    assert_eq!(r["reverted"], json!(true), "{r}");
+    let warning = r["warning"].as_str().unwrap_or_default();
+    assert!(warning.contains("Mount"), "the warning names the joint: {warning}");
+}

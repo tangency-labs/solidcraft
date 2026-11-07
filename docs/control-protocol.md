@@ -42,13 +42,14 @@ Query replies contain no new host effects.
 | `panel.list` | `{}` → `{state:LayoutReply,kinds:[PanelSpec]}` from the live sink and registry. |
 | `panel.open` | `{kind,instance,destination?,expected_revision?}`. New instances require a destination; closed instances can reuse remembered placement. |
 | `panel.close` | `{target:instance,expected_revision?}`. Explicit guarded close retains placement and can refuse cancellation. |
-| `panel.move` | `{target:instance,destination,expected_revision?}`. Existing open instances only. |
-| `panel.resize` | `{target:section|instance,size:{width,height},expected_revision?}`. Instance must have an open section; all tab bounds intersect. |
-| `panel.collapse` | `{target:section|instance,collapsed:bool,expected_revision?}`. Keeps requested dimensions. |
+| `panel.move` | `{target:instance,destination,activate?:false,expected_revision?}`. Existing open instances only; explicit activation joins atomically. |
+| `panel.resize` | `{target:column\|section\|instance,size:{width,height},thickness_only?:bool,expected_revision?}`. Omitted/false keeps full-size behavior. True changes shared Bottom row height or side column width while preserving stack extent preference/rank/weight; Floating/Window refuse. Both size components must remain finite, positive and bounded. All tab and column bounds intersect. |
+| `panel.collapse` | `{target:section\|instance,collapsed:bool,expected_revision?}`. Keeps requested dimensions. |
 | `panel.float` | Same as move, requiring a `new_section` with `floating` location. |
 | `panel.popout` | Same as move, requiring a `new_section` with `window` location and return destination. Desktop/headless without native capability refuse; web explicitly lowers to `floating`. |
 | `panel.focus` | `{target:instance,expected_revision?}`. Reopens retained closed state, activates, expands and requests focus. |
 | `panel.activate` | `{target:instance,expected_revision?}`. Activates an open tab without expanding or requesting focus. |
+| `panel.action` | `{target:instance,action:ControlId,expected_revision?}`. Validates registration, active/open state, availability and owning controller binding, then invokes the real bound action. Returns `LayoutReply`; missing/disabled bindings refuse. |
 | `panel.peek` | `{target:instance,expected_revision?}`. Temporary presentation of a collapsed tab, without persistence changes to size/collapse. |
 | `panel.dismiss` | `{expected_revision?}`. Dismisses transient peek. |
 | `panel.resize_pair` | `{first:SectionId,second:SectionId,first_size:{width,height},second_size:{width,height},expected_revision?}`. Adjacent sections of one dock; conserves split-axis extent and cross-axis dimensions. |
@@ -58,13 +59,14 @@ Query replies contain no new host effects.
 | `layout.apply` | `{name,expected_revision?}`. Applies a named preset to the **current** workspace, rebinding its known layout workspace ID. |
 | `layout.reset` | `{expected_revision?}`. Applies the selected workspace's registered immutable default. User presets and other workspace histories remain. Missing defaults return a capability error. |
 | `layout.get` | `{}` → `{state,workspaces:[{id,title_key,default_preset,has_remembered_layout}]}`. Selection is only `state.layout.workspace`. |
-| `layout.workspace.select` | `{workspace:WorkspaceId,expected_revision?}` → `{previous_workspace,source:"remembered"|"default_preset"|"unchanged",state}`. Registered descriptors only; no implicit creation. |
+| `layout.workspace.select` | `{workspace:WorkspaceId,expected_revision?}` → `{previous_workspace,source:"remembered"\|"default_preset"\|"unchanged",state}`. Registered descriptors only; no implicit creation. |
 
 Destinations are distinct foundation operations, not aliases:
 
 ```json
 {"type":"new_section","section":"logs","index":0,"location":{"type":"dock","zone":"left"},"size":{"width":280,"height":240}}
 {"type":"join_tab","section":"logs","index":1}
+{"type":"relative","section":"logs","placement":"after_column","new_section":"new-logs","new_column":"extra-column","size":{"width":280,"height":240}}
 ```
 
 New-section indices address the global section order after detachment; join indices
@@ -74,6 +76,32 @@ activation, collapse and dimensions. Locations are `dock` (left/right/bottom),
 `return_to` contains `{zone,index,size,collapsed,join?:{section,index}}`; it never
 recursively contains another native host. Pins and placement/size intersections
 retain the foundation's structured refusal rules.
+
+The host's explicit title/tab drag is a separate UX intent: a tab landing sends
+Move and Activate in the same guarded transaction so the dragged tab is visible.
+Generic background joins keep the activation semantics above.
+
+Side sections reference stable columns, ordered outer to inner, and retain saved
+stack weights. Relative Before/After column placement is logical; Above/Below
+stacks within a target column. Pointer code maps physical edges through dock side
+and RTL. App commands and gestures share host allocation and typed `no_space`
+admission. Missing host/environment refuses structural app commands. Overflowing
+neutral/worsening proposals reject except Close, Collapse (including expansion),
+Focus, Activate, or strict extent improvement without growth on the other axis. Independent
+commands and refused batches cancel a pending gesture before parsing/preflight.
+Standalone `panel.action` validates registration, the available fallback selection,
+owner availability, enabled binding and controller preflight. It can execute
+without a host environment, during overflow, or when layout storage refuses writes;
+it neither allocates placement nor stages layout persistence. It cannot be combined with structural
+mutations in one runtime transaction. Published peek/dismiss requests remain
+compatibility commands; the amended host exposes no rail/peek/pin-open UI.
+
+Sole side Content height uses bounded immutable controller metrics at assigned
+width, including chrome/body/footer/padding. Fill is declarative registration or
+responsive snapshot data. An incoming owner cohort captures its own availability and immutable metric
+providers before candidate allocation. Projection and commit retain those same
+controllers/providers. Changing metrics cancels previews, pending widget intents,
+cached proposals and the old frame, requiring fresh paint for widget admission. No hidden render pass is used.
 
 Preset names trim surrounding whitespace, require 1..64 Unicode scalar values and
 reject controls anywhere in the supplied name. Raw input is capped at 1024 UTF-8
@@ -103,8 +131,11 @@ retained data or recovery intent reject atomically. Restoration uses the foundat
 decoder and reappearance logic. Storage preparation finishes before live dispatch;
 catalogue publication is infallible after successful native/controller guards.
 Revision changes during staging reject the staged catalogue. No fallible storage
-write after live commit is treated as an atomic success. The shipped catalogue is
-in-memory; production preference durability and migrations remain peer work.
+write after live commit is treated as an atomic success. The default catalogue is
+in-memory. An explicitly enabled application preference adapter stores its
+existing bounded snapshot under `panel_layout` in `SolveApp::prefs`; native and
+web use their existing writers for the same value. This does not enable the
+production panel migration or change Classic defaults.
 
 Atomic layout batches contain 1..64 commands, using the same parser/executor and
 one final guarded Apply or Replace plus one catalogue publication. Queries and
@@ -154,6 +185,18 @@ duplicate names across users/built-ins, duplicate workspace keys, corrupt framin
 trailing data, invalid envelope identities and all existing aggregate/node/depth
 limits before a candidate can be published. This seam performs no disk storage.
 
+With application panel preferences enabled, the existing Layout preferences page
+uses these commands for workspace selection, named layout save/apply and reset.
+Reset changes only the current workspace and keeps the named layout library.
+Preferences Cancel restores the layout and catalogue through runtime admission;
+if restoration is refused, the dialog and its saved baseline stay open. Periodic
+preference writes retain that baseline until Apply. Settings profiles carry the
+selected layout workspace and each workspace's current arrangement, excluding
+the named library and machine-specific native window geometry. Page defaults
+preserve all arrangements and the library. None of these operations changes the
+design or camera. Names compare case-insensitively; `layout.save {name,replace:true}`
+explicitly replaces a user layout. The legacy `overwrite` flag remains accepted.
+
 Reading a retained envelope does not consume quarantine merely because the registry
 has grown. `decode_retained_record` validates an already-retained record exactly;
 `decode_retained` additionally checks its workspace. Neither reader generates
@@ -184,7 +227,9 @@ model change earlier in a sequential batch/script is visible to the next panel
 step without a tick. Queries and failed actions cannot borrow the previous
 document's context. No content tick, document edit, geometry work or camera tail is
 added to this boundary. All application GUI and command routes use one stored
-native adapter, installed once; redock its native sections before disabling it.
+native adapter. Command-adapter installation is once-only and precedes native
+placements. Disabling the runtime preflights retained controllers and native
+release through that same adapter; refusal leaves it installed.
 Unsupported atomic intent mixtures are rejected by pure structural preflight
 before any context/controller publication as well as before layout/native effects.
 
@@ -206,6 +251,131 @@ Render dock changes can affect a pair. They are not silently mapped to universal
 instances. Integrations with explicit identities can issue typed `panel.move`,
 `panel.resize` and `panel.collapse` requests for safe placement changes. No command
 implicitly selects a layout workspace on a document, ribbon, tool or context change.
+
+At the Rust app boundary, `AppPanelRuntime::new(runtime, services)` is fallible and
+rejects incoming native placements. `SolveApp::dispatch_panel_layout(action)` uses
+the stored native adapter with the shared host enabled or disabled; it accepts no
+borrowed adapter. Install a future native adapter with `set_panel_native_adapter`
+before native creation/restore, or install it with the catalogue through
+`AppPanelRuntime::set_command_adapters`. Once command adapters are installed,
+neither injection API can replace them. App command/action/render/mount boundaries reconcile the
+actual current Session without another service tick. Runtime inspection remains
+read-only. The shared host adds no production command registration beyond the
+application-layout commands above.
+
+For native host evidence, `ui.panel_fixture {enabled?, preset?, remember?, translucency_percent?}` installs bounded
+synthetic content in the real `SolveApp` workspace host. The normal connection
+authentication applies. It is off by default and ephemeral unless explicitly
+enabled with `remember:true`. It adds no design change, production content
+registration or native panel window.
+
+| Request | Effect |
+| --- | --- |
+| `{}` | Read current host/probe/Session observations without ticking services or dispatching actions. |
+| `{"enabled":true}` | Enable the `docks` specimen if no runtime exists. |
+| `{"preset":"tabs"}` | Enable the named specimen if no runtime exists. |
+| `{"preset":"tabs","remember":true}` | Enable the specimen and its application preference catalogue. Restore a saved record after valid host dimensions are available. |
+| `{"preset":"surfaces","translucency_percent":50}` | Enable declared surface-policy specimens with a runtime-only translucency request (finite 0–100 percent). Readability may raise effective opacity. |
+| `{"translucency_percent":100}` | Change the enabled specimen's request without replacing controllers, drafts or layout. Refuse if no specimen owns the host. |
+| `{"enabled":false}` | Preflight and tear down only the specimen runtime; refusal leaves it intact. |
+
+Presets are `docks` (Left/Right/Bottom, with two Left sections), `tabs` (two groups
+of two), `collapsed` (four full-width collapsed headers), `floating` (four in-app floating
+sections), `overflow` (24 instances), and `pinned` (an outer pinned Right section
+plus ordinary docks), `columns` (three independent Left columns), `stack_tabs`, `content_fill` (sole Content versus Fill), `inline` (one editable total row), and `surfaces` (mixed tab and explicit surface policies). Only `surfaces` opts out of compatibility opaque presentation. Requested opacity is `1 - translucency_percent / 100`; the override never changes saved preferences. The retired `rails` preset is rejected. Original synthetic content retains editable drafts and
+controller state across hiding and moves. Services keep ticking while content is
+hidden. Apply/Finish/Cancel are synthetic actions; the Session is never passed to
+their command sink. The editor's cancellation guard checkbox can refuse explicit
+Close and whole-runtime teardown while its synthetic transaction is live.
+
+Enabling always rejects an existing runtime, including an already enabled specimen.
+To change preset, disable successfully first, then enable the next preset. Enable
+stages the runtime, first tick and host before publishing any of them; teardown
+preflights every retained controller. Wrong types, unknown parameters/presets and
+`enabled:false` combined with `preset` fail before mutation.
+
+`remember` is an opt-in enable parameter, not a switch on an existing runtime.
+To review restart persistence, save through the normal application preference
+writer, restart with the same isolated settings, then explicitly enable the same
+specimen with `remember:true`. Loading settings alone never starts specimen
+content. A failed restore retains the saved record and reports a recovery notice.
+Any Modelling, Sketch, Render, Review or Classic arrangements registered by this
+fixture are synthetic demonstrations, not production workspace presets.
+
+Replies include `enabled`, `runtime` when the specimen runtime exists, `host`
+(null before its first rendered frame), and `session`. `runtime` contains the
+committed `LayoutReply`, retained controller count and synthetic probe snapshots
+(typed instance/owner, process-local controller identity tokens, drafts,
+service/render/lifecycle/action counts, transaction and guard state).
+`host` reports the last actual host frame: full semantic control IDs/typed target
+descriptions, accessible names, enabled flags and logical rectangles; section/body
+rectangles, collapse/inline flags, declared surface policy and captured frame
+`paint_alpha` (null without a renderer snapshot), resolved unpresented content,
+bounded scroll extent/offset, paint/input/occlusion
+rectangles, render domain, placement capacity, usable-space geometry, viewport,
+exact prepared preview, menu bounds, observed host events and committed frame
+reply. The top-level `effective_usable` application contour additionally includes
+current persistent windows and independent navigation controls; the host's own
+usable geometry describes host footprints. Sections and resolved geometry retain intended layout;
+paint/input/occlusion arrays and published controls describe actual paint, excluding
+invisible Area sizing passes. `reply`, `committed` and `prepared_committed` events describe authoritative post-dispatch state.
+Region events include the menu and owned overlays in effective paint/input/
+occlusion rectangles. Those overlays do not shrink the render domain or become
+automatic camera targets. The viewport fills everything below the application
+bar, including behind the ribbon and panels; opacity never makes controls
+click-through. Ordinary layout commands and gestures preserve camera pose, zoom,
+projection and framing offset. Explicit Fit/Centre use safe usable space and the
+model extent. The effective contour combines host footprints with current
+persistent surfaces outside the host, such as the active sketch palette; hidden
+surfaces and transient menus do not create fitting reservations. Fit may change
+zoom. Existing Look At/`view.normal_to` centring
+preserves zoom/distance, requested orientation and selected focus: it places the
+whole footprint at the current zoom when possible, otherwise only the focus at a
+stable usable centre. It never silently zooms out, and generic camera apply/replay
+does not acquire a centring offset.
+
+Ordinary title/tab drags accept explicit dock, split and tab targets. A landing
+preview describes the exact candidate, affected neighbours and insertion index.
+Empty space does not create a floating panel; use `panel.float` or the explicit
+menu action. Invalid/no target, cancellation and stale captured geometry
+commit nothing. A valid unchanged candidate commits once, consuming its owned prepared state without redispatch. Only its landing, changed neighbours and tab marker are painted. There are no idle target widgets. Full-width collapsed headers retain declared custom actions, menu, chevron and optional quick close; one click expands. Tiny windows retain panels at minima in a bounded scroll extent; narrow scroll tracks do not shield uncovered canvas.
+
+Public Rust `SolveApp::universal_panel_frame()` also exposes
+`HostFrame::next_layout`, the resolved state pending repaint, and
+`owned_overlays`. The fixture JSON does not serialize those two as separate
+fields. Never infer painted controls from pending layout geometry. Compare the
+painted frame's revision with committed replies and runtime revisions. An empty
+fixture query neither reconciles context nor ticks: the current Session may have
+changed since the retained runtime/frame was reconciled. Compare document scope
+as well as revision. Target descriptions are diagnostics, never command addresses
+or strings to parse.
+
+`session` observes actual document ID/UID/revision/dirty/undo/redo, document/model/
+cache Arc identities, recomputed feature counts, existing cached mesh identities
+(first 128 bodies, with total count), and camera. Pointer strings are opaque
+process-local equality tokens. Inspection uses only already cached meshes;
+`evaluation_count` counts live-model evaluations after Session initialization.
+It excludes construction, other Sessions and trial evaluations of cloned models;
+it does not count all geometry work or tessellation. These values permit
+before/after comparisons, not a claim that any invariant or visual result has
+already been verified.
+
+In the real `cad_ui`, host drawing defers input finalization until after all
+foreground windows/modal layers. Finalization checks the current Session and the
+actual enabled/top-layer egui target before accepting an initial press, then uses
+the stored native adapter for dispatch. Exported rectangles alone do not authorize
+clicking through another window. The root host and each native-host presentation
+use complete separate mount sets; mounting or unmounting one does not deactivate
+the others. These are native-adapter seams, not an implementation of OS panel
+windows. The specimen/default adapter advertises no native windows, and the
+current opaque renderer rejects unsupported translucent policy requests.
+
+Scenarios accept `{"panel_fixture":{"enabled":true,"preset":"docks"}}`,
+`{"panel_fixture":{}}` and `{"panel_fixture":{"enabled":false}}`, using this
+same control path and normal `fail:true` handling. Use the returned control
+rectangles with existing pointer/key, resize and screenshot requests. Capture real
+native `ui.screenshot` output and inspect it for chrome evidence; a model-only
+`ui.render` or headless scenario does not show a native panel host.
 
 For UI-kit review, `ui.status_fixture {"preset":"mode"}` shows bounded status
 specimens in the real viewport. Presets are `off`, `mode`, `result`, `attention`,
@@ -235,14 +405,34 @@ The control channel is **on by default**. SolidCraft listens on `127.0.0.1` only
 so agents can drive the app without a launch flag. Every connection still needs this launch's
 token (below); nothing else on the machine, and nothing off it, can send a command.
 
-Internal rendering harness: `ui.blur {radius_px?, surface_alpha?}` queries or sets
-session-only panel blur. Radius is finite physical pixels in 0..40; the optional
+Internal rendering harness: `ui.blur {radius_px?, surface_alpha?, fixture?}` queries or sets
+session-only panel blur. Radius is finite physical pixels in 0..60; the optional
 capture tint is 0..1 (`null` restores ordinary fills). This is not a saved
-preference. The reply contains requested radius, capability/reason and cumulative
+preference. Theme-authored blur is edited with `ui.prefs {theme_options:{theme_id:{blur:18}}}`;
+the theme must declare the option. Finite fractional values remain valid, although
+the UI slider edits in steps of one physical pixel. The `ui.prefs` option definition's
+`available`/translated `reason` describes current app/device/OS availability; its
+value remains the saved/default intent while unavailable.
+
+The `ui.blur` reply contains requested radius, renderer capability, app-aware
+`available`/`reason`, `guard` (tier cap, streak, notice, session opt-out), and cumulative
 actual effect counters, including live resources and encoded passes. Unsupported
 software/web/source contexts stay on ordinary painting. Use `ui.screenshot` for
 panel evidence; `ui.render` remains a model-only capture. Activation, full egui GPU
 fixture and manager-run evidence commands are in [blur-behind.md](blur-behind.md).
+Supplying `radius_px` selects the legacy session-only rendering harness override;
+`fixture:"clear"` removes that override and any injected availability reason,
+returning to theme intent. It does not revoke a quality-guard Undo opt-out.
+
+Explicit evidence-only fixtures are `gpu-software`, `reduce-transparency`, and
+`web-unsupported` (force an unavailable reason), plus `guard-60` (inject sixty
+eligible 23 ms samples into the transient guard at the current positive radius).
+The reply labels the active injection as `evidence_fixture`; `null` means none.
+These are not end-user settings, real adapter/OS readings or performance measurements.
+There is no fixture that makes an unsupported renderer available. They do not
+change saved options, host OS settings or document history. All supplied fields
+are validated before mutation. Capture fixture screenshots with that label in the
+evidence description, and clear the fixture before checking real capabilities.
 
 | Launch | What listens |
 |---|---|
@@ -391,8 +581,10 @@ contracts at that level, whatever the app's own (which is `off`), as a headless 
 `param_warnings` to its result; `strict` refuses it (a batch before its first step), and the
 design is left as it was. Every reply to such a request says the level it was checked at as
 `param_check`, beside `ok`. A command that switches to another design (`component.edit_in_place`,
-`component.finish_edit`, `view.next_tab`, `view.previous_tab`) has its parameters checked at
-that level before it runs, and then runs at the app's own level, as each design keeps its own.
+`component.finish_edit`, `view.next_tab`, `view.previous_tab`), or one that goes to the file
+loader (`doc.open`, `file.insert_step`, `file.insert_mesh`, `file.export_view_dxf`,
+`pointcloud.insert`, `pointcloud.reload`), has its parameters checked at that level before it
+runs, and then runs at the app's own level, as each design keeps its own.
 Any other word is refused; other methods ignore the field. An app older than this ignores the field and its reply has no
 `param_check`, so a client that needs the check asks `control.capabilities` first and treats a
 reply without `param_check` as unchecked. The bridged MCP server asks once per connection
@@ -404,13 +596,21 @@ reply without `param_check` as unchecked. The bridged MCP server asks once per c
 |---|---|---|
 | `engine.execute` | `command`: command id, `params`: JSON object | the command's result |
 | `engine.script` | `commands`: `[{command, params}, …]` | results, stops at the first error |
-| `engine.batch` | `commands`: `[{command, params}, …]` (at most 10 000), `rollback?`: bool (default true), `timings?`, `profile?`, `coalesce_parameters?`: bool (default false) | `{completed, results, undone}`, plus `failed: {index, command, error}` when a step fails, and with `timings` `timings: [{index, command, ms}]` (the failing step included) and `total_ms`; `profile` adds each step's `profile: {boolean_ms, tessellate_ms, other_ms}`. Runs the steps in one request, so within one frame, each as `engine.execute` runs it. The first failure stops the batch, and with `rollback` the design goes back to how it was before it (`undone`: the steps taken back, `rolled_back`: whether the design is back as it was, `false` only when the checkpoint could not restore it). Refused before anything runs, with an error starting `engine.batch unavailable`, while the agent cursor is shown, when a step loads a file (`doc.open`, `file.insert_step`, `file.insert_mesh`) or when it goes to another design's tab (`component.edit_in_place`, `component.finish_edit`, which `engine.script` refuses too). Send such steps one by one. A step the batch would certainly refuse at its turn is found before the first step runs (#5853): a step without a command, an unknown command id (with the closest ids) or, with strict parameter checking, a call that breaks its command's contract. The reply is then that step's failure with `completed: 0`, `undone: 0`, `not_run` listing every step and a `note`; nothing has run. With `coalesce_parameters`, each run of consecutive plain parameter edits (`parameters.change` with only a name and an expression, or with `changes`) is set as one `parameters.change {changes}`, so the design rebuilds once for the run. Every step still gets its own result (with `coalesced`: the run's length), and the run is one undo step. The run skips the states between its edits: an edit that would be refused on its own, but not once the run's later edits are in, goes through. A run whose combined edit is refused (a new parameter, a bad expression) runs step by step, so the refused step is named. Answered when done, for up to 3600 s |
+| `engine.batch` | `commands`: `[{command, params}, …]` (at most 10 000), `rollback?`: bool (default true), `timings?`, `profile?`, `coalesce_parameters?`: bool (default false) | `{completed, results, undone}`, plus `failed: {index, command, error}` when a step fails, and with `timings` `timings: [{index, command, ms}]` (the failing step included) and `total_ms`; `profile` adds each step's `profile: {boolean_ms, tessellate_ms, other_ms}`. Runs the steps in one request, so within one frame, each as `engine.execute` runs it. The first failure stops the batch, and with `rollback` the design goes back to how it was before it (`undone`: the steps taken back, `rolled_back`: whether the design is back as it was, `false` only when the checkpoint could not restore it). Refused before anything runs, with an error starting `engine.batch unavailable`, when a step loads a file (`doc.open`, `file.insert_step`, `file.insert_mesh`, `pointcloud.insert`, `pointcloud.reload`) or when it goes to another design's tab (`component.edit_in_place`, `component.finish_edit`, which `engine.script` refuses too). Send such steps one by one. A step the batch would certainly refuse at its turn is found before the first step runs (#5853): a step without a command, an unknown command id (with the closest ids) or, with strict parameter checking, a call that breaks its command's contract. The reply is then that step's failure with `completed: 0`, `undone: 0`, `not_run` listing every step and a `note`; nothing has run. With `coalesce_parameters`, each run of consecutive plain parameter edits (`parameters.change` with only a name and an expression, or with `changes`) is set as one `parameters.change {changes}`, so the design rebuilds once for the run. Every step still gets its own result (with `coalesced`: the run's length), and the run is one undo step. The run skips the states between its edits: an edit that would be refused on its own, but not once the run's later edits are in, goes through. A run whose combined edit is refused (a new parameter, a bad expression) runs step by step, so the refused step is named. Answered when done, for up to 3600 s |
 | `engine.commands` | — | every command: id, label, tab, panel, icon, shortcut (the user's current first key, or null when cleared), params doc, enabled |
 | `document.revision` | — | `{document_id, revision}`: the active design's id and a number that moves whenever the design changes, for programs that follow it ([Following the design](#following-the-design)) |
 | `control.subscribe` | — | `{document_id, revision}`, as `document.revision`; the connection is then sent a `design.changed` line whenever they change ([Following the design](#following-the-design)) |
-| `document.inspect` | `measure?`: bool | parameters, timeline (errors, timings), bodies, sketches, selection (assembly joints: `engine.execute` `joint.inspect {joint?}`, which reads only: each joint's two origins with the occurrence, the snap as saved, the feature, face, edge or sketch curve its names refer to, and whether it resolves or why not; kind, offset, angle, flip, values, limits, expressions and motion links) |
+| `document.inspect` | `measure?`: bool, `sketch_counts?`: bool (default false) | parameters, timeline (errors, timings), bodies, sketches, selection (assembly joints: `engine.execute` `joint.inspect {joint?}`, which reads only: each joint's two origins with the occurrence, the snap as saved, the feature, face, edge or sketch curve its names refer to, and whether it resolves or why not; kind, offset, angle, flip, values, limits, expressions and motion links); with `sketch_counts` each sketch also gives its `plane` and its number of `points` and `constraints` |
+| `mcp.options` | — | `{"compact": bool}`: the output the MCP server bridged to this app should give its agents (Preferences › AI › Agents through MCP, `ui.prefs` `mcp_compact`, default false; [MCP](mcp.md#compact-output)) |
+| `document.export` | — | `{name, revision, dirty, format, text}`: the active design as its file holds it, for a host that keeps the files itself ([browser command API](browser-api.md)). `text` is the design's JSON, what a `.json` design file holds; `format` is `"json"`; `revision` is the one `document.revision` answers for this state. Only reads |
+| `document.import` | `text`: a design's JSON; `name?`: the name it takes | `{name, features, errors, revision}`: replaces the active design with `text`, timeline and parameters as saved; it opens saved, with a new `document_id` and nothing to undo. It does not ask about unsaved changes in the design it replaces: that is the caller's to decide. A text that does not read changes nothing. Waits behind a file loading or a design change, and evaluates on the window thread in the frame it runs |
+| `document.saved` | `revision`: as `document.export` gave it | `{revision, dirty}`: the host saved the design at that revision, so it counts as saved from there. Refused when the design has changed since |
 
 Commands never open dialogs when run this way. `solidcraft-cli commands` prints the same registry.
+
+`document.export`, `document.import` and `document.saved` are control methods, not commands: they
+act on the app's open design rather than on an engine session, and they are not among the methods
+the agent chat may use.
 
 ### Following the design
 
@@ -462,7 +662,7 @@ the legacy behavior: surface shading and Continuity remain independently active 
 and `view.status_items` faithfully lists both, using a separate stable `continuity` ID. Together
 with Section there are at most three slots. Turning the preference back on keeps the last
 successfully started or changed analysis at the oldest analysis-group position beside Section.
-Queries never normalize state. Graphics Restore Defaults restores `true`; other page resets
+Queries never normalize state. Graphics Restore page defaults restores `true`; other page resets
 leave it alone. It applies immediately to all open designs without document edits or undo.
 Cancel restores the opening preference value, but does not restart an analysis already stopped
 by switching to single mode. Run that analysis again to restore coexistence after cancelling.
@@ -592,9 +792,9 @@ no box selection.
 | `ui.click` | `x`, `y` (screen points), `button?`: left/right/middle, `shift?`, `ctrl?`, `double?` | real pointer input |
 | `ui.move` | `x`, `y`, `shift?`, `alt?`, `ctrl?`, `cmd?` | pointer movement without a button; modifiers apply until the next synthetic move/click; a move with omitted modifiers releases them. With `nav: "touchpad"`, Shift pans and Alt/Option orbits. |
 | `ui.drag` | `x0`, `y0`, `x1`, `y1`, `via?`, `button?`, `shift?`, `ctrl?`, `steps?`, `hold?`, `hold_end?` | press, move, release; `via` is a list of `[x, y]` points passed through on the way (`steps` moves to each); a left drag on the model is a box selection (left to right: window, right to left: crossing), or with `lassoSelect` on (`ui.set`, the SELECT panel's Lasso) a freehand lasso that takes what is wholly inside it; with OpenSCAD navigation, plain left-drag on empty space orbits, Shift+left-drag box-selects, and drags starting on sketch geometry edit it; `hold` keeps the button down that many frames first (a right press-and-hold opens the marking menu, releasing over a direction picks it), `hold_end` that many frames at the end (a sketch drag shows its snap) |
-| `ui.menu` | `x?`, `y?`, `target?`, `close?` | with a point: open a context menu there as a right-click would (the viewport's marking menu, or a browser menu with `target: {"type": "body", "name"} \| {"type": "sketch", "id"} \| {"type": "component", "id"}`); without: the open menu (`radial` and `items`: id, label, shortcut, enabled, icon, placeholder; blank icons on headings/separators have `placeholder: false`) |
+| `ui.menu` | `x?`, `y?`, `target?`, `close?` | with a point: open a context menu there as a right-click would (the viewport's marking menu, a browser menu with `target: {"type": "body", "name"} \| {"type": "sketch", "id"} \| {"type": "component", "id"}`, or a History bar feature's with `{"type": "timeline", "feature": id}`); a target the design doesn't have is refused (`no body \`Name\``); without: the open menu (`radial` and `items`: id, label, shortcut, enabled, icon, placeholder, and `children` for a row that opens a flyout; blank icons on headings/separators have `placeholder: false`) |
 | `ui.icon_audit` | `reset?`, `stop?` | `reset: true` enables collection on the UI thread and clears previous requests; returns `{requested: [{name, master, placeholder}]}` sorted by requested id. Each read drains names collected since the previous read/reset. Collection stays enabled until `stop: true` (which returns pending names before disabling it). Includes aliases, variable/table ids and cached paints. |
-| `ui.menuPick` | `item`: id or label | runs an item of the open menu, as clicking it does |
+| `ui.menuPick` | `item`: id or label | runs an item of the open menu or of any of its flyouts, as clicking it does; a row that only opens a flyout is refused |
 | `ui.selectOther` | `x?`, `y?`, `pick?`, `add?`, `hover?`, `close?` | Select Other: with a point, list compatible hidden and visible geometry near the pointer by default (as holding the left button does; disable `select_other_hidden` for the original visible-only list); the popup fits the available window space and scrolls only for overflow; `pick`: select row `pick` (`add`: as Shift-click; with a dialog open, into its active input); `hover`: light a row up; without: the open list (`open`, `at`, `total`: everything under the cursor, `rows`: label, icon, sel, at most 20 per kind, nearest first) |
 | `ui.rename` | `text?`, `commit?` (default true) | finishes the rename box a Rename item opened |
 | `ui.selection` | | the selection, the open dialog's inputs, the hovered item, and the active sketch's drawn dimensions (`dimensions`: id and text centre, `dimension_selected`, `dimension_editing`), and finished sketches' dimensions shown in the model view (`shown_dimensions`: sketch, id and text centre; a double-click there edits the value) |
@@ -605,6 +805,7 @@ no box selection.
 | `ui.at` | `world: [x,y,z]` \| `sketch: [x,y]` \| `plane: "XY"` \| `axis: "Z"` \| `dimension: "d1"` (its value text) \| `handle: "arrow"` (a manipulator handle, see `scenario::publish_handle`) | the screen point (a scenario step's target; see `crates/ui-egui/src/scenario.rs`) |
 | `ui.pick` | `pixels?: [[x,y]…]`, `rays?: [{origin, dir}…]`, `frame?: "window"\|"model"`, `width?`, `height?`, `edges?` (default true), `edge_px?` (default 6), `all?`, `include_ghosted?` | read-only geometry under each pixel or ray (#6304): one entry per input, `null` where nothing is hit — body, face index, exact world `point` and outward `normal`, `depth`, `occurrence`/`component` for placed parts, `edge`/`vertex` within `edge_px` of a pixel, `section_cap: true` on a cut face. `window` pixels are physical pixels of a window screenshot; `model` pixels are pixels of a `ui.render` of `width`×`height` (default 960×600), so it works headless. As `view.pick` through `engine.execute`/`engine.batch`. See `crates/ui-egui/src/view_pick.rs` |
 | `ui.handles` | `prefix?` | the handles drawn last frame, `[{name, x, y}]`: toolbar buttons and drop-down items `toolbar:<command id>` (the button alone: `button:<command id>`; a drop-down row: `dropdown:<command id>`, highlighted `dropdown_hot:<command id>`, its pin `dropdown_pin:<command id>`; Customize Toolbar's check boxes `customize:<command id>`), ribbon tabs `tab:<name>` (MODEL, SURFACE, ASSEMBLE, INSERT, INSPECT, MANAGE, VIEW, SHEET METAL, WELDMENTS; contextual SKETCH; workspace RENDER), the toolbar menu button `ribbon:add_tab`, the hint when every tab is hidden `ribbon:tabs_hidden`, Preferences tab check boxes `prefs:toolbar_tab:<NAME>`, panel labels `panel:<tab>:<panel>` (also `ribbon:section:<TAB>:<SECTION>`), document overflow list `tab:overflow`, workspace column `ribbon:workspace`, command-search launcher `ribbon:search`, browser rows `row:<label>`, where each row's depth puts it `indent:<label>`, and fold arrows `fold:<label>`, manipulator handles; signed-axis tips `axis_view:z`, `axis_view:-y`; optional cube facets `navigation_cube:top`, `navigation_cube:top_front_right`, controls `navigation_cube:control:home` (and other actions), plus signed-axis aliases for visible cube faces; Preferences navigator picker `prefs:navigator`, options `prefs:navigator:Signed axes` and `prefs:navigator:Cube`; in the Motion Study dialog, where the chart puts its first and last step `motion:chart_start` and `motion:chart_end`, the Check collisions button `motion:check` and each collision found `motion:collision:<n>` |
+| `ui.editFolder` | `folder` (id or name) | Edit Holes on a History folder that holds holes only: one Hole dialog, filled in from its first hole, whose OK gives every hole in the folder the fields changed there. Replies as `ui.start` does |
 | `ui.editFeature` | `feature` (id or name) | what double-clicking a timeline item does: rolls back to it and opens its dialog filled in (sketches open in sketch mode). Replies as `ui.start` does, with the history `marker` |
 | `ui.scroll` | `x`, `y`, `delta?`, `ctrl?`, `unit?`: `point` \| `line` | wheel zoom at the cursor. `ctrl: true` replays a Ctrl+wheel pinch (Ctrl held and the wheel in points); `unit` selects the wheel unit and defaults to points with `ctrl` and lines without it. `delta` is in points either way. Invalid units or coordinates outside the finite screen-coordinate range are rejected before queuing input |
 | `ui.key` | `key` (egui key name, `Enter`, `Escape`…), `cmd?`, `ctrl?`, `shift?`, `alt?`, `pressed?` | By default, press and release, then release modifiers. With `pressed: true` or `false`, send only that edge; modifiers remain as given. `cmd` retains the legacy primary-modifier alias unless `ctrl` is explicit: `cmd:true, ctrl:false` sends physical Command, and both true sends Control+Command. `ui.move` can change modifiers between edges. |
@@ -626,7 +827,7 @@ no box selection.
 | `engine.execute` → `browser.expand_all` | `path?`: occurrence ids; `component?`: id; omit both for the whole tree | Open every Browser row under that scope, including folders that start closed (Origin, Named Views, Features). Display only: not saved in the design, not an undo step. |
 | `engine.execute` → `browser.collapse_all` | same | Close those rows. The design row stays open when the whole tree is collapsed. |
 | `engine.execute` → `view.history_layout` | `width?`, `dock?`: `bottom`, `left`, `under_browser`, `collapsed?` | Resize/dock the history without opening a dialog or changing the design. Contents respond to measured width; browser-stacked history shares its width and splits the height at the remembered share (`browser_share`, half until the seam between the two cards is dragged). One folded header gives the expanded card the rest; two folded headers stay at the top. |
-| `ui.agent_chat` | `features?`, `toolbar_button?`, `connect_at_start?` and `open_at_start?` (connect the agent started last, and open the panel, when SolidCraft starts; both off by default, never with `--control`), `permissions?` (`ask`, `edits`, `all`), `add_agent?` ({`name`, `kind`: `acp`, `api` or `anthropic` (`api` is OpenAI-compatible, `anthropic` Anthropic-compatible), `command` or `base_url` + `model` + `request_timeout_s?` (seconds one model request may take, 300 by default, rounded and clamped to 30 to 3600)}; no keys), `add_dialog?` (`installed`, `custom`, `api`, `anthropic`, or `false` to close), `edit_dialog?` (the id of an agent you added: the same dialog filled with what it holds, as its **Edit** button opens it; the key is never shown), `default_agent?`, `agent?` (the conversation's agent, by id), `mode?` (the agent's own mode), `provider?` (which provider's group the model picker opens first, when the models come from several), `model?` (one of its models, or see below), `open?`, `side?` (`left`, `right`), `minimized?`, `popped?` (in its own window), `width?`, `picker?`, `refresh?`, `connect?`, `stop?`, `attach?`: a file's path (a picture, a text file or a CAD file, for the next message; CAD files are imported at once), `remove_file?` (index of a file on the next message), `send?`: text (files alone make a message too), `attach_view?`, `attach_selection?`, `pick?` (true: open the context picker), `permission?`: an option id or `"cancel"` (the newest question of the agent's own), `approve?`: true, false or `"always"` (the oldest request held for Allow/Deny), `cancel?` (Stop: the queue stays), `send_now?` (stop the running step, then send the queued messages), `remove_pending?` (index), `new_chat?` (clear the chat, new session), `undo?` (the last message's changes) | the chat's state: `features`, `agents` (found and added), `currentAgent`, `state` (off, starting, ready, busy, auth, exited, failed: the agent never got ready, and Connect reads Retry), `connectAtStart`, `openAtStart`, `lastAgent` (the agent started last), `popped`, `window` (its place and size), `agent`, `modes`, `mode`, `models`, `model`, `modelWarning` (the model capability warning text, or `null` when unknown or tool support is reported; checked asynchronously and never blocks sending), `turnWarning` (the latest completed turn's no-tool notice, otherwise `null`; cleared on the next turn or new chat), `providers` (`name` and `count` of each, empty with one provider), `provider` (the one listed), `authMethods`, `toolsPort`, `pid`, `waiting`, `turn`, `pending` (queued messages, with their `files`), `attachments` (the files on the next message, by name), `loading` (pictures still being read for it, by name), `stopped`, `detection` and the conversation (`items`). With `features` off only the settings apply. Desktop only; see [Agent chat](agent-chat.md) |
+| `ui.agent_chat` | `features?`, `toolbar_button?`, `connect_at_start?` and `open_at_start?` (connect the agent started last, and open the panel, when SolidCraft starts; both off by default, never with `--control`), `instructions?` (the custom instructions every new chat's system note carries, Preferences → AI; at most 4000 characters are kept), `permissions?` (`ask`, `edits`, `all`), `add_agent?` ({`name`, `kind`: `acp`, `api` or `anthropic` (`api` is OpenAI-compatible, `anthropic` Anthropic-compatible), `command` or `base_url` + `model` + `request_timeout_s?` (seconds one model request may take, 300 by default, rounded and clamped to 30 to 3600), `allow_insecure_http?` (OpenAI-compatible endpoints only; false by default; explicitly permits sending the key over unencrypted HTTP to this endpoint, without opening a confirmation dialog)}; no keys), `add_dialog?` (`installed`, `custom`, `api`, `anthropic`, or `false` to close), `edit_dialog?` (the id of an agent you added: the same dialog filled with what it holds, as its **Edit** button opens it; the key is never shown), `default_agent?`, `agent?` (the conversation's agent, by id), `mode?` (the agent's own mode), `provider?` (which provider's group the model picker opens first, when the models come from several), `model?` (one of its models, or see below), `open?`, `side?` (`left`, `right`), `minimized?`, `popped?` (in its own window), `width?`, `picker?`, `refresh?`, `connect?`, `stop?`, `attach?`: a file's path (a picture, a text file or a CAD file, for the next message; CAD files are imported at once), `remove_file?` (index of a file on the next message), `send?`: text (files alone make a message too), `attach_view?`, `attach_selection?`, `pick?` (true: open the context picker), `permission?`: an option id or `"cancel"` (the newest question of the agent's own), `approve?`: true, false or `"always"` (the oldest request held for Allow/Deny), `cancel?` (Stop: the queue stays), `send_now?` (stop the running step, then send the queued messages), `remove_pending?` (index), `new_chat?` (clear the chat, new session), `undo?` (the last message's changes) | the chat's state: `features`, `agents` (found and added), `currentAgent`, `state` (off, starting, ready, busy, auth, exited, failed: the agent never got ready, and Connect reads Retry), `connectAtStart`, `openAtStart`, `instructions`, `lastAgent` (the agent started last), `popped`, `window` (its place and size), `agent`, `modes`, `mode`, `models`, `model`, `modelWarning` (the model capability warning text, or `null` when unknown or tool support is reported; checked asynchronously and never blocks sending), `turnWarning` (the latest completed turn's no-tool notice, otherwise `null`; cleared on the next turn or new chat), `providers` (`name` and `count` of each, empty with one provider), `provider` (the one listed), `authMethods`, `toolsPort`, `pid`, `waiting`, `turn`, `pending` (queued messages, with their `files`), `attachments` (the files on the next message, by name), `loading` (pictures still being read for it, by name), `stopped`, `detection` and the conversation (`items`). With `features` off only the settings apply. Desktop only; see [Agent chat](agent-chat.md) |
 | `ui.resize` | `width`, `height` | |
 | `app.quit` | `force?` (quit without asking about unsaved designs) | `quitting` (the window closes), `asking` (a "save changes?" prompt is open) |
 
@@ -674,6 +875,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `angle_decimals`
 - `assembly_move_handles` (default true): explicit Assembly Move uses the permitted joint-motion handles; false keeps the previous Move panel.
 - `auto_operation` (default true: feature windows choose Join, New Body or Cut from what their material touches until one is picked; false: each keeps the operation it opens with, Extrude its own Join or Cut)
+- `background_image` (string, default empty: a picture's file, shown behind the model and covering the window from its centre).
 - `browser_bodies_folders` (`several` (default): a component with one body and no groups lists it straight under the component in the browser, without a Bodies folder; `always`; `never`: components list their bodies and groups straight under them, and the folder's menu items are on the component's menu; the design's own Bodies folder, and one hidden with its eye, always show; #4217)
 - `browser_components_open` (default false: each component placement in the browser starts closed until it is opened, by its fold arrow, Expand All or Find in Browser; true: every placement starts open, as before #9274)
 - `browser_eye_left` (default false: each browser and History tree row's eye, handle `eye:<name>`, sits in a column at the rows' right end, clear of the fold arrow and the radio; true: between them, as before #8718)
@@ -682,16 +884,25 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `default_units`
 - `dialog_buttons` (`bottom` (default), `top`: a feature dialog's OK, Cancel and Apply sit in its title row instead of under its inputs, #6708; the buttons keep their handles, and `dialog:close` is then Cancel's; the Sketch panel's Finish Sketch row moves above its options, #9860)
 - `dialog_place` (`edge` (default) or `left_column`: command dialogs open in the left column in place of the browser and the History, #6707)
+- `dimension_input` (`view` (default): a sketch dimension's value is typed in a box on the dimension; `window`: placing a dimension with the Dimension tool, or double-clicking one, opens a small window at it with the value field (handle `dimwin:value`), arrows that step the value (`dimwin:up`, `dimwin:down`), a check (`dimwin:ok`, also Enter) and a cross (`dimwin:cancel`, also Esc), #7246)
+- `dimension_step_deg` (default 1, 0.001…180: what the dimension window's arrows, Up/Down and the wheel over its field add to an angle, in degrees)
+- `dimension_step_mm` (default 1, 0.001…1000: what the window's arrows, Up/Down and the wheel over its field add to a length, in millimetres, written in the unit the value is written in)
+- `escape_twice_finishes_sketch` (default true: in a sketch, two quick presses of Esc (0.4 s apart or less) with no tool or dialog left to cancel finish it, as before; false: Esc only cancels the tool, dialog or selection and the sketch stays open until Finish Sketch, #12069)
+- `extrude_arrow_face_stops` (default true: dragging Extrude's distance arrow stops at flat faces parallel to the profile that lie over it, takes their exact distance and outlines them, #2398; false: the drag moves in round steps only, as before)
 - `extrude_auto_to_object` (default true: in the Extrude dialog, with a profile picked, a face, vertex or parallel plane picked off its plane switches the extent to To Object, unless the Profiles box was clicked into; it applies to Extrude dialogs opened afterwards)
 - `frame_rate_details` (default false: with the frame rate, a frame-time graph of the frames drawn with the triangles over it, a frame-time histogram and what the GPU drew; clicking the readout switches it)
 - `graphics_adapter` (exact card name, or empty for Automatic; applies after restart; `WGPU_ADAPTER_NAME` takes precedence)
+- `ground_shadow_follows_model` (Graphics, default false): raised models cast their ground shadow on the origin ground plane; true restores the shadow below the lowest visible body. Both modes keep the shadow below bodies extending beneath the origin, and follow the selected up axis.
 - `hidden_toolbar_tabs` (default `[]`: all existing tabs, including Sheet Metal and Weldments, stay visible; lists tabs to hide, each once, e.g. `["SURFACE", "SHEET METAL"]`; hidden tabs stay hidden regardless of the design's features; [ribbon layout](ribbon-layout.md))
 - `history_sketches` (`in_order` (default), `under_feature`: the History at the left lists a sketch under the first feature built from it, #6489; the timeline at the bottom keeps the creation order)
 - `hole_moves` (default false: a placed Single hole has a drag handle (`hole:<n>`), and a pick on a face that has a hole moves it there)
+- `hole_several` (default false: a face takes several Single holes; a pick elsewhere on a face that has a hole adds another, and a pick on a hole takes it out)
 - `hole_snaps` (default false: a Single hole snaps to its face's middle and round edges' centres)
 - `home_fit_size` (0.1…1, default 1: how much of the view the model fills when Home, Fit, an opened design or a navigator view change frames it, with `navigator_fit` on or off; 1 fills the room between the panels, the compass and the navigation bar, as before; #10091)
 - `joint_rotation_coarse` (default 10°): coarse Assembly Move rotation step, in 0.001…180°.
 - `joint_rotation_fine` (default 0.1°): fine Assembly Move rotation step, in 0.001…180°.
+- `keep_unsaved_also_asks` (default true; web app, with `keep_unsaved_in_browser` on: the browser's "leave site?" box still appears when the tab closes with unsaved work; off, it appears only while a copy isn't current yet, #10220)
+- `keep_unsaved_in_browser` (default false; web app: each open design's unsaved changes are kept current in the browser's private storage, and the next visit offers them back in a "Restore unsaved design?" window with Restore, Open saved version and Discard; off, nothing is kept, #10220)
 - `keep_work_on_tab_switch` (default false: each design tab keeps its open dialog or tool, with what was picked and typed in it, and its toolbar tab while another design is shown, and has them back when it is shown again; off, a switch cancels them and shows MODEL, #9360)
 - `language` (`en`, `ar`, `ja`, `de`, `fr`, `he`, `ko`, `ms`, `ru`, `uk`, `zh`; see [localization](localization.md))
 - `length_decimals`
@@ -702,13 +913,19 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `look_at_speed`
 - `max_design_file_mb` (default 256): the largest design file opened, in MB, from the default up to 16384 (16 GB) (Preferences › General › Largest file to open, #4086; a `--max-file-size` launch flag overrides both for that run; the web app keeps the defaults and refuses other values; [large files](book/src/guide/files.md#large-files))
 - `max_step_file_mb` (default 512): the largest STEP or import file opened, in MB, from the default up to 16384 (16 GB) (Preferences › General › Largest file to open, #4086; a `--max-file-size` launch flag overrides both for that run; the web app keeps the defaults and refuses other values; [large files](book/src/guide/files.md#large-files))
+- `mcp_compact` (default false): compact tool output for agents bridged to this app through the MCP server (Preferences › AI › Agents through MCP; the server reads it with `mcp.options`; [MCP compact output](mcp.md#compact-output))
 - `middle_double_click` (`home` (default), `fit`, `off`)
 - `msaa`
 - `nav` (`fusion`, `solidworks`, `creo`, `inventor`, `alias`, `blender`, `tinkercad`, `openscad`, `touchpad`)
 - `nav_bridge_enabled` (default false) and `nav_bridge_port` (default 8765: a device's own app on this computer moves the view, [the navigation bridge](3d-mouse.md#device-apps-the-navigation-bridge))
+- `navigator_arrows` (default true: the custom view navigator has the cube's orbit and roll arrows around its body; also `view.navigator {arrows}`)
 - `navigator_fit` (default false: a view chosen on the view cube or the axis gizmo also looks at the middle of the model from the one distance that fits its bounding sphere in the free part of the view, at `home_fit_size`; Home and an opened design use the same zoom and centre while it is on, so views chosen after them only turn; #10091)
+- `navigator_home` (default true: the custom view navigator has the cube's Home button beside it; also `view.navigator {home}`)
+- `navigator_style` (`axes` (default), `cube`, `custom`: the body chosen with `view.navigator`, the cube until one is chosen)
+- `navigator_texture` (`themed` (default): the custom view navigator in the cube's colours; `modeled`: in its body's own appearance and edge colour)
 - `offer_stand_up`
 - `orbit_around` (`view_centre` (default: what Pan moves and Fit frames), `origin` (the world origin stays still on screen), `cursor` (the model point under the pointer when the drag began); the older `orbit_cursor` boolean still sets `cursor` when true)
+- `orbit_cursor_wrap` (default true: an orbit drag that reaches the edge of the view moves the cursor to the opposite edge and keeps turning)
 - `orbit_reverse` (default false: Shift with two-finger scrolling orbits the other way)
 - `origin_plane_names` (`xyz` (default) or `top_front_right`: the browser, dialogs and lists call the origin planes Top, Front and Right; their ids, commands and saved designs keep XY, XZ and YZ)
 - `pan_reverse_x` (default false: horizontal scrolling pans the other way)
@@ -718,8 +935,10 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `placement_handles` (default false: handles on the preview of a Rest, Boss or Snap Fit that move it across the model and turn it)
 - `print_face_highlight` (0…1, default 0.2: how strongly a print face is tinted and outlined in the view, #8429; 0 draws no highlight)
 - `quick_measure` (default false: the selection's length, area or distance in the view's bottom right corner, the rect `measure:quick`; #7000)
+- `ribbon_menus_follow_hover` (default false). Click a ribbon panel label to open its menu. Hover another panel label to switch, or move outside the ribbon and open menu to close it.
 - `ribbon_reveal` (default false: hovering a result in Search commands switches the ribbon to the command's tab and marks its button, or opens the panel drop-down that holds it on its row, handle `ribbon:reveal`; leaving the results goes back to the tab before; a command started from the search blinks there, and a running command from a drop-down marks its panel label, `ribbon:running_section:<TAB>:<SECTION>`, #7287)
 - `right_drag_orbits` (default true; false: a right drag the mouse preset would orbit leaves the camera alone, #6492)
+- `select_hidden_edges` (default false: v0.30.1 visible-only edge picking; true allows ordinary edge picks through faces in Shaded with hidden edges, including Fillet inputs; hidden bodies and section-clipped edges stay excluded)
 - `select_other_hidden` (default true: Select Other includes hidden geometry near the pointer; false restores the original visible-only list under the pointer)
 - `show_frame_rate` (default false: frames per second in the view's bottom-right corner, counting the frames the view draws anyway; it reads 0 FPS once the view is idle)
 - `sketch_auto_dimensions` (default false: each shape drawn in a sketch gets all its dimensions at the sizes drawn, as `sketch.draw.dimensioned` with `as_drawn`; typed values win)
@@ -727,6 +946,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `sketch_conflict_colour` (default true: while the open sketch's constraints conflict, the curves and points a failing constraint holds are drawn in the theme's `sketch_conflict` colour too, not only its glyph or dimension; false: only the glyphs and dimensions are red, in `error`, as before, #7244)
 - `sketch_construction_lines` (default true: show the Construction Line tool family in Sketch CREATE; false restores the earlier menu)
 - `sketch_exit_view` (`keep` (default: the view stays where it is when a sketch ends), `previous` (back to the view from before the sketch), `unless_rotated` (back unless the sketch view was turned))
+- `sketch_mirror_auto_line` (default true: opening Sketch Mirror uses the only preselected straight construction line of the active sketch as its reference; unselected lines do not count; false keeps manual reference selection)
 - `sketch_open_look_at` (default true: creating or editing a sketch turns the view to face it; false leaves the view as it is, and Look At faces the sketch when asked)
 - `sketch_recent_snap` (default false: while drawing, the cursor snaps where the horizontal guide of one recent circle or arc centre or straight-edge midpoint meets the vertical guide of another; a free coordinate, with no constraint and no construction geometry. Off: those guides stay visual and the cursor does not move. The references come from `sketch_tracking_guides`, #8694)
 - `sketch_state_icons` (default true: a sketch's icon in History and the browser takes the colour of its solve state, `sketch` under constrained, `sketch_fixed` fully constrained, `error` while its constraints conflict, and its tooltip names the state; false: every sketch row's icon and tooltip as before, #7245)
@@ -737,6 +957,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `stand_up_unknown` (`note` (default: a file whose header names no program known to save Y up and whose bodies seem to lie on their back (their flat area across Y outweighs their flat area facing down Z) gets a small note over the view, "Did this part open the wrong way up?", with Stand it up and Don't ask again as the handles `stand_up:stand` and `stand_up:never`, and its close (×) as `toast:stand_up:close` (also `stand_up:dismiss`); it goes by itself after 10 seconds and never blocks input), `ask` (the "Stand this part up?" dialog for every file from another program, SolidWorks too, without looking at how it rests, as before #7717), `off` (no offer); otherwise a SolidWorks file gets the dialog, or the note when its bodies clearly stand on Z already)
 - `status_bar` (default false: a thin bar along the window's bottom edge, below History, handle `status:bar`: what is being edited (`status:editing`), the open sketch's state in its colour (`status:sketch`) and the design's units (`status:units`, a click opens the Units menu, whose rows run `document.units`); the sketch's state then leaves the view's top-left corner, #7243)
 - `step_values` (default false: Up/Down and the wheel step a plain number in a focused value field)
+- `tab_double_click_renames` (default true: a double-click on the selected design's tab edits its name in the tab, handle `tab:rename`; Enter or a click elsewhere keeps the name through `component.rename` with `component: 0`, Esc cancels, and a name left as it was or blank changes nothing; false: a double-click on a tab maximizes the window, as the bar's empty space does, as before)
 - `theme` (`dark`, `light`, `system` or a theme file's id: a built-in one such as `gruvbox-dark`, or an imported one; the reply's `theme_ids` lists them)
 - `theme_export: true` (the reply's `theme_file` is the active theme, including a followed file; themes with options retain their authored definitions, defaults and overlays, while older themes keep the complete snapshot shape; saved option values are excluded; see [colour themes](book/src/guide/ui-tour.md#colour-themes))
 - `theme_follow` (desktop only, default `""`: a `solidcraft-theme/1` file's path to follow as the theme, reloaded within about a second whenever it changes and when the window gains the focus; the file is read at once, and a file that doesn't read keeps the last good theme; `""` stops following, as does setting `theme`; in the browser it is an error; the launch flag `--theme-file PATH` follows a file for one run without saving it; the reply's `theme_followed` is the path followed now or null, and `theme_follow_error` why its last read was not applied, or null)
@@ -770,7 +991,7 @@ when both occur in a call. Imported themes cannot claim the retired built-in ids
 
 Theme option values persist per theme, including a followed file's own id, through the same
 preference store in the browser and on desktop. Switching themes restores their saved values;
-Interface's Restore Defaults clears them. Preference exports and settings profiles carry values;
+Interface's Restore page defaults clears them. Preference exports and settings profiles carry values;
 `theme_export` carries the author's defaults. Saved entries that no longer fit a definition remain
 stored and use the default with a notice; unknown ids have a notice and no effective value.
 
@@ -795,6 +1016,25 @@ Other `ui.prefs` parameters:
 `ui.workspace {workspace?: "design" | "render"}` reads or changes the active workspace.
 Entering Render requires finishing the current modelling operation; returning restores
 the Design camera. See [the integrated Render workspace](render-workspace.md).
+
+`ui.inspect.render.live` reads automatic image feedback without launching or pumping
+work. It includes enabled/paused, pending/running, capture generation, isolated job,
+completed passes, target, sequence, current/stale image and error. These job
+identities belong to the live scratch session and cannot be exported or selected as
+completed results through the original document session. `view.render_live {paused:
+true|false}` pauses/resumes feedback through the registered command; its headless
+form validates and echoes the request without changing a document.
+
+GPU adaptive checkpoints include optional `preview.adaptive` metadata in
+`render.status` and `ui.inspect.render.live.adaptive`: `stage` is `pilot` or
+`production`, `completed` and `target` count that phase's iterations, and
+`pilot_samples`, `minimum_production_samples`, `maximum_production_samples` retain
+the captured allocation bounds. The compatibility field `samples_per_pixel` is an
+absolute completed pilot-plus-production iteration when this metadata is present;
+it represents uniform SPP only when `adaptive` is absent. The checkpoint target is
+the validated pilot count plus maximum production count. Pilot images never enter
+the final image or raw master, and production iteration counts are not uniform
+per-pixel sample counts.
 
 ### Sketch alignment guides
 
@@ -834,11 +1074,26 @@ channel; see [mcp.md](mcp.md).
 {"id":5,"method":"ui.screenshot","params":{"path":"/tmp/part.png"}}
 ```
 
-Preferences → Navigation → View navigator offers **Signed axes** (the original default) and
-**Cube**. This choice is saved independently of the mouse preset. The control channel selects it
-with `ui.prefs {"navigator_style":"axes"}` or `ui.prefs {"navigator_style":"cube"}`.
-Existing settings without this field keep signed axes. Signed-axis tips choose principal views;
-clicking an aligned tip again reverses the view.
+Preferences → Navigation → View navigator offers **Signed axes** (the original default),
+**Cube** and **Custom**; a right-click anywhere on the navigator offers the same three. This choice is
+saved independently of the mouse preset. The control channel selects it with
+`ui.prefs {"navigator_style":"axes"}`, `"cube"` or `"custom"`. Existing settings without this field
+keep signed axes. Signed-axis tips choose principal views; clicking an aligned tip again reverses
+the view.
+
+Custom draws a body in place of the cube, at the cube's size; a click on one of its faces looks
+straight at it, and with `navigator_fit` on it also frames the model, as the cube does. Picking
+Custom from the navigator's menu opens the Custom View Navigator panel, with OK and Cancel: pick
+the body in the view, then its texture (`themed`: the cube's colours; `modeled`: the body's own
+appearance and the view's edge colour) and whether the cube's rotation arrows and Home button go
+around it. The navigator previews the panel's choices while it is open. OK runs
+`view.navigator`, which scripts and `engine.execute` run too without opening anything:
+`{"style": "custom", "body": "Body1", "texture": "modeled", "arrows": true, "home": false}` (any
+subset; `"body": null` goes back to the cube) returns the whole navigator. A body over 10,000
+triangles is refused, and so is a long or flat one: measured across the axes and the diagonals,
+its thinnest width must be at least a fifth of its widest. The body is kept as a snapshot with the
+preferences and in settings profiles (`settings.profile.*`, as `view_gizmo`), so it stays across
+runs and designs and travels with an exported profile.
 
 Hold Shift during an orbit gesture to snap to the nearest standard or diagonal view. This applies to
 right-drag, the Orbit navigation tool, and dragging either view navigator. Under the default preset,

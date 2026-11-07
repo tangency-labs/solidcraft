@@ -12,12 +12,21 @@ use crate::{SolveApp, dialogs, help};
 
 mod form;
 
+/// The most an answer keeps, in characters (as `TextEdit::char_limit` counts them, not bytes).
 const MAX_ANSWER: usize = 2000;
+/// An answer with fewer characters left than this says how many.
+const ANSWER_ROOM: usize = 200;
 const MAX_BODY: usize = 24_000;
-// Room for all three answers and the original bounded diagnostic context.
-const MAX_REPORT: usize = 32_000;
+// Room for all three answers (up to four bytes a character) and the original bounded diagnostic
+// context.
+const MAX_REPORT: usize = 3 * 4 * MAX_ANSWER + MAX_BODY + 1000;
 const MAX_IMAGE_PIXELS: usize = 16_000_000;
 const ISSUE_URL: &str = "https://github.com/tangency-labs/solidcraft/issues/new";
+/// GitHub answers a longer link with `414 URI Too Long` (from about 8,200 characters).
+const MAX_URL: usize = 6000;
+/// Someone who isn't signed in is sent to sign in with the link to return to, encoded once more;
+/// past about 7,600 characters GitHub drops it and the form comes back empty after signing in.
+const MAX_SIGN_IN_URL: usize = 7000;
 
 thread_local! {
     static CAD_INPUT_BLOCKED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -182,7 +191,7 @@ impl Draft {
     }
 
     fn report_body(&self) -> String {
-        let answer = |text: &str| if text.trim().is_empty() { "Not provided".to_string() } else { limited(text, MAX_ANSWER) };
+        let answer = |text: &str| if text.trim().is_empty() { "Not provided".to_string() } else { limited_chars(text, MAX_ANSWER) };
         let mut report = format!(
             "## Actual behavior\n{}\n\n## Reproduction\n{}\n\n## Expected behavior\n{}\n\n",
             answer(&self.description),
@@ -297,6 +306,18 @@ fn limited(value: &str, limit: usize) -> String {
         end = end.saturating_sub(1);
     }
     value.get(..end).unwrap_or_default().to_string()
+}
+
+/// [`truncate`] by characters: an answer's limit counts them, not bytes (#7191).
+fn truncate_chars(value: &mut String, limit: usize) {
+    if let Some((end, _)) = value.char_indices().nth(limit) {
+        value.truncate(end);
+    }
+}
+
+/// [`limited`] by characters.
+fn limited_chars(value: &str, limit: usize) -> String {
+    value.chars().take(limit).collect()
 }
 
 fn block(value: &str) -> String {
@@ -587,10 +608,15 @@ pub fn begin_crash(app: &mut SolveApp, ctx: &egui::Context, report: &serde_json:
     app.issue_report.draft = Some(draft);
 }
 
+/// A query value as GitHub reads it: a space is `+`, so a `+` is encoded, as are `&`, `#`, `%`,
+/// `=`, quotes, line breaks and every byte outside ASCII. The rest of what RFC 3986 allows in a
+/// query stays as it is: a report's link is about a fifth longer than its text, not two-thirds.
 fn encode(value: &str) -> String {
-    let mut out = String::new();
+    let mut out = String::with_capacity(value.len());
     for b in value.bytes() {
-        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
+        if b == b' ' {
+            out.push('+');
+        } else if b.is_ascii_alphanumeric() || b"-_.~!$()*,;:@/?".contains(&b) {
             out.push(char::from(b));
         } else {
             let _ = write!(&mut out, "%{b:02X}");
@@ -599,13 +625,22 @@ fn encode(value: &str) -> String {
     out
 }
 
-/// Long drafts stay local and can be copied into the browser editor; never discard them.
+/// The length of `url` as GitHub's sign-in page carries it back: encoded once more.
+fn sign_in_length(url: &str) -> usize {
+    url.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.*~".contains(&b) { 1 } else { 3 }).sum()
+}
+
+/// The link to a new issue with `title` and `body` filled in, and whether `body` was too long
+/// for it (the link then carries the title alone): a report went in it whole only up to 2,000
+/// characters, with every space and line break taking three, so most went through the
+/// clipboard and a quarter of them arrived empty (#7103). Long drafts stay local and can be
+/// copied into the browser editor; never discard them.
 pub fn draft_url(title: &str, body: &str) -> (String, bool) {
     let title = limited(title, 160);
     let base = format!("{ISSUE_URL}?title={}", encode(&title));
-    if body.len() <= MAX_BODY {
+    if body.len() <= MAX_URL {
         let url = format!("{base}&body={}", encode(body));
-        if url.len() <= 2000 {
+        if url.len() <= MAX_URL && sign_in_length(&url) <= MAX_SIGN_IN_URL {
             return (url, false);
         }
     }
@@ -774,7 +809,7 @@ pub(crate) fn hold_input(app: &mut SolveApp, raw: &mut egui::RawInput) {
 }
 
 /// What [`hold_input`] keeps for the form.
-fn typing(event: &egui::Event) -> bool {
+pub(crate) fn typing(event: &egui::Event) -> bool {
     matches!(
         event,
         egui::Event::Text(_) | egui::Event::Key { .. } | egui::Event::Paste(_) | egui::Event::Copy | egui::Event::Cut | egui::Event::Ime(_)
@@ -926,8 +961,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         crate::dim_view::drag_end();
         crate::sketch3d::drag_end();
         crate::drag_snap::clear();
-        crate::gizmo::cancel(ctx, egui::Id::new("sc_move_triad"));
-        crate::gizmo::cancel(ctx, egui::Id::new("sc_occ_triad"));
+        crate::gizmo::cancel(ctx, egui::Id::unique("sc_move_triad"));
+        crate::gizmo::cancel(ctx, egui::Id::unique("sc_occ_triad"));
         if let Some(focus) = app.issue_report.cad_focus.take() {
             ctx.memory_mut(|m| m.request_focus(focus));
         }
@@ -1102,6 +1137,58 @@ mod tests {
         assert!(bounded.len() <= MAX_REPORT && bounded.ends_with("[technical details truncated]\n"));
     }
 
+    /// An answer keeps 2,000 characters in any script (#7191): the limit counted bytes, so one in
+    /// Chinese kept 666. Wherever it is cut, no character is split.
+    #[test]
+    fn issue_report_answers_keep_2000_characters_in_any_script() {
+        let mut draft = draft_for(&app(), None, None);
+        draft.body = format!("{}END_CONTEXT", "d".repeat(MAX_BODY - 11));
+        let mixed = |n: usize| "a現🚀é".chars().cycle().take(n).collect::<String>();
+        for n in [MAX_ANSWER - 1, MAX_ANSWER, MAX_ANSWER + 1, MAX_ANSWER + 2, MAX_ANSWER + 3, 3000] {
+            (draft.description, draft.steps, draft.expected) = (mixed(n), "現".repeat(n), "🚀".repeat(n));
+            let kept = n.min(MAX_ANSWER);
+            let answers = format!(
+                "## Actual behavior\n{}\n\n## Reproduction\n{}\n\n## Expected behavior\n{}\n\n",
+                mixed(kept),
+                "現".repeat(kept),
+                "🚀".repeat(kept)
+            );
+            let report = draft.report_body();
+            assert!(report.starts_with(&answers), "{n} characters");
+            assert!(report.len() <= MAX_REPORT && report.ends_with(&draft.body), "{n} characters: the technical details still fit");
+        }
+    }
+
+    /// Near the limit, an answer says how many characters are left: a paste past it is visibly
+    /// cut (#7191).
+    #[test]
+    fn issue_report_answer_near_its_limit_says_how_many_characters_are_left() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.issue_report.draft = Some(draft_for(&h.app, None, None));
+        h.frames(16);
+        h.ctx.memory_mut(|m| m.request_focus(egui::Id::unique("issue_report_body")));
+        h.frames(1);
+        h.frame_with(vec![egui::Event::Paste("故障".repeat(1500))]);
+        h.frames(4);
+        let draft = h.app.issue_report.draft.as_mut().unwrap();
+        assert_eq!(draft.description, "故障".repeat(MAX_ANSWER / 2), "3,000 Chinese characters pasted, 2,000 kept");
+        // An answer that gets past the limit some other way is cut there too, between characters.
+        let mixed = |n: usize| "a現🚀é".chars().cycle().take(n).collect::<String>();
+        (draft.steps, draft.expected) = ("步".repeat(MAX_ANSWER - 150), mixed(MAX_ANSWER + 3));
+        h.frames(4);
+        assert_eq!(h.app.issue_report.draft.as_ref().unwrap().expected, mixed(MAX_ANSWER));
+        for note in ["0 characters left", "150 characters left"] {
+            assert!(h.widget(note).is_some(), "{note}");
+        }
+        h.app.issue_report.draft.as_mut().unwrap().steps = "步".repeat(MAX_ANSWER - 1);
+        h.frames(4);
+        assert!(h.widget("1 character left").is_some());
+        h.app.issue_report.draft.as_mut().unwrap().steps = "步".repeat(MAX_ANSWER - 200);
+        h.frames(4);
+        assert!(h.widget("1 character left").is_none() && h.widget("200 characters left").is_none(), "no note far from the limit");
+    }
+
     #[test]
     fn issue_report_requires_an_answer_before_browser_handoff_without_changing_the_design() {
         for (size, scale) in [([1600, 1000], 1.0), ([640, 480], 2.0)] {
@@ -1115,7 +1202,7 @@ mod tests {
             let commands = open_commands(&mut h);
             assert!(!commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(_))));
             assert!(h.app.issue_report.draft.as_ref().unwrap().missing_description);
-            assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("issue_report_body")));
+            assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::unique("issue_report_body")));
             h.step(&json!({"text":"The preview disappeared"})).unwrap();
             let commands = open_commands(&mut h);
             assert!(commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(url) if url.url.starts_with(ISSUE_URL))));
@@ -1132,11 +1219,11 @@ mod tests {
         h.app.home.open = false;
         h.app.issue_report.draft = Some(draft_for(&h.app, None, None));
         h.frames(16);
-        let description = Some(egui::Id::new("issue_report_body"));
+        let description = Some(egui::Id::unique("issue_report_body"));
         open_commands(&mut h);
         assert_eq!(h.ctx.memory(|m| m.focused()), description);
         // Click the Summary field (found by its id: it has no label of its own) and type.
-        let title = egui::Id::new("issue_report_title").accesskit_id();
+        let title = egui::Id::unique("issue_report_title").accesskit_id();
         let tree = h.output.accesskit_update.as_ref().unwrap();
         let b = tree.nodes.iter().find(|(id, _)| *id == title).and_then(|(_, n)| n.bounds()).unwrap();
         h.step(&json!({"click":[(b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0]})).unwrap();
@@ -1170,28 +1257,20 @@ mod tests {
                     h.step(&json!({"widget":"Technical details"})).unwrap();
                     h.call("ui.scroll", json!({"x":800,"y":600,"delta":-1000}));
                 }
-                h.ctx.memory_mut(|m| m.request_focus(egui::Id::new(field)));
+                h.ctx.memory_mut(|m| m.request_focus(egui::Id::unique(field)));
                 h.frames(1);
                 let [x, y] = h.widget("Open GitHub issue form").unwrap();
                 let pos = egui::pos2(x as f32, y as f32);
                 let modifiers = egui::Modifiers { ctrl: true, command: true, ..Default::default() };
-                let raw = egui::RawInput {
-                    screen_rect: Some(h.ctx.content_rect()),
-                    focused: true,
-                    events: vec![
-                        egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers },
-                        egui::Event::Paste("Latest reviewed content".into()),
-                        egui::Event::PointerMoved(pos),
-                        egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() },
-                        egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() },
-                    ],
-                    ..Default::default()
-                };
-                let app = &mut h.app;
-                let mut output = h.ctx.run_ui(raw, |ui| {
-                    app.logic(ui.ctx());
-                    app.ui(ui);
-                });
+                h.frame_with(vec![
+                    egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers },
+                    egui::Event::Paste("Latest reviewed content".into()),
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() },
+                    egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() },
+                ]);
+                // The click waits one frame for the typing before it.
+                h.frame();
                 let draft = h.app.issue_report.draft.as_ref().unwrap();
                 let edited = match field {
                     "issue_report_body" => &draft.description,
@@ -1204,13 +1283,12 @@ mod tests {
                 let body = draft.report_body();
                 let (url, copy_needed) = draft_url(&draft.report_title(), &body);
                 assert!(
-                    output.platform_output.commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(u) if u.url == url)),
-                    "handoff must use this frame's edits: {field}, clipboard={clipboard}"
+                    h.output.commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(u) if u.url == url)),
+                    "handoff must use the click frame's edits: {field}, clipboard={clipboard}"
                 );
                 if copy_needed {
-                    assert!(output.platform_output.commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(text) if text == &body)));
+                    assert!(h.output.commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(text) if text == &body)));
                 }
-                output.textures_delta.clear();
                 assert!(draft.opened_github && !draft.missing_description);
             }
         }
@@ -1377,6 +1455,63 @@ mod tests {
         assert!(section.contains("0 s ago error: \"錯誤"), "a broken time still reads: {section}");
     }
 
+    /// The query of `url` as GitHub reads it: names and values, `+` a space.
+    fn query(url: &str) -> Vec<(String, String)> {
+        let decode = |v: &str| {
+            let (mut bytes, mut it) = (Vec::new(), v.bytes());
+            while let Some(b) = it.next() {
+                bytes.push(match b {
+                    b'+' => b' ',
+                    b'%' => u8::from_str_radix(&String::from_utf8(vec![it.next().unwrap(), it.next().unwrap()]).unwrap(), 16).unwrap(),
+                    b => b,
+                });
+            }
+            String::from_utf8(bytes).unwrap()
+        };
+        let (_, query) = url.split_once('?').unwrap();
+        query.split('&').map(|pair| pair.split_once('=').map(|(k, v)| (decode(k), decode(v))).unwrap()).collect()
+    }
+
+    /// A typical report goes in the link whole (#7103, #10556). The link took at most 2,000
+    /// characters, with every space and line break taking three: most reports didn't fit, and
+    /// GitHub opened with the title alone.
+    #[test]
+    fn issue_report_link_carries_a_typical_report_whole_and_exactly() {
+        let mut app = app();
+        app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+        let mut draft = draft_for(&app, None, None);
+        draft.description = "The fillet fails: \"radius 6 > 5\" & the preview shows #3 + 50% of the edge 🚀\n".repeat(8);
+        draft.steps = "1. Sketch a circle on XY\n2. Extrude it 10 mm\n3. Fillet the top edge with 6 mm".into();
+        let body = draft.report_body();
+        assert!(body.len() >= 1600, "as long as a typical report: {}", body.len());
+        let (url, too_long) = draft_url(&draft.report_title(), &body);
+        assert!(!too_long, "the report fits the link: {}", url.len());
+        assert_eq!(query(&url), [("title".to_string(), draft.report_title()), ("body".to_string(), body)]);
+    }
+
+    /// GitHub refuses a link longer than about 8,200 characters, and drops one its sign-in page
+    /// encodes to more than about 7,600 (the form then comes back empty after signing in). A
+    /// report too long for that goes through the clipboard, never cut.
+    #[test]
+    fn issue_report_link_stays_within_what_github_keeps() {
+        for chunk in ["word ", "x", "ünïcødé ", "a&b=c#d+e%f\"g'\n"] {
+            let (mut fitted, mut refused) = (false, false);
+            for n in (0..8000).step_by(97) {
+                let body = chunk.repeat(n / chunk.len() + 1);
+                let (url, too_long) = draft_url("Fillet fails", &body);
+                if too_long {
+                    assert!(!url.contains("&body="), "{chunk:?}");
+                    refused = true;
+                } else {
+                    assert!(url.len() <= MAX_URL && sign_in_length(&url) <= MAX_SIGN_IN_URL, "{chunk:?} × {n}");
+                    assert_eq!(query(&url), [("title".to_string(), "Fillet fails".to_string()), ("body".to_string(), body)]);
+                    fitted = true;
+                }
+            }
+            assert!(fitted && refused, "{chunk:?}");
+        }
+    }
+
     #[test]
     fn issue_report_hostile_context_and_url_are_bounded_without_new_query_parameters() {
         let mut app = app();
@@ -1391,7 +1526,7 @@ mod tests {
         assert_eq!(url.matches('&').count(), 1);
         assert!(url.contains("%26labels%3Dsecret") && url.contains("%F0%9F%9A%80"));
         let (short, copy) = draft_url(&hostile, &draft.body);
-        assert!(copy && short.len() <= 2000 && !short.contains("&body="));
+        assert!(copy && short.len() <= MAX_URL && !short.contains("&body="));
         assert!(draft.body.contains("Stock"), "fallback must retain the editable full report");
     }
 
@@ -1491,7 +1626,13 @@ mod tests {
         let mut draft = draft_for(&h.app, None, None);
         draft.title.clear();
         draft.description = "d".repeat(160);
-        draft.body = "x".repeat(1500);
+        // Just long enough that the title drawn from the description takes the link over.
+        for n in (0..MAX_URL).step_by(16) {
+            draft.body = "x".repeat(n);
+            if draft_url(&draft.report_title(), &draft.report_body()).1 {
+                break;
+            }
+        }
         let reviewed = draft.report_body();
         assert!(!draft_url("", &reviewed).1, "the fallback title must be what crosses the URL limit");
         assert!(draft_url(&draft.report_title(), &reviewed).1);
@@ -1516,7 +1657,8 @@ mod tests {
                 draft.image = Some(Arc::new(ColorImage::new([1600, 1000], vec![egui::Color32::GREEN; 1_600_000])));
                 h.app.issue_report.draft = Some(draft);
                 h.frames(20);
-                let rect = |h: &crate::scenario::Harness| egui::containers::AreaState::load(&h.ctx, egui::Id::new("sc_issue_report")).unwrap().rect();
+                let rect =
+                    |h: &crate::scenario::Harness| egui::containers::AreaState::load(&h.ctx, egui::Id::unique("sc_issue_report")).unwrap().rect();
                 let settled = rect(&h);
                 h.frames(120);
                 let idle = rect(&h);
@@ -1545,7 +1687,7 @@ mod tests {
             }
             h.app.issue_report.draft = Some(draft_for(&h.app, None, None));
             h.frames(10);
-            let rect = |h: &crate::scenario::Harness| egui::containers::AreaState::load(&h.ctx, egui::Id::new("sc_issue_report")).unwrap().rect();
+            let rect = |h: &crate::scenario::Harness| egui::containers::AreaState::load(&h.ctx, egui::Id::unique("sc_issue_report")).unwrap().rect();
             let at = rect(&h);
             assert!((at.center().x - h.ctx.content_rect().center().x).abs() < 1.0, "sketch={sketch}: it opens at the top middle: {at:?}");
             // On the title, clear of the close button.
@@ -1598,7 +1740,7 @@ mod tests {
         h.frames(4);
         let before = (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision);
         for field in ["issue_report_title", "issue_report_body"] {
-            let id = egui::Id::new(field);
+            let id = egui::Id::unique(field);
             h.ctx.memory_mut(|m| m.request_focus(id));
             h.frames(1);
             h.step(&json!({"text":"edited-report-marker"})).unwrap();
@@ -1637,7 +1779,7 @@ mod tests {
         receive(&mut h.app, token, Arc::new(ColorImage::new([2, 2], vec![egui::Color32::GREEN; 4])));
         h.frames(3);
         for field in ["issue_report_title", "issue_report_body"] {
-            let id = egui::Id::new(field);
+            let id = egui::Id::unique(field);
             h.ctx.memory_mut(|m| m.request_focus(id));
             h.frames(2);
             assert_eq!(h.ctx.memory(|m| m.focused()), Some(id), "placed Text must not steal report focus");
@@ -1666,8 +1808,8 @@ mod tests {
     fn issue_report_boundary_preserves_opacity_widget_state_and_real_focus() {
         let mut app = app();
         let ctx = crate::fonts::test_context();
-        let focus = egui::Id::new("report-review-focus");
-        let state = egui::Id::new("cad-layout-state");
+        let focus = egui::Id::unique("report-review-focus");
+        let state = egui::Id::unique("cad-layout-state");
         begin(&mut app, &ctx, None, None);
         let raw = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))),
@@ -1681,16 +1823,16 @@ mod tests {
             ui.disable();
             assert_eq!(ui.opacity(), 1.0, "capture must retain normal drawing opacity");
             assert!(!ui.is_enabled());
-            Container::new(&ctx, Surface::Popup).area(egui::Id::new("cad-boundary-proof")).fade_in(false).show(&ctx, |ui| {
+            Container::new(&ctx, Surface::Popup).area(egui::Id::unique("cad-boundary-proof")).fade_in(false).show(&ctx, |ui| {
                 assert!(!ui.is_enabled());
                 assert_eq!(ui.opacity(), 1.0);
                 ui.ctx().data_mut(|d| d.insert_temp(state, 42_u32));
-                ui.ctx().memory_mut(|m| m.request_focus(egui::Id::new("underlying-editor")));
+                ui.ctx().memory_mut(|m| m.request_focus(egui::Id::unique("underlying-editor")));
             });
             drop(barrier);
             assert_eq!(ctx.memory(|m| m.focused()), Some(focus));
             assert_eq!(ctx.data(|d| d.get_temp::<u32>(state)), Some(42));
-            assert!(Container::new(&ctx, Surface::Popup).area(egui::Id::new("report-boundary-proof")).is_enabled());
+            assert!(Container::new(&ctx, Surface::Popup).area(egui::Id::unique("report-boundary-proof")).is_enabled());
         });
         output.textures_delta.clear();
         app.issue_report.draft = None;
@@ -1763,7 +1905,7 @@ mod tests {
         let token = h.app.issue_report.pending.as_ref().unwrap().token;
         receive(&mut h.app, token, Arc::new(ColorImage::new([2, 2], vec![egui::Color32::GREEN; 4])));
         h.frames(3);
-        h.ctx.memory_mut(|m| m.request_focus(egui::Id::new("issue_report_body")));
+        h.ctx.memory_mut(|m| m.request_focus(egui::Id::unique("issue_report_body")));
         h.step(&json!({"text":"Typing here describes the bug, not a CAD dimension."})).unwrap();
         h.step(&json!({"key":"Enter"})).unwrap();
         h.step(&json!({"key":"Escape"})).unwrap();
@@ -1772,7 +1914,7 @@ mod tests {
         assert!(h.app.issue_report.draft.as_ref().unwrap().description.contains("Typing here describes"));
         h.step(&json!({"widget":"Close draft"})).unwrap();
         h.frames(2);
-        assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_dim_edit")));
+        assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::unique("sc_dim_edit")));
         h.step(&json!({"key":"Enter"})).unwrap();
         assert!(!crate::dim_view::editing());
         assert_eq!(h.app.session.undo.len(), before.1 + 1);
@@ -1800,7 +1942,7 @@ mod tests {
         let token = h.app.issue_report.pending.as_ref().unwrap().token;
         receive(&mut h.app, token, Arc::new(ColorImage::new([2, 2], vec![egui::Color32::GREEN; 4])));
         h.frames(3);
-        h.ctx.memory_mut(|m| m.request_focus(egui::Id::new("issue_report_body")));
+        h.ctx.memory_mut(|m| m.request_focus(egui::Id::unique("issue_report_body")));
         h.step(&json!({"text":"report only"})).unwrap();
         h.step(&json!({"key":"Enter"})).unwrap();
         h.step(&json!({"key":"Escape"})).unwrap();

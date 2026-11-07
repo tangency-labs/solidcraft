@@ -541,6 +541,84 @@ fn isolate_nested_child_hides_ancestor_material_and_sibling() {
     }
 }
 
+/// #7896: isolating a body hides its own component's other bodies one by one and every other
+/// placement as a placement, so the Browser row of a component shows it is off and its eye
+/// brings it back. A second placement of the body's own component is another placement.
+/// #7896: isolating a body inside a hidden Bodies folder or group shows that folder and group
+/// again, so the body is visible; the folder's other bodies stay hidden.
+#[test]
+fn isolate_shows_the_hidden_folder_and_group_a_picked_body_is_in() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Kept"}));
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"corner":[20,0,0],"body_name":"Other","operation":"new"}));
+    let group = run(&mut s, "browser.group", json!({"folder": "bodies", "items": ["Kept"], "name": "Held"}));
+    let group = group["group"].as_u64().or_else(|| group["id"].as_u64()).expect("the group's id");
+    run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/bodies", format!("c0/g{group}")], "visible": false}));
+    assert!(!s.body_visible("Kept") && !s.body_visible("Other"));
+    run(&mut s, "browser.visibility", json!({"items": ["Kept"], "visible": true, "isolate": true}));
+    assert!(s.body_visible("Kept"), "the picked body shows: {:?}", s.visibility.hidden_folders);
+    assert!(!s.body_visible("Other"), "the folder's other body stays hidden");
+    assert!(s.visibility.hidden_folders.is_empty(), "{:?}", s.visibility.hidden_folders);
+}
+
+#[test]
+fn isolate_bodies_hides_other_components_as_components() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"corner":[-20,0,0],"body_name":"Root"}));
+    let comp = |s: &mut Session, name: &str| {
+        let c = run(s, "component.create", json!({"name": name, "parent": "root", "grounded": false}));
+        c["occurrence"].as_u64().unwrap()
+    };
+    let a = comp(&mut s, "CompA");
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"BoxA"}));
+    run(&mut s, "solid.box", json!({"length":2,"width":2,"height":2,"corner":[0,0,20],"body_name":"BoxA2"}));
+    let b = comp(&mut s, "CompB");
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"corner":[20,0,0],"body_name":"BoxB1"}));
+    run(&mut s, "solid.box", json!({"length":5,"width":5,"height":5,"corner":[40,0,0],"body_name":"BoxB2"}));
+    let a2 = run(&mut s, "occurrence.copy", json!({"occurrence":a,"translate":[0,40,0]}))["occurrence"].as_u64().unwrap();
+    let in_a = s.occurrence_bodies(&[a], false).unwrap();
+    let (box_a, box_a2) = (in_a.iter().find(|n| !n.contains("BoxA2")).unwrap().clone(), in_a.iter().find(|n| n.contains("BoxA2")).unwrap().clone());
+
+    let out = run(&mut s, "browser.visibility", json!({"visible":true,"items":[box_a],"isolate":true}));
+    assert_eq!(out["isolated"], json!([box_a]));
+    let mut occurrences = s.visibility.hidden_occurrences.clone();
+    occurrences.sort();
+    let mut others = vec![vec![b], vec![a2]];
+    others.sort();
+    assert_eq!(occurrences, others, "CompB and CompA's other placement go as placements");
+    let mut bodies = s.visibility.hidden_bodies.clone();
+    bodies.sort();
+    assert_eq!(bodies, vec![box_a2.clone(), "Root".to_string()], "only bodies beside BoxA go one by one");
+    assert!(s.body_visible(&box_a) && !s.body_visible(&box_a2) && !s.body_visible("Root"));
+    for name in s.occurrence_bodies(&[b], false).unwrap().iter().chain(&s.occurrence_bodies(&[a2], false).unwrap()) {
+        assert!(!s.body_visible(name), "{name}");
+    }
+    // CompB's eye brings it back whole.
+    run(&mut s, "browser.visibility", json!({"visible":true,"paths":[[b]]}));
+    assert!(s.occurrence_bodies(&[b], false).unwrap().iter().all(|n| s.body_visible(n)));
+
+    // Isolating a root body hides every placement as a placement and no body one by one.
+    run(&mut s, "browser.visibility", json!({"visible":true,"items":["Root"],"isolate":true}));
+    let mut occurrences = s.visibility.hidden_occurrences.clone();
+    occurrences.sort();
+    let mut all = vec![vec![a], vec![b], vec![a2]];
+    all.sort();
+    assert_eq!(occurrences, all);
+    assert!(s.visibility.hidden_bodies.is_empty() && s.body_visible("Root"), "{:?}", s.visibility.hidden_bodies);
+
+    // Only bodies isolate, and only shown; a refusal changes nothing.
+    let before = s.visibility.clone();
+    for p in [
+        json!({"visible":false,"items":["Root"],"isolate":true}),
+        json!({"visible":true,"items":["XY"],"isolate":true}),
+        json!({"visible":true,"items":["Nope"],"isolate":true}),
+        json!({"visible":true,"folder":"bodies","isolate":true}),
+    ] {
+        assert!(s.execute("browser.visibility", &p).is_err(), "{p}");
+    }
+    assert_eq!(s.visibility, before);
+}
+
 #[test]
 fn context_new_child_uses_inactive_parent_placement() {
     let mut s = Session::default();
@@ -1750,6 +1828,31 @@ fn a_body_copied_in_another_design_pastes_as_an_imported_body() {
     assert!(matches!(&s.doc.find_feature("Import1").unwrap().kind, solidcraft_doc::FeatureKind::Import { file, .. } if file == "Bracket (pasted)"));
     run(&mut s, "edit.undo", json!({}));
     assert!(s.model.state().body("Cube (2)").is_none());
+}
+
+/// A body pasted from another design while an exploded view moves the target component is at
+/// the world coordinates it had there once the target is shown assembled again.
+#[test]
+fn a_body_pasted_from_another_design_while_an_exploded_view_is_shown_keeps_its_world_position() {
+    let mut source = Session::default();
+    source.doc_mut().name = "Bracket".into();
+    run(&mut source, "solid.box", json!({"length": 2, "width": 2, "height": 2, "body_name": "Cube"}));
+    let was = source.world_state().unwrap().body("Cube").unwrap().mesh().bounds();
+    let copy = crate::ForeignCopy::of(&source, vec!["Cube".into()], Vec::new()).unwrap();
+
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1, "body_name": "Block"}));
+    let (a, a_at) = created(&mut s, "A");
+    run(&mut s, "occurrence.move", json!({"occurrence": a_at, "translate": [100,0,0]}));
+    // An exploded view needs two placements: B stays put.
+    run(&mut s, "component.create", json!({"name": "B", "parent": 0, "activate": false}));
+    let view = run(&mut s, "explode.create", json!({"moves": [{"occurrence": a_at, "translate": [0, 60, 0]}]}))["view"].as_u64().unwrap();
+    run(&mut s, "explode.show", json!({"view": view}));
+    s.foreign_copy = Some(std::sync::Arc::new(copy));
+    run(&mut s, "component.paste_from_design", json!({"component": a, "component_path": [a_at]}));
+    run(&mut s, "explode.show", json!({}));
+    let is = s.world_state().unwrap().body("Cube").unwrap().mesh().bounds();
+    assert!(was.min.dist(is.min) < 1e-6 && was.max.dist(is.max) < 1e-6, "{was:?} vs {is:?}");
 }
 
 /// A body seen in another placement of its component ("Cube (Holder:2)") pastes into another

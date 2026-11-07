@@ -239,7 +239,10 @@ impl<'a> ProfileRoles<'a> {
         // Every curve the segment is drawn on (one, or several coincident or collinear ones).
         let curve = |segment: usize| -> Vec<String> {
             let (Some(curves), Some(segment)) = (curves.as_ref(), segments.get(segment)) else { return Vec::new() };
-            let drawn: Vec<String> = curves.find_all_along(segment).into_iter().map(|id| format!("side:{id}")).collect();
+            let mut drawn: Vec<String> = curves.find_all_along(segment).into_iter().map(|id| format!("side:{id}")).collect();
+            if drawn.is_empty() {
+                drawn.extend(curves.find_free_form(segment).map(|id| format!("side:{id}")));
+            }
             match self.thin {
                 // A thin wall's side beside its curve (the other side may lie on it).
                 Some(thin) if drawn.is_empty() => curves.find_offset(segment, &thin.curves, thin.distances),
@@ -424,6 +427,24 @@ pub(crate) fn cylinder_tool(body: Body) -> Traced {
             .collect()
     });
     Traced::made(body, roles)
+}
+
+/// The roles of a cone primitive's faces, from the body revolved from its half section (base
+/// side first, then the sloped side, then the top side of a cut-off cone; the side on the axis
+/// makes no face): `bottom`, `side` and `top`, as a cylinder's are (#7476). `None` when the body
+/// has no history of its own.
+pub(crate) fn cone_roles(body: &Body) -> Option<Vec<Vec<String>>> {
+    body.history().filter(|h| h.operands == 0).map(|h| {
+        h.faces
+            .iter()
+            .map(|f| match f.origins.as_slice() {
+                [FaceOrigin::Profile { segment: 0 }] => vec!["bottom".to_string()],
+                [FaceOrigin::Profile { segment: 1 }] => vec!["side".to_string()],
+                [FaceOrigin::Profile { segment: 2 }] => vec!["top".to_string()],
+                _ => Vec::new(),
+            })
+            .collect()
+    })
 }
 
 /// A tool a feature builds without a sketch (a boss's post, a rib, a lip's band), its faces named
@@ -754,10 +775,19 @@ pub(crate) fn order_lumps(bodies: &mut [crate::ModelBody], origin: &Arc<crate::n
         // cut body's own feature's and the rest are the cut's, and `body.rename` stores a name in
         // the `body_names` of the feature a body says made it (#10438).
         let names: Vec<(String, u64)> = members.iter().filter_map(|i| bodies.get(*i).map(|b| (b.name.clone(), b.feature))).collect();
-        for ((name, feature), (_, i)) in names.into_iter().zip(keys) {
-            if let Some(b) = bodies.get_mut(i) {
-                b.name = name;
-                b.feature = feature;
+        // The pieces take the family's places in that order too, so the state lists them as
+        // their names run. The session pins a feature's body names in state order, and the next
+        // evaluation hands them out in this order: listed in the kernel's order, the pieces
+        // swapped names once the design was evaluated again from its pinned names (opened).
+        let moved: Vec<crate::ModelBody> = keys.iter().filter_map(|(_, i)| bodies.get(*i).cloned()).collect();
+        if moved.len() != members.len() || names.len() != members.len() {
+            continue;
+        }
+        for ((mut b, (name, feature)), place) in moved.into_iter().zip(names).zip(&members) {
+            b.name = name;
+            b.feature = feature;
+            if let Some(slot) = bodies.get_mut(*place) {
+                *slot = b;
             }
         }
     }

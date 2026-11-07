@@ -1,14 +1,128 @@
 # SolidCraft UI kit
 
-The internal opt-in [universal panel foundation](panel-foundation.md) separates
-engine layout/specs from retained UI controllers and host-local services.
-`panel_runtime::EguiPanelHost` mounts bounded Header/Body/Footer slots through one
-existing `ui_kit::Container`; content controls its own scrolling. This reference
-adapter requires a full rectangular paint/input surface, rejects sparse geometry,
-and preserves parent clipping. `SolveApp::mount_panels` uses the enabled runtime's
-injected services. It adds no default
-placement/content change. Production docking and panel migrations remain separate.
+The opt-in [universal panel foundation](panel-foundation.md) separates engine
+layout, retained content controllers and viewport-local services. Its production
+content adapters are sibling work; existing content, Classic and shipping defaults
+remain available. `WorkspacePanelHost` uses the existing Container policy, theme
+tokens and stable semantic widgets. No second shell or camera path is added.
 
+Shared headers span their complete column width when collapsed. They retain the
+active identity and declared custom actions, menu, chevron and optional quick
+close, in that LTR order and mirrored in RTL. `hot_closable` controls quick close;
+`closable` independently controls permission. One click on the same chevron
+restores the body. There is no rail, hover-peek or pin-open product presentation.
+Registered actions are bound to retained controllers and validated through the
+same engine command route as `panel.action`; unbound/disabled actions cannot run.
+
+Tab groups place text-only tab headings in this same header row, replacing the
+single active title. One leading six-dot section grip drags the active tab;
+individual tabs keep their select, drag and reorder responses. Grip, tabs,
+compact overflow and actual controls use disjoint hitboxes, mirrored in RTL.
+Collapsed groups retain their headings; inline groups use the allocated title
+region without displacing editable inline content. Overflow reserves one compact
+control width, preserving the active label when it fits and keeping every entry
+reachable through the accessible menu. Single titles retain the heading font
+without placeholder icons. Icon metadata remains available to other consumers.
+Neither `HostMetrics` nor `AllocationEnvironment` has a second-row tab metric;
+measurement chrome counts the shared header only once.
+
+After the existing six-point Move threshold, only the dragged instance's title
+ink fades to 50% of its current opacity. Group grips have no title ink; the
+matching tab fades instead. Font selection, other labels, icons, grips, actions,
+fills and bodies stay unchanged. A paint-only badge shows the full live title
+next to the pointer on the existing preview tooltip layer, independently of
+landing validity. Theme typography, padding, radius and opaque backing keep it
+legible; the offset mirrors in RTL, and the badge clamps to the render-domain clip.
+The full title remains in its existing display order on one line, with no
+automatic wrapping, second bidi pass or ellipsis. Oversized text clips from a
+left-aligned galley in LTR or a right-aligned galley in RTL, preserving its reading
+start. Explicit metadata newlines retain their existing meaning.
+There is no added widget, container or input/occlusion/usable-space footprint.
+Pointer absence hides the badge while the held source remains dim; re-entry
+uses a fresh position. Release and cancellation clear feedback and repaint the
+source. Presses, clicks and either resize kind retain their normal appearance.
+
+Expanded content receives bounded Header/Body/Footer slots and owns its scrolling.
+`HostOptions::content_header_height` can reserve a content toolbar. Collapsed
+content has no body and renders none of these slots. Expanded Wide hosts below
+`theme::PANEL_INLINE_MAX_HEIGHT` use one total row with the shared title/grip, leading registered actions,
+a dedicated inline content slot, then menu, chevron and optional quick close. The
+complete row mirrors in RTL. Only `render_inline` runs; its safe default delegates
+to Body and adapters may supply a compact view. There is no extra title band or
+duplicated footer. The inline specimen contains a working synthetic text input;
+it does not replace real History playback or timeline content.
+
+Columns have independent widths and stacked tab sections. Sole side Content
+panels use bounded preferred metrics at their assigned width and leave uncovered
+space below; declared Fill panels use available height within the same limits.
+`PanelController::measure` captures immutable `HostContentMetrics` snapshots,
+including a revision that changes whenever any answer changes. The default
+reports the registration's preferred outer height honestly. Real adapters supply
+bounded intrinsic/preferred metrics without rendering hidden bodies or enumerating
+unbounded lists. Candidate and committed allocation use the same captured metrics.
+
+Tiny windows keep real panels at minimum dimensions in a bounded scroll extent.
+Scroll tracks own narrow input regions; leftover wheel input over actual panel
+paint scrolls presentation after content scrolling. The scroll canvas has no
+full-viewport response. Uncovered gaps stay navigable. Actual clipped paint,
+input/occlusion and usable contour remain separate from the full render domain
+below the application bar, including behind the ribbon. Panel changes never move
+the camera. Fit/Centre and independent navbar/compass placement include persistent
+legacy forms, palettes and confirmations after all producer passes.
+
+Pointer and app commands use `prepare_host_layout_with_snapshot` and the same
+NO_SPACE admission. Pointer release stages the injected layout catalogue, then
+consumes the exact owned `PreparedHostLayout` after lifecycle and native preflight; it never reconstructs an action. Only the selected successful
+candidate's landing, changed neighbours and tab marker paint. No idle targets or
+rejected-target grid is shown. Escape, invalid/outside release, focus/visibility/
+modal loss, independent commands and changed environment/metrics cancel capture.
+Missing host/environment refuses structural app commands. A standalone registered
+HeaderAction follows the owning controller route without placement or layout-store
+staging. Availability, fallback selection and binding permission still validate.
+Projection and commit reuse one staged incoming cohort; metric/reservation changes
+invalidate pending widgets and cached proposals as well as drag and the old frame.
+The next widget admission requires fresh paint.
+
+The app paints through `show_host_deferred`, then finalizes after later windows
+and modals using actual enabled top-layer responses. Geometry alone cannot
+permission input through a foreign window. `Container::bring_to_front` and
+owner-scoped popup layer registration preserve current layer ownership. Root and
+native windows mount complete separate cohorts. `HostFrame::layout` retains
+intended section geometry; its published controls and actual footprint arrays
+exclude invisible Area sizing passes. `reply`, `Committed` and
+`PreparedCommitted` events describe committed state, while `next_layout` describes
+a pending repaint. Transient menus shield input without becoming Fit targets.
+
+`AppPanelRuntime` retains the installed native adapter and read-only Session
+provider. Inspection exposes an immutable runtime; callers cannot replace an
+adapter while native placements exist. The default adapter truthfully supplies no
+native Window service. Host cards reuse adaptive Container styling, title fonts,
+the six-dot grip and header separator. Shared shell gaps are allocation space.
+Captured frame alpha is reported separately from declarative surface intent;
+the opt-in surface renderer reports contrast outcomes and raises opacity to retain
+readable primary and muted text. An invalid authored pair uses an opaque accessible
+fallback and reports its reason rather than claiming the original pair complies.
+Native windows, comprehensive accessibility/keyboard
+bindings, saved workspace rollout and real content migrations remain peer work.
+
+The authenticated `ui.panel_fixture` seam is off by default and rejects replacing
+an existing runtime. Presets are `docks`, `tabs`, `collapsed`, `floating`, `overflow`
+(24 instances), `pinned`, `columns`, `stack_tabs`, `content_fill`, `inline` and `surfaces`.
+Only `surfaces` opts out of the compatibility opaque host policy. Its optional
+`translucency_percent` request (finite 0–100) converts to opacity as
+`1 - percent / 100`; readability protection may increase effective opacity.
+This fixture override changes no saved preference. Inspection reports each
+section's declared `surface`, actual `paint_alpha` and optional `contrast` outcome,
+including fallback reasons. See [the surface specimen contract](panel-foundation.md#surface-review-specimen).
+An enabled specimen accepts `translucency_percent` alone to update presentation
+in place, retaining its controllers, drafts, layout and model. A missing/disabled
+specimen host or a runtime owned by another provider refuses this update.
+Drafts, controller identities and lifecycle/service/action counters are inspectable.
+The native specimen exposes editor Apply/Finish/Cancel actions. Separate
+action-binding fixtures retain their declared test actions.
+Strings use pending `ui.panel_fixture.*` / `ui.panel_host.*` catalog entries.
+Authored source cases and scenarios do not establish visual or automated
+verification; root owns builds, screenshots, visual acceptance and checks.
 `viewport_status_item` and `viewport_status_row` draw persistent viewport pills on
 `Surface::ViewportStatus`. Callers supply translated names, formatted settings,
 kind, stable identity and key availability, and dispatch returned clear/edit actions.
@@ -98,6 +212,10 @@ rules. Its compass is 110 pt; the 48 pt Shots strip clears the docks by 8 pt.
   `hint_row` for a value the form checks before it runs: with a warning, the field is outlined in
   the warning colour and the message sits under it (`warning_caption`), so colour is never the
   only cue.
+  The label of an `expr_row` or `hint_row` scrubs: dragging it sideways changes a
+  literal value (`20 mm`, `45°`) by about a hundredth of its size per point, on that step's
+  grid, Shift ten times finer and Ctrl/Cmd ten times coarser. It keeps the unit and decimal
+  mark as typed, never makes a size negative, and leaves expressions and parameters alone.
 - `Panel::workspace` owns grip-based left/right placement and bounded width resizing for
   floating workspace cards, including in Compact ribbon layouts. It reuses the 40 pt
   Panel/Window header and padded body, with no second top inset below the ribbon.
@@ -487,7 +605,8 @@ The natural scrolling body height is published as `dialog:body:content_height`,
 so geometry tests distinguish content size from the viewport cap.
 After a successful parameter add, a fresh empty draft retains Name focus for
 continuous keyboard entry; leaving that empty row drops it.
-Parameter draft fields retain `param:new:name/unit/expression/comment`.
+Parameter draft fields retain `param:new:name/unit/expression/comment`, and the draft's
+bin button publishes `param:new:delete`.
 Configuration drafts publish `config:new:name`; existing `config:cell:ROW:COLUMN`,
 activation, rule and preview handles remain. The header plus retains
 `dialog:menu:Add Column`, including the existing menu nesting. The old separate
@@ -669,6 +788,25 @@ border strip without changing logical panel allocations. The application bar has
 an independent surface role.
 The saved `Prefs::layout` is changed through `view.layout`; `ui.set` may still make a
 transient automation override.
+With the universal host enabled, the model render domain fills the area below the application bar in both layout modes,
+including behind ribbon, docked and floating chrome. Paint/input footprints remain
+separate: transparent styling does not expose controls to picking. The usable
+region follows actual occupied edges, retains short-panel gaps and floating-panel
+holes, and supplies explicit Fit/Centre and measured navbar/compass placement.
+This contour also includes actually painted persistent surfaces outside the host,
+such as the active sketch palette. Closing one releases its footprint; transient
+menus shield input without changing fitting or control placement.
+Ordinary panel operations preserve the camera and its framing. Fit may change
+zoom; explicit Look At/`view.normal_to` centring preserves zoom, distance,
+orientation and selected focus. If the selection cannot fit at the current zoom,
+only its focus moves to stable usable space; it does not trigger a zoom-out.
+
+Universal title/tab drags offer explicit dock, split and tab targets. Their landing
+preview uses the same prepared geometry as the final transaction, including
+affected neighbours and insertion index. Releasing outside a valid target cancels;
+floating placement is an explicit action or command. Previewing never changes the
+committed usable region or the render projection.
+
 ## File/start presentation
 
 `FileView` owns File surfaces and controls. It accepts translated strings, existing
@@ -867,8 +1005,9 @@ shared token paint and hit targets. All are exercised in the kit gallery.
 
 The compact `settings_choice_row` variant reuses the shared settings radio-card painter
 for preset lists: 40 pt rows, right-aligned summaries and the active workspace accent.
-`progress_action` keeps a status caption, bounded progress track and Cancel action on
-one row inside a Navigation card. `Container::below_navigation_row` reserves that card
+`progress_action` keeps a name, a status, a bounded progress track and a Cancel action on
+one row inside a Navigation card. Cancel and the status always show whole; a long name is
+cut first (ellipsis, full name on hover), then the track narrows. `Container::below_navigation_row` reserves that card
 and its shared gap above an inline result toolbar.
 
 `number_pair` extends the shared value-pair row to bounded numeric fields (such as
@@ -888,7 +1027,7 @@ these shared pieces; the pages themselves arrive in later steps. Sizes follow
 | `preset_card(ui, name, word, selected, enabled, &icon, width)` | A 70 pt card with a 38 pt icon box (`icon` paints into it in the ink it is given), a name, one word and an accent check. Used for Performance, Quality and Custom. | as above, `pref_well` |
 | `help_icon(ui, text)` | The (i) after a label. Shows `text` as a tooltip and exposes it as the widget's label. | `form_dim`, `form_ink` |
 | `shortcut_binding(ui, chord, editable)` | Complete mono keycaps using the command-search painter; one focusable recorder target per binding, or a read-only label. Empty chords show dim Not assigned. `shortcut_binding_width` measures the same font and padding, including literal plus keys. Gallery: `shortcut_binding`. | `font_small/label`, `control_height`, `form_dim`, `form_primary`, `space_4/8/10`, `radius_sm` |
-| `carousel(ui, id, count, item_width, item_height, item)` | A row of items between a previous and a next arrow (both labelled from the `prefs.carousel_*` messages). `carousel_window(count, offset, available, item_width, gap, arrow)` says which items show; the arrow at an end is dimmed (0.35) and inert. The first shown index is kept in the Ui's temporary memory under `id`. | `dialog_border`, `control_fill`, `hover`, `form_ink`, `radius_lg` |
+| `theme_browser(ui, id, count, grid, reveal, item)` | The Appearance theme list: a carousel (one clipped row, an edge fade in the container fill, round arrows on a side with more cards, an arrow moves by the cards that fit, drag and horizontal wheel scroll while vertical wheel input goes to the page) or a 5-across grid with its own vertical scroll. `reveal` scrolls an index into view. The box and fades use the `settings_card_frame` fill and stroke. | `dialog_border`, `dialog_border`, `control_fill`, `hover`, `form_ink`, `radius_lg` |
 
 `card_look(selected, enabled, hovered, focused)` holds the state rules (border width, fill, ink, weight,
 dimming, focus ring) apart from the painting so they can be tested.
@@ -924,7 +1063,7 @@ Theme thumbnails (`paint_theme_thumbnail`, `paint_theme_system`) take a `ThemeSa
 The Orientation figures and the visual-style icon are not repeated here: the app already has them.
 
 New pieces and figures each have an entry in `gallery::ELEMENTS` (`picture_card`, `toggle_tile`,
-`preset_card`, `help_icon`, `carousel`, `preference_theme_thumbnails`, `preference_figures`), checked
+`preset_card`, `help_icon`, `theme_browser`, `preference_theme_thumbnails`, `preference_figures`), checked
 in both themes. `SOLIDCRAFT_PREFERENCE_WIDGET_EVIDENCE=<dir>` keeps the CPU-rendered boards
 (`preferences-widgets-*.png`, `preferences-figures-*.png`) from
 `preference_widgets_and_figures_board_in_both_themes`.

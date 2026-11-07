@@ -393,6 +393,8 @@ pub(crate) struct ExactSketchCurves<'a> {
     /// Each analytic curve's id, whether it is projected (linked) reference geometry, and its
     /// segments.
     segments: Vec<(&'a str, bool, Vec<Seg2>)>,
+    /// Each free-form curve's id (ellipses, conics, splines) and its exact segments.
+    free_form: Vec<(&'a str, Vec<Seg2>)>,
 }
 
 impl<'a> ExactSketchCurves<'a> {
@@ -400,10 +402,17 @@ impl<'a> ExactSketchCurves<'a> {
     /// and segment allocation must not be repeated for every generated face.
     pub(crate) fn new(sketch: &'a SolvedSketch) -> Self {
         let mut segments = Vec::new();
+        let mut free_form = Vec::new();
         if sketch.sketch.curves.len() > 2000 {
-            return Self { segments };
+            return Self { segments, free_form };
         }
         for (index, curve) in sketch.sketch.curves.iter().enumerate() {
+            if !curve.construction
+                && let Some(exact) = sketch.sketch.exact_segs(index)
+            {
+                free_form.push((curve.id.as_str(), exact));
+                continue;
+            }
             if curve.construction
                 || !matches!(
                     curve.kind,
@@ -425,7 +434,21 @@ impl<'a> ExactSketchCurves<'a> {
             };
             segments.push((curve.id.as_str(), curve.link.is_some(), originals));
         }
-        Self { segments }
+        Self { segments, free_form }
+    }
+
+    /// The one free-form sketch curve (an ellipse, conic or spline) a generated segment is a
+    /// whole piece of, either way round: one of the exact segments the curve is made of. A
+    /// segment two curves share stays ambiguous.
+    pub(crate) fn find_free_form(&self, generated: &Seg2) -> Option<String> {
+        let reversed = generated.reversed();
+        let mut found: Option<Option<&str>> = None;
+        for (id, originals) in &self.free_form {
+            if originals.iter().any(|original| *original == *generated || *original == reversed) {
+                found = Some(if found.is_some() { None } else { Some(*id) });
+            }
+        }
+        found.flatten().map(str::to_owned)
     }
 
     /// The one sketch curve a generated segment lies on. A curve drawn over projected

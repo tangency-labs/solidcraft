@@ -88,6 +88,20 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         }
                     }
                 });
+                // A picture of the user's behind the model.
+                let label = app.tr("prefs.background_image");
+                ui_kit::row(ui, label, |ui| {
+                    if ui_kit::button(ui, app.tr("prefs.background_choose"), ui_kit::Button::Normal).clicked() {
+                        app.pick_open_for(&["png", "jpg", "jpeg", "webp", "bmp", "tif", "tiff"], |app, path| {
+                            if let Some(path) = path {
+                                app.preferences.background_image = path;
+                            }
+                        });
+                    }
+                    if !app.preferences.background_image.is_empty() && ui_kit::button(ui, app.tr_label("Reset"), ui_kit::Button::Ghost).clicked() {
+                        app.preferences.background_image.clear();
+                    }
+                });
                 // The logo in the theme's own logo colours or in its accent.
                 let label = app.tr("prefs.logo");
                 ui_kit::row(ui, label, |ui| {
@@ -115,7 +129,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                                     ui_kit::Slider { step: Some(0.05), format: |v| format!("{:.0} %", v * 100.0), ..Default::default() },
                                 )
                             })
-                            .on_hover_text(app.tr("prefs.scale_note"));
+                            .backing_on_hover_text(app.tr("prefs.scale_note"));
                             crate::scenario::publish_target("prefs:scale", response.rect);
                         });
                     });
@@ -160,7 +174,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         app.preferences.ui_font.clear();
                     }
                 });
-                ui.scope(|ui| ui_kit::font_specimen(ui, app.tr("prefs.font_sample"))).response.on_hover_text(app.tr("prefs.font_fallback"));
+                ui.scope(|ui| ui_kit::font_specimen(ui, app.tr("prefs.font_sample"))).response.backing_on_hover_text(app.tr("prefs.font_fallback"));
             }
         });
         ui_kit::settings_section(ui, "colour_vision", app.tr("ui.colour_vision"), |ui| {
@@ -207,13 +221,14 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.tr("prefs.structure.layout_note"),
             Some(crate::settings_profiles::tag),
         );
+        super::panel_layout::show(app, ui);
         // Retain the section key for existing reveal/open callers.
         ui_kit::settings_section(ui, "layout", app.tr("prefs.layout_page.window"), |ui| {
             ui_kit::settings_pair(
                 ui,
                 |ui| {
                     ui_kit::settings_form(ui, t.form_label_width + t.space_16, |ui| {
-                        ui_kit::row(ui, app.tr("prefs.workspace"), |ui| {
+                        ui_kit::row(ui, app.tr("ui.panel_layout.panel_style"), |ui| {
                             let mut selected = usize::from(app.ui.layout == crate::shell::LayoutMode::Docked);
                             if ui_kit::segmented(
                                 ui,
@@ -283,6 +298,13 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 app.tr("prefs.keep_work_on_tab_switch_note"),
                 &mut app.preferences.keep_work_on_tab_switch,
                 "keep_work_on_tab_switch",
+            );
+            layout_check(
+                ui,
+                app.tr("prefs.tab_double_click_renames"),
+                app.tr("prefs.tab_double_click_renames_note"),
+                &mut app.preferences.tab_double_click_renames,
+                "tab_double_click_renames",
             );
         });
         if let Some(rect) = crate::scenario::rect_of(&format!("dialog:section:{}", app.tr("prefs.layout_page.window"))) {
@@ -389,6 +411,22 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     &mut app.preferences.history_play_button,
                     "history_play_button",
                 );
+                // A design's joints as one button in the History, from the second joint (#8884).
+                layout_check(
+                    ui,
+                    app.tr("prefs.history_group_joints"),
+                    app.tr("prefs.history_group_joints_note"),
+                    &mut app.preferences.history_group_joints,
+                    "history_group_joints",
+                );
+                // Folds in the History bar, and a folder for a STEP insert's items (#8885).
+                layout_check(
+                    ui,
+                    app.tr("prefs.history_bar_groups"),
+                    app.tr("prefs.history_bar_groups_note"),
+                    &mut app.preferences.history_bar_groups,
+                    "history_bar_groups",
+                );
                 ui.add_enabled_ui(app.preferences.timeline_left, |ui| {
                     layout_check(
                         ui,
@@ -404,6 +442,14 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     app.tr("prefs.browser_components_open_note"),
                     &mut app.preferences.browser_components_open,
                     "browser_components_open",
+                );
+                // Folders and placements start closed and open only on request (#8768).
+                layout_check(
+                    ui,
+                    app.tr("prefs.browser_rows_start_closed"),
+                    app.tr("prefs.browser_rows_start_closed_note"),
+                    &mut app.preferences.browser_rows_start_closed,
+                    "browser_rows_start_closed",
                 );
                 layout_check(
                     ui,
@@ -422,7 +468,7 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     let options = [app.tr("prefs.dialogs_edge"), app.tr("prefs.dialogs_left_column")];
                     let segments =
                         ui.scope(|ui| ui_kit::segmented(ui, &mut selected, &options, ui_kit::Segments { intrinsic: true, ..Default::default() }));
-                    segments.response.on_hover_text(app.tr("prefs.dialogs_note"));
+                    segments.response.backing_on_hover_text(app.tr("prefs.dialogs_note"));
                     if segments.inner {
                         app.preferences.dialog_place = if selected == 1 { DialogPlace::LeftColumn } else { DialogPlace::Edge };
                     }
@@ -476,7 +522,9 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 app.tr("prefs.sketch_tab_always"),
                 app.tr("prefs.layout_page.active_commands"),
                 app.tr("prefs.ribbon_reveal"),
+                app.tr("prefs.ribbon_tabs_only"),
                 app.tr("prefs.layout_page.pinned_menus"),
+                app.tr("prefs.layout_page.hover_panel_menus"),
             ];
             let widest =
                 labels.iter().map(|label| ui_kit::ContentWidth::label(ui, label)).fold(0.0, f32::max) + t.space_14 + t.space_6 * 2.0 + t.space_16;
@@ -484,10 +532,10 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
             let width = (ui.available_width() - t.space_16 * (columns - 1) as f32) / columns as f32;
             ui.scope(|ui| {
                 ui.spacing_mut().item_spacing.y = t.space_6;
-                for row in (0..4).step_by(columns) {
+                for row in (0..labels.len()).step_by(columns) {
                     ui.horizontal_top(|ui| {
                         ui.spacing_mut().item_spacing.x = t.space_16;
-                        for index in row..(row + columns).min(4) {
+                        for index in row..(row + columns).min(labels.len()) {
                             ui.allocate_ui_with_layout(
                                 egui::vec2(width.max(0.0), t.control_height),
                                 egui::Layout::top_down(egui::Align::Min),
@@ -522,10 +570,28 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                                     3 => {
                                         layout_check(
                                             ui,
+                                            app.tr("prefs.ribbon_tabs_only"),
+                                            app.tr("prefs.ribbon_tabs_only_note"),
+                                            &mut app.preferences.ribbon_tabs_only,
+                                            "ribbon_tabs_only",
+                                        );
+                                    }
+                                    4 => {
+                                        layout_check(
+                                            ui,
                                             app.tr("prefs.layout_page.pinned_menus"),
                                             app.tr("ui.ribbon_menus_skip_pinned"),
                                             &mut app.preferences.ribbon_menus_skip_pinned,
                                             "ribbon_menus_skip_pinned",
+                                        );
+                                    }
+                                    5 => {
+                                        layout_check(
+                                            ui,
+                                            app.tr("prefs.layout_page.hover_panel_menus"),
+                                            app.tr("prefs.layout_page.hover_panel_menus_help"),
+                                            &mut app.preferences.ribbon_menus_follow_hover,
+                                            "ribbon_menus_follow_hover",
                                         );
                                     }
                                     _ => {}
@@ -560,7 +626,7 @@ fn layout_check(ui: &mut egui::Ui, label: &str, help: &str, value: &mut bool, ke
                 ui.spacing_mut().item_spacing.x = t.space_6;
                 let check_width = (ui.available_width() - t.space_16 - t.space_6).max(0.0);
                 let response = ui_kit::settings_control_width(ui, check_width, |ui| {
-                    ui_kit::checkbox(ui, label, value).on_hover_text(help).on_disabled_hover_text(help)
+                    ui_kit::checkbox(ui, label, value).backing_on_hover_text(help).backing_on_disabled_hover_text(help)
                 });
                 crate::scenario::publish_target(&format!("prefs:{key}"), response.rect);
                 ui_kit::help_icon(ui, help);

@@ -103,6 +103,11 @@ enum End {
     /// At (or within half a pitch of) an end of the face where material goes on past it, a
     /// shoulder, a head, a blind hole's bottom: the groove stops short, clear of it.
     Closed,
+    /// At an end of an external thread's face where a shoulder starts and stays beyond the face's
+    /// end: the groove runs on through the plane of that end and is trimmed there, so the root
+    /// reaches the shoulder at every angle, a nut bottoms out on it, and nothing past the plane
+    /// is cut.
+    Shoulder,
     /// Inside the face: the groove stops square there.
     Inside,
 }
@@ -121,6 +126,9 @@ pub(super) struct ThreadOn {
     /// A modelled internal thread in a hole wider than it needs: the radius the bore is narrowed
     /// to (the thread's minor radius) before the groove is cut, with the hole's own radius.
     narrow: Option<f64>,
+    /// A shoulder keeps the square stop because the kernel couldn't check whether it stays beyond
+    /// the face's end.
+    shoulder_unchecked: bool,
 }
 
 /// The free-end test of a face's two ends (`side` 0 at its start, 1 at its end), each made
@@ -159,6 +167,22 @@ impl FaceEnds<'_> {
             *slot = Some(free);
         }
         Ok(free)
+    }
+
+    /// Does the shoulder at this closed end stay beyond the plane of the face's end? Not where it
+    /// rises back along the face (a slanted plate, a boss on a round body), which a groove
+    /// running to that plane would cut into: there is material outside the face just inside it.
+    /// The caller keeps the square stop, and says so, when the kernel can't make the check.
+    fn clear_of_end_plane(&self, side: usize) -> Result<bool> {
+        #[cfg(test)]
+        if tests::FAIL_CLEARANCE.get() {
+            return Err(kernel::KernelError::Failed("clearance refused for the test".into()).into());
+        }
+        let (p, e) = (self.pitch, self.pitch * 1e-3);
+        let inside = if side == 0 { (self.cyl.start + e, self.cyl.start + p) } else { (self.cyl.end - p, self.cyl.end - e) };
+        // All the radii the groove cuts beyond the face; only touching their rims is not in its
+        // way, as in `free`.
+        kernel::material_in_ring(self.body, self.cyl, self.beyond.0 + e, self.beyond.1 - e, inside).map(|hit| !hit).map_err(DocError::from)
     }
 }
 
@@ -333,11 +357,23 @@ pub(super) fn thread_on(st: &ModelState, feature: u64, p: Vec3, ask: &ThreadAsk)
     // How each end of the thread meets the face: at a face end, or within half a pitch (and its
     // runout) of one, where the groove would reach past it, that end's free-end test decides.
     let near = |at: f64, side: usize| if side == 0 { at - lo } else { hi - at } < pitch / 2.0 + ease.get(side).copied().unwrap_or(0.0);
+    // A shoulder whose check the kernel couldn't make keeps the square stop, and the feature says so.
+    let mut unchecked = false;
     let mut kind = |at: f64, side: usize| -> Result<End> {
         Ok(if !ask.modeled || !near(at, side) {
             End::Inside
         } else if !ends.free(side)? {
-            End::Closed
+            let at_end = (if side == 0 { at - lo } else { hi - at }) < pitch * 1e-3;
+            let square = ease.get(side).copied().unwrap_or(0.0) == 0.0;
+            let clear = at_end && square && !cyl.internal && !form.is_taper() && {
+                let check = ends.clear_of_end_plane(side);
+                unchecked |= matches!(check, Err(DocError::Kernel(_)));
+                match check {
+                    Err(DocError::Kernel(_)) => false,
+                    other => other?,
+                }
+            };
+            if clear { End::Shoulder } else { End::Closed }
         } else if (if side == 0 { at - lo } else { hi - at }) < pitch * 1e-3 {
             End::Free
         } else {
@@ -373,7 +409,7 @@ pub(super) fn thread_on(st: &ModelState, feature: u64, p: Vec3, ask: &ThreadAsk)
         .then(|| form.groove(major, pitch, true))
         .filter(|g| !(g.root_r - cyl.radius >= g.basic_depth / 4.0))
         .map(|g| g.crest_r);
-    Ok(ThreadOn { info, cyl, ends, steep: ask.steep, ease, from: side, narrow })
+    Ok(ThreadOn { info, cyl, ends, steep: ask.steep, ease, from: side, narrow, shoulder_unchecked: unchecked })
 }
 
 /// The end of the face (0: its start, 1: its end) a thread of limited length starts at: the end
@@ -536,7 +572,9 @@ fn thread_grooves(
     // Past a free end of the face the groove runs out into the air, a pitch beyond it. Before
     // a closed one it stops with its section clear of the face's end (its centre as far inside
     // as the section reaches that way), so it never cuts into the shoulder there; inside the
-    // face it stops square at the threaded length's end.
+    // face it stops square at the threaded length's end. At a shoulder it can be trimmed against
+    // ([`End::Shoulder`]) its whole section runs past the plane of the face's end, so every angle
+    // of the last turn is cut down to that plane ([`trim_at_shoulders`] takes off the rest).
     //
     // A runout `e` at an end (ISO 3508) fades the groove out over `e`: its section moves out of
     // the material (an external thread's away from the axis, past the surface; an internal
@@ -548,12 +586,14 @@ fn thread_grooves(
         (End::Free, false) => t.start - p,
         (End::Free, true) => t.start,
         (End::Closed, _) => (t.start - ease[0]).max(face.0 + w_lo),
+        (End::Shoulder, _) => face.0 - w_hi - 0.1 * p,
         (End::Inside, _) => t.start - ease[0],
     };
     let s1 = match (ends[1], ease[1] > 0.0) {
         (End::Free, false) => t.end + p,
         (End::Free, true) => t.end,
         (End::Closed, _) => (t.end + ease[1]).min(face.1 - w_hi),
+        (End::Shoulder, _) => face.1 + w_lo + 0.1 * p,
         (End::Inside, _) => t.end + ease[1],
     };
     if !(s1 - s0 > p * 1e-3) {
@@ -698,6 +738,24 @@ fn taper_envelope(t: &ThreadInfo, radius: f64, ends: [End; 2], (d0, from): (f64,
     Ok(ring.pop())
 }
 
+/// The groove with what runs past a shoulder's plane taken off ([`End::Shoulder`]), so cutting it
+/// leaves the shoulder whole.
+fn trim_at_shoulders(mut tool: Body, axis: Vec3, ends: [End; 2], face: (f64, f64), k: UnitVec3) -> Result<Body> {
+    for (end, at, keep_positive) in [(ends[0], face.0, true), (ends[1], face.1, false)] {
+        if end != End::Shoulder {
+            continue;
+        }
+        let plane = Plane::from_normal(axis + k * at, *k).ok_or_else(|| DocError::Invalid("thread axis".into()))?;
+        // An error of the cut, like the kernel's own: `cut` then falls back to the square stop.
+        let missed = || kernel::KernelError::Failed("the thread's groove misses its face".into());
+        let kept = kernel::half_space(&tool, &plane, keep_positive)?.0;
+        #[cfg(test)]
+        let kept = kept.filter(|_| !tests::EMPTY_TRIM.get());
+        tool = kept.ok_or_else(missed)?;
+    }
+    Ok(tool)
+}
+
 /// Evaluate a thread feature: a cosmetic thread is listed in the model's threads, a modelled
 /// one cut into its body.
 pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
@@ -768,7 +826,13 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             None => note,
         });
     }
-    cut(st, on, (*tip, angle, depth))
+    if let Some(note) = cut(st, on, (*tip, angle, depth))? {
+        *warning = Some(match warning.take() {
+            Some(w) => format!("{w}; {note}"),
+            None => note,
+        });
+    }
+    Ok(())
 }
 
 /// A runout as (mm, pitches): ISO 3508's standard 2.5 P and short 1.25 P, or a length.
@@ -783,9 +847,10 @@ pub(super) fn runout(vals: &BTreeMap<String, Value>, e: &Option<crate::ThreadRun
 
 /// Cut a modelled thread resolved on its face into its body: the grooves (SMLib's exact screw
 /// sweeps, a taper's crests by its envelope) by one B-rep boolean, then the chamfered tip
-/// (`tip`, with its angle and depth when given).
-pub(super) fn cut(st: &mut ModelState, on: ThreadOn, (tip, angle, depth): (ThreadTip, Option<f64>, Option<f64>)) -> Result<()> {
-    let ThreadOn { info: t, cyl, ends, steep, ease, from: from_side, narrow } = on;
+/// (`tip`, with its angle and depth when given). What the user should be told about the result, if
+/// anything, is returned.
+pub(super) fn cut(st: &mut ModelState, on: ThreadOn, (tip, angle, depth): (ThreadTip, Option<f64>, Option<f64>)) -> Result<Option<String>> {
+    let ThreadOn { info: t, cyl, ends, steep, ease, from: from_side, narrow, shoulder_unchecked } = on;
     let i = st.bodies.iter().position(|b| b.name == t.body).ok_or_else(|| DocError::Invalid("threaded body".into()))?;
     let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
     let (mut input, radius) = (mb.traced(), cyl.radius);
@@ -822,21 +887,46 @@ pub(super) fn cut(st: &mut ModelState, on: ThreadOn, (tip, angle, depth): (Threa
         }
         false => None,
     };
-    let mut grooves = Vec::new();
-    for g in thread_grooves(&t, groove_radius, (cyl.start, cyl.end), ends, steep, ease, taper)? {
-        let section = Region2 { outer: solidcore_record::Loop2::polygon(&g.section), holes: Vec::new() };
-        grooves.push(kernel::sweep_helix_radial(&g.plane, &section, g.base, g.axis, g.pitch, g.turns, &g.law)?);
-    }
-    if let Some(taper) = taper
-        && let Some(envelope) = taper_envelope(&t, radius, ends, taper)?
-    {
-        grooves.push(envelope);
-    }
-    let tool = match grooves.as_slice() {
-        [one] => one.clone(),
-        many => kernel::union_all(&many.iter().collect::<Vec<_>>())?,
+    let cut_grooves = |ends: [End; 2]| -> Result<(Option<Body>, usize)> {
+        let mut grooves = Vec::new();
+        for g in thread_grooves(&t, groove_radius, (cyl.start, cyl.end), ends, steep, ease, taper)? {
+            let section = Region2 { outer: solidcore_record::Loop2::polygon(&g.section), holes: Vec::new() };
+            grooves.push(kernel::sweep_helix_radial(&g.plane, &section, g.base, g.axis, g.pitch, g.turns, &g.law)?);
+        }
+        if let Some(taper) = taper
+            && let Some(envelope) = taper_envelope(&t, radius, ends, taper)?
+        {
+            grooves.push(envelope);
+        }
+        let tool = match grooves.as_slice() {
+            [one] => one.clone(),
+            many => kernel::union_all(&many.iter().collect::<Vec<_>>())?,
+        };
+        let tool = trim_at_shoulders(tool, t.axis_point, ends, (cyl.start, cyl.end), t.axis)?;
+        let cut = kernel::boolean(&input.body, &tool, BoolOp::Cut)?;
+        // Now rather than at the feature's end, where it could only fail the feature.
+        if ends.contains(&End::Shoulder)
+            && let Some(body) = &cut
+        {
+            kernel::check_kept(body)?;
+        }
+        Ok((cut, tool.face_count()))
     };
-    let (nb, groove_faces) = (kernel::boolean(&input.body, &tool, BoolOp::Cut)?, tool.face_count());
+    // A design that built with the square stop keeps building: where the kernel can't make the
+    // trimmed cut, the groove stops clear of the shoulder as it did, and the feature says so.
+    let mut made = cut_grooves(ends);
+    let mut square_stop = shoulder_unchecked;
+    if matches!(made, Err(DocError::Kernel(_))) && ends.contains(&End::Shoulder) {
+        made = cut_grooves(ends.map(|e| if e == End::Shoulder { End::Closed } else { e }));
+        square_stop = true;
+    }
+    let note = (square_stop && made.is_ok()).then(|| {
+        format!(
+            "the {} thread's groove could not be run down to the shoulder here, so it stops clear of it and its last turn is left uncut",
+            t.designation
+        )
+    });
+    let (nb, groove_faces) = made?;
     let nb = nb.ok_or_else(|| DocError::Invalid("the thread removed everything".into()))?;
     // The groove's faces have no role to name them by.
     let groove = crate::lineage::Lineage::unnamed_faces(groove_faces);
@@ -854,7 +944,7 @@ pub(super) fn cut(st: &mut ModelState, on: ThreadOn, (tip, angle, depth): (Threa
     if let Some(slot) = st.bodies.get_mut(i) {
         *slot = ModelBody::traced_new(mb.name, nb, mb.feature);
     }
-    Ok(())
+    Ok(note)
 }
 
 /// The chamfered tip of an external thread (ISO 4753, chamfered end CH) at the free ends `tip`
@@ -936,4 +1026,127 @@ fn tip_cones(
         return Err(DocError::Invalid("a chamfered tip needs a free end of the thread (one with no material past it)".into()));
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+
+    thread_local! {
+        /// Make [`trim_at_shoulders`] find nothing of the groove left.
+        pub(super) static EMPTY_TRIM: Cell<bool> = const { Cell::new(false) };
+        /// Make the rising-shoulder check fail as the kernel would.
+        pub(super) static FAIL_CLEARANCE: Cell<bool> = const { Cell::new(false) };
+    }
+
+    fn ask() -> ThreadAsk<'static> {
+        ThreadAsk {
+            form: None,
+            designation: Some("M10"),
+            hand: ThreadHand::Right,
+            starts: 1,
+            steep: SteepFlank::default(),
+            extent: Extent::Full,
+            from: None,
+            modeled: true,
+            ease_out: (0.0, 0.0),
+            tapped: false,
+            old_auto_size: false,
+        }
+    }
+
+    /// How a thread's ends meet the face at (5, 0, z) of `body`.
+    fn ends_of(body: Body, z: f64) -> [End; 2] {
+        let mut st = ModelState::default();
+        st.bodies.push(ModelBody::new("Part".into(), body, 1));
+        thread_on(&st, 1, Vec3::new(5.0, 0.0, z), &ask()).unwrap().ends
+    }
+
+    /// A shoulder that stays beyond the face's end takes the trim. One rising back along the face
+    /// (a slanted plate, a boss on a round body) keeps the square stop.
+    #[test]
+    fn only_a_shoulder_that_stays_beyond_the_faces_end_takes_the_trim() {
+        let z = Vec3::new(0.0, 0.0, 1.0);
+        let join = |a: &Body, b: &Body| kernel::boolean(a, b, BoolOp::Union).unwrap().unwrap();
+        let boss = kernel::cylinder(Vec3::new(0.0, 0.0, 2.0), z, 5.0, 26.0).unwrap();
+        let plate = kernel::box_solid(Vec3::new(-20.0, -20.0, -6.0), Vec3::new(20.0, 20.0, 2.0)).unwrap();
+        let flat = ends_of(join(&plate, &boss), 20.0);
+        assert!(flat.contains(&End::Shoulder), "{flat:?}");
+        let tilted = kernel::cylinder(Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.2, 0.0, 1.0), 20.0, 6.0).unwrap();
+        let slanted = ends_of(join(&tilted, &boss), 20.0);
+        assert!(slanted.contains(&End::Closed) && !slanted.contains(&End::Shoulder), "{slanted:?}");
+        let round = kernel::cylinder(Vec3::new(0.0, -20.0, 0.0), Vec3::new(0.0, 1.0, 0.0), 10.0, 40.0).unwrap();
+        let on_round = ends_of(join(&round, &boss), 20.0);
+        assert!(on_round.contains(&End::Closed) && !on_round.contains(&End::Shoulder), "{on_round:?}");
+    }
+
+    /// Where the kernel can't check the shoulder, the thread still builds with the square stop, and
+    /// the feature says its last turn is left uncut.
+    #[test]
+    fn a_shoulder_the_kernel_cannot_check_keeps_the_square_stop_and_says_so() {
+        let plate = kernel::box_solid(Vec3::new(-20.0, -20.0, 0.0), Vec3::new(20.0, 20.0, 6.0)).unwrap();
+        let boss = kernel::cylinder(Vec3::new(0.0, 0.0, 6.0), Vec3::new(0.0, 0.0, 1.0), 5.0, 16.0).unwrap();
+        let body = kernel::boolean(&plate, &boss, BoolOp::Union).unwrap().unwrap();
+        let mut st = ModelState::default();
+        st.bodies.push(ModelBody::new("Part".into(), body, 1));
+        FAIL_CLEARANCE.set(true);
+        let on = thread_on(&st, 1, Vec3::new(5.0, 0.0, 14.0), &ask());
+        FAIL_CLEARANCE.set(false);
+        let on = on.unwrap();
+        assert!(on.ends.contains(&End::Closed) && !on.ends.contains(&End::Shoulder), "{:?}", on.ends);
+        let note = cut(&mut st, on, (ThreadTip::None, None, None)).unwrap();
+        assert!(note.is_some_and(|n| n.contains("M10") && n.contains("left uncut")));
+    }
+
+    /// Where the trim leaves nothing of the groove, a thread at a shoulder that built with the
+    /// square stop still builds with it, and the feature says its last turn is left uncut.
+    #[test]
+    fn a_shoulder_cut_the_kernel_refuses_falls_back_to_the_square_stop_and_says_so() {
+        let plate = kernel::box_solid(Vec3::new(-20.0, -20.0, 0.0), Vec3::new(20.0, 20.0, 6.0)).unwrap();
+        let boss = kernel::cylinder(Vec3::new(0.0, 0.0, 6.0), Vec3::new(0.0, 0.0, 1.0), 5.0, 16.0).unwrap();
+        let body = kernel::boolean(&plate, &boss, BoolOp::Union).unwrap().unwrap();
+        let build = |fail: bool| {
+            let mut st = ModelState::default();
+            st.bodies.push(ModelBody::new("Part".into(), body.clone(), 1));
+            let on = thread_on(&st, 1, Vec3::new(5.0, 0.0, 14.0), &ask()).unwrap();
+            EMPTY_TRIM.set(fail);
+            let note = cut(&mut st, on, (ThreadTip::None, None, None));
+            EMPTY_TRIM.set(false);
+            (note.unwrap(), kernel::measure(&st.bodies[0].body).unwrap().volume)
+        };
+        let (none, trimmed) = build(false);
+        assert_eq!(none, None);
+        let (note, square) = build(true);
+        assert!(note.is_some_and(|n| n.contains("M10") && n.contains("left uncut")));
+        // The square stop leaves about half a pitch's worth of groove uncut: well over a mm³.
+        assert!(square > trimmed + 1.0, "{square} vs {trimmed}");
+    }
+
+    /// A modelled thread on one hole leaves the other hole's wall a cylinder to thread: the
+    /// second hole still takes its thread (#11367).
+    ///
+    /// The modelled thread cuts the body, and the cut must not take the body's other cylinders
+    /// with it: the second hole's wall is still a cylinder, so it still takes a thread, modelled
+    /// or cosmetic.
+    #[test]
+    fn a_modelled_thread_leaves_the_next_hole_a_cylinder_to_thread() {
+        // An 80 x 80 x 20 mm block with two 5 mm holes.
+        let block = kernel::box_solid(Vec3::new(-40.0, -40.0, 0.0), Vec3::new(40.0, 40.0, 20.0)).unwrap();
+        let hole = |x: f64| kernel::cylinder(Vec3::new(x, 0.0, -1.0), Vec3::new(0.0, 0.0, 1.0), 2.5, 22.0).unwrap();
+        let mut body = kernel::boolean(&block, &hole(-20.0), BoolOp::Cut).unwrap().unwrap();
+        body = kernel::boolean(&body, &hole(20.0), BoolOp::Cut).unwrap().unwrap();
+        let mut st = ModelState::default();
+        st.bodies.push(ModelBody::new("Part".into(), body, 1));
+        let ask = ThreadAsk { designation: Some("M6"), ..ask() };
+        // The first hole takes a modelled M6 thread.
+        let on = thread_on(&st, 1, Vec3::new(-17.5, 0.0, 10.0), &ask).unwrap();
+        cut(&mut st, on, (ThreadTip::None, None, None)).unwrap();
+        // The second hole's wall is still a cylinder: it takes a thread too.
+        let on = thread_on(&st, 1, Vec3::new(22.5, 0.0, 10.0), &ask);
+        assert!(on.is_ok(), "the second hole still has a cylinder to thread: {:?}", on.err());
+        // And a modelled one cuts there as well.
+        let on = thread_on(&st, 1, Vec3::new(22.5, 0.0, 10.0), &ask).unwrap();
+        assert!(cut(&mut st, on, (ThreadTip::None, None, None)).is_ok());
+    }
 }

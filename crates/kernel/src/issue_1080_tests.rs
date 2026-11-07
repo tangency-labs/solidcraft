@@ -88,7 +88,7 @@ fn chamfers_crossing_each_other_are_refused() {
     too_large(crate::chamfer(&rib, &edges, 3.0));
     too_large(crate::fillet(&rib, &edges, 3.0));
     assert_eq!(crate::chamfer_max(&rib, &edges, 3.0).unwrap().map(|x| x.0), Some(2.0));
-    assert_eq!(crate::fillet_max(&rib, &edges, 3.0).unwrap().map(|x| x.0), Some(2.0));
+    assert_eq!(crate::fillet_max(&rib, &edges, 3.0, crate::FilletTurn::Mitre).unwrap().map(|x| x.0), Some(2.0));
     // Below half the width both build.
     let b = crate::chamfer(&rib, &edges, 1.5).unwrap();
     assert!((b.volume_at(0.01).unwrap() - (3200.0 - 2.0 * 0.5 * 1.5 * 1.5 * 40.0)).abs() < 1e-6);

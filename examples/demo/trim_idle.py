@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""trim_idle.py IN OUT [--rate R] [--crf N]: speed a real-time screen recording up R times and cut
-the idle stretches (nothing on screen changes: the pointer is still and the app is waiting).
+"""trim_idle.py IN OUT [--rate R] [--crf N] [--hold S]: speed a real-time screen recording up R
+times and cut the idle stretches (nothing on screen changes: the pointer is still and the app is waiting).
 
 A run of near-identical frames that would play for more than 0.15 s at the new speed is cut down
-to 0.1 s; the last run (the held finished model) is kept for 0.5 s. Frames are compared at 320 px
+to 0.1 s (--hold S keeps S seconds instead, and cuts only runs longer than 1.5 S); the last run
+(the held finished model) is kept for 0.5 s, or S if longer. Frames are compared at 320 px
 wide, so a moving pointer, a drifting camera or a changing caption all count as activity.
 Then every R-th remaining frame is kept at 30 fps and the result is encoded like the other
 recordings (H.264 CRF 20, yuv420p, faststart). Pure Python and ffmpeg; no other dependencies."""
@@ -17,6 +18,7 @@ ap.add_argument("out")
 ap.add_argument("--rate", type=float, default=1.0)
 ap.add_argument("--crf", default="20")
 ap.add_argument("--threshold", type=int, default=4, help="grey levels a pixel must change by")
+ap.add_argument("--hold", type=float, default=0.1, help="seconds of each idle stretch kept, at the new speed")
 a = ap.parse_args()
 FPS = 30
 info = json.loads(subprocess.check_output(["ffprobe", "-v", "error", "-select_streams", "v", "-show_entries", "stream=width,height", "-of", "json", a.inp]))["streams"][0]
@@ -40,7 +42,7 @@ for f in frames(f"fps={FPS},scale={AW}:{AH}", AW * AH):
     active.append(True if prev is None else sum(1 for x, y in zip(f, prev) if abs(x - y) > a.threshold) >= 2)
     prev = f
 n = len(active)
-longest, keep_run, end_keep = int(0.15 * a.rate * FPS), int(0.1 * a.rate * FPS), int(0.5 * a.rate * FPS)
+longest, keep_run, end_keep = int(max(0.15, a.hold * 1.5) * a.rate * FPS), int(a.hold * a.rate * FPS), int(max(0.5, a.hold) * a.rate * FPS)
 keep = [True] * n
 i = cut = 0
 while i < n:

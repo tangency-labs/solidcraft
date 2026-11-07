@@ -7,6 +7,7 @@ use solidcore_record::Vec2;
 use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
+use crate::i18n::tr;
 use crate::tool_modifiers::{Audit, Scope, ToolModifiers};
 use crate::viewport::{Hit, Proj, pick_for_tool as pick, sketch_point_at};
 
@@ -164,28 +165,24 @@ impl Tool {
 
 pub fn hint(id: &str) -> String {
     match id {
-        "sketch.line" => "Line: click points; right-click or Esc to finish".into(),
-        "sketch.rectangle.two_point" => "Rectangle: click two opposite corners".into(),
-        "sketch.rectangle.center" => "Center rectangle: click the centre, then a corner".into(),
-        "sketch.rectangle.rounded" => "Rounded rectangle: click two opposite corners (Tab to the radius box to type the corner radius)".into(),
-        "sketch.rectangle.three_point" => "3-point rectangle: click two points of one edge, then the width".into(),
-        "sketch.circle.center" => "Circle: click the centre, then a point on the circle".into(),
-        "sketch.arc.three_point" => "Arc: click start, end, then a point on the arc".into(),
-        "sketch.arc3d" => "3D Arc: click start, end, then a point on the arc (points may leave the sketch plane)".into(),
-        "sketch.line3d" => "3D Line: click world points; right-click or Esc to finish (points may leave the sketch plane)".into(),
-        "sketch.spline3d" => "3D Spline: click fit points in 3D; right-click or Esc to finish".into(),
-        "sketch.point3d" => "3D Point: click where a 3D point goes".into(),
-        "sketch.arc.center_point" => "Arc: click centre and start, go round either way and click the end, or type a signed sweep".into(),
-        "sketch.dimension" => {
-            "Dimension: pick one or two entities and type the value (or click to place it first); click a dimension to edit it; Enter applies".into()
-        }
-        "sketch.constraint.horizontal_vertical" => {
-            "Horizontal/Vertical: pick a line, two points, or a point and a line; hold Shift to pick a line midpoint".into()
-        }
-        "sketch.slot.center_to_center" | "sketch.slot.overall" => "Slot: click both ends, then the width".into(),
-        "sketch.constraint.midpoint" => "MidPoint: pick a point and a line, or two lines to centre the second on the first".into(),
-        _ if id.starts_with("sketch.constraint.") => "Constraint: pick the sketch entities".into(),
-        _ => crate::sketch_tools::hint(id).unwrap_or_else(|| "Click in the sketch".into()),
+        "sketch.line" => tr("sketch.hint.line").into(),
+        "sketch.rectangle.two_point" => tr("sketch.hint.rectangle.two_point").into(),
+        "sketch.rectangle.center" => tr("sketch.hint.rectangle.center").into(),
+        "sketch.rectangle.rounded" => tr("sketch.hint.rectangle.rounded").into(),
+        "sketch.rectangle.three_point" => tr("sketch.hint.rectangle.three_point").into(),
+        "sketch.circle.center" => tr("sketch.hint.circle.center").into(),
+        "sketch.arc.three_point" => tr("sketch.hint.arc.three_point").into(),
+        "sketch.arc3d" => tr("sketch.hint.arc3d").into(),
+        "sketch.line3d" => tr("sketch.hint.line3d").into(),
+        "sketch.spline3d" => tr("sketch.hint.spline3d").into(),
+        "sketch.point3d" => tr("sketch.hint.point3d").into(),
+        "sketch.arc.center_point" => tr("sketch.hint.arc.center_point").into(),
+        "sketch.dimension" => tr("sketch.hint.dimension").into(),
+        "sketch.constraint.horizontal_vertical" => tr("sketch.hint.constraint.horizontal_vertical").into(),
+        "sketch.slot.center_to_center" | "sketch.slot.overall" => tr("sketch.hint.slot").into(),
+        "sketch.constraint.midpoint" => tr("sketch.hint.constraint.midpoint").into(),
+        _ if id.starts_with("sketch.constraint.") => tr("sketch.hint.constraint.generic").into(),
+        _ => crate::sketch_tools::hint(id).unwrap_or_else(|| tr("sketch.hint.fallback").into()),
     }
 }
 
@@ -411,6 +408,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                         Hit::SketchCurve { sketch, id, straight, .. } if Some(*sketch) == app.session.active_sketch => {
                             Some((id.clone(), true, *straight))
                         }
+                        Hit::Axis { name } => sketch_axis_of(app, name).map(|a| (a.to_string(), true, true)),
                         _ => None,
                     })
                 })
@@ -734,7 +732,7 @@ pub(crate) fn constraint_preselection(
         (unique.len() == ids.len()).then_some(ids)
     };
     match (command, selection) {
-        ("sketch.constraint.fix", _) => selected_ids(false, 1).map(|ids| json!({"entities":ids})),
+        ("sketch.constraint.fix", _) => fix_preselection(selection).map(|ids| json!({"entities":ids})),
         ("sketch.constraint.polygon", _) => selected_ids(true, 3).map(|ids| json!({"lines":ids})),
         // Three or more curves: all of them equal, in pick order (#4985). Two keep the `a, b` form.
         ("sketch.constraint.equal", _) if selection.len() >= 3 => selected_ids(true, 3).map(|ids| json!({"curves":ids})),
@@ -772,6 +770,30 @@ pub(crate) fn constraint_preselection(
         }
         _ => None,
     }
+}
+
+/// The sketch points and curves Fix takes from a selection (#11663). A box drawn over a sketch
+/// also takes its dimensions and constraint icons; those cannot be fixed and are passed over, so
+/// the geometry boxed with them is still fixed at once. Anything else selected (a body, a
+/// midpoint, a curve of another sketch) leaves the choice to the pick tool. As many entities as the command takes.
+fn fix_preselection(selection: &[solidcraft_engine::Sel]) -> Option<Vec<&str>> {
+    use solidcraft_engine::Sel::{SketchConstraint, SketchCurve, SketchPoint};
+    const MAX_ENTITIES: usize = 10_000;
+    let mut ids = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for s in selection {
+        let id = match s {
+            SketchCurve { id, sketch: None } | SketchPoint { id } => id.as_str(),
+            // A curve of another sketch: its id alone would name a curve of this one (#3726).
+            SketchCurve { .. } => return None,
+            SketchConstraint { .. } => continue,
+            _ => return None,
+        };
+        if seen.insert(id) {
+            ids.push(id);
+        }
+    }
+    (1..=MAX_ENTITIES).contains(&ids.len()).then_some(ids)
 }
 
 pub(crate) fn projection_preselection(selection: &[solidcraft_engine::Sel]) -> Option<Vec<Value>> {
@@ -1181,14 +1203,17 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
         if snap.as_deref() == Some("Midpoint") && t.kind == Kind::HorizontalVertical {
             painter.circle_stroke(sp, 8.0, Stroke::new(2.0, tk.accent));
         }
-        let readout = painter.text(
-            crate::tool_cursor::readout_at(painter, proj.rect, sp),
-            egui::Align2::LEFT_TOP,
-            format!("{}, {}", crate::prefs::show_mm(app, hp.x, 1), crate::prefs::show_mm(app, hp.y, 1)),
-            egui::FontId::proportional(crate::theme::Tokens::get().font_small),
-            tk.text_dim,
-        );
-        crate::scenario::publish_rect("viewport:readout", readout);
+        // The design's coordinates: not while a value is typed and the sketch is drawn at it.
+        if crate::dim_view::preview_world(app).is_none() {
+            let readout = painter.text(
+                crate::tool_cursor::readout_at(painter, proj.rect, sp),
+                egui::Align2::LEFT_TOP,
+                format!("{}, {}", crate::prefs::show_mm(app, hp.x, 1), crate::prefs::show_mm(app, hp.y, 1)),
+                egui::FontId::proportional(crate::theme::Tokens::get().font_small),
+                tk.text_dim,
+            );
+            crate::scenario::publish_rect("viewport:readout", readout);
+        }
     }
     if matches!(t.kind, Kind::HorizontalVertical | Kind::Dimension) {
         for target in &t.point_picks {

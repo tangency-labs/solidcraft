@@ -108,11 +108,12 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(params) = app.easyprint.ask.clone() else { return };
     let _language = crate::i18n::scope(&app.preferences.language);
-    let (closed, action) = ui_kit::Confirm::new(egui::Id::new("sc_easyprint_confirm"), "mesh_export", crate::i18n::tr_label("Open with EasyPrint"))
-        .actions("Upload", "Cancel", None)
-        .show(ctx, true, |ui| {
-            ui_kit::text(ui, crate::i18n::tr("ui.easyprint_consent"), ui_kit::Text::Report("easyprint_consent", false));
-        });
+    let (closed, action) =
+        ui_kit::Confirm::new(egui::Id::unique("sc_easyprint_confirm"), "mesh_export", crate::i18n::tr_label("Open with EasyPrint"))
+            .actions("Upload", "Cancel", None)
+            .show(ctx, true, |ui| {
+                ui_kit::text(ui, crate::i18n::tr("ui.easyprint_consent"), ui_kit::Text::Report("easyprint_consent", false));
+            });
     match action {
         ui_kit::Action::Ok => {
             app.easyprint.ask = None;

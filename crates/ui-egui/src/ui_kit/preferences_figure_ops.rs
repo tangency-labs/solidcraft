@@ -298,6 +298,23 @@ pub(super) fn paint(p: &Painter, rect: Rect, figure: &Figure, sample: Option<&Th
     paint_with_tokens(p, rect, figure, sample, clip, &Tokens::get(), Palette::Figure);
 }
 
+/// Clip every miniature-window operation, including its top bar, to its rounded outline.
+/// Rectangular scissoring alone leaves the bar's square corners outside the rounded ground.
+pub(super) fn paint_rounded(p: &Painter, rect: Rect, figure: &Figure, sample: &ThemeSample, radius: f32) {
+    let size = rect.size();
+    if !rect.is_finite() || !size.is_finite() || size.min_elem() < 1.0 || size.max_elem() > MAX_SIDE || !radius.is_finite() {
+        return;
+    }
+    let [fw, fh] = figure.size;
+    if !(fw > 0.0 && fh > 0.0) {
+        return;
+    }
+    let scale = (size.x / fw).min(size.y / fh);
+    let outline: Vec<_> =
+        rounded(Rect::from_min_size(Pos2::ZERO, vec2(fw, fh)), radius.max(0.0) / scale).into_iter().map(|point| [point.x, point.y]).collect();
+    paint(p, rect, figure, Some(sample), Some(&outline));
+}
+
 /// Reuse the six canonical figures with the semantic palette being previewed, without global state.
 pub(super) fn paint_colour_vision(p: &Painter, rect: Rect, index: usize, t: &Tokens) {
     use super::preferences_figure_data as figures;
@@ -338,6 +355,29 @@ pub(crate) fn paint_navigation_axes(p: &Painter, rect: Rect) {
 
 pub(crate) fn paint_navigation_cube(p: &Painter, rect: Rect) {
     paint_with_tokens(p, rect, &super::preferences_figure_data::NAVIGATOR_CUBE, None, None, &Tokens::get(), Palette::Navigator);
+}
+
+/// A generic body (a hexagonal prism) in the navigator palette: the user's own body stands in its place.
+pub(crate) fn paint_navigation_custom(p: &Painter, rect: Rect) {
+    let Some((p, scale)) = navigation_canvas(p, rect) else { return };
+    let t = Tokens::get();
+    let ctx = Ctx { t: &t, sample: None, palette: Palette::Navigator, origin: rect.min, scale };
+    let c = rect.center();
+    let (radius, height) = (34.0 * scale, 26.0 * scale);
+    let top: Vec<Pos2> = (0..6)
+        .map(|i| {
+            let a = std::f32::consts::FRAC_PI_3 * i as f32;
+            c + vec2(a.cos() * radius, a.sin() * radius * 0.5 - height * 0.5)
+        })
+        .collect();
+    let line = Stroke::new(1.4 * scale, ctx.ink(Ink::Line, 1.0));
+    // The three faces toward the viewer, then the top over them.
+    for (i, ink) in [(0, Ink::Right), (1, Ink::Left), (2, Ink::Left)] {
+        let (a, b) = (top[i], top[i + 1]);
+        let side = vec![a, b, b + vec2(0.0, height), a + vec2(0.0, height)];
+        p.add(Shape::convex_polygon(side, ctx.ink(ink, 1.0), line));
+    }
+    p.add(Shape::convex_polygon(top, ctx.ink(Ink::Top, 1.0), line));
 }
 
 /// Preserve the mouse's figure palette, with slightly stronger lettering.
@@ -767,7 +807,7 @@ mod tests {
     #[test]
     fn rounded_rectangle_preserves_its_authored_dashes() {
         let ctx = crate::fonts::test_context();
-        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             let t = Tokens::light();
             let drawing = Ctx { t: &t, sample: None, palette: Palette::Figure, origin: pos2(10.0, 10.0), scale: 1.0 };
             draw(
@@ -782,6 +822,7 @@ mod tests {
                 None,
             );
         });
+        output.textures_delta.clear();
         // A dashed outline is separate path segments, never a solid rectangle stroke.
         assert!(output.shapes.len() > 4);
         assert!(output.shapes.iter().all(|shape| !matches!(shape.shape, Shape::Rect(_))));

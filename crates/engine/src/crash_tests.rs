@@ -18,7 +18,8 @@ fn child() {
     let (Some(dir), Some(mode)) = (solidcraft_geom::env::var_os("CRASH_CHILD_DIR"), solidcraft_geom::env::var("CRASH_CHILD")) else {
         return;
     };
-    let fresh = install(PathBuf::from(dir), build());
+    let dir = PathBuf::from(dir);
+    let fresh = install(dir.clone(), build());
     println!("FRESH {}", serde_json::to_string(&fresh).unwrap());
     // Dying while starting up, before any command: in a graphics driver, with or without what
     // a native crash handler caught.
@@ -203,6 +204,24 @@ fn child() {
             s.execute("solid.sphere", &json!({"diameter": 8})).unwrap();
             let _ = s.execute("diagnostics.crash_test", &json!({"mode": "abort"}));
         }
+        // A clean exit whose journal cannot be removed: the directory is read-only.
+        "clean_read_only" => {
+            let sessions = dir.join("sessions");
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&sessions, fs::Permissions::from_mode(0o500)).unwrap();
+                end_session();
+                fs::set_permissions(&sessions, fs::Permissions::from_mode(0o700)).unwrap();
+            }
+            #[cfg(not(unix))]
+            end_session();
+            println!("CLEAN_READ_ONLY_OK");
+        }
+        // A second install in the same process: the journal it opens is an orphan.
+        "install_twice" => {
+            install(dir.clone(), build());
+        }
         _ => {}
     }
     end_session();
@@ -322,6 +341,37 @@ fn a_known_panic_that_ends_the_app_is_counted_not_reported_again_as_an_unclean_e
     // A repeat the app survives is counted once, though it then ends cleanly.
     assert!(run_child(&d, "thread").1);
     assert_eq!(only_report(&d).0.count, 3);
+    let _ = fs::remove_dir_all(&d);
+}
+
+/// A clean exit whose journal cannot be removed (its directory is read-only) is not an unclean
+/// exit at the next start: the journal says the session ended cleanly.
+#[test]
+fn a_clean_exit_whose_journal_cannot_be_removed_is_not_reported_as_an_unclean_exit() {
+    let d = fresh_dir("clean-exit");
+    let (out, ok) = run_child(&d, "clean_read_only");
+    assert!(ok && out.contains("CLEAN_READ_ONLY_OK"), "{out}");
+    // The next start finds the journal the clean exit could not remove: it says nothing about it.
+    let (out, ok) = run_child(&d, "none");
+    assert!(ok);
+    assert!(out.contains("FRESH []"), "{out}");
+    let reports = list(&d);
+    assert!(reports.is_empty(), "{reports:?}");
+    let _ = fs::remove_dir_all(&d);
+}
+
+/// A second install in the same process leaves no journal behind: the next start has nothing to
+/// report about it.
+#[test]
+fn a_journal_left_behind_by_a_second_install_is_not_reported_as_an_unclean_exit() {
+    let d = fresh_dir("install-twice");
+    let (out, ok) = run_child(&d, "install_twice");
+    assert!(ok, "{out}");
+    let (out, ok) = run_child(&d, "none");
+    assert!(ok);
+    assert!(out.contains("FRESH []"), "{out}");
+    let reports = list(&d);
+    assert!(reports.is_empty(), "{reports:?}");
     let _ = fs::remove_dir_all(&d);
 }
 
@@ -635,6 +685,22 @@ fn signatures_ignore_numbers_but_not_places() {
     assert_eq!(signature("a.rs:1", "face 12 of 40"), signature("a.rs:1", "face 7 of 3"));
     assert_ne!(signature("a.rs:1", "face 12"), signature("a.rs:2", "face 12"));
     assert_ne!(signature("a.rs:1", "edge"), signature("a.rs:1", "face"));
+}
+
+/// A graphics device reset met first by a queue write panics inside wgpu-core (#10240, #6528):
+/// that is the device loss, which the app restarts after, not a crash to report. The same words
+/// from anywhere else, and wgpu's other panics, still are.
+#[test]
+fn a_lost_graphics_device_met_inside_wgpu_is_not_a_crash() {
+    let lost = "called `Result::unwrap()` on an `Err` value: Lost";
+    let windows = r"C:\Users\runneradmin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\wgpu-core-30.0.1\src\device\queue.rs:503";
+    let linux = "/home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wgpu-core-30.0.1/src/device/queue.rs:503";
+    assert!(graphics_device_lost(lost, windows));
+    assert!(graphics_device_lost(lost, linux));
+    assert!(!graphics_device_lost(lost, "crates/gpu/src/view.rs:3189"), "not inside wgpu");
+    assert!(!graphics_device_lost("called `Result::unwrap()` on an `Err` value: OutOfMemory", linux));
+    assert!(!graphics_device_lost("Error in Queue::submit: Validation Error", linux));
+    assert!(!graphics_device_lost(lost, "/home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/wgpu-30.0.1/src/api/queue.rs:1"));
 }
 
 #[test]

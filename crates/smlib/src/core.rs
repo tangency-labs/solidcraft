@@ -6,12 +6,11 @@
 //! fork fixed in its own sources; each one turned on here says which fork commit it matches.
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::vector3d::Vec3;
-use solidcore::kernel::{Kernel, KernelOptions, UpstreamFixes};
+use solidcore::kernel::{CancelToken, Kernel, KernelOptions, Rng, UpstreamFixes};
 use solidcore::mass::integrator::properties::{PropertyAttributes, brep_volume};
 use solidcore::primitive::api_primitives as primitives;
 
@@ -108,7 +107,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_resolve_crossing_loops = true;
     f.offset_walls_touch_refused = true;
     f.offset_analytic_mate_edges = true;
-    f.precise_properties_split_at_surface_knots = true;
     f.nurb_cylinder_inside_out_frame = true;
     f.shell_inner_shell_of_statuses = true;
     f.local_operation_offset_status = true;
@@ -147,13 +145,10 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.torus_signed_gen_curve_interval = true;
     f.sheet_sweep_joins_profile_wires = true;
     f.point_solve_keeps_triangle_guess = true;
-    f.fillet_setback_from_start_vertex = true;
     f.imprint_trims_edge_to_proto_vertex = true;
     f.imprint_extends_edge_to_proto_vertex = true;
     f.fillet_point_step_per_point = true;
     f.analytic_copy_keeps_parameterization = true;
-    f.fillet_point_bigger_step_retry = true;
-    f.fillet_through_extended_rail_end = true;
     f.precise_properties_body_length_scale = true;
     f.offset_extension_from_base = true;
     f.corner_blend_stays_inside_neighbours = true;
@@ -174,11 +169,9 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.boolean_skips_faces_apart = true;
     f.uv_trim_checks_on_surface = true;
     f.loop_orientation_floor_from_loop_box = true;
-    f.offset_extends_cones_as_themselves = true;
     f.local_operation_box_holds_new_surfaces = true;
     f.uv_trim_joins_drop_pieces = true;
     f.shell_edges_on_analytics_exact = true;
-    f.ssi_no_reverse_of_empty_trace = true;
     f.ssi_pole_point_keeps_its_tangent = true;
     f.iso_curve_sliver_domain_is_degenerate = true;
     f.corner_blend_coons_patch_tangent_to_sides = true;
@@ -230,7 +223,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_cleanup_removes_input_slits = true;
     f.fillet_rail_end_on_continued_surface = true;
     f.glue_vertices_joins_every_region = true;
-    f.fillet_nx1_tangent_side_edge_same_convexity = true;
     f.fillet_removal_takes_ring_fillets = true;
     // The fork's commits that reached `SMLIB_REV` at eaa998a (tangency-labs/smlib#68, #69, #70).
     f.fillet_trim_inside_by_best_dot = true;
@@ -274,9 +266,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_keep_cavity_regions = true;
     f.offset_four_face_vertex_split = true;
     f.gap_samples_non_bspline_v_stride = true;
-    f.gap_array_append_updates_longest = true;
     f.imprint_skips_collapsed_definition = true;
-    f.precise_properties_trim_base_v = true;
     f.fillet_blend_curve_revolved_on_arc = true;
     f.temporary_radius_setup_errors = true;
     f.ellipse_step_interval_checks = true;
@@ -319,7 +309,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.circle_silhouette_perspective_center = true;
     f.ellipse_convert_to_2d_uses_both_axes = true;
     f.circle_offset_antiparallel_normal = true;
-    f.masked_array_uses_bit_shift = true;
     f.global_solver_identical_prefers_larger_when_maximizing = true;
     f.surface_continuity_checks_last_v_knot = true;
     f.surface_point_solver_propagates_bbox_failure = true;
@@ -331,7 +320,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.crv_in_volume_mults_by_break_index = true;
     f.curve_bounded_surface_read_uv_type_and_implicit_outer = true;
     f.polar_box_region_to_arc_transposes_domain = true;
-    f.point_set_centroid_all_blocks = true;
     f.local_solve1d_unbounded_newton_step = true;
     f.composite_curve_bbox_segment_intervals = true;
     f.knot_vector_valid_requires_span = true;
@@ -339,14 +327,12 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.curve_property_gs_branch_bounds = true;
     f.volume_representational_end_continuities = true;
     f.integrator_propagates_failure = true;
-    f.precise_properties_span_end_from_below = true;
     f.offset_open_edge_second_trim_point = true;
     f.close_loop_relates_only_coincident_edges = true;
     f.ssi_split_curves_at_singular_points = true;
     f.surface_parallel_to_vector_checks = true;
     f.fillet_round_ends_at_tangent_continuation = true;
     f.geometric_g2_continuity = true;
-    f.hash_table_grow_preserves_removed_records = true;
     f.bend_volume_bbox_contains_wide_angle_and_inf_u = true;
     f.bend_volume_trim_param_box_across_period = true;
     f.point_set_tight_pbox_projects_points = true;
@@ -376,8 +362,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_overflow_trim_at_creases = true;
     f.fillet_section_end_trim_at_creases = true;
     f.fillet_refuse_mixed_corner_crossing_rails = true;
-    f.fillet_keep_features = true;
-    f.fillet_blend_corner = true;
     f.fillet_exact_arc_sections = true;
     f.fillet_exact_arc_spans = true;
     // Held back: see `HELD_BACK`.
@@ -385,11 +369,21 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.cone_unbounded_parameterized_as_nurb = true;
     f.ellipse_open_arc_keeps_end_angle = true;
     f.fillet_round_as_definition = true;
-    f.fillet_round_on_round_as_definition = true;
     f.fillet_overflow_crease_along_edge = true;
     f.plane_first_torus_section_exact = true;
     f.keep_exact_pcurves = true;
     f.shell_one_construction = true;
+    f.approximate_surface_checks_every_row = true;
+    f.topological_vertex_has_only_edge_uses = true;
+    f.planar_section_face_tolerance = true;
+    f.face_swap_uv_transposes_trims = true;
+    f.closed_smooth_pole_tangent_limit = true;
+    // Held back: see `HELD_BACK`.
+    f.fillet_round_ends_on_outline = false;
+    f.fillet_setback_beside_curved_faces = true;
+    f.fillet_chamfer_corner = true;
+    f.brep_ray_classifies_current_trims = true;
+    f.revolution_frame_from_profile_origin = true;
     f
 }
 
@@ -399,55 +393,113 @@ pub(crate) fn fixes() -> UpstreamFixes {
 /// the fork doesn't have stays on, and where solidcore builds what SMLib refuses, a result right
 /// against its closed form is a win.
 ///
-/// `fillet_refuse_rounds_breaking_through` (WR-707, solidcore#2311): sound geometry refused. With it
-/// on, 11 rig cases that pass with it off, each graded against its closed form or invariants, are
-/// refused as breaking through the part (190-fillet-disc-rim-past-its-2mm-wall fails status 1001
-/// instead): every-hole-top-rim-r12-past-plate-bottom, 1080-chamfer-runs-into-openings-cut-by-them
-/// (3350, its closed form), 1080-fillet-notched-block-top-outline-r8,
-/// 324-fillet-over-hole-cut-by-overlong-cylinder, 324-fillet-over-hole-overlap,
-/// 5158-fillet-adjacent-plate-edges-as-thick-as-plate and the sloped and equal-slope basin rims of
-/// #1080 and #5835. A fix under the same flag is in progress on solidcore.
+/// `fillet_refuse_rounds_breaking_through` (WR-707, solidcore#2311): sound geometry refused. At
+/// solidcore 9856ffee5, with it on, the fillet rig's 1668-fillet-both-sides-of-thin-wall-r7 is
+/// refused as breaking through the wall into the hollow behind it ("the largest radius that fits is
+/// 6.828 mm"), where with it off it builds the closed form, 39509.938 (at 8ddce9016 it refused 11
+/// rig cases that pass with it off; at this pin the other 270 fillet rig cases come out as with it
+/// off).
+///
+/// `fillet_round_ends_on_outline` (WR-730, solidcore#2541): volumes wrong against their closed
+/// forms, and rounds too big for their faces built instead of refused. With it on, each of these
+/// passes with it off: `fillet_over_a_cliff` measures 721.832 against the closed form's 693.205;
+/// `a_round_wider_than_its_faces_overflows_onto_its_tangent_sides` 6125.719 against 6107.529;
+/// `taper_follows_the_room_along_the_edge` 4210.926 against 4195.579; the round larger than the
+/// cube in `hostile_inputs_are_errors` builds (4773.168 against the 1094.853 its refusal leaves),
+/// as do the fillets the CLI's `run_strict` and `json_out` tests need to fail; and
+/// `a_corner_round_wider_than_its_faces_overflows_and_takes_the_corners_other_edges`,
+/// `overflow_goes_first`, `corners_refuse_what_they_cannot_build` and
+/// `fillet_edge_removed_by_a_larger_overflowing_round_is_noted` are refused (too large, no room,
+/// status 1001), where with it off they build. Measured again at solidcore 9856ffee5: the same.
 #[cfg(test)]
-const HELD_BACK: &[&str] = &["fillet_refuse_rounds_breaking_through"];
+const HELD_BACK: &[&str] = &["fillet_refuse_rounds_breaking_through", "fillet_round_ends_on_outline"];
 
-/// How far apart two kernels' procedural blend serials start. A body keeps the serials of the
-/// kernel that made it and may be used on any other, whose memo of solved stations is keyed by
-/// serial alone: the ranges keep one definition's stations from answering for another's.
-pub(crate) const BLEND_SERIALS_PER_KERNEL: u64 = 1 << 40;
-
-/// A new kernel. Each takes the next range of blend serials, the first starting at 0.
+/// A new kernel, with this backend's fixes.
 fn fresh() -> Kernel {
-    static MADE: AtomicU64 = AtomicU64::new(0);
     let mut k = Kernel::new(&KernelOptions::default());
     k.fixes = fixes();
-    k.blend_last_serial.set(MADE.fetch_add(1, Ordering::Relaxed).wrapping_mul(BLEND_SERIALS_PER_KERNEL));
     k
 }
 
-/// Most kernels kept for later calls; those over it are dropped when their call ends.
-const MOST_IDLE: usize = 8;
-
-/// The kernels no call is using, the last used on top. The lock is only held to take or put back
-/// a kernel, never during a call: a call that runs long (or never returns) holds up nothing but
-/// its own body, so one design's long operation never delays another's. Calls one after another
-/// all get the same kernel, as a single kernel would serve them; one that starts while another
-/// runs gets one of its own (solidcore keeps no global state, and a body's identities are valid
-/// only in the kernel that issued them, so any kernel takes any body).
-static IDLE: Mutex<Vec<Kernel>> = Mutex::new(Vec::new());
-
-fn take_kernel() -> Kernel {
-    IDLE.lock().unwrap_or_else(PoisonError::into_inner).pop().unwrap_or_else(fresh)
+/// The kernels calls run on. The lock is only held to take or put back a kernel, never during a
+/// call: a call that runs long (or never returns) holds up nothing but its own body, so one
+/// design's long operation never delays another's. Calls one after another all get the same
+/// kernel; one that starts while another runs gets one of its own (solidcore keeps no global
+/// state, and a body's identities are valid only in the kernel that issued them, so any kernel
+/// takes any body).
+///
+/// A call stuck for good keeps its kernel and the thread it runs on, and costs nothing more: at
+/// most `most_idle` kernels wait between calls, however many calls once ran side by side. A job
+/// that starts again and sticks again holds one more each time, so at `most_running` calls a new
+/// call fails, saying so, rather than grow without end or wait for calls that may never return.
+pub(crate) struct Pool<K> {
+    pub(crate) idle: Vec<K>,
+    pub(crate) running: usize,
+    pub(crate) most_idle: usize,
+    pub(crate) most_running: usize,
 }
 
-fn put_kernel(k: Kernel) {
-    let mut idle = IDLE.lock().unwrap_or_else(PoisonError::into_inner);
-    if idle.len() < MOST_IDLE {
-        idle.push(k);
+impl<K> Pool<K> {
+    /// A kernel for a call, the last used first; `None` when too many are running.
+    pub(crate) fn take(&mut self, make: impl FnOnce() -> K) -> Option<K> {
+        if self.running >= self.most_running {
+            return None;
+        }
+        self.running += 1;
+        Some(self.idle.pop().unwrap_or_else(make))
+    }
+
+    /// A call ended, handing back its kernel if it is fit to use again.
+    pub(crate) fn put(&mut self, kernel: Option<K>) {
+        self.running = self.running.saturating_sub(1);
+        if let Some(kernel) = kernel
+            && self.idle.len() < self.most_idle
+        {
+            self.idle.push(kernel);
+        }
     }
 }
 
+/// Most calls at once. Far above what any work needs: an operation runs on at most 16 threads.
+const MOST_RUNNING: usize = 256;
+
+static POOL: Mutex<Pool<Kernel>> = Mutex::new(Pool { idle: Vec::new(), running: 0, most_idle: 8, most_running: MOST_RUNNING });
+
+fn take_kernel() -> Option<Kernel> {
+    POOL.lock().unwrap_or_else(PoisonError::into_inner).take(fresh)
+}
+
+fn put_kernel(k: Option<Kernel>) {
+    POOL.lock().unwrap_or_else(PoisonError::into_inner).put(k);
+}
+
+/// What a call must not find from the calls before it: the same operation on the same bodies
+/// answers the same on any kernel, however much that kernel did first. (Its draws of random rays,
+/// the stations it remembers; marks, identities and what is only kept to reuse memory change no
+/// answer. Tolerances and fixes are the same on every kernel.)
+fn start_clean(k: &mut Kernel) {
+    k.rng = Rng::new(KernelOptions::default().seed);
+    *k.blend_station_memo.borrow_mut() = Default::default();
+    k.fillet_point_step.set(None);
+    k.upstream_ub_passed.clear();
+}
+
+/// A kernel kept out of use until dropped ([`crate::hold_a_kernel`]).
+pub struct HeldKernel(Option<Kernel>);
+
+impl Drop for HeldKernel {
+    fn drop(&mut self) {
+        put_kernel(self.0.take());
+    }
+}
+
+pub(crate) fn hold_a_kernel() -> HeldKernel {
+    HeldKernel(take_kernel())
+}
+
 /// Runs `f` on a kernel of its own. A panic in solidcore is caught: the kernel, which it may have
-/// left half-updated, is replaced by a fresh one and the call fails with [`Error::Internal`].
+/// left half-updated, is dropped and the call fails with [`Error::Internal`]. A token over this
+/// thread's work ([`crate::stop`]) stops it.
 pub(crate) fn run<T: dump::Answer>(call: &'static str, f: impl FnOnce(&mut Kernel) -> std::result::Result<T, solidcore::SolidError>) -> Result<T> {
     run_on(call, &[], f)
 }
@@ -470,7 +522,26 @@ pub(crate) fn run_on<T: dump::Answer>(
     inputs: dump::Inputs<'_>,
     f: impl FnOnce(&mut Kernel) -> std::result::Result<T, solidcore::SolidError>,
 ) -> Result<T> {
-    let mut k = take_kernel();
+    let stop = crate::stop::token();
+    if stop.as_ref().is_some_and(CancelToken::is_cancelled) {
+        return Err(Error::Solidcore(format!("{call}: cancelled")));
+    }
+    call_on(call, inputs, stop, f)
+}
+
+/// [`run_on`], stopped by `stop`.
+fn call_on<T: dump::Answer>(
+    call: &'static str,
+    inputs: dump::Inputs<'_>,
+    stop: Option<CancelToken>,
+    f: impl FnOnce(&mut Kernel) -> std::result::Result<T, solidcore::SolidError>,
+) -> Result<T> {
+    let Some(mut k) = take_kernel() else {
+        log::warn!(target: "smlib", "{call}: refused, {MOST_RUNNING} kernel calls are still running");
+        return Err(Error::Solidcore(format!("{call}: {MOST_RUNNING} kernel calls are still running")));
+    };
+    start_clean(&mut k);
+    k.cancel = stop.clone();
     // A profiler span per call: where the kernel's time goes.
     let _span = solidcraft_profile::span("solidcore", call);
     let in_flight = dump::in_flight(call);
@@ -495,6 +566,11 @@ pub(crate) fn run_on<T: dump::Answer>(
         }
     };
     drop(in_flight);
+    // Stopped, it is no failure to look into, and solidcore may have left the kernel part way.
+    if stop.is_some_and(|s| s.is_cancelled()) {
+        put_kernel(None);
+        return r;
+    }
     let why = match &r {
         Ok(v) => v.refusal(),
         Err(e) => Some(e.to_string()),
@@ -503,7 +579,8 @@ pub(crate) fn run_on<T: dump::Answer>(
         // The kernel the call ran on, or the fresh one that replaced it after a panic.
         dump::failed(&k, call, &why, inputs);
     }
-    put_kernel(k);
+    k.cancel = None;
+    put_kernel(Some(k));
     r
 }
 
@@ -530,7 +607,8 @@ pub(crate) fn with_body<T: dump::Answer>(
     if body.0.is_poisoned() {
         return Err(Error::Internal(format!("{call}: the body was left unfinished by an earlier panic")));
     }
-    run_on(call, &[("brep", body)], |k| f(k, &mut body.0.lock().unwrap_or_else(PoisonError::into_inner)))
+    // No token stops it: stopped part way, solidcore may leave the body it borrows half-changed.
+    call_on(call, &[("brep", body)], None, |k| f(k, &mut body.0.lock().unwrap_or_else(PoisonError::into_inner)))
 }
 
 /// An axis-aligned box from its lower corner (`SmApiCreateBox`, as `smlib_make_box` checks it:
