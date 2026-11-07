@@ -60,6 +60,8 @@ solidcraft-profile = { workspace = true, features = ["enabled"] }
 solidcraft-io = { workspace = true, features = ["trust-unknown-source"] }
 # Normal CI exercises profiling assertions without enabling the production feature.
 solidcraft-sketch = { workspace = true, features = ["solver-profiling"] }
+# The byte mutator and no-panic check for readers of hostile files.
+solidcraft-testkit = { workspace = true }
 
 [[example]]
 name = "render_resource_workflow"
