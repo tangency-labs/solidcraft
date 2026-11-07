@@ -2,10 +2,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde_json::{Value, json};
+use serde_json::Value;
 use solidcraft_doc::{Document, Feature, FeatureKind, Mat, PlaneRef};
 
 use crate::params::{bad, vec3};
+use crate::schema::timeline_clipboard::{PasteResult, Pasted};
 use crate::{Result, Sel, Session};
 
 const CMD: &str = "timeline.paste";
@@ -186,11 +187,7 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> Result<Value> {
         }
     };
     let path = match p.get("component_path") {
-        Some(v) => v
-            .as_array()
-            .filter(|a| a.len() <= 64)
-            .and_then(|a| a.iter().map(Value::as_u64).collect::<Option<Vec<_>>>())
-            .ok_or_else(|| bad(CMD, "`component_path` must list 0..64 occurrence ids"))?,
+        Some(v) => super::clipboard::component_path_form(v).ok_or_else(|| bad(CMD, "`component_path` must list 0..64 occurrence ids"))?,
         None if component == s.active_component => s.active_occurrence_path.clone().unwrap_or_else(|| s.doc.first_path(component)),
         None => super::component::placing::placement_of(s, &s.placed_document(), component, None, "component_path", CMD)?.0,
     };
@@ -248,7 +245,7 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> Result<Value> {
         }
         ids.insert(feature.id, id);
         names.insert(feature.name.clone(), name.clone());
-        made.push(json!({"id": id, "name": name, "from": feature.name}));
+        made.push(Pasted { id, name: name.clone(), from: feature.name.clone() });
     }
     parameters(scratch.doc_mut(), &copy.doc, &copy.features, &mut mapped)?;
     let source_values = copy.doc.param_values().0;
@@ -306,5 +303,6 @@ pub(super) fn paste(s: &mut Session, p: &Value) -> Result<Value> {
     }
     scratch.selection = ids.values().map(|id| Sel::Feature { id: *id }).collect();
     s.accept_computed(scratch);
-    Ok(json!({"pasted": made, "errors": [], "notices": []}))
+    serde_json::to_value(PasteResult { pasted: made, errors: Vec::new(), notices: Vec::new(), param_warnings: Vec::new() })
+        .map_err(|e| bad(CMD, e.to_string()))
 }
