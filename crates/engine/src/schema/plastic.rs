@@ -117,13 +117,25 @@ fn rule_name_schema(_: &mut SchemaGenerator) -> Schema {
 #[schemars(deny_unknown_fields, transform = bodies_required)]
 pub struct AssignRuleParams {
     /// The bodies, by name: 1 to 10 000.
-    // Optional in the type, required in the schema: left out or empty, the handler refuses the
-    // call with its own message.
+    // Optional in the type, required in the schema: left out, `null` or empty, the handler
+    // refuses the call with its own message, so the schema allows none of those.
     #[serde(default)]
+    #[schemars(schema_with = "bodies_schema")]
     pub bodies: Option<NameList>,
     /// The rule, by name, as `plastic.rules` lists it. Empty or left out: the bodies have no
     /// rule of their own, so the active rule applies.
     pub rule: Option<String>,
+}
+
+/// `bodies` as `plastic.assign_rule` takes it: a name, or a list of 1 to 10 000 names. Not
+/// `NameList`'s own schema, which allows the empty list the handler refuses.
+fn bodies_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "anyOf": [
+            {"type": "string"},
+            {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": crate::params::MAX_STRING_LIST}
+        ]
+    })
 }
 
 /// List the plastic rules (the library's and the design's), the active rule and the rules
