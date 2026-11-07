@@ -3002,6 +3002,27 @@ fn surrender_keyboard_focus(ui: &egui::Ui) {
     }
 }
 
+/// Give the keyboard back from a widget of the dialog framed by `rect`: one of its fields, or
+/// its value box in the view.
+fn release_dialog_keyboard(ctx: &egui::Context, rect: egui::Rect) {
+    let Some(id) = ctx.memory(|memory| memory.focused()) else { return };
+    let value_box = id == egui::Id::new("sc_canvas_value") || id == egui::Id::new("sc_canvas_value2");
+    if value_box || ctx.read_response(id).is_some_and(|response| rect.contains(response.rect.center())) {
+        ctx.memory_mut(|memory| memory.surrender_focus(id));
+    }
+}
+
+/// Before this frame's shortcuts: a dialog that closed last frame leaves none of its fields
+/// holding the keyboard, so Ctrl+Z and the other shortcuts work at once.
+pub(crate) fn release_closed_dialog_keyboard(app: &SolveApp, ctx: &egui::Context) {
+    if app.dialog.is_none()
+        && app.tree.redefine.is_none()
+        && let Some(rect) = app.viewport.dialog_rect
+    {
+        release_dialog_keyboard(ctx, rect);
+    }
+}
+
 pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::prefs::OriginPlaneNames, range: std::ops::Range<usize>) {
     // Edit Text shows its Path input among its own rows.
     if matches!(d.kind, Kind::Text(_)) {
@@ -3975,6 +3996,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         crate::scenario::publish_rect("dialog:outer", r);
         crate::scenario::publish_target("dialog:card", r);
     }
+    // While OK computes the fields are disabled, and a click into one does not take the keyboard
+    // either: it would stay there once the dialog closes.
+    if app.applying.is_some()
+        && let Some(rect) = app.viewport.dialog_rect
+    {
+        release_dialog_keyboard(ctx, rect);
+    }
     if let Some(field) = crate::ui_kit::canvas_value_focus(ctx) {
         value_fields.push(field);
     }
@@ -3987,7 +4015,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // The editor loses the keyboard while the click is still being handled, possibly in a later
     // pass of the same frame, so give it back once the pointer is idle again.
     let pointer_busy = ctx.input(|i| i.pointer.any_down() || i.pointer.any_pressed() || i.pointer.any_released());
-    if d.restore_value_focus && !pointer_busy {
+    if d.restore_value_focus && !pointer_busy && app.applying.is_none() {
         d.restore_value_focus = false;
         let target = value_fields.iter().find(|(id, _)| Some(*id) == d.value_focus).or_else(|| value_fields.first());
         if let Some(&(id, length)) = target {
@@ -4001,7 +4029,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
         }
     }
-    if d.restore_value_focus {
+    if app.applying.is_some() {
+        // The field to give the keyboard back to stays as it was until OK's result is in.
+    } else if d.restore_value_focus {
         ctx.request_repaint();
     } else {
         d.value_focus = ctx.memory(|memory| memory.focused()).filter(|id| value_fields.iter().any(|(field, _)| field == id));

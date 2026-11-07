@@ -3220,6 +3220,7 @@ impl SolveApp {
         issue_report::tick(self, ctx);
         self.collect_screenshots(ctx);
         self.issue_screenshots(ctx);
+        dialogs::release_closed_dialog_keyboard(self, ctx);
         if self.issue_report.draft.is_none() && self.file_picker.is_none() {
             // Completion owns its keys before either CAD shortcuts or text editors see them.
             panel_runtime::reserve_host_input(self, ctx);
