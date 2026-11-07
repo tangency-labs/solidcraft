@@ -437,6 +437,11 @@ pub struct PlaneAtAngleParams {
     /// Omit to use the base plane's origin. `null` counts as not given.
     #[serde(default)]
     pub pivot: Option<GeoRefParam>,
+    /// Bring `base` onto the axis first (moved along its normal, tilted when the axis is not
+    /// parallel to it), so the plane goes through the whole axis even when it is off the base.
+    /// Not with `direction_only`. Default false: `base` turns about the axis where it is.
+    #[serde(default)]
+    pub through_axis: Option<bool>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: PlaneCommon,
 }

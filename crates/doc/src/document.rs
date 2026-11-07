@@ -63,7 +63,10 @@ pub enum PlaneRef {
     /// found there on each evaluation and `axis_origin`/`axis_dir` are where it was when picked.
     /// With `direction_only`, only the axis direction is used: it is projected onto the base
     /// (nothing of that projection is kept as geometry) and the plane turns about the line
-    /// through `pivot`, or through the base origin when `pivot` is absent.
+    /// through `pivot`, or through the base origin when `pivot` is absent. With `through_axis`, the
+    /// base is first brought onto the axis (moved along its normal, and tilted when the axis is
+    /// not parallel to it) so the plane goes through the whole axis, at `angle` from where it
+    /// came onto it (#6180).
     AtAngle {
         base: Box<PlaneRef>,
         axis_origin: Vec3,
@@ -77,6 +80,10 @@ pub enum PlaneRef {
         /// Pivot for `direction_only`; absent means the base plane's origin.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pivot: Option<Box<GeoRef>>,
+        /// Go through the axis even when it is off the base; absent in older designs, which keep
+        /// turning the base about the line where it is.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        through_axis: bool,
     },
     /// A construction plane feature (by id).
     Construction { feature: FeatureId },
@@ -3080,6 +3087,34 @@ fn is_root(c: &u64) -> bool {
     *c == 0
 }
 
+/// The sine of the angle to the base normal below which [`onto_axis`] takes a line as square to the
+/// plane: nearer than that, which way the plane tilts would come from rounding in the line's direction.
+const SQUARE_SIN: f64 = 1e-6;
+
+/// `base` brought onto the line through `at` along the unit direction `dir`: tilted by the least
+/// turn that makes it parallel to the line, then moved along its normal until it holds the line.
+/// A base that already holds the line comes back unchanged (#6180). A line within
+/// [`SQUARE_SIN`] of the base normal counts as square to it and is refused.
+fn onto_axis(base: Plane, at: Vec3, dir: Vec3) -> Result<Plane> {
+    let n = base.normal();
+    let along = n - dir * dir.dot(n);
+    let to = (along.len() > SQUARE_SIN)
+        .then(|| along.normalized())
+        .flatten()
+        .ok_or_else(|| DocError::Invalid("the axis is square to the plane, so no plane at an angle from it goes through the axis".into()))?;
+    let k = n.cross(to);
+    let (sin, cos) = (k.len(), n.dot(to));
+    let (x, y) = match k.normalized() {
+        Some(k) if sin > 1e-12 => {
+            let tilt = |v: Vec3| v * cos + k.cross(v) * sin + k * (k.dot(v) * (1.0 - cos));
+            (tilt(base.x), tilt(base.y))
+        }
+        _ => (base.x, base.y),
+    };
+    let origin = base.origin - to * to.dot(base.origin - at);
+    Plane::new(origin, x, y).ok_or_else(|| DocError::Invalid("degenerate plane".into()))
+}
+
 /// A standard part (fastener, pin, bearing) inserted as a component.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StandardPart {
@@ -4443,7 +4478,7 @@ impl Document {
                 let b = self.resolve_plane_in(vals, base, depth + 1, st)?;
                 Ok(b.offset(Self::eval_in(vals, distance, Kind::Length)?))
             }
-            PlaneRef::AtAngle { base, axis_origin, axis_dir, angle, line, direction_only, pivot } => {
+            PlaneRef::AtAngle { base, axis_origin, axis_dir, angle, line, direction_only, pivot, through_axis } => {
                 let b = self.resolve_plane_in(vals, base, depth + 1, st)?;
                 let a = Self::eval_in(vals, angle, Kind::Angle)?;
                 let (axis_origin, axis_dir) = match line {
@@ -4473,6 +4508,7 @@ impl Document {
                     let d = axis_dir.normalized().ok_or_else(|| DocError::Invalid("rotation axis".into()))?;
                     (axis_origin, d)
                 };
+                let b = if *through_axis && !*direction_only { onto_axis(b, axis_origin, d)? } else { b };
                 let rot = |v: Vec3| v * a.cos() + d.cross(v) * a.sin() + d * (d.dot(v) * (1.0 - a.cos()));
                 let o = axis_origin + rot(b.origin - axis_origin);
                 Plane::new(o, rot(b.x), rot(b.y)).ok_or_else(|| DocError::Invalid("degenerate plane".into()))

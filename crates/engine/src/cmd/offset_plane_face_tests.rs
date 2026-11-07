@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use crate::Session;
 use serde_json::{Value, json};
-use solidcore_record::Plane;
+use solidcore_record::{Plane, Vec3};
 use solidcraft_doc::construct::ConstructGeom;
 use solidcraft_doc::{Document, FeatureKind, PlaneRef};
 use solidcraft_geom::prelude::*;
@@ -173,6 +173,86 @@ fn plane_at_angle_from_a_planar_face_follows_the_face() {
     assert!((reopened_slanted.origin.y - -30.0 * half).abs() < 1e-9, "{reopened_slanted:?}");
     assert!((reopened_slanted.origin.z - 30.0 * half).abs() < 1e-9, "{reopened_slanted:?}");
     assert!((reopened_slanted.normal().y - (-half)).abs() < 1e-9, "{reopened_slanted:?}");
+}
+
+/// Plane at Angle about an edge off the base goes through that edge with `through_axis`, and
+/// keeps doing so as the edge moves; without it the base turns about the edge where it is (#6180).
+#[test]
+fn plane_at_angle_through_an_edge_off_the_base_goes_through_the_edge() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "name": "Base"}));
+    // The top front edge, along X at y = 0, z = 20; the base XY is 20 below it.
+    let edge = json!({"edge": [20, 0, 20]});
+    run(&mut s, "construct.plane.at_angle", json!({"base": "XY", "axis": edge, "angle": "45 deg", "through_axis": true, "name": "Through"}));
+    run(&mut s, "construct.plane.at_angle", json!({"base": "XY", "axis": edge, "angle": "45 deg", "name": "Turned"}));
+    let half = 1.0_f64 / 2.0_f64.sqrt();
+    let on_edge = |pl: &Plane, z: f64| [Vec3::new(0.0, 0.0, z), Vec3::new(40.0, 0.0, z)].map(|p| pl.height(p).abs());
+    let through = plane(&s, "Through");
+    assert!(on_edge(&through, 20.0).iter().all(|h| *h < 1e-9), "{through:?}");
+    assert!((through.normal().y - (-half)).abs() < 1e-9 && (through.normal().z - half).abs() < 1e-9, "{through:?}");
+    // Without the option: the same tilt, but still the box height off the edge, as before.
+    let turned = plane(&s, "Turned");
+    assert!(on_edge(&turned, 20.0).iter().all(|h| (h - 20.0).abs() < 1e-9), "{turned:?}");
+    assert!((turned.normal().z - through.normal().z).abs() < 1e-9, "{turned:?}");
+
+    // The edge rises with the box; the plane follows it, also saved and reopened.
+    run(&mut s, "timeline.edit", json!({"feature": "Base", "set": {"height": "30"}}));
+    let moved = plane(&s, "Through");
+    assert!(on_edge(&moved, 30.0).iter().all(|h| *h < 1e-9), "{moved:?}");
+    let reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(on_edge(&plane(&reopened, "Through"), 30.0).iter().all(|h| *h < 1e-9));
+    let FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { through_axis, .. } } = &reopened.doc.find_feature("Turned").unwrap().kind else {
+        panic!("at_angle plane")
+    };
+    assert!(!through_axis, "a plane made without the option keeps turning about the axis where it is");
+}
+
+/// An axis not parallel to the base: the base is tilted onto it, so the plane holds the whole
+/// axis at every angle. An axis square to the base has no such plane, and the option can't be
+/// mixed with `direction_only` (#6180).
+#[test]
+fn plane_at_angle_through_a_slanted_axis_holds_it_and_refuses_a_square_one() {
+    let mut s = Session::default();
+    let axis = json!({"origin": [0, 0, 10], "dir": [1, 0, 1]});
+    for (name, angle) in [("Flat", "0 deg"), ("Steep", "90 deg"), ("Odd", "33 deg")] {
+        run(&mut s, "construct.plane.at_angle", json!({"base": "XY", "axis": axis, "angle": angle, "through_axis": true, "name": name}));
+        let pl = plane(&s, name);
+        for p in [Vec3::new(0.0, 0.0, 10.0), Vec3::new(25.0, 0.0, 35.0), Vec3::new(-8.0, 0.0, 2.0)] {
+            assert!(pl.height(p).abs() < 1e-9, "{name}: {p:?} off {pl:?}");
+        }
+    }
+    // At 0° the least tilt: the normal stays square to Y, as close to Z as the axis allows.
+    let flat = plane(&s, "Flat");
+    let half = 1.0_f64 / 2.0_f64.sqrt();
+    assert!(flat.normal().y.abs() < 1e-9 && (flat.normal().z - half).abs() < 1e-9, "{flat:?}");
+
+    let features = s.doc.features.len();
+    let square = s.execute("construct.plane.at_angle", &json!({"base": "XY", "axis": "Z", "angle": "30 deg", "through_axis": true}));
+    assert!(square.is_err(), "{square:?}");
+    let both =
+        s.execute("construct.plane.at_angle", &json!({"base": "XY", "axis": axis, "angle": "30 deg", "through_axis": true, "direction_only": true}));
+    assert!(both.is_err(), "{both:?}");
+    // A string is not a yes, even with parameter checking off.
+    let text = s.execute("construct.plane.at_angle", &json!({"base": "XY", "axis": axis, "angle": "30 deg", "through_axis": "true"}));
+    assert!(text.is_err(), "{text:?}");
+    // An axis a hair off the normal is square too: which way to tilt would be rounding noise.
+    let hair = 1e-7_f64;
+    let near = json!({"origin": [0, 0, 0], "dir": [hair.sin(), 0, hair.cos()]});
+    let nearly = s.execute("construct.plane.at_angle", &json!({"base": "XY", "axis": near, "angle": "30 deg", "through_axis": true}));
+    assert!(nearly.is_err(), "{nearly:?}");
+    assert_eq!(s.doc.features.len(), features);
+    // A little further off, the plane stands up and holds the axis.
+    let tilt = 1e-5_f64;
+    let steep = json!({"origin": [3, 0, 0], "dir": [tilt.sin(), 0, tilt.cos()]});
+    run(&mut s, "construct.plane.at_angle", json!({"base": "XY", "axis": steep, "angle": "0 deg", "through_axis": true, "name": "Upright"}));
+    let upright = plane(&s, "Upright");
+    for t in [0.0, 50.0, -50.0] {
+        let p = Vec3::new(3.0 + t * tilt.sin(), 0.0, t * tilt.cos());
+        assert!(upright.height(p).abs() < 1e-9, "{p:?} off {upright:?}");
+    }
+    // Without the option, turning XY about Z stays a turn within the plane, as before.
+    run(&mut s, "construct.plane.at_angle", json!({"base": "XY", "axis": "Z", "angle": "30 deg", "name": "Spun"}));
+    assert!((plane(&s, "Spun").normal().z - 1.0).abs() < 1e-9);
 }
 
 #[test]
