@@ -20,6 +20,9 @@ pub const DEFAULT_PORT: u16 = 27878;
 /// Ports tried from [`DEFAULT_PORT`] upward when it is taken (a second window, another program).
 pub const PORT_TRIES: u16 = 16;
 
+/// The error a connection past the app's limit is refused with, unrun (docs/control-protocol.md).
+pub const TOO_MANY_CONNECTIONS: &str = "too many connections";
+
 /// Where the control channel listens, from the launch's `--control`/environment port and the
 /// "Let AI agents connect" preference.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
