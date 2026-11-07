@@ -569,3 +569,56 @@ fn single_holes_on_two_faces_share_a_parameter_typed_in_the_dialog() {
     assert!(!solid_at(&h, Vec3::new(30.0, 20.0, 17.0)) && !solid_at(&h, Vec3::new(25.0, 3.0, 10.0)), "both holes are drilled");
     assert!(solid_at(&h, Vec3::new(30.0, 20.0, 8.0)), "5 mm deep (and its drill point), not through");
 }
+
+/// Each hole's (diameter, depth, position) in History order.
+fn hole_fields(h: &Harness) -> Vec<(String, Option<String>, Vec3)> {
+    h.app
+        .session
+        .doc
+        .features
+        .iter()
+        .filter_map(|f| match &f.kind {
+            FeatureKind::Hole { diameter, depth, position, .. } => Some((diameter.to_string(), depth.as_ref().map(|d| d.to_string()), position.0)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn edit_holes_on_a_folder_changes_what_was_edited_in_every_hole_and_keeps_the_rest() {
+    let mut h = block_as_installed();
+    // Bore is through; the others are 4 and 6 mm deep.
+    h.app.run("solid.hole", json!({"position": [30, 8, 20], "diameter": 6, "depth": 4, "name": "A"})).unwrap();
+    h.app.run("solid.hole", json!({"position": [30, 22, 20], "diameter": 6, "depth": 6, "name": "B"})).unwrap();
+    let folder = h.app.run("timeline.group", json!({"name": "Holes", "features": ["Bore", "A", "B"]})).unwrap()["group"].as_u64().unwrap();
+    let before = hole_fields(&h);
+    h.step(&json!({"call": "ui.editFolder", "params": {"folder": "Holes"}})).unwrap();
+    h.frames(3);
+    let d = h.app.dialog.as_ref().expect("the Hole dialog opened");
+    assert!(d.editing.is_none() && d.inputs.is_empty(), "nothing to pick: each hole keeps its place");
+    assert_eq!(crate::hole_folder::summary(&h.app, d), Some((3, "Holes".to_string())));
+    // One redefinition per hole.
+    let cmds = crate::dialogs::apply_commands(&h.app, d).unwrap();
+    assert_eq!(cmds.iter().map(|(cmd, _)| cmd.as_str()).collect::<Vec<_>>(), ["timeline.redefine"; 3]);
+    match h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        Some(Kind::Hole { diameter, .. }) => *diameter = "4 mm".into(),
+        _ => panic!("the Hole dialog is open"),
+    }
+    h.step(&json!({"click": {"handle": "dialog:ok"}})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().map(|d| &d.error));
+    let after = hole_fields(&h);
+    assert_eq!(after.len(), 3);
+    for ((_, depth, position), (diameter, depth_now, position_now)) in before.iter().zip(&after) {
+        assert_eq!(diameter, "4 mm", "every hole takes the new diameter");
+        assert_eq!(depth, depth_now, "and keeps its own depth");
+        assert!(position.dist(*position_now) < 1e-9, "and its place");
+    }
+    assert!(!solid_at(&h, Vec3::new(31.5, 8.0, 18.0)) && solid_at(&h, Vec3::new(33.5, 8.0, 18.0)), "A is 4 mm wide now");
+    assert_eq!(h.app.session.doc.timeline_groups[0].id, folder, "still in their folder");
+    // A folder with anything but holes has no Edit Holes.
+    h.app.run("timeline.group", json!({"name": "Mixed", "features": [h.app.session.doc.features[0].id], "groups": [folder]})).unwrap();
+    let mixed = h.app.session.doc.timeline_groups.iter().find(|g| g.name == "Mixed").unwrap().id;
+    assert!(crate::hole_folder::holes(&h.app, mixed).is_none());
+    assert!(h.step(&json!({"call": "ui.editFolder", "params": {"folder": "Mixed"}})).is_err());
+}

@@ -397,8 +397,23 @@ fn polyline(verts: &[(Vec2, f64)], closed: bool, out: &mut Vec<Geom2>) {
     }
 }
 
-/// Write 2D geometry (millimetres) as an R12-style ASCII DXF.
-pub fn write_dxf(geom: &[Geom2]) -> String {
+/// Options for writing an R12-style ASCII DXF.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DxfWriteOptions {
+    /// DXF $INSUNITS: 1 in, 2 ft, 4 mm (default), 5 cm, 6 m.
+    pub insunits: i32,
+    /// Default layer name (default "0").
+    pub layer: String,
+}
+
+impl Default for DxfWriteOptions {
+    fn default() -> Self {
+        DxfWriteOptions { insunits: 4, layer: "0".to_string() }
+    }
+}
+
+/// Write 2D geometry with per-entity layer names as an R12-style ASCII DXF.
+pub fn write_dxf_entities(entities: &[(&str, Geom2)], insunits: i32) -> String {
     let mut s = String::new();
     let mut w = |c: i32, v: &str| {
         s.push_str(&format!("{c}\n{v}\n"));
@@ -406,22 +421,24 @@ pub fn write_dxf(geom: &[Geom2]) -> String {
     w(0, "SECTION");
     w(2, "HEADER");
     w(9, "$INSUNITS");
-    w(70, "4");
+    let insunits_str = insunits.to_string();
+    w(70, &insunits_str);
     w(0, "ENDSEC");
     w(0, "SECTION");
     w(2, "ENTITIES");
     let f = |x: f64| format!("{x:.9}");
-    for g in geom {
+    for (layer, g) in entities {
+        let lyr = if layer.trim().is_empty() { "0" } else { layer.trim() };
         match g {
             Geom2::Point(p) => {
                 w(0, "POINT");
-                w(8, "0");
+                w(8, lyr);
                 w(10, &f(p.x));
                 w(20, &f(p.y));
             }
             Geom2::Line(a, b) => {
                 w(0, "LINE");
-                w(8, "0");
+                w(8, lyr);
                 w(10, &f(a.x));
                 w(20, &f(a.y));
                 w(11, &f(b.x));
@@ -429,14 +446,14 @@ pub fn write_dxf(geom: &[Geom2]) -> String {
             }
             Geom2::Circle(c, r) => {
                 w(0, "CIRCLE");
-                w(8, "0");
+                w(8, lyr);
                 w(10, &f(c.x));
                 w(20, &f(c.y));
                 w(40, &f(*r));
             }
             Geom2::Arc { c, a, b } => {
                 w(0, "ARC");
-                w(8, "0");
+                w(8, lyr);
                 w(10, &f(c.x));
                 w(20, &f(c.y));
                 w(40, &f(c.dist(*a)));
@@ -445,7 +462,7 @@ pub fn write_dxf(geom: &[Geom2]) -> String {
             }
             Geom2::Text { text, at, height, angle } => {
                 w(0, "TEXT");
-                w(8, "0");
+                w(8, lyr);
                 w(10, &f(at.x));
                 w(20, &f(at.y));
                 w(40, &f(*height));
@@ -459,6 +476,18 @@ pub fn write_dxf(geom: &[Geom2]) -> String {
     w(0, "ENDSEC");
     w(0, "EOF");
     s
+}
+
+/// Write 2D geometry as an R12-style ASCII DXF with options.
+pub fn write_dxf_opts(geom: &[Geom2], opts: &DxfWriteOptions) -> String {
+    let layer = if opts.layer.trim().is_empty() { "0" } else { opts.layer.as_str() };
+    let entities: Vec<(&str, Geom2)> = geom.iter().cloned().map(|g| (layer, g)).collect();
+    write_dxf_entities(&entities, opts.insunits)
+}
+
+/// Write 2D geometry (millimetres) as an R12-style ASCII DXF.
+pub fn write_dxf(geom: &[Geom2]) -> String {
+    write_dxf_opts(geom, &DxfWriteOptions::default())
 }
 
 #[cfg(test)]
@@ -642,5 +671,29 @@ mod tests {
         );
         let g = read_dxf(&array).unwrap_or_default();
         assert!(g.is_empty(), "an empty block has no geometry to place");
+    }
+
+    #[test]
+    fn write_dxf_opts_and_entities_round_trip() {
+        let geom = vec![Geom2::Line(Vec2::ZERO, Vec2::new(25.4, 0.0)), Geom2::Circle(Vec2::new(12.7, 12.7), 6.35)];
+
+        // Default write_dxf: byte-identical check with write_dxf_opts default
+        let d0 = write_dxf(&geom);
+        let d1 = write_dxf_opts(&geom, &DxfWriteOptions::default());
+        assert_eq!(d0, d1);
+        assert!(d0.contains("\n8\n0\n"));
+        assert!(d0.contains("\n70\n4\n"));
+
+        // Custom layer and inch units (insunits = 1)
+        let opts = DxfWriteOptions { insunits: 1, layer: "CUT".to_string() };
+        let d_inch = write_dxf_opts(&geom, &opts);
+        assert!(d_inch.contains("\n8\nCUT\n"));
+        assert!(d_inch.contains("\n70\n1\n"));
+
+        // Per-entity layers with write_dxf_entities
+        let ents = vec![("OUTLINE", Geom2::Line(Vec2::ZERO, Vec2::new(10.0, 0.0))), ("CUT", Geom2::Circle(Vec2::new(5.0, 5.0), 2.0))];
+        let d_roles = write_dxf_entities(&ents, 4);
+        assert!(d_roles.contains("\n8\nOUTLINE\n"));
+        assert!(d_roles.contains("\n8\nCUT\n"));
     }
 }
