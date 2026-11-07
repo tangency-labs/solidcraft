@@ -470,8 +470,8 @@ given.
 - **Ball corners are one rational patch on the sphere**, box corners included.
 - **Overflow keeps the blend and moves the sharp edge**, matching the constant-radius overflow mode
   common CAD practice offers; keeping the edge is a future option.
-- **A boss or cut standing inside a round's band is kept by default** (its walls carried down to the
-  round); an option lets the round take it. Matches the "keep features" option of common practice.
+- **A boss or cut standing inside a round's band is kept** (its walls carried down to the round),
+  as the "keep features" option of common practice; letting the round take it is a future option.
 - **A partly selected tangent chain** rounds exactly the selected edges and ends at the smooth vertex
   with a real End.
 - **Folds are refused, never trimmed**, naming the radius.

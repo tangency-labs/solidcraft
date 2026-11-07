@@ -827,8 +827,7 @@ impl FilletSession<'_> {
             // the round is trimmed round it in place and sewn in instead of merged.
             // (not with an open G1 setback corner: the fork's ef57570)
             let open_setback = session.has_open_setback();
-            if k.fixes.fillet_keep_features
-                && !session.executive.cliff_overflow
+            if !session.executive.cliff_overflow
                 && !session.executive.open_ends.iter().any(|end| end.section)
                 && !open_setback
             {

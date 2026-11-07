@@ -19,12 +19,6 @@ use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::{edge, EdgeId};
 use solidcore::{Brep, Kernel, Result};
 
-fn kernel(keep: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_keep_features = keep;
-    k
-}
-
 /// The block with a boss 5 tall on its top, or a hole 5 deep in it.
 fn featured_block(k: &mut Kernel, boss: bool) -> Brep {
     let block = create_box(k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
@@ -123,23 +117,15 @@ fn wall_on_round(k: &Kernel, b: &Brep) -> f64 {
 
 /// One sound solid of volume `want` within `rel` with `faces` faces; with `reach`, the wall on
 /// the round all round its footprint.
-fn assert_feature_in_band(
-    boss: bool,
-    keep: bool,
-    r: f64,
-    want: f64,
-    rel: f64,
-    faces: usize,
-    reach: bool,
-) {
-    let mut k = kernel(keep);
+fn assert_feature_in_band(boss: bool, r: f64, want: f64, rel: f64, faces: usize, reach: bool) {
+    let mut k = Kernel::default();
     let mut b = featured_block(&mut k, boss);
     let e = pick(&k, &b, Point3::new(20.0, 0.0, 20.0));
     fillet_edges(&mut k, &mut b, &[e], r, 1, 1, 1.0).unwrap();
     let v = volume_of(&k, &mut b);
     let turned = wall_on_round(&k, &b);
     println!(
-        "boss {boss} keep {keep} r {r}: volume {v:.9}, want {want:.9}; {} faces, want {faces}; wall on the round {turned:.9}",
+        "boss {boss} r {r}: volume {v:.9}, want {want:.9}; {} faces, want {faces}; wall on the round {turned:.9}",
         b.face_list().len()
     );
     assert!((v - want).abs() <= rel * want, "volume {v}, want {want}");
@@ -165,47 +151,19 @@ fn assert_feature_in_band(
 #[test]
 fn the_boss_in_the_band_is_kept() {
     let want = featured_rounded(true, 8.0) + column_under_footprint();
-    assert_feature_in_band(true, true, 8.0, want, 1e-7, 9, true);
+    assert_feature_in_band(true, 8.0, want, 1e-7, 9, true);
 }
 
 #[test]
 fn the_hole_in_the_band_is_kept() {
     let want = featured_rounded(false, 8.0) + column_under_footprint();
-    assert_feature_in_band(false, true, 8.0, want, 1e-7, 9, true);
+    assert_feature_in_band(false, 8.0, want, 1e-7, 9, true);
 }
 
 #[test]
-fn with_keep_off_the_round_takes_the_boss() {
-    assert_feature_in_band(
-        true,
-        false,
-        8.0,
-        24000.0 - 40.0 * spandrel(8.0),
-        1e-9,
-        7,
-        false,
-    );
-}
-
-#[test]
-fn with_keep_off_the_round_takes_the_hole() {
-    assert_feature_in_band(
-        false,
-        false,
-        8.0,
-        24000.0 - 40.0 * spandrel(8.0),
-        1e-9,
-        7,
-        false,
-    );
-}
-
-#[test]
-fn a_band_short_of_the_feature_leaves_it_either_way() {
-    for keep in [false, true] {
-        for boss in [true, false] {
-            assert_feature_in_band(boss, keep, 1.9, featured_rounded(boss, 1.9), 1e-9, 9, false);
-        }
+fn a_band_short_of_the_feature_leaves_it() {
+    for boss in [true, false] {
+        assert_feature_in_band(boss, 1.9, featured_rounded(boss, 1.9), 1e-9, 9, false);
     }
 }
 
@@ -214,7 +172,7 @@ fn a_band_short_of_the_feature_leaves_it_either_way() {
 /// The opt-ins these figures rest on, found by removing every flag the figures don't need, so a
 /// new flag on `main` can't move them. Not `UpstreamFixes::all()`: it holds fixes the fork doesn't
 /// have.
-fn fork_kernel(keep: bool) -> Kernel {
+fn fork_kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut fixes = UpstreamFixes::default();
     fixes.fillet_refuse_rails_leaving_faces = true;
@@ -222,7 +180,6 @@ fn fork_kernel(keep: bool) -> Kernel {
     fixes.fillet_overflow_trim_at_creases = true;
     fixes.linear_sweep_arc_is_cylinder = true;
     fixes.precise_properties_body_length_scale = true;
-    fixes.fillet_keep_features = keep;
     k.fixes = fixes;
     k
 }
@@ -230,8 +187,8 @@ fn fork_kernel(keep: bool) -> Kernel {
 type Feature = fn(&mut Kernel, Brep) -> Result<Brep>;
 
 /// The block with a feature, its top front edge rounded `r`: the volume and the faces.
-fn rounded_with(keep: bool, feature: Feature, r: f64) -> Result<(f64, usize)> {
-    let mut k = fork_kernel(keep);
+fn rounded_with(feature: Feature, r: f64) -> Result<(f64, usize)> {
+    let mut k = fork_kernel();
     let block = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0)?;
     let mut b = feature(&mut k, block)?;
     let e = pick(&k, &b, Point3::new(5.0, 0.0, 20.0));
@@ -256,8 +213,8 @@ fn rounded_with(keep: bool, feature: Feature, r: f64) -> Result<(f64, usize)> {
 /// r 1.9 boss and hole are off by +2.0e-7 and -3.6e-7 (the fork's +4.4e-7 and -1.9e-7), and the
 /// r 8 kept cylinder boss and hole, cone boss and 19 degree lean stay 3.4e-5 to 4.8e-5 above
 /// theirs, the crease's fit, as the fork's do; the cone pit has none.
-fn assert_pinned(keep: bool, feature: Feature, r: f64, volume: f64, faces: usize) {
-    let (v, n) = rounded_with(keep, feature, r).unwrap();
+fn assert_pinned(feature: Feature, r: f64, volume: f64, faces: usize) {
+    let (v, n) = rounded_with(feature, r).unwrap();
     // Bit for bit where the figures were taken (Linux). Elsewhere the platform's libm can move
     // the last bit (one on Windows, the kept hole).
     if cfg!(target_os = "linux") {
@@ -275,6 +232,7 @@ fn assert_pinned(keep: bool, feature: Feature, r: f64, volume: f64, faces: usize
     assert_eq!(n, faces);
 }
 
+/// The block's round with neither feature; a kept feature's figure is this plus its own part.
 const TAKEN: f64 = 23450.619298757134;
 
 fn cylinder_boss(k: &mut Kernel, block: Brep) -> Result<Brep> {
@@ -309,37 +267,28 @@ fn cone_pit(k: &mut Kernel, block: Brep) -> Result<Brep> {
 
 #[test]
 fn cylinders_keep_their_pinned_volumes() {
-    assert_pinned(true, cylinder_boss, 8.0, 23528.165527753492, 9);
-    assert_pinned(true, cylinder_hole, 8.0, 23402.501835298488, 9);
-    assert_pinned(false, cylinder_boss, 8.0, TAKEN, 7);
-    assert_pinned(false, cylinder_hole, 8.0, TAKEN, 7);
-    for keep in [true, false] {
-        assert_pinned(keep, cylinder_boss, 1.9, 24031.84334806833, 9);
-        assert_pinned(keep, cylinder_hole, 1.9, 23906.179641369188, 9);
-    }
+    assert_pinned(cylinder_boss, 8.0, 23528.165527753492, 9);
+    assert_pinned(cylinder_hole, 8.0, 23402.501835298488, 9);
+    assert_pinned(cylinder_boss, 1.9, 24031.84334806833, 9);
+    assert_pinned(cylinder_hole, 1.9, 23906.179641369188, 9);
 }
 
 /// Planar walls: each crease is an exact section.
 #[test]
 fn prisms_keep_their_pinned_volumes() {
-    assert_pinned(true, prism_boss, 8.0, 23549.896259768986, 12);
-    assert_pinned(true, prism_pocket, 8.0, 23389.896259952173, 12);
-    assert_pinned(false, prism_boss, 8.0, TAKEN, 7);
-    assert_pinned(false, prism_pocket, 8.0, TAKEN, 7);
+    assert_pinned(prism_boss, 8.0, 23549.896259768986, 12);
+    assert_pinned(prism_pocket, 8.0, 23389.896259952173, 12);
 }
 
 /// Walls that lean: kept as the fork keeps them, the boss's with no refusal.
 #[test]
 fn cones_keep_their_pinned_volumes() {
-    assert_pinned(true, cone_boss, 8.0, 23501.985588856085, 11);
-    assert_pinned(true, cone_pit, 8.0, 23427.54088939281, 9);
-    assert_pinned(false, cone_boss, 8.0, TAKEN, 7);
-    assert_pinned(false, cone_pit, 8.0, TAKEN, 7);
+    assert_pinned(cone_boss, 8.0, 23501.985588856085, 11);
+    assert_pinned(cone_pit, 8.0, 23427.54088939281, 9);
 }
 
 /// A boss's walls count as upright within the fillet's angular tolerance: at 19 degrees off they
-/// are carried down, at 30 and 45 the round is refused with the flag on and takes the boss with it
-/// off, as the fork.
+/// are carried down, at 30 and 45 the round is refused, as the fork.
 #[test]
 fn a_boss_leaning_past_the_angular_tolerance_is_refused_as_the_fork() {
     fn lean_19(k: &mut Kernel, block: Brep) -> Result<Brep> {
@@ -354,27 +303,23 @@ fn a_boss_leaning_past_the_angular_tolerance_is_refused_as_the_fork() {
         let c = create_cone(k, Point3::new(20.0, 4.0, 20.0), 2.0, 1.0, 1.0)?;
         boolean_union(k, block, c)
     }
-    assert_pinned(true, lean_19, 8.0, 23486.59179069601, 11);
-    assert_pinned(false, lean_19, 8.0, TAKEN, 7);
+    assert_pinned(lean_19, 8.0, 23486.59179069601, 11);
     for steep in [lean_30 as Feature, lean_45] {
-        assert!(rounded_with(true, steep, 8.0).is_err());
-        assert_pinned(false, steep, 8.0, TAKEN, 7);
+        assert!(rounded_with(steep, 8.0).is_err());
     }
 }
 
-/// A boss astride the round's contact line: refused with the flag on or off, as the fork.
+/// A boss astride the round's contact line: refused, as the fork.
 #[test]
 fn a_boss_astride_the_contact_line_is_refused_as_the_fork() {
     fn astride(k: &mut Kernel, block: Brep) -> Result<Brep> {
         let c = create_box(k, Point3::new(18.0, 6.0, 20.0), 4.0, 4.0, 5.0)?;
         boolean_union(k, block, c)
     }
-    for keep in [true, false] {
-        assert!(rounded_with(keep, astride, 8.0).is_err(), "keep {keep}");
-    }
+    assert!(rounded_with(astride, 8.0).is_err());
 }
 
-/// A pocket astride the contact line stands with the flag on or off, as the fork. This figure is
+/// A pocket astride the contact line stands, as the fork. This figure is
 /// the fork's at 5e8c9c1: this round is a cliff overflow, trimmed at its creases since step 6
 /// (WR-695), which runs none of keep features (23371.292359325398 at eb883ad).
 #[test]
@@ -383,9 +328,7 @@ fn a_pocket_astride_the_contact_line_matches_the_fork() {
         let c = create_box(k, Point3::new(18.0, 6.0, 15.0), 4.0, 4.0, 6.0)?;
         boolean_difference(k, block, c)
     }
-    for keep in [true, false] {
-        assert_pinned(keep, astride, 8.0, 23371.292359915951, 12);
-    }
+    assert_pinned(astride, 8.0, 23371.292359915951, 12);
 }
 
 // ---- Work ----
@@ -402,7 +345,7 @@ fn walls_are_read_from_one_copy_per_body() {
         let boss = create_box(k, Point3::new(28.0, 2.0, 20.0), 4.0, 4.0, 5.0)?;
         boolean_union(k, block, boss)
     }
-    let mut k = fork_kernel(true);
+    let mut k = fork_kernel();
     let block = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 40.0, 30.0, 20.0).unwrap();
     let mut b = pocket_and_boss(&mut k, block).unwrap();
     let e = pick(&k, &b, Point3::new(20.0, 0.0, 20.0));

@@ -198,12 +198,12 @@ fn swept_net() -> BSplineSurface {
 }
 
 /// SolidCraft's own fix profile at its `ws/pin-16`: every flag on but the two it holds
-/// back, `fillet_keep_features` and `fillet_refuse_rounds_breaking_through`, as
-/// `issue_2370_keep_features_band_clear_of_boss` names that profile. The issue measured
+/// back, `fillet_refuse_rounds_breaking_through` and keep features (the default since
+/// #2426, so no longer held back here), as `issue_2370_keep_features_band_clear_of_boss`
+/// names that profile. The issue measured
 /// through SolidCraft, so this is the set its refusal came from.
 fn solidcraft_fixes() -> UpstreamFixes {
     let mut fixes = UpstreamFixes::all();
-    fixes.fillet_keep_features = false;
     fixes.fillet_refuse_rounds_breaking_through = false;
     fixes
 }

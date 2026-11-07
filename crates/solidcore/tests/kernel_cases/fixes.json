@@ -288,7 +288,6 @@
   "boolean_coincident_strip_drops_crossing",
   "ascii_doubles_round_trip",
   "fillet_round_ends_at_tangent_continuation",
-  "fillet_keep_features",
   "fillet_gn_section_generator",
   "fillet_round_as_definition",
   "fillet_exact_arc_sections",

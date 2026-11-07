@@ -1,4 +1,4 @@
-//! #2370: with `fillet_keep_features` (WR-703) on, a round whose band never reaches a boss on
+//! #2370: with keep features (WR-703), a round whose band never reaches a boss on
 //! its face was refused (`SM_ERR_INVALID_INPUT`). A 30 x 20 x 8 block with a boss r 6 about
 //! (10, 10) standing to z 20, its front top edge (y = 0, z = 8) rounded r 3: the band on the
 //! top runs y 0..3, the boss's footprint y 4..16.
@@ -27,16 +27,13 @@ use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::{loopuse, EdgeId, EdgeuseId, FaceId};
 use solidcore::{Brep, Kernel};
 
-/// Default fixes, or every fix on but WR-707 (SolidCraft's profile at its ws/pin-16, whose
-/// `HELD_BACK` is `fillet_keep_features` and `fillet_refuse_rounds_breaking_through`), with
-/// `fillet_keep_features` as given.
-fn kernel(solidcraft: bool, keep: bool) -> Kernel {
+/// Default fixes, or every fix on but WR-707 (SolidCraft's profile at its ws/pin-16).
+fn kernel(solidcraft: bool) -> Kernel {
     let mut k = Kernel::default();
     if solidcraft {
         k.fixes = UpstreamFixes::all();
         k.fixes.fillet_refuse_rounds_breaking_through = false;
     }
-    k.fixes.fillet_keep_features = keep;
     k
 }
 
@@ -119,8 +116,8 @@ fn closed_form(hole: bool) -> f64 {
 }
 
 /// The front top edge rounded r 3 as SolidCraft rounds it (`SmApiFilletEdgesPerEdge`'s session
-/// steps, a circular section): one sound solid of the closed form's volume. Returns the volume.
-fn round_front_top(mut k: Kernel, mut b: Brep, hole: bool) -> f64 {
+/// steps, a circular section): one sound solid of the closed form's volume.
+fn round_front_top(mut k: Kernel, mut b: Brep, hole: bool) {
     let e = pick(&k, &b, Point3::new(15.0, 0.0, 8.0));
     fillet_edges_per_edge(
         &mut k,
@@ -141,40 +138,31 @@ fn round_front_top(mut k: Kernel, mut b: Brep, hole: bool) -> f64 {
         .unwrap()
         .lines();
     assert!(lines.is_empty(), "{lines:?}");
-    v
 }
 
-/// With keep on the round is the one keep off builds, to the bit: no feature is kept.
-fn assert_as_without_keep(solidcraft: bool, body: impl Fn(&mut Kernel) -> Brep, hole: bool) {
-    let mut on = kernel(solidcraft, true);
-    let b = body(&mut on);
-    let v_on = round_front_top(on, b, hole);
-    let mut off = kernel(solidcraft, false);
-    let b = body(&mut off);
-    let v_off = round_front_top(off, b, hole);
-    assert_eq!(
-        v_on.to_bits(),
-        v_off.to_bits(),
-        "keep on {v_on}, off {v_off}"
-    );
+/// No feature is kept: the round is the closed form's.
+fn assert_rounds_clear(solidcraft: bool, body: impl Fn(&mut Kernel) -> Brep, hole: bool) {
+    let mut k = kernel(solidcraft);
+    let b = body(&mut k);
+    round_front_top(k, b, hole);
 }
 
 #[test]
 fn solidcraft_body_rounds_clear_of_the_boss() {
-    assert_as_without_keep(true, solidcraft_body, false);
+    assert_rounds_clear(true, solidcraft_body, false);
 }
 
 #[test]
 fn solidcraft_body_rounds_clear_of_the_boss_default_fixes() {
-    assert_as_without_keep(false, solidcraft_body, false);
+    assert_rounds_clear(false, solidcraft_body, false);
 }
 
 #[test]
 fn primitive_body_rounds_clear_of_the_boss() {
-    assert_as_without_keep(true, |k| primitive_body(k, false), false);
+    assert_rounds_clear(true, |k| primitive_body(k, false), false);
 }
 
 #[test]
 fn primitive_body_with_a_hole_rounds_clear_of_the_boss() {
-    assert_as_without_keep(true, |k| primitive_body(k, true), true);
+    assert_rounds_clear(true, |k| primitive_body(k, true), true);
 }
