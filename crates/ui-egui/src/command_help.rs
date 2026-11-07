@@ -36,6 +36,7 @@ pub const DOCUMENTED: &[&str] = &[
     "construct.plane.at_angle",
     "construct.plane.axis_point",
     "construct.plane.midplane",
+    "construct.plane.normal_to_axis",
     "construct.plane.offset",
     "construct.plane.perpendicular",
     "construct.plane.tangent",

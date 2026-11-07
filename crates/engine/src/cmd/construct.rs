@@ -16,8 +16,9 @@ use super::features::{add_feature, check_expr, plane_param, sketch_id};
 use crate::params::{bad, req_expr, str_, vec3};
 use crate::schema::construct::{
     AxisEdgeParams, AxisNormalToFaceParams, AxisThroughCylinderParams, AxisTwoPlanesParams, AxisTwoPointsParams, MidplaneParams,
-    PlaneAlongPathParams, PlaneAxisPointParams, PlanePerpendicularParams, PlaneTangentParams, PlaneThreePointsParams, PlaneTwoEdgesParams,
-    PointAlongPathParams, PointCenterParams, PointEdgePlaneParams, PointThreePlanesParams, PointTwoEdgesParams, PointVertexParams,
+    PlaneAlongPathParams, PlaneAxisPointParams, PlaneNormalToAxisParams, PlanePerpendicularParams, PlaneTangentParams, PlaneThreePointsParams,
+    PlaneTwoEdgesParams, PointAlongPathParams, PointCenterParams, PointEdgePlaneParams, PointThreePlanesParams, PointTwoEdgesParams,
+    PointVertexParams,
 };
 use crate::schema::features::FeatureResult;
 use crate::schema::{TypedContract, output_schema_for};
@@ -44,6 +45,7 @@ const PLANE_THREE_POINTS_CONTRACT: TypedContract<PlaneThreePointsParams> = Typed
 const PLANE_TANGENT_CONTRACT: TypedContract<PlaneTangentParams> = TypedContract::new();
 const PLANE_ALONG_PATH_CONTRACT: TypedContract<PlaneAlongPathParams> = TypedContract::new();
 const PLANE_PERPENDICULAR_CONTRACT: TypedContract<PlanePerpendicularParams> = TypedContract::new();
+const PLANE_NORMAL_TO_AXIS_CONTRACT: TypedContract<PlaneNormalToAxisParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("construct.axis.through_cylinder", "Axis Through Cylinder/Cone/Torus", crate::checked!("construct.axis.through_cylinder", axis_face))
@@ -156,6 +158,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "plane: plane or planar face ref; line: straight edge, sketch line or axis ref; name? The plane holds the line and is square to the plane",
         ),
+    CommandSpec::new("construct.plane.normal_to_axis", "Plane Normal To Axis", crate::checked!("construct.plane.normal_to_axis", plane_normal_to_axis))
+        .at("SOLID", "CONSTRUCT")
+        .icon("plane_normal_to_axis")
+        .contract(&PLANE_NORMAL_TO_AXIS_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params("axis: straight edge, sketch line or axis ref; point: point ref (vertex, sketch point, point); name? The plane is square to the axis, through the point"),
 ];
 
 /// Whether [`model_axis_param`] reads `v` as an edge or face of the model: `{edge: …}`,
@@ -435,4 +443,18 @@ fn plane_perpendicular(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "construct.plane.perpendicular";
     let (base, line) = (geo(s, p.get("plane"), cmd, "plane")?, geo(s, p.get("line"), cmd, "line")?);
     plane(s, p, PlaneRef::Perpendicular { plane: Box::new(base), line: Box::new(line) })
+}
+
+fn plane_normal_to_axis(s: &mut Session, p: &Value) -> Result<Value> {
+    let kind = plane_normal_to_axis_kind(s, p)?;
+    add_feature(s, p, kind)
+}
+
+/// Shared parser for the constructor and its world-to-authoring-frame boundary, as
+/// `plane_axis_point_kind`.
+pub(crate) fn plane_normal_to_axis_kind(s: &Session, p: &Value) -> Result<FeatureKind> {
+    let cmd = "construct.plane.normal_to_axis";
+    let axis = geo(s, p.get("axis"), cmd, "axis")?;
+    let point = geo(s, p.get("point"), cmd, "point")?;
+    Ok(FeatureKind::ConstructionPlane { plane: PlaneRef::NormalToAxis { axis: Box::new(axis), point: Box::new(point) } })
 }

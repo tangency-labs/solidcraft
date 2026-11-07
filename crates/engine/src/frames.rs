@@ -49,6 +49,10 @@ enum K {
 
 use K::*;
 
+/// The plane commands that take an `axis` and a `point` reference, mapped to the active
+/// component's frame as one parsed definition (#10178, #11134).
+const AXIS_AND_POINT: [&str; 2] = ["construct.plane.axis_point", "construct.plane.normal_to_axis"];
+
 /// What `timeline.redefine` maps for a surface revolve, which no command is called.
 const SURFACE_REVOLVE_EDIT: &str = "surface.revolve (edit)";
 
@@ -426,7 +430,7 @@ impl Nested {
         });
         if outer {
             let inner = if id == "timeline.redefine" { None } else { Some(id) };
-            MAPPED.with(|m| m.set(inner.is_none_or(|i| !table(i).is_empty() || i == "construct.plane.axis_point")));
+            MAPPED.with(|m| m.set(inner.is_none_or(|i| !table(i).is_empty() || AXIS_AND_POINT.contains(&i))));
             OUTER_MOVE.with(|m| m.set(id == "solid.move"));
         }
         (Nested, outer)
@@ -612,13 +616,19 @@ fn map_local(s: &Session, world: &solidcraft_doc::ModelState, id: &str, params: 
     {
         return None;
     }
-    if id == "construct.plane.axis_point" && placed(s) {
+    if AXIS_AND_POINT.contains(&id) && placed(s) {
         // Construction references include tagged saved forms as well as pick wrappers.
         // Map the parsed definition once at the boundary, including a nested Edit Feature.
         // The constructor can then name local model picks and retain their exact references.
-        let mut kind = crate::cmd::plane_axis_point_kind(s, params).ok()?;
+        let mut kind = if id == "construct.plane.axis_point" {
+            crate::cmd::plane_axis_point_kind(s, params).ok()?
+        } else {
+            crate::cmd::plane_normal_to_axis_kind(s, params).ok()?
+        };
         kind.transform_geometry(&mat_inverse(&s.active_component_frame())?);
-        let solidcraft_doc::FeatureKind::ConstructionPlane { plane: solidcraft_doc::PlaneRef::AxisPoint { axis, point } } = kind else {
+        let (solidcraft_doc::FeatureKind::ConstructionPlane { plane: solidcraft_doc::PlaneRef::AxisPoint { axis, point } }
+        | solidcraft_doc::FeatureKind::ConstructionPlane { plane: solidcraft_doc::PlaneRef::NormalToAxis { axis, point } }) = kind
+        else {
             return None;
         };
         let mut out = params.clone();

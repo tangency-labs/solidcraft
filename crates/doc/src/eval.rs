@@ -8410,6 +8410,7 @@ fn plane_reads_geometry(plane: &PlaneRef) -> bool {
         | PlaneRef::Tangent { .. }
         | PlaneRef::AlongPath { .. }
         | PlaneRef::Perpendicular { .. }
+        | PlaneRef::NormalToAxis { .. }
         | PlaneRef::Face { .. } => true,
     }
 }

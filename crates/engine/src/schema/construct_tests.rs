@@ -2,8 +2,9 @@ use serde_json::{Value, json};
 
 use super::{
     AxisEdgeParams, AxisNormalToFaceParams, AxisThroughCylinderParams, AxisTwoPlanesParams, AxisTwoPointsParams, MidplaneParams,
-    PlaneAlongPathParams, PlaneAxisPointParams, PlanePerpendicularParams, PlaneTangentParams, PlaneThreePointsParams, PlaneTwoEdgesParams,
-    PointAlongPathParams, PointCenterParams, PointEdgePlaneParams, PointThreePlanesParams, PointTwoEdgesParams, PointVertexParams,
+    PlaneAlongPathParams, PlaneAxisPointParams, PlaneNormalToAxisParams, PlanePerpendicularParams, PlaneTangentParams, PlaneThreePointsParams,
+    PlaneTwoEdgesParams, PointAlongPathParams, PointCenterParams, PointEdgePlaneParams, PointThreePlanesParams, PointTwoEdgesParams,
+    PointVertexParams,
 };
 use crate::Session;
 use crate::schema::features::FeatureResult;
@@ -30,6 +31,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<PlaneTangentParams>(), &["angle", "at", "face", "name", "participants", "reference"]);
     assert_keys(input_schema_for::<PlaneAlongPathParams>(), &["name", "participants", "path", "t"]);
     assert_keys(input_schema_for::<PlanePerpendicularParams>(), &["line", "name", "participants", "plane"]);
+    assert_keys(input_schema_for::<PlaneNormalToAxisParams>(), &["axis", "name", "participants", "point"]);
 }
 
 #[test]
@@ -96,6 +98,8 @@ fn construction_features_reply_with_feature_result() {
         run("construct.plane.tangent", json!({"face": {"face": [30, 5, 5]}, "at": [30, 6, 5], "participants": ["Body1"]})),
         run("construct.plane.along_path", json!({"path": {"edge": [5, 0, 0]}})),
         run("construct.plane.perpendicular", json!({"plane": "XY", "line": {"edge": [5, 0, 0]}})),
+        run("construct.plane.normal_to_axis", json!({"axis": {"edge": [5, 0, 0]}, "point": {"vertex": [10, 10, 10]}})),
+        run("construct.plane.normal_to_axis", json!({"axis": {"sketch": sketch, "curve": curve}, "point": {"construct_point": "Corner"}})),
         // The offset and at-angle planes' contracts are in schema/features.rs; they run here
         // because they use this design's `Top`, its faces and the `Bore` axis.
         run("construct.plane.offset", json!({"base": "Top", "offset": 5, "name": "Shelf"})),

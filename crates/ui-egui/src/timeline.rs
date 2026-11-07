@@ -222,6 +222,7 @@ fn construction_plane_icon(plane: &PlaneRef) -> &'static str {
         PlaneRef::Tangent { .. } => "plane_tangent",
         PlaneRef::AlongPath { .. } => "plane_along_path",
         PlaneRef::Perpendicular { .. } => "plane_perpendicular",
+        PlaneRef::NormalToAxis { .. } => "plane_normal_to_axis",
         _ => "plane",
     }
 }
@@ -1521,6 +1522,7 @@ mod tests {
             ("tangent", PlaneRef::Tangent { face: reference(), at: Vec3::ZERO, reference: None, angle: None }),
             ("along_path", PlaneRef::AlongPath { path: reference(), t: "0.5".into() }),
             ("perpendicular", PlaneRef::Perpendicular { plane: reference(), line: reference() }),
+            ("normal_to_axis", PlaneRef::NormalToAxis { axis: reference(), point: reference() }),
         ] {
             cases.push((format!("construct.plane.{id}"), FeatureKind::ConstructionPlane { plane }));
         }

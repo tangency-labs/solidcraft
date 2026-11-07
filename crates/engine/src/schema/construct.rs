@@ -254,6 +254,20 @@ pub struct PlanePerpendicularParams {
     pub common: PlaneCommon,
 }
 
+/// Add a construction plane square to a line, through a point.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct PlaneNormalToAxisParams {
+    /// The line the plane is square to: a straight edge, a sketch line, X, Y, Z or a
+    /// construction axis (a circular edge or a cylinder, cone or torus face gives its axis).
+    pub axis: GeoRefParam,
+    /// The point the plane goes through (its origin): a vertex, a sketch point, a construction
+    /// point or a fixed point, on the line or off it.
+    pub point: GeoRefParam,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: PlaneCommon,
+}
+
 #[cfg(test)]
 #[path = "construct_tests.rs"]
 mod tests;
