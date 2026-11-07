@@ -2129,6 +2129,23 @@ fn the_edit_dialog_sets_and_shows_a_joints_dynamics() {
 }
 
 #[test]
+fn find_limits_leaves_the_dynamics_out() {
+    let mut app = two_boxes();
+    let (a, b) = (occ(&app, "A"), occ(&app, "B"));
+    app.run(
+        "joint.create",
+        json!({"type": "revolute", "a": {"occurrence": a, "face": [10, 10, 10]}, "b": {"occurrence": b, "face": [40, 10, 0]}, "name": "J"}),
+    )
+    .unwrap();
+    let id = app.session.doc.assembly.joints[0].id;
+    let mut d = edit_joint(&app, id).unwrap();
+    let Kind::Assembly(Asm::Joint(f)) = &mut d.kind else { panic!("not a joint") };
+    f.dynamics[0][0] = "0".into();
+    let commands = edit_commands(&app, f, &d.inputs).unwrap();
+    assert!(commands.iter().all(|(c, _)| c != "joint.dynamics" && c != "joint.limits"), "{commands:?}");
+}
+
+#[test]
 fn a_mistyped_dynamics_value_is_refused_with_a_message() {
     let mut app = two_boxes();
     let (a, b) = (occ(&app, "A"), occ(&app, "B"));
@@ -2139,8 +2156,10 @@ fn a_mistyped_dynamics_value_is_refused_with_a_message() {
     .unwrap();
     let id = app.session.doc.assembly.joints[0].id;
     let mut d = edit_joint(&app, id).unwrap();
-    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
-        f.dynamics[0][0] = "lots".into();
+    for typed in ["lots", "nan", "inf", "-inf"] {
+        if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+            f.dynamics[0][0] = typed.into();
+        }
+        assert!(apply_commands(&app, &d).is_err(), "{typed}");
     }
-    assert!(apply_commands(&app, &d).is_err());
 }

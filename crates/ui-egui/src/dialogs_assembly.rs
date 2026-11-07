@@ -1632,10 +1632,10 @@ fn find_limits_row(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut JointForm, id:
 }
 
 /// The commands OK would run for the joint as the dialog has it (its sides as picked in
-/// `inputs`), but its limits (what Find Limits fills in).
+/// `inputs`), but its limits (what Find Limits fills in) and dynamics (Find Limits doesn't use them).
 fn edit_commands(app: &SolveApp, f: &JointForm, inputs: &[SelInput]) -> Result<Vec<(String, Value)>, String> {
     let edit = Dialog::new(Kind::Assembly(Asm::Joint(Box::new(f.clone()))), inputs.to_vec());
-    Ok(crate::dialogs::apply_commands(app, &edit)?.into_iter().filter(|(id, _)| id != "joint.limits").collect())
+    Ok(crate::dialogs::apply_commands(app, &edit)?.into_iter().filter(|(id, _)| id != "joint.limits" && id != "joint.dynamics").collect())
 }
 
 /// Find Limits: on a copy of the design, the joint as the dialog has it now (its type and
@@ -2017,7 +2017,8 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                     let mut p = json!({"joint": id, "index": i});
                     for (key, text) in ["effort", "velocity", "damping", "friction"].into_iter().zip(row) {
                         if !text.trim().is_empty() {
-                            let x: f64 = text.trim().parse().map_err(|_| format!("{}: {text}", crate::i18n::tr_label("Not a number")))?;
+                            let x = text.trim().parse::<f64>().ok().filter(|x| x.is_finite());
+                            let x = x.ok_or_else(|| format!("{}: {text}", crate::i18n::tr_label("Not a number")))?;
                             p[key] = json!(x);
                         }
                     }

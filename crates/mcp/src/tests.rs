@@ -561,6 +561,13 @@ fn export_tool_writes_a_urdf_package() {
     // effort and velocity reach file.export, which refuses a bad one.
     let r = raw_tool(&mut s, "export", json!({"path": urdf.to_string_lossy(), "effort": -1}));
     assert_eq!(r["result"]["isError"], json!(true), "{r}");
+    // place_meshes reaches file.export too: false keeps the meshes beside the URDF.
+    let beside = dir.join("beside");
+    std::fs::create_dir_all(&beside).unwrap();
+    let urdf = beside.join("robot.urdf");
+    tool(&mut s, "export", json!({"path": urdf.to_string_lossy(), "mesh_prefix": "meshes/", "place_meshes": false}));
+    assert!(beside.join("robot-base.stl").exists());
+    assert!(!beside.join("meshes").exists());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
