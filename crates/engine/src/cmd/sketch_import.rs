@@ -377,6 +377,44 @@ mod tests {
         }
     }
 
+    /// #11119: a closed SPLINE with more control points than a sketch spline holds keeps its
+    /// whole loop, ends and all, so it still makes a profile; the tail was cut off before, which
+    /// left an outline of open splines that cannot be extruded.
+    #[test]
+    fn a_closed_spline_with_too_many_control_points_still_closes() {
+        let n = solidcraft_sketch::MAX_SPLINE_POINTS * 3;
+        let mut points = String::new();
+        for i in 0..=n {
+            let a = std::f64::consts::TAU * (i % n) as f64 / n as f64;
+            points.push_str(&format!("10
+{}
+20
+{}
+", 30.0 * a.cos(), 30.0 * a.sin()));
+        }
+        let dxf = format!("0
+SECTION
+2
+ENTITIES
+0
+SPLINE
+70
+11
+71
+3
+{points}0
+ENDSEC
+0
+EOF
+");
+        let mut s = Session::default();
+        let r = s.execute("sketch.insert_dxf", &json!({"text": dxf})).unwrap();
+        let sk = s.model.state().sketch(r["sketch"].as_u64().unwrap()).unwrap().clone();
+        assert_eq!(sk.profiles.len(), 1, "the loop closes into one profile: {r}");
+        let want = std::f64::consts::PI * 900.0;
+        assert!((sk.profiles[0].area - want).abs() < want * 0.01, "{} vs {want}", sk.profiles[0].area);
+    }
+
     /// #10874: a drawing with more entities than a sketch can hold is refused with the point
     /// cap and that scale alone does not help (a floorplan SVG often hits this).
     #[test]
