@@ -1755,6 +1755,22 @@ pub fn command_note(s: &Session, cmd: &str, reply: &Value) -> Option<(String, bo
     joint_conflict(s, cmd, reply).map(|why| (why, true))
 }
 
+/// Why ungrounding left a part where it was: each joint holding it that the solve skips, and why
+/// (`None`: the reply of `occurrence.ground` warns of none).
+pub fn ground_note(s: &Session, reply: &Value) -> Option<String> {
+    reply.get("warning")?;
+    let id = reply.get("occurrence").and_then(Value::as_u64);
+    let part = s.doc.occurrences.iter().find(|o| Some(o.id) == id).map(|o| o.name.as_str()).unwrap_or_default();
+    let text = |j: &Value, key: &str| j.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
+    let said: Vec<String> = reply
+        .get("skipped")?
+        .as_array()?
+        .iter()
+        .map(|j| crate::i18n::format("joint.skips_part", &[("joint", &text(j, "name")), ("part", part), ("why", &text(j, "why"))]))
+        .collect();
+    (!said.is_empty()).then(|| said.join("; "))
+}
+
 /// What a drive that stopped short of the asked values says: where the joint got to and why
 /// (`None`: it went all the way). `reply` is `joint.drive`'s result. A drive whose joint is
 /// joined to nothing grounded moves nothing, and says which part that is.
