@@ -1,0 +1,42 @@
+{
+  "en": {
+    "joint.both_grounded": "{joint} moves neither part: both are grounded ({a}, {b}). Unground one to let the joint place it.",
+    "joint.conflicts": "{joint} doesn't hold: {why}",
+    "joint.unground": "Unground {part}"
+  },
+  "ar": {
+    "joint.both_grounded": "لا يحرّك {joint} أيًّا من الجزأين: كلاهما مثبّت بالأرض ({a}، {b}). فُكّ تثبيت أحدهما ليضعه المفصل في مكانه.",
+    "joint.conflicts": "لا يتحقق {joint}: {why}",
+    "joint.unground": "فك تثبيت {part} بالأرض"
+  },
+  "de": {
+    "joint.both_grounded": "{joint} bewegt keines der beiden Teile: Beide sind festgesetzt ({a}, {b}). Lösen Sie die Fixierung eines Teils, damit das Gelenk es platziert.",
+    "joint.conflicts": "{joint} hält nicht: {why}",
+    "joint.unground": "Fixierung von {part} lösen"
+  },
+  "he": {
+    "joint.both_grounded": "{joint} לא מזיז אף אחד מהחלקים: שניהם מעוגנים ({a}, {b}). בטלו את העיגון של אחד מהם כדי שהמפרק ימקם אותו.",
+    "joint.conflicts": "{joint} לא מתקיים: {why}",
+    "joint.unground": "ביטול עיגון של {part}"
+  },
+  "ja": {
+    "joint.both_grounded": "{joint} はどちらの部品も動かしません: 両方とも空間固定されています ({a}, {b})。ジョイントで配置するには、どちらかの固定を解除してください。",
+    "joint.conflicts": "{joint} が成り立ちません: {why}",
+    "joint.unground": "{part} の固定を解除"
+  },
+  "ko": {
+    "joint.both_grounded": "{joint}은(는) 어느 부품도 움직이지 않습니다: 둘 다 고정되어 있습니다({a}, {b}). 관절이 배치하도록 하나의 고정을 해제하세요.",
+    "joint.conflicts": "{joint}이(가) 성립하지 않습니다: {why}",
+    "joint.unground": "{part} 고정 해제"
+  },
+  "vi": {
+    "joint.both_grounded": "{joint} không di chuyển chi tiết nào: cả hai đều đã cố định ({a}, {b}). Hủy cố định một chi tiết để khớp nối đặt nó vào vị trí.",
+    "joint.conflicts": "{joint} không được thỏa mãn: {why}",
+    "joint.unground": "Hủy cố định {part}"
+  },
+  "zh": {
+    "joint.both_grounded": "{joint} 不移动任何一个零件：两者都已固定（{a}、{b}）。请取消其中一个的固定，让接头放置它。",
+    "joint.conflicts": "{joint} 无法满足：{why}",
+    "joint.unground": "取消固定 {part}"
+  }
+}

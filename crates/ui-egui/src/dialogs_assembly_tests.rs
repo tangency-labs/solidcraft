@@ -1094,11 +1094,11 @@ fn drive_says_where_a_loop_stopped_it() {
     // Within its swing: no stop.
     ask(&mut d, "20 deg");
     let b = world_preview(&app.session, &apply_commands(&app, &d).unwrap(), colors).unwrap().unwrap();
-    assert!(b.stopped.is_none());
+    assert!(b.reply.is_none());
     // Past its toggle position (about +50.4° from where it stands).
     ask(&mut d, "100 deg");
     let b = world_preview(&app.session, &apply_commands(&app, &d).unwrap(), colors).unwrap().unwrap();
-    let why = b.stopped.as_ref().and_then(drive_stop).unwrap();
+    let why = b.reply.as_ref().and_then(drive_stop).unwrap();
     assert!(why.starts_with("Stopped at 50.") && why.contains("can't close any further"), "{why}");
     // OK drives it there and says so.
     crate::dialogs::run_dialog(&mut app, &d).unwrap();
@@ -1148,10 +1148,125 @@ fn drive_says_when_its_joint_is_joined_to_nothing_grounded() {
         cut_tint: true,
     };
     let b = world_preview(&app.session, &apply_commands(&app, &d).unwrap(), colors).unwrap().unwrap();
-    let why = b.stopped.as_ref().and_then(drive_stop).unwrap();
+    let why = b.reply.as_ref().and_then(drive_stop).unwrap();
     assert!(why.starts_with("Moves nothing") && why.contains("C:1"), "{why}");
     crate::dialogs::run_dialog(&mut app, &d).unwrap();
     assert_eq!(app.status.clone().map(|(status, _, error)| (status, error)), Some((why, false)));
+}
+
+/// Both boxes grounded, and the Joint dialog with A's top face and B's bottom face picked.
+fn grounded_pair() -> (SolveApp, Dialog) {
+    let mut app = two_boxes();
+    app.run("occurrence.ground", json!({"occurrence": "B:1", "grounded": true})).unwrap();
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap());
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 10.0, 0.0)).unwrap());
+    (app, d)
+}
+
+fn grounded(app: &SolveApp, name: &str) -> bool {
+    app.session.doc.occurrences.iter().any(|o| o.name == name && o.grounded)
+}
+
+/// A joint between two grounded parts moves neither: the dialog says so under the picks and
+/// offers to unground the second, after which OK snaps that part into place.
+#[test]
+fn a_joint_between_two_grounded_parts_says_so_and_offers_to_unground() {
+    let (mut app, d) = grounded_pair();
+    let colors = crate::preview::Colors {
+        body: [1, 1, 1, 255],
+        added: [2, 2, 2, 255],
+        new_body: [2, 2, 2, 255],
+        removed: [3, 3, 3, 100],
+        mirrored: [6, 6, 6, 100],
+        edge: [0, 0, 0, 255],
+        ghost: true,
+        tint_new: true,
+        cut_tint: true,
+    };
+    let b = world_preview(&app.session, &apply_commands(&app, &d).unwrap(), colors).unwrap().unwrap();
+    let name = b.reply.as_ref().and_then(|r| r["name"].as_str()).unwrap_or_default().to_string();
+    assert!(!name.is_empty(), "the preview keeps the new joint's reply: {:?}", b.reply);
+    app.preview.reply = b.reply;
+    app.dialog = Some(d);
+    let ctx = crate::fonts::test_context();
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    let frame = |app: &mut SolveApp, events: Vec<egui::Event>| {
+        let input = egui::RawInput { screen_rect: Some(screen), events, ..Default::default() };
+        let mut out = ctx.run_ui(input, |ui| crate::dialogs::show(app, ui.ctx()));
+        out.textures_delta.clear();
+        out
+    };
+    for _ in 0..3 {
+        frame(&mut app, vec![]);
+    }
+    let out = frame(&mut app, vec![]);
+    let why = solidcraft_ui_text::format("joint.both_grounded", &[("joint", name.as_str()), ("a", "A:1"), ("b", "B:1")]);
+    assert!(text_at(&out, &why).is_some(), "the dialog says why");
+    let at = text_at(&out, &solidcraft_ui_text::format("joint.unground", &[("part", "B:1")])).expect("and offers to unground B");
+    let button = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+    frame(&mut app, vec![egui::Event::PointerMoved(at)]);
+    frame(&mut app, vec![button(true)]);
+    frame(&mut app, vec![button(false)]);
+    assert!(!grounded(&app, "B:1") && grounded(&app, "A:1"), "only B is ungrounded");
+    let out = frame(&mut app, vec![]);
+    assert!(text_at(&out, &why).is_none(), "nothing left to say");
+    let d = app.dialog.clone().expect("the dialog stays open");
+    crate::dialogs::run_dialog(&mut app, &d).unwrap();
+    let b1 = app.session.doc.occurrences.iter().find(|o| o.name == "B:1").unwrap().id;
+    let world = solidcraft_engine::doc::joints::occurrence_world(&app.session.doc, b1);
+    let bottom = solidcraft_engine::doc::apply_point(&world, Vec3::new(40.0, 10.0, 0.0));
+    assert!(bottom.dist(Vec3::new(10.0, 10.0, 10.0)) < 1e-6, "B's bottom sits on A's top: {bottom:?}");
+    assert!(app.messages.iter().all(|m| !m.error), "nothing went wrong");
+}
+
+/// OK on a joint between two grounded parts keeps it, and Messages says it moves neither part.
+#[test]
+fn ok_on_a_joint_between_two_grounded_parts_leaves_an_error() {
+    let (mut app, d) = grounded_pair();
+    crate::dialogs::run_dialog(&mut app, &d).unwrap();
+    let j = app.session.doc.assembly.joints.last().cloned().expect("the joint is kept");
+    let why = solidcraft_ui_text::format("joint.both_grounded", &[("joint", j.name.as_str()), ("a", "A:1"), ("b", "B:1")]);
+    assert_eq!(app.status.clone().map(|(status, _, error)| (status, error)), Some((why.clone(), true)));
+    assert!(app.messages.iter().any(|m| m.error && m.text == why), "it is in Messages");
+}
+
+/// A root body joined to a grounded part: the base can't be ungrounded, so the dialog offers
+/// nothing, and OK leaves the engine's why, which names the base.
+#[test]
+fn ok_on_a_joint_from_the_base_to_a_grounded_part_names_the_base() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length":20,"width":20,"height":10,"corner":[0,0,0]})).unwrap();
+    s.execute("component.create", &json!({"name":"B","grounded":true})).unwrap();
+    s.execute("solid.box", &json!({"length":20,"width":20,"height":10,"corner":[30,0,0]})).unwrap();
+    s.execute("component.activate", &json!({"component":"root"})).unwrap();
+    let mut app = SolveApp::new(s, Services::default());
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap());
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 10.0, 0.0)).unwrap());
+    let colors = crate::preview::Colors {
+        body: [1, 1, 1, 255],
+        added: [2, 2, 2, 255],
+        new_body: [2, 2, 2, 255],
+        removed: [3, 3, 3, 100],
+        mirrored: [6, 6, 6, 100],
+        edge: [0, 0, 0, 255],
+        ghost: true,
+        tint_new: true,
+        cut_tint: true,
+    };
+    let b = world_preview(&app.session, &apply_commands(&app, &d).unwrap(), colors).unwrap().unwrap();
+    assert!(b.reply.is_some(), "the preview keeps the conflicting reply");
+    app.preview.reply = b.reply;
+    let crate::dialogs::Kind::Assembly(k) = &d.kind else { panic!("the Joint dialog") };
+    assert!(both_grounded(&app, k, &d.inputs).is_none(), "no Unground button for the base");
+    crate::dialogs::run_dialog(&mut app, &d).unwrap();
+    let j = app.session.doc.assembly.joints.last().cloned().expect("the joint is kept");
+    let why = "it joins the design's base to B:1, which is grounded, so it can move neither";
+    let said = solidcraft_ui_text::format("joint.conflicts", &[("joint", j.name.as_str()), ("why", why)]);
+    assert_eq!(app.status.clone().map(|(status, _, error)| (status, error)), Some((said, true)));
 }
 
 /// Drive Joints opens on the joint picked in the browser; with none picked, on the first joint
