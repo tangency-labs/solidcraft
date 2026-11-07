@@ -120,10 +120,8 @@ sketch.arc.tangent
 sketch.arc.three_point
 sketch.auto_constrain
 sketch.auto_constrain_from_datum
-sketch.auto_project
 sketch.blend_curve
 sketch.break
-sketch.break_link
 sketch.centerline
 sketch.chain
 sketch.chamfer.distance_angle
@@ -163,16 +161,11 @@ sketch.export_dxf
 sketch.extend
 sketch.fillet
 sketch.finish_auto_constrain
-sketch.fit_curves_to_section
 sketch.glyphs
-sketch.include_3d
 sketch.infinite
 sketch.insert_dxf
 sketch.insert_svg
 sketch.inspect
-sketch.intersect
-sketch.intersection_curve
-sketch.isoparametric_curve
 sketch.line
 sketch.line.midpoint
 sketch.line3d
@@ -190,8 +183,6 @@ sketch.point3d
 sketch.polygon.circumscribed
 sketch.polygon.edge
 sketch.polygon.inscribed
-sketch.project
-sketch.project_to_surface
 sketch.rectangle.center
 sketch.rectangle.rounded
 sketch.rectangle.three_point
@@ -209,7 +200,6 @@ sketch.spline.control_point
 sketch.spline.control_point_5
 sketch.spline.fit_point
 sketch.spline3d
-sketch.spun_profile
 sketch.text
 sketch.toggle_driven
 sketch.trim
