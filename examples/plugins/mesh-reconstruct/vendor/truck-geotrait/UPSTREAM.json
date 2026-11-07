@@ -1,0 +1,26 @@
+{
+  "crate": "truck-geotrait",
+  "version": "0.4.0",
+  "repository": "https://github.com/ricosjp/truck",
+  "commit": "487292c3686c4efd4b4c01acef9ff86136f6f630",
+  "license": "Apache-2.0",
+  "author": "Yoshinori Tanimura <tanimura@ricos.co.jp>",
+  "source_files_before_local_changes": {
+    "Cargo.toml": "48a11e7e4ae20ca727dfa4e8f2d013cd48163bedc3b0055cdf03d2e0ca1a34ad",
+    "Cargo.toml.orig": "7a4f4401b5dddc759586dba65c4a0414f196846773ca39cabe9d4bcb054ee8bc",
+    "README.md": "72415179443b124f594cfb7dd5de8b3f5932f5cec91538fe8d343af1bcfc7de8",
+    "src/lib.rs": "52f3893bba8ac8c5bbc2760f89520eacb91abb9091806fc2a7fdb799f15e35ad",
+    "tests/curve.rs": "a38489e539809b3a62576c3a12062b65b0bebc60d7860eb4c745c6bf51940fa3",
+    "tests/derives.rs": "b40d0a3f597c1450943c4cb323799d5820f5cb6d0fe262568130ee442c856f09",
+    "tests/polynomial.rs": "ef00c794c7d078987649b802d10b739fa45e411c9ddcd80eb01fb1e7f3a3daa4",
+    "tests/surface.rs": "197b071f4623c7223dd9e87d4066abae23d228ca449f177c81e8926d654c1339",
+    "src/algo/curve.rs": "90ece6077265b70220954d29bcd9f4fa8b4fb57198fd89fca0911d82792ad9eb",
+    "src/algo/mod.rs": "d2871c0d0635f923feed997aadfd4b5a384d239be2038a5be260f734f3c2b917",
+    "src/algo/surface.rs": "6f834fa4e7bbc9d9573b12a2ff91b4f2a422018912e35c67e8a783ee79f7c46f",
+    "src/traits/curve.rs": "c5e6ea640c5f3e1a1f6087406833f38ec789c09377a603a96434821657a6738d",
+    "src/traits/mod.rs": "77348d54a1c9f2acaf7bd1fd2bfccfd162f21f585d37c4c91dc03d695a69f492",
+    "src/traits/search_parameter.rs": "72460eeb953c51621a7ede277db59b31e016d37041644d0a7202892b9ecad57e",
+    "src/traits/surface.rs": "f3dfec7753f71cff515e5209384a6db6584069420ad47255adc1143dec9ac3fc"
+  },
+  "changes": "Optional random-tests feature gates only the six randomized test helpers and their entropy dependencies; numerical traits and algorithms unchanged."
+}

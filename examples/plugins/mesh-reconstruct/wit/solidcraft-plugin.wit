@@ -1,0 +1,33 @@
+package solidcraft:plugin@0.1.0;
+
+// Initial command world, aligned with the interface proposal in PR #4980.
+interface types {
+    type json = string;
+    variant plugin-error { failed(string), denied(string), limit(string), invalid(string) }
+}
+interface engine {
+    use types.{json, plugin-error};
+    run: func(command: string, args: json) -> result<json, plugin-error>;
+}
+interface log {
+    enum level { debug, info, warn, error }
+    log: func(level: level, message: string);
+}
+interface store {
+    use types.{plugin-error};
+    get: func(key: string) -> result<option<list<u8>>, plugin-error>;
+    set: func(key: string, value: list<u8>) -> result<_, plugin-error>;
+    remove: func(key: string) -> result<_, plugin-error>;
+    keys: func() -> result<list<string>, plugin-error>;
+    previous-version: func() -> option<string>;
+}
+interface command {
+    use types.{json, plugin-error};
+    execute: func(entry: string, params: json) -> result<json, plugin-error>;
+}
+world command-plugin {
+    import engine;
+    import log;
+    import store;
+    export command;
+}
