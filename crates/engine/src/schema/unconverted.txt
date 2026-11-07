@@ -159,7 +159,6 @@ sketch.drag_end
 sketch.draw.dimensioned
 sketch.edit_text
 sketch.ellipse
-sketch.export_dxf
 sketch.extend
 sketch.fillet
 sketch.finish_auto_constrain
@@ -167,8 +166,6 @@ sketch.fit_curves_to_section
 sketch.glyphs
 sketch.include_3d
 sketch.infinite
-sketch.insert_dxf
-sketch.insert_svg
 sketch.inspect
 sketch.intersect
 sketch.intersection_curve
