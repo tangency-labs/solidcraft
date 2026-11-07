@@ -80,10 +80,14 @@ pub(crate) fn expand_knots(knots: &[f64], mults: &[u32], expected: usize) -> Opt
     Some(out)
 }
 
-/// The point at `t` (de Boor), homogeneous when rational.
+/// The point at `t` (de Boor), homogeneous when rational; `None` for a curve the reader
+/// refuses with [`check_bspline_curve`](crate::map::check_bspline_curve) (fewer than
+/// degree + 1 points, knots not increasing, multiplicities or weights out of range),
+/// which a model built by hand may carry.
 pub(crate) fn bspline_point(c: &BSplineCurve, t: f64) -> Option<P3> {
     let p = c.degree as usize;
     let n = c.points.len();
+    crate::map::check_bspline_curve(c).ok()?;
     let u = expand_knots(&c.knots, &c.mults, n.checked_add(p)?.checked_add(1)?)?;
     let lo = *u.get(p)?;
     let hi = *u.get(n)?;
@@ -206,5 +210,66 @@ mod tests {
         assert_eq!(bspline_param(&c, [0.0, 1.0, 0.0]).unwrap(), 1.0);
         let t = bspline_param(&c, m).unwrap();
         assert!((t - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn bspline_with_decreasing_knots_has_no_point() {
+        // a model built by hand, not read: the reader's `check_knots` refuses these knots
+        let c = BSplineCurve {
+            degree: 1,
+            points: vec![[0.0; 3], [1.0, 0.0, 0.0]],
+            weights: None,
+            knots: vec![1.0, 0.0],
+            mults: vec![2, 2],
+        };
+        assert_eq!(bspline_point(&c, 0.5), None);
+        let c = BSplineCurve {
+            knots: vec![0.0, f64::NAN],
+            ..c
+        };
+        assert_eq!(bspline_point(&c, 0.5), None);
+        // an interior NaN knot: the evaluated bounds are finite and ordered
+        let c = BSplineCurve {
+            points: vec![[0.0; 3], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]],
+            knots: vec![0.0, f64::NAN, 1.0],
+            mults: vec![2, 1, 2],
+            ..c
+        };
+        assert_eq!(bspline_point(&c, 0.5), None);
+    }
+
+    #[test]
+    fn bspline_with_too_few_points_has_no_point() {
+        // degree 2 needs 3 points; the knots [0, 0, 1, 1] fit one point and put
+        // u[p] = 1 above u[n] = 0
+        let c = BSplineCurve {
+            degree: 2,
+            points: vec![[0.0; 3]],
+            weights: None,
+            knots: vec![0.0, 1.0],
+            mults: vec![2, 2],
+        };
+        assert_eq!(bspline_point(&c, 0.5), None);
+    }
+
+    #[test]
+    fn bspline_with_multiplicity_out_of_range_has_no_point() {
+        // a multiplicity of 0, and one above degree + 1 (the reader's `check_knots`
+        // refuses both)
+        let c = BSplineCurve {
+            degree: 1,
+            points: vec![[0.0; 3], [1.0, 0.0, 0.0]],
+            weights: None,
+            knots: vec![0.0, 0.5, 1.0],
+            mults: vec![2, 0, 2],
+        };
+        assert_eq!(bspline_point(&c, 0.5), None);
+        let c = BSplineCurve {
+            points: vec![[0.0; 3], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]],
+            knots: vec![0.0, 1.0],
+            mults: vec![3, 2],
+            ..c
+        };
+        assert_eq!(bspline_point(&c, 0.5), None);
     }
 }

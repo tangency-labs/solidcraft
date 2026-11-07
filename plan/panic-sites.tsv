@@ -1038,8 +1038,8 @@ crates/solidcore/src/topology/brep/validation/spatial.rs	SpatialIndex::new	int-r
 crates/solidcore/src/topology/brep/vertex_fans.rs	remove_vertexuse	Vec::remove	1	open	remove(index)	
 crates/solidcore/src/topology/brep_data_write.rs	BrepData::from_brep	Vec::insert	1	proven	insert(0, r)	index 0 is never past the end
 crates/solidcore/src/topology/brep_data_write.rs	BrepData::from_brep	Vec::remove	1	open	remove(i + 1)	
-crates/solidcore/src/topology/database_io.rs	DatabaseReader::read_raw_items	chunks	1	open	chunks_exact(N)	
-crates/solidcore/src/topology/database_io.rs	DatabaseReader::read_raw_items	copy_from_slice	1	open	copy_from_slice(c)	
+crates/solidcore/src/topology/database_io.rs	DatabaseReader::read_raw_items	chunks	1	proven	chunks_exact(N)	N is a const generic, 1, 4 or 8 at every call
+crates/solidcore/src/topology/database_io.rs	DatabaseReader::read_raw_items	copy_from_slice	1	proven	copy_from_slice(c)	c is a chunks_exact(N) chunk of [u8; N]
 crates/solidcore/src/topology/database_io.rs	InputStream::scan_int	int-div	1	proven	max / 10	constant non-zero divisor
 crates/solidcore/src/topology/edge.rs	insert_after	Vec::insert	1	open	insert(pos + 1, obj)	
 crates/solidcore/src/topology/edge.rs	is_seam_of_surface	step_by	1	proven	step_by(2)	constant non-zero step
@@ -1116,14 +1116,14 @@ crates/solidcore/src/topology/trimming_tools.rs	order_curves_into_loops	int-rem	
 crates/solidcore/src/topology/trimming_tools/curve_loops.rs	CurveLoops::insert_into_loops	Vec::insert	1	open	insert(idx + 1, new_curve)	
 crates/solidcore/src/topology/trimming_tools/curve_loops.rs	CurveLoops::insert_into_loops	Vec::insert	2	open	insert(idx + 1, o)	
 crates/step-brep/src/brep_to_model.rs	brep_to_model	with_capacity	1	proven	Vec::with_capacity(65)	constant capacity
-crates/step-brep/src/brep_to_model.rs	bspline_surface	chunks	1	open	chunks(v_count)	
-crates/step-brep/src/brep_to_model.rs	bspline_surface	chunks	2	open	chunks(v_count)	
-crates/step-brep/src/constructor.rs	remove_face	Vec::remove	1	open	remove(slot)	
+crates/step-brep/src/brep_to_model.rs	bspline_surface	chunks	1	proven	chunks(v_count)	v_count is net.v_count.max(1)
+crates/step-brep/src/brep_to_model.rs	bspline_surface	chunks	2	proven	chunks(v_count)	v_count is net.v_count.max(1)
+crates/step-brep/src/constructor.rs	remove_face	Vec::remove	1	proven	remove(slot)	slot is enumerate() over the same shell's faces
 crates/step-brep/src/constructor.rs	skip_limit	int-div	1	proven	faces / 100	constant non-zero divisor
 crates/step-brep/src/pcurves.rs	Piece::trim_curve	windows	1	proven	windows(2)	constant non-zero size
 crates/step-brep/src/pcurves.rs	chain	int-div	1	proven	piece.samples.len() / 2	constant non-zero divisor
-crates/step-brep/src/pcurves.rs	chain	rotate	1	open	rotate_right(anchor)	
-crates/step-brep/src/pcurves.rs	clamp	f64::clamp	1	open	clamp(low, low + period)	
+crates/step-brep/src/pcurves.rs	chain	rotate	1	proven	rotate_right(anchor)	anchor < pieces.len() == shifts.len()
+crates/step-brep/src/pcurves.rs	clamp	f64::clamp	1	proven	clamp(low, low + period)	period is 360; low a periodic STEP domain low: 0, or finite from script::axis_range
 crates/step-brep/src/pcurves.rs	edge_use	windows	1	proven	windows(2)	constant non-zero size
 crates/step-brep/src/pcurves.rs	edge_use	windows	2	proven	windows(2)	constant non-zero size
 crates/step-export/src/lib.rs	faceted_shell	int-rem	1	open	(index + 1) % len	
@@ -1145,11 +1145,11 @@ crates/step-export/src/lib.rs	write_pcurve_edge	with_capacity	1	open	Vec::with_c
 crates/step-export/src/lib.rs	write_pcurve_edge	with_capacity	2	open	Vec::with_capacity(uv.len())	
 crates/step-import/src/flat.rs	Rd::bspline_surface	int-div	1	proven	self.d.len().saturating_sub(self.i) / 3	constant non-zero divisor
 crates/step-import/src/flat.rs	Rd::count	int-div	1	proven	left / min_words.max(1)	divisor is max(.., >= 1)
-crates/step-import/src/geom.rs	bspline_point	f64::clamp	1	open	clamp(lo, hi)	
-crates/step-import/src/map.rs	Mapper::poly_loop	int-rem	1	open	(k + 1) % vs.len()	
+crates/step-import/src/geom.rs	bspline_point	f64::clamp	1	proven	clamp(lo, hi)	check_bspline_curve just above: n > p, knots increasing, no NaN, so lo <= hi
+crates/step-import/src/map.rs	Mapper::poly_loop	int-rem	1	proven	(k + 1) % vs.len()	vs has one entry per point, fewer than 3 refused
 crates/step-import/src/map.rs	check_knots	windows	1	proven	windows(2)	constant non-zero size
-crates/step-import/src/map.rs	implied_knots	int-div	1	open	(n - 1) / dd	
-crates/step-import/src/map.rs	polygon_plane	int-rem	1	open	(k + 1) % pts.len()	
+crates/step-import/src/map.rs	implied_knots	int-div	1	proven	(n - 1) / dd	dd == 0 returns Err just above
+crates/step-import/src/map.rs	polygon_plane	int-rem	1	proven	(k + 1) % pts.len()	inside iteration over pts, so len() > 0
 crates/step-import/src/script.rs	Rd::count	int-div	1	proven	left / min_words.max(1)	divisor is max(.., >= 1)
 crates/step-import/src/script.rs	step_face_area	f64::clamp	1	proven	clamp(-1.0, 1.0)	constant bounds, min <= max
 crates/step-import/src/script.rs	step_uv_domain	f64::clamp	1	proven	clamp(-1.0, 1.0)	constant bounds, min <= max

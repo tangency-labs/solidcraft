@@ -1683,6 +1683,43 @@ mod tests {
             .is_empty());
     }
 
+    /// A body built by hand, not read from a file, with a B-spline edge whose knots
+    /// decrease (the reader refuses them): the face's STEP domain samples the edge, and
+    /// the build fails instead of panicking.
+    #[test]
+    fn hand_built_bspline_edge_with_decreasing_knots_is_refused() {
+        let mut body = triangle();
+        let edge = body.edges.first_mut().expect("an edge");
+        edge.curve = Curve::BSpline(step_import::model::BSplineCurve {
+            degree: 1,
+            points: vec![[0.0; 3], [10.0, 0.0, 0.0]],
+            weights: None,
+            knots: vec![1.0, 0.0],
+            mults: vec![2, 2],
+        });
+        edge.t_start = 0.0;
+        edge.t_end = 1.0;
+        assert!(build(&body).is_err());
+    }
+
+    /// As above, with increasing knots but fewer control points than degree + 1: the
+    /// expanded knots' evaluated bounds come out reversed.
+    #[test]
+    fn hand_built_bspline_edge_with_too_few_points_is_refused() {
+        let mut body = triangle();
+        let edge = body.edges.first_mut().expect("an edge");
+        edge.curve = Curve::BSpline(step_import::model::BSplineCurve {
+            degree: 2,
+            points: vec![[0.0; 3]],
+            weights: None,
+            knots: vec![0.0, 1.0],
+            mults: vec![2, 2],
+        });
+        edge.t_start = 0.0;
+        edge.t_end = 1.0;
+        assert!(build(&body).is_err());
+    }
+
     #[test]
     fn exports_and_reimports_edge_with_crv_on_surf_seam() {
         let body = cylinder_solid();
