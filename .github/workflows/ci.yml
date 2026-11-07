@@ -2,7 +2,7 @@
 # PRs test what they touch; main and nightly test everything. On a pull request the "Select
 # checks" job maps the changed files to workspace packages (scripts/ci/affected.py), adds the
 # packages that depend on them, and Clippy, the test archive and the test shards cover only
-# those. Test data under tests/, vendored crates under vendor/ and root files a crate embeds
+# those. Test data under tests/, vendored code under vendor/ and solidcore/ and root files a crate embeds
 # select the packages that read them. Changes to the lockfile, root manifest,
 # toolchain/cargo/nextest config, this workflow, scripts/ or any file no package owns select the
 # whole workspace, as do pushes to main that change code, the nightly run and Run workflow.
@@ -130,7 +130,6 @@ jobs:
       actions: read
     outputs:
       native: ${{ steps.paths.outputs.native }}
-      kernel: ${{ steps.paths.outputs.kernel }}
       windows: ${{ steps.paths.outputs.windows }}
       # The GPU path tests run (see the rule where it is computed). The job's `if` and the `ci` job's check both read this, so they cannot disagree.
       gpu: ${{ steps.paths.outputs.gpu }}
@@ -168,7 +167,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           native=false
-          kernel=false
           windows=false
           gpu_paths=false
           deps=false
@@ -186,12 +184,12 @@ jobs:
           }
           # Whether the NUL-separated paths in $1 (the diff $2) reach what the Windows D3D12 jobs
           # exercise: the GPU crate and its shaders, the app and its startup, the viewport's wgpu
-          # glue, the vendored egui-wgpu, their scripts, or a lockfile change that moves the
-          # graphics stack (wgpu, naga, egui, winit, windows). Pull requests and merge groups share it.
+          # glue, the vendored egui-wgpu and kernel, their scripts, or a lockfile change that moves
+          # the graphics stack (wgpu, naga, egui, winit, windows). Pull requests and merge groups share it.
           windows_paths() {
             while IFS= read -r -d '' path; do
               case "$path" in
-                crates/gpu/*|apps/solidcraft/*|crates/ui-egui/src/gpu.rs|vendor/egui-wgpu/*) windows=true ;;
+                crates/gpu/*|apps/solidcraft/*|crates/ui-egui/src/gpu.rs|vendor/egui-wgpu/*|solidcore/*) windows=true ;;
                 tools/windows-*.ps1|.github/workflows/ci.yml|rust-toolchain*|.cargo/*) windows=true ;;
               esac
             done < "$1"
@@ -224,7 +222,7 @@ jobs:
                 Cargo.lock|Cargo.toml|*/Cargo.toml) deps=true ;;
               esac
               case "$path" in
-                crates/*|apps/solidcraft-web/*|vendor/*|Cargo.lock|Cargo.toml|rust-toolchain*|.cargo/*|.github/workflows/ci.yml) wasm=true ;;
+                crates/*|apps/solidcraft-web/*|vendor/*|solidcore/*|Cargo.lock|Cargo.toml|rust-toolchain*|.cargo/*|.github/workflows/ci.yml) wasm=true ;;
               esac
             done < "$1"
           }
@@ -292,9 +290,6 @@ jobs:
           else
             # Compare both old and new paths of renames; unknown paths run native checks.
             git diff --no-renames --name-only -z "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/ci-paths"
-            while IFS= read -r -d '' path; do
-              case "$path" in crates/kernel/*|vendor/truck-*) kernel=true ;; esac
-            done < "$RUNNER_TEMP/ci-paths"
             # Computed as for a merge group, then turned off below (the fast lane).
             windows_paths "$RUNNER_TEMP/ci-paths" "$BASE_SHA...$HEAD_SHA"
             # The advisories run on the pull request itself (it builds nothing of ours: about two minutes, most of it installing cargo-deny);
@@ -361,7 +356,6 @@ jobs:
           {
             echo "native=$native"
             echo "gpu=$gpu"
-            echo "kernel=$kernel"
             echo "windows=$windows"
             echo "oracle=$oracle"
             echo "doctests=$doctests"

@@ -3,7 +3,7 @@
 //!
 //! - **Panics** are caught by a hook. One inside a command becomes a report with the design as
 //!   it was before the command and the command itself, so `solidcraft-cli run replay.json --in
-//!   design.sc` reproduces it. Panics the third-party kernel raises (and
+//!   design.sc` reproduces it. Panics the vendored kernel raises (and
 //!   `solidcraft_kernel::guard` turns into errors) are reported the same way, marked recovered.
 //! - **Crashes no hook sees** (an abort, a stack overflow, a segfault, the process being killed)
 //!   are found at the next start: every running app keeps a small, locked command journal; a

@@ -1,0 +1,172 @@
+# Mirror SolidCraft's vendored kernel to its own repository.
+#
+# `solidcore` is the SolidCore kernel, vendored with `git subtree`, so `main` keeps
+# SolidCore's history. This workflow pushes the commits under `solidcore` back to
+# tangency-labs/solidcore, so the same history can be read from either repository.
+#
+# The push is always a fast-forward. A force push would rewrite SolidCore's history, so the
+# workflow stops instead when the two have diverged, or when the history under solidcore
+# is not the vendored kernel alone (a squash-merged or merge-committed vendoring commit would
+# carry SolidCraft's own commits into SolidCore).
+#
+# SolidCore's `main` is protected. The deploy key must have write access to that repository and
+# must bypass its `protect-main` ruleset (see the pull request that added this file).
+name: Mirror to SolidCore
+
+on:
+  push:
+    branches: [main]
+    # Only a change to the vendored kernel can move SolidCore. Editing this file rehearses it.
+    paths:
+      - "solidcore/**"
+      - ".github/workflows/solidcore-mirror.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One run at a time, never cancelled: two pushes to SolidCore must not race.
+concurrency:
+  group: solidcore-mirror
+  cancel-in-progress: false
+
+env:
+  # The directory in SolidCraft that is the whole of SolidCore.
+  PREFIX: solidcore
+  SOLIDCORE_URL: git@github.com:tangency-labs/solidcore.git
+  SOLIDCORE_BRANCH: main
+
+jobs:
+  mirror:
+    name: Mirror main's kernel commits
+    runs-on: ubuntu-24.04
+    # git subtree replays every commit under the prefix; the vendored history is large.
+    timeout-minutes: 60
+    steps:
+      # Always the real main, and always its whole history: git subtree rebuilds SolidCore's
+      # commits from main's ancestry, so a shallow clone would mirror nothing.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The private half of a deploy key with write access to tangency-labs/solidcore. Fail here,
+      # with a readable message, instead of somewhere inside git.
+      - name: Set up the SolidCore deploy key
+        env:
+          SOLIDCORE_DEPLOY_KEY: ${{ secrets.SOLIDCORE_DEPLOY_KEY }}
+        run: |
+          if [ -z "$SOLIDCORE_DEPLOY_KEY" ]; then
+            echo "::error::The SOLIDCORE_DEPLOY_KEY secret is not set. Add the private half of a deploy key that has write access to tangency-labs/solidcore under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          install -d -m 700 "$RUNNER_TEMP/ssh"
+          (umask 077 && printf '%s\n' "$SOLIDCORE_DEPLOY_KEY" > "$RUNNER_TEMP/ssh/solidcore")
+          # The fetch and the push inherit this, so both use the same key.
+          printf '%s\n' "GIT_SSH_COMMAND=ssh -i $RUNNER_TEMP/ssh/solidcore -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new" >> "$GITHUB_ENV"
+
+      # Decide, before touching SolidCore, whether there is anything to mirror and whether it is a
+      # fast-forward. There are three states: in sync, SolidCore behind (push), diverged (fail).
+      - name: Check what needs mirroring
+        id: check
+        run: |
+          set -euo pipefail
+
+          # The remote tip, so the ancestry tests below compare against what SolidCore has.
+          if ! git fetch --no-tags "$SOLIDCORE_URL" "$SOLIDCORE_BRANCH"; then
+            echo "::error::Could not fetch $SOLIDCORE_URL $SOLIDCORE_BRANCH. Check that SOLIDCORE_DEPLOY_KEY is the private half of a solidcore deploy key with write access, and that the branch exists."
+            exit 1
+          fi
+          REMOTE=$(git rev-parse FETCH_HEAD)
+
+          # Replay the solidcore commits out of main's full history.
+          if ! SPLIT=$(git subtree split --prefix="$PREFIX" 2>/dev/null); then
+            echo "::error::Could not split '$PREFIX' out of main's history."
+            exit 1
+          fi
+          if [ -z "$SPLIT" ]; then
+            echo "::error::No commits for '$PREFIX' were found in main."
+            exit 1
+          fi
+
+          STATE=diverged
+          if git merge-base --is-ancestor "$SPLIT" "$REMOTE"; then
+            if [ "$SPLIT" = "$REMOTE" ]; then STATE=in-sync; else STATE=remote-ahead; fi
+          elif git merge-base --is-ancestor "$REMOTE" "$SPLIT"; then
+            STATE=fast-forward
+          fi
+
+          # The split must not contain commits that are already on main's first-parent line.
+          # If it does, the vendoring commit was not a git subtree merge on main, and pushing it
+          # would copy SolidCraft's history into SolidCore. Never do that.
+          if [ "$STATE" = fast-forward ]; then
+            CONTAMINATED=$(for c in $(git rev-list "$REMOTE".."$SPLIT"); do
+              if git merge-base --is-ancestor "$c" HEAD; then echo " $c"; fi
+            done)
+            if [ -n "$CONTAMINATED" ]; then
+              echo "::error::The split's new commits include SolidCraft mainline commits:$CONTAMINATED. The vendoring commit was not a git subtree merge on main, so mirroring would copy SolidCraft history into SolidCore. This workflow never force-pushes; fix the landing first."
+              exit 1
+            fi
+          fi
+
+          {
+            echo "state=$STATE"
+            echo "split=$SPLIT"
+            echo "remote=$REMOTE"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Mirror to SolidCore"
+            echo
+            echo "| | commit |"
+            echo "| --- | --- |"
+            echo "| SolidCraft \`$PREFIX\` split | \`$SPLIT\` |"
+            echo "| solidcore \`$SOLIDCORE_BRANCH\` | \`$REMOTE\` |"
+            echo
+            case "$STATE" in
+              in-sync) echo "**In sync.** Nothing to mirror." ;;
+              remote-ahead) echo "**Nothing to mirror.** SolidCore is ahead of this checkout: it has commits SolidCraft does not have." ;;
+              fast-forward) echo "**Fast-forward push needed.** SolidCore is behind." ;;
+              diverged) echo "**Diverged.** The mirror would not be a fast-forward, so this run fails instead of rewriting history." ;;
+            esac
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$STATE" = diverged ]; then
+            BASE=$(git merge-base "$SPLIT" "$REMOTE" || true)
+            if [ -z "$BASE" ]; then
+              echo "::error::solidcore history and solidcore main share no commits. The vendoring commit was probably squash-merged into main, which flattened SolidCore's history, so git subtree can no longer fast-forward solidcore. Land the vendoring pull request as a real merge commit, then re-run. This workflow never force-pushes."
+            else
+              LOCAL_COUNT=$(git rev-list --count "$REMOTE".."$SPLIT")
+              REMOTE_COUNT=$(git rev-list --count "$SPLIT".."$REMOTE")
+              echo "::error::SolidCraft and solidcore both have new commits since $BASE (SolidCraft-side: $LOCAL_COUNT, solidcore-side: $REMOTE_COUNT), so the mirror would not be a fast-forward. Reconcile with git subtree pull, then re-run. This workflow never force-pushes."
+            fi
+            exit 1
+          fi
+
+          if [ "$STATE" = remote-ahead ]; then
+            echo "::warning::solidcore $SOLIDCORE_BRANCH ($REMOTE) is ahead of SolidCraft's split ($SPLIT); nothing to mirror."
+          fi
+
+      # git subtree push recomputes the split and pushes it. A plain push is also the safety net:
+      # git itself refuses a non-fast-forward.
+      - name: Push the mirror commit
+        if: steps.check.outputs.state == 'fast-forward'
+        env:
+          SPLIT: ${{ steps.check.outputs.split }}
+        run: |
+          set -euo pipefail
+
+          if ! git subtree push --prefix="$PREFIX" "$SOLIDCORE_URL" "$SOLIDCORE_BRANCH"; then
+            echo "::error::Push to solidcore failed. If git names a protected branch or GH006, SOLIDCORE_DEPLOY_KEY has no write access or does not bypass solidcore's protect-main ruleset. If git names a non-fast-forward, solidcore moved during this run; re-run."
+            exit 1
+          fi
+
+          # Confirm SolidCore now has exactly the commit this run checked.
+          PUSHED=$(git ls-remote "$SOLIDCORE_URL" "refs/heads/$SOLIDCORE_BRANCH" | cut -f1)
+          if [ "$PUSHED" != "$SPLIT" ]; then
+            echo "::error::solidcore $SOLIDCORE_BRANCH is $PUSHED after the push, expected $SPLIT."
+            exit 1
+          fi
+
+          { echo; echo "**Mirrored.** solidcore \`$SOLIDCORE_BRANCH\` is now \`$SPLIT\`."; } >> "$GITHUB_STEP_SUMMARY"
