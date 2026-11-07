@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 use solidcraft_doc::bom::Tree;
-use solidcraft_doc::drawing::fields::{FieldState, Values};
+use solidcraft_doc::drawing::fields::{FieldState, Values, no_field};
 use solidcraft_doc::drawing::note::{Anchor, Note};
 use solidcraft_doc::ids;
 use solidcraft_geom::cell::{Content, Part};
@@ -62,7 +62,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "note: its id → {note, record: as saved, status: ok, ambiguous, suppressed or lost, why?, point?: where its leader ends, in the \
              design's frame, exact, candidates?: [{edge: {body, index}}], text: what it says now, its fields read for its sheet, \
-             fields?: [{source, key, state: shown, empty or lost (its sheet documents a component the design no longer has), value?}], \
+             fields?: [{source, key, state: shown, empty, lost (its sheet documents a component the design no longer has) or unknown \
+             (its source has no such field), value?, why?}], \
              warnings?: its view edited since to leave out the part its leader points at}. A lost reference keeps the note and its text in place, without a \
              leader. Read-only; no model is evaluated.",
         ),
@@ -167,8 +168,9 @@ fn fields(values: &Values, content: &Content) -> Vec<FieldResult> {
             FieldState::Shown(value) => ("shown", Some(value)),
             FieldState::Empty => ("empty", None),
             FieldState::Lost => ("lost", None),
+            FieldState::Unknown => ("unknown", None),
         };
-        Some(FieldResult { source: *source, key: key.clone(), state: state.into(), value })
+        Some(FieldResult { source: *source, key: key.clone(), state: state.into(), value, why: no_field(*source, key) })
     };
     content.0.iter().filter_map(field).collect()
 }

@@ -245,6 +245,30 @@ fn a_notes_fields_read_its_sheet_and_inspect_tells_a_lost_one() {
     assert_eq!((&plain["text"], plain.get("fields")), (&json!("Deburr"), None), "{plain}");
 }
 
+/// A field its source doesn't have is refused when a note is added or edited, and the note is left
+/// as it was; a drawing saved with one still opens, and inspect says the field is unknown and why.
+#[test]
+fn a_field_its_source_lacks_is_refused_and_one_saved_reads_unknown() {
+    let (mut s, _, view, _) = placed();
+    let weight = json!([{"text": "Mass: "}, {"field": {"source": "component", "key": "weight"}}]);
+    let why = "the component has no field `weight`";
+    let e = refused(&mut s, ADD, json!({"anchor": {"view": ids::encode(view)}, "at": [0, -30], "content": weight}));
+    assert!(e.contains(why), "{e}");
+    let note = run(&mut s, ADD, json!({"anchor": {"view": ids::encode(view)}, "at": [0, -30], "content": "Mass"}))["note"].clone();
+    let before = saved(&s);
+    let e = refused(&mut s, EDIT, json!({"note": note, "set": {"content": weight}}));
+    assert!(e.contains(why), "{e}");
+    assert_eq!(saved(&s), before, "the refused edit changed nothing");
+    // As a file saved with one opens.
+    let mut v: Value = serde_json::from_str(&before).unwrap();
+    v["notes"][0]["content"] = weight.clone();
+    let opened = solidcraft_doc::drawing::Drawing::from_json(&v.to_string()).unwrap();
+    s.doc_mut().put_drawing(Arc::new(opened));
+    let reply = run(&mut s, INSPECT, json!({"note": note}));
+    assert_eq!(reply["text"], json!("Mass: "));
+    assert_eq!(reply["fields"], json!([{"source": "component", "key": "weight", "state": "unknown", "why": why}]));
+}
+
 #[test]
 fn hostile_notes_are_refused() {
     let (mut s, _, view, [bracket, _]) = placed();
@@ -261,6 +285,7 @@ fn hostile_notes_are_refused() {
         (good(json!([0, 0]), json!([])), "some text"),
         (good(json!([0, 0]), json!("x".repeat(4097))), "4096"),
         (good(json!([0, 0]), json!([{"field": {"source": "prompt", "key": "x"}}])), "fields"),
+        (good(json!([0, 0]), json!([{"field": {"source": "sheet", "key": "page"}}])), "the sheet has no field `page`"),
         (good(json!([0, 0]), json!(7)), "content"),
         (json!({"anchor": {"view": ids::encode(view)}, "at": [0, 0], "content": "x", "cap_mm": 0.1}), "text height"),
         (json!({"anchor": {"view": ids::encode(view)}, "at": [0, 0], "content": "x", "extra": 1}), "extra"),

@@ -44,7 +44,14 @@ impl<'de> Deserialize<'de> for ContentParam {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         match Value::deserialize(d)? {
             Value::String(text) => Ok(ContentParam(Content(vec![Part::Text(text)]))),
-            parts => serde_json::from_value(parts).map(ContentParam).map_err(D::Error::custom),
+            parts => {
+                let content: Content = serde_json::from_value(parts).map_err(D::Error::custom)?;
+                // Refused when given; a drawing saved with one still opens, and the field reads unknown.
+                match solidcraft_doc::drawing::fields::unknown_field(&content) {
+                    Some(why) => Err(D::Error::custom(why)),
+                    None => Ok(ContentParam(content)),
+                }
+            }
         }
     }
 }
@@ -178,10 +185,13 @@ pub struct FieldResult {
     #[schemars(with = "String")]
     pub source: Source,
     pub key: String,
-    /// `shown`; `empty`: its source has no value for it; or `lost`: its sheet documents a
-    /// component the design no longer has.
+    /// `shown`; `empty`: its source has no value for it; `lost`: its sheet documents a component
+    /// the design no longer has; or `unknown`: its source has no such field.
     pub state: String,
     /// What it shows, when shown.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
+    /// Why it is unknown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
 }

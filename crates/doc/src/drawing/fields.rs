@@ -4,7 +4,9 @@
 //! by the bill of materials). A key its source doesn't have is refused when a block is given or
 //! read; a value that isn't there, or is empty, shows [`MISSING`]. Each field is shown, empty or
 //! lost ([`Values::state`]): lost when the sheet documents a component the design no longer has,
-//! so a reader can tell the two apart while the paper shows neither as stale text. Sheet tables'
+//! so a reader can tell the two apart while the paper shows neither as stale text. A note's field its
+//! source doesn't have is refused when it is given ([`unknown_field`]), but a drawing saved with one
+//! still opens: the field reads unknown. Sheet tables'
 //! cells (B3) and notes read the same fields.
 //!
 //! - **component:** `name`, `part_number`, `description`, `revision` (its part properties),
@@ -76,6 +78,8 @@ pub enum FieldState {
     Empty,
     /// Its source is gone: the sheet documents a component the design no longer has.
     Lost,
+    /// Its source has no such field ([`no_field`] says why).
+    Unknown,
 }
 
 /// Whether `source` has the field `key`.
@@ -91,6 +95,23 @@ pub fn has_key(source: Source, key: &str) -> bool {
     }
 }
 
+/// Why `source` can't have the field `key`, when it can't.
+pub fn no_field(source: Source, key: &str) -> Option<String> {
+    (!has_key(source, key)).then(|| {
+        let source = serde_json::to_value(source).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
+        format!("the {source} has no field `{key}`")
+    })
+}
+
+/// Why `content` can't be read, when it can't: the first of its fields its source doesn't have.
+pub fn unknown_field(content: &Content) -> Option<String> {
+    let unknown = |part: &Part| match part {
+        Part::Field { source, key, .. } => no_field(*source, key),
+        Part::Text(_) => None,
+    };
+    content.0.iter().find_map(unknown)
+}
+
 /// Whether `block` has a text cell `name`: what a sheet's override may name.
 pub fn overridable(block: Option<&TitleBlock>, name: &str) -> bool {
     block.is_some_and(|block| block.cells.iter().any(|cell| cell.name == name && matches!(cell.kind, CellKind::Text(_))))
@@ -100,13 +121,8 @@ pub fn overridable(block: Option<&TitleBlock>, name: &str) -> bool {
 pub fn check_block(block: &TitleBlock) -> Result<()> {
     for cell in &block.cells {
         let CellKind::Text(text) = &cell.kind else { continue };
-        for part in &text.content.0 {
-            if let Part::Field { source, key, .. } = part
-                && !has_key(*source, key)
-            {
-                let source = serde_json::to_value(source).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
-                return Err(DocError::Invalid(format!("cell `{}`: the {source} has no field `{key}`", cell.name)));
-            }
+        if let Some(why) = unknown_field(&text.content) {
+            return Err(DocError::Invalid(format!("cell `{}`: {why}", cell.name)));
         }
     }
     Ok(())
@@ -128,7 +144,7 @@ impl Values<'_> {
             Part::Text(text) => text.clone(),
             Part::Field { source, key, .. } => match self.state(*source, key) {
                 FieldState::Shown(value) => value,
-                FieldState::Empty | FieldState::Lost => MISSING.into(),
+                FieldState::Empty | FieldState::Lost | FieldState::Unknown => MISSING.into(),
             },
         };
         content.0.iter().map(part).collect()
@@ -136,6 +152,9 @@ impl Values<'_> {
 
     /// What the field `key` of `source` reads.
     pub fn state(&self, source: Source, key: &str) -> FieldState {
+        if !has_key(source, key) {
+            return FieldState::Unknown;
+        }
         match self.field(source, key) {
             Some(value) if !value.is_empty() => FieldState::Shown(value),
             _ if source == Source::Component && matches!(self.component, Documented::Gone) => FieldState::Lost,

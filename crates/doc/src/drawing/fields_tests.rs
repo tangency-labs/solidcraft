@@ -227,3 +227,24 @@ fn a_sheets_scale_is_the_one_its_base_views_share() {
     d.views[at] = Arc::new(View { settings, ..(*d.views[at]).clone() });
     assert_eq!(scale(&d), ["1:2", "1:5", ""], "its views draw at 1:2 and 2:1: no scale of the sheet's");
 }
+
+/// A field its source doesn't have reads unknown, prints nothing, and says why: a note saved with
+/// one still opens, and a block or a note given one is refused with the same words.
+#[test]
+fn a_field_its_source_lacks_reads_unknown() {
+    let d = drawing();
+    let metadata = Metadata::default();
+    let bracket = Component { name: "Bracket", metadata: &metadata, properties: None, material: None, mass: None };
+    let values = Values { drawing: &d, sheet: 0, component: Documented::Present(bracket) };
+    assert_eq!(values.state(Source::Component, "weight"), FieldState::Unknown);
+    assert_eq!(values.state(Source::Sheet, "scales"), FieldState::Unknown);
+    assert_eq!(values.state(Source::Component, "name"), FieldState::Shown("Bracket".into()));
+    let gone = Values { component: Documented::Gone, ..values };
+    assert_eq!(gone.state(Source::Component, "weight"), FieldState::Unknown, "unknown before lost");
+    let parts = Content(vec![field(Source::Component, "name"), field(Source::Component, "weight"), field(Source::Sheet, "page")]);
+    assert_eq!(values.text(&parts), "Bracket");
+    assert_eq!(no_field(Source::Component, "weight").as_deref(), Some("the component has no field `weight`"));
+    assert_eq!(no_field(Source::Component, "mass"), None);
+    assert_eq!(unknown_field(&parts).as_deref(), Some("the component has no field `weight`"), "the first one");
+    assert_eq!(unknown_field(&Content(vec![field(Source::Sheet, "scale")])), None);
+}

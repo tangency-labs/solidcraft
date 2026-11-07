@@ -123,6 +123,8 @@ fn the_notes_rules_are_kept_on_reading() {
         assert_eq!(content(json!([{"field": {"source": source, "key": "x"}}])), rule(&on_view, reads), "{source}");
     }
     assert_eq!(content(json!([{"text": "Sheet "}, {"field": {"source": "sheet", "key": "number"}}])), "read");
+    // A field its source doesn't have is refused when given, never on opening: the note opens.
+    assert_eq!(content(json!([{"field": {"source": "component", "key": "weight"}}])), "read");
     // Its place and height are on paper.
     let paper = rule(&on_sheet, "its place is at most 5000 mm on paper");
     let at = |at: [f64; 2]| refused(&d, |v| note(v, &on_sheet)["at"] = json!(at));
