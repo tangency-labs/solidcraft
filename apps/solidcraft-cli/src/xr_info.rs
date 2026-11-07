@@ -15,11 +15,15 @@
 
 use serde_json::{Value, json};
 
-/// Run `xr-info` and print the diagnostic report as JSON.
-/// Every failure is inside the JSON — the exit code is always 0.
-pub fn cmd(_args: &[String]) -> Result<(), String> {
+/// Run `xr-info`: print the JSON report, or `--summary` for a plain-language
+/// verdict. Every failure is inside the report — the exit code is always 0.
+pub fn cmd(args: &[String]) -> Result<(), String> {
     let report = probe();
-    println!("{}", pretty(&report));
+    if args.iter().any(|a| a == "--summary") {
+        println!("{}", summary(&report));
+    } else {
+        println!("{}", pretty(&report));
+    }
     Ok(())
 }
 
@@ -56,6 +60,9 @@ fn probe() -> Value {
         Ok(e) => e,
         Err(msg) => {
             report["openxr"]["error"] = json!(msg);
+            // The loader is a per-application DLL on Windows, not a system component:
+            // this failure means the probe was moved away from its own files.
+            report["openxr"]["error_stage"] = json!("loader");
             return report;
         }
     };
@@ -101,6 +108,9 @@ fn probe() -> Value {
         Ok(inst) => inst,
         Err(e) => {
             report["openxr"]["error"] = json!(format!("failed to create instance: {e}"));
+            // The loader found no registered runtime: the VR software is not installed
+            // or not running, which the person testing can act on.
+            report["openxr"]["error_stage"] = json!("runtime");
             return report;
         }
     };
@@ -207,6 +217,182 @@ fn probe() -> Value {
     report
 }
 
+/// A plain-language version of the report, ending in a pass/fail verdict.
+///
+/// For someone running the probe on a headset they own: JSON tells the project
+/// what a Phase 1 renderer must handle, but it does not tell the person testing
+/// whether it worked. Pure over the report, so every verdict is testable without
+/// VR hardware (see `tests`).
+fn summary(report: &Value) -> String {
+    let mut out = String::from("SolidCraft VR check\n===================\n\n");
+
+    let runtime_name = str_at(report, &["openxr", "runtime", "runtime_name"]);
+    let runtime_version = str_at(report, &["openxr", "runtime", "runtime_version"]);
+    let runtime = match (runtime_name, runtime_version) {
+        (Some(n), Some(v)) => format!("{n} {v}"),
+        (Some(n), None) => n.to_string(),
+        _ => "not found".to_string(),
+    };
+    out.push_str(&format!("OpenXR runtime ..... {runtime}\n"));
+
+    if runtime_name.is_none() {
+        out.push_str("\nRESULT: FAIL\n");
+        // A missing loader is our packaging problem, not the tester's setup: say so,
+        // so nobody goes hunting for VR software that is already running.
+        if str_at(report, &["openxr", "error_stage"]) == Some("loader") {
+            out.push_str("The OpenXR loader file is missing. That is a packaging problem on our\n");
+            out.push_str("side, not something wrong with your PC.\n");
+            out.push_str("Unzip the whole folder and run VR-check.cmd from inside it.\n");
+        } else {
+            out.push_str("No VR software is running on this PC.\n");
+            out.push_str("Start SteamVR (or Quest Link, or Windows Mixed Reality), put the\n");
+            out.push_str("headset on, then run the check again.\n");
+        }
+        if let Some(e) = str_at(report, &["openxr", "error"]) {
+            out.push_str(&format!("\nDetail: {e}\n"));
+        }
+        return out;
+    }
+
+    let headset = headset_name(report);
+    out.push_str(&format!("Headset ............ {}\n", headset.unwrap_or("not found")));
+
+    if let Some((w, h)) = stereo_eye_size(report) {
+        out.push_str(&format!("Eye resolution ..... {w} x {h} per eye\n"));
+    }
+    let vulkan = report["openxr"]["graphics"]["vulkan_supported"].as_bool();
+    if let Some(v) = vulkan {
+        let word = if v { "yes" } else { "no" };
+        out.push_str(&format!("Vulkan support ..... {word}\n"));
+    }
+
+    out.push('\n');
+    if headset.is_none() {
+        out.push_str("RESULT: FAIL\n");
+        out.push_str("The VR software is running, but no headset was found.\n");
+        out.push_str("Check that the headset is plugged in and switched on, then run the\n");
+        out.push_str("check again.\n");
+    } else if vulkan == Some(false) {
+        out.push_str("RESULT: PASS (with a note)\n");
+        out.push_str("Your setup was read successfully, but Vulkan is not available here.\n");
+        out.push_str("That is still useful to know - please share the report with the project.\n");
+    } else {
+        out.push_str("RESULT: PASS\n");
+        out.push_str("Everything we need was reported. Please share the report with the project.\n");
+    }
+    out
+}
+
+/// The head-mounted display the runtime reports, if any.
+fn headset_name(report: &Value) -> Option<&str> {
+    report["openxr"]["systems"].as_array()?.first()?.get("system_name")?.as_str()
+}
+
+/// The recommended per-eye image size of the primary stereo view configuration.
+fn stereo_eye_size(report: &Value) -> Option<(u64, u64)> {
+    let stereo = report["openxr"]["view_configurations"]
+        .as_array()?
+        .iter()
+        .find(|c| c.get("type").and_then(Value::as_str) == Some("primary_stereo"))?;
+    let view = stereo.get("views")?.as_array()?.first()?;
+    Some((view.get("recommended_width")?.as_u64()?, view.get("recommended_height")?.as_u64()?))
+}
+
+/// Walk a path of object keys, returning the string at the end of it.
+fn str_at<'a>(value: &'a Value, path: &[&str]) -> Option<&'a str> {
+    let mut cur = value;
+    for key in path {
+        cur = cur.get(*key)?;
+    }
+    cur.as_str()
+}
+
 fn pretty(v: &Value) -> String {
     serde_json::to_string_pretty(v).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// A report from a machine that has everything Phase 1 needs.
+    fn working_setup() -> Value {
+        json!({
+            "openxr": {
+                "runtime": { "runtime_name": "SteamVR", "runtime_version": "1.24.7" },
+                "systems": [{ "system_name": "Valve Index" }],
+                "view_configurations": [{
+                    "type": "primary_stereo",
+                    "views": [{ "recommended_width": 1440, "recommended_height": 1600 }],
+                }],
+                "graphics": { "vulkan_supported": true },
+            }
+        })
+    }
+
+    #[test]
+    fn a_working_setup_passes() {
+        let s = summary(&working_setup());
+        assert!(s.contains("RESULT: PASS"), "{s}");
+        assert!(s.contains("SteamVR 1.24.7"), "{s}");
+        assert!(s.contains("Valve Index"), "{s}");
+        assert!(s.contains("1440 x 1600 per eye"), "{s}");
+        assert!(s.contains("Vulkan support ..... yes"), "{s}");
+    }
+
+    #[test]
+    fn no_runtime_fails_and_says_what_to_do() {
+        let s = summary(&json!({
+            "openxr": {
+                "runtime": Value::Null,
+                "error": "failed to create instance: the loader was unable to find or load a runtime",
+                "error_stage": "runtime",
+            }
+        }));
+        assert!(s.contains("RESULT: FAIL"), "{s}");
+        assert!(s.contains("No VR software is running"), "{s}");
+        assert!(s.contains("Start SteamVR"), "{s}");
+    }
+
+    #[test]
+    fn a_missing_loader_blames_the_package_not_the_tester() {
+        let s = summary(&json!({
+            "openxr": {
+                "runtime": Value::Null,
+                "error": "no OpenXR loader: failed loading",
+                "error_stage": "loader",
+            }
+        }));
+        assert!(s.contains("RESULT: FAIL"), "{s}");
+        assert!(s.contains("packaging problem"), "{s}");
+        assert!(!s.contains("No VR software is running"), "{s}");
+    }
+
+    #[test]
+    fn runtime_without_a_headset_fails() {
+        let s = summary(&json!({
+            "openxr": {
+                "runtime": { "runtime_name": "SteamVR", "runtime_version": "1.24.7" },
+                "systems": [{ "error": "no head mounted display" }],
+            }
+        }));
+        assert!(s.contains("RESULT: FAIL"), "{s}");
+        assert!(s.contains("no headset was found"), "{s}");
+    }
+
+    #[test]
+    fn no_vulkan_passes_with_a_note() {
+        let mut report = working_setup();
+        report["openxr"]["graphics"]["vulkan_supported"] = json!(false);
+        let s = summary(&report);
+        assert!(s.contains("RESULT: PASS (with a note)"), "{s}");
+        assert!(s.contains("Vulkan support ..... no"), "{s}");
+    }
+
+    #[test]
+    fn an_empty_report_still_prints_a_verdict() {
+        let s = summary(&json!({}));
+        assert!(s.contains("RESULT: FAIL"), "{s}");
+    }
 }
