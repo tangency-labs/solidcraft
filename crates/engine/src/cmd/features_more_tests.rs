@@ -2721,5 +2721,9 @@ fn cut_to_object_up_to_an_inclined_face_removes_the_hole() {
     let params = json!({"sketch": "C", "operation": "cut", "direction": "negative", "distance": "10 mm", "exact_regions": true, "profiles": [0], "to": [20, 11, -5]});
     run(&mut s, "solid.extrude", params);
     let after = run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
-    assert!(before - after > 100.0, "{before} -> {after}");
+    // The incline is a plane, so the hole is the circle's area times the height at its centre:
+    // from the bottom (z -20) to the incline at x 20 (z -10 + 20 / 4 = -5), 15 mm.
+    let expected = std::f64::consts::PI * 16.0 * 15.0;
+    let removed = before - after;
+    assert!((removed - expected).abs() / expected < 1e-3, "removed {removed}, expected {expected}");
 }
