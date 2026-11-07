@@ -65,7 +65,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let anchor = crate::frame::offset_anchor(docked, moved, drag_bounds, side);
     let panel = ui_kit::Panel::new(
         title,
-        egui::Id::new("sc_material_card_review"),
+        egui::Id::unique("sc_material_card_review"),
         anchor,
         drag_bounds,
         side,
@@ -95,8 +95,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             |ui| {
                 ui_kit::text(ui, tr("ui.material_review.scope"), ui_kit::Text::Hint("manage"));
                 ui_kit::text(ui, tr("ui.material_review.input"), ui_kit::Text::Report("material_input_label", false));
-                let response =
-                    ui_kit::text_area(ui, tr("ui.material_review.input"), egui::Id::new("sc_material_card_input"), &mut window.input, 5, MAX_BYTES);
+                let response = ui_kit::text_area(
+                    ui,
+                    tr("ui.material_review.input"),
+                    egui::Id::unique("sc_material_card_input"),
+                    &mut window.input,
+                    5,
+                    MAX_BYTES,
+                );
                 crate::scenario::publish_handle("review:input", response.rect.center());
                 if response.changed() {
                     window.reviewed = None;
@@ -272,7 +278,7 @@ mod tests {
         assert!(h.widget("Original synthetic candidate").is_some());
         assert!(h.widget("Density: Unknown").is_some());
         assert!(h.widget("E: 1.2e10 Pa").is_some());
-        h.ctx.memory_mut(|m| m.request_focus(egui::Id::new("sc_material_card_input")));
+        h.ctx.memory_mut(|m| m.request_focus(egui::Id::unique("sc_material_card_input")));
         h.step(&json!({"text":" "})).unwrap();
         assert!(h.app.material_card_review.as_ref().unwrap().reviewed.is_none(), "editing invalidates the old report");
         h.step(&json!({"click":{"handle":"dialog:close"}})).unwrap();

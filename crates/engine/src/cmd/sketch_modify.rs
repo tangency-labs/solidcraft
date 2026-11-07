@@ -66,7 +66,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("trim")
         .enabled(in_sketch)
         .params(concat!(
-            "points: [[x,y]…] (2…2000 positions: a path drawn across the sketch). Every piece the path crosses is removed as `sketch.trim` removes the piece at that crossing, in the order the path crosses them; a piece crossed again after it is gone is not trimmed twice; projected geometry, infinite lines, offset outputs and pieces trim refuses are passed over (why in `skipped`). dry_run?: bool (report without changing the design). One undo step → trimmed: [each trim's result], removed: [[[x,y]…]] (each removed piece as a polyline)",
+            "points: [[x,y]…] (2…2000 positions: a path drawn across the sketch). Every piece the path crosses is removed as `sketch.trim` removes the piece at that crossing, in the order the path crosses them; a piece crossed again after it is gone is not trimmed twice; eligible single-line offset outputs are trimmed while preserving their distance; projected geometry, infinite lines, other offset outputs and pieces trim refuses are passed over (why in `skipped`). dry_run?: bool (report without changing the design). One undo step → trimmed: [each trim's result], removed: [[[x,y]…]] (each removed piece as a polyline)",
             created_doc!()
         )),
     CommandSpec::new("sketch.extend", "Extend", extend)
@@ -233,9 +233,12 @@ fn pin(sk: &mut Sketch, p: usize, cutter: usize) -> Result<()> {
 
 /// Split curve `ci` at interior parameters `ts` (sorted). Returns the pieces in parameter
 /// order (the first keeps the original index) and the new points.
-fn split_at(sk: &mut Sketch, ci: usize, ts: &[f64]) -> Result<(Vec<usize>, Vec<usize>)> {
-    let sh = sk.shape(ci).ok_or_else(|| bad("split", "curve"))?;
-    let kind = sk.curves.get(ci).map(|c| c.kind.clone()).ok_or_else(|| bad("split", "curve"))?;
+///
+/// `cmd` is the command the caller used (`sketch.trim`, `sketch.trim.path`, `sketch.break`):
+/// a refusal names the command the caller can write, never an internal step.
+fn split_at(sk: &mut Sketch, ci: usize, ts: &[f64], cmd: &str) -> Result<(Vec<usize>, Vec<usize>)> {
+    let sh = sk.shape(ci).ok_or_else(|| bad(cmd, "curve"))?;
+    let kind = sk.curves.get(ci).map(|c| c.kind.clone()).ok_or_else(|| bad(cmd, "curve"))?;
     let construction = sk.curves.get(ci).is_some_and(|c| c.construction);
     let mut pts = Vec::new();
     for t in ts {
@@ -273,7 +276,7 @@ fn split_at(sk: &mut Sketch, ci: usize, ts: &[f64]) -> Result<(Vec<usize>, Vec<u
         }
         CurveKind::Circle { c, .. } => {
             if pts.len() < 2 {
-                return Err(bad("split", "a circle needs two points to split at"));
+                return Err(bad(cmd, "a circle needs two points to split at"));
             }
             let mut chain = pts.clone();
             if let Some(f) = pts.first() {
@@ -287,9 +290,21 @@ fn split_at(sk: &mut Sketch, ci: usize, ts: &[f64]) -> Result<(Vec<usize>, Vec<u
                 push(sk, CurveKind::Arc { c, a: w[0], b: w[1] }, "a")?;
             }
         }
-        _ => return Err(bad("split", "not supported yet for ellipses, splines and conics")),
+        _ => return Err(bad(cmd, "not supported yet for ellipses, splines and conics")),
     }
     Ok((pieces, pts))
+}
+
+/// Points placed at a share of curve `ci`'s length (Divide Curve) stay on what is left of it, free to
+/// slide: a trim or a break changes the length they share, and holding the shares would move them.
+pub(super) fn loosen_along(sk: &mut Sketch, ci: usize) {
+    for k in &mut sk.constraints {
+        if let ConstraintKind::PointAlong { p, c, .. } = k.kind
+            && c == ci
+        {
+            k.kind = ConstraintKind::PointOnCurve { p, c };
+        }
+    }
 }
 
 /// Keep the pieces of a split tied together: lines collinear, arcs on one circle.
@@ -501,6 +516,7 @@ fn refuse_offset_ends(sk: &Sketch, ci: usize, what: &str, cmd: &str) -> Result<(
     }
 }
 
+/// Trim the picked piece and release eligible offset extents in the same undo step.
 fn trim(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.trim";
     let at = req_vec2(cmd, p, "at")?;
@@ -519,7 +535,8 @@ fn trim(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// Source lines and their single-line offsets can have independent endpoints. Materialize
 /// the affected line chains before Trim, retaining their original driving distance parameters
-/// as point-line dimensions. Closed or mixed-curve output chains still need their association.
+/// as point-line dimensions. Without a dimension, the stored distance stays a fixed distance.
+/// Closed or mixed-curve output chains still need their association.
 fn release_line_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, ci: usize, cmd: &str) -> Result<Vec<String>> {
     let Some(curve) = sk.curves.get(ci) else { return Ok(Vec::new()) };
     if curve.infinite || sk.is_linked_curve(ci) || !matches!(curve.kind, CurveKind::Line { .. }) {
@@ -559,10 +576,9 @@ fn release_line_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, ci: usi
                 matches!(&c.kind,
             ConstraintKind::OffsetDistance { output, .. } if record.outputs.contains(output))
             })
-            .cloned()
-            .ok_or_else(|| bad(cmd, "missing offset distance dimension"))?;
-        let value = match dimension.kind {
-            ConstraintKind::OffsetDistance { value, .. } => value,
+            .cloned();
+        let value = match dimension.as_ref().map(|c| &c.kind) {
+            Some(ConstraintKind::OffsetDistance { value, .. }) => *value,
             _ => record.distance.abs(),
         };
         sk.constraints.retain(|c| !matches!(&c.kind, ConstraintKind::OffsetDistance { output, .. } if record.outputs.contains(output)));
@@ -589,8 +605,10 @@ fn release_line_offsets(sk: &mut Sketch, doc: &solidcraft_doc::Document, ci: usi
             }
             let p = sk.curves.get(target).and_then(|c| c.kind.ends()).map(|ends| ends.0).ok_or_else(|| bad(cmd, "missing offset line endpoint"))?;
             let kind = ConstraintKind::PointLineDistance { p, l: source, value };
-            let id = sk.add_constraint(kind.clone(), dimension.param.clone())?;
-            if let Some(added) = sk.constraints.iter_mut().find(|c| c.id == id) {
+            let id = sk.add_constraint(kind.clone(), dimension.as_ref().and_then(|c| c.param.clone()))?;
+            if let Some(dimension) = &dimension
+                && let Some(added) = sk.constraints.iter_mut().find(|c| c.id == id)
+            {
                 let mut kept = dimension.clone();
                 kept.id = if index == 0 { dimension.id.clone() } else { id };
                 kept.kind = kind;
@@ -611,10 +629,64 @@ fn middle_implied(sk: &Sketch, m: usize, l: usize) -> bool {
     add_c(&mut with, ConstraintKind::Midpoint { p: m, l }).is_ok() && dof_now(&with) == dof_now(sk)
 }
 
+/// Points held at the middle of line `ci`: `release_extent` drops that hold, so a cut there
+/// remembers them (a center rectangle's centre on its first diagonal).
+fn held_midpoints(sk: &Sketch, ci: usize) -> Vec<usize> {
+    sk.constraints
+        .iter()
+        .filter_map(|k| match k.kind {
+            ConstraintKind::Midpoint { p, l } if l == ci => Some(p),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A point a Midpoint constraint holds at `at`, on a line `on` accepts.
+fn held_middle(sk: &Sketch, at: Vec2, on: impl Fn(usize) -> bool) -> Option<usize> {
+    sk.constraints.iter().find_map(|k| match k.kind {
+        ConstraintKind::Midpoint { p, l } if on(l) && sk.point(p).is_some_and(|q| q.dist(at) < TOL * 10.0) => Some(p),
+        _ => None,
+    })
+}
+
+/// Hold the new point `pi` that `cutter` cut a line at. A cut on a point already held there ends
+/// the pieces on that point instead, with no second point: the point to put in place of `pi` is
+/// returned. `midpoints` are the points held at the cut line's middle before `release_extent`
+/// (`held_midpoints`), and `before` the sketch as it was then.
+fn hold_cut(sk: &mut Sketch, before: Option<&Sketch>, midpoints: &[usize], pi: usize, cutter: usize) -> Result<Option<usize>> {
+    let Some(at) = sk.point(pi) else { return Ok(None) };
+    // The cutter's middle, held there, is taken as its ends are (`pin`).
+    if let Some(m) = held_middle(sk, at, |l| l == cutter) {
+        return Ok(Some(m));
+    }
+    let Some(m) = midpoints.iter().copied().find(|m| sk.point(*m).is_some_and(|q| q.dist(at) < TOL * 10.0)) else {
+        pin(sk, pi, cutter)?;
+        return Ok(None);
+    };
+    // The cut line's middle: it moves to the cutter's middle when the sketch makes it that too (a
+    // center rectangle's diagonals bisect each other), else it stays on the cutter. A cutter
+    // whose middle is there only by chance gets no hold it never had.
+    let middle = match sk.curves.get(cutter).map(|c| &c.kind) {
+        Some(CurveKind::Line { a, b }) => sk.point(*a).zip(sk.point(*b)).map(|(a, b)| (a + b) * 0.5),
+        _ => None,
+    };
+    let implied = match before {
+        Some(was) if middle.is_some_and(|q| q.dist(at) < TOL * 10.0) => middle_implied(was, m, cutter),
+        _ => false,
+    };
+    if implied {
+        add_c(sk, ConstraintKind::Midpoint { p: m, l: cutter })?;
+    } else {
+        pin(sk, m, cutter)?;
+    }
+    Ok(Some(m))
+}
+
 /// Remove the piece of curve `ci` around `at`: between the nearest intersections on either
 /// side, or the whole curve when nothing crosses it. Returns what `sketch.trim` reports and the
 /// removed piece as a polyline.
 fn remove_piece(sk: &mut Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<(Value, Vec<Vec2>)> {
+    loosen_along(sk, ci);
     let id = sk.curves.get(ci).map(|c| c.id.clone()).unwrap_or_default();
     if sk.curves.get(ci).is_some_and(|c| c.infinite) {
         return Err(bad(cmd, "an infinite line has no ends to trim back to: make it a normal line first"));
@@ -655,20 +727,13 @@ fn remove_piece(sk: &mut Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<(Valu
         .collect();
     // Points held at the middle of the trimmed line (a center rectangle's centre on its first
     // diagonal): `release_extent` drops that hold, so remember them for the cuts below.
-    let midpoints: Vec<usize> = sk
-        .constraints
-        .iter()
-        .filter_map(|k| match k.kind {
-            ConstraintKind::Midpoint { p, l } if l == ci => Some(p),
-            _ => None,
-        })
-        .collect();
+    let midpoints = held_midpoints(sk, ci);
     // The sketch as it was, for `middle_implied`: only needed when a midpoint can be cut.
     let before = (!midpoints.is_empty()).then(|| sk.clone());
     release_extent(sk, ci);
     let tangencies = endpoint_tangencies(sk, ci);
     let ts: Vec<f64> = cuts.iter().map(|c| c.0).collect();
-    let (pieces, pts) = split_at(sk, ci, &ts)?;
+    let (pieces, pts) = split_at(sk, ci, &ts, cmd)?;
     // The piece containing tq.
     let k = if full {
         let (a, b) = (ts[0], ts[1]);
@@ -679,36 +744,8 @@ fn remove_piece(sk: &mut Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<(Valu
     // A cut on a point already held there ends the piece on that point: no second point.
     let mut welds: Vec<(usize, usize)> = Vec::new();
     for (pi, c) in pts.iter().zip(&cuts) {
-        let cutter = c.2;
-        let Some(at) = sk.point(*pi) else { continue };
-        let near = |sk: &Sketch, p: usize| sk.point(p).is_some_and(|q| q.dist(at) < TOL * 10.0);
-        // The cutter's middle, held there, is taken as its ends are (`pin`).
-        let held = sk.constraints.iter().find_map(|k| match k.kind {
-            ConstraintKind::Midpoint { p, l } if l == cutter && near(sk, p) => Some(p),
-            _ => None,
-        });
-        if let Some(m) = held {
+        if let Some(m) = hold_cut(sk, before.as_ref(), &midpoints, *pi, c.2)? {
             welds.push((*pi, m));
-        } else if let Some(m) = midpoints.iter().copied().find(|m| near(sk, *m)) {
-            // The trimmed line's middle: it moves to the cutter's middle when the sketch makes it
-            // that too (a center rectangle's diagonals bisect each other), else it stays on the
-            // cutter. A cutter whose middle is there only by chance gets no hold it never had.
-            welds.push((*pi, m));
-            let middle = match sk.curves.get(cutter).map(|c| &c.kind) {
-                Some(CurveKind::Line { a, b }) => sk.point(*a).zip(sk.point(*b)).map(|(a, b)| (a + b) * 0.5),
-                _ => None,
-            };
-            let implied = match &before {
-                Some(was) if middle.is_some_and(|q| q.dist(at) < TOL * 10.0) => middle_implied(was, m, cutter),
-                _ => false,
-            };
-            if implied {
-                add_c(sk, ConstraintKind::Midpoint { p: m, l: cutter })?;
-            } else {
-                pin(sk, m, cutter)?;
-            }
-        } else {
-            pin(sk, *pi, cutter)?;
         }
     }
     let gone = pieces.get(k).copied().ok_or_else(|| bad(cmd, "piece"))?;
@@ -821,6 +858,7 @@ fn seg_cross(a: Vec2, b: Vec2, c: Vec2, d: Vec2) -> Option<(f64, Vec2)> {
     ((0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u)).then(|| (t, a + r * t))
 }
 
+/// Preview or trim the pieces crossed by a path, skipping protected or unsupported geometry.
 fn trim_path(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.trim.path";
     let path = vec2_list(cmd, p, "points", MAX_PATH_POINTS)?;
@@ -891,6 +929,7 @@ fn break_cmd(s: &mut Session, p: &Value) -> Result<Value> {
             separate_end(sk, ci, end)?;
             return Ok(ids_of(sk, &[ci]));
         }
+        loosen_along(sk, ci);
         if sk.curves.get(ci).is_some_and(|c| c.kind.is_freeform()) {
             let r = if let Some(points) = &points {
                 super::sketch_freeform::break_at_points(sk, ci, points, cmd)?
@@ -935,15 +974,27 @@ fn break_cmd(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, "the curve is already broken there"));
         }
         let (ts, cutters): (Vec<f64>, Vec<Option<usize>>) = kept.into_iter().unzip();
+        // A cut on a point held at the middle of either line joins the pieces at that point.
+        let midpoints = held_midpoints(sk, ci);
+        let before = (!midpoints.is_empty()).then(|| sk.clone());
         // Its length (and its midpoint, an equal length) measured the whole curve: left on the
         // first piece, it would stretch that piece back to the old size and skew the sketch.
         release_extent(sk, ci);
-        let (pieces, pts) = split_at(sk, ci, &ts)?;
+        let (pieces, pts) = split_at(sk, ci, &ts, cmd)?;
+        let mut welded = Vec::new();
         for (pi, c) in pts.iter().zip(&cutters) {
-            if let Some(c) = c {
-                pin(sk, *pi, *c)?;
+            if let Some(c) = c
+                && let Some(m) = hold_cut(sk, before.as_ref(), &midpoints, *pi, *c)?
+            {
+                for piece in &pieces {
+                    if let Some(curve) = sk.curves.get_mut(*piece) {
+                        curve.kind.map_points(&|p| if p == *pi { m } else { p });
+                    }
+                }
+                welded.push(*pi);
             }
         }
+        sk.remove_points(&welded);
         tie(sk, &pieces)?;
         Ok(ids_of(sk, &pieces))
     })?;
@@ -1287,13 +1338,19 @@ fn add_arc_extension(sk: &mut Sketch, ci: usize, aim: &ArcAim, stop: Option<usiz
 }
 
 /// The point the extension stops at when the sketch already has one there: an end of another
-/// curve at the hit. Joining that point keeps the extension attached to the geometry that is
-/// there instead of laying a second point over it. `None` when the stop needs a new point.
+/// curve at the hit, or a point held at another line's middle there (a center rectangle's
+/// centre). Joining that point keeps the extension attached to the geometry that is there
+/// instead of laying a second point over it. `None` when the stop needs a new point.
 fn stop_point(sk: &Sketch, ci: usize, q: Vec2) -> Option<usize> {
-    sk.curves.iter().enumerate().filter(|(i, _)| *i != ci).find_map(|(_, c)| {
-        let (a, b) = c.kind.ends()?;
-        [a, b].into_iter().find(|p| sk.point(*p).is_some_and(|pt| pt.dist(q) <= TOL * 10.0))
-    })
+    sk.curves
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i != ci)
+        .find_map(|(_, c)| {
+            let (a, b) = c.kind.ends()?;
+            [a, b].into_iter().find(|p| sk.point(*p).is_some_and(|pt| pt.dist(q) <= TOL * 10.0))
+        })
+        .or_else(|| held_middle(sk, q, |l| l != ci))
 }
 
 /// Add the line an extension needs, from the growing end to the stop: the sketch's own point
@@ -1326,7 +1383,7 @@ fn arc_end_held(sk: &Sketch, ci: usize, end: usize) -> bool {
         use solidcraft_sketch::ConstraintKind::*;
         match c.kind {
             Coincident { p, q } => p == end || q == end,
-            Fix { p } | PointOnCurve { p, .. } | Midpoint { p, .. } => p == end,
+            Fix { p } | PointOnCurve { p, .. } | PointAlong { p, .. } | Midpoint { p, .. } => p == end,
             HorizontalPoints { p, q } | VerticalPoints { p, q } | Symmetric { p, q, .. } => p == end || q == end,
             _ => false,
         }
@@ -1444,7 +1501,7 @@ fn grow_line(sk: &mut Sketch, ci: usize, aim: LineAim) -> Result<String> {
         match c.kind {
             Coincident { p, q } => p == end || q == end,
             Fix { p } => p == end,
-            PointOnCurve { p, .. } => p == end,
+            PointOnCurve { p, .. } | PointAlong { p, .. } => p == end,
             Midpoint { p, .. } => p == end,
             HorizontalPoints { p, q } | VerticalPoints { p, q } => p == end || q == end,
             Symmetric { p, q, .. } => p == end || q == end,

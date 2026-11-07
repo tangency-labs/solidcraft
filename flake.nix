@@ -112,7 +112,11 @@
           version = (pkgs.lib.importTOML ./Cargo.toml).workspace.package.version;
           src = self;
 
-          cargoLock.lockFile = ./Cargo.lock;
+          cargoLock = {
+            lockFile = ./Cargo.lock;
+            allowBuiltinFetchGit = true;
+          };
+
           # The CLI draws the same packaging icons as the other Linux distributions.
           cargoBuildFlags = [
             "-p"

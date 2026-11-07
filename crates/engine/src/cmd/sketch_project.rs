@@ -42,7 +42,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "CREATE")
         .icon("intersection_curve")
         .enabled(in_sketch)
-        .params(concat!("a, b: {body} | {face: [x,y,z], body?}: where they meet, as linked 3D curves", created_doc!())),
+        .params(concat!("a, b: {body} | {face: [x,y,z], body?} | {sketch, curve} (a curve of another sketch, standing in for its extrusion along that sketch's normal): where they meet, as linked 3D curves", created_doc!())),
     CommandSpec::new("sketch.spun_profile", "Spun Profile", spun_profile)
         .at("SKETCH", "CREATE")
         .icon("spun")
@@ -579,8 +579,8 @@ fn intersection_curve(s: &mut Session, p: &Value) -> Result<Value> {
     let side = |k: &str| -> Result<LinkSource> {
         let v = p.get(k).ok_or_else(|| bad(cmd, format!("missing `{k}`")))?;
         match source(s, v, cmd)? {
-            x @ (LinkSource::Body { .. } | LinkSource::Face { .. }) => Ok(x),
-            _ => Err(bad(cmd, format!("`{k}` must be a body or a face"))),
+            x @ (LinkSource::Body { .. } | LinkSource::Face { .. } | LinkSource::SketchCurve { .. }) => Ok(x),
+            _ => Err(bad(cmd, format!("`{k}` must be a body, a face or a curve of another sketch"))),
         }
     };
     let (a, b) = (side("a")?, side("b")?);

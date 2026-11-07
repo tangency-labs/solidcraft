@@ -245,8 +245,8 @@ fn slot_count(app: &SolveApp, ui: &mut egui::Ui, stage: Rect, bar: Rect) {
     };
     let rect = Rect::from_min_size(egui::pos2(x, y), size);
     ui.painter().with_clip_rect(stage).galley(rect.min, galley, view.text_dim);
-    let response = ui.interact(rect, ui.id().with("navbar_slot_count"), Sense::hover());
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text.as_str()));
+    let response = ui.interact(rect, ui.scope_id().with("navbar_slot_count"), Sense::hover());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), text.as_str()));
     scenario::publish_rect("prefs:navbar:count", rect);
 }
 
@@ -393,7 +393,7 @@ fn inspector_header(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State, in
             })
             .inner
             .backing_on_hover_text(label);
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled && ui.is_enabled(), label));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled && ui.is_enabled(), label));
         scenario::publish_target(&format!("prefs:navbar:{key}"), response.rect);
         if response.clicked() {
             edit(app, state, index, key);

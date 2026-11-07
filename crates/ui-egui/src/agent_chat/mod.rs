@@ -377,6 +377,8 @@ pub struct AgentChat {
     pub panel_rect: Option<egui::Rect>,
     /// A pointer press in the transcript owns keys just like a focused text editor.
     keyboard_owned: bool,
+    /// The panel forgets its own width the next time it is drawn, so the preference applies.
+    pub(crate) forget_width: bool,
     /// Unreserved sheet space, shared by the actual dock and its drag preview.
     pub(crate) dock_space: Option<egui::Rect>,
     /// The last message sent, kept to send again after a sign-in (its files too).
@@ -467,6 +469,7 @@ impl AgentChat {
     pub(crate) fn swap_document(&mut self, other: &mut Self) {
         std::mem::swap(self, other);
         std::mem::swap(&mut self.open, &mut other.open);
+        std::mem::swap(&mut self.forget_width, &mut other.forget_width);
         std::mem::swap(&mut self.following_document, &mut other.following_document);
         std::mem::swap(&mut self.settings, &mut other.settings);
         std::mem::swap(&mut self.control_starter, &mut other.control_starter);
@@ -493,6 +496,14 @@ impl AgentChat {
         self.stop_backend(wait);
         if self.state.is_some() {
             self.state = Some(State::Off);
+        }
+    }
+
+    pub(crate) fn disconnect_endpoint(&mut self, session: &mut solidcraft_engine::Session, id: &str) {
+        #[cfg(not(target_arch = "wasm32"))]
+        settings::forget_card_listing(&mut self.settings, id);
+        if self.running_id == id {
+            self.disconnect_document(session, false);
         }
     }
 
@@ -1029,6 +1040,7 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
                         base_url: entry.base_url.clone(),
                         model: entry.model.clone(),
                         key,
+                        allow_insecure_http: entry.allow_insecure_http,
                         http,
                         request_timeout_s: entry.request_timeout_s,
                         reasoning_effort: entry.reasoning_effort.clone(),
@@ -1116,6 +1128,16 @@ fn connect_at_start(app: &mut SolveApp, ctx: &egui::Context) {
 pub fn disconnect(app: &mut SolveApp) {
     crate::edit_in_place::forget_after_turn(app);
     app.agent_chat.disconnect_document(&mut app.session, false);
+}
+
+/// Revoking an endpoint's HTTP consent also stops its conversations in other document tabs.
+pub(super) fn disconnect_endpoint(app: &mut SolveApp, id: &str) {
+    #[cfg(not(target_arch = "wasm32"))]
+    settings::forget_card_listing(&mut app.agent_chat.settings, id);
+    if app.agent_chat.running_id == id {
+        disconnect(app);
+    }
+    crate::documents::disconnect_background_endpoint(app, id);
 }
 
 /// The app is quitting: end the agent and its helpers before the window goes.
@@ -2405,6 +2427,10 @@ pub fn control(app: &mut SolveApp, ctx: &egui::Context, p: &Value) -> Result<Val
             c.id = agents::new_id(&app.preferences, if c.kind.is_api() { c.kind.id() } else { "custom" });
         }
         c.key = false;
+        c.allow_insecure_http &= c.kind == agents::Kind::Api;
+        if !c.allow_insecure_http && app.preferences.agents.iter().any(|old| old.id == c.id && old.allow_insecure_http) {
+            disconnect_endpoint(app, &c.id);
+        }
         app.preferences.agents.retain(|x| x.id != c.id);
         app.preferences.agents.push(c);
     }
@@ -2491,7 +2517,7 @@ pub fn control(app: &mut SolveApp, ctx: &egui::Context, p: &Value) -> Result<Val
     }
     if let Some(w) = p.get("width").and_then(Value::as_f64).filter(|w| w.is_finite()) {
         app.preferences.agent_chat_width = (w as f32).clamp(panel::MIN_WIDTH, panel::MAX_WIDTH);
-        panel::forget_width(ctx);
+        app.agent_chat.forget_width = true;
     }
     if let Some(path) = p.get("attach").and_then(Value::as_str) {
         attach_path(app, path)?;

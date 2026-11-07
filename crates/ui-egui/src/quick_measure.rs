@@ -252,7 +252,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &egui::Ui, view: egui::Rect, taken: &
         return None;
     }
     let response =
-        ui.interact(r, egui::Id::new("sc_quick_measure"), egui::Sense::click()).backing_on_hover_text(crate::i18n::tr("measure.quick_copy"));
+        ui.interact(r, egui::Id::unique("sc_quick_measure"), egui::Sense::click()).backing_on_hover_text(crate::i18n::tr("measure.quick_copy"));
     crate::scenario::publish_rect("measure:quick", r);
     painter.rect_filled(r, t.radius_sm, if response.hovered() { t.hover } else { t.overlay });
     painter.rect_stroke(r, t.radius_sm, egui::Stroke::new(1.0, t.border), egui::StrokeKind::Inside);

@@ -42,7 +42,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "Save Layout",
         wire::Save,
         wire::SaveReply,
-        "name, overwrite?: false, expected_revision?: save complete envelope in injected catalogue"
+        "name, replace?: false (overwrite accepted for compatibility), expected_revision?: save complete envelope in injected catalogue"
     ),
     command!(
         "layout.workspace.select",
@@ -51,6 +51,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         wire::WorkspaceSelect,
         wire::WorkspaceReply,
         "workspace, expected_revision?: atomically remember outgoing and replace with destination"
+    ),
+    command!(
+        "panel.action",
+        "activate",
+        "Run Panel Header Action",
+        wire::HeaderAction,
+        crate::panels::LayoutReply,
+        "target or legacy id, action, expected_revision?: invoke a registered owning-controller action"
     ),
     command!(
         "panel.activate",
@@ -114,7 +122,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "Move Panel",
         wire::Move,
         crate::panels::LayoutReply,
-        "target or legacy id, destination: new_section or join_tab, expected_revision?"
+        "target or legacy id, destination: new_section, join_tab or relative, activate?: false, expected_revision?"
     ),
     command!(
         "panel.native_close",
@@ -162,7 +170,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "Resize Panel Section",
         wire::Resize,
         crate::panels::LayoutReply,
-        "target or legacy id, size: {width,height}, expected_revision?"
+        "target or legacy id, size: {width,height}, thickness_only?: false by default; true changes Bottom height or side column width and ignores the other valid size component, expected_revision?"
     ),
     command!(
         "panel.resize_pair",
