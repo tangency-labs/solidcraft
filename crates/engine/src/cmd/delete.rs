@@ -211,6 +211,11 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     for k in keys(p, "canvases") {
+        // A locked canvas stays (#12310), as a locked body does.
+        if let Some(c) = s.doc.canvases.iter().find(|c| c.id.to_string() == k || c.name == k).filter(|c| c.locked) {
+            skip(super::sketch_canvas::locked_reason(c));
+            continue;
+        }
         sub(s, "canvas.delete", json!({ "canvas": k }))?;
         done = true;
     }
