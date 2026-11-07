@@ -8,8 +8,13 @@
 //! as a nested edit and, its status ignored, kept the faces: three extra offset faces
 //! at distance 5.6, five at 11.2. At 11.2 the extra faces made coincident proto edges
 //! that `ResolveOverlappingProtoEdges` rebuilt forever (C++ finishes in seconds; the
-//! port ran past 30 minutes). The face counts are the C++ reference's (difftest unit
-//! `offset.offset_executive_p2`); in release the full offset takes well under a second.
+//! port ran past 30 minutes). The C++ reference keeps 20 faces at 5.6 and 12 at 11.2.
+//!
+//! Face 2 bends with radius 3.96 towards the outset, so its offset folds at both
+//! distances: the offset is refused before anything is built, naming that radius as the
+//! largest wall that works (#2350 S1, D5), and neither the deletion nor the proto-edge
+//! loop is reached from this part. The deletion stays covered by
+//! `offset_shell_lamina_face_delete.rs`.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -21,6 +26,8 @@
 mod offset_fixture;
 
 use offset_fixture::Notifications;
+use solidcore::error::offset::OffsetFailure;
+use solidcore::error::{ErrorKind, Reason};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::object::ObjectRef;
 use solidcore::offset::offset_executive::p1::{OffsetExecutive, OffsetOperation};
@@ -29,7 +36,8 @@ use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::p7::read_from_file;
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::topology::NotifyRecords;
-use solidcore::{Brep, EntityRef, Kernel};
+use solidcore::topology::FaceId;
+use solidcore::{Brep, EntityRef, Kernel, SolidError};
 
 fn fillet2(k: &mut Kernel) -> Option<Brep> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -62,46 +70,47 @@ fn fillet2(k: &mut Kernel) -> Option<Brep> {
     Some(b)
 }
 
-/// `DoSolidOffset` of the part at `distance`, face 0 the shell face.
-fn offset(distance: f64, skip_stitch_merge: bool) -> Option<Brep> {
+/// `DoSolidOffset` of the part at `distance`, face 0 the shell face, and the part's
+/// face 2; `None` (the test is skipped) without the pinned upstream checkout.
+fn offset(distance: f64, skip_stitch_merge: bool) -> Option<(Result<Brep, SolidError>, FaceId)> {
     let mut k = Kernel::default();
     let mut part = fillet2(&mut k)?;
-    let face = part.face_list()[0];
+    let faces = part.face_list();
+    let (face, face2) = (faces[0], faces[2]);
     let mut exec = OffsetExecutive::new(OffsetOperation::SolidOffset, distance, 1e-5);
     exec.set_inset(false);
     exec.set_extend_convex_edges(false);
     exec.set_merge_results(true);
     exec.set_shell_faces(&[face]);
     let mut notifications = Notifications::new(&mut part);
-    Some(
-        exec.do_solid_offset(
-            &mut k,
-            Some(&mut part),
-            SolidOffsetOptions { skip_stitch_merge },
-            &mut notifications.context(),
-        )
-        .unwrap(),
-    )
+    let result = exec.do_solid_offset(
+        &mut k,
+        Some(&mut part),
+        SolidOffsetOptions { skip_stitch_merge },
+        &mut notifications.context(),
+    );
+    Some((result, face2))
 }
 
 #[test]
-fn offsets_deleted_by_lamina_edge_test_are_gone_before_the_merge() {
-    // C++: 20 faces at 5.6 and 12 at 11.2 (the port kept 23 and 17)
-    for (distance, faces) in [(5.6, 20), (11.2, 12)] {
-        let Some(b) = offset(distance, true) else {
+fn rounded_outsets_past_face_2s_radius_are_refused_naming_it() {
+    for (distance, skip_stitch_merge) in [(5.6, true), (11.2, true), (11.2, false)] {
+        let Some((result, face2)) = offset(distance, skip_stitch_merge) else {
             return;
         };
-        assert_eq!(b.face_list().len(), faces, "distance {distance}");
+        let e = result.unwrap_err();
+        assert_eq!(e.kind(), ErrorKind::OffsetFolds, "{e}");
+        let Some(&Reason::Offset(OffsetFailure::Folds {
+            face,
+            distance: d,
+            largest,
+        })) = e.failure().map(|f| &f.reason)
+        else {
+            panic!("{e}");
+        };
+        assert_eq!(face, face2);
+        assert_eq!(d, distance);
+        // face 2's least radius of curvature on the outset side, measured: 3.9579840524301826
+        assert!((largest - 3.957_984_052_430_182_6).abs() < 1e-9, "largest {largest}");
     }
-}
-
-#[test]
-fn rounded_outset_at_11_2_finishes() {
-    let Some(b) = offset(11.2, false) else {
-        return;
-    };
-    assert_eq!(
-        (b.face_list().len(), b.edges().len(), b.vertices().len()),
-        (13, 40, 29)
-    );
 }

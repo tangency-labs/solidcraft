@@ -360,7 +360,7 @@ local operation.
 |---|---|
 | S1: certified offset, regularity, collapse | `offset/construction/sheets.rs` tests (`parabola_folds_past_its_apex_radius`, `rational_cylinder_folds_inside_its_radius`, `a_round_offset_by_its_radius_is_proved_to_collapse`) |
 | S1 in the shell | `tests/issue_2350_shell_offset_construction.rs` (`parabola_thickens_to_its_certified_offset`, `parabola_fold_is_refused_naming_its_apex_radius`, `analytic_shells_keep_their_closed_forms`) |
-| the collapse refusal | `tests/offset_shell_extrusion_extend.rs` (`inset_by_the_rounds_radius_is_refused_naming_why`) |
+| the collapse and fold refusals | `tests/offset_shell_extrusion_extend.rs` (`inset_by_the_rounds_radius_is_refused_naming_why`, `inset_past_face_2s_radius_is_refused_naming_its_largest_wall`); `tests/offset_fillet2_rounded_outset.rs`; `tests/hang_51_extrusion_old_offset.rs` |
 | rounds offset by their definition | `tests/wr669_exact_round_classes.rs` (`a_box_round_offsets_to_the_round_of_r_plus_d_on_the_offset_faces`, `the_offset_of_a_circle_round_is_its_round_of_r_plus_minus_d`); `tests/wr698_gn_round_is_its_definition.rs` (`the_offset_of_a_round_is_the_offset_of_its_definition`) |
 | the reach | `offset/offset_executive/reach.rs` tests (`signed_reach_is_the_foot_of_the_offsets_meeting`, `an_unmoved_face_is_met_where_it_stands`) |
 | the room test | `offset/wall_room.rs` tests (`an_open_block_has_room_up_to_its_half_width`, `a_witness_that_does_not_certify_is_passed_over`) |
