@@ -144,8 +144,10 @@ We tuned it like a small training loop, with a person in the loop and one change
 5. **Measure with repeats.** Three runs per task. Run-to-run spread was 2-12%, so one run cannot separate a
    10% change from noise.
 6. **Stopping rule.** Keep a change only if the 3-run average improves cost or tokens by at least 5% with no
-   lost pass. Stop after two changes in a row miss that bar. For Haiku 5.5, v10 and v11 each gained under
-   5% but were kept anyway (v10 was harmless, v11 removed 22 repeated errors), and tuning went on; v12 was
+   lost pass. Stop after two changes in a row miss that bar. For Haiku 5.5 the bar is read on the tasks both
+   versions ran. v10 gained under 5% there (its -6% tokens is against a mixed v9 + v5-edit baseline, at -1%
+   cost) and v11 under 5% too, but both were kept anyway (v10 was harmless, v11 removed 22 repeated errors),
+   and tuning went on; v12 was
    a regression and was reverted; v13 fixed the cut-off instructions with flat efficiency. Tuning stopped
    there, so v13 is the final Haiku version (the [change log](CHANGELOG.md) has each step).
 
