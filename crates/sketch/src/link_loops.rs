@@ -31,9 +31,30 @@ pub(super) fn same_lines(a: &[Vec2], b: &[Vec2]) -> bool {
     a.len() == b.len() && a.iter().all(|x| b.iter().any(|y| x.dot(*y).abs() > 0.98))
 }
 
-/// Whether the lines leave two points the same ways ([`Roles::old_leaving`]).
+/// Whether the lines leave two points the same ways ([`Roles::old_leaving`]): each direction
+/// of one point matches a different direction of the other. At a sharp corner two nearly
+/// parallel directions must not both match one direction while the other line turned round.
+/// A point with more than 8 lines is never matched: the search stays small.
 pub(super) fn same_leaving(a: &[Vec2], b: &[Vec2]) -> bool {
-    a.len() == b.len() && a.iter().all(|x| b.iter().any(|y| x.dot(*y) > 0.98))
+    fn assign(a: &[Vec2], b: &[Vec2], used: &mut [bool]) -> bool {
+        let Some((x, rest)) = a.split_first() else { return true };
+        for (i, y) in b.iter().enumerate() {
+            if used.get(i).copied().unwrap_or(true) || x.dot(*y) <= 0.98 {
+                continue;
+            }
+            if let Some(slot) = used.get_mut(i) {
+                *slot = true;
+            }
+            if assign(rest, b, used) {
+                return true;
+            }
+            if let Some(slot) = used.get_mut(i) {
+                *slot = false;
+            }
+        }
+        false
+    }
+    a.len() == b.len() && a.len() <= 8 && assign(a, b, &mut vec![false; b.len()])
 }
 fn on(s: &Shape, p: Vec2, tol: f64) -> bool {
     match *s {

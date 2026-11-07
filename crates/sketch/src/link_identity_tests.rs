@@ -501,3 +501,17 @@ fn a_face_with_a_thin_arm_follows_its_body_made_smaller() {
     assert!(solve(&mut sk).ok());
     assert!(sk.points[free].pos.dist(Vec2::new(56.0, -6.0)) < 1e-7, "{:?}", sk.points[free].pos);
 }
+
+/// The lines at a point leave it the same ways only when each direction matches a different
+/// one: two nearly parallel lines at a sharp corner don't both match one line while the other
+/// line turned round.
+#[test]
+fn leaving_directions_match_one_to_one() {
+    let (right, left, up) = (Vec2::new(1.0, 0.0), Vec2::new(-1.0, 0.0), Vec2::new(0.0, 1.0));
+    let near_right = Vec2::new(0.995, 0.0998);
+    assert!(super::loops::same_leaving(&[right, up], &[up, right]), "the same lines, read in another order");
+    assert!(super::loops::same_leaving(&[right, near_right], &[near_right, right]));
+    assert!(!super::loops::same_leaving(&[right, near_right], &[right, left]), "one line turned round");
+    assert!(!super::loops::same_leaving(&[right, up], &[right, up, left]));
+    assert!(super::loops::same_leaving(&[], &[]));
+}
