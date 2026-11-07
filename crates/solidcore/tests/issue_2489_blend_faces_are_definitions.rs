@@ -12,7 +12,8 @@
 //! (continuity 2), its chamfer; three equal rounds at a box corner (the Ball) and three
 //! unequal ones (the Setback), and beside a cylinder (the curved Setback, #2343); a boss's base rounded r 1 with its Turns Mitred and Swept; a
 //! cut ball's rim (two Joins); #2256's tangent peg (the Mixed corner); and the offset of
-//! #2388's chamfered box (the offsets of a chamfer and two rounds).
+//! #2388's chamfered box (the offsets of a chamfer and two rounds); and the two
+//! captured mirrored shell rims, using the geometry matrix's shared builder and rig fix set.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -41,6 +42,9 @@ use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::EdgeId;
 use solidcore::{Brep, EntityRef, Kernel};
+
+#[path = "support/mirrored_shell_rim.rs"]
+mod mirrored_shell_rim;
 
 /// Every fix on, the blend face log on.
 fn kernel() -> Kernel {
@@ -316,6 +320,45 @@ fn cases() -> Vec<Case> {
         &offset,
         &made,
     ));
+
+    // The mirrored-rim matrix grades these same captures and builder at every seed.
+    // Keep the ledger's own evidence non-vacuous for its chamfer entry too.
+    for edited in [false, true] {
+        let (mut k, mut b) = if edited {
+            mirrored_shell_rim::edited_input()
+        } else {
+            mirrored_shell_rim::input()
+        };
+        let (name, point, size) = if edited {
+            let diagonal = 4.0 / 2.0_f64.sqrt();
+            (
+                "edited mirrored-rim chamfer",
+                Point3::new(29.0 + diagonal, 19.0 + diagonal, 33.0),
+                0.627,
+            )
+        } else {
+            (
+                "original mirrored-rim chamfer",
+                Point3::new(3.8786796564403563, 36.121320343559645, 30.0),
+                0.47,
+            )
+        };
+        mirrored_shell_rim::build_rim(
+            &mut k,
+            &mut b,
+            point,
+            mirrored_shell_rim::Kind::Chamfer,
+            size,
+        )
+        .unwrap();
+        let case = checked(name, &b, &self::made(&k));
+        assert_eq!(case.bare.len(), 4, "{name}: four cone strips remain bare");
+        for bare in &case.bare {
+            assert_eq!(bare.kind, BlendFaceKind::Chamfer);
+            assert_eq!(bare.surface, "cone");
+        }
+        out.push(case);
+    }
 
     out
 }
