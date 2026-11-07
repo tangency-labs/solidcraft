@@ -135,7 +135,7 @@ mod tests {
         h.app.session.selection.clear();
         h.settle();
         let before = drawn(&h);
-        let top = Sel::Face { body: "Block".into(), index: 0, point: solidcraft_engine::geom::Vec3::new(10.0, 5.0, 5.0) };
+        let top = Sel::Face { body: "Block".into(), index: 0, point: solidcore_record::Vec3::new(10.0, 5.0, 5.0) };
         assert!(super::set(&mut h.app, "Block", Some(&top)));
         h.app.session.selection.clear();
         h.settle();
