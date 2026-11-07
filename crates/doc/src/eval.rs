@@ -1161,6 +1161,9 @@ pub struct Model {
     placement_inputs: Option<placement_reuse::Inputs>,
     /// All evaluated features use supported local inputs; computed with the existing owner index.
     placement_local: bool,
+    /// The [`placement_digest`] each [`pose_only`] feature was last evaluated at, by feature id.
+    /// Their fingerprints leave it out, so a pose change doesn't reach the features after them.
+    poses: std::collections::HashMap<u64, u64>,
 }
 
 /// Parameters a feature uses directly (inputs, sketch dimensions and the expressions of a
@@ -1467,7 +1470,10 @@ fn chain_fingerprint(
     steps: &ImportDigests,
     st: Option<&ModelState>,
 ) -> u64 {
-    let mut fp = fingerprint(doc, prev, f, vals, rolled_back, steps) ^ placement_digest(doc, f, st);
+    // A pose-only feature's placement is checked on its own ([`Model::poses`]), so moving the
+    // parts it reads doesn't change the fingerprint of every feature after it (#12139).
+    let placed = if pose_only(f) { 0 } else { placement_digest(doc, f, st) };
+    let mut fp = fingerprint(doc, prev, f, vals, rolled_back, steps) ^ placed;
     // Sheet metal features also depend on the rules (and the parameters they use).
     if f.kind.is_sheet() {
         let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -1764,6 +1770,70 @@ fn mirror_placements_digest(doc: &Document, f: &Feature, placements: &[Vec<u64>]
         serde_json::to_string(&doc.body_offsets.get(&b.0)).unwrap_or_default().hash(&mut h);
     }
     h.finish()
+}
+
+/// Whether only the bodies `f` makes follow where parts are placed: a mirror of placed bodies
+/// into new bodies. A feature after it reads its copies only by naming them, so a pose change
+/// need not evaluate features that don't (#12139).
+fn pose_only(f: &Feature) -> bool {
+    matches!(&f.kind, FeatureKind::Mirror { features, bodies, placements, combine: false, .. }
+        if features.is_empty() && !bodies.is_empty() && !placements.is_empty())
+}
+
+/// The new bodies of pose-only `f`, evaluated again (to `state`) for its pose alone: the result
+/// `old` was on the same definitions and made bodies of the same names, and nothing besides.
+fn pose_moved(old: Option<&FeatureResult>, f: &Feature, fp: u64, state: &ModelState) -> Option<Vec<ModelBody>> {
+    let old = old.filter(|o| o.id == f.id && o.fingerprint == fp && !o.stale && !o.skipped && !o.unkept && o.error.is_none())?;
+    let made = |st: &ModelState| st.bodies.iter().filter(|b| b.feature == f.id).cloned().collect::<Vec<_>>();
+    let (before, after) = (made(&old.state), made(state));
+    let names = |bodies: &[ModelBody]| bodies.iter().map(|b| b.name.clone()).collect::<std::collections::BTreeSet<_>>();
+    let same = names(&before) == names(&after)
+        && old.state.bodies.len() == state.bodies.len()
+        && old.state.threads.len() == state.threads.len()
+        && old.state.sheets.len() == state.sheets.len()
+        && old.state.construct.len() == state.construct.len();
+    same.then_some(after)
+}
+
+/// `old` (a result after the moved pose-only features) with their new bodies in place of theirs.
+fn with_moved(old: &Arc<ModelState>, moved: &[(u64, Vec<ModelBody>)]) -> Arc<ModelState> {
+    let mut st = (**old).clone();
+    for b in &mut st.bodies {
+        if let Some(new) = moved.iter().filter(|(id, _)| *id == b.feature).flat_map(|(_, bodies)| bodies).find(|n| n.name == b.name) {
+            *b = new.clone();
+        }
+    }
+    Arc::new(st)
+}
+
+/// Whether `f` (starting from `st`) reads none of the bodies of `moved`: it reads no bodies, or
+/// only bodies it names or would cut or join, none of them those. Anything else (a picked face,
+/// a projection, To Object, ...) is taken as reading them.
+fn reads_none_of(f: &Feature, st: &ModelState, moved: &[(u64, Vec<ModelBody>)], components: &std::collections::HashMap<u64, u64>) -> bool {
+    if !f.face_names.is_empty() || !f.edge_names.is_empty() || !f.edge_refs.is_empty() {
+        return false;
+    }
+    let reads: Vec<String> = match &f.kind {
+        _ if placement_reuse::local_geometry(f, components) => Vec::new(),
+        FeatureKind::Sketch { plane, sketch } if sketch.links.is_empty() && sketch.wires.is_empty() && placement_reuse::local_plane(plane, 0) => {
+            Vec::new()
+        }
+        FeatureKind::Mirror { features, bodies, plane, .. } if features.is_empty() && placement_reuse::local_plane(plane, 0) => {
+            bodies.iter().map(|b| b.0.clone()).collect()
+        }
+        FeatureKind::Extrude { extent, .. } if extent.to.is_some() || extent.from.is_some() => return false,
+        FeatureKind::Revolve { to: Some(_), .. } => return false,
+        kind if drawn_tools_change_bodies(kind) => {
+            let mut reads = PlacementReads::default();
+            reads.drawn_targets(Some(st), f);
+            if reads.all {
+                return false;
+            }
+            reads.bodies.into_iter().collect()
+        }
+        _ => return false,
+    };
+    !moved.iter().flat_map(|(_, bodies)| bodies).any(|b| reads.contains(&b.name))
 }
 
 fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64 {
@@ -2108,10 +2178,11 @@ impl Model {
         let mut state = self.empty.clone();
         doc.features.iter().zip(&self.results).enumerate().all(|(i, (f, r))| {
             prev = chain_fingerprint(doc, &vals, f, prev, i >= marker, &steps, Some(&state));
+            let posed = !pose_only(f) || self.poses.get(&f.id) == Some(&placement_digest(doc, f, Some(&state)));
             if !r.skipped {
                 state = r.state.clone();
             }
-            r.id == f.id && r.fingerprint == prev
+            r.id == f.id && r.fingerprint == prev && posed
         })
     }
 
@@ -2175,6 +2246,10 @@ impl Model {
             feature_component.entry(f.id).or_insert(f.component);
         }
         let watched = crate::progress::begin(doc.features.len());
+        let mut poses = std::collections::HashMap::new();
+        // Pose-only features evaluated again for a pose change alone: their new bodies, which
+        // replace the old ones in the results reused after them (#12139).
+        let mut moved: Vec<(u64, Vec<ModelBody>)> = Vec::new();
         // The features that failed so far in this pass, by id: their names and errors (#9075).
         let mut failed: std::collections::HashMap<u64, (String, String)> = std::collections::HashMap::new();
         for (i, f) in doc.features.iter().enumerate() {
@@ -2203,7 +2278,12 @@ impl Model {
             let cancelled = watched.step(i);
             let fp = chain_fingerprint(doc, &vals, f, prev_fp, rolled_back, &self.import_digests, Some(&state));
             prev_fp = fp;
-            let current = |old: &&FeatureResult| old.id == f.id && old.fingerprint == fp && !old.stale;
+            let pose = pose_only(f).then(|| placement_digest(doc, f, Some(&state)));
+            if let Some(pose) = pose {
+                poses.insert(f.id, pose);
+            }
+            let posed = pose.is_none_or(|pose| self.poses.get(&f.id) == Some(&pose));
+            let current = |old: &&FeatureResult| old.id == f.id && old.fingerprint == fp && !old.stale && posed;
             // A state the saved model did not keep is evaluated again from the one before it; the
             // results after it that the model did keep still stand (#3220).
             let unkept = reuse && self.results.get(i).filter(current).is_some_and(|old| old.unkept);
@@ -2214,14 +2294,28 @@ impl Model {
             // has a result only while those picks are what they were.
             if reuse
                 && !unkept
-                && let Some(old) = self.results.get(i).filter(current).filter(|old| old.skipped || legacy_current(doc, f, &state, &old.state))
+                && let Some(old) = self
+                    .results
+                    .get(i)
+                    .filter(current)
+                    .filter(|old| moved.is_empty() || old.skipped || reads_none_of(f, &state, &moved, &feature_component))
+                    .filter(|old| old.skipped || legacy_current(doc, f, &state, &old.state))
             {
-                if !old.skipped {
-                    state = old.state.clone();
+                if moved.is_empty() {
+                    if !old.skipped {
+                        state = old.state.clone();
+                    }
+                    out.push(old.clone());
+                } else {
+                    if !old.skipped {
+                        state = with_moved(&old.state, &moved);
+                    }
+                    out.push(FeatureResult { state: state.clone(), ..old.clone() });
                 }
-                out.push(old.clone());
                 continue;
             }
+            // Reuse goes on past a pose-only feature evaluated again for its pose alone.
+            let reusing = reuse && !unkept && pose.is_some();
             reuse = unkept && !cancelled;
             if f.suppressed || rolled_back || cancelled {
                 out.push(FeatureResult {
@@ -2297,6 +2391,14 @@ impl Model {
                 }
                 // A kept result after a failed one would not be this evaluation's.
                 reuse &= c.error.is_none();
+                if reusing
+                    && c.error.is_none()
+                    && let Some(bodies) = pose_moved(self.results.get(i), f, fp, &state)
+                {
+                    moved.retain(|(id, _)| *id != f.id);
+                    moved.push((f.id, bodies));
+                    reuse = true;
+                }
                 out.push(FeatureResult {
                     id: f.id,
                     name: f.name.clone(),
@@ -2318,8 +2420,9 @@ impl Model {
             // (the same chain of definitions from the start). Changed inputs never reuse it.
             if let Some(r) = rolled
                 .as_ref()
+                .filter(|_| moved.is_empty())
                 .filter(current)
-                .or_else(|| primed.as_ref().and_then(|p| p.get(&f.id)).filter(current))
+                .or_else(|| primed.as_ref().filter(|_| moved.is_empty()).and_then(|p| p.get(&f.id)).filter(current))
                 .filter(|r| r.error.is_some() || legacy_current(doc, f, &state, &r.state))
             {
                 restored += 1;
@@ -2460,6 +2563,14 @@ impl Model {
                 }
             }
             reuse &= error.is_none();
+            if reusing
+                && error.is_none()
+                && let Some(bodies) = pose_moved(self.results.get(i), f, fp, &state)
+            {
+                moved.retain(|(id, _)| *id != f.id);
+                moved.push((f.id, bodies));
+                reuse = true;
+            }
             out.push(FeatureResult {
                 id: f.id,
                 name: f.name.clone(),
@@ -2477,6 +2588,7 @@ impl Model {
             });
         }
         self.placement_local = self.placement_local && out.iter().all(|r| !r.skipped && !r.stale && !r.unkept && r.error.is_none());
+        self.poses = poses;
         self.results = out;
         self.last_recomputed = recomputed;
         self.recomputed += recomputed;

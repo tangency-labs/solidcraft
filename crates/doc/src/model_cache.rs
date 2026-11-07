@@ -917,7 +917,10 @@ impl Model {
         }
         let mut model = Model { results, param_errors, import_digests, context: ctx, frame_bodies, validation, ..Model::default() };
         let unkept = model.results.iter().filter(|r| r.unkept).count();
-        if unkept > 0 {
+        // A pose-only feature's fingerprint leaves its pose out, so its saved result may be from
+        // another pose than `doc`'s: evaluated again, with what reads none of it kept (#12139).
+        let posed = doc.features.iter().zip(&model.results).any(|(f, r)| !r.skipped && pose_only(f));
+        if unkept > 0 || posed {
             // The features whose state the file did not keep, each evaluated again from the state
             // before it: nothing else in the model is missing then.
             model.evaluate(doc);
@@ -933,6 +936,12 @@ impl Model {
         let mut before = Arc::new(ModelState::default());
         if let Ok(mut cache) = model.cache.lock() {
             for (f, r) in doc.features.iter().zip(&model.results).filter(|(_, r)| !r.skipped && r.error.is_none()) {
+                // A pose-only feature's fingerprint leaves its pose out, so its saved result may be
+                // from another pose than `doc`'s: it is no result for `doc`'s key (#12139).
+                if pose_only(f) {
+                    before = r.state.clone();
+                    continue;
+                }
                 let local = fingerprint(doc, 0, f, &vals, false, &model.import_digests) ^ placement_digest(doc, f, Some(&before));
                 cache.put(
                     cache_key(f, r.fingerprint, local, ctx, &before),
