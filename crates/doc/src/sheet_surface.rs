@@ -205,6 +205,8 @@ const ON_LINE: f64 = 1e-7;
 /// cuts), with each piece of a zone sorted by what still holds it (see [`sort_zones`]). The flat
 /// pattern and the folded solid are both made of them.
 pub(crate) fn pieces(dev: &Development, work: &mut FlatWork) -> Result<Vec<(Piece, Region2)>> {
+    #[cfg(test)]
+    crate::eval::cost_tests::count_flat();
     let mut pieces = Vec::new();
     for (i, flat) in dev.panels.iter().enumerate() {
         let Some(flat) = flat else { continue };

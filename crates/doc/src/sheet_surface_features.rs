@@ -103,7 +103,7 @@ impl SurfaceSheet {
         let small = (self.sheet.thickness * 1e-3).max(1e-6);
         let on = |s: &Seg2, p: Vec2| s.point_at(s.closest_param(p).clamp(0.0, 1.0)).dist(p) <= small;
         let mut best: Option<(f64, FreeEdge)> = None;
-        for (k, a, b, n) in self.rims() {
+        for &(k, a, b, ref n) in &self.rims {
             if k != i || n != rim {
                 continue;
             }
@@ -1150,7 +1150,7 @@ impl SurfaceSheet {
         if let Some(rim) = side.strip_prefix("rim.") {
             // Along the rim's edge, through the thickness from the sheet's surface.
             let i = self.sheet.panels.iter().position(|p| p.name == panel)?;
-            let (_, a, b, _) = self.rims().into_iter().find(|(k, _, _, n)| *k == i && n == rim)?;
+            let &(_, a, b, _) = self.rims.iter().find(|(k, _, _, n)| *k == i && n == rim)?;
             let dev = develop(&self.sheet, 0).ok()?;
             let frame = crate::sheet_surface_cuts::frames(self, &dev).ok()?.get(i).copied().flatten()?;
             let d = (b - a).normalized()?;

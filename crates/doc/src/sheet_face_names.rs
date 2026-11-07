@@ -13,7 +13,7 @@ use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_geom::prelude::*;
 
 use solidcore_record::Region2;
-use solidcraft_develop::{Development, JointKind, Sheet, Surface, develop};
+use solidcraft_develop::{Development, JointKind, Sheet, Surface};
 
 use crate::sheet_surface::Piece;
 
@@ -278,24 +278,27 @@ pub(crate) fn carried(before: &[Option<String>], body: &solidcraft_kernel::Body)
         .collect()
 }
 
-impl SurfaceSheet {
-    /// Each straight rim of the sheet's flat panels: the panel, its edge in the panel's chart and
-    /// its name there (see [`FaceNamer`]).
-    pub(crate) fn rims(&self) -> Vec<(usize, Vec2, Vec2, String)> {
-        let Ok(dev) = develop(&self.sheet, 0) else { return Vec::new() };
-        let Ok(pieces) = crate::sheet_surface::pieces(&dev, &mut crate::sheet::FlatWork::new()) else { return Vec::new() };
-        let mut out = Vec::new();
-        for (i, panel) in self.sheet.panels.iter().enumerate() {
-            let (Surface::Plane, Some(Some(at))) = (&panel.surface, dev.placements.get(i)) else { continue };
-            let back = at.inverse();
-            let own: Vec<Region2> =
-                pieces.iter().filter(|(p, _)| matches!(p, crate::sheet_surface::Piece::Panel(k) if *k == i)).map(|(_, r)| back.region(r)).collect();
-            let zones: Vec<Region2> = dev.zones.iter().map(|z| back.region(&z.region)).collect();
-            out.extend(rim_names(&self.sheet, i, &own, &zones, &self.base_curves).into_iter().map(|(a, b, name)| (i, a, b, name)));
-        }
-        out
+/// Each straight rim of the flat panels of `sheet`, developed as `dev` into `pieces`: the panel,
+/// its edge in the panel's chart and its name there (see [`FaceNamer`]). `base_curves` are the
+/// sketch lines that made the base panel's edges (see [`SurfaceSheet::base_curves`]).
+pub(crate) fn rims(
+    sheet: &Sheet,
+    dev: &Development,
+    pieces: &[(Piece, Region2)],
+    base_curves: &[(String, Vec2, Vec2)],
+) -> Vec<(usize, Vec2, Vec2, String)> {
+    let mut out = Vec::new();
+    for (i, panel) in sheet.panels.iter().enumerate() {
+        let (Surface::Plane, Some(Some(at))) = (&panel.surface, dev.placements.get(i)) else { continue };
+        let back = at.inverse();
+        let own: Vec<Region2> = pieces.iter().filter(|(p, _)| matches!(p, Piece::Panel(k) if *k == i)).map(|(_, r)| back.region(r)).collect();
+        let zones: Vec<Region2> = dev.zones.iter().map(|z| back.region(&z.region)).collect();
+        out.extend(rim_names(sheet, i, &own, &zones, base_curves).into_iter().map(|(a, b, name)| (i, a, b, name)));
     }
+    out
+}
 
+impl SurfaceSheet {
     /// The name of the rim of panel `panel` along the line through `origin` along the unit `dir`
     /// (the panel's chart), as [`Self::rims`] names it, or beside it: a rim parallel to the line
     /// and no more than `band` off it (a bend's anchor lies inside the edge its flange was drawn
@@ -306,16 +309,16 @@ impl SurfaceSheet {
         let small = (self.thickness * 1e-3).max(1e-6);
         let off = |p: Vec2| (p - origin).cross(dir);
         let along = |p: Vec2| (p - origin).dot(dir);
-        self.rims()
-            .into_iter()
-            .filter(|(i, a, b, _)| *i == panel && (off(*a) - off(*b)).abs() <= small && off(*a).abs() <= band + small)
-            .filter_map(|(_, a, b, name)| {
+        self.rims
+            .iter()
+            .filter(|&&(i, a, b, _)| i == panel && (off(a) - off(b)).abs() <= small && off(a).abs() <= band + small)
+            .filter_map(|&(_, a, b, ref name)| {
                 let (s0, s1) = (along(a).min(along(b)), along(a).max(along(b)));
                 let overlap = s1.min(span.1) - s0.max(span.0);
                 (overlap > small).then_some((off(a).abs(), overlap, name))
             })
             .min_by(|x, y| if (x.0 - y.0).abs() <= small { y.1.total_cmp(&x.1) } else { x.0.total_cmp(&y.0) })
-            .map(|(_, _, name)| name)
+            .map(|(_, _, name)| name.clone())
     }
 }
 

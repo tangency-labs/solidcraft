@@ -2133,6 +2133,12 @@ pub struct SurfaceSheet {
     /// sketch (a contour flange, a converted body).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub base_curves: Vec<(String, Vec2, Vec2)>,
+    /// Each straight rim of its flat panels as last laid out: the panel, its edge in the panel's
+    /// chart and its name there (see [`crate::sheet::FaceNamer`]). A pick is named by them and
+    /// found again by its name, so a feature reads them here rather than laying the sheet out
+    /// again.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rims: Vec<(usize, Vec2, Vec2, String)>,
 }
 
 /// `r` through `map`, a rigid map of the plane (mirrored or not): lines and arcs stay lines and
@@ -2243,6 +2249,7 @@ impl SurfaceSheet {
             face_names: Vec::new(),
             perforations: Vec::new(),
             base_curves: Vec::new(),
+            rims: Vec::new(),
         };
         sheet.laid_out(&c.development, c.pieces()?, c.flat()?)?;
         let (solid, names) = c.named_solid()?;
@@ -2389,6 +2396,7 @@ impl SurfaceSheet {
             face_names: Vec::new(),
             perforations: Vec::new(),
             base_curves,
+            rims: Vec::new(),
         };
         let solid = sheet.build()?;
         Ok((sheet, solid))
@@ -2737,8 +2745,9 @@ impl SurfaceSheet {
     }
 
     /// Keeps the flat `regions` of the development `dev` (joined from its `pieces`), with its
-    /// bends and their tabs, stretch, and rolls and their lines.
+    /// bends and their tabs, stretch, rolls and their lines, and its panels' rims.
     fn laid_out(&mut self, dev: &Development, pieces: &[(Piece, Region2)], regions: Vec<Region2>) -> Result<()> {
+        self.rims = crate::sheet::rims(&self.sheet, dev, pieces, &self.base_curves);
         self.bends = dev
             .zones
             .iter()

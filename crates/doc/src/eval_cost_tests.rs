@@ -20,8 +20,8 @@ use crate::*;
 /// measured, bodies searched for by name, features searched for by id, bodies a cut (or
 /// intersect) ran its booleans on, bodies searched for the cylinder a tap marking lies on,
 /// bodies whose faces a tapped hole read for its wall, intersects run to find a pattern's copies
-/// that cut nothing, and the tools a cut of many tools is made with (one when they are cut in one
-/// go).
+/// that cut nothing, the tools a cut of many tools is made with (one when they are cut in one
+/// go), and the flats of sheets made from surfaces laid out (their pieces cut).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Counts {
     pub moved: usize,
@@ -36,6 +36,7 @@ pub(super) struct Counts {
     pub tapped_wall: usize,
     pub miss_intersects: usize,
     pub cut_tools: usize,
+    pub flats: usize,
 }
 
 thread_local! {
@@ -53,6 +54,7 @@ thread_local! {
             tapped_wall: 0,
             miss_intersects: 0,
             cut_tools: 0,
+            flats: 0,
         })
     };
 }
@@ -84,6 +86,11 @@ fn written(f: impl FnOnce()) -> usize {
 /// A search on this thread through all of a design's features for one.
 pub(crate) fn count_feature_search() {
     count(|c| c.feature_searches += 1);
+}
+
+/// The flat of a sheet made from surfaces laid out on this thread: its pieces cut.
+pub(crate) fn count_flat() {
+    count(|c| c.flats += 1);
 }
 
 /// The searches `f` makes on this thread through all features or all bodies.
@@ -1491,6 +1498,41 @@ fn a_hole_into_a_rim_still_bores_its_sheet_beside_far_ones() {
     let removed = whole - volume(&work.model, &near);
     let bore = std::f64::consts::PI * (d / 2.0).powi(2) * 60.0;
     assert!((removed - bore).abs() < 0.02 * bore, "removed {removed} of {bore}");
+}
+
+/// A flange on a sheet made from surfaces lays the sheet's flat out once, however many flanges
+/// the sheet already has: naming its pick, finding the sheet and the edge again by that name, and
+/// naming the panels it makes read the rims the sheet was last laid out with. Each of them laid
+/// the whole sheet out again, five flats for every flange built (#6748).
+#[test]
+fn a_flange_lays_its_sheet_out_once() {
+    let mut doc = Document::new("flanges");
+    flat_sheet(&mut doc, Vec2::new(0.0, 0.0), 150.0, 100.0);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let flange = |p: Vec3| FeatureKind::SheetFlange {
+        edges: vec![FlangeEdge::at(p)],
+        height: "20 mm".into(),
+        angle: "90 deg".into(),
+        radius: None,
+        position: "inside".into(),
+        flip: false,
+        body: None,
+        corner_relief_shape: None,
+        corner_relief: None,
+        height_from: None,
+    };
+    for p in [Vec3::new(75.0, 0.0, 2.5), Vec3::new(75.0, 100.0, 2.5), Vec3::new(0.0, 50.0, 2.5), Vec3::new(150.0, 50.0, 2.5)] {
+        // The pick is named as the engine names it, on the model as it is.
+        let mut names = Vec::new();
+        let naming = counted(|| names = crate::sheet::sheet_edge_names(&model.state(), &[p])).flats;
+        assert!(names.first().is_some_and(|n| n.contains(":rim.")), "{names:?}");
+        let id = doc.add_feature(flange(p), None).unwrap();
+        doc.feature_mut(id).unwrap().edge_names = names;
+        let built = counted(|| model.evaluate(&doc)).flats;
+        assert_eq!(model.result(id).unwrap().error, None, "the flange at {p:?} builds");
+        assert_eq!((naming, built), (0, 1), "the flange at {p:?}: flats laid out naming its pick, and building it");
+    }
 }
 
 /// A 1.5 mm disc of 50 mm radius with a 3.5 mm through hole at `radius` on X, patterned `count`
