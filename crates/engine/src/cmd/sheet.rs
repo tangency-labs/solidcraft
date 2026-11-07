@@ -721,7 +721,8 @@ fn sheet_of(s: &Session, p: &Value, cmd: &str) -> Result<SheetBody> {
     }
 }
 
-/// The centre and radius of a loop that is one whole circle (often two semicircles).
+/// The flat-pattern caller's historical whole-circle compatibility bound.
+/// Keep this local: generic Loop2 recognition and DXF path admission stay strict.
 fn loop_circle(lp: &solidcore_record::Loop2) -> Option<(Vec2, f64)> {
     use solidcore_record::Seg2;
     let Some(Seg2::Arc { center, radius, sweep, .. }) = lp.segs.first() else { return None };
@@ -730,6 +731,18 @@ fn loop_circle(lp: &solidcore_record::Loop2) -> Option<(Vec2, f64)> {
         |s| matches!(s, Seg2::Arc { center: c, radius: r, sweep: a, .. } if c.dist(*center) < 1e-9 && (*r - *radius).abs() < 1e-9 && a.signum() == sweep.signum()),
     );
     (circular && (total.abs() - std::f64::consts::TAU).abs() < 1e-9).then_some((*center, *radius))
+}
+
+/// Admit through the shared converter before applying this caller's legacy merge.
+/// An invalid piece, style or budget still refuses instead of being hidden by CIRCLE.
+fn flat_loop_shapes(lp: &solidcore_record::Loop2, style: solidcraft_io::DxfPathStyle) -> solidcraft_io::Result<Vec<solidcraft_io::DxfShape>> {
+    use solidcraft_io::{DxfPath, DxfShape, path_shapes};
+    let mut shapes = path_shapes(DxfPath::Closed(lp), style)?;
+    if let Some((c, r)) = loop_circle(lp) {
+        shapes.clear();
+        shapes.push(DxfShape::Circle { c, r });
+    }
+    Ok(shapes)
 }
 
 /// A loop's exact shape for the flat pattern JSON: a circle, or its lines and arcs (other
@@ -907,7 +920,7 @@ fn bend_note(b: &solidcraft_doc::sheet::BendInfo, height: f64, display: sheet::A
 /// per pocket depth and PERFORATION. Inner contours are written before the outline, so a program
 /// that follows the file's order cuts inside-out. Free-form curves as `o.curves` says.
 pub fn flat_dxf(sh: &SheetBody, o: &DxfOptions) -> Result<String> {
-    use solidcraft_io::{DxfEntity, DxfShape};
+    use solidcraft_io::{DxfEntity, DxfPathStyle, DxfShape};
     let regions = sh.flat_regions()?;
     let pockets = sh.machining()?;
     let letters = sh.letters();
@@ -976,25 +989,14 @@ pub fn flat_dxf(sh: &SheetBody, o: &DxfOptions) -> Result<String> {
     }
     loops.sort_by_key(|(pass, ..)| *pass);
     let mut entities = Vec::new();
-    for (_, h, layer) in loops {
-        // A circle is often represented by two semicircles. Keep the whole analytic
-        // boundary as one CIRCLE rather than approximating outer boundaries with chords.
-        if let Some((center, radius)) = loop_circle(h) {
-            entities.push(DxfEntity { layer, shape: DxfShape::Circle { c: center, r: radius } });
-            continue;
-        }
-        let fitted;
-        let h = match o.curves {
-            DxfCurves::Arcs if !h.is_line_arc() => {
-                fitted = h
-                    .fit_arcs(solidcraft_kernel::PLANAR_FIT_TOL)
-                    .ok_or_else(|| EngineError::Other("a flat-pattern curve could not be written as arcs".into()))?;
-                &fitted
-            }
-            _ => h,
+    for (i, (_, h, layer)) in loops.into_iter().enumerate() {
+        let style = match o.curves {
+            DxfCurves::Exact => DxfPathStyle::Exact,
+            DxfCurves::Arcs => DxfPathStyle::Arcs { tolerance_mm: solidcraft_kernel::PLANAR_FIT_TOL },
         };
-        // A whole ellipse is one ELLIPSE; every other segment is an entity of its own.
-        entities.extend(solidcraft_io::loop_shapes(h).into_iter().map(|shape| DxfEntity { layer: layer.clone(), shape }));
+        let shapes = flat_loop_shapes(h, style)
+            .map_err(|e| EngineError::Other(format!("flat-pattern body {:?}, layer {layer:?}, contour {}: {e}", sh.body, i + 1)))?;
+        entities.extend(shapes.into_iter().map(|shape| DxfEntity { layer: layer.clone(), shape }));
     }
     for b in sh.bends() {
         if !o.no_bend_lines {
