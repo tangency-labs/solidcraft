@@ -2,6 +2,7 @@
 //! never additional application viewports; every colour and control metric comes from tokens.
 pub(crate) use super::preferences_figure_data::{paint_assembly_move, paint_direct_interaction, paint_measure_axis_distances, paint_tool_cursor};
 use super::{metrics::dimension, text::paint_text};
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{
     scenario,
     theme::{ColorVision, Tokens},
@@ -10,6 +11,79 @@ use egui::{Color32, FontId, Pos2, Rect, Response, Sense, Stroke, Ui, pos2, vec2}
 
 pub(super) const PAGE_SCROLL_GUTTER: &str = "sc_page_scroll_gutter";
 
+pub(crate) fn blur_cost_bars(radius: f32) -> usize {
+    if radius.is_finite() && radius > 0.0 { (radius / 8.0).ceil().clamp(1.0, 5.0) as usize } else { 0 }
+}
+
+fn blur_meter_width(t: &Tokens) -> f32 {
+    t.space_4 * 5.0 + t.space_2 * 4.0
+}
+
+fn blur_cost_meter(ui: &mut Ui, radius: f32) {
+    let t = Tokens::get();
+    let (rect, response) = ui.allocate_exact_size(vec2(blur_meter_width(&t), t.control_height), Sense::hover());
+    let filled = blur_cost_bars(radius);
+    if filled == 0 {
+        ui.painter().rect_filled(Rect::from_center_size(rect.center(), vec2(rect.width(), t.space_2)), t.radius_sm, t.form_dim);
+    } else {
+        let heights = [t.space_4, t.space_6, t.space_8, t.space_8 + t.space_3, t.space_14];
+        for (i, height) in heights.into_iter().enumerate() {
+            let bar = Rect::from_min_size(
+                pos2(rect.left() + i as f32 * (t.space_4 + t.space_2), rect.center().y + t.space_8 - height),
+                vec2(t.space_4, height),
+            );
+            ui.painter().rect_filled(bar, t.radius_sm, if i < filled { t.form_primary } else { t.dialog_rule });
+        }
+    }
+    scenario::publish_rect("prefs:blur_cost", rect);
+    response.backing_on_hover_text(crate::i18n::tr("prefs.blur_cost"));
+}
+
+/// Theme problems stay inline when space permits, with stacked text and wrapping actions otherwise.
+pub(crate) fn theme_option_notice(ui: &mut Ui, id: &str, text: &str, can_undo: bool) -> (bool, bool) {
+    let mut undo = false;
+    let mut dismiss = false;
+    let response = ui.push_id(("theme_notice", id, text), |ui| {
+        let t = Tokens::get();
+        let dismiss_label = crate::i18n::tr("prefs.theme_notice_dismiss");
+        let actions = super::ContentWidth::button(ui, dismiss_label)
+            + t.space_8
+            + if can_undo { super::ContentWidth::button(ui, crate::i18n::tr("ui.undo")) + t.space_8 } else { 0.0 };
+        let mut draw_actions = |ui: &mut Ui| {
+            if can_undo {
+                let response = super::text_button(ui, crate::i18n::tr("ui.undo"), true);
+                scenario::publish_target("prefs:theme_notice_undo:guard", response.rect);
+                undo = response.clicked();
+            }
+            let response = super::text_button(ui, dismiss_label, true);
+            scenario::publish_target(&format!("prefs:theme_notice_dismiss:{id}"), response.rect);
+            dismiss = response.clicked();
+        };
+        let width = dimension(ui.available_width());
+        let text_minimum =
+            ui.painter().layout_no_wrap(text.to_owned(), FontId::proportional(t.font_body), t.form_dim).size().x.min(t.form_label_width);
+        if width >= actions + text_minimum {
+            ui.horizontal_top(|ui| {
+                let width = dimension(ui.available_width() - actions);
+                ui.allocate_ui_with_layout(vec2(width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+                    super::text(ui, text, super::Text::Hint(id));
+                });
+                draw_actions(ui);
+            });
+        } else {
+            ui.allocate_ui_with_layout(vec2(width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+                ui.set_width(width);
+                // The form normally truncates controls; a long translated action may wrap here.
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+                super::text(ui, text, super::Text::Hint(id));
+                ui.horizontal_wrapped(draw_actions);
+            });
+        }
+    });
+    scenario::publish_rect(&format!("prefs:theme_notice:{id}"), response.response.rect);
+    (undo, dismiss)
+}
+
 /// Presentation data is resolved by the caller; controls never distinguish standard/custom ids.
 pub(crate) struct ThemeOptionRow<'a> {
     pub definition: &'a crate::theme_files::OptionDef,
@@ -17,6 +91,7 @@ pub(crate) struct ThemeOptionRow<'a> {
     pub help: String,
     pub choices: Vec<String>,
     pub reason: Option<String>,
+    pub blur: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -49,7 +124,10 @@ fn theme_option_metrics(ui: &Ui, option: &ThemeOptionRow<'_>, value: Option<&cra
                 .into_iter()
                 .map(|n| super::ContentWidth::label(ui, &format!("{n}{}", unit.as_deref().unwrap_or(""))))
                 .fold(0.0, f32::max);
-            theme_option_slider_minimum(&t) + t.space_8 + readout
+            if option.blur {
+                readout = readout.max(super::ContentWidth::label(ui, crate::i18n::tr("prefs.blur_off")));
+            }
+            theme_option_slider_minimum(&t) + t.space_8 + readout + if option.blur { blur_meter_width(&t) + t.space_8 } else { 0.0 }
         }
         OptionKind::Choice { values, .. } => {
             if values.len() > 5 {
@@ -114,6 +192,9 @@ pub(crate) fn theme_options_list(
             for &index in cell {
                 let Some(option) = options.get(index) else { continue };
                 advanced |= option.definition.advanced;
+                if option.blur && cell.len() == 1 {
+                    width = Width::Wide;
+                }
                 if let OptionKind::Choice { values, .. } = &option.definition.kind
                     && choice_width(values.len()) == Width::Wide
                 {
@@ -239,7 +320,8 @@ fn theme_option_control(
                                 theme_option_switch(ui, &option.label, on);
                             }
                             (OptionKind::Range { min, max, step, unit, .. }, OptionValue::Num(n)) => {
-                                let available = dimension(ui.available_width() - metrics.readout - t.space_8);
+                                let meter = if option.blur { blur_meter_width(&t) + t.space_8 } else { 0.0 };
+                                let available = dimension(ui.available_width() - metrics.readout - t.space_8 - meter);
                                 // Standalone ranges fill their cell; composites retain their compact control alignment.
                                 let width =
                                     if fill_range { available } else { available.min(t.form_label_width.max(theme_option_slider_minimum(&t))) };
@@ -248,7 +330,12 @@ fn theme_option_control(
                                         ui,
                                         n,
                                         *min..=*max,
-                                        super::Slider { step: Some(f64::from(*step)), show_value: false, ..Default::default() },
+                                        super::Slider {
+                                            step: Some(f64::from(*step)),
+                                            show_value: false,
+                                            off_endpoint: option.blur,
+                                            ..Default::default()
+                                        },
                                     );
                                 });
                                 // Keep fractional theme values visible, including sliders with fractional steps.
@@ -256,10 +343,18 @@ fn theme_option_control(
                                     vec2(metrics.readout, t.control_height),
                                     egui::Layout::left_to_right(egui::Align::Center),
                                     |ui| {
-                                        super::text(ui, &format!("{}{}", *n, unit.as_deref().unwrap_or("")), super::Text::Inline);
+                                        let label = if option.blur && *n == 0.0 {
+                                            crate::i18n::tr("prefs.blur_off").to_owned()
+                                        } else {
+                                            format!("{}{}", *n, unit.as_deref().unwrap_or(""))
+                                        };
+                                        super::text(ui, &label, super::Text::Inline);
                                     },
                                 );
                                 scenario::publish_rect(&format!("prefs:theme_option_readout:{}", def.id), readout.response.rect);
+                                if option.blur {
+                                    blur_cost_meter(ui, *n);
+                                }
                             }
                             (OptionKind::Choice { values, .. }, OptionValue::Choice(selected)) => {
                                 let labels: Vec<_> = option.choices.iter().map(String::as_str).collect();
@@ -282,7 +377,7 @@ fn theme_option_control(
         .inner
         .response
     });
-    let response = response.inner.on_hover_text(&option.help);
+    let response = response.inner.backing_on_hover_text(&option.help);
     scenario::publish_target(&format!("prefs:theme_option:{}", def.id), response.rect);
     if let Some(reason) = &option.reason {
         let note = ui.horizontal(|ui| super::settings_inline_note(ui, reason));
@@ -306,7 +401,7 @@ fn theme_option_switch(ui: &mut Ui, label: &str, on: &mut bool) {
     if response.has_focus() {
         ui.painter().rect_stroke(rect, t.control_radius, Stroke::new(t.space_2, t.form_primary), egui::StrokeKind::Inside);
     }
-    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), *on, label));
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), *on, label));
     scenario::publish_target(&format!("prefs:theme_option_switch:{label}"), response.rect);
 }
 
@@ -365,7 +460,7 @@ pub(crate) fn settings_heading_with_tag(ui: &mut Ui, title: &str, description: &
         ui.spacing_mut().item_spacing.y = t.space_3;
         let (rect, response) =
             ui.allocate_exact_size(vec2(dimension(ui.available_width()), if page { t.space_24 } else { t.space_16 + t.space_3 }), Sense::hover());
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), title));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), title));
         paint_text(ui, rect, title, crate::fonts::semibold(if page { t.font_page_heading } else { t.font_intro }), t.form_ink, false);
         if let Some(tag) = tag {
             let width = ui
@@ -471,13 +566,16 @@ fn settings_section_count_spaced<R>(
 pub(crate) fn settings_card<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> egui::InnerResponse<R> {
     let t = Tokens::get();
     let container = super::Container::new(ui.ctx(), super::Surface::Navigation);
-    let frame = container
-        .frame(ui.ctx(), t.dialog_footer, crate::frame::Side::Left)
-        .inner_margin(egui::Margin::symmetric(t.space_12 as i8, t.space_10 as i8));
+    let frame = settings_card_frame(ui).inner_margin(egui::Margin::symmetric(t.space_12 as i8, t.space_10 as i8));
     container.show_frame(ui, frame, ui.max_rect(), |ui| {
         ui.set_min_width(dimension(ui.available_width()));
         add(ui)
     })
+}
+
+/// The theme browser and its options panel share exactly the same themed backing.
+pub(super) fn settings_card_frame(ui: &Ui) -> egui::Frame {
+    super::Container::new(ui.ctx(), super::Surface::Navigation).frame(ui.ctx(), Tokens::get().dialog_footer, crate::frame::Side::Left)
 }
 
 /// Controls and one explanatory specimen side by side, stacked on narrow viewports.
@@ -505,44 +603,6 @@ pub(crate) fn settings_pair<R>(ui: &mut Ui, controls: impl FnOnce(&mut Ui) -> R,
             ui.allocate_ui_with_layout(vec2(preview_width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| preview(ui, state));
         });
     }
-}
-
-/// Dashed import tile, bounded by its carousel cell.
-pub(crate) fn theme_import_tile(ui: &mut Ui, label: &str, note: &str) -> Response {
-    if crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, &[label, note]) {
-        return crate::prefs_search::hidden_response(ui);
-    }
-    let t = Tokens::get();
-    let width = t.space_24 * 3.0 + t.space_16;
-    let height = t.space_24 * 4.0;
-    let (r, response) = ui.allocate_exact_size(vec2(width.min(dimension(ui.available_width())), height), Sense::click());
-    if response.hovered() {
-        ui.painter().rect_filled(r, t.radius_lg, t.hover);
-    }
-    let mut outline = rounded_perimeter(r.shrink(t.space_2 / 2.0), f32::from(t.radius_lg));
-    if let Some(first) = outline.first().copied() {
-        outline.push(first);
-    }
-    ui.painter().extend(egui::Shape::dashed_line(&outline, Stroke::new(t.space_3 / 2.0, t.control_border), t.space_3, t.space_3));
-    let icon = Rect::from_center_size(pos2(r.center().x, r.top() + t.space_16), vec2(t.space_16, t.space_16));
-    crate::icons::paint_ink(ui.painter(), icon, "import_tray", t.form_dim);
-    centred_text(
-        ui.painter(),
-        Rect::from_min_size(pos2(r.left(), r.top() + t.space_24 + t.space_4), vec2(r.width(), t.space_16)),
-        label,
-        FontId::proportional(t.font_label),
-        t.form_dim,
-    );
-    centred_text(
-        ui.painter(),
-        Rect::from_min_size(pos2(r.left(), r.top() + t.space_24 + t.space_4 + t.space_16), vec2(r.width(), t.space_16)),
-        note,
-        FontId::proportional(t.font_small),
-        t.form_dim,
-    );
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
-    scenario::publish_target(&format!("dialog:{label}"), r);
-    response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 /// Compact informational state badge for settings; never an interactive control.
@@ -664,9 +724,9 @@ pub(crate) fn option_card(ui: &mut Ui, label: &str, note: Option<&str>, selected
         ui.painter().line_segment([centre + vec2(-t.space_4, 0.0), centre + vec2(-t.space_2, t.space_2)], Stroke::new(2.0, ink));
         ui.painter().line_segment([centre + vec2(-t.space_2, t.space_2), centre + vec2(t.space_4, -t.space_3)], Stroke::new(2.0, ink));
     }
-    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, enabled, selected, label));
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::RadioButton, enabled, selected, label));
     scenario::publish_target(&format!("prefs:option:{label}"), rect);
-    let response = response.on_hover_text(label);
+    let response = response.backing_on_hover_text(label);
     if enabled { response.on_hover_cursor(egui::CursorIcon::PointingHand) } else { response }
 }
 
@@ -875,7 +935,7 @@ pub(crate) fn settings_inline_note(ui: &mut Ui, text: &str) {
         ui.painter().layout_no_wrap(text.to_owned(), FontId::proportional(t.font_body), t.form_dim)
     };
     let (r, response) = ui.allocate_exact_size(galley.size(), Sense::hover());
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), text));
     ui.painter().galley(r.min, galley, t.form_dim);
 }
 

@@ -74,7 +74,7 @@ fn snapping(app: &mut SolveApp, ui: &mut egui::Ui) {
                             }
                         }
                     })
-                    .on_hover_text(crate::i18n::tr("prefs.snap_drawing_note"));
+                    .backing_on_hover_text(crate::i18n::tr("prefs.snap_drawing_note"));
                     crate::scenario::publish_target("prefs:suppress_sketch_snap", response.rect);
                 });
             });
@@ -90,8 +90,11 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
             "prefs.line_hover_tangent_arc",
             "prefs.sketch.center_arc",
             "prefs.sketch_construction_lines",
+            "prefs.sketch_mirror_auto_line",
+            "prefs.sketch.ellipse_axes",
             "prefs.sketch.auto_dimensions",
             "prefs.sketch.auto_locate",
+            "ui.first_dimension_scales",
         ];
         let right_labels =
             ["prefs.sketch.shortcut_cycles_modes", "prefs.ribbon_click_ends_tool", "ui.project_face_edges_sketch", "prefs.sketch.project_options"];
@@ -127,6 +130,8 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                     &mut app.preferences.center_arc_follows_cursor,
                 );
                 check(ui, "sketch_construction_lines", "prefs.sketch_construction_lines", None, &mut app.preferences.sketch_construction_lines);
+                check(ui, "sketch_mirror_auto_line", "prefs.sketch_mirror_auto_line", None, &mut app.preferences.sketch_mirror_auto_line);
+                check(ui, "ellipse_axes", "prefs.sketch.ellipse_axes", Some("prefs.sketch.ellipse_axes_note"), &mut app.preferences.ellipse_axes);
                 check(
                     ui,
                     "sketch_auto_dimensions",
@@ -143,6 +148,13 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                         &mut app.preferences.sketch_auto_locate,
                     );
                 });
+                check(
+                    ui,
+                    "first_dimension_scales",
+                    "ui.first_dimension_scales",
+                    Some("ui.first_dimension_scales_tip"),
+                    &mut app.preferences.first_dimension_scales,
+                );
             });
             ui.allocate_ui_with_layout(egui::vec2(right, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
                 check(
@@ -172,6 +184,7 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                 );
             });
         });
+        dimension_values(app, ui, t.space_24 * 8.0 + t.space_8);
     });
 }
 
@@ -232,7 +245,7 @@ fn opening(app: &mut SolveApp, ui: &mut egui::Ui) {
                         },
                         width,
                     )
-                    .on_hover_text(app.tr("prefs.sketch_exit_view_note"));
+                    .backing_on_hover_text(app.tr("prefs.sketch_exit_view_note"));
                     crate::scenario::publish_target(&format!("prefs:sketch_exit_view:{key}"), response.rect);
                     crate::scenario::publish_target(&format!("dialog:list:{}", choice.label_id()), response.rect);
                     if app.preferences.sketch_exit_view == choice {
@@ -307,7 +320,7 @@ fn marks(app: &mut SolveApp, ui: &mut egui::Ui) {
                     },
                     width,
                 )
-                .on_hover_text(crate::i18n::tr(help));
+                .backing_on_hover_text(crate::i18n::tr(help));
                 targets(key, &response);
                 if response.clicked() {
                     *value = !*value;
@@ -390,6 +403,13 @@ fn selecting(app: &mut SolveApp, ui: &mut egui::Ui) {
         check(ui, "prefer_free_sketch_points", "prefs.sketch.prefer_free_points", None, &mut app.preferences.prefer_free_sketch_points);
         check(
             ui,
+            "select_hidden_edges",
+            "prefs.select_hidden_edges",
+            Some("prefs.select_hidden_edges_help"),
+            &mut app.preferences.select_hidden_edges,
+        );
+        check(
+            ui,
             "select_other_hidden",
             "prefs.sketch.select_other_hidden",
             Some("prefs.select_other_hidden_help"),
@@ -451,7 +471,7 @@ fn check(ui: &mut egui::Ui, key: &str, label: &str, help: Option<&str>, value: &
             if show_help && response.rect.is_positive() {
                 ui_kit::help_icon(ui, help);
             }
-            response.on_hover_text(help)
+            response.backing_on_hover_text(help)
         } else {
             response
         }
@@ -468,6 +488,7 @@ fn targets(key: &str, response: &egui::Response) {
         "sketch_align_points" => "Line up with other sketch points while drawing",
         "sketch_auto_dimensions" => "Dimension new shapes",
         "sketch_auto_locate" => "Also place them from the origin (fully constrained)",
+        "first_dimension_scales" => "The first dimension scales the drawing",
         "center_arc_follows_cursor" => "Center point arc follows the cursor's direction",
         "shortcut_cycles_modes" => "Pressing a tool's shortcut again switches its mode",
         "project_options_dialog" => "Project options dialog",
@@ -479,4 +500,36 @@ fn targets(key: &str, response: &egui::Response) {
         _ => return,
     };
     crate::scenario::publish_target(&format!("dialog:{legacy}"), response.rect);
+}
+
+/// Where a dimension's value is typed, and what the window's arrows step lengths and angles by
+/// (#7246). The steps only matter in the window, so they wait for it.
+fn dimension_values(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
+    let label = app.tr("prefs.dimension_values").to_string();
+    ui_kit::settings_block_hint(ui, &label, app.tr("prefs.dimension_values_note"), label_width, |ui| {
+        let options = [app.tr("prefs.dimension_values_view"), app.tr("prefs.dimension_values_window")];
+        let mut selected = usize::from(app.preferences.dimension_input == DimensionInput::Window);
+        if ui_kit::settings_segments(ui, &label, &mut selected, &options) {
+            app.preferences.dimension_input = if selected == 1 { DimensionInput::Window } else { DimensionInput::View };
+        }
+    });
+    let window = app.preferences.dimension_input == DimensionInput::Window;
+    let units = app.session.doc.units.clone();
+    let decimals = app.preferences.length_decimals;
+    ui_kit::settings_block(ui, app.tr("prefs.dimension_steps"), label_width, |ui| {
+        ui.add_enabled_ui(window, |ui| {
+            ui.horizontal(|ui| {
+                let t = Tokens::get();
+                ui_kit::settings_control_width(ui, t.form_label_width, |ui| {
+                    let p = &mut app.preferences;
+                    ui_kit::bounded_length_field(ui, &mut p.dimension_step_mm, &units, decimals, DIMENSION_STEP_MM, 0.1)
+                        .on_hover_text(crate::i18n::tr("prefs.dimension_step_length"));
+                });
+                ui_kit::settings_control_width(ui, t.form_label_width, |ui| {
+                    ui_kit::number_field(ui, &mut app.preferences.dimension_step_deg, DIMENSION_STEP_DEG, 0.1, "°")
+                        .on_hover_text(crate::i18n::tr("prefs.dimension_step_angle"));
+                });
+            });
+        });
+    });
 }

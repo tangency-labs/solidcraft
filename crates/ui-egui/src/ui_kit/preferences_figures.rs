@@ -1,6 +1,7 @@
 //! Deliberately composed preference illustrations. A shared orthographic projection keeps
 //! faces, ground contact, rotation cues and axes consistent at their small display size.
 use crate::theme::Tokens;
+use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Color32, Painter, Pos2, Rect, Shape, Stroke, Vec2, vec2};
 
 struct Canvas {
@@ -280,7 +281,8 @@ pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutP
     let dialog = panel(dialog_x, dialog_top, bw, dialog_height, "Dialogs", t.dialog_footer);
     crate::scenario::publish_rect("prefs:layout_preview:dialog", dialog);
     crate::scenario::publish_rect("prefs:layout_preview", outer);
-    ui.interact(outer, ui.make_persistent_id("layout_preview_help"), egui::Sense::hover()).on_hover_text(crate::i18n::tr("prefs.layout_note"));
+    ui.interact(outer, ui.make_persistent_id("layout_preview_help"), egui::Sense::hover())
+        .backing_on_hover_text(crate::i18n::tr("prefs.layout_note"));
 }
 
 #[allow(unused_imports, reason = "painted by the Preferences pages of #9875 to #9883")]
@@ -293,14 +295,10 @@ pub(crate) fn paint_theme_thumbnail(p: &Painter, rect: Rect, sample: &ThemeSampl
     paint(p, rect, &super::preferences_figure_data::THEME_THUMBNAIL, Some(sample), None);
 }
 
-#[allow(dead_code, reason = "painted by the Preferences pages of #9875 to #9883")]
-/// The "System" theme card: `light` with `dark` over a slanted band of it (the board clips the dark
-/// half to the polygon 56 %,0 / 100 %,0 / 100 %,100 % / 40 %,100 %).
-pub(crate) fn paint_theme_system(p: &Painter, rect: Rect, light: &ThemeSample, dark: &ThemeSample) {
-    const BAND: [[f32; 2]; 4] = [[69.44, 0.0], [124.0, 0.0], [124.0, 76.0], [49.6, 76.0]];
-    let figure = &super::preferences_figure_data::THEME_THUMBNAIL;
-    paint(p, rect, figure, Some(light), None);
-    paint(p, rect, figure, Some(dark), Some(&BAND));
+/// The theme picker's thumbnails have an inner radius matching their card's border.
+/// Keep other thumbnail callers' existing sizing and painting unchanged.
+pub(crate) fn paint_theme_thumbnail_rounded(p: &Painter, rect: Rect, sample: &ThemeSample, radius: f32) {
+    super::preferences_figure_ops::paint_rounded(p, rect, &super::preferences_figure_data::THEME_THUMBNAIL, sample, radius);
 }
 
 #[cfg(test)]
@@ -362,7 +360,7 @@ mod tests {
         }
     }
 
-    use super::{ThemeSample, paint_theme_system, paint_theme_thumbnail};
+    use super::{ThemeSample, paint_theme_thumbnail, paint_theme_thumbnail_rounded};
     use crate::theme::Tokens;
     use crate::ui_kit::preferences_figure_data::FIGURES;
     use egui::{Pos2, Rect, vec2};
@@ -393,6 +391,34 @@ mod tests {
             Rect::from_min_size(Pos2::ZERO, vec2(-40.0, 30.0)),
             Rect::from_min_size(Pos2::ZERO, vec2(nan, nan)),
         ]
+    }
+
+    #[test]
+    fn theme_thumbnail_operations_stay_inside_the_rounded_inner_border() {
+        let rect = Rect::from_min_size(Pos2::new(20.0, 20.0), vec2(124.0, 76.0));
+        for dark in [false, true] {
+            let sample = ThemeSample::from_tokens(&if dark { Tokens::dark() } else { Tokens::light() });
+            for border in [1.0, 2.0] {
+                let radius = f32::from(Tokens::get().radius_lg) - border;
+                let centre_rect = rect.shrink(radius);
+                let mut vertices = 0;
+                for clipped in shapes(rect, |p, r| paint_theme_thumbnail_rounded(p, r, &sample, radius)) {
+                    crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+                        if let egui::Shape::Mesh(mesh) = shape {
+                            for vertex in &mesh.vertices {
+                                let nearest = Pos2::new(
+                                    vertex.pos.x.clamp(centre_rect.left(), centre_rect.right()),
+                                    vertex.pos.y.clamp(centre_rect.top(), centre_rect.bottom()),
+                                );
+                                assert!(vertex.pos.distance(nearest) <= radius + 0.05, "thumbnail fill leaks outside rounded clip: {:?}", vertex.pos);
+                                vertices += 1;
+                            }
+                        }
+                    });
+                }
+                assert!(vertices > 20, "check the actual background and top-bar geometry");
+            }
+        }
     }
 
     /// Every figure, in both themes, paints at size zero, tiny, normal, huge and non-finite without
@@ -442,18 +468,16 @@ mod tests {
     }
 
     #[test]
-    fn theme_thumbnails_paint_with_the_sample_colours_and_a_slanted_system_band() {
+    fn theme_thumbnails_paint_with_the_sample_colours() {
         let (light, dark) = (ThemeSample::from_tokens(&Tokens::light()), ThemeSample::from_tokens(&Tokens::dark()));
         assert_ne!(light, dark);
         let rect = Rect::from_min_size(Pos2::new(4.0, 4.0), vec2(124.0, 76.0));
         for rect in rects().into_iter().chain([rect]) {
             let _ = shapes(rect, |p, r| paint_theme_thumbnail(p, r, &light));
-            let _ = shapes(rect, |p, r| paint_theme_system(p, r, &light, &dark));
         }
-        let single = shapes(rect, |p, r| paint_theme_thumbnail(p, r, &light)).len();
-        let system = shapes(rect, |p, r| paint_theme_system(p, r, &light, &dark)).len();
-        assert!(system > single, "the dark band adds shapes over the light card");
-        for shape in shapes(rect, |p, r| paint_theme_system(p, r, &light, &dark)) {
+        let single = shapes(rect, |p, r| paint_theme_thumbnail(p, r, &light));
+        assert!(!single.is_empty());
+        for shape in single {
             let bounds = shape.shape.visual_bounding_rect().intersect(shape.clip_rect);
             assert!(!bounds.is_positive() || rect.expand(1.0).contains_rect(bounds), "{bounds:?}");
         }

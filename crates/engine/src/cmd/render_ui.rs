@@ -154,7 +154,7 @@ fn divider(_: &mut Session, params: &Value) -> Result<Value> {
     Ok(json!({"position":input.position.clamp(0.05,0.95)}))
 }
 
-fn batch(s: &mut Session, params: &Value) -> Result<Value> {
+pub(crate) fn batch_request(s: &Session, params: &Value) -> Result<Value> {
     let input: BatchParams = serde_json::from_value(params.clone()).map_err(|e| bad("render.batch", e.to_string()))?;
     s.render_batch_ready().map_err(|reason| bad("render.batch", reason))?;
     if s.model.is_stale() {
@@ -187,7 +187,11 @@ fn batch(s: &mut Session, params: &Value) -> Result<Value> {
         return Err(bad("render.batch", "replace must be false or omitted"));
     }
     request.insert("settings".into(), json!(settings));
-    let request = std::sync::Arc::new(Value::Object(request));
+    Ok(Value::Object(request))
+}
+
+fn batch(s: &mut Session, params: &Value) -> Result<Value> {
+    let request = std::sync::Arc::new(batch_request(s, params)?);
     let shots = s
         .doc
         .render

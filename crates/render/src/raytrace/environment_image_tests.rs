@@ -129,7 +129,8 @@ fn centre(png: &[u8]) -> [u8; 4] {
 
 #[test]
 fn progressive_hdr_and_rough_reflections_keep_the_same_absolute_prefix_at_every_quantum() {
-    for (target, checkpoints) in [(3, vec![1, 2]), (7, vec![1, 2, 4])] {
+    for target in [3, 7] {
+        let checkpoints: Vec<_> = (1..target).collect();
         let result = progressive_hdr_png(target, 82, 1, Some(input()));
         assert_eq!(result.previews.iter().map(|(n, _)| *n).collect::<Vec<_>>(), checkpoints);
         let other = progressive_hdr_png(target, 82, 16384, Some(input()));

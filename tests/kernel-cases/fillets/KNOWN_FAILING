@@ -15,8 +15,6 @@ cov-fillet-g2-four-edge-apex-corner [fail] step 11 (solid.fillet): invalid input
 cov-fillet-g2-mixed-corner [unsupported] refused as on SMLib d01d7b0: a G2 corner is set back only where every edge meeting it is rounded and all are convex or all concave
 cov-fillet-g2-oblique-three-edge-corner [unsupported] refused on solidcore: its three edges meet at different wedge angles, and one curvature fillet takes the first edge's equal-area thumbweight for every edge (solidcore#2250, issuecomment-6563419897); SMLib d01d7b0 fails it too
 cov-fillet-g2-pocket-corner [fail] continuity_order: G1 at one seam where the corner patch meets a contact face (g2 wanted), as on SMLib d01d7b0
-cov-fillet-turn-swept-boss-base-r1 [fail] as on SMLib: solid.fillet has no `turn`; the corners are mitred (12508.9675, the Mitre case's volume)
-cov-fillet-turn-swept-pocket-sharp-corner-refused-r1 [fail] as on SMLib: solid.fillet has no `turn`, so the sharp concave corners are mitred, not refused
 cov-junction-boss-tilt-20-root-round [fail] fillet status 1001 on a cylinder tilted 20 degrees into the plate, as on SMLib
 cov-junction-boss-tilt-40-root-round [fail] fillet status 1001 on a cylinder tilted 40 degrees into the plate, as on SMLib
 cov-junction-tee-equal-round [fail] the result is not a closed solid, as on SMLib: equal pipes' intersection is two plane ellipses crossing, a corner the old corner code cannot join (the corner step)

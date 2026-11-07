@@ -12,6 +12,7 @@
 //! centre that drags it across the model (snapping as a pick would) and takes it out when
 //! clicked, and a pick elsewhere on a face that already has a hole moves the hole there.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use solidcraft_engine::geom::prelude::*;
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -268,7 +269,6 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     if !matches!(&d.kind, Kind::Hole { opts, .. } if !opts.multiple) || app.applying.is_some() {
         return;
     }
-    let t = Tokens::get();
     marks(app, painter, proj);
     if !app.preferences.hole_moves {
         return;
@@ -278,7 +278,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     let mut removed: Option<usize> = None;
     for (n, (i, at)) in places.into_iter().enumerate() {
         let Some(mut c) = proj.to_screen(at) else { continue };
-        let id = egui::Id::new(("sc_hole_place", i));
+        let id = egui::Id::unique(("sc_hole_place", i));
         let r = ui.interact(egui::Rect::from_center_size(c, vec2(2.0 * HANDLE_REACH, 2.0 * HANDLE_REACH)), id, egui::Sense::click_and_drag());
         // A click on the hole takes it out, as a pick of a picked face does.
         if r.clicked() {
@@ -302,10 +302,10 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
         if hot {
             ui.ctx().set_cursor_icon(if r.dragged() { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Grab });
         }
-        crate::icons::markers::hole_handle(painter, c, if hot { t.accent } else { t.manipulator }, hot);
+        crate::place_gizmo::marker(ui, painter, id, c, r.hovered(), r.dragged());
         crate::scenario::publish_handle(&format!("hole:{n}"), c);
         if !r.dragged() {
-            r.on_hover_text(crate::i18n::tr_label("Drag to move the hole; click to remove it"));
+            r.backing_on_hover_text(crate::i18n::tr_label("Drag to move the hole; click to remove it"));
         }
     }
     if let Some((i, to)) = moved

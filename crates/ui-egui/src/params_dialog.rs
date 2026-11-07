@@ -13,6 +13,7 @@
 //! [`complete`] adds suggestions (parameters, functions, units) under any expression box: the
 //! names come from `parameters.complete`, cached per document revision by [`publish`].
 
+use crate::ui_kit::BackingTooltipExt as _;
 use std::sync::Arc;
 
 use serde_json::{Value, json};
@@ -225,7 +226,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let title = crate::i18n::tr_label("Parameters");
     let panel = ui_kit::Panel::new(
         title,
-        egui::Id::new("sc_params_dialog"),
+        egui::Id::unique("sc_params_dialog"),
         anchor,
         drag_bounds,
         side,
@@ -235,7 +236,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     .body_rows(16.0)
     .reset_scroll(d.reset_scroll);
     let panel = if side == crate::frame::Side::Left {
-        let available = palette.map_or(viewport.width(), |r| (r.left() - viewport.left() - crate::theme::Tokens::get().space_8).max(0.0));
+        let available = crate::sketch_palette::room_left_of(app, ctx, viewport);
         panel.width((crate::theme::Tokens::get().form_card_width * 3.0).min(available))
     } else {
         panel
@@ -273,7 +274,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 });
                 ui.horizontal_wrapped(|ui| {
                     if ui_kit::icon_label_button(ui, "Import…", "import_tray", true, false)
-                        .on_hover_text(crate::i18n::tr_label("CSV or JSON: updates existing parameters, adds new ones"))
+                        .backing_on_hover_text(crate::i18n::tr_label("CSV or JSON: updates existing parameters, adds new ones"))
                         .clicked()
                     {
                         app.pick_open_command("parameters.import", json!({}), IMPORT_TYPES);
@@ -362,7 +363,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// Where the chosen order is kept: egui's persisted memory, like a section's open state.
 fn sort_id() -> egui::Id {
-    egui::Id::new("sc_params_sort")
+    egui::Id::unique("sc_params_sort")
 }
 
 /// The dialog's sections, each in the chosen order.
@@ -601,7 +602,7 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&R
                     }
                 });
                 row.cell(|ui| {
-                    ui_kit::text(ui, &shown, ui_kit::Text::Value(&format!("value:{}", r.name), error)).on_hover_text(&shown);
+                    ui_kit::text(ui, &shown, ui_kit::Text::Value(&format!("value:{}", r.name), error)).backing_on_hover_text(&shown);
                 });
                 row.cell(|ui| {
                     let mut comment = d.comments.get(&r.name).cloned().unwrap_or_else(|| r.comment.clone());
@@ -700,7 +701,7 @@ fn apply_held(app: &mut SolveApp, d: &mut ParamsDialog, rows: &[Row]) -> bool {
 /// back on applies what was waiting.
 fn apply_live_checkbox(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[Row]) {
     let response = ui_kit::checkbox(ui, crate::i18n::tr("parameters.apply_live"), &mut app.preferences.parameters_apply_live)
-        .on_hover_text(crate::i18n::tr("parameters.apply_live_tip"));
+        .backing_on_hover_text(crate::i18n::tr("parameters.apply_live_tip"));
     crate::scenario::publish_handle("params:apply_live", response.rect.center());
     if response.changed() && app.preferences.parameters_apply_live {
         apply_held(app, d, rows);
@@ -754,7 +755,7 @@ fn add_row(app: &mut SolveApp, ui: &mut egui::Ui, table: &mut ui_kit::Table<'_>,
             left |= !completed && response.lost_focus();
         });
         row.cell(|ui| {
-            ui_kit::text(ui, &value, ui_kit::Text::Value("new_value", invalid)).on_hover_text(&value);
+            ui_kit::text(ui, &value, ui_kit::Text::Value("new_value", invalid)).backing_on_hover_text(&value);
         });
         row.cell(|ui| {
             let response = ui_kit::cell_editor(ui, comment_id, &mut d.new_comment, "Comment", false);
@@ -861,7 +862,7 @@ struct Cache {
 }
 
 fn cache_id() -> egui::Id {
-    egui::Id::new("sc_param_completions")
+    egui::Id::unique("sc_param_completions")
 }
 
 /// Keep the completion list (parameters, functions, constants, units) for this revision of the
@@ -1827,8 +1828,9 @@ mod tests {
         assert!(wide.width() > cell.width() * 1.5, "the edited formula opens wide: {wide:?} vs {cell:?}");
         assert!((wide.left() - cell.left()).abs() < 1.0, "it opens from its own cell: {wide:?} vs {cell:?}");
 
-        // The open field wraps, so the end of the text is Ctrl+End.
-        h.run(&json!([{"key":"End","cmd":true}, {"text":" * 2"}, {"key":"Enter"}])).unwrap();
+        // The open field wraps, so the end of the text is Command+Down. Not Ctrl+End:
+        // egui ignores that on macOS, and the typed tail would land where the click put the cursor.
+        h.run(&json!([{"key":"ArrowDown","cmd":true,"ctrl":false}, {"text":" * 2"}, {"key":"Enter"}])).unwrap();
         h.frames(2);
         assert_eq!(h.app.session.doc.param("length").unwrap().expr, format!("{long} * 2"));
         let after = crate::scenario::rect_of("param:length").unwrap();
