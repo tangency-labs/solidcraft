@@ -56,11 +56,26 @@ pub fn run(app: &mut SolveApp, f: &UrdfExport) -> Result<(), String> {
     app.pick_save(&name, &["urdf"], move |app, path| {
         let Some(path) = path else { return };
         let Ok(p) = params(&form, &path) else { return };
-        if app.run("file.export", p).is_ok() {
-            app.set_status(format!("Exported {path}"), false);
+        if let Ok(r) = app.run("file.export", p) {
+            report(app, &path, &r);
         }
     });
     Ok(())
+}
+
+/// The export's status. What the URDF leaves out (a free coupled joint, a body without
+/// collision) is said, each warning in the output.
+fn report(app: &mut SolveApp, path: &str, r: &Value) {
+    let warnings: Vec<&str> = r["warnings"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    match warnings.first() {
+        None => app.set_status(format!("Exported {path}"), false),
+        Some(first) => {
+            for w in &warnings {
+                app.session.echo(format!("URDF: {w}"));
+            }
+            app.set_status(format!("Exported {path} with {} warning(s): {first}", warnings.len()), true);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -85,6 +100,16 @@ mod tests {
             p,
             json!({"path": "r.urdf", "format": "urdf", "mimic": false, "collision": "convex_hull", "mesh_prefix": "package://r/meshes/", "effort": 5.0, "velocity": 2.5})
         );
+    }
+
+    #[test]
+    fn export_warnings_are_shown_not_just_success() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        report(&mut app, "r.urdf", &json!({"warnings": ["`J1` is left free", "body `B` has no collision"]}));
+        assert!(app.messages.iter().any(|m| m.text.contains("2 warning") && m.text.contains("J1")));
+        assert!(app.session.log.iter().any(|l| l.contains("body `B` has no collision")));
+        report(&mut app, "s.urdf", &json!({"warnings": []}));
+        assert!(app.messages.iter().any(|m| m.text == "Exported s.urdf"));
     }
 
     #[test]

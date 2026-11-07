@@ -1634,7 +1634,11 @@ fn find_limits_row(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut JointForm, id:
 /// The commands OK would run for the joint as the dialog has it (its sides as picked in
 /// `inputs`), but its limits (what Find Limits fills in) and dynamics (Find Limits doesn't use them).
 fn edit_commands(app: &SolveApp, f: &JointForm, inputs: &[SelInput]) -> Result<Vec<(String, Value)>, String> {
-    let edit = Dialog::new(Kind::Assembly(Asm::Joint(Box::new(f.clone()))), inputs.to_vec());
+    // Without the Dynamics fields: Find Limits doesn't use them, so a half-typed value there
+    // must not stop it.
+    let mut f = f.clone();
+    f.dynamics.clear();
+    let edit = Dialog::new(Kind::Assembly(Asm::Joint(Box::new(f))), inputs.to_vec());
     Ok(crate::dialogs::apply_commands(app, &edit)?.into_iter().filter(|(id, _)| id != "joint.limits" && id != "joint.dynamics").collect())
 }
 

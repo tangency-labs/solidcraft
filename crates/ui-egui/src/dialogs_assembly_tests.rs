@@ -2140,7 +2140,7 @@ fn find_limits_leaves_the_dynamics_out() {
     let id = app.session.doc.assembly.joints[0].id;
     let mut d = edit_joint(&app, id).unwrap();
     let Kind::Assembly(Asm::Joint(f)) = &mut d.kind else { panic!("not a joint") };
-    f.dynamics[0][0] = "0".into();
+    f.dynamics[0][0] = "lots".into();
     let commands = edit_commands(&app, f, &d.inputs).unwrap();
     assert!(commands.iter().all(|(c, _)| c != "joint.dynamics" && c != "joint.limits"), "{commands:?}");
 }
