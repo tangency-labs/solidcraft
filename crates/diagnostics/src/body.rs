@@ -36,6 +36,8 @@ pub struct EdgeInfo {
 
 /// The display mesh, each triangle tagged with its kernel face.
 pub struct Mesh {
+    /// Explicit edge-only rendering: face conversion and meshing were not attempted.
+    pub wireframe: bool,
     pub positions: Vec<[f64; 3]>,
     pub triangles: Vec<[u32; 3]>,
     pub triangle_face: Vec<usize>,
@@ -129,6 +131,7 @@ pub fn mesh(body: &mut Body, edges: &[EdgeInfo]) -> Result<Mesh, String> {
             .map_or(usize::MAX, |f| f.index() as usize)
     };
     Ok(Mesh {
+        wireframe: false,
         positions: mesh.positions.iter().map(|p| [p.x, p.y, p.z]).collect(),
         triangles: mesh.triangles,
         triangle_face: mesh
@@ -142,6 +145,18 @@ pub fn mesh(body: &mut Body, edges: &[EdgeInfo]) -> Result<Mesh, String> {
             .collect(),
         size,
     })
+}
+
+/// An explicit edge-only view; no record conversion or face meshing is attempted.
+pub fn wireframe(edges: &[EdgeInfo]) -> Mesh {
+    Mesh {
+        wireframe: true,
+        positions: Vec::new(),
+        triangles: Vec::new(),
+        triangle_face: Vec::new(),
+        refused: Vec::new(),
+        size: diagonal(edges.iter().flat_map(|e| e.points.iter().copied())),
+    }
 }
 
 /// The diagonal of the points' bounding box, 1 when there are none.

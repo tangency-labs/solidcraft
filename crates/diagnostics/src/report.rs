@@ -54,9 +54,10 @@ pub fn build(
         .collect();
     json!({
         "file": file.display().to_string(),
+        "render_mode": if mesh.wireframe { "wireframe" } else { "shaded" },
         "body_tolerance": body.brep.tolerance(),
         "view": {"azimuth": view.azimuth, "elevation": view.elevation},
-        "mesh": {"triangles": mesh.triangles.len(), "size": mesh.size, "refused": refused},
+        "mesh": {"attempted": !mesh.wireframe, "triangles": mesh.triangles.len(), "size": mesh.size, "refused": refused},
         "faces": faces,
         "edges": edges,
     })
@@ -65,6 +66,9 @@ pub fn build(
 /// The body tolerance, the counts and the largest edge tolerances, one per line.
 pub fn summary(body: &Body, edges: &[EdgeInfo], mesh: &Mesh) -> String {
     let mut s = String::new();
+    if mesh.wireframe {
+        let _ = writeln!(s, "wireframe: native edges only; no face mesh attempted");
+    }
     let _ = writeln!(
         s,
         "body tolerance {:e}; {} edges; {} triangles; {} faces refused",

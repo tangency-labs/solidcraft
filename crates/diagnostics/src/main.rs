@@ -10,11 +10,12 @@
 //!
 //! ```text
 //! cargo run -p diagnostics --release -- FILE.smb [--out DIR] [--view AZ,EL] [--size WxH]
-//!     [--highlight F,..] [--see-through F,..] [--edges-above TOL] [--binary] [--rebuild]
+//!     [--highlight F,..] [--see-through F,..] [--edges-above TOL] [--binary] [--rebuild] [--wireframe]
 //! ```
 //!
 //! It writes `DIR/<stem>.png` and `DIR/<stem>.json` and prints the largest edge
-//! tolerances.
+//! tolerances. `--wireframe` draws only native edges and explicitly reports that no
+//! face mesh was attempted; the normal shaded path still reports conversion errors.
 
 mod body;
 mod png;
@@ -41,10 +42,12 @@ struct Options {
     binary: bool,
     /// Rebuild the UV trim curves on read instead of checking and fixing them.
     rebuild: bool,
+    /// Draw native edges without converting or meshing faces.
+    wireframe: bool,
 }
 
 const USAGE: &str = "usage: solidcore-diag FILE.smb [--out DIR] [--view AZ,EL] [--size WxH] \
-[--highlight F,..] [--see-through F,..] [--edges-above TOL] [--binary] [--rebuild]";
+[--highlight F,..] [--see-through F,..] [--edges-above TOL] [--binary] [--rebuild] [--wireframe]";
 
 fn main() -> ExitCode {
     match parse(std::env::args().skip(1)).and_then(|o| run(&o)) {
@@ -61,7 +64,11 @@ fn run(o: &Options) -> Result<(), String> {
     let mut body = body::read(&o.file, o.binary, o.rebuild)?;
     let faces = body::faces(&body)?;
     let edges = body::edges(&body)?;
-    let mesh = body::mesh(&mut body, &edges)?;
+    let mesh = if o.wireframe {
+        body::wireframe(&edges)
+    } else {
+        body::mesh(&mut body, &edges)?
+    };
     let (picture, frame) = render::draw(&mesh, &edges, o.view, &o.style, o.width, o.height);
     let stem = o
         .file
@@ -104,6 +111,7 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Options, String> {
         },
         binary: false,
         rebuild: false,
+        wireframe: false,
     };
     while let Some(a) = args.next() {
         let mut value = || {
@@ -122,6 +130,7 @@ fn parse(mut args: impl Iterator<Item = String>) -> Result<Options, String> {
             "--edges-above" => o.style.edges_above = number(&value()?)?,
             "--binary" => o.binary = true,
             "--rebuild" => o.rebuild = true,
+            "--wireframe" => o.wireframe = true,
             "-h" | "--help" => return Err(USAGE.to_owned()),
             _ if a.starts_with('-') => return Err(format!("unknown option {a}\n{USAGE}")),
             _ if file.is_none() => file = Some(PathBuf::from(a)),
@@ -157,4 +166,67 @@ fn list(s: &str) -> Result<Vec<usize>, String> {
         .filter(|t| !t.trim().is_empty())
         .map(number)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Wireframe is opt-in and preserves the requested camera and edge styling.
+    #[test]
+    fn wireframe_is_explicit_and_preserves_view_and_edge_tolerance() {
+        let default = parse(["body.smb".to_owned()].into_iter()).unwrap();
+        assert!(!default.wireframe);
+        let options = parse(
+            [
+                "body.smb",
+                "--wireframe",
+                "--view",
+                "12,34",
+                "--edges-above",
+                "0.002",
+            ]
+            .map(str::to_owned)
+            .into_iter(),
+        )
+        .unwrap();
+        assert!(options.wireframe);
+        assert_eq!(options.view.azimuth, 12.0);
+        assert_eq!(options.view.elevation, 34.0);
+        assert_eq!(options.style.edges_above, 0.002);
+    }
+
+    /// An edge-only image remains visible and reports unattempted face meshing.
+    #[test]
+    fn wireframe_draws_edges_and_reports_unattempted_faces() {
+        let body = body::Body {
+            kernel: solidcore::Kernel::default(),
+            brep: solidcore::Brep::new_with_infinite_region().unwrap(),
+        };
+        let edges = vec![body::EdgeInfo {
+            index: 7,
+            tolerance: 0.002,
+            faces: vec![3],
+            points: vec![[0.0, 0.0, 0.0], [1.0, 1.0, 0.0]],
+        }];
+        let faces = vec![body::FaceInfo {
+            index: 3,
+            surface: "plane",
+            tolerance: 0.001,
+        }];
+        let mesh = body::wireframe(&edges);
+        assert!(mesh.triangles.is_empty() && mesh.refused.is_empty());
+        let o = parse(["body.smb", "--wireframe"].map(str::to_owned).into_iter()).unwrap();
+        let (picture, frame) = render::draw(&mesh, &edges, o.view, &o.style, 64, 64);
+        assert_eq!(picture.rgb.len(), 64 * 64 * 3);
+        assert!(picture.rgb.iter().any(|&channel| channel < 255));
+        let data = report::build(&o.file, &body, &faces, &edges, &mesh, o.view, &frame);
+        assert_eq!(data["render_mode"], "wireframe");
+        assert_eq!(data["mesh"]["attempted"], false);
+        assert_eq!(data["mesh"]["triangles"], 0);
+        assert_eq!(data["edges"][0]["tolerance"], 0.002);
+        assert_eq!(data["faces"][0]["tolerance"], 0.001);
+        assert!(data["faces"][0]["label_pixel"].is_null());
+        assert!(report::summary(&body, &edges, &mesh).contains("no face mesh attempted"));
+    }
 }
