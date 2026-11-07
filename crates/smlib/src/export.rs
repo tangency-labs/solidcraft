@@ -549,10 +549,9 @@ fn trims(flat: View, n_edgeuses: usize) -> Res<Vec<Option<b::Curve2>>> {
 /// edgeuse runs against the edge (`same` false) reversed exactly (control points in reverse
 /// order, knots t ↦ a + b − t), then the knots mapped. SMLib keeps a trim on its edge's
 /// interval; where the two ends differ by the rounding of SMLib's own or this remap (within the
-/// schema's 10⁻⁹ of the interval's magnitude, at least 1), the knots at the trim's ends, and any
-/// knot that rounding put past them, are the edge record's interval ends, and the end spans that
-/// leaves without length go with their control points, so the pcurve is a valid record defined
-/// on the edge; farther apart is an error.
+/// schema's 10⁻⁹ of the interval's magnitude, at least 1), every knot within that of an interval
+/// end is that end, and the end spans this leaves without length go with their control points,
+/// so the pcurve is a valid record defined on the edge; farther apart is an error.
 fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f64; 2]) -> Res<b::Curve2> {
     fn along<T: Clone>(knots: &[f64], points: &[T], same: bool) -> (Vec<f64>, Vec<T>) {
         if same {
@@ -561,9 +560,10 @@ fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f6
         let (a, b) = (knots.first().copied().unwrap_or(0.0), knots.last().copied().unwrap_or(0.0));
         (knots.iter().rev().map(|t| a + b - t).collect(), points.iter().rev().cloned().collect())
     }
-    // The knots mapped, and the points with them: a knot a rounding past an end of the trim's
-    // domain (within the slack) is that end, and the end spans that leaves without length are
-    // dropped with their control points. SMLib can hand over a trim whose domain runs a rounding
+    // The knots mapped, and the points with them: a knot within the slack of an end of the edge's
+    // interval, inside or past it, is that end, and the end spans that leaves without length are
+    // dropped with their control points (on an edgeuse against its edge the trim is reversed
+    // first, so the issue's dead span sits inside the start as a run a rounding after it). SMLib can hand over a trim whose domain runs a rounding
     // past the edge's interval with a dead span there (knots `5 x4, 5.00000000003 x5` on an edge
     // ending at 5: the slot of a sloped bar, solidcraft#12365), or whose last interior knots lie
     // one ulp past its end knots. Moving the ends alone left a run of 9 knots at 5, or an
@@ -581,9 +581,9 @@ fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f6
             return Err(invalid(format!("a UV trim on [{a}, {z}], its edge on [{t0}, {t1}]")));
         }
         for x in &mut k {
-            if (*x < a && *x >= a - slack) || *x == a {
+            if (*x - t0).abs() <= slack {
                 *x = t0;
-            } else if (*x > z && *x <= z + slack) || *x == z {
+            } else if (*x - t1).abs() <= slack {
                 *x = t1;
             }
         }
