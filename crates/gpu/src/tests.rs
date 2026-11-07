@@ -1598,6 +1598,36 @@ fn collision_lbvh_morton_and_ssi_edge_cases() {
         let single_res = vk.collision().lbvh_query(&[box_a, box_b, box_c], &single_lbvh, 0.0).expect("vk lbvh single");
         assert_eq!(single_res.pairs, vec![OverlapPair { a: 0, b: 0 }, OverlapPair { a: 2, b: 0 }]);
 
+        // Caller-supplied 65-leaf left-comb LBVH exceeding LBVH_STACK_CAP (64) must be rejected by lbvh_fits_traversal_stack and lbvh_query:
+        assert!(crate::collision::lbvh_fits_traversal_stack(&lbvh_coincident));
+        let mut left_comb = Vec::with_capacity(129);
+        for d in 0..64u32 {
+            left_comb.push(crate::collision::GpuLbvhNode {
+                min_x: 0.0,
+                min_y: 0.0,
+                min_z: 0.0,
+                left_or_prim: if d < 63 { d + 1 } else { 64 },
+                max_x: 1.0,
+                max_y: 1.0,
+                max_z: 1.0,
+                right_or_flag: 65 + d,
+            });
+        }
+        for leaf_id in 0..65u32 {
+            left_comb.push(crate::collision::GpuLbvhNode {
+                min_x: 0.0,
+                min_y: 0.0,
+                min_z: 0.0,
+                left_or_prim: leaf_id,
+                max_x: 1.0,
+                max_y: 1.0,
+                max_z: 1.0,
+                right_or_flag: 0x8000_0000,
+            });
+        }
+        assert!(!crate::collision::lbvh_fits_traversal_stack(&left_comb));
+        assert!(vk.collision().lbvh_query(&[box_a], &left_comb, 0.0).is_none());
+
         // 6. SSI surface residual evaluation: disjoint surfaces vs intersecting surfaces & grid_res clamping:
         let c1 = ok(solidcraft_kernel::cylinder(Vec3::ZERO, Vec3::Z, 2.0, 5.0));
         let c2_disjoint = ok(solidcraft_kernel::cylinder(Vec3::new(20.0, 0.0, 0.0), Vec3::Z, 2.0, 5.0));
