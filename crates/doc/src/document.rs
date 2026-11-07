@@ -562,6 +562,20 @@ impl EmbossFace {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+#[serde(deny_unknown_fields)]
+pub struct FlangeCorner {
+    pub covering: Position,
+    pub covered: Position,
+    pub corner_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(length = "Corner overlap")]
+    pub overlap: Option<Expr>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(length = "Corner gap")]
+    pub gap: Option<Expr>,
+}
+
 /// One edge of an edge flange feature: a point on the sheet's edge and, where given, this
 /// edge's own angle and height (expressions) in place of the feature's. In a design file an
 /// edge with neither is the point `[x, y, z]`, as every edge was before; one with its own
@@ -1370,6 +1384,20 @@ pub enum FeatureKind {
         /// virtual sharp (`sheet::HeightFrom`).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         height_from: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        corners: Vec<FlangeCorner>,
+    },
+    SheetCornerJoin {
+        covering: String,
+        covered: String,
+        corner_type: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Overlap")]
+        overlap: Option<Expr>,
+        body: BodyName,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Corner gap")]
+        gap: Option<Expr>,
     },
     /// Flat hems on sheet edges.
     SheetHem {
@@ -2617,6 +2645,7 @@ impl FeatureKind {
             FeatureKind::SheetBase { .. }
                 | FeatureKind::SheetContour { .. }
                 | FeatureKind::SheetFlange { .. }
+                | FeatureKind::SheetCornerJoin { .. }
                 | FeatureKind::SheetHem { .. }
                 | FeatureKind::SheetPerforate { .. }
                 | FeatureKind::SheetFold { .. }
@@ -2675,6 +2704,7 @@ impl FeatureKind {
             FeatureKind::SheetBase { .. } => "BaseFlangeFeature",
             FeatureKind::SheetContour { .. } => "ContourFlangeFeature",
             FeatureKind::SheetFlange { .. } => "EdgeFlangeFeature",
+            FeatureKind::SheetCornerJoin { .. } => "CornerJoinFeature",
             FeatureKind::SheetHem { .. } => "HemFeature",
             FeatureKind::SheetPerforate { .. } => "PerforateFeature",
             FeatureKind::SheetFold { .. } => "FoldFeature",
@@ -2755,6 +2785,7 @@ impl FeatureKind {
             FeatureKind::SheetBase { .. } => "sheet_base",
             FeatureKind::SheetContour { .. } => "sheet_contour",
             FeatureKind::SheetFlange { .. } => "sheet_flange",
+            FeatureKind::SheetCornerJoin { .. } => "sheet_corner_join",
             FeatureKind::SheetHem { .. } => "sheet_hem",
             FeatureKind::SheetPerforate { .. } => "sheet_perforate",
             FeatureKind::SheetFold { .. } => "sheet_fold",
@@ -2840,6 +2871,7 @@ impl FeatureKind {
             "BaseFlangeFeature" => "sheet_base",
             "ContourFlangeFeature" => "sheet_contour",
             "EdgeFlangeFeature" => "sheet_flange",
+            "CornerJoinFeature" => "sheet_corner_join",
             "HemFeature" => "sheet_hem",
             "PerforateFeature" => "sheet_perforate",
             "FoldFeature" => "sheet_fold",
@@ -2924,6 +2956,7 @@ impl FeatureKind {
             FeatureKind::SheetBase { .. } => "BaseFlange",
             FeatureKind::SheetContour { .. } => "ContourFlange",
             FeatureKind::SheetFlange { .. } => "EdgeFlange",
+            FeatureKind::SheetCornerJoin { .. } => "CornerJoin",
             FeatureKind::SheetHem { .. } => "Hem",
             FeatureKind::SheetPerforate { .. } => "Perforate",
             FeatureKind::SheetFold { .. } => "Fold",

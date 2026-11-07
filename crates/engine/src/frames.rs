@@ -87,10 +87,11 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         }
         "plastic.lip" => &[("face", Pick), ("body", Body)],
         "sheet.convert" => &[("face", Pick), ("bends", Picks), ("body", Body)],
-        "sheet.flange" | "sheet.hem" => &[("edges", Picks), ("body", Body)],
+        "sheet.flange" => &[("edges", Picks), ("corners", Picks), ("body", Body)],
+        "sheet.hem" => &[("edges", Picks), ("body", Body)],
         "sheet.fold" => &[("points", Picks), ("fixed", Pick), ("body", Body)],
         "sheet.path_flange" => &[("edge", Pick), ("body", Body)],
-        "sheet.perforate" => &[("body", Body)],
+        "sheet.perforate" | "sheet.corner_join" => &[("body", Body)],
         "sketch.create" | "sketch.redefine" => &[("plane", HerePlane)],
         "canvas.decal" => &[("face", Here)],
         "canvas.insert" => &[("plane", HerePlane), ("at", Here)],
@@ -291,7 +292,7 @@ impl Mapper<'_> {
             Value::Object(o) => {
                 let b = o.get("body").and_then(Value::as_str).map(str::to_string);
                 let mut m = o.clone();
-                for k in ["point", "face", "edge", "vertex", "at"] {
+                for k in ["point", "face", "edge", "vertex", "at", "covering", "covered"] {
                     if let Some(x) = o.get(k)
                         && let Some(y) = self.pick(x, b.as_deref().or(body))
                     {

@@ -6388,13 +6388,21 @@ pub(crate) fn face_sel(s: &Session, p0: Vec3) -> Option<Sel> {
 
 /// [`face_sel`], searching only the body called `only` when given (a pick saved on that body).
 pub(crate) fn face_sel_on(s: &Session, only: Option<&str>, p0: Vec3) -> Option<Sel> {
+    face_sel_in_frames(s, only, p0, stored_frames(s))
+}
+
+/// The body face containing an already placed world point, including during dialog refill.
+pub(crate) fn face_sel_world(s: &Session, point: Vec3) -> Option<Sel> {
+    face_sel_in_frames(s, None, point, None)
+}
+
+fn face_sel_in_frames(s: &Session, only: Option<&str>, p0: Vec3, frames: Option<Vec<(String, solidcraft_engine::doc::Mat)>>) -> Option<Sel> {
     use solidcraft_engine::kernel::{self, FaceSurface};
 
     if !p0.is_finite() {
         return None;
     }
     let st = crate::open_meshing::session_world(s);
-    let frames = stored_frames(s);
     let mut best: Option<(f64, &solidcraft_engine::doc::ModelBody, usize, Vec3)> = None;
     for b in st.bodies.iter().filter(|b| only.is_none_or(|n| b.name == n)) {
         let p = stored_on(&frames, &b.name, p0);

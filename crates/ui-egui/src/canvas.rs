@@ -358,6 +358,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
         app.dialog = Some(d);
         return;
     }
+    crate::dialogs_sheet::corner_overlay(app, painter, proj, &d);
     if let Kind::Measure { result, show, labels, .. } = &mut d.kind {
         labels.drawn = Default::default();
         if !ui.input(|i| i.pointer.primary_down()) {

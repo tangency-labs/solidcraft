@@ -139,6 +139,7 @@ pub const DOCUMENTED: &[&str] = &[
     "plastic.snap_fit",
     "pointcloud.insert",
     "sheet.convert",
+    "sheet.corner_join",
     "sheet.export_bend_table",
     "sheet.export_dxf",
     "sheet.flange",

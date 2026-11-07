@@ -611,3 +611,29 @@ fn a_combine_tool_stays_where_it_is_placed() {
     assert_eq!(lumps(&s), Some(2), "the boss stays where it is in the world");
     assert!((volume(&mut s) - 17000.0).abs() < 1e-6, "{}", volume(&mut s));
 }
+
+/// Nested flange picks follow a translated and rotated component; lengths stay unchanged.
+#[test]
+fn sheet_flange_corner_coordinates_map_into_moved_component() {
+    let mut s = moved_part();
+    run(&mut s, "occurrence.move", json!({"occurrence":"Part:1","axis":[0,0,1],"angle":"90 deg","origin":[50,0,0]}));
+    let params = json!({
+        "body":"Body1",
+        "edges":[[45,15,10]],
+        "height":"20 mm",
+        "corners":[{"covering":[45,15,10],"covered":[30,5,5],"corner_type":"partial","gap":"0.5 mm","overlap":"1 mm"}]
+    });
+    let mapped = crate::frames::to_local(&s, "sheet.flange", &params).unwrap().unwrap();
+    for (point, expected) in [
+        (&mapped["edges"][0], Vec3::new(15.0, 5.0, 10.0)),
+        (&mapped["corners"][0]["covering"], Vec3::new(15.0, 5.0, 10.0)),
+        (&mapped["corners"][0]["covered"], Vec3::new(5.0, 20.0, 5.0)),
+    ] {
+        let actual = Vec3::new(point[0].as_f64().unwrap(), point[1].as_f64().unwrap(), point[2].as_f64().unwrap());
+        assert!(near(actual, expected), "{actual:?} != {expected:?}");
+    }
+    assert_eq!(mapped["height"], params["height"]);
+    for key in ["corner_type", "gap", "overlap"] {
+        assert_eq!(mapped["corners"][0][key], params["corners"][0][key]);
+    }
+}

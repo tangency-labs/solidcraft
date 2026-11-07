@@ -7347,6 +7347,7 @@ fn eval_feature(
         FeatureKind::SheetBase { .. }
         | FeatureKind::SheetContour { .. }
         | FeatureKind::SheetFlange { .. }
+        | FeatureKind::SheetCornerJoin { .. }
         | FeatureKind::SheetHem { .. }
         | FeatureKind::SheetPerforate { .. }
         | FeatureKind::SheetFold { .. }
@@ -8873,6 +8874,10 @@ pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut 
         by_component.entry(*owner).or_default().push(b);
     }
     let bodies_of = |comp: u64| by_component.get(&comp).into_iter().flatten().copied();
+    let mut sheets_by_body: std::collections::HashMap<&str, Vec<&crate::sheet::SheetBody>> = std::collections::HashMap::new();
+    for sheet in &st.sheets {
+        sheets_by_body.entry(sheet.body.as_str()).or_default().push(sheet);
+    }
     // Each tap's component and the offset of the body it is on (the first body of that name).
     let mut first_body: std::collections::HashMap<&str, (&ModelBody, u64)> = std::collections::HashMap::new();
     for (b, owner) in st.bodies.iter().zip(&owners).rev() {
@@ -8937,6 +8942,12 @@ pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut 
             // source model, including modifiers on component instances.
             placed.names = crate::naming::NameCell::same(b);
             out.bodies.push(placed);
+            for &sheet in sheets_by_body.get(b.name.as_str()).into_iter().flatten() {
+                let mut sheet = sheet.clone();
+                sheet.body = names.name(&b.name, comp, &path);
+                sheet.frame = placed_plane(&bm, &sheet.frame)?;
+                out.sheets.push(sheet);
+            }
         }
         if primary {
             for s in st.sketches.iter().filter(|s| comp_of_feature(s.feature) == comp) {
