@@ -83,8 +83,8 @@ fn null() -> SolidError {
 /// edges (seams) is given a surface its seams' two UV lines do not lift to one curve on
 /// (not closed in the seam's direction, or the lines not on its seam: `keeps_seams`),
 /// before anything changes; [`OffsetFailure::Unsound`] (not upstream) when the body built
-/// fails what `b` did not (`refuse_unsound`: a check failure class `b`'s check has fewer
-/// lines of, a geometry the check could not reach, a manifold solid lost, a volume not
+/// fails what `b` did not (`refuse_unsound`: a check failure at a new entity site,
+/// a geometry the check could not reach, a manifold solid lost, a volume not
 /// positive); those of the callees ([`crate::offset::offset_executive::p2`], the surfaces'
 /// normals, reversal and analytic copy, the bounding box). On every error `b` is as it
 /// came in, the caches its surfaces had included (the operation edits a copy of it), and
@@ -305,8 +305,8 @@ fn local_operation_on(
 /// fails what its input did not ([`validation::soundness`] of both, `input` measured
 /// before the edit, the body on a private copy):
 ///
-/// - the check at `SM_LEVEL_2` has more failure lines of some class (the failed test and
-///   the type of the object it is about, [`FailureClass`]) than the input's check had
+/// - the check at `SM_LEVEL_2` has a failure at an entity site the input did not have,
+///   matched by the failed test's [`FailureClass`] and the report's named objects
 ///   ([`BrepCheck::failures_beyond`](validation::BrepCheck::failures_beyond));
 /// - the body's pointer check failed, so its geometry was not checked (`AssertValid` is
 ///   skipped then), even where the input's pointer check failed alike;
@@ -317,13 +317,13 @@ fn local_operation_on(
 /// The owners the check tests the geometry against are the identities the body's naming
 /// scheme names its entities by ([`validation::standing`]), as `move_faces` sets them.
 ///
-/// Failures are compared by class, not by entity: the operation rebuilds every face (the
-/// extended offset builds them all, unmoved ones on copies of their surfaces, and they
-/// are copied into `b`), so no identity persists to compare by. A failure the input had
-/// and the body still has is the input's; one the input had on a face the operation
-/// rebuilt and the body no longer has is gone; a class the body has more of is the
-/// operation's. (A failure gone from one entity while one of its class appears on
-/// another is counted as the input's.)
+/// Failure sites rely on arena ids, not on caller-supplied geometry owner names:
+/// `standing`'s reports encode the entity kind and arena index. Private measurement
+/// copies keep those ids; `Arena` never reuses removed slots (validity-and-tolerances
+/// §3, invariant 1). `move_faces` removes every original face and copies the extended
+/// offset's faces into the same arenas, so both picked and unpicked faces are rebuilt
+/// with new ids. A failure on any such new entity is new: there is no correspondence
+/// proved by a matching count or by unchanged surface geometry.
 ///
 /// Each moved edge is found again where extended surfaces meet; where that cannot close
 /// the body (a surface that meets its neighbours nowhere near the old edges, a vertex
@@ -2502,12 +2502,11 @@ mod tests {
             .failure_classes()
     }
 
-    /// The gate holds the operation to what it adds: a cube whose bottom fails its check
-    /// on its own, its top raised by 5, is returned (the bottom untouched, its failure
-    /// the input's), a manifold solid of the raised volume whose check has no failure
-    /// class beyond the input's.
+    /// The unpicked bottom is rebuilt too: its defective edge curves get new ids.
+    /// Their failures therefore cannot be inherited from the old bottom by class count.
+    /// Refusal rolls the entire body back, including the original failure sites.
     #[test]
-    fn a_failure_the_input_has_on_an_untouched_face_is_not_the_operations() {
+    fn a_failure_on_a_rebuilt_unpicked_face_is_new() {
         let mut k = Kernel::default();
         let mut b = cube_with_a_defective_bottom(&mut k);
         let had = failure_classes(&mut k, &b);
@@ -2523,19 +2522,21 @@ mod tests {
         );
         let (v0, manifold) = volume_and_manifold(&k, &mut b);
         assert!(manifold && (v0 - 8000.0).abs() <= 1e-9 * 8000.0, "{v0}");
+        let input = validation::standing(&mut k, &mut b.clone_standing_for_self().unwrap()).unwrap();
+        refuse_unsound(&mut k, &b, &input).unwrap();
         let top = box_top(&k, &b);
         let raised = Surface::from(Plane::from_normal(Vec3::new(0.0, 0.0, 25.0), Vec3::Z));
-        with_notifications(&mut b, |b, notes| {
-            local_operation(&mut k, b, &[top], vec![raised], notes)
-        })
-        .unwrap();
-        let (v, manifold) = volume_and_manifold(&k, &mut b);
-        assert!(manifold && (v - 10000.0).abs() <= 1e-9 * 10000.0, "{v}");
-        let has = failure_classes(&mut k, &b);
+        let why = refused_unchanged_or_returned(&mut k, &mut b, &[top], vec![raised]);
         assert!(
-            has.iter().all(|(c, n)| had.get(c).is_some_and(|m| n <= m)),
-            "{has:?} vs {had:?}"
+            matches!(
+                why,
+                Some(OffsetFailure::Unsound {
+                    what: crate::error::offset::Unsoundness::Check { failures: 1.., .. }
+                })
+            ),
+            "{why:?}"
         );
+        assert_eq!(failure_classes(&mut k, &b), had);
     }
 
     /// The same cube, its top given a roof with a ridge: a degree-1 B-spline patch whose
@@ -2568,11 +2569,10 @@ mod tests {
         assert_eq!(failure_classes(&mut k, &b), had);
     }
 
-    /// [`BrepCheck::failures_beyond`](validation::BrepCheck::failures_beyond) counts per
-    /// class: a class the input has as many lines of is not listed, one more line of it
-    /// is, and a class the input lacks is.
+    /// Match by class and site before counting: retained sites pass, a new owner fails
+    /// even with fewer total lines, and the returned counts remain grouped by class.
     #[test]
-    fn failures_beyond_counts_lines_per_class() {
+    fn failures_beyond_matches_lines_per_class_and_site() {
         use crate::geom::assert_array::labels::SURFACE_TYPE;
         use crate::geom::assert_array::{AssertArray, AssertReport, ObjectKey, ReportSpec};
         // (each report about its own surface: the array keeps one of equal reports)
@@ -2586,9 +2586,9 @@ mod tests {
             })
             .unwrap()
         };
-        let check = |tests: &[u64]| {
+        let check = |tests: &[(u64, u64)]| {
             let mut reports = AssertArray::new();
-            for (owner, &t) in (0..).zip(tests) {
+            for &(t, owner) in tests {
                 assert!(reports.add_unique_delete_duplicate(report(t, owner)));
             }
             validation::BrepCheck {
@@ -2598,13 +2598,18 @@ mod tests {
                 reports,
             }
         };
-        let input = check(&[4, 4, 6]);
-        assert!(check(&[4, 6]).failures_beyond(&input).is_empty());
-        assert!(check(&[4, 4, 6]).failures_beyond(&input).is_empty());
-        let more = check(&[4, 4, 4, 6]).failures_beyond(&input);
+        let input = check(&[(4, 0), (4, 1), (6, 2)]);
+        assert!(check(&[(4, 0), (6, 2)]).failures_beyond(&input).is_empty());
+        assert!(check(&[(4, 0), (4, 1), (6, 2)]).failures_beyond(&input).is_empty());
+        let more = check(&[(4, 0), (4, 1), (4, 3), (6, 2)]).failures_beyond(&input);
         assert_eq!(more.len(), 1);
         assert_eq!(more.first().map(|&(_, n)| n), Some(1));
-        let other = check(&[5]).failures_beyond(&input);
+        let transferred = check(&[(4, 3), (6, 2)]).failures_beyond(&input);
+        assert!(matches!(
+            transferred.as_slice(),
+            [(FailureClass::Report { test_index: 4, .. }, 1)]
+        ));
+        let other = check(&[(5, 0)]).failures_beyond(&input);
         assert!(matches!(
             other.as_slice(),
             [(FailureClass::Report { test_index: 5, .. }, 1)]
