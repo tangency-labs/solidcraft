@@ -1064,6 +1064,22 @@ impl AnalyticSupport {
         Ok(a)
     }
 
+    /// Whether `s`'s form proves its analytic label ([`Self::check`]'s test): true where it
+    /// has no label or no form, so nothing to prove.
+    ///
+    /// # Errors
+    ///
+    /// Those of making the form and of [`lies_on`].
+    pub fn label_stands(k: &Kernel, s: &Surface) -> Result<bool> {
+        let Some(a) = Self::of(s) else {
+            return Ok(true);
+        };
+        match crate::blend::fillet_section::station::as_b_spline(k, s)? {
+            Some(form) => lies_on(&form, &a.implicit()),
+            None => Ok(true),
+        }
+    }
+
     /// The analytic surface on the NURB `form`: refused unless `form` lies on it
     /// ([`lies_on`]) and its placement's axes are orthonormal. A plane keeps its placement
     /// as given; a cylinder, cone, sphere or torus is parametrised as the kernel recognises

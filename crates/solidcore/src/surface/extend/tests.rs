@@ -1949,3 +1949,56 @@ fn a_small_torus_patch_far_from_the_origin_extends_on_its_torus() {
         assert!((a.enclosure.mid() - 1.5).abs() <= 1e-9 * 1.5, "{a:?}");
     }
 }
+
+/// A cylinder whose label's axis is tilted off its form's rulings past the proof (recognition
+/// can leave one on a body): the label is dropped and the form is extended, not refused.
+#[test]
+fn a_label_its_form_does_not_prove_extends_as_the_form() {
+    use crate::geom::axis2_placement::Axis2Placement;
+    use crate::surface::cone::p1::Cone;
+    use crate::surface::implicit::AnalyticSupport;
+
+    let k = Kernel::default();
+    let mut s = Surface::from(Cone::new_cylinder_bounded(
+        Vec3::new(0.0, 0.0, 0.0),
+        Vec3::new(1.0, 0.0, 0.0),
+        Vec3::new(0.0, 1.0, 0.0),
+        40.0,
+        0.0,
+        9.0,
+        94.0,
+        false,
+        false,
+        false,
+    ));
+    let SurfaceKind::Cone(c) = s.kind_mut() else {
+        panic!("a cone");
+    };
+    c.make_nurb(&k).unwrap();
+    c.rev.position = Axis2Placement::from_stored(
+        Vec3::new(0.0, 0.0, 0.0),
+        Vec3::new(1.0, 0.0, 1e-9),
+        Vec3::new(0.0, 1.0, 0.0),
+    );
+    assert!(!AnalyticSupport::label_stands(&k, &s).unwrap());
+    assert!(AnalyticSupport::check(&k, &s).is_err());
+    let d = s.natural_uv_domain_with_nurb(&k).unwrap();
+    let grown = s
+        .extended_sides_keeping_parameters(&k, &BoxSide::ALL, Continuity::Ruled, 5.0)
+        .unwrap()
+        .surface;
+    assert!(!matches!(grown.kind(), SurfaceKind::Cone(_)));
+    let n = grown.natural_uv_domain_with_nurb(&k).unwrap();
+    assert!(n.min().x < d.min().x && n.max().x > d.max().x);
+    let uv = Point2::new(d.u_interval().mid(), d.v_interval().mid());
+    // the form, not the label: the result is the form's surface
+    let form = crate::blend::fillet_section::station::as_b_spline(&k, &s)
+        .unwrap()
+        .unwrap()
+        .into_owned();
+    let (a, b) = (
+        Surface::from(form).evaluate_point(&k, uv).unwrap(),
+        grown.evaluate_point(&k, uv).unwrap(),
+    );
+    assert!((a - b).length() < 1e-12, "{a:?} {b:?}");
+}

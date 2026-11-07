@@ -41,6 +41,7 @@ use crate::error::{Result, SolidError};
 use crate::kernel::Kernel;
 use crate::math::INFINITE_PARAMETER;
 use crate::nurbs::b_spline_surface::SurfParamType;
+use crate::surface::implicit::AnalyticSupport;
 use crate::surface::side::{Across, BoxSide};
 use crate::surface::surface::{Surface, SurfaceKind};
 
@@ -145,6 +146,16 @@ impl Surface {
         distance: f64,
         keeping: bool,
     ) -> Result<ExtendedSides> {
+        // a label its form does not prove is dropped (owner 22254, as a face's read label is,
+        // `face_surface::labelled`): the surface is its exact NURBS, extended as one. A body
+        // can carry such a label from recognition, rounding in its frame (an axis 1.4e-13 off
+        // straight rows 94 long). The form has no label, so this goes one level down.
+        if !AnalyticSupport::label_stands(k, self)? {
+            if let Some(form) = crate::blend::fillet_section::station::as_b_spline(k, self)? {
+                return Surface::from(form.into_owned())
+                    .extended_sides_with(k, asked, how, distance, keeping);
+            }
+        }
         // a ball patch as its sphere (`ball`)
         if let SurfaceKind::BallPatch(patch) = self.kind() {
             if let Some(e) = super::ball::ball_extended_sides(k, self, patch, asked, distance)? {
