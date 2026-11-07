@@ -606,6 +606,33 @@ mod tests {
         assert_eq!(x[4].as_f64(), Some(1e-3));
     }
 
+    /// #11650: the header is metadata, so a malformed record in it must not stop the import.
+    #[test]
+    fn a_malformed_header_record_is_skipped() {
+        let t = "ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION((''), '2;1');1');
+
+FILE_NAME('','',(''),(''),'','sys','');
+
+FILE_SCHEMA (('AUTOMOTIVE_DESIGN'));
+ENDSEC;
+DATA;
+#1=CARTESIAN_POINT('p',(0.,1.,2.));
+ENDSEC;
+END-ISO-10303-21;
+";
+        let ex = parse(t).unwrap();
+        // The records after the broken one are still read.
+        assert_eq!(ex.originating_system, "sys");
+        assert_eq!(ex.schemas, vec!["AUTOMOTIVE_DESIGN"]);
+        assert_eq!(ex.get(1).unwrap().name(), "CARTESIAN_POINT");
+        // A header with nothing after the junk to resume at is still an error.
+        assert!(parse("ISO-10303-21;
+HEADER;
+FILE_NAME('a');junk').;ENDSEC;DATA;ENDSEC;END-ISO-10303-21;").is_err());
+    }
+
     #[test]
     fn hostile_text_is_an_error() {
         for t in [
