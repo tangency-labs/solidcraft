@@ -1,0 +1,32 @@
+[package]
+name = "solidcraft-ios"
+description = "SolidCraft native iOS host for the shared desktop CAD interface"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+too_many_arguments = "allow"
+type_complexity = "allow"
+neg_cmp_op_on_partial_ord = "allow"
+
+[target.'cfg(target_os = "ios")'.dependencies]
+solidcraft-engine = { workspace = true, features = ["bundled-render-library", "raytrace-cpu"] }
+solidcraft-ui-egui = { workspace = true }
+egui = { workspace = true }
+eframe = { workspace = true, features = ["default_fonts", "wgpu_no_default_features"] }
+wgpu = { workspace = true, features = ["metal"] }
+winit = { version = "0.30", default-features = false }
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSEnumerator", "NSError", "NSObject", "NSString", "NSURL"] }
+objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "UIApplication", "UIDocumentPickerViewController", "UIPresentationController", "UIResponder", "UIView", "UIViewController", "UIWindow", "UIScene", "UIWindowScene", "block2", "objc2-uniform-type-identifiers"] }
+objc2-uniform-type-identifiers = { version = "0.3", default-features = false, features = ["std", "UTCoreTypes", "UTType"] }

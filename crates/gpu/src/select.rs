@@ -123,10 +123,10 @@ pub struct AdapterReport {
     pub tier: Tier,
 }
 
-/// The backends a headless device looks at on this platform: Metal on macOS, Vulkan and D3D12
+/// The backends a headless device looks at on this platform: Metal on Apple OSes, Vulkan and D3D12
 /// on Windows, Vulkan and GL elsewhere; `WGPU_BACKEND` narrows them further.
 pub fn native_backends() -> wgpu::Backends {
-    let native = if cfg!(target_os = "macos") {
+    let native = if cfg!(target_vendor = "apple") {
         wgpu::Backends::METAL
     } else if cfg!(target_os = "windows") {
         wgpu::Backends::DX12 | wgpu::Backends::VULKAN
@@ -287,9 +287,9 @@ mod tests {
         assert!(rank(wgpu::DeviceType::DiscreteGpu) > rank(wgpu::DeviceType::IntegratedGpu));
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(target_vendor = "apple")]
     #[test]
-    fn macos_surveys_metal_only() {
+    fn apple_surveys_metal_only() {
         assert_eq!(native_backends() & !wgpu::Backends::METAL, wgpu::Backends::empty());
         let s = survey(Policy::Auto);
         assert!(s.adapters.iter().all(|a| a.backend == "Metal"), "{s:?}");

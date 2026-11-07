@@ -1,4 +1,8 @@
 /target*/
+/packaging/ios/.build/
+/packaging/ios/Libs/
+
+/packaging/ios/xtool/
 /plan/
 /dist/
 *~
