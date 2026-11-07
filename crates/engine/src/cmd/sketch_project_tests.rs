@@ -337,6 +337,7 @@ fn a_construction_point_of_a_moved_component_projects_where_it_is_placed() {
     assert!(near(at(&s, own), (10.0, 5.0)), "{:?}", at(&s, own));
     assert!(near(at(&s, root), (10.0, 5.0)), "{:?}", at(&s, root));
     let placement = s.doc.occurrences.iter().find(|o| o.component == part).map(|o| o.id).unwrap();
+    run(&mut s, "occurrence.ground", json!({"occurrence": placement, "grounded": false}));
     run(&mut s, "occurrence.move", json!({"occurrence": placement, "translate": [100, 0, 0], "capture": true}));
     let opened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
     for session in [&s, &opened] {
