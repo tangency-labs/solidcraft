@@ -4144,6 +4144,71 @@ mod tests {
         assert_eq!(executive.kept_edgeuses.len(), 16);
     }
 
+    /// The tilted top z = x - 1 crosses the interiors of the bottom edges
+    /// parallel to X. Neither those edges nor their vertices touch the top.
+    /// The other two bottom edges stay a positive distance from the moved top.
+    #[test]
+    fn a_moved_surface_crossing_an_edges_interior_prevents_keeping_it() {
+        let mut kernel = Kernel::default();
+        let brep = crate::primitive::api_primitives::create_box(
+            &mut kernel,
+            Vec3::ZERO,
+            2.0,
+            2.0,
+            2.0,
+        )
+        .unwrap();
+        let faces = bp1::faces(&brep, None).unwrap();
+        let top = *faces
+            .iter()
+            .find(|&&f| {
+                face_edges(&brep, f).unwrap().iter().all(|&e| {
+                    edge::vertices(&brep, e, None).unwrap().iter().all(|&v| {
+                        (vertex::point(&brep, v.unwrap()).unwrap().z - 2.0).abs() < 1e-12
+                    })
+                })
+            })
+            .unwrap();
+        let surfaces = faces
+            .iter()
+            .map(|&f| {
+                if f == top {
+                    Surface::from(crate::surface::plane::Plane::from_normal(
+                        Vec3::new(1.0, 0.0, 0.0),
+                        Vec3::new(-1.0, 0.0, 1.0),
+                    ))
+                } else {
+                    brep.face(f).unwrap().surface.clone().unwrap()
+                }
+            })
+            .collect();
+        let mut executive = OffsetExecutive::new(OffsetOperation::LocalOperation, 0.125, 1e-6);
+        executive.set_local_surfaces(&faces, surfaces, &[top]);
+        executive.keep_unmoved_edges(&brep).unwrap();
+        let mut crossing = 0;
+        let mut far = 0;
+        for e in bp1::edges(&brep, None).unwrap() {
+            let points: Vec<_> = edge::vertices(&brep, e, None)
+                .unwrap()
+                .into_iter()
+                .map(|v| vertex::point(&brep, v.unwrap()).unwrap())
+                .collect();
+            if !points.iter().all(|p| p.z.abs() < 1e-12) {
+                continue;
+            }
+            let crosses = points.iter().any(|p| p.x < 1.0)
+                && points.iter().any(|p| p.x > 1.0);
+            if crosses {
+                crossing += 1;
+                assert!(!executive.kept_edges.contains(&e), "crossed edge {e:?} kept");
+            } else {
+                far += 1;
+                assert!(executive.kept_edges.contains(&e), "far edge {e:?} lost");
+            }
+        }
+        assert_eq!((crossing, far), (2, 2));
+    }
+
     #[test]
     fn a_box_face_margin_is_its_offset_corner_reach() {
         let mut kernel = Kernel::default();

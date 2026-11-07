@@ -1285,6 +1285,46 @@ mod tests {
         assert!(manifold && (v - 10000.0).abs() <= 1e-9 * 10000.0, "{v}");
     }
 
+    /// Issue 2976: z = x - 1 cuts the two bottom edges y = 0 and y = 2 at
+    /// (1, y, 0), away from their vertices. Those edges bound the bottom and a
+    /// side, and all faces at their vertices are bottom/sides, never the top:
+    /// the old vertex-neighbourhood rule therefore keeps both crossed edges.
+    /// The solid is the triangular prism 1 <= x <= 2, 0 <= z <= x - 1,
+    /// 0 <= y <= 2, with volume 2 * integral_1^2 (x - 1) dx = 1.
+    #[test]
+    fn a_tilted_top_reintersects_the_unmoved_bottom_edges_it_crosses() {
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, Point3::ZERO, 2.0, 2.0, 2.0).unwrap();
+        let top = bp1::faces(&b, None)
+            .unwrap()
+            .into_iter()
+            .find(|&f| {
+                let s = face_ops::surface(&b, f).unwrap().unwrap();
+                let uv = s.natural_uv_domain_with_nurb(&k).unwrap().evaluate(0.5, 0.5);
+                (s.evaluate_point(&k, uv).unwrap().z - 2.0).abs() < 1e-9
+            })
+            .unwrap();
+        let tilted = Surface::from(Plane::from_normal(
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(-1.0, 0.0, 1.0),
+        ));
+        let result = with_notifications(&mut b, |b, notes| {
+            local_operation(&mut k, b, &[top], vec![tilted], notes)
+        });
+        let (volume, manifold) = volume_and_manifold(&k, &mut b);
+        eprintln!("issue 2976: result={result:?}, volume={volume}, manifold={manifold}; exact=1");
+        result.unwrap();
+        crate::topology::integrity::check(&b).unwrap();
+        let check = validation::check_brep(
+            &mut k,
+            &mut b.clone_standing_for_self().unwrap(),
+            validation::CheckLevel::Level2,
+        )
+        .unwrap();
+        assert!(check.lines().is_empty(), "{:?}", check.lines());
+        assert!(manifold && (volume - 1.0).abs() <= 1e-8, "{volume}");
+    }
+
     #[test]
     fn moves_the_top_of_a_box_and_keeps_it_a_solid() {
         let mut k = Kernel::default();
