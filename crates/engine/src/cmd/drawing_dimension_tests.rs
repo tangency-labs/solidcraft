@@ -466,6 +466,104 @@ fn a_cylinders_diameter_is_read_between_its_silhouettes() {
     assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
 }
 
+/// A sphere's size, as ISO 129-1 writes it: a ball of radius 10 is a whole sphere, so it reads
+/// SØ20.00, picked by a point on it or by its body and index, and saved by its face's name. A ball
+/// of radius 10 on the end of a Ø16 rod is part of a sphere, so it reads SR10.00. It takes no settings. A flat face is
+/// refused, and a sphere named as a cylinder keeps the cylinder's own words, with the drawing
+/// unchanged.
+#[test]
+fn a_spheres_size_is_its_diameter_when_whole_and_its_radius_when_part() {
+    let (mut s, view) = front_view();
+    let drawing = s.drawing("test").unwrap().id;
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "solid.sphere", json!({"radius": 10, "center": [140, 20, 15], "operation": "new", "body_name": "Ball"}));
+    // Not the rod's own radius: a ball as wide as its rod meets it along a tangent.
+    run(&mut s, "solid.cylinder", json!({"radius": 8, "height": 30, "base": [-60, 20, 15], "axis": "X", "operation": "new", "body_name": "Rod"}));
+    run(&mut s, "solid.sphere", json!({"radius": 10, "center": [-60, 20, 15], "operation": "join", "targets": ["Rod"]}));
+    run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+    // Off every pole and seam: 10 from each centre along (±1, -1, 1) / √3.
+    let along = 10.0 / 3f64.sqrt();
+    let (on_ball, on_dome) = ([140.0 + along, 20.0 - along, 15.0 + along], [-60.0 - along, 20.0 - along, 15.0 + along]);
+    let ball = add(&mut s, view, json!({"sphere": {"face": on_ball}}));
+    reads(&ball, 20.0, "SØ20.00");
+    let saved = ball["record"]["kind"]["sphere"]["face"].clone();
+    assert!(saved["body"] == "Ball" && saved["name"].as_str().is_some_and(|n| !n.is_empty()), "{saved}");
+    let index = {
+        let state = s.model.state();
+        solidcraft_doc::appearance::face_index_at(state.body("Ball").unwrap(), Vec3::from(on_ball)).unwrap()
+    };
+    let by_index = add(&mut s, view, json!({"sphere": {"face": {"body": "Ball", "index": index}}}));
+    assert_eq!(by_index["record"]["kind"], ball["record"]["kind"]);
+    reads(&add(&mut s, view, json!({"sphere": {"face": on_dome}})), 10.0, "SR10.00");
+    let id = ball["dimension"].clone();
+    let before = s.drawing("test").unwrap().to_json().unwrap();
+    for (set, why) in [
+        (json!({"direction": "horizontal"}), "a sphere's size has no direction, reading or side"),
+        (json!({"diameter": true}), "`diameter` is a radial dimension's"),
+    ] {
+        let p = json!({"dimension": id, "set": set});
+        let e = s.execute(EDIT, &p).err().map(|e| e.to_string()).unwrap_or_else(|| panic!("accepted: {p}"));
+        assert!(e.contains(why), "{p}: {e}");
+    }
+    let v = ids::encode(view);
+    let cases = [
+        (json!({"view": v, "kind": {"sphere": {"face": [40, 0, 10]}}}), "isn't a sphere"),
+        (json!({"view": v, "kind": {"cylinder": {"face": on_ball}}}), "isn't a cylinder"),
+    ];
+    for (p, why) in cases {
+        let e = refused(&mut s, p.clone());
+        assert!(e.contains(why), "{p}: {e}");
+    }
+    assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
+}
+
+/// A cone's included angle, between its two silhouettes: a Ø20 pin's top rim chamfered 2 across
+/// and 2 down is a cone of half-angle 45°, so the front view, whose plane holds its axis, reads
+/// 90.00°, with the 2 decimals every dimension starts with, saved by its face's name. Chamfered 1 across and 3 down it reads 2·atan(1/3), 36.87°;
+/// 3 across and 1 down, 2·atan(3), 143.13°. It takes no settings. A flat face is refused, and a
+/// cone named as a cylinder keeps the cylinder's own words, with the drawing unchanged.
+#[test]
+fn a_cones_angle_is_read_between_its_silhouettes() {
+    let (mut s, view) = front_view();
+    let drawing = s.drawing("test").unwrap().id;
+    run(&mut s, "drawing.close", json!({}));
+    // A point halfway down each chamfer, an eighth of a turn round from the front.
+    let pin = |s: &mut Session, x: f64, name: &str, across: f64, down: f64| {
+        let base = json!({"radius": 10, "height": 20, "base": [x, 20, 0], "axis": "Z", "operation": "new", "body_name": name});
+        run(s, "solid.cylinder", base);
+        run(s, "solid.chamfer", json!({"edges": [[x + 10.0, 20, 20]], "distance": across, "distance2": down, "body": name}));
+        let (r, turn) = (10.0 - across / 2.0, -std::f64::consts::FRAC_PI_4);
+        [x + r * turn.cos(), 20.0 + r * turn.sin(), 20.0 - down / 2.0]
+    };
+    let (even, steep, flat) = (pin(&mut s, 140.0, "Even", 2.0, 2.0), pin(&mut s, 180.0, "Steep", 1.0, 3.0), pin(&mut s, 220.0, "Flat", 3.0, 1.0));
+    run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+    let reads_near = |reply: &Value, degrees: f64, text: &str| {
+        assert_eq!((reply["status"].as_str(), reply["text"].as_str()), (Some("ok"), Some(text)), "{reply}");
+        assert!((reply["value"].as_f64().unwrap() - degrees).abs() < 1e-6 && reply["foreshortened"] != json!(true), "{reply}");
+    };
+    let square = add(&mut s, view, json!({"cone": {"face": even}}));
+    reads_near(&square, 90.0, "90.00°");
+    let saved = square["record"]["kind"]["cone"]["face"].clone();
+    assert!(saved["body"] == "Even" && saved["name"].as_str().is_some_and(|n| !n.is_empty()), "{saved}");
+    reads_near(&add(&mut s, view, json!({"cone": {"face": steep}})), 2.0 * (1f64 / 3.0).atan().to_degrees(), "36.87°");
+    reads_near(&add(&mut s, view, json!({"cone": {"face": flat}})), 2.0 * 3f64.atan().to_degrees(), "143.13°");
+    let id = square["dimension"].clone();
+    let before = s.drawing("test").unwrap().to_json().unwrap();
+    let p = json!({"dimension": id, "set": {"direction": "horizontal"}});
+    let e = s.execute(EDIT, &p).err().map(|e| e.to_string()).unwrap_or_else(|| panic!("accepted: {p}"));
+    assert!(e.contains("a cone's angle has no direction, reading or side"), "{e}");
+    let v = ids::encode(view);
+    let cases = [
+        (json!({"view": v, "kind": {"cone": {"face": [40, 0, 10]}}}), "isn't a cone"),
+        (json!({"view": v, "kind": {"cylinder": {"face": even}}}), "isn't a cylinder"),
+    ];
+    for (p, why) in cases {
+        let e = refused(&mut s, p.clone());
+        assert!(e.contains(why), "{p}: {e}");
+    }
+    assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
+}
+
 /// Two bosses along X on the box's right face, radius 5 at z = 15 and radius 3 at z = 25, in the
 /// front view: near to near 2, near to far 8, far to near 12 and far to far 18, saved by each
 /// face's name and side; up the view the same. Two faces of one boss make its Ø10, which takes no
@@ -1049,6 +1147,8 @@ fn each_slot_reaches_its_own_reference() {
             vec![(SlotParam::Point(0), "corner 0"), (SlotParam::Point(1), "corner 1")],
         ),
         (DimensionKind::Cylinder { face: face("f") }, vec![(SlotParam::Face, "face f")]),
+        (DimensionKind::Sphere { face: face("f") }, vec![(SlotParam::Face, "face f")]),
+        (DimensionKind::Cone { face: face("f") }, vec![(SlotParam::Face, "face f")]),
         (DimensionKind::Silhouettes { a: side("a"), b: side("b"), direction }, vec![(a, "face a"), (b, "face b")]),
         (DimensionKind::Faces { a: face("a"), b: face("b"), direction }, vec![(a, "face a"), (b, "face b")]),
     ];

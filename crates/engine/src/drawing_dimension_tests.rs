@@ -2,6 +2,7 @@
 //! the origin (length along X, width along Y, height along Z), every value worked by hand.
 
 use std::collections::BTreeSet;
+use std::f64::consts::FRAC_1_SQRT_2;
 use std::sync::Arc;
 
 use serde_json::{Value, json};
@@ -9,11 +10,11 @@ use solidcore_record::Vec3;
 use solidcraft_doc::ModelBody;
 use solidcraft_doc::appearance::face_index_at;
 use solidcraft_doc::drawing::dimension::{
-    Candidate, Dimension, DimensionKind, MAX_CANDIDATES, ModelEdge, ModelFace, ModelPoint, Resolved, Silhouette, Status, TextPlace,
+    Candidate, Dimension, DimensionKind, LabelKind, MAX_CANDIDATES, ModelEdge, ModelFace, ModelPoint, Resolved, Silhouette, Status, TextPlace,
 };
 use solidcraft_doc::drawing::view::{View, ViewKind, ViewPlace};
 use solidcraft_doc::drawing::{Drawing, Source, Units};
-use solidcraft_doc::drawing_view::{ViewDirection, ViewOverrides};
+use solidcraft_doc::drawing_view::{Looking, ViewDirection, ViewOverrides};
 use solidcraft_doc::ids::IdSource;
 use solidcraft_doc::naming::{edge_names, face_names};
 use solidcraft_geom::drawing_measure::{LinearDirection, Reading, SilhouetteSide};
@@ -632,6 +633,91 @@ fn a_cylinders_diameter_is_found_through_all_its_faces() {
     assert!(matches!(&r.status, Status::Suppressed), "{r:?}");
 }
 
+/// The point `degrees` from the top of the sphere at `centre` of `radius`, off its seams.
+fn on_sphere(centre: [f64; 3], radius: f64, degrees: f64) -> [f64; 3] {
+    let (up, out) = (degrees.to_radians().cos(), degrees.to_radians().sin() * FRAC_1_SQRT_2);
+    [centre[0] + radius * out, centre[1] - radius * out, centre[2] + radius * up]
+}
+
+/// A sphere's size reads SR on the arc of its contour that lies on its faces, unless they are the
+/// whole sphere. A ball of radius 6 on the end of a Ø10 boss along X ends where it meets the boss,
+/// x = 100 - √11: the front view reads SR6.00 on the contour past that, its arc's middle at x = 106;
+/// the right view, which looks along the boss, on its whole contour. A notch whose rims' planes
+/// cross the front contour on the ball leaves it rim to rim, and a new radius of 7 reads SR7.00.
+/// A cap of radius 12 standing 4 above the box's top reads SR12.00 in the front view on the arc
+/// above the top (its middle at z = 34) and is refused in a top view, which sees its rim, not its
+/// radius. With the cap suppressed it says so.
+#[test]
+fn a_spheres_size_reads_on_its_contour_where_its_faces_are() {
+    let mut f = boxed();
+    run(&mut f.s, "solid.cylinder", json!({"radius": 5, "height": 20, "base": [80, 20, 15], "axis": "X", "operation": "join", "targets": ["Box"]}));
+    run(&mut f.s, "solid.sphere", json!({"radius": 6, "center": [100, 20, 15], "operation": "join", "targets": ["Box"]}));
+    let ball = f.s.doc.features.last().unwrap().id;
+    run(&mut f.s, "solid.sphere", json!({"radius": 12, "center": [40, 20, 22], "operation": "join", "targets": ["Box"]}));
+    let cap_feature = f.s.doc.features.last().unwrap().id;
+    let (end, cap) = (f.face(on_sphere([100.0, 20.0, 15.0], 6.0, 60.0)), f.face(on_sphere([40.0, 20.0, 22.0], 12.0, 30.0)));
+    let sphere = |face: &ModelFace| DimensionKind::Sphere { face: face.clone() };
+    let (front, right) = (f.add(f.front, sphere(&end), None), f.add(f.right, sphere(&end), None));
+    let r = f.resolve(front);
+    assert_reads(&r, 6.0, false);
+    assert_eq!((r.text.as_deref(), r.label), (Some("SR6.00"), Some(LabelKind::SphericalRadius)), "{r:?}");
+    let rim = 100.0 - 11f64.sqrt();
+    let [centre, start, mid, stop] = r.points.as_slice() else { panic!("{r:?}") };
+    assert!(centre.dist(Vec3::new(100.0, 20.0, 15.0)) < 1e-9 && mid.dist(Vec3::new(106.0, 20.0, 15.0)) < 1e-6, "{:?}", r.points);
+    assert!((start.x - rim).abs() < 1e-6 && (stop.x - rim).abs() < 1e-6 && (start.z - stop.z).abs() > 9.0, "rim to rim: {:?}", r.points);
+    let r = f.resolve(right);
+    assert_reads(&r, 6.0, false);
+    assert!(r.points[1].dist(r.points[3]) < 1e-9, "the whole contour: {:?}", r.points);
+    // A notch behind the ball (y 22 to 30) has rims on x = 104 and z = 11 and 19, whose planes also
+    // cross the front contour where the ball goes on: it still reads rim to rim.
+    run(&mut f.s, "solid.box", json!({"length": 6, "width": 8, "height": 8, "corner": [104, 22, 11], "operation": "cut", "targets": ["Box"]}));
+    let r = f.resolve(front);
+    assert_eq!(r.text.as_deref(), Some("SR6.00"), "{r:?}");
+    let [_, start, mid, stop] = r.points.as_slice() else { panic!("{r:?}") };
+    assert!(mid.dist(Vec3::new(106.0, 20.0, 15.0)) < 1e-6, "{:?}", r.points);
+    assert!((start.x - rim).abs() < 1e-6 && (stop.x - rim).abs() < 1e-6, "rim to rim past the notch's planes: {:?}", r.points);
+    run(&mut f.s, "timeline.edit", json!({"feature": ball.to_string(), "set": {"radius": 7}}));
+    let r = f.resolve(front);
+    assert_eq!(r.text.as_deref(), Some("SR7.00"), "the ball's new radius: {r:?}");
+    assert!(r.points[2].dist(Vec3::new(107.0, 20.0, 15.0)) < 1e-6, "{:?}", r.points);
+    let on_top = f.add(f.front, sphere(&cap), None);
+    let r = f.resolve(on_top);
+    assert_eq!(r.text.as_deref(), Some("SR12.00"), "{r:?}");
+    let [_, start, mid, stop] = r.points.as_slice() else { panic!("{r:?}") };
+    assert!(mid.dist(Vec3::new(40.0, 20.0, 34.0)) < 1e-6 && (start.z - 30.0).abs() < 1e-6 && (stop.z - 30.0).abs() < 1e-6, "{:?}", r.points);
+    let top = f.d.allocate_id(&mut f.ids).unwrap();
+    let (sheet, source) = (f.d.sheets[0].id, f.d.sources[0].id);
+    let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Top) };
+    let place = ViewPlace::At([300.0, 230.0]);
+    let settings = ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() };
+    f.d.add_views([Arc::new(View { id: top, sheet, kind, place, settings, reference_shown_percent: 0.0 })]);
+    let from_above = f.add(top, sphere(&cap), None);
+    let r = f.resolve(from_above);
+    assert!(matches!(&r.status, Status::Unmeasurable(why) if why.contains("contour in this view isn't on it")), "{r:?}");
+    run(&mut f.s, "timeline.suppress", json!({"feature": cap_feature, "suppressed": true}));
+    assert!(matches!(f.resolve(on_top).status, Status::Suppressed), "{:?}", f.resolve(on_top));
+}
+
+/// Caps of radius 12 on the box's top whose contour arcs in the front view span 11° and 12°, either
+/// side of one step of 32 round a circle, read SR12.00 on arcs that wide: their rims are circles, so
+/// the contour is cut exactly where it leaves them.
+#[test]
+fn a_spheres_narrow_cap_reads_on_an_arc_as_wide_as_it() {
+    for degrees in [11.0f64, 12.0] {
+        let mut f = boxed();
+        let half = (degrees / 2.0).to_radians();
+        let centre = [40.0, 20.0, 30.0 - 12.0 * half.cos()];
+        run(&mut f.s, "solid.sphere", json!({"radius": 12, "center": centre, "operation": "join", "targets": ["Box"]}));
+        let cap = f.face(on_sphere(centre, 12.0, degrees / 4.0));
+        let id = f.add(f.front, DimensionKind::Sphere { face: cap }, None);
+        let r = f.resolve(id);
+        assert_eq!(r.text.as_deref(), Some("SR12.00"), "{degrees}°: {r:?}");
+        let [c, start, _, stop] = r.points.as_slice() else { panic!("{r:?}") };
+        let spans = (*start - *c).normalized().unwrap().dot((*stop - *c).normalized().unwrap()).acos();
+        assert!((spans - degrees.to_radians()).abs() < 1e-6, "{degrees}°: spans {}°", spans.to_degrees());
+    }
+}
+
 /// Two bosses along X on the box's right face, radius 5 at z = 15 and radius 3 at z = 25: in the
 /// front view the big one's near silhouette (z = 20) is 8 from the small one's far one (z = 28),
 /// exactly, each silhouette from x = 80 to 100. The right view looks along their axes. A flat cut
@@ -711,4 +797,78 @@ fn an_override_shows_its_text_and_still_reads_the_model() {
     let r = f.resolve(id);
     assert_eq!((&r.status, r.text.as_deref()), (&Status::Overridden, Some("≈80")));
     assert_reads(&r, 100.0, false);
+}
+
+/// A cone on the box's top, its base Ø20 at z = 30 and its apex 20 above, reads its included angle
+/// 2·atan(1/2) in the front view and the right one, whose planes hold its axis: between its
+/// silhouettes from the apex to its base's rim, 10 either side of the axis. An iso view reads the
+/// same angle, foreshortened; a top view, along its axis, is refused. Made 10 tall, it reads 90°.
+/// Half a cone, cut along its axis, is refused in the front view, where one silhouette is gone. With
+/// the cone suppressed it says so.
+#[test]
+fn a_cones_angle_reads_between_its_silhouettes_where_its_faces_are() {
+    let mut f = boxed();
+    run(&mut f.s, "solid.cone", json!({"radius": 10, "height": 20, "base": [40, 20, 30], "operation": "join", "targets": ["Box"]}));
+    let cone_feature = f.s.doc.features.last().unwrap().id;
+    // 10 below the apex, the cone's radius is 5: an eighth of a turn round from the front.
+    let on_cone = [40.0 + 5.0 * FRAC_1_SQRT_2, 20.0 - 5.0 * FRAC_1_SQRT_2, 40.0];
+    let face = f.face(on_cone);
+    let kind = || DimensionKind::Cone { face: face.clone() };
+    let angle = 2.0 * 0.5f64.atan();
+    // A new dimension of `kind` in `view`, read.
+    let added = |f: &mut Fixture, view: u64, kind: DimensionKind| {
+        let id = f.add(view, kind, None);
+        f.resolve(id)
+    };
+    let front = f.add(f.front, kind(), None);
+    let r = f.resolve(front);
+    assert_reads(&r, angle, false);
+    let apex = Vec3::new(40.0, 20.0, 50.0);
+    let [a0, a1, b0, b1] = r.points.as_slice() else { panic!("{r:?}") };
+    assert!(a0.dist(apex) < 1e-6 && b0.dist(apex) < 1e-6, "from the apex: {:?}", r.points);
+    for rim in [a1, b1] {
+        assert!((rim.z - 30.0).abs() < 1e-6 && (rim.y - 20.0).abs() < 1e-6 && ((rim.x - 40.0).abs() - 10.0).abs() < 1e-6, "{:?}", r.points);
+    }
+    assert!((a1.x - b1.x).abs() > 19.0, "either side of the axis: {:?}", r.points);
+    let right = f.right;
+    assert_reads(&added(&mut f, right, kind()), angle, false);
+    let iso = base_view(&mut f, ViewDirection::Named(NamedView::IsoFrontRight), [320.0, 230.0]);
+    let top = base_view(&mut f, ViewDirection::Named(NamedView::Top), [150.0, 250.0]);
+    assert_reads(&added(&mut f, iso, kind()), angle, true);
+    let r = added(&mut f, top, kind());
+    assert!(matches!(&r.status, Status::Unmeasurable(why) if why.contains("end-on")), "{r:?}");
+    run(&mut f.s, "timeline.edit", json!({"feature": cone_feature.to_string(), "set": {"height": 10}}));
+    assert_reads(&f.resolve(front), std::f64::consts::FRAC_PI_2, false);
+    run(&mut f.s, "timeline.suppress", json!({"feature": cone_feature, "suppressed": true}));
+    assert!(matches!(f.resolve(front).status, Status::Suppressed), "{:?}", f.resolve(front));
+    // Half a cone of its own: the half past x = 140 cut away.
+    run(&mut f.s, "solid.cone", json!({"radius": 10, "height": 20, "base": [140, 20, 0], "operation": "new", "body_name": "Half"}));
+    let half_feature = f.s.doc.features.last().unwrap().id;
+    run(&mut f.s, "solid.box", json!({"length": 15, "width": 30, "height": 25, "corner": [140, 5, -1], "operation": "cut", "targets": ["Half"]}));
+    let half = f.s.model.state().bodies.iter().find(|b| b.name == "Half").unwrap().clone();
+    let index = face_index_at(&half, Vec3::new(140.0 - 5.0 * FRAC_1_SQRT_2, 20.0 - 5.0 * FRAC_1_SQRT_2, 10.0)).unwrap();
+    let face = ModelFace { body: "Half".into(), origin_feature: half_feature, name: face_names(&half)[index].clone(), path: Vec::new() };
+    let not_whole = |r: &Resolved| matches!(&r.status, Status::Unmeasurable(why) if why.contains("isn't a whole cone in this view"));
+    let front_view = f.front;
+    let r = added(&mut f, front_view, DimensionKind::Cone { face: face.clone() });
+    assert!(not_whole(&r), "{r:?}");
+    // Seen tilted off its axis's plane, its silhouettes aren't opposite: looking along (2, 0, 1), they
+    // are 104.5° either way round the axis from +X, both on the kept half, so it reads, foreshortened;
+    // along (0, 2, 1), one is at 194.5° on it and the other at -14.5°, cut away.
+    let looking = |direction: [f64; 3]| ViewDirection::Looking(Looking { direction, up: [0.0, 0.0, 1.0], origin: [0.0; 3] });
+    let both = base_view(&mut f, looking([2.0, 0.0, 1.0]), [100.0, 250.0]);
+    assert_reads(&added(&mut f, both, DimensionKind::Cone { face: face.clone() }), angle, true);
+    let one = base_view(&mut f, looking([0.0, 2.0, 1.0]), [300.0, 80.0]);
+    let r = added(&mut f, one, DimensionKind::Cone { face });
+    assert!(not_whole(&r), "{r:?}");
+}
+
+/// A base view of `f`'s model along `direction` at 1:2, centred `at` on the sheet: its id.
+fn base_view(f: &mut Fixture, direction: ViewDirection, at: [f64; 2]) -> u64 {
+    let id = f.d.allocate_id(&mut f.ids).unwrap();
+    let (sheet, source) = (f.d.sheets[0].id, f.d.sources[0].id);
+    let kind = ViewKind::Base { source, view: direction };
+    let settings = ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() };
+    f.d.add_views([Arc::new(View { id, sheet, kind, place: ViewPlace::At(at), settings, reference_shown_percent: 0.0 })]);
+    id
 }

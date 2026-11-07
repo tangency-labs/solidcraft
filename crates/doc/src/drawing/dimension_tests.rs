@@ -335,35 +335,49 @@ fn a_chain_saves_its_points_in_order_and_keeps_its_rules() {
     assert!(reading.starts_with("damaged drawing: "), "{reading}");
 }
 
-/// A cylinder dimension saves its face by name, and the face keeps a reference's rules.
+/// A cylinder, a sphere or a cone dimension saves its face by name, and the face keeps a reference's rules.
 #[test]
-fn a_cylinder_dimension_saves_its_face() {
-    let (mut d, _) = measured();
-    let (view, id) = (d.views[0].id, d.allocate_id(&mut IdSource::seeded(SEED + 1)).unwrap());
+fn a_cylinder_sphere_or_cone_dimension_saves_its_face() {
     let face = ModelFace { body: BODY.into(), origin_feature: FEATURE, name: "F4:boss".into(), path: vec![3] };
-    let kind = DimensionKind::Cylinder { face };
-    d.add_dimensions([Arc::new(Dimension {
-        id,
-        view,
-        kind,
-        offset_mm: 6.0,
-        text: TextPlace::Centred,
-        decimals: 1,
-        override_text: None,
-        last_good: None,
-    })]);
-    d.validate().unwrap();
-    let cylinder = ids::encode(id);
-    let mut v = file(&d);
-    let saved = json!({"cylinder": {"face": {"body": "Box", "origin_feature": 7, "name": "F4:boss", "path": [3]}}});
-    assert_eq!(dim(&mut v, &cylinder)["kind"], saved);
-    assert_eq!(Drawing::from_json(&v.to_string()).unwrap(), d);
-    let rule = |rule: &str| format!("damaged drawing: dimension {cylinder}: {rule}");
-    let changed = |key: &str, value: Value| refused(&d, |v| dim(v, &cylinder)["kind"]["cylinder"]["face"][key] = value);
-    assert_eq!(changed("name", json!("")), rule("a name in a reference is 1 to 512 bytes, without control characters"));
-    assert_eq!(changed("origin_feature", json!(0)), rule("a reference names the feature that made its body"));
-    assert_eq!(changed("path", json!([0])), rule("an occurrence path is at most 64 occurrences, none of them 0"));
-    assert!(changed("edges", json!(["F4:boss"])).starts_with("damaged drawing: "), "a face has no edges");
+    let kinds = [
+        ("cylinder", DimensionKind::Cylinder { face: face.clone() }),
+        ("sphere", DimensionKind::Sphere { face: face.clone() }),
+        ("cone", DimensionKind::Cone { face: face.clone() }),
+    ];
+    for (key, kind) in kinds {
+        let (mut d, _) = measured();
+        let (view, id) = (d.views[0].id, d.allocate_id(&mut IdSource::seeded(SEED + 1)).unwrap());
+        d.add_dimensions([Arc::new(Dimension {
+            id,
+            view,
+            kind,
+            offset_mm: 6.0,
+            text: TextPlace::Centred,
+            decimals: 1,
+            override_text: None,
+            last_good: None,
+        })]);
+        d.validate().unwrap();
+        let encoded = ids::encode(id);
+        let mut v = file(&d);
+        let saved = json!({key: {"face": {"body": "Box", "origin_feature": 7, "name": "F4:boss", "path": [3]}}});
+        assert_eq!(dim(&mut v, &encoded)["kind"], saved);
+        assert_eq!(Drawing::from_json(&v.to_string()).unwrap(), d);
+        let rule = |rule: &str| format!("damaged drawing: dimension {encoded}: {rule}");
+        let changed = |field: &str, value: Value| refused(&d, |v| dim(v, &encoded)["kind"][key]["face"][field] = value);
+        assert_eq!(changed("name", json!("")), rule("a name in a reference is 1 to 512 bytes, without control characters"));
+        assert_eq!(changed("origin_feature", json!(0)), rule("a reference names the feature that made its body"));
+        assert_eq!(changed("path", json!([0])), rule("an occurrence path is at most 64 occurrences, none of them 0"));
+        assert!(changed("edges", json!(["F4:boss"])).starts_with("damaged drawing: "), "{key}: a face has no edges");
+    }
+}
+
+/// A sphere's size reads SØ or SR, the diameter sign as a diameter's (ISO 129-1).
+#[test]
+fn a_spheres_label_is_sr_or_s_diameter() {
+    assert_eq!(reading_label(LabelKind::SphericalDiameter, 20.0, "mm", 2), "SØ20.00");
+    assert_eq!(reading_label(LabelKind::SphericalRadius, 10.0, "mm", 1), "SR10.0");
+    assert_eq!(reading_label(LabelKind::Diameter, 20.0, "mm", 0), "Ø20", "unchanged");
 }
 
 /// A dimension between two cylinders' silhouettes saves each one's face and side, and its
@@ -578,4 +592,18 @@ fn pieces_are_one_circle_only_when_they_all_lie_on_it() {
     assert!(one_circle(&[three.clone(), short(c)]).is_some(), "short arcs of one circle, read together");
     assert!(one_circle(&[three, short([45.0, 15.0])]).is_none(), "short arcs of two circles of one radius");
     assert!(one_circle(&[]).is_none());
+}
+
+/// Faces lie on one cone when they share its apex, its axis's way and its half-angle, within the
+/// cylinder's margins: a double cone's other half (the same apex and axis line, facing the other
+/// way) is another surface, and so is a cone whose half-angle or apex is off by more.
+#[test]
+fn faces_lie_on_one_cone_by_its_apex_axis_and_half_angle() {
+    let cone = |apex: Vec3, axis: Vec3, half_angle: f64| Curved::Cone(Cone { apex, axis, half_angle });
+    let a = cone(Vec3::ZERO, Vec3::Z, 0.5);
+    assert!(a.same(&cone(Vec3::new(1e-7, 0.0, 0.0), Vec3::Z, 0.5 + 1e-6), 1e-6));
+    assert!(!a.same(&cone(Vec3::ZERO, Vec3::new(0.0, 0.0, -1.0), 0.5), 1e-6), "a double cone's other half");
+    assert!(!a.same(&cone(Vec3::ZERO, Vec3::Z, 0.5 + 1e-3), 1e-6), "another half-angle");
+    assert!(!a.same(&cone(Vec3::new(1e-3, 0.0, 0.0), Vec3::Z, 0.5), 1e-6), "another apex");
+    assert!(!a.same(&Curved::Sphere(Sphere { center: Vec3::ZERO, radius: 1.0 }), 1e-6));
 }

@@ -17,6 +17,11 @@
 //!   the members adding up to the overall from the first point to the last.
 //! - **Cylinder** (W20b): a whole cylinder's diameter between its two silhouettes, on a view that
 //!   doesn't look along its axis (a face, [`ModelFace`]).
+//! - **Sphere** (R2b): a sphere's size on any view (a face, [`ModelFace`]): SØ, its diameter, when
+//!   the body's faces on it are the whole sphere, else SR, its radius, where its contour in the
+//!   view lies on them (a ball end, a dome).
+//! - **Cone** (R2b): a cone's included angle between its two silhouettes, on a view that doesn't
+//!   look along its axis (a face, [`ModelFace`]): a chamfer's, a countersink's, a drill point's.
 //! - **Silhouettes** (W20b): between a silhouette of one cylinder and a silhouette of another, each
 //!   named by its face and by whether it is the one nearer the other cylinder or the one farther,
 //!   as the view shows them ([`Silhouette`]). Two silhouettes of one cylinder are its diameter.
@@ -53,12 +58,13 @@
 //! refuse a pick that doesn't name one thing.
 
 use std::collections::BTreeMap;
-use std::f64::consts::PI;
+use std::f64::consts::{PI, TAU};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+use solidcore_record::brep::Loop;
 use solidcore_record::{Plane, Seg2, Vec2, Vec3};
-use solidcraft_geom::drawing_measure::{self, AngleFrom, Cylinder, LinearDirection, Measured, Reading, SilhouetteSide};
+use solidcraft_geom::drawing_measure::{self, AngleFrom, Cone, Cylinder, LinearDirection, Measured, Reading, SilhouetteSide, Sphere};
 use solidcraft_geom::drawing_view::{Invalid, is_paper_coordinate};
 use solidcraft_geom::paper::MAX_SIDE_MM;
 use solidcraft_geom::prelude::*;
@@ -68,7 +74,7 @@ use crate::config::MAX_REFERENCE_NAME_BYTES;
 use crate::construct::{MAX_VERTEX_EDGES, as_circle, as_line, point_tolerance, shared_ends};
 use crate::display_units::length_number;
 use crate::format::MAX_REAL;
-use solidcraft_kernel::{FaceSurface, face_surface};
+use solidcraft_kernel::{FaceSurface, PointClass, edge_circle, face_surface};
 
 use crate::appearance::face_index_at;
 use crate::name_lookup::{BodyEdges, EdgeMatch, face_has_name, faces_with_stem};
@@ -85,6 +91,10 @@ pub enum LabelKind {
     Angle,
     Radius,
     Diameter,
+    /// A sphere's radius, SR (ISO 129-1).
+    SphericalRadius,
+    /// A sphere's diameter, SØ (ISO 129-1).
+    SphericalDiameter,
 }
 
 /// What a reading says: `value`, in model millimetres or radians for an angle, in `units` with
@@ -96,6 +106,8 @@ pub fn reading_label(kind: LabelKind, value: f64, units: &str, decimals: u8) -> 
         LabelKind::Angle => format!("{:.*}°", usize::from(decimals), value.to_degrees()),
         LabelKind::Radius => format!("R{}", length()),
         LabelKind::Diameter => format!("{DIAMETER_SIGN}{}", length()),
+        LabelKind::SphericalRadius => format!("SR{}", length()),
+        LabelKind::SphericalDiameter => format!("S{DIAMETER_SIGN}{}", length()),
     }
 }
 
@@ -165,6 +177,12 @@ pub enum DimensionKind {
     /// A whole cylinder's diameter between its two silhouettes, on a view that doesn't look along
     /// its axis: the cylinder a face of it lies on.
     Cylinder { face: ModelFace },
+    /// A sphere's size, on any view: its diameter when the body's faces on the sphere a face of it
+    /// lies on are the whole sphere, else its radius.
+    Sphere { face: ModelFace },
+    /// A cone's included angle, between its two silhouettes, on a view that doesn't look along its
+    /// axis: the cone a face of it lies on.
+    Cone { face: ModelFace },
     /// The distance between a silhouette of one cylinder and a silhouette of another, as the view
     /// shows them.
     Silhouettes { a: Silhouette, b: Silhouette, direction: LinearDirection },
@@ -180,10 +198,15 @@ impl DimensionKind {
             DimensionKind::Length { edge, .. } | DimensionKind::Radial { edge, .. } => vec![&edge.path],
             DimensionKind::Angle { a, b, .. } => vec![&a.path, &b.path],
             DimensionKind::Chain { points, .. } => points.iter().map(|point| point.path.as_slice()).collect(),
-            DimensionKind::Cylinder { face } => vec![&face.path],
+            DimensionKind::Cylinder { face } | DimensionKind::Sphere { face } | DimensionKind::Cone { face } => vec![&face.path],
             DimensionKind::Silhouettes { a, b, .. } => vec![&a.face.path, &b.face.path],
             DimensionKind::Faces { a, b, .. } => vec![&a.path, &b.path],
         }
+    }
+
+    /// Whether it reads an angle, as its label says: between two edges, or a cone's.
+    pub fn is_angle(&self) -> bool {
+        label_of(self) == Some(LabelKind::Angle)
     }
 }
 
@@ -313,7 +336,7 @@ impl Drawing {
                 let instead = || "a chain shows its members' numbers, never a text instead".into();
                 require(d.override_text.is_none(), instead)?;
             }
-            DimensionKind::Cylinder { face } => check_face(face)?,
+            DimensionKind::Cylinder { face } | DimensionKind::Sphere { face } | DimensionKind::Cone { face } => check_face(face)?,
             DimensionKind::Silhouettes { a, b, direction } => {
                 check_face(&a.face)?;
                 check_face(&b.face)?;
@@ -405,9 +428,12 @@ pub struct Resolved {
     /// overridden dimension has it too.
     pub measured: Option<Measured>,
     /// What it shows: the text given instead of its number, else the number in the drawing's
-    /// units with its decimals (degrees for an angle, after R or Ø for a radius or a diameter).
-    /// `None` with neither, and for a chain, which shows its members'.
+    /// units with its decimals (degrees for an angle, after R or Ø for a radius or a diameter, SR
+    /// or SØ for a sphere's). `None` with neither, and for a chain, which shows its members'.
     pub text: Option<String>,
+    /// What its number is, whenever it was measured, a chain's members aside: a sphere's says
+    /// whether it is drawn as a diameter or a radius.
+    pub label: Option<LabelKind>,
     /// A chain's members, from its first point to its last, each as it reads and its text: empty
     /// unless measured, and for other kinds. `measured` is then the chain's overall.
     pub members: Vec<Member>,
@@ -415,9 +441,10 @@ pub struct Resolved {
     pub exact: bool,
     /// What it measures, in the design's frame: a linear dimension's two points, an angle's two
     /// lines (four points, each line from its first to its second), a radial dimension's
-    /// centre and its arc's start, middle and end, a chain's points, or the ends of each silhouette
-    /// measured (a cylinder's two, from its faces' one end along its axis to the other). Empty
-    /// unless measured.
+    /// centre and its arc's start, middle and end (a sphere's: the arc of its contour on its faces,
+    /// or the whole contour from one point round to it again), a chain's points, or the ends of
+    /// each silhouette measured (a cylinder's two, from its faces' one end along its axis to the
+    /// other). Empty unless measured.
     pub points: Vec<Vec3>,
 }
 
@@ -631,11 +658,52 @@ pub(super) struct Lookup<'a> {
     state: Arc<ModelState>,
     /// Each named body's edge names, by its index in `state`.
     named: BTreeMap<usize, BodyEdges>,
-    /// Each body a cylinder dimension names: the cylinder each face lies on (its axis a unit
-    /// vector, in the body's own frame), by face.
-    cylinders: BTreeMap<usize, Vec<Option<Cylinder>>>,
+    /// Each body a cylinder or a sphere dimension names: the curved surface each face lies on, in
+    /// the body's own frame, by face.
+    curved: BTreeMap<usize, Vec<Option<Curved>>>,
     /// Each body a lost reference names: its leads, read on its first miss.
     leads: BTreeMap<usize, Leads>,
+}
+
+/// A curved surface a face lies on, in its body's own frame: the kinds a dimension reads by a face
+/// ([`curved_of`]).
+#[derive(Clone, Copy, Debug)]
+enum Curved {
+    /// Its axis a unit vector.
+    Cylinder(Cylinder),
+    Sphere(Sphere),
+    /// Its axis a unit vector, from the apex into the cone.
+    Cone(Cone),
+}
+
+impl Curved {
+    /// Whether `self` and `other` are one surface, to `tol`: the kernel's own condition for faces on
+    /// a common one. The kernel has none for a cone, so a cone takes the cylinder's margins
+    /// ([`same_cylinder`]): `tol` for its apex and [`SAME_WAY`] for its axis's way and its
+    /// half-angle. Its axis keeps its sense, as a double cone's two halves are two surfaces.
+    fn same(&self, other: &Curved, tol: f64) -> bool {
+        match (self, other) {
+            (Curved::Cylinder(a), Curved::Cylinder(b)) => same_cylinder(a, b, tol),
+            (Curved::Sphere(a), Curved::Sphere(b)) => a.center.dist(b.center) < tol && (a.radius - b.radius).abs() < tol,
+            (Curved::Cone(a), Curved::Cone(b)) => {
+                a.apex.dist(b.apex) < tol && a.axis.dot(b.axis) > SAME_WAY && (a.half_angle - b.half_angle).cos() > SAME_WAY
+            }
+            _ => false,
+        }
+    }
+}
+
+/// The faces of a body that lie on the surface a face lies on, as the model has it now
+/// ([`Lookup::on_surface`]).
+struct OnSurface {
+    /// The body's index, and the frame its geometry is in.
+    body: usize,
+    frame: Mat,
+    /// Every face of the body on the surface.
+    faces: Vec<usize>,
+    /// The kernel's tolerance for faces on one surface of the body.
+    tol: f64,
+    exact: bool,
 }
 
 /// The cylinder a face lies on as the model has it now ([`Lookup::on_cylinder`]).
@@ -694,6 +762,15 @@ struct Found {
     members: Vec<Measured>,
     points: Vec<Vec3>,
     exact: bool,
+    /// What its number is, where the kind alone doesn't say: a sphere's SØ or SR.
+    label: Option<LabelKind>,
+}
+
+impl Found {
+    /// One measurement, no chain, whose kind says what its number is.
+    fn new(measured: Measured, points: Vec<Vec3>, exact: bool) -> Found {
+        Found { measured, members: Vec::new(), points, exact, label: None }
+    }
 }
 
 /// The edges a name finds on a body: their indices and polylines in the design's frame, whether
@@ -787,7 +864,7 @@ fn gone(model: &Model, makers: &[FeatureId], lost: String) -> Status {
 
 impl<'a> Lookup<'a> {
     pub(super) fn new(doc: &'a Document, model: &'a Model) -> Lookup<'a> {
-        Lookup { doc, model, state: model.state(), named: BTreeMap::new(), cylinders: BTreeMap::new(), leads: BTreeMap::new() }
+        Lookup { doc, model, state: model.state(), named: BTreeMap::new(), curved: BTreeMap::new(), leads: BTreeMap::new() }
     }
 
     fn resolve(&mut self, d: &Dimension, basis: &Plane, units: &str) -> Resolved {
@@ -796,21 +873,14 @@ impl<'a> Lookup<'a> {
             Err(status) => (status, None),
         };
         let measured = found.as_ref().map(|f| f.measured);
+        let label = found.as_ref().and_then(|f| f.label.or_else(|| label_of(&d.kind)));
         let length = |m: Measured| length_number(m.value, units, d.decimals);
-        let number = |m: Measured| {
-            let kind = match d.kind {
-                DimensionKind::Angle { .. } => LabelKind::Angle,
-                DimensionKind::Radial { diameter: false, .. } => LabelKind::Radius,
-                DimensionKind::Radial { diameter: true, .. } | DimensionKind::Cylinder { .. } => LabelKind::Diameter,
-                DimensionKind::Chain { .. } => return None,
-                _ => LabelKind::Length,
-            };
-            Some(reading_label(kind, m.value, units, d.decimals))
-        };
+        let number = measured.zip(label).map(|(m, kind)| reading_label(kind, m.value, units, d.decimals));
         let (members, points, exact) = found.map_or_else(Default::default, |f| (f.members, f.points, f.exact));
         Resolved {
             status,
-            text: d.override_text.clone().or_else(|| measured.and_then(number)),
+            text: d.override_text.clone().or(number),
+            label,
             members: members.into_iter().map(|m| Member { measured: m, text: length(m) }).collect(),
             exact,
             points,
@@ -826,7 +896,7 @@ impl<'a> Lookup<'a> {
                 let (a, exact_a) = self.corner(a)?;
                 let (b, exact_b) = self.corner(b)?;
                 let measured = drawing_measure::linear(basis, a, b, *direction, *reading).map_err(unmeasurable)?;
-                Ok(Found { measured, members: Vec::new(), points: vec![a, b], exact: exact_a && exact_b })
+                Ok(Found::new(measured, vec![a, b], exact_a && exact_b))
             }
             DimensionKind::Length { edge, direction, reading } => {
                 let found = self.edges(edge)?;
@@ -837,7 +907,7 @@ impl<'a> Lookup<'a> {
                 let ends = found.pieces.first().and_then(|(_, line)| straight(line));
                 let [a, b] = ends.ok_or_else(|| Status::Unmeasurable(format!("edge `{}` isn't straight", edge.name)))?;
                 let measured = drawing_measure::linear(basis, a, b, *direction, *reading).map_err(unmeasurable)?;
-                Ok(Found { measured, members: Vec::new(), points: vec![a, b], exact: found.exact })
+                Ok(Found::new(measured, vec![a, b], found.exact))
             }
             DimensionKind::Angle { a, b, reading, other_side } => {
                 let (a, exact_a) = self.line(a)?;
@@ -845,22 +915,24 @@ impl<'a> Lookup<'a> {
                 let between = drawing_measure::angle(basis, (a[0], a[1]), AngleFrom::Edge(b[0], b[1]), *reading).map_err(unmeasurable)?;
                 let value = between_lines(between.value, *other_side);
                 let points = vec![a[0], a[1], b[0], b[1]];
-                Ok(Found { measured: Measured { value, ..between }, members: Vec::new(), points, exact: exact_a && exact_b })
+                Ok(Found::new(Measured { value, ..between }, points, exact_a && exact_b))
             }
             DimensionKind::Radial { edge, diameter } => {
                 let (radius, points, exact) = self.whole_arc(edge, basis)?;
                 let value = if *diameter { 2.0 * radius } else { radius };
                 let measured = Measured { value, foreshortened: false };
-                Ok(Found { measured, members: Vec::new(), points: points.to_vec(), exact })
+                Ok(Found::new(measured, points.to_vec(), exact))
             }
             DimensionKind::Chain { points, direction } => {
                 let found = points.iter().map(|p| self.corner(p)).collect::<std::result::Result<Vec<_>, _>>()?;
                 let exact = found.iter().all(|(_, exact)| *exact);
                 let points: Vec<Vec3> = found.into_iter().map(|(p, _)| p).collect();
                 let chain = drawing_measure::chain(basis, &points, *direction).map_err(unmeasurable)?;
-                Ok(Found { measured: chain.overall, members: chain.members, points, exact })
+                Ok(Found { members: chain.members, ..Found::new(chain.overall, points, exact) })
             }
             DimensionKind::Cylinder { face } => self.cylinder(face, basis),
+            DimensionKind::Sphere { face } => self.sphere(face, basis),
+            DimensionKind::Cone { face } => self.cone(face, basis),
             DimensionKind::Silhouettes { a, b, direction } => self.silhouettes(a, b, *direction, basis),
             DimensionKind::Faces { a, b, direction } => self.faces(a, b, *direction, basis),
         }
@@ -1053,25 +1125,91 @@ impl<'a> Lookup<'a> {
     /// The cylinder `face` lies on (or the pieces it was cut into, all on one cylinder), with every
     /// face of the body on that cylinder.
     fn on_cylinder(&mut self, face: &ModelFace) -> std::result::Result<OnCylinder, Status> {
+        let (on, first) = self.on_surface(face, "cylinder", |c| if let Curved::Cylinder(c) = c { Some(*c) } else { None })?;
+        let state = Arc::clone(&self.state);
+        let b = state.bodies.get(on.body).ok_or_else(|| Status::lost("its body no longer exists"))?;
+        let axis = apply_vector(&on.frame, first.axis).normalized().ok_or_else(|| Status::lost("its occurrence flattens it"))?;
+        let cylinder = Cylinder { origin: apply_point(&on.frame, first.origin), axis, radius: first.radius };
+        Ok(OnCylinder { cylinder, body: on.body, corners: face_corners(b, &on.frame, &on.faces), tol: on.tol, exact: on.exact })
+    }
+
+    /// The curved surface `face` lies on (or the pieces it was cut into, all on one), with every
+    /// face of the body on it: `kind` reads the surface wanted off it, and a face on no such
+    /// surface isn't a `noun`.
+    fn on_surface<T>(&mut self, face: &ModelFace, noun: &str, kind: impl Fn(&Curved) -> Option<T>) -> std::result::Result<(OnSurface, T), Status> {
         let (i, frame) = self.body(&face.body, face.origin_feature, &face.path)?;
         let state = Arc::clone(&self.state);
         let b = state.bodies.get(i).ok_or_else(|| Status::lost("its body no longer exists"))?;
         let (found, exact) = faces_named(b, &face.name);
-        let candidates = || face_candidates(b, &found);
-        let cylinders = self.cylinders.entry(i).or_insert_with(|| cylinders_of(b));
-        let on = |f: &usize| cylinders.get(*f).copied().flatten();
+        let curved = self.curved.entry(i).or_insert_with(|| curved_of(b));
+        let on = |f: &usize| curved.get(*f).copied().flatten();
+        let isnt = || Status::Unmeasurable(format!("face `{}` isn't a {noun}", face.name));
         let first = match found.first() {
             None => return Err(self.lost_face(i, &face.name)),
-            Some(f) => on(f).ok_or_else(|| Status::Unmeasurable(format!("face `{}` isn't a cylinder", face.name)))?,
+            Some(f) => on(f).ok_or_else(isnt)?,
         };
-        let tol = cylinder_tolerance(b);
-        if !found.iter().all(|f| on(f).is_some_and(|c| same_cylinder(&first, &c, tol))) {
-            return Err(Status::Ambiguous(candidates()));
+        let wanted = kind(&first).ok_or_else(isnt)?;
+        let tol = surface_tolerance(b);
+        if !found.iter().all(|f| on(f).is_some_and(|c| first.same(&c, tol))) {
+            return Err(Status::Ambiguous(face_candidates(b, &found)));
         }
-        let faces: Vec<usize> = (0..cylinders.len()).filter(|f| on(f).is_some_and(|c| same_cylinder(&first, &c, tol))).collect();
-        let axis = apply_vector(&frame, first.axis).normalized().ok_or_else(|| Status::lost("its occurrence flattens it"))?;
-        let cylinder = Cylinder { origin: apply_point(&frame, first.origin), axis, radius: first.radius };
-        Ok(OnCylinder { cylinder, body: i, corners: face_corners(b, &frame, &faces), tol, exact })
+        let faces = (0..curved.len()).filter(|f| on(f).is_some_and(|c| first.same(&c, tol))).collect();
+        Ok((OnSurface { body: i, frame, faces, tol, exact }, wanted))
+    }
+
+    /// A sphere's size on the view through `basis`: its diameter when the body's faces on it are
+    /// the whole sphere ([`rim`] finds none), else its radius, read on the arc of its contour in
+    /// this view that lies on them ([`contour_on`]). Its points are its centre and that arc's start,
+    /// middle and end, as a radial dimension's are; a whole sphere's arc is its whole contour.
+    fn sphere(&mut self, face: &ModelFace, basis: &Plane) -> std::result::Result<Found, Status> {
+        let (on, sphere) = self.on_surface(face, "sphere", |c| if let Curved::Sphere(s) = c { Some(*s) } else { None })?;
+        let state = Arc::clone(&self.state);
+        let b = state.bodies.get(on.body).ok_or_else(|| Status::lost("its body no longer exists"))?;
+        // The contour is read in the body's own frame, where its faces and edges are.
+        let flattens = || Status::lost("its occurrence flattens it");
+        let to_body = mat_inverse(&on.frame).ok_or_else(flattens)?;
+        let seen = Plane::new(sphere.center, apply_vector(&to_body, basis.x), apply_vector(&to_body, basis.y)).ok_or_else(flattens)?;
+        let rim = rim(b, &on.faces);
+        let (label, value, (start, sweep)) = if rim.is_empty() {
+            (LabelKind::SphericalDiameter, 2.0 * sphere.radius, (0.0, TAU))
+        } else {
+            let arc = contour_on(b, &seen, &sphere, &rim)?.ok_or_else(|| {
+                Status::Unmeasurable(format!("face `{}`'s contour in this view isn't on it: the view sees its rim, not its radius", face.name))
+            })?;
+            (LabelKind::SphericalRadius, sphere.radius, arc)
+        };
+        let at = |angle: f64| apply_point(&on.frame, sphere.contour_point(&seen, angle));
+        let points = vec![apply_point(&on.frame, sphere.center), at(start), at(start + sweep / 2.0), at(start + sweep)];
+        let measured = Measured { value, foreshortened: false };
+        Ok(Found { label: Some(label), ..Found::new(measured, points, on.exact) })
+    }
+
+    /// The included angle of the cone `face` lies on, between its two silhouettes on the view through
+    /// `basis`: both must lie on the body's faces on that cone ([`ray_on`]), so half a cone is
+    /// refused. Its points are each silhouette's piece on them, from the end nearer the apex, as an
+    /// angle's two edges are.
+    fn cone(&mut self, face: &ModelFace, basis: &Plane) -> std::result::Result<Found, Status> {
+        let (on, cone) = self.on_surface(face, "cone", |c| if let Curved::Cone(c) = c { Some(*c) } else { None })?;
+        let state = Arc::clone(&self.state);
+        let b = state.bodies.get(on.body).ok_or_else(|| Status::lost("its body no longer exists"))?;
+        // The silhouettes are read in the body's own frame, where its faces and edges are.
+        let flattens = || Status::lost("its occurrence flattens it");
+        let to_body = mat_inverse(&on.frame).ok_or_else(flattens)?;
+        let seen = Plane::new(cone.apex, apply_vector(&to_body, basis.x), apply_vector(&to_body, basis.y)).ok_or_else(flattens)?;
+        let (sides, foreshortened) = cone.silhouettes(&seen).map_err(|e| Status::Unmeasurable(e.0.to_string()))?;
+        let bounds = b.body.exact_bounds().map_err(|e| Status::Unmeasurable(e.to_string()))?;
+        // Every point of the body is within this of the apex.
+        let reach = cone.apex.dist(bounds.center()) + bounds.size().len() / 2.0;
+        let rim = rim(b, &on.faces);
+        let mut points = Vec::with_capacity(4);
+        for way in sides {
+            let (near, far) = ray_on(b, cone.apex, way, reach, &rim)?.ok_or_else(|| {
+                Status::Unmeasurable(format!("face `{}` isn't a whole cone in this view: one of its silhouettes isn't on it", face.name))
+            })?;
+            points.extend([near, far].map(|t| apply_point(&on.frame, cone.apex + way * t)));
+        }
+        let measured = Measured { value: 2.0 * cone.half_angle, foreshortened };
+        Ok(Found::new(measured, points, on.exact))
     }
 
     /// The diameter of the whole cylinder `face` lies on, between its two silhouettes on the view
@@ -1087,7 +1225,7 @@ impl<'a> Lookup<'a> {
             )));
         }
         let measured = Measured { value: 2.0 * on.cylinder.radius, foreshortened: false };
-        Ok(Found { measured, members: Vec::new(), points: [on.ends(side), on.ends(-side)].concat(), exact: on.exact })
+        Ok(Found::new(measured, [on.ends(side), on.ends(-side)].concat(), on.exact))
     }
 
     /// The distance between silhouettes `a` and `b` on the view through `basis`, each on its
@@ -1103,7 +1241,7 @@ impl<'a> Lookup<'a> {
             }
         }
         let points = [on_a.ends(way_a), on_b.ends(way_b)].concat();
-        Ok(Found { measured, members: Vec::new(), points, exact: on_a.exact && on_b.exact })
+        Ok(Found::new(measured, points, on_a.exact && on_b.exact))
     }
 
     /// The flat face `face` names, or the pieces it was cut into, all on one oriented plane. A face
@@ -1130,7 +1268,7 @@ impl<'a> Lookup<'a> {
         let measured = between.map_err(|e| Status::Unmeasurable(e.0.to_string()))?;
         let ends = |on: &OnPlane, face: &ModelFace| on.ends(basis).ok_or_else(|| Status::Unmeasurable(format!("face `{}` has no mesh", face.name)));
         let points = [ends(&on_a, a)?, ends(&on_b, b)?].concat();
-        Ok(Found { measured, members: Vec::new(), points, exact: on_a.exact && on_b.exact })
+        Ok(Found::new(measured, points, on_a.exact && on_b.exact))
     }
 }
 
@@ -1153,27 +1291,176 @@ fn face_candidates(b: &ModelBody, faces: &[usize]) -> Vec<Candidate> {
     faces.iter().take(MAX_CANDIDATES).map(|f| Candidate::Face { body: b.name.clone(), index: *f }).collect()
 }
 
-/// The cylinder each face of `b` lies on, by face; `None` for a face of another surface.
-fn cylinders_of(b: &ModelBody) -> Vec<Option<Cylinder>> {
+/// The cylinder, sphere or cone each face of `b` lies on, by face; `None` for a face of another
+/// surface.
+fn curved_of(b: &ModelBody) -> Vec<Option<Curved>> {
     (0..b.body.face_count())
         .map(|f| match face_surface(&b.body, f) {
-            Some(FaceSurface::Cylinder { origin, axis, radius }) => Some(Cylinder { origin, axis: Vec3::from(axis), radius }),
+            Some(FaceSurface::Cylinder { origin, axis, radius }) => Some(Curved::Cylinder(Cylinder { origin, axis: Vec3::from(axis), radius })),
+            Some(FaceSurface::Sphere { center, radius }) => Some(Curved::Sphere(Sphere { center, radius })),
+            Some(FaceSurface::Cone { apex, axis, half_angle }) => Some(Curved::Cone(Cone { apex, axis: Vec3::from(axis), half_angle })),
             _ => None,
         })
         .collect()
 }
 
-/// How near two cylinders of `b` must be to be one: the kernel's own tolerance for two faces on a
-/// common cylinder.
-fn cylinder_tolerance(b: &ModelBody) -> f64 {
+/// How near two surfaces of `b` must be to be one: the kernel's own tolerance for two faces on a
+/// common cylinder, taken for a sphere's centre and radius too.
+fn surface_tolerance(b: &ModelBody) -> f64 {
     (b.body.size() * 1e-7).max(1e-9) * 10.0
 }
+
+/// The edges where `faces` of `b` meet a face that isn't one of them, or meet none (a free edge),
+/// each once. None when the faces close up on their own, as a whole sphere's do: its seam's and
+/// its poles' uses are all its own. Read off the record's topology, so exact.
+fn rim(b: &ModelBody, faces: &[usize]) -> Vec<usize> {
+    let record = b.body.record();
+    let edges = faces.iter().filter_map(|f| record.faces.get(*f)).flat_map(|f| &f.loops).flat_map(|l| match l {
+        Loop::Edges { edges } => edges.as_slice(),
+        Loop::Vertex { .. } => [].as_slice(),
+    });
+    let bounds =
+        |e: &usize| record.edges.get(*e).is_some_and(|edge| edge.uses.len() < 2 || edge.uses.iter().any(|u| !faces.contains(&(u.face as usize))));
+    let mut rim: Vec<usize> = edges.map(|u| u.edge as usize).filter(bounds).collect();
+    rim.sort_unstable();
+    rim.dedup();
+    rim
+}
+
+/// The most rim edges [`contour_on`] reads a sphere's contour across: past it, the faces are too
+/// broken up to read a radius off.
+const MAX_RIM_EDGES: usize = 128;
+/// Where a rim edge isn't a circle, [`contour_on`] also cuts the contour at this many even steps.
+const CONTOUR_STEPS: u32 = 32;
+/// Cuts closer than this round the contour (radians) are one.
+const SAME_ANGLE: f64 = 1e-9;
+
+/// The longest arc of `sphere`'s contour on the view `seen` (both in `b`'s own frame) that lies on
+/// `b`'s boundary: its start angle and its sweep, or `None` when none does. The contour is cut
+/// where it crosses the plane of each circle in `rim` (the edges where the sphere's faces end).
+/// Between two cuts it is all on the faces or all off them, so one point classification at its middle (exact,
+/// SMLib's) decides, and pieces on them next to each other join: a rim circle's plane can also cut
+/// the contour where the faces go on. A rim edge that isn't on a circle ([`edge_circle`]) adds
+/// [`CONTOUR_STEPS`] even cuts instead, so there the arc's ends are within half a step, and an arc
+/// that holds no step's middle is missed.
+fn contour_on(b: &ModelBody, seen: &Plane, sphere: &Sphere, rim: &[usize]) -> std::result::Result<Option<(f64, f64)>, Status> {
+    if rim.len() > MAX_RIM_EDGES {
+        return Err(Status::Unmeasurable(format!("the sphere's faces end at more than {MAX_RIM_EDGES} edges: give a radius another way")));
+    }
+    let (mut cuts, mut stepped) = (Vec::new(), false);
+    for e in rim {
+        match edge_circle(&b.body, *e) {
+            Some(circle) => {
+                let crossed = drawing_measure::contour_crossings(seen, sphere, circle.center, Vec3::from(circle.axis));
+                cuts.extend(crossed.map_err(|e| Status::Unmeasurable(e.0.to_string()))?);
+            }
+            None => stepped = true,
+        }
+    }
+    if stepped {
+        cuts.extend((0..CONTOUR_STEPS).map(|k| TAU * f64::from(k) / f64::from(CONTOUR_STEPS)));
+    }
+    cuts.sort_by(f64::total_cmp);
+    cuts.dedup_by(|a, b| (*a - *b).abs() <= SAME_ANGLE);
+    // Each cut to the next round, the last back to the first; no cut leaves the whole contour.
+    let arcs: Vec<(f64, f64)> = match cuts.as_slice() {
+        [] => vec![(0.0, TAU)],
+        [one] => vec![(*one, TAU)],
+        _ => cuts.iter().zip(cuts.iter().cycle().skip(1)).map(|(a, b)| (*a, (b - a).rem_euclid(TAU))).collect(),
+    };
+    let mut pieces = Vec::with_capacity(arcs.len());
+    for (start, sweep) in arcs.into_iter().filter(|(_, sweep)| *sweep > SAME_ANGLE) {
+        let class = b.body.classify_point(sphere.contour_point(seen, start + sweep / 2.0)).map_err(|e| Status::Unmeasurable(e.to_string()))?;
+        pieces.push((start, sweep, class == PointClass::OnBoundary));
+    }
+    Ok(longest_run(&pieces, true))
+}
+
+/// The longest run of `pieces` (each a start, a length, and whether it lies on the faces) on the
+/// faces, the pieces next to each other joined: its start and its length. `round`, the pieces go
+/// once round a full turn, so runs are counted round from a piece off the faces and none is split
+/// at the list's end; with none off, the faces hold the whole turn.
+fn longest_run(pieces: &[(f64, f64, bool)], round: bool) -> Option<(f64, f64)> {
+    let from = match pieces.iter().position(|(_, _, on)| !on) {
+        Some(off) if round => off,
+        None if round => return pieces.first().map(|(start, _, _)| (*start, TAU)),
+        _ => 0,
+    };
+    let (mut longest, mut run): (Option<(f64, f64)>, Option<(f64, f64)>) = (None, None);
+    for (start, length, on) in pieces[from..].iter().chain(&pieces[..from]) {
+        run = if *on { Some(run.map_or((*start, *length), |(at, so_far)| (at, so_far + length))) } else { None };
+        if let Some((_, so_far)) = run
+            && longest.is_none_or(|(_, most)| so_far > most)
+        {
+            longest = run;
+        }
+    }
+    longest
+}
+
+/// The longest piece of the ray from `apex` along the unit `way` (both in `b`'s own frame), out
+/// to `reach`, that lies on `b`'s boundary: how far from the apex it starts and ends, or `None`
+/// when none does. Cut as [`contour_on`] cuts a sphere's contour: where the ray crosses the plane of
+/// each circle in `rim`, or at [`CONTOUR_STEPS`] even steps where a rim edge isn't a circle, with
+/// one point classification at each piece's middle.
+fn ray_on(b: &ModelBody, apex: Vec3, way: Vec3, reach: f64, rim: &[usize]) -> std::result::Result<Option<(f64, f64)>, Status> {
+    if rim.len() > MAX_RIM_EDGES {
+        return Err(Status::Unmeasurable(format!("the cone's faces end at more than {MAX_RIM_EDGES} edges: give its angle another way")));
+    }
+    let (mut cuts, mut stepped) = (vec![0.0, reach], false);
+    for e in rim {
+        match edge_circle(&b.body, *e) {
+            Some(circle) => {
+                let normal = Vec3::from(circle.axis);
+                let slant = way.dot(normal);
+                // A ray in the circle's plane, or parallel to it, isn't cut by it.
+                if slant.abs() > SAME_ANGLE {
+                    let t = (circle.center - apex).dot(normal) / slant;
+                    if t > 0.0 && t < reach {
+                        cuts.push(t);
+                    }
+                }
+            }
+            None => stepped = true,
+        }
+    }
+    if stepped {
+        cuts.extend((1..CONTOUR_STEPS).map(|k| reach * f64::from(k) / f64::from(CONTOUR_STEPS)));
+    }
+    cuts.sort_by(f64::total_cmp);
+    cuts.dedup_by(|a, b| (*a - *b).abs() <= SAME_ANGLE * reach);
+    let mut pieces = Vec::with_capacity(cuts.len());
+    for pair in cuts.windows(2) {
+        let (start, length) = (pair[0], pair[1] - pair[0]);
+        let class = b.body.classify_point(apex + way * (start + length / 2.0)).map_err(|e| Status::Unmeasurable(e.to_string()))?;
+        pieces.push((start, length, class == PointClass::OnBoundary));
+    }
+    Ok(longest_run(&pieces, false).map(|(start, length)| (start, start + length)))
+}
+
+/// What a dimension of `kind` reads, where the kind says: `None` for a chain, which shows its
+/// members', and for a sphere, whose measure says (SØ or SR).
+fn label_of(kind: &DimensionKind) -> Option<LabelKind> {
+    match kind {
+        DimensionKind::Angle { .. } | DimensionKind::Cone { .. } => Some(LabelKind::Angle),
+        DimensionKind::Radial { diameter: false, .. } => Some(LabelKind::Radius),
+        DimensionKind::Radial { diameter: true, .. } | DimensionKind::Cylinder { .. } => Some(LabelKind::Diameter),
+        DimensionKind::Chain { .. } | DimensionKind::Sphere { .. } => None,
+        DimensionKind::Linear { .. } | DimensionKind::Length { .. } | DimensionKind::Silhouettes { .. } | DimensionKind::Faces { .. } => {
+            Some(LabelKind::Length)
+        }
+    }
+}
+
+/// Two faces' unit directions are one surface's past this cosine: a cylinder's axes, a cone's axes
+/// and, as the cosine of their difference, a cone's half-angles ([`Curved::same`]).
+const SAME_WAY: f64 = 1.0 - 1e-9;
 
 /// Whether two cylinders are one: parallel axes, on one line, and one radius, to `tol` (the
 /// kernel's own condition for faces on a common cylinder).
 fn same_cylinder(a: &Cylinder, b: &Cylinder, tol: f64) -> bool {
     let off = b.origin - a.origin;
-    a.axis.dot(b.axis).abs() > 1.0 - 1e-9 && (a.radius - b.radius).abs() < tol && (off - a.axis * off.dot(a.axis)).len() < tol
+    a.axis.dot(b.axis).abs() > SAME_WAY && (a.radius - b.radius).abs() < tol && (off - a.axis * off.dot(a.axis)).len() < tol
 }
 
 /// The corners of the triangles of `faces` of `b`'s mesh, in the design's frame through `frame`.

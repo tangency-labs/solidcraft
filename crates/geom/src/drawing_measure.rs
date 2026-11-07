@@ -6,6 +6,8 @@
 //! `foreshortened` says a measured line isn't parallel to the view's plane, so the two differ. The
 //! view's scale and place on the sheet never change a measurement.
 
+use std::f64::consts::TAU;
+
 use serde::{Deserialize, Serialize};
 
 use crate::EPS;
@@ -140,6 +142,83 @@ pub struct Cylinder {
     pub origin: Vec3,
     pub axis: Vec3,
     pub radius: f64,
+}
+
+/// A sphere as a measurement takes it (model): its centre and its radius.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Sphere {
+    pub center: Vec3,
+    pub radius: f64,
+}
+
+impl Sphere {
+    /// The point `angle` round the sphere's contour on the view through `basis`, from the view's
+    /// horizontal and counter-clockwise as the view shows it. Any view shows a sphere as a circle as
+    /// wide as its diameter: its contour, the great circle square to the view's normal, so its size
+    /// reads true.
+    pub fn contour_point(&self, basis: &Plane, angle: f64) -> Vec3 {
+        self.center + (basis.x * angle.cos() + basis.y * angle.sin()) * self.radius
+    }
+}
+
+/// A cone as a measurement takes it (model): its apex, its axis (from the apex into the cone) and
+/// its half-angle, between the axis and its sides.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Cone {
+    pub apex: Vec3,
+    pub axis: Vec3,
+    pub half_angle: f64,
+}
+
+impl Cone {
+    /// The ways from the apex along the cone's two silhouettes on the view through `basis`: the
+    /// sides whose tangent planes hold the view's direction, at twice the half-angle to each other.
+    /// Foreshortened (the flag) when the view's plane doesn't hold the axis, so the angle between
+    /// them on paper isn't the cone's. Refused when the view looks along the axis or within the
+    /// half-angle of it, where the cone shows its rim as a circle and has no silhouettes.
+    pub fn silhouettes(&self, basis: &Plane) -> Result<([Vec3; 2], bool)> {
+        validate_plane(basis).map_err(|_| Invalid("a view's basis is finite and orthonormal"))?;
+        let open = self.half_angle > EPS && self.half_angle < std::f64::consts::FRAC_PI_2 - EPS;
+        require(model_point(self.apex) && open, "a cone has its apex within 1e12 mm of the origin and a half-angle between 0 and 90°")?;
+        let axis = self.axis.normalized().ok_or(Invalid("the cone's axis is zero or not finite"))?;
+        let end_on = Invalid("the cone is seen end-on in this view: its rim is a circle");
+        // The side at φ round the axis from `u` has the normal (u cos φ + v sin φ) cos h - axis sin h,
+        // which is square to the view's normal n where s cos φ cos h = (n·axis) sin h.
+        let along = basis.normal().dot(axis);
+        let across = basis.normal() - axis * along;
+        let u = across.normalized().ok_or_else(|| end_on.clone())?;
+        let (sin, cos) = self.half_angle.sin_cos();
+        let at = along * sin / (across.len() * cos);
+        if at.abs() >= 1.0 - EPS {
+            return Err(end_on);
+        }
+        let (v, off) = (axis.cross(u), at.acos());
+        let side = |phi: f64| axis * cos + (u * phi.cos() + v * phi.sin()) * sin;
+        Ok(([side(off), side(-off)], out_of_plane(basis, axis)))
+    }
+}
+
+/// The angles round `sphere`'s contour on the view through `basis` (as [`Sphere::contour_point`]
+/// takes them, from 0 to 2π) where it crosses the plane through `point` square to `normal`: none,
+/// one where it touches, or two. None for a plane parallel to the view's, which the contour never
+/// crosses.
+pub fn contour_crossings(basis: &Plane, sphere: &Sphere, point: Vec3, normal: Vec3) -> Result<Vec<f64>> {
+    validate_plane(basis).map_err(|_| Invalid("a view's basis is finite and orthonormal"))?;
+    let round = model_point(sphere.center) && sphere.radius > EPS && sphere.radius <= MAX_NUMBER;
+    require(round && model_point(point), "a sphere has its centre within 1e12 mm of the origin and a radius over 0, and a plane a point as near")?;
+    let normal = normal.normalized().ok_or(Invalid("a plane's normal is zero or not finite"))?;
+    // The contour meets the plane where a cos θ + b sin θ = d.
+    let (a, b, d) = (sphere.radius * basis.x.dot(normal), sphere.radius * basis.y.dot(normal), (point - sphere.center).dot(normal));
+    let reach = a.hypot(b);
+    if reach <= PARALLEL * sphere.radius || d.abs() > reach {
+        return Ok(Vec::new());
+    }
+    let (at, off) = (b.atan2(a), (d / reach).clamp(-1.0, 1.0).acos());
+    let mut angles = vec![(at - off).rem_euclid(TAU)];
+    if off > EPS {
+        angles.push((at + off).rem_euclid(TAU));
+    }
+    Ok(angles)
 }
 
 /// Which of a cylinder's two silhouettes on a view, by where another cylinder is there: the one
