@@ -921,14 +921,14 @@ fn mimic_false_gives_the_previous_output() {
 }
 
 #[test]
-fn file_export_writes_mimic_unless_told_not_to() {
+fn file_export_writes_mimic_only_when_asked() {
     let mut s = fan(&["revolute", "revolute"]);
     link(&mut s, "J0", "J1", 2.0, 0.0);
     let dir = temp("mimic");
     let on = dir.join("on.urdf");
     let off = dir.join("off.urdf");
-    run(&mut s, "file.export", json!({"path": on.to_string_lossy()}));
-    run(&mut s, "file.export", json!({"path": off.to_string_lossy(), "mimic": false}));
+    run(&mut s, "file.export", json!({"path": on.to_string_lossy(), "mimic": true}));
+    run(&mut s, "file.export", json!({"path": off.to_string_lossy()}));
     assert!(std::fs::read_to_string(&on).unwrap_or_default().contains("<mimic"));
     assert!(!std::fs::read_to_string(&off).unwrap_or_default().contains("<mimic"));
 }
@@ -1483,7 +1483,7 @@ fn export_with_prefix(tag: &str, urdf: &str, prefix: &str) -> (PathBuf, std::pat
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    run(&mut s, "file.export", json!({"path": path.to_string_lossy(), "mesh_prefix": prefix}));
+    run(&mut s, "file.export", json!({"path": path.to_string_lossy(), "mesh_prefix": prefix, "place_meshes": true}));
     let xml = std::fs::read_to_string(&path).unwrap_or_default();
     (dir, path, xml)
 }
@@ -1549,11 +1549,11 @@ fn a_file_url_prefix_is_decoded_like_a_url() {
 }
 
 #[test]
-fn place_meshes_false_keeps_every_mesh_beside_the_urdf() {
+fn by_default_every_mesh_stays_beside_the_urdf_as_before() {
     let mut s = two_cubes();
     let dir = temp("prefix-unplaced");
     let path = dir.join("robot.urdf");
-    run(&mut s, "file.export", json!({"path": path.to_string_lossy(), "mesh_prefix": "meshes/", "place_meshes": false}));
+    run(&mut s, "file.export", json!({"path": path.to_string_lossy(), "mesh_prefix": "meshes/"}));
     let xml = std::fs::read_to_string(&path).unwrap_or_default();
     assert!(xml.contains(r#"filename="meshes/robot-B.stl""#), "{xml}");
     assert!(dir.join("robot-B.stl").exists());
@@ -1579,7 +1579,7 @@ fn a_web_prefix_keeps_the_meshes_beside_the_urdf_and_says_so() {
     let mut s = two_cubes();
     let dir = temp("prefix-web");
     let path = dir.join("r.urdf");
-    let r = run(&mut s, "file.export", json!({"path": path.to_string_lossy(), "mesh_prefix": "https://example.com/m/"}));
+    let r = run(&mut s, "file.export", json!({"path": path.to_string_lossy(), "mesh_prefix": "https://example.com/m/", "place_meshes": true}));
     assert!(dir.join("r-B.stl").exists());
     assert!(r["warnings"].to_string().contains("mesh_prefix"), "{r}");
     let _ = std::fs::remove_dir_all(&dir);

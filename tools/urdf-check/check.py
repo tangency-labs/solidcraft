@@ -270,7 +270,12 @@ def main():
         expected = json.loads((HERE / "expected" / f"{name}.json").read_text())
         with tempfile.TemporaryDirectory() as tmp:
             urdf = Path(tmp) / f"{name}.urdf"
-            r = subprocess.run([cli, "run", str(HERE / "fixtures" / f"{name}.json"), "--out", str(urdf)], capture_output=True, text=True, check=False)
+            # Exported as the desktop dialog does it: motion links as <mimic> (off by default).
+            script = json.loads((HERE / "fixtures" / f"{name}.json").read_text())
+            script["commands"].append({"command": "file.export", "params": {"path": str(urdf), "mimic": True}})
+            run = Path(tmp) / f"{name}-run.json"
+            run.write_text(json.dumps(script))
+            r = subprocess.run([cli, "run", str(run)], capture_output=True, text=True, check=False)
             if r.returncode or not urdf.exists():
                 print(f"{name}: export FAILED: {(r.stdout + r.stderr).strip()[-400:]}")
                 failed += 1

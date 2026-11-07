@@ -5,8 +5,9 @@ Description Format), the format ROS, Gazebo, Isaac Sim, PyBullet and MuJoCo read
 becomes a link with its mesh, mass and inertia. Each joint becomes a URDF joint, or a short
 chain of them, that moves the parts the way SolidCraft does.
 
-- **Desktop:** **File → Export URDF…** asks for the options below. It remembers **Couple motion
-  links**, which is the preference `urdf_mimic`.
+- **Desktop:** **File → Export URDF…** asks for the options below. It writes the meshes where
+  `mesh_prefix` points, and remembers **Couple motion links**, which is the preference
+  `urdf_mimic` (on by default).
 - **Commands:** `file.export {"path": "robot.urdf"}` (or `"format": "urdf"`)
 - **MCP:** the `export` tool with a `.urdf` path or `format: "urdf"`
 - **CLI:** `solidcraft-cli run script.json --out robot.urdf`
@@ -15,9 +16,9 @@ URDF always exports the whole assembly, so `bodies` is refused.
 
 ## Files
 
-The export writes binary STLs in metres, next to `robot.urdf` unless `mesh_prefix` names a folder
-(see [Parameters](#parameters)). `mesh_prefix` decides both the names the URDF gives and where
-the files go:
+The export writes binary STLs in metres, next to `robot.urdf`. `mesh_prefix` goes before each
+name in the URDF; with `place_meshes` the files are also written where it points (see
+[Parameters](#parameters)):
 
 - `robot-<component>.stl` holds all of the component's bodies, as drawn. The root component's
   bodies go in `robot-base.stl`. When every body collides as drawn (`mesh`), this file is also
@@ -37,19 +38,19 @@ way, the error names the files already written and the one that failed.
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `mesh_prefix` | none | Put before each mesh file name, and decides where the meshes are written (see below). Leave it empty for loaders that resolve against the URDF's folder (Isaac Sim, PyBullet, MuJoCo, yourdfpy). RViz and other ROS tools need `package://<pkg>/meshes/` or an absolute folder. |
+| `mesh_prefix` | none | Put before each mesh file name, and with `place_meshes` where the meshes are written (see below). Leave it empty for loaders that resolve against the URDF's folder (Isaac Sim, PyBullet, MuJoCo, yourdfpy). RViz and other ROS tools need `package://<pkg>/meshes/` or an absolute folder. |
 | `effort` | 1000 | Effort limit for joint values with none saved, in N (sliding) or N m (turning). |
 | `velocity` | 10 | Velocity limit for joint values with none saved, in m/s or rad/s. |
 | `collision` | mesh | What a body left on `auto` becomes: `mesh` or `convex_hull`. See [Collision shapes](#collision-shapes). |
-| `mimic` | true | Write `<mimic>` for motion links. `false` leaves each joint free, as older versions did. |
-| `place_meshes` | true | Write the meshes where `mesh_prefix` points. `false` writes them next to the URDF whatever the prefix says, as older versions did; copy them where the prefix points yourself. |
+| `mimic` | false | Write `<mimic>` for motion links. `false` leaves each joint free, as older versions did. The desktop dialog turns it on (`urdf_mimic`). |
+| `place_meshes` | false | Write the meshes where `mesh_prefix` points, making the folder. `false` writes them next to the URDF whatever the prefix says, as older versions did; copy them where the prefix points yourself. The desktop dialog turns it on. |
 
 URDF requires `effort` and `velocity` on every moving joint. A joint's own values come first, then
 these parameters, then the defaults, with a warning naming the joints that used them. A value that
 is not a positive number is refused.
 
-The meshes go where the URDF says they are, and a missing folder is created (unless
-`place_meshes` is `false`):
+With `place_meshes: true` the meshes go where the URDF says they are, and a missing folder is
+created:
 
 | `mesh_prefix` | Written to |
 |---|---|
@@ -125,7 +126,7 @@ placed several times, the frame appears on the first placement.
   reversed, so the values still match.
 - **Limits** are written as `lower <= upper` in radians or metres. A sliding step without a
   limit gets ±1000 m, since URDF requires one, with a warning.
-- **Motion links** (gears, racks, screws and plain links) are written as `<mimic>` on the driven
+- **Motion links** (gears, racks, screws and plain links) are written, with `mimic: true`, as `<mimic>` on the driven
   joint, converted to metres and radians. A chain of links is composed down to its first driver,
   since many tools accept only a mimic of a joint that is not one itself. A warning names a driven
   joint left free: a cam (not linear), a cycle, or a driver that is not in the URDF. A driver whose

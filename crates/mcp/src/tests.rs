@@ -554,18 +554,18 @@ fn export_tool_writes_a_urdf_package() {
     let dir = std::env::temp_dir().join(format!("solidcraft-mcp-urdf-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let urdf = dir.join("robot.urdf");
-    let r = tool(&mut s, "export", json!({"path": urdf.to_string_lossy(), "mesh_prefix": "package://robot/meshes/"}));
+    let r = tool(&mut s, "export", json!({"path": urdf.to_string_lossy(), "mesh_prefix": "package://robot/meshes/", "place_meshes": true}));
     assert_eq!(r["format"], "Urdf", "{r}");
     assert!(std::fs::read_to_string(&urdf).unwrap().contains(r#"filename="package://robot/meshes/robot-base.stl""#));
     assert!(dir.join("meshes/robot-base.stl").exists());
     // effort and velocity reach file.export, which refuses a bad one.
     let r = raw_tool(&mut s, "export", json!({"path": urdf.to_string_lossy(), "effort": -1}));
     assert_eq!(r["result"]["isError"], json!(true), "{r}");
-    // place_meshes reaches file.export too: false keeps the meshes beside the URDF.
+    // Without place_meshes the meshes stay beside the URDF, as before.
     let beside = dir.join("beside");
     std::fs::create_dir_all(&beside).unwrap();
     let urdf = beside.join("robot.urdf");
-    tool(&mut s, "export", json!({"path": urdf.to_string_lossy(), "mesh_prefix": "meshes/", "place_meshes": false}));
+    tool(&mut s, "export", json!({"path": urdf.to_string_lossy(), "mesh_prefix": "meshes/"}));
     assert!(beside.join("robot-base.stl").exists());
     assert!(!beside.join("meshes").exists());
     let _ = std::fs::remove_dir_all(&dir);

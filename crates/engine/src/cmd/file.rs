@@ -116,7 +116,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&EXPORT_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::FileExportResult>)
-        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|glb|urdf|json (default from extension; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic and roughness as materials; a transparent body or face, or a body a render setup gives an image texture or optics, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it or in the folder mesh_prefix names; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/; a folder in it is where the meshes go), place_meshes? (default true; false: the meshes next to the .urdf whatever mesh_prefix says), effort? (default 1000), velocity? (default 10), mimic? (default true: motion links as <mimic>), collision?: mesh|convex_hull (default mesh: what a body with no shape of its own becomes); quality?: standard|fine|finest (STL, OBJ, 3MF and GLB: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies)"),
+        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|glb|urdf|json (default from extension; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; glb: binary glTF in metres with Y up, each body placed and named, its colours, metallic and roughness as materials; a transparent body or face, or a body a render setup gives an image texture or optics, is refused; urdf: the whole assembly as a robot, with STL meshes written next to it, or where mesh_prefix points with place_meshes; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), place_meshes? (default false: the meshes next to the .urdf whatever mesh_prefix says; true: written where mesh_prefix points, its folder made), effort? (default 1000), velocity? (default 10), mimic? (default false; true: motion links as <mimic>), collision?: mesh|convex_hull (default mesh: what a body with no shape of its own becomes); quality?: standard|fine|finest (STL, OBJ, 3MF and GLB: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts); lay_on_print_faces?: bool (STL and 3MF only, default false: each body with a print face (body.print_face) is written laid on it, as a slicer export lays it → print_faces: the bodies laid, warnings: each body that has a print face but was written as it lies)"),
     // One command per format, so each File › Export item can have a key of its own; started
     // from a key or command search, the app opens the save picker (the mesh dialog for STL and
     // 3MF). Each takes `file.export`'s parameters for its format, without `format`.
@@ -149,7 +149,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&EXPORT_URDF_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::UrdfExportResult>)
-        .params("path; mesh_prefix? (a folder in it is where the meshes go); place_meshes? (default true; false: the meshes next to the .urdf whatever mesh_prefix says); effort? (default 1000), velocity? (default 10): for joints with none saved; mimic? (default true); collision?: mesh|convex_hull (default mesh) → {path, format, files, links, joints, warnings}: the whole assembly as a robot, with STL meshes written next to it or in the folder mesh_prefix names; docs/urdf.md"),
+        .params("path; mesh_prefix? (before each mesh file name); place_meshes? (default false: the meshes next to the .urdf; true: where mesh_prefix points, its folder made); effort? (default 1000), velocity? (default 10): for joints with none saved; mimic? (default false; true: motion links as <mimic>); collision?: mesh|convex_hull (default mesh) → {path, format, files, links, joints, warnings}: the whole assembly as a robot, with STL meshes written next to it, or where mesh_prefix points with place_meshes; docs/urdf.md"),
     CommandSpec::new("file.save_mesh", "Save As Mesh", crate::checked!("file.save_mesh", save_mesh))
         .at("INSERT", "FILES")
         .icon("mesh_export")
@@ -2437,7 +2437,7 @@ fn export_urdf(s: &Session, cmd: &str, path: &str, p: &Value) -> Result<Value> {
         mesh_prefix,
         effort: positive("effort")?,
         velocity: positive("velocity")?,
-        mimic: flag("mimic", true)?,
+        mimic: flag("mimic", false)?,
         collision: match p.get("collision") {
             None | Some(Value::Null) => solidcraft_io::urdf::CollisionDefault::Mesh,
             Some(Value::String(c)) if c == "mesh" => solidcraft_io::urdf::CollisionDefault::Mesh,
@@ -2445,9 +2445,9 @@ fn export_urdf(s: &Session, cmd: &str, path: &str, p: &Value) -> Result<Value> {
             Some(_) => return Err(bad(cmd, "`collision` must be mesh or convex_hull")),
         },
     };
-    // false: every mesh next to the `.urdf` whatever `mesh_prefix` says, the placement before
-    // `mesh_prefix` decided it.
-    let place_meshes = flag("place_meshes", true)?;
+    // true: the meshes where `mesh_prefix` points. Off by default, as before: every mesh next to
+    // the `.urdf` whatever the prefix says.
+    let place_meshes = flag("place_meshes", false)?;
     let file = std::path::Path::new(path);
     let stem = file.file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
     // Occurrences where they are shown, uncaptured moves included, except those the joint solver

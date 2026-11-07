@@ -121,8 +121,8 @@ pub struct ExportUrdfParams {
     /// Default: none.
     #[serde(default)]
     pub mesh_prefix: Option<String>,
-    /// Write the meshes where `mesh_prefix` points; false keeps every mesh next to the `.urdf`
-    /// whatever the prefix says. Default: true.
+    /// Write the meshes where `mesh_prefix` points, making its folder if missing; false keeps
+    /// every mesh next to the `.urdf` whatever the prefix says. Default: false.
     #[serde(default)]
     pub place_meshes: Option<bool>,
     /// The effort limit of joints with none saved (`joint.dynamics`), a positive number. Default: 1000.
@@ -131,7 +131,7 @@ pub struct ExportUrdfParams {
     /// The velocity limit of joints with none saved (`joint.dynamics`), a positive number. Default: 10.
     #[serde(default)]
     pub velocity: Option<f64>,
-    /// Write motion links as `<mimic>`. Default: true.
+    /// Write motion links as `<mimic>`. Default: false (each joint free).
     #[serde(default)]
     pub mimic: Option<bool>,
     /// What a body with no collision shape of its own (`body.collision`) becomes: `mesh` or
@@ -181,11 +181,11 @@ pub struct ExportParams {
     /// `file.export_stl` has it; refused for the other formats. Default: false. Not read for URDF.
     #[serde(default)]
     pub lay_on_print_faces: Option<bool>,
-    /// URDF only: write motion links as `<mimic>`. Default: true.
+    /// URDF only: write motion links as `<mimic>`. Default: false, each joint free.
     #[serde(default)]
     pub mimic: Option<bool>,
-    /// URDF only: write the meshes where `mesh_prefix` points; false keeps them next to the
-    /// `.urdf`. Default: true.
+    /// URDF only: write the meshes where `mesh_prefix` points, making the folder. Default: false,
+    /// next to the `.urdf` whatever the prefix says.
     #[serde(default)]
     pub place_meshes: Option<bool>,
     /// URDF only: what a body with no collision shape of its own becomes: `mesh` or
