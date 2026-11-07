@@ -7112,18 +7112,27 @@ fn trim_to_body(tools: Vec<Traced>, target: &ModelBody, dist_to_start: impl Fn(V
     let mut out = Vec::new();
     let target_traced = target.traced();
     for t in tools {
-        let Some(cut) = kernel::boolean(&t.body, &target.body, BoolOp::Cut)? else { continue };
-        let cut = Traced::step(cut, &[&t, &target_traced]);
-        let lumps = cut.body.lumps()?;
-        let lineages = crate::lineage::Lineage::lumps(&cut.body, cut.lineage.as_ref(), &lumps);
-        for (lump, lineage) in lumps.into_iter().zip(lineages) {
-            let tol = (lump.size() * 1e-4).max(1e-6);
-            let touches = lump
-                .mesh(&solidcraft_kernel::MeshTolerance::chord((lump.size() * 1e-2).max(1e-2)))
-                .map(|m| m.positions.iter().any(|q| dist_to_start(*q) < tol))
-                .unwrap_or(false);
-            if touches {
-                out.push(Traced { body: lump, lineage });
+        // The tool less the body is the stretch before the surface when the profile starts outside
+        // the body. When the profile lies on the body's own face (a cut up to a slanted face of
+        // the same part), the stretch before the surface is inside it: the tool within the body.
+        for op in [BoolOp::Cut, BoolOp::Intersect] {
+            let before = out.len();
+            let Some(cut) = kernel::boolean(&t.body, &target.body, op)? else { continue };
+            let cut = Traced::step(cut, &[&t, &target_traced]);
+            let lumps = cut.body.lumps()?;
+            let lineages = crate::lineage::Lineage::lumps(&cut.body, cut.lineage.as_ref(), &lumps);
+            for (lump, lineage) in lumps.into_iter().zip(lineages) {
+                let tol = (lump.size() * 1e-4).max(1e-6);
+                let touches = lump
+                    .mesh(&solidcraft_kernel::MeshTolerance::chord((lump.size() * 1e-2).max(1e-2)))
+                    .map(|m| m.positions.iter().any(|q| dist_to_start(*q) < tol))
+                    .unwrap_or(false);
+                if touches {
+                    out.push(Traced { body: lump, lineage });
+                }
+            }
+            if out.len() > before {
+                break;
             }
         }
     }
