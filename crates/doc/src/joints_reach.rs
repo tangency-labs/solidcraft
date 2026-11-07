@@ -161,6 +161,7 @@ pub fn reach(doc: &Document, st: &ModelState, r: &Reach) -> Result<Reached, Stri
     let mut x = x0.clone();
     let miss = |res: &[f64]| res.iter().take(mt).map(|v| v * v).sum::<f64>().sqrt();
     let before = f(&x0).map_or(f64::INFINITY, |r| miss(&r));
+    unlock_balls(tree, &vars, &bounds, mt, &mut f, &mut x);
     let res = approach(&mut f, &|a, b| stride(asm, &vals, &vars, &paced, a, b), mt, &mut x, &bounds, &cap, tol, loose_gap(scale))
         .ok_or("a closed loop on its chain is open and can't close (joint.list shows its conflict)")?;
     let mut out = Reached::default();
@@ -288,6 +289,51 @@ fn misses(
         *v *= LOOP_WEIGHT;
     }
     out.iter().all(|v| v.is_finite()).then_some(out)
+}
+
+/// A ball joint whose pitch is 0 or a half turn is in gimbal lock: its yaw and roll turn about the
+/// same axis, so only pitch tilts it, and only one way, and a nudge across that way gets no step
+/// (#12873). There yaw and roll can trade against each other without moving anything, so turn
+/// them until pitch tilts the point toward the target the fastest, within their limits.
+fn unlock_balls(tree: &Tree, vars: &[(u64, usize)], bounds: &[(f64, f64)], mt: usize, f: &mut dyn FnMut(&[f64]) -> Option<Vec<f64>>, x: &mut [f64]) {
+    let at = |id: u64, i: usize| vars.iter().position(|v| *v == (id, i));
+    let miss = |res: &[f64]| res.iter().take(mt).map(|v| v * v).sum::<f64>();
+    for j in tree.joints.values().filter(|j| j.kind == super::JointKind::Ball) {
+        let (Some(ky), Some(kp), Some(kr)) = (at(j.id, 0), at(j.id, 1), at(j.id, 2)) else { continue };
+        let Some(&pitch) = x.get(kp) else { continue };
+        if pitch.sin().abs() > 1e-9 {
+            continue;
+        }
+        // Yaw + δ with roll − δ (at pitch 0) or roll + δ (at a half turn) is the same pose.
+        let c = pitch.cos().signum();
+        let (lo, hi) = bounds.get(kp).copied().unwrap_or((f64::NEG_INFINITY, f64::INFINITY));
+        let h = if pitch + 1e-6 <= hi { 1e-6 } else { -1e-6 };
+        if pitch + h < lo {
+            continue;
+        }
+        let turned = |x: &[f64], d: f64, tilt: f64| {
+            let mut y = x.to_vec();
+            for (k, dv) in [(ky, d), (kr, -c * d), (kp, tilt)] {
+                if let Some(v) = y.get_mut(k) {
+                    *v += dv;
+                }
+            }
+            y
+        };
+        // How the miss changes as pitch tilts, with yaw turned by δ: a cos δ + b sin δ.
+        let Some(m0) = f(x).map(|r| miss(&r)) else { continue };
+        let slope = |f: &mut dyn FnMut(&[f64]) -> Option<Vec<f64>>, d: f64| f(&turned(x, d, h)).map(|r| (miss(&r) - m0) / h.abs());
+        let (Some(a), Some(b)) = (slope(f, 0.0), slope(f, std::f64::consts::FRAC_PI_2)) else { continue };
+        if a.hypot(b) <= 1e-12 * m0.max(1.0) {
+            continue;
+        }
+        let d = (-b).atan2(-a);
+        let y = turned(x, d, 0.0);
+        let inside = [ky, kr].iter().all(|k| bounds.get(*k).zip(y.get(*k)).is_some_and(|((lo, hi), v)| (*lo..=*hi).contains(v)));
+        if inside {
+            x.copy_from_slice(&y);
+        }
+    }
 }
 
 /// The target's misses for these values: the point's (mm), then the axis's (as mm across `scale`).

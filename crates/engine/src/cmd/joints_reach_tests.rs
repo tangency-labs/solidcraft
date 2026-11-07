@@ -385,3 +385,56 @@ fn quarter_turn_reaches_keep_the_four_bar_closed_and_diagnostics_current() {
         }
     }
 }
+
+/// A ball joint at its rest pose (yaw, pitch and roll all 0) tilts toward a nudge of its tip in
+/// every direction, not only along its pitch (#12873): there yaw and roll turn about the same
+/// axis, so pitch alone tilts it, one way. The same holds a hair off the rest pose.
+#[test]
+fn a_ball_joint_at_rest_tilts_toward_a_sideways_nudge() {
+    let side = (22.0f64 * 22.0 - 1.0).sqrt();
+    for (start, to) in [
+        (None, Vec3::new(1.0, 0.0, side)),
+        (None, Vec3::new(0.0, 1.0, side)),
+        (None, Vec3::new(-1.0, 0.0, side)),
+        (None, Vec3::new(0.0, -1.0, side)),
+        (Some(Vec3::new(0.0, 1e-3, 22.0)), Vec3::new(1.0, 0.0, side)),
+    ] {
+        let mut s = Session::default();
+        part(&mut s, "Socket", [-1.0, -1.0, -1.0]);
+        part(&mut s, "Ball", [-1.0, -1.0, 21.0]);
+        let socket = occ(&s, "Socket");
+        run(&mut s, "occurrence.ground", json!({"occurrence": socket, "grounded": true}));
+        pin(&mut s, "ball", "Ball joint", "Socket", "Ball", Vec3::ZERO, Vec3::Z);
+        let tip = Vec3::new(0.0, 0.0, 22.0);
+        if let Some(near) = start {
+            reach(&mut s, "Ball", tip, json!({"point": pt(near)}));
+        }
+        let r = reach(&mut s, "Ball", tip, json!({"point": pt(to)}));
+        assert_eq!((&r["reached"], &r["moved"]), (&json!(true), &json!(true)), "from {start:?} to {to:?}: {r}");
+        assert!(got(&r).dist(to) < 1e-3, "from {start:?} to {to:?}: {r}");
+        assert!(place(&s, "Ball", tip).dist(to) < 1e-3, "from {start:?} to {to:?}: {r}");
+    }
+}
+
+/// A ball joint whose pitch is limited, reached past the limit from its rest pose, tilts toward
+/// the target until pitch meets the limit, and says which limit stopped it. The case is from
+/// asd417's review of the gimbal-lock fix (#12873).
+#[test]
+fn a_ball_joint_reached_past_its_pitch_limit_stops_there_and_says_so() {
+    let to = Vec3::new(22.0 * 30f64.to_radians().sin(), 0.0, 22.0 * 30f64.to_radians().cos());
+    for (min, max, limit) in [(-10.0, 10.0, "max"), (0.0, 10.0, "max"), (-10.0, 0.0, "min")] {
+        let mut s = Session::default();
+        part(&mut s, "Socket", [-1.0, -1.0, -1.0]);
+        part(&mut s, "Ball", [-1.0, -1.0, 21.0]);
+        let socket = occ(&s, "Socket");
+        run(&mut s, "occurrence.ground", json!({"occurrence": socket, "grounded": true}));
+        pin(&mut s, "ball", "Ball joint", "Socket", "Ball", Vec3::ZERO, Vec3::Z);
+        run(&mut s, "joint.limits", json!({"joint": "Ball joint", "index": 1, "min": min, "max": max}));
+        let r = reach(&mut s, "Ball", Vec3::new(0.0, 0.0, 22.0), json!({"point": pt(to)}));
+        assert_eq!((&r["reached"], &r["moved"]), (&json!(false), &json!(true)), "[{min}, {max}]: {r}");
+        assert_eq!(r["stopped_by_limit"], json!([{"joint": "Ball joint", "value": "pitch", "limit": limit}]), "[{min}, {max}]: {r}");
+        // Tilted 10° toward the target: 20° short of it, a chord of 2 · 22 · sin 10°.
+        let short = 2.0 * 22.0 * 10f64.to_radians().sin();
+        assert!((r["error_mm"].as_f64().unwrap_or(f64::NAN) - short).abs() < 1e-6, "[{min}, {max}]: {r}");
+    }
+}
