@@ -1248,9 +1248,7 @@ fn pattern_on_path_orders_the_curves_into_one_chain() {
         let mut s = Session::default();
         run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [9, 9, 0], "body_name": "Pin"}));
         run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Path"}));
-        for (id, a, b) in
-            [("l1", [10, 10], [30, 10]), ("l2", [30, 10], [30, 30]), ("l3", [30, 30], [60, 30]), ("l4", [60, 30], [60, 10])]
-        {
+        for (id, a, b) in [("l1", [10, 10], [30, 10]), ("l2", [30, 10], [30, 30]), ("l3", [30, 30], [60, 30]), ("l4", [60, 30], [60, 10])] {
             run(&mut s, "sketch.line", json!({"points": [a, b], "connect": false, "ids": [id]}));
         }
         run(&mut s, "sketch.finish", json!({}));
@@ -1270,4 +1268,23 @@ fn pattern_on_path_orders_the_curves_into_one_chain() {
     assert_eq!(copies(["l1", "l2", "l3", "l4"]), want);
     assert_eq!(copies(["l1", "l3", "l2", "l4"]), want);
     assert_eq!(copies(["l4", "l3", "l2", "l1"]), copies(["l4", "l2", "l3", "l1"]));
+}
+
+/// #12199: putting the listed curves in chain order does not join curves with a gap between
+/// them: such a path is still refused.
+#[test]
+fn pattern_on_path_with_a_gap_is_still_refused() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [9, 9, 0], "body_name": "Pin"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Path"}));
+    // (10,10) → (30,10), then a 20 mm gap, then (30,30) → (60,30).
+    for (id, a, b) in [("l1", [10, 10], [30, 10]), ("l3", [30, 30], [60, 30])] {
+        run(&mut s, "sketch.line", json!({"points": [a, b], "connect": false, "ids": [id]}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    for order in [["l1", "l3"], ["l3", "l1"]] {
+        let p = json!({"bodies": ["Pin"], "path_sketch": "Path", "path": order, "count": 3, "spacing": 10});
+        let error = s.execute("solid.pattern.path", &p).unwrap_err().to_string();
+        assert!(error.contains("not connected end to end"), "{order:?}: {error}");
+    }
 }

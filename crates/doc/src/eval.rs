@@ -6113,8 +6113,7 @@ pub(crate) fn path_segments_at(ps: &SolvedSketch, ids: &[String], start: Vec3, p
 /// its end. Curves that meet nothing keep their listed order after the chain, so a real gap is
 /// still reported by the caller.
 fn chain_order(curves: Vec<Vec<solidcore_record::Seg2>>, joint: f64) -> Vec<Vec<solidcore_record::Seg2>> {
-    let ends: Vec<Option<(Vec2, Vec2)>> =
-        curves.iter().map(|c| c.first().zip(c.last()).map(|(f, l)| (f.start(), l.end()))).collect();
+    let ends: Vec<Option<(Vec2, Vec2)>> = curves.iter().map(|c| c.first().zip(c.last()).map(|(f, l)| (f.start(), l.end()))).collect();
     let meets = |p: Vec2, q: Vec2| p.dist(q) <= joint;
     // Already end to end as listed: nothing to do.
     let connected = ends.windows(2).all(|w| match (w[0], w[1]) {
@@ -6127,9 +6126,7 @@ fn chain_order(curves: Vec<Vec<solidcore_record::Seg2>>, joint: f64) -> Vec<Vec<
     let n = curves.len();
     // Whether end `p` of curve `i` meets an end of any other curve.
     let shared = |i: usize, p: Vec2| (0..n).any(|j| j != i && ends[j].is_some_and(|(a, b)| meets(a, p) || meets(b, p)));
-    let head = (0..n)
-        .find(|&i| ends[i].is_some_and(|(a, b)| !shared(i, a) || !shared(i, b)))
-        .or_else(|| (0..n).find(|&i| ends[i].is_some()));
+    let head = (0..n).find(|&i| ends[i].is_some_and(|(a, b)| !shared(i, a) || !shared(i, b))).or_else(|| (0..n).find(|&i| ends[i].is_some()));
     let Some(head) = head else { return curves };
     let mut used = vec![false; n];
     let mut order = vec![head];
