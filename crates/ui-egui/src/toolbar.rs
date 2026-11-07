@@ -6405,7 +6405,7 @@ mod persistent_ribbon_tests {
             let effects = h.app.session.status_items();
             let ctx = h.ctx.clone();
             let mut expected = Vec::new();
-            let output = ctx.run_ui(
+            let mut output = ctx.run_ui(
                 egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(400.0, 240.0))), focused: true, ..Default::default() },
                 |ui| {
                     expected.clear(); // Context layout passes never accumulate stale paint expectations.
@@ -6434,6 +6434,7 @@ mod persistent_ribbon_tests {
                     paint_persistent_ribbon(&h.app, ui, paints, "INSPECT", "ribbon_grid");
                 },
             );
+            output.textures_delta.clear();
             assert_eq!(h.app.session.status_items(), effects, "rendering real active cells never changes their effects");
             for (id, cell, original_clip) in expected {
                 let mut backgrounds = Vec::new();
