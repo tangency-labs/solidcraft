@@ -2769,10 +2769,10 @@ fn align_object_type_row(d: &mut Dialog, ui: &mut egui::Ui) {
     }
 }
 
-/// Rows above the selection inputs: the pattern type and object type, the Hole placement (one
-/// face point, or sketch points).
+/// Rows above the selection inputs: the pattern object type, the Hole placement (one face
+/// point, or sketch points). Pattern kind (Rectangular / Circular / Path) comes from the
+/// toolbar command, not an in-dialog Type switch (#9643).
 fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
-    let session = &app.session;
     if matches!(d.kind, Kind::Mirror) {
         object_type_row(d, ui);
         return;
@@ -2785,52 +2785,7 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
         crate::dialogs_move::type_row(app, d, ui);
         return;
     }
-    let current = match d.kind {
-        Kind::PatternRect { .. } => Some(0),
-        Kind::PatternCirc { .. } => Some(1),
-        Kind::PathPattern { .. } => Some(2),
-        _ => None,
-    };
-    if let Some(cur) = current {
-        let mut ty = cur;
-        choice_row(ui, "Type", "pat_type", &mut ty, &["Rectangular", "Circular", "Path"]);
-        if ty != cur {
-            // Same objects, the new pattern's other inputs.
-            let objects = d.inputs.first().map(|i| i.items.clone()).unwrap_or_default();
-            let (kind, mut inputs) = match ty {
-                0 => (
-                    Kind::PatternRect {
-                        count: "3".into(),
-                        spacing: length_default(session, "20"),
-                        count2: "1".into(),
-                        spacing2: length_default(session, "20"),
-                    },
-                    vec![
-                        SelInput::new("Objects", BODIES, true),
-                        SelInput::new("Direction", AXES | EDGES, false),
-                        SelInput::new("Direction 2", AXES | EDGES, false),
-                    ],
-                ),
-                1 => (
-                    Kind::PatternCirc { count: "6".into(), angle: "360 deg".into() },
-                    vec![SelInput::new("Objects", BODIES, true), SelInput::new("Axis", AXIS_PICKS, false)],
-                ),
-                _ => (
-                    Kind::PathPattern { count: "4".into(), spacing: length_default(session, "20") },
-                    vec![SelInput::new("Objects", BODIES, true), SelInput::new("Path", CURVES, true)],
-                ),
-            };
-            let accept = d.inputs.first().map(|i| i.accept).unwrap_or(BODIES);
-            if let Some(i) = inputs.first_mut() {
-                i.items = objects;
-                i.accept = accept;
-                i.label = objects_label(accept);
-            }
-            d.kind = kind;
-            d.inputs = inputs;
-            d.extra.clear();
-            d.advance();
-        }
+    if matches!(d.kind, Kind::PatternRect { .. } | Kind::PatternCirc { .. } | Kind::PathPattern { .. }) {
         object_type_row(d, ui);
         return;
     }

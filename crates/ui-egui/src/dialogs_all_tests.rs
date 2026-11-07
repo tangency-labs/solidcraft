@@ -252,7 +252,11 @@ fn representative(h: &Harness, command: &str) -> Dialog {
         if command == "solid.cylinder" {
             continue; // its face and reference edges place it (cylinder reference tests); this form checks its fields
         }
-        if matches!(input.label, "Rail" | "Second Rail" | "Pass through" | "Direction" | "Roller (optional)" | "Tip (optional)") {
+        // Sweep's optional Direction stays empty for the form check; Rectangular Pattern's
+        // Direction is required (#9643 form cases).
+        if matches!(input.label, "Rail" | "Second Rail" | "Pass through" | "Roller (optional)" | "Tip (optional)")
+            || (input.label == "Direction" && command != "solid.pattern.rectangular")
+        {
             continue;
         }
         let name = if index == 1 && command != "surface.ruled" { "Body2" } else { "Body1" };
@@ -671,7 +675,21 @@ fn align_components_mode_switches_and_aligns_only_selected_instance() {
     assert!((b2.min.x - 10.0).abs() < 1e-5 && (b2.max.x - 70.0).abs() < 1e-5, "{b2:?}");
 }
 form_case!(remove, "solid.remove", []);
-form_case!(path_pattern, "solid.pattern.path", ["Type", "Object Type", "Quantity", "Spacing"]);
+form_case!(rectangular_pattern, "solid.pattern.rectangular", ["Object Type", "Quantity", "Spacing", "Quantity 2", "Spacing 2"]);
+form_case!(circular_pattern, "solid.pattern.circular", ["Object Type", "Quantity", "Total angle"]);
+form_case!(path_pattern, "solid.pattern.path", ["Object Type", "Quantity", "Spacing"]);
+
+/// Pattern kind is chosen from the toolbar; the form has no Rectangular/Circular/Path Type (#9643).
+#[test]
+fn pattern_dialogs_have_no_in_dialog_type_switch() {
+    for command in ["solid.pattern.rectangular", "solid.pattern.circular", "solid.pattern.path"] {
+        let mut h = fixture();
+        h.app.start(command);
+        h.frames(2);
+        assert!(crate::scenario::handle_at("dialog:Type").is_none(), "{command}: no Type row");
+        assert!(crate::scenario::handle_at("dialog:Object Type").is_some(), "{command}: Object Type remains");
+    }
+}
 form_case!(pipe, "solid.pipe", ["Diameter", "Wall", "Operation"]);
 form_case!(stock, "solid.bounding_solid", ["Margin"]);
 form_case!(frame_member, "frame.member", ["All Lines", "Anchor", "Angle", "Mirror", "Name"]);
