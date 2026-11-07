@@ -231,6 +231,7 @@ fn whole(c: &Curve) -> R<Option<BCurve>> {
         }
         Curve::Line { .. } | Curve::Circle { .. } | Curve::Ellipse { .. } | Curve::Hyperbola { .. } | Curve::Parabola { .. } => None,
         Curve::OffsetCurve3d { .. } => return Err(unsupported("an OFFSET_CURVE_3D profile")),
+        Curve::Replica { .. } => return Err(unsupported("a CURVE_REPLICA profile")),
         Curve::Trimmed { .. } | Curve::SurfaceCurve { .. } => return Err(unsupported("nested profile curves")),
     })
 }
