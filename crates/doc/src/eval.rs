@@ -7614,6 +7614,15 @@ fn eval_feature(
                     return apply_beside_sheet_cut(doc, st, f, tools, *operation, &crate::plain(targets), &handled);
                 }
             }
+            // A tapered cut's walls are not square to a sheet made from surfaces: refused where it
+            // changes one.
+            if matches!(operation, Operation::Cut | Operation::Intersect)
+                && matches!(&f.kind, FeatureKind::Extrude { extent, .. } if extent.taper.is_some())
+                && !st.surface_sheets.is_empty()
+            {
+                let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();
+                more::surface_taper_refused(st, &bodies, &crate::plain(targets), *operation)?;
+            }
             // A cut square through flat panels of sheets made from surfaces goes into their outlines.
             if *operation == Operation::Cut && matches!(f.kind, FeatureKind::Extrude { .. }) && !st.surface_sheets.is_empty() {
                 let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();
@@ -8194,6 +8203,10 @@ fn eval_feature(
             let b = if matches!(operation, Operation::NewBody | Operation::Join) { b.with_cylinder_certificate(f.id)? } else { b };
             let prism = more::PrimitivePrism::Cylinder { base, axis: axis.0, radius, height };
             let handled = more::sheet_primitive_cut(f, st, &b, prism, *operation, false, warning)?;
+            // One lying along a panel of a sheet made from surfaces, in its thickness, is refused.
+            if handled.is_empty() && *operation == Operation::Cut && !st.surface_sheets.is_empty() {
+                more::surface_lying_cylinder_refused(st, &b, base, axis.0, radius, height)?;
+            }
             let tools = vec![crate::lineage::cylinder_tool(b)];
             if !handled.is_empty() {
                 return apply_beside_sheet_cut(doc, st, f, tools, *operation, &[], &handled);

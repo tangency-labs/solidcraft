@@ -1626,6 +1626,61 @@ pub(super) fn surface_prism_cut(
     Ok(handled)
 }
 
+/// Refuses a tapered extrude cut (or intersect) that changes a sheet made from surfaces it targets
+/// (#6748), as the flat model refuses it: its walls are not square to the sheet, so the sheet
+/// can't keep it (read back, only its floor would show). A sheet clear of every tool by their
+/// exact boxes is passed over by a cut: a cut beside the sheet changes nothing.
+pub(super) fn surface_taper_refused(st: &ModelState, tools: &[Body], targets: &[String], op: Operation) -> Result<()> {
+    let all = targets.len() == 1 && targets.first().is_some_and(|t| t == "*");
+    let reach: Vec<Option<Aabb3>> = tools.iter().map(exact_box).collect();
+    for sk in &st.surface_sheets {
+        if !(all || targets.is_empty() || targets.contains(&sk.body)) {
+            continue;
+        }
+        let Some(mb) = st.body(&sk.body) else { continue };
+        let target = exact_box(&mb.body);
+        if op == Operation::Cut && reach.iter().all(|tool| boxes_apart(tool, &target)) {
+            continue;
+        }
+        super::sheet_boolean_unchanged(&mb.body, tools, op)?;
+    }
+    Ok(())
+}
+
+/// Refuses a cylinder cut lying along a flat panel of a sheet made from surfaces (#6748), as the
+/// flat model refuses it: its axis parallel to the panel, the cylinder in the panel's thickness
+/// or breaking out of a face, and its axis crossing the panel's outline within its length. That
+/// is a bore or a groove the sheet can't keep (only a hole feature drilled along a panel keeps
+/// its bore, see [`crate::sheet::SheetBore`]); the sheet would read nothing of it, and the cut
+/// would be lost. Refused only where it changes the sheet's body.
+pub(super) fn surface_lying_cylinder_refused(st: &ModelState, tool: &Body, base: Vec3, axis: Vec3, radius: f64, height: f64) -> Result<()> {
+    let Some(a) = axis.normalized() else { return Ok(()) };
+    let (from, to) = (height.min(0.0), height.max(0.0));
+    let reach = exact_box(tool);
+    for sk in &st.surface_sheets {
+        let Some(mb) = st.body(&sk.body) else { continue };
+        if boxes_apart(&reach, &exact_box(&mb.body)) {
+            continue;
+        }
+        let Some((panels, _)) = sk.pieces_in_space() else { continue };
+        let t = sk.thickness;
+        let lies = panels.iter().any(|(_, frame, own)| {
+            let back = frame.inverse();
+            let (b, d) = (back.point(base), back.vector(a));
+            // Along the panel, and meeting its slab, z 0 to t.
+            if d.z.abs() > 1e-9 || !(b.z - radius < t && b.z + radius > 0.0) {
+                return false;
+            }
+            let Some(u) = Vec2::new(d.x, d.y).normalized() else { return false };
+            crate::sheet_surface_convert::extent_across(own, (Vec2::new(b.x, b.y), u)).is_some_and(|(lo, hi)| lo.max(from) < hi.min(to))
+        });
+        if lies {
+            super::sheet_boolean_unchanged(&mb.body, std::slice::from_ref(tool), Operation::Cut)?;
+        }
+    }
+    Ok(())
+}
+
 /// What a hole feature's drills take from the sheets made from surfaces they reach (#6748): a
 /// drill square across a flat panel, through its thickness and clear inside its material, is a
 /// round hole in its outline; one along a flat panel, inside its thickness, a bore of it (see
