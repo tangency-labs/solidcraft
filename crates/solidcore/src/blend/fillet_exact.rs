@@ -1033,6 +1033,30 @@ fn pair_plane(
     centre: Point3,
     tol: f64,
 ) -> Option<(Point3, Vec3)> {
+    let mut best = BIG_DOUBLE;
+    let mut out = None;
+    for sign in [1.0, -1.0] {
+        let Some((n, k, len)) = pair_plane_form(q, rho, sign) else {
+            continue;
+        };
+        let off = (n.dot(centre - c) - k).abs() / len;
+        if off < best {
+            best = off;
+            let normal = n * (1.0 / len);
+            out = Some((c + normal * (k / len), normal));
+        }
+    }
+    if best <= tol {
+        out
+    } else {
+        None
+    }
+}
+
+/// One of the pair's two planes, by `sign`: (x - c).n = k, as `n`, `k` and the length of
+/// `n`; `None` for a plane not defined (the quadrics' axes along each other). `n` depends
+/// on the quadrics' axes alone, so a sign names the same plane's normal for every offset.
+fn pair_plane_form(q: &[BlendQuadric; 2], rho: f64, sign: f64) -> Option<(Vec3, f64, f64)> {
     let mut u = [Vec3::ZERO; 2];
     let mut kk = [0.0; 2];
     let mut s = [0.0; 2];
@@ -1045,26 +1069,34 @@ fn pair_plane(
             *si = if cone { 1.0 / qi.angle.cos() } else { 1.0 };
         }
     }
-    let mut best = BIG_DOUBLE;
-    let mut out = None;
-    for sign in [1.0, -1.0] {
-        let n = u[1] * s[1] - u[0] * (sign * s[0]);
-        let k = kk[1] * s[1] - kk[0] * sign * s[0];
-        let len = n.length();
-        if len <= EFF_ZERO_SQRT {
-            continue;
-        }
-        let off = (n.dot(centre - c) - k).abs() / len;
-        if off < best {
-            best = off;
-            let normal = n * (1.0 / len);
-            out = Some((c + normal * (k / len), normal));
-        }
-    }
-    if best <= tol {
-        out
-    } else {
-        None
+    let n = u[1] * s[1] - u[0] * (sign * s[0]);
+    let k = kk[1] * s[1] - kk[0] * sign * s[0];
+    let len = n.length();
+    (len > EFF_ZERO_SQRT).then_some((n, k, len))
+}
+
+/// The conic of a [`BlendSpine::ConicPair`] on which the edge lies (solidcore #2952). The
+/// two conics cross where the two faces touch, so a station there lies on both and does not
+/// tell them apart: the spine is then read off the edge. The faces meet in their own pair of
+/// conics, in planes of the same normals as the offsets' (they depend on the axes alone),
+/// and `mid`, the edge's middle, lies on one of those.
+fn pair_plane_of_edge(blend: &mut ExactBlend, mid: Point3, tol: f64) {
+    let [a, b] = blend.offsets;
+    let Some(c) = lines_meet(a.point, a.dir, b.point, b.dir, tol) else {
+        return;
+    };
+    let rho = 0.5 * (inscribed_radius(&a, c) + inscribed_radius(&b, c));
+    let [fa, fb] = blend.faces;
+    let rho_faces = 0.5 * (inscribed_radius(&fa, c) + inscribed_radius(&fb, c));
+    let off = |sign: f64| {
+        pair_plane_form(&blend.faces, rho_faces, sign)
+            .map_or(BIG_DOUBLE, |(n, k, len)| (n.dot(mid - c) - k).abs() / len)
+    };
+    let sign = if off(1.0) <= off(-1.0) { 1.0 } else { -1.0 };
+    if let Some((n, k, len)) = pair_plane_form(&blend.offsets, rho, sign) {
+        let normal = n * (1.0 / len);
+        blend.point = c + normal * (k / len);
+        blend.dir = normal;
     }
 }
 
@@ -1491,7 +1523,7 @@ pub fn classify_exact_blend(
         .solver()
         .edgeuse(0)?
         .ok_or_else(|| SolidError::null_pointer(OP))?;
-    eu::edge(b, eu0)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let e = eu::edge(b, eu0)?.ok_or_else(|| SolidError::null_pointer(OP))?;
     let tol = b.tolerance();
 
     let mut radius = 0.0;
@@ -1551,7 +1583,15 @@ pub fn classify_exact_blend(
         ball_on_collapsed: !radii_can_change,
         radii_can_change,
     };
-    Ok(classify_faces(faces, &inputs))
+    let mut blend = classify_faces(faces, &inputs);
+    if blend.spine == BlendSpine::ConicPair {
+        use crate::topology::edge;
+        if let Some(curve) = edge::curve(b, e)? {
+            let mid = curve.evaluate_point(k, edge::interval(b, e)?.evaluate(0.5))?;
+            pair_plane_of_edge(&mut blend, mid, tol);
+        }
+    }
+    Ok(blend)
 }
 
 /// The class of a round on faces whose quadrics are `faces`, read with `inputs`

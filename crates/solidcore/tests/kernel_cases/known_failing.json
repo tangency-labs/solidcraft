@@ -65,11 +65,6 @@
     "reason": "continuity_order: G1 at one seam where the corner patch meets a contact face (g2 wanted), as on SMLib d01d7b0"
   },
   {
-    "case": "fillets/cov-junction-tee-equal-round",
-    "issue": "tangency-labs/solidcore#2952",
-    "reason": "the result is not a closed solid, as on SMLib: equal pipes' intersection is two plane ellipses crossing, a corner the old corner code cannot join (the corner step)"
-  },
-  {
     "case": "fillets/cov-junction-y-junction-120-round",
     "issue": "tangency-labs/solidcore#2361",
     "reason": "refused as on SMLib: the faces between the three intersection curves narrow to nothing at the two triple points, so the room check trips (the corner step)"

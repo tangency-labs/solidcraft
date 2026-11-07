@@ -40,11 +40,13 @@
       }
     },
     {
-      "error": "SMLib's result is not a closed solid",
       "inputs": [
         "b15"
       ],
       "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
       "params": {
         "edges": {
           "kind": "edge",
@@ -129,28 +131,22 @@
     "continuity": {
       "order": "g1"
     },
+    "faces": 8,
     "method": "no closed form for the round on these quadrics' intersection: one valid closed body whose round meets its faces G1",
     "source": "invariants",
     "sources": [],
     "what": "equal pipes R8 tee, rounded 1"
   },
   "expressible": false,
-  "gallery_note": "the two exact conic-pair rounds meet at the ellipses' crossings in a corner the old corner code cannot join",
+  "gallery_note": "the exact conic-pair round on one half ellipse: its two rails meet at the ellipses' crossings, where the pipes touch, and the round fades out there",
   "operation_expressible": true,
-  "outcome": {
-    "engine_error": "step 3 (solid.fillet): SMLib fillet: operation: SMLib's result is not a closed solid (tangent propagation blended the picked edges' tangent chain with them; with it off, tangent_chain: false, only the picked edges are blended)",
-    "kernel_error": "SMLib's result is not a closed solid",
-    "ran": false
-  },
   "records": "cov-junction-tee-equal-round.bodies.json.gz",
-  "result": [],
-  "rig": {
-    "error": "step 3 (solid.fillet): SMLib fillet: operation: SMLib's result is not a closed solid (tangent propagation blended the picked edges' tangent chain with them; with it off, tangent_chain: false, only the picked edges are blended)",
-    "known_failing": "[fail] the result is not a closed solid, as on SMLib: equal pipes' intersection is two plane ellipses crossing, a corner the old corner code cannot join (the corner step)",
-    "measured": null,
-    "refused_with": null,
-    "status": "fail"
-  },
+  "result": [
+    {
+      "body": "Tee",
+      "made": "b16"
+    }
+  ],
   "sources": [],
   "traced_ops": [
     "extrude",
