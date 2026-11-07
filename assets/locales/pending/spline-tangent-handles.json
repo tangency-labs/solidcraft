@@ -1,4 +1,9 @@
 {
+  "ar": {"cmd.sketch_spline_handles": "إظهار مقابض المماس"},
   "de": {"cmd.sketch_spline_handles": "Tangentengriffe anzeigen"},
-  "en": {"cmd.sketch_spline_handles": "Show Tangent Handles"}
+  "en": {"cmd.sketch_spline_handles": "Show Tangent Handles"},
+  "he": {"cmd.sketch_spline_handles": "הצג ידיות משיק"},
+  "ja": {"cmd.sketch_spline_handles": "接線ハンドルを表示"},
+  "vi": {"cmd.sketch_spline_handles": "Hiện tay nắm tiếp tuyến"},
+  "zh": {"cmd.sketch_spline_handles": "显示切线控制柄"}
 }
