@@ -14,7 +14,7 @@ use solidcraft_doc::drawing::dimension::{
 };
 use solidcraft_doc::drawing::view::{View, ViewKind, ViewPlace};
 use solidcraft_doc::drawing::{Drawing, Source, Units};
-use solidcraft_doc::drawing_view::{ViewDirection, ViewOverrides};
+use solidcraft_doc::drawing_view::{Looking, ViewDirection, ViewOverrides};
 use solidcraft_doc::ids::IdSource;
 use solidcraft_doc::naming::{edge_names, face_names};
 use solidcraft_geom::drawing_measure::{LinearDirection, Reading, SilhouetteSide};
@@ -797,4 +797,78 @@ fn an_override_shows_its_text_and_still_reads_the_model() {
     let r = f.resolve(id);
     assert_eq!((&r.status, r.text.as_deref()), (&Status::Overridden, Some("≈80")));
     assert_reads(&r, 100.0, false);
+}
+
+/// A cone on the box's top, its base Ø20 at z = 30 and its apex 20 above, reads its included angle
+/// 2·atan(1/2) in the front view and the right one, whose planes hold its axis: between its
+/// silhouettes from the apex to its base's rim, 10 either side of the axis. An iso view reads the
+/// same angle, foreshortened; a top view, along its axis, is refused. Made 10 tall, it reads 90°.
+/// Half a cone, cut along its axis, is refused in the front view, where one silhouette is gone. With
+/// the cone suppressed it says so.
+#[test]
+fn a_cones_angle_reads_between_its_silhouettes_where_its_faces_are() {
+    let mut f = boxed();
+    run(&mut f.s, "solid.cone", json!({"radius": 10, "height": 20, "base": [40, 20, 30], "operation": "join", "targets": ["Box"]}));
+    let cone_feature = f.s.doc.features.last().unwrap().id;
+    // 10 below the apex, the cone's radius is 5: an eighth of a turn round from the front.
+    let on_cone = [40.0 + 5.0 * FRAC_1_SQRT_2, 20.0 - 5.0 * FRAC_1_SQRT_2, 40.0];
+    let face = f.face(on_cone);
+    let kind = || DimensionKind::Cone { face: face.clone() };
+    let angle = 2.0 * 0.5f64.atan();
+    // A new dimension of `kind` in `view`, read.
+    let added = |f: &mut Fixture, view: u64, kind: DimensionKind| {
+        let id = f.add(view, kind, None);
+        f.resolve(id)
+    };
+    let front = f.add(f.front, kind(), None);
+    let r = f.resolve(front);
+    assert_reads(&r, angle, false);
+    let apex = Vec3::new(40.0, 20.0, 50.0);
+    let [a0, a1, b0, b1] = r.points.as_slice() else { panic!("{r:?}") };
+    assert!(a0.dist(apex) < 1e-6 && b0.dist(apex) < 1e-6, "from the apex: {:?}", r.points);
+    for rim in [a1, b1] {
+        assert!((rim.z - 30.0).abs() < 1e-6 && (rim.y - 20.0).abs() < 1e-6 && ((rim.x - 40.0).abs() - 10.0).abs() < 1e-6, "{:?}", r.points);
+    }
+    assert!((a1.x - b1.x).abs() > 19.0, "either side of the axis: {:?}", r.points);
+    let right = f.right;
+    assert_reads(&added(&mut f, right, kind()), angle, false);
+    let iso = base_view(&mut f, ViewDirection::Named(NamedView::IsoFrontRight), [320.0, 230.0]);
+    let top = base_view(&mut f, ViewDirection::Named(NamedView::Top), [150.0, 250.0]);
+    assert_reads(&added(&mut f, iso, kind()), angle, true);
+    let r = added(&mut f, top, kind());
+    assert!(matches!(&r.status, Status::Unmeasurable(why) if why.contains("end-on")), "{r:?}");
+    run(&mut f.s, "timeline.edit", json!({"feature": cone_feature.to_string(), "set": {"height": 10}}));
+    assert_reads(&f.resolve(front), std::f64::consts::FRAC_PI_2, false);
+    run(&mut f.s, "timeline.suppress", json!({"feature": cone_feature, "suppressed": true}));
+    assert!(matches!(f.resolve(front).status, Status::Suppressed), "{:?}", f.resolve(front));
+    // Half a cone of its own: the half past x = 140 cut away.
+    run(&mut f.s, "solid.cone", json!({"radius": 10, "height": 20, "base": [140, 20, 0], "operation": "new", "body_name": "Half"}));
+    let half_feature = f.s.doc.features.last().unwrap().id;
+    run(&mut f.s, "solid.box", json!({"length": 15, "width": 30, "height": 25, "corner": [140, 5, -1], "operation": "cut", "targets": ["Half"]}));
+    let half = f.s.model.state().bodies.iter().find(|b| b.name == "Half").unwrap().clone();
+    let index = face_index_at(&half, Vec3::new(140.0 - 5.0 * FRAC_1_SQRT_2, 20.0 - 5.0 * FRAC_1_SQRT_2, 10.0)).unwrap();
+    let face = ModelFace { body: "Half".into(), origin_feature: half_feature, name: face_names(&half)[index].clone(), path: Vec::new() };
+    let not_whole = |r: &Resolved| matches!(&r.status, Status::Unmeasurable(why) if why.contains("isn't a whole cone in this view"));
+    let front_view = f.front;
+    let r = added(&mut f, front_view, DimensionKind::Cone { face: face.clone() });
+    assert!(not_whole(&r), "{r:?}");
+    // Seen tilted off its axis's plane, its silhouettes aren't opposite: looking along (2, 0, 1), they
+    // are 104.5° either way round the axis from +X, both on the kept half, so it reads, foreshortened;
+    // along (0, 2, 1), one is at 194.5° on it and the other at -14.5°, cut away.
+    let looking = |direction: [f64; 3]| ViewDirection::Looking(Looking { direction, up: [0.0, 0.0, 1.0], origin: [0.0; 3] });
+    let both = base_view(&mut f, looking([2.0, 0.0, 1.0]), [100.0, 250.0]);
+    assert_reads(&added(&mut f, both, DimensionKind::Cone { face: face.clone() }), angle, true);
+    let one = base_view(&mut f, looking([0.0, 2.0, 1.0]), [300.0, 80.0]);
+    let r = added(&mut f, one, DimensionKind::Cone { face });
+    assert!(not_whole(&r), "{r:?}");
+}
+
+/// A base view of `f`'s model along `direction` at 1:2, centred `at` on the sheet: its id.
+fn base_view(f: &mut Fixture, direction: ViewDirection, at: [f64; 2]) -> u64 {
+    let id = f.d.allocate_id(&mut f.ids).unwrap();
+    let (sheet, source) = (f.d.sheets[0].id, f.d.sources[0].id);
+    let kind = ViewKind::Base { source, view: direction };
+    let settings = ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() };
+    f.d.add_views([Arc::new(View { id, sheet, kind, place: ViewPlace::At(at), settings, reference_shown_percent: 0.0 })]);
+    id
 }

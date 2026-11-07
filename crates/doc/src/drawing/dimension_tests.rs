@@ -335,11 +335,16 @@ fn a_chain_saves_its_points_in_order_and_keeps_its_rules() {
     assert!(reading.starts_with("damaged drawing: "), "{reading}");
 }
 
-/// A cylinder or a sphere dimension saves its face by name, and the face keeps a reference's rules.
+/// A cylinder, a sphere or a cone dimension saves its face by name, and the face keeps a reference's rules.
 #[test]
-fn a_cylinder_or_sphere_dimension_saves_its_face() {
+fn a_cylinder_sphere_or_cone_dimension_saves_its_face() {
     let face = ModelFace { body: BODY.into(), origin_feature: FEATURE, name: "F4:boss".into(), path: vec![3] };
-    for (key, kind) in [("cylinder", DimensionKind::Cylinder { face: face.clone() }), ("sphere", DimensionKind::Sphere { face: face.clone() })] {
+    let kinds = [
+        ("cylinder", DimensionKind::Cylinder { face: face.clone() }),
+        ("sphere", DimensionKind::Sphere { face: face.clone() }),
+        ("cone", DimensionKind::Cone { face: face.clone() }),
+    ];
+    for (key, kind) in kinds {
         let (mut d, _) = measured();
         let (view, id) = (d.views[0].id, d.allocate_id(&mut IdSource::seeded(SEED + 1)).unwrap());
         d.add_dimensions([Arc::new(Dimension {
@@ -587,4 +592,18 @@ fn pieces_are_one_circle_only_when_they_all_lie_on_it() {
     assert!(one_circle(&[three.clone(), short(c)]).is_some(), "short arcs of one circle, read together");
     assert!(one_circle(&[three, short([45.0, 15.0])]).is_none(), "short arcs of two circles of one radius");
     assert!(one_circle(&[]).is_none());
+}
+
+/// Faces lie on one cone when they share its apex, its axis's way and its half-angle, within the
+/// cylinder's margins: a double cone's other half (the same apex and axis line, facing the other
+/// way) is another surface, and so is a cone whose half-angle or apex is off by more.
+#[test]
+fn faces_lie_on_one_cone_by_its_apex_axis_and_half_angle() {
+    let cone = |apex: Vec3, axis: Vec3, half_angle: f64| Curved::Cone(Cone { apex, axis, half_angle });
+    let a = cone(Vec3::ZERO, Vec3::Z, 0.5);
+    assert!(a.same(&cone(Vec3::new(1e-7, 0.0, 0.0), Vec3::Z, 0.5 + 1e-6), 1e-6));
+    assert!(!a.same(&cone(Vec3::ZERO, Vec3::new(0.0, 0.0, -1.0), 0.5), 1e-6), "a double cone's other half");
+    assert!(!a.same(&cone(Vec3::ZERO, Vec3::Z, 0.5 + 1e-3), 1e-6), "another half-angle");
+    assert!(!a.same(&cone(Vec3::new(1e-3, 0.0, 0.0), Vec3::Z, 0.5), 1e-6), "another apex");
+    assert!(!a.same(&Curved::Sphere(Sphere { center: Vec3::ZERO, radius: 1.0 }), 1e-6));
 }

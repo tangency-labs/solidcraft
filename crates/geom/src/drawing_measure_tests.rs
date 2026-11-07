@@ -244,6 +244,36 @@ fn a_spheres_contour_is_its_great_circle_square_to_the_view() {
     refused(contour_crossings(&Plane { x: Vec3::new(2.0, 0.0, 0.0), ..front() }, &ball, ball.center, Vec3::X), "basis");
 }
 
+/// A cone's silhouettes are its two sides whose tangent planes hold the view's direction: each at
+/// its half-angle to the axis, both in the view's plane and twice the half-angle apart when the
+/// view's plane holds the axis (true), and still on the cone but foreshortened when it doesn't. Seen
+/// along its axis, or within its half-angle of it, it has none.
+#[test]
+fn a_cones_silhouettes_are_its_sides_the_view_sees_edge_on() {
+    let quarter = std::f64::consts::FRAC_PI_4;
+    let cone = Cone { apex: Vec3::new(1.0, 2.0, 3.0), axis: Vec3::X * 2.0, half_angle: quarter };
+    let ([a, b], foreshortened) = cone.silhouettes(&front()).unwrap();
+    assert!(!foreshortened);
+    for side in [a, b] {
+        assert!(close(side.len(), 1.0) && close(side.dot(Vec3::X), quarter.cos()) && side.dot(front().normal()).abs() < 1e-12, "{side:?}");
+    }
+    assert!(close(a.dot(b), (2.0 * quarter).cos()), "{a:?} {b:?}");
+    // Its axis up the view's normal's slant: each side still holds the view's direction in its tangent plane.
+    let tilted = Cone { axis: Vec3::Z, half_angle: PI / 6.0, ..cone };
+    let ([a, b], foreshortened) = tilted.silhouettes(&iso()).unwrap();
+    assert!(foreshortened);
+    for side in [a, b] {
+        let normal = side.cross(Vec3::Z.cross(side));
+        assert!(close(side.dot(Vec3::Z), (PI / 6.0).cos()) && normal.dot(iso().normal()).abs() < 1e-12, "{side:?}");
+    }
+    refused(Cone { axis: front().normal(), ..cone }.silhouettes(&front()), "end-on");
+    refused(Cone { axis: Vec3::Z, half_angle: PI / 3.0, ..cone }.silhouettes(&iso()), "end-on");
+    refused(Cone { half_angle: 0.0, ..cone }.silhouettes(&front()), "half-angle");
+    refused(Cone { half_angle: std::f64::consts::FRAC_PI_2, ..cone }.silhouettes(&front()), "half-angle");
+    refused(Cone { apex: Vec3::new(f64::NAN, 0.0, 0.0), ..cone }.silhouettes(&front()), "apex");
+    refused(Cone { axis: Vec3::ZERO, ..cone }.silhouettes(&front()), "axis");
+}
+
 fn cylinder(origin: Vec3, axis: Vec3, radius: f64) -> Cylinder {
     Cylinder { origin, axis, radius }
 }

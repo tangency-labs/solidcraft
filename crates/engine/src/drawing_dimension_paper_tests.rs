@@ -269,6 +269,18 @@ fn a_spheres_size_is_drawn_as_its_label_says() {
     assert!(tips.len() == 1 && close(tips[0].x, m) && close(tips[0].y, m), "{tips:?}");
 }
 
+/// A cone is drawn as an angle between its silhouettes, which run out from its apex: its arrows
+/// are the offset from the apex, on its own side, 120 degrees apart for a cone of half-angle 60.
+#[test]
+fn a_cones_angle_is_drawn_between_its_silhouettes() {
+    let (c, s) = (0.5, 3f64.sqrt() / 2.0);
+    let sides = [[0.0, 0.0], [-50.0 * s, -50.0 * c], [0.0, 0.0], [50.0 * s, -50.0 * c]];
+    let tips = parts(&drawn(DimensionKind::Cone { face: face() }, 20.0, &sides, "120.0°", "1:1")).1;
+    assert!(tips.len() == 2 && tips.iter().all(|t| close(t.len(), 20.0) && t.y < 0.0), "below the apex: {tips:?}");
+    let between = (tips[0].dot(tips[1]) / 400.0).clamp(-1.0, 1.0).acos();
+    assert!((between - 120f64.to_radians()).abs() < 1e-9, "{tips:?}");
+}
+
 /// A chain is one line of frames at one offset: a shared extension line is drawn once, whichever
 /// point is further from the line.
 #[test]
@@ -417,6 +429,7 @@ fn a_dimension_with_no_points_has_no_lines() {
         DimensionKind::Radial { edge: edge(), diameter: false },
         DimensionKind::Cylinder { face: face() },
         DimensionKind::Sphere { face: face() },
+        DimensionKind::Cone { face: face() },
     ] {
         assert!(laid(&dimension(kind, 10.0, TextPlace::Centred), &lost, &view_at("1:1")).is_none());
     }
@@ -465,6 +478,7 @@ fn hostile_points_and_offsets_never_panic() {
             DimensionKind::Chain { points: Vec::new(), direction: LinearDirection::Aligned },
             DimensionKind::Cylinder { face: face() },
             DimensionKind::Sphere { face: face() },
+            DimensionKind::Cone { face: face() },
         ];
         for kind in kinds {
             let d = dimension(kind, offset, text);

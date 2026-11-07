@@ -517,6 +517,53 @@ fn a_spheres_size_is_its_diameter_when_whole_and_its_radius_when_part() {
     assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
 }
 
+/// A cone's included angle, between its two silhouettes: a Ø20 pin's top rim chamfered 2 across
+/// and 2 down is a cone of half-angle 45°, so the front view, whose plane holds its axis, reads
+/// 90.00°, with the 2 decimals every dimension starts with, saved by its face's name. Chamfered 1 across and 3 down it reads 2·atan(1/3), 36.87°;
+/// 3 across and 1 down, 2·atan(3), 143.13°. It takes no settings. A flat face is refused, and a
+/// cone named as a cylinder keeps the cylinder's own words, with the drawing unchanged.
+#[test]
+fn a_cones_angle_is_read_between_its_silhouettes() {
+    let (mut s, view) = front_view();
+    let drawing = s.drawing("test").unwrap().id;
+    run(&mut s, "drawing.close", json!({}));
+    // A point halfway down each chamfer, an eighth of a turn round from the front.
+    let pin = |s: &mut Session, x: f64, name: &str, across: f64, down: f64| {
+        let base = json!({"radius": 10, "height": 20, "base": [x, 20, 0], "axis": "Z", "operation": "new", "body_name": name});
+        run(s, "solid.cylinder", base);
+        run(s, "solid.chamfer", json!({"edges": [[x + 10.0, 20, 20]], "distance": across, "distance2": down, "body": name}));
+        let (r, turn) = (10.0 - across / 2.0, -std::f64::consts::FRAC_PI_4);
+        [x + r * turn.cos(), 20.0 + r * turn.sin(), 20.0 - down / 2.0]
+    };
+    let (even, steep, flat) = (pin(&mut s, 140.0, "Even", 2.0, 2.0), pin(&mut s, 180.0, "Steep", 1.0, 3.0), pin(&mut s, 220.0, "Flat", 3.0, 1.0));
+    run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+    let reads_near = |reply: &Value, degrees: f64, text: &str| {
+        assert_eq!((reply["status"].as_str(), reply["text"].as_str()), (Some("ok"), Some(text)), "{reply}");
+        assert!((reply["value"].as_f64().unwrap() - degrees).abs() < 1e-6 && reply["foreshortened"] != json!(true), "{reply}");
+    };
+    let square = add(&mut s, view, json!({"cone": {"face": even}}));
+    reads_near(&square, 90.0, "90.00°");
+    let saved = square["record"]["kind"]["cone"]["face"].clone();
+    assert!(saved["body"] == "Even" && saved["name"].as_str().is_some_and(|n| !n.is_empty()), "{saved}");
+    reads_near(&add(&mut s, view, json!({"cone": {"face": steep}})), 2.0 * (1f64 / 3.0).atan().to_degrees(), "36.87°");
+    reads_near(&add(&mut s, view, json!({"cone": {"face": flat}})), 2.0 * 3f64.atan().to_degrees(), "143.13°");
+    let id = square["dimension"].clone();
+    let before = s.drawing("test").unwrap().to_json().unwrap();
+    let p = json!({"dimension": id, "set": {"direction": "horizontal"}});
+    let e = s.execute(EDIT, &p).err().map(|e| e.to_string()).unwrap_or_else(|| panic!("accepted: {p}"));
+    assert!(e.contains("a cone's angle has no direction, reading or side"), "{e}");
+    let v = ids::encode(view);
+    let cases = [
+        (json!({"view": v, "kind": {"cone": {"face": [40, 0, 10]}}}), "isn't a cone"),
+        (json!({"view": v, "kind": {"cylinder": {"face": even}}}), "isn't a cylinder"),
+    ];
+    for (p, why) in cases {
+        let e = refused(&mut s, p.clone());
+        assert!(e.contains(why), "{p}: {e}");
+    }
+    assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), before);
+}
+
 /// Two bosses along X on the box's right face, radius 5 at z = 15 and radius 3 at z = 25, in the
 /// front view: near to near 2, near to far 8, far to near 12 and far to far 18, saved by each
 /// face's name and side; up the view the same. Two faces of one boss make its Ø10, which takes no
@@ -1101,6 +1148,7 @@ fn each_slot_reaches_its_own_reference() {
         ),
         (DimensionKind::Cylinder { face: face("f") }, vec![(SlotParam::Face, "face f")]),
         (DimensionKind::Sphere { face: face("f") }, vec![(SlotParam::Face, "face f")]),
+        (DimensionKind::Cone { face: face("f") }, vec![(SlotParam::Face, "face f")]),
         (DimensionKind::Silhouettes { a: side("a"), b: side("b"), direction }, vec![(a, "face a"), (b, "face b")]),
         (DimensionKind::Faces { a: face("a"), b: face("b"), direction }, vec![(a, "face a"), (b, "face b")]),
     ];

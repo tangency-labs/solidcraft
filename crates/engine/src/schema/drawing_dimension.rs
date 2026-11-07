@@ -346,6 +346,12 @@ pub enum KindParam {
         /// A face on the sphere.
         face: FaceParam,
     },
+    /// A cone's included angle between its two silhouettes, on a view that doesn't look along its
+    /// axis; foreshortened unless the view's plane holds the axis.
+    Cone {
+        /// A face on the cone.
+        face: FaceParam,
+    },
     /// The distance between a silhouette of one cylinder and a silhouette of another, as the view
     /// shows them; two of one cylinder make its `cylinder` dimension.
     Silhouettes {
