@@ -11,7 +11,8 @@
 //! clips the face to the offset domain with a 2D boolean of planar faces made from the
 //! face's UV loops. Taken from the inset's opposite face use, upstream's loops run
 //! clockwise, the planar face is inside out, the intersection is empty and the bottom
-//! gets no offset: the shell comes back open, of no volume. With
+//! gets no offset: the offset is open, so the default shell refuses it and retains
+//! the input. With
 //! `offset_clip_right_side_out` the bottom is offset and the shell is closed, its
 //! volume the vase's less the cavity bounded by the exact offsets (a cylinder r 13 and
 //! the bottom cone moved 2 along its normal):
@@ -29,13 +30,17 @@
 #[path = "support/offset_fixture.rs"]
 mod offset_fixture;
 
-use offset_fixture::{planar_faces_at, shell, volume};
+use offset_fixture::{planar_faces_at, shell, volume, Notifications};
 use solidcore::curve::curve::Curve;
+use solidcore::error::SM_ERR;
 use solidcore::math::{Point3, Vec3, PI};
+use solidcore::offset::offset_executive::p1::OffsetExecutive;
+use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions};
 use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::query::api_queries::brep_is_manifold_solid;
 use solidcore::sweep::api_brep::create_rotational_sweep;
-use solidcore::{Brep, Kernel};
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+use solidcore::{Brep, Kernel, SolidError};
 
 /// Wall radius, height of the conical bottom, height of the vase.
 const R: f64 = 15.0;
@@ -99,12 +104,93 @@ fn wr_342_vase_shells_closed_with_the_fix() {
     }
 }
 
-/// Upstream: the bottom gets no offset, and the shell is open, of no volume.
+/// Without WR-342 the bottom gets no offset. The default shell refuses the open
+/// result and retains the vase, for either rotational sweep direction.
 #[test]
-fn wr_342_default_leaves_the_bottom_without_an_offset() {
+fn wr_342_default_refuses_the_open_shell_and_retains_the_vase() {
     for up in [true, false] {
-        let (k, mut b) = shelled(up, false);
-        assert!(!brep_is_manifold_solid(&b).unwrap(), "up {up}");
-        assert!(volume(&k, &mut b).unwrap().abs() < 1e-9, "up {up}");
+        let mut k = Kernel::default();
+        k.fixes.revolution_offset_axis_both_sides = true;
+        let mut part = vase(&mut k, up);
+        let open = planar_faces_at(&k, &part, 1, H);
+        assert_eq!(open.len(), 1);
+        let mut notifications = Notifications::new(&mut part);
+        let key = part.key();
+        let tolerance = part.tolerance();
+        let ids = (
+            part.face_list().to_vec(),
+            part.edge_list().to_vec(),
+            part.vertex_list().to_vec(),
+        );
+        let points: Vec<_> = part
+            .vertices()
+            .iter()
+            .map(|(id, v)| (id, v.point, v.tolerance))
+            .collect();
+        let outcome = OffsetExecutive::shell_brep(
+            &mut k,
+            part,
+            ShellOptions {
+                offset: OffsetOptions {
+                    distance: -2.0,
+                    extend_convex_edges: true,
+                    merge_results: true,
+                },
+                create_offset_solid: false,
+                merge_sheet_side_walls: false,
+            },
+            &open,
+            &mut notifications.context(),
+        );
+        let error = outcome.result.as_ref().unwrap_err();
+        assert!(
+            matches!(
+                error,
+                SolidError::Upstream {
+                    operation: "offset::offset_executive::p2::shell_brep",
+                    code: SM_ERR,
+                    ..
+                }
+            ),
+            "up {up}: {error:?}"
+        );
+        assert!(!outcome.input_ownership_transferred());
+        let mut retained = outcome.retained_input.unwrap();
+        assert_eq!(retained.key(), key);
+        assert_eq!(retained.tolerance(), tolerance);
+        assert_eq!(
+            (
+                retained.face_list().to_vec(),
+                retained.edge_list().to_vec(),
+                retained.vertex_list().to_vec()
+            ),
+            ids
+        );
+        assert_eq!(
+            retained
+                .vertices()
+                .iter()
+                .map(|(id, v)| (id, v.point, v.tolerance))
+                .collect::<Vec<_>>(),
+            points
+        );
+        // Check the retained caches as returned, without refreshing them first.
+        assert!(
+            solidcore::topology::integrity::check(&retained).is_ok(),
+            "up {up}"
+        );
+        assert!(brep_is_manifold_solid(&retained).unwrap(), "up {up}");
+        for level in [CheckLevel::Level0, CheckLevel::Level1, CheckLevel::Level2] {
+            let checked = check_brep(&mut k, &mut retained, level).unwrap();
+            assert!(
+                checked.is_valid(),
+                "up {up}, {level:?}: {:?}",
+                checked.lines()
+            );
+        }
+        let v = volume(&k, &mut retained).unwrap();
+        let exact = PI * R * R * (HB / 3.0 + H - HB);
+        // The original cone and cylinder, not an open or partially hollowed body.
+        assert!((v - exact).abs() <= 1e-9 * exact, "up={up}: {v}");
     }
 }
