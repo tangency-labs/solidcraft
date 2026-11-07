@@ -570,11 +570,18 @@ fn a_body_keeps_a_faint_bar_while_one_of_its_faces_is_selected() {
         let lit = super::Lit::of(app);
         lit.row(app, &super::entries(app, component, "bodies")[0])
     };
+    // The row of the placement the body is in.
+    let placement = |app: &mut crate::SolveApp| {
+        let lit = super::Lit::of(app);
+        lit.placement(&app.session.doc, &[occurrence], component)
+    };
     h.app.run("select.set", json!({"items":[Sel::Face{body:body.clone(),index:face,point}]})).unwrap();
     h.app.viewport.hover = None;
     assert_eq!(row(&mut h.app), (false, super::Mark::Branch), "a face of the body selected, the pointer off the model");
+    assert_eq!(placement(&mut h.app), super::Mark::Branch, "the placement holding the body keeps its faint bar too");
     h.app.run("select.set", json!({"items":[Sel::Body{name:body}]})).unwrap();
     assert_eq!(row(&mut h.app), (true, super::Mark::Here), "the body itself selected");
     h.app.run("select.clear", json!({})).unwrap();
     assert_eq!(row(&mut h.app), (false, super::Mark::None), "nothing selected");
+    assert_eq!(placement(&mut h.app), super::Mark::None, "and its placement is clear");
 }
