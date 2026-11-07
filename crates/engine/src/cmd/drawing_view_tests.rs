@@ -2162,3 +2162,98 @@ fn a_left_out_part_says_where_each_kind_of_setter_set_it() {
     assert_eq!(set_on(SetBy::Drawing), " (set on the drawing)");
     assert_eq!((set_on(SetBy::This), set_on(SetBy::Default)), (String::new(), String::new()));
 }
+
+/// The W23 assembly sheet's assembly (#11773) from its command script, and the occurrences the
+/// script names: the plate, the two holders and the block placed in each.
+fn assembly_sheet() -> (Session, [u64; 4]) {
+    let script: Value = serde_json::from_str(include_str!("../../../../tests/fixtures/w23-assembly-sheet/assembly.json")).unwrap();
+    let mut s = Session::default();
+    let made = s.run_script(&script).unwrap();
+    let named = |name: &str| {
+        let step = script["commands"].as_array().unwrap().iter().position(|c| c["as"] == name).unwrap();
+        made[step]["occurrence"].as_u64().unwrap()
+    };
+    (s, ["plate", "first_holder", "second_holder", "block"].map(named))
+}
+
+/// Saved top views of the W23 assembly sheet at 1:1 that choose what they draw (#11873, #11773),
+/// each size worked out by hand in the fixture's `hand_views`. The plate is 120 x 80; a holder's
+/// block is 20 x 20 at x 40..60 and its screws are Ø6 at x 35, so one holder is 28 x 28 and both,
+/// 40 apart along Y, 28 x 68. The second holder moved 30 along Y or deleted changes only the views
+/// that draw it: the one that hides it never changes, and the one that draws only it is a
+/// placeholder once it's gone. The drawing's record never changes with the model; undo, and save
+/// and reopen, give the sizes as made. Every model edit is made with the drawing closed.
+#[test]
+fn the_assembly_sheets_views_keep_what_they_show_through_the_model() {
+    let (mut s, [plate, first, second, block]) = assembly_sheet();
+    run(&mut s, "drawing.create", json!({}));
+    let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
+    let mut base = |at: [f64; 2], choice: Value| {
+        let mut p = json!({"sheet": "Sheet 1", "view": "top", "scale": "1:1", "position_mm": at});
+        for (key, value) in choice.as_object().unwrap() {
+            p[key] = value.clone();
+        }
+        run(&mut s, "drawing.view.base", p)["view"].clone()
+    };
+    let views = [
+        base([100.0, 100.0], json!({})),
+        base([250.0, 100.0], json!({"source": {"occurrences": [[first]]}})),
+        base([350.0, 100.0], json!({"source": {"occurrences": [[first], [second]]}})),
+        base([100.0, 300.0], json!({"hide": [[plate]]})),
+        base([250.0, 300.0], json!({"source": {"occurrences": [[first, block]]}})),
+        base([350.0, 300.0], json!({"source": {"occurrences": [[first]]}, "hide": [[first, block]]})),
+        base([480.0, 100.0], json!({"source": {"occurrences": [[second]]}})),
+        base([480.0, 300.0], json!({"hide": [[second]]})),
+    ];
+    let authored = s.drawing("test").unwrap().to_json().unwrap();
+    // A view's boundary is read from the display mesh, whose chords sit inside a round screw: never
+    // wider than worked out, and within 0.01 mm of it. `None` is a placeholder with nothing chosen.
+    let expect = |s: &mut Session, when: &str, want: [Option<[f64; 2]>; 8]| {
+        for (i, (view, want)) in views.iter().zip(want).enumerate() {
+            let read = run(s, INSPECT, json!({"view": view}));
+            let Some(want) = want else {
+                let extents = (&read["extents"]["status"], &read["extents"]["provenance"]);
+                assert_eq!(extents, (&json!("placeholder"), &json!("nothing_chosen")), "{when}, view {i}: {read}");
+                continue;
+            };
+            let (size, _) = boundary(&read);
+            for (got, want) in [(size.x, want[0]), (size.y, want[1])] {
+                assert!(got <= want + EPS && want - got < 0.01, "{when}, view {i}: {got}, want {want}");
+            }
+        }
+    };
+    let on_the_model = |s: &mut Session, id: &str, p: Value| {
+        run(s, "drawing.close", json!({}));
+        run(s, id, p);
+        run(s, "drawing.open", drawing.clone());
+    };
+    let as_made = [[120.0, 80.0], [28.0, 28.0], [28.0, 68.0], [106.0, 68.0], [20.0, 20.0], [6.0, 26.0], [28.0, 28.0], [120.0, 80.0]].map(Some);
+    expect(&mut s, "as made", as_made);
+
+    // The second holder 30 along Y: its block reaches y 100, its screws y 98.
+    on_the_model(&mut s, "occurrence.move", json!({"occurrence": second, "space": "world", "translate": [0, 30, 0]}));
+    let moved = [[120.0, 100.0], [28.0, 28.0], [28.0, 98.0], [106.0, 98.0], [20.0, 20.0], [6.0, 26.0], [28.0, 28.0], [120.0, 80.0]].map(Some);
+    expect(&mut s, "second holder moved", moved);
+    assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), authored, "the record never changes with the model");
+    on_the_model(&mut s, "edit.undo", json!({}));
+    expect(&mut s, "move undone", as_made);
+
+    // The second holder deleted: the corner screws end at y 68, the first holder's start at y 2.
+    on_the_model(&mut s, "selection.delete", json!({"occurrences": [second]}));
+    let mut deleted = [[120.0, 80.0], [28.0, 28.0], [28.0, 28.0], [106.0, 66.0], [20.0, 20.0], [6.0, 26.0], [0.0, 0.0], [120.0, 80.0]].map(Some);
+    deleted[6] = None;
+    expect(&mut s, "second holder deleted", deleted);
+    assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), authored, "the paths stay, for an undo");
+    on_the_model(&mut s, "edit.undo", json!({}));
+    expect(&mut s, "delete undone", as_made);
+
+    // Saved and opened again: the same record and the same sizes.
+    let folder = crate::tests::Folder::new("assembly-sheet-views");
+    let path = folder.path("assembly.solidcraft");
+    run(&mut s, "file.save", json!({"path": path}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": path}));
+    run(&mut opened, "drawing.open", drawing.clone());
+    assert_eq!(opened.drawing("test").unwrap().to_json().unwrap(), authored, "opened again");
+    expect(&mut opened, "opened again", as_made);
+}

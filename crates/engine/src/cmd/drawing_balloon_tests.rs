@@ -5,6 +5,7 @@ use solidcraft_geom::drawing_view::NamedView;
 
 use super::*;
 use crate::schema::tests::conforms;
+use crate::tests::Folder;
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     let reply = s.execute(id, &p).unwrap_or_else(|e| panic!("{id}: {e}"));
@@ -522,4 +523,224 @@ fn a_balloon_reads_a_components_list_below_it() {
     s.execute("component.delete", &json!({"component": component})).unwrap();
     s.execute("drawing.open", &json!({"drawing": drawing})).unwrap();
     assert_eq!(read(&mut s, &balloon)["row_status"], json!("not_found"));
+}
+
+/// The W23 assembly sheet's test assembly (#11773), from its command script, and the occurrences
+/// the script names: the plate, the first screw, the two holders and the block placed in each.
+fn assembly_sheet() -> (Session, [u64; 5]) {
+    let script: Value = serde_json::from_str(include_str!("../../../../tests/fixtures/w23-assembly-sheet/assembly.json")).unwrap();
+    let mut s = Session::default();
+    let made = s.run_script(&script).unwrap();
+    let named = |name: &str| {
+        let step = script["commands"].as_array().unwrap().iter().position(|c| c["as"] == name).unwrap();
+        made[step]["occurrence"].as_u64().unwrap()
+    };
+    let occurrences = ["plate", "screw", "first_holder", "second_holder", "block"].map(named);
+    (s, occurrences)
+}
+
+/// Balloons on the assembly sheet's top view and the drawing's revision rows, through model edits
+/// made with the drawing closed, their undo and redo, and save and reopen: a balloon follows its
+/// occurrence; the second holder's balloon reads lost when that holder is deleted, and is never
+/// moved to the first holder or removed; the drawing's saved record and its revision rows never
+/// change with the model.
+#[test]
+fn balloons_on_the_assembly_sheet_follow_the_model_and_its_revision_rows_stay() {
+    let (mut s, [plate, screw, first, second, block]) = assembly_sheet();
+    run(&mut s, "drawing.create", json!({}));
+    let top = run(&mut s, "drawing.view.base", json!({"sheet": "Sheet 1", "view": "top", "scale": "1:2", "position_mm": [150, 150]}))["view"].clone();
+    let drawing = ids::encode(s.drawing("test").unwrap().id);
+
+    // Four balloons: the plate's top front edge, the first screw's top rim, and the block by its
+    // top front edge through each holder.
+    let put = |s: &mut Session, point: [f64; 3], path: Value, at: [f64; 2]| {
+        let reply = run(s, ADD, json!({"view": top, "edge": {"point": point, "path": path}, "at": at}));
+        assert_eq!((&reply["status"], &reply["occurrence"]), (&json!("ok"), &path), "{reply}");
+        reply
+    };
+    let on_plate = put(&mut s, [60.0, 0.0, 10.0], json!([plate]), [-60.0, -50.0]);
+    let on_screw = put(&mut s, [8.0, 5.0, 30.0], json!([screw]), [-70.0, 40.0]);
+    let on_first = put(&mut s, [50.0, 10.0, 40.0], json!([first, block]), [0.0, 60.0]);
+    let on_second = put(&mut s, [50.0, 50.0, 40.0], json!([second, block]), [40.0, 60.0]);
+    ends_at(&on_plate, [60.0, 0.0, 10.0]);
+    ends_at(&on_first, [50.0, 10.0, 40.0]);
+    ends_at(&on_second, [50.0, 50.0, 40.0]);
+    assert_ne!(on_first["record"]["edge"], on_second["record"]["edge"], "one block, two placements, two balloons");
+    let balloons = [&on_plate, &on_screw, &on_first, &on_second].map(|b| b["balloon"].clone());
+
+    // Revision rows 1, 2 and 3; row 2 deleted: 1 and 3 stay, and the next is still 4.
+    let mut rows = Vec::new();
+    for (description, date) in [("First issue", "2026-11-03"), ("Withdrawn", "2026-11-04"), ("Holder moved", "2026-11-05")] {
+        rows.push(run(&mut s, "drawing.revision.add", json!({"set": {"description": description, "designer": "BS", "date": date}}))["row"].clone());
+    }
+    run(&mut s, "drawing.revision.delete", json!({"row": rows[1]}));
+    let revisions = run(&mut s, "drawing.inspect", json!({}))["revisions"].clone();
+    let numbers: Vec<&str> = revisions["rows"].as_array().unwrap().iter().map(|r| r["revision"].as_str().unwrap()).collect();
+    assert_eq!((numbers, revisions["next"].as_str()), (vec!["1", "3"], Some("4")), "{revisions}");
+
+    // The model is edited with the drawing closed, then the drawing is opened again.
+    let record = saved(&s);
+    let on_the_model = |s: &mut Session, id: &str, p: Value| {
+        run(s, "drawing.close", json!({}));
+        run(s, id, p);
+        run(s, "drawing.open", json!({"drawing": drawing}));
+    };
+    let read = |s: &mut Session| balloons.clone().map(|b| run(s, INSPECT, json!({"balloon": b})));
+    let statuses = |reads: &[Value; 4]| reads.clone().map(|r| r["status"].as_str().unwrap().to_string());
+    let ok = ["ok", "ok", "ok", "ok"].map(String::from);
+
+    // The second holder moved 30 mm along Y: its balloon's arrow follows, the others stay.
+    on_the_model(&mut s, "occurrence.move", json!({"occurrence": second, "space": "world", "translate": [0, 30, 0]}));
+    let moved = read(&mut s);
+    assert_eq!(statuses(&moved), ok);
+    ends_at(&moved[0], [60.0, 0.0, 10.0]);
+    ends_at(&moved[2], [50.0, 10.0, 40.0]);
+    ends_at(&moved[3], [50.0, 80.0, 40.0]);
+    assert_eq!(saved(&s), record, "a model edit leaves the drawing's record alone");
+    on_the_model(&mut s, "edit.undo", json!({}));
+    ends_at(&read(&mut s)[3], [50.0, 50.0, 40.0]);
+
+    // The second holder deleted: its balloon is lost, says why, keeps its occurrence and is still
+    // there; the others stay ok.
+    on_the_model(&mut s, "selection.delete", json!({"occurrences": [second]}));
+    let gone = read(&mut s);
+    assert_eq!(statuses(&gone), ["ok", "ok", "ok", "lost"].map(String::from), "{gone:?}");
+    assert!(gone[3]["why"].is_string(), "{}", gone[3]);
+    assert_eq!(gone[3]["occurrence"], json!([second, block]), "never moved to the first holder");
+    assert_eq!(gone[3]["record"], on_second["record"], "never removed or changed");
+    ends_at(&gone[2], [50.0, 10.0, 40.0]);
+    assert_eq!(saved(&s), record);
+
+    // Saved with the holder deleted and opened again: the same record, statuses and revisions.
+    let folder = Folder::new("assembly-sheet-balloons");
+    let path = folder.path("assembly.solidcraft");
+    run(&mut s, "file.save", json!({"path": path}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": path}));
+    run(&mut opened, "drawing.open", json!({"drawing": drawing}));
+    assert_eq!(saved(&opened), record, "opened again");
+    let again = read(&mut opened);
+    assert_eq!(statuses(&again), statuses(&gone));
+    for (was, is) in gone.iter().zip(&again) {
+        assert_eq!((&is["record"], &is["occurrence"]), (&was["record"], &was["occurrence"]), "{is}");
+    }
+    assert_eq!(run(&mut opened, "drawing.inspect", json!({}))["revisions"], revisions, "revision rows opened again");
+
+    // Undone: the second holder and its balloon are back; redone, lost again; undone once more.
+    on_the_model(&mut s, "edit.undo", json!({}));
+    let back = read(&mut s);
+    assert_eq!(statuses(&back), ok, "{back:?}");
+    ends_at(&back[3], [50.0, 50.0, 40.0]);
+    on_the_model(&mut s, "edit.redo", json!({}));
+    assert_eq!(statuses(&read(&mut s))[3], "lost");
+    on_the_model(&mut s, "edit.undo", json!({}));
+    assert_eq!(statuses(&read(&mut s)), ok);
+
+    // Through every model edit, the drawing's record and its revision rows are as they were.
+    assert_eq!(saved(&s), record);
+    assert_eq!(run(&mut s, "drawing.inspect", json!({}))["revisions"], revisions);
+}
+
+/// Recipe 4 of #11773 (W23-AS-04), on #11897: on the assembly sheet's first-level parts list, a
+/// balloon through either holder to its block reads HL-300's row, item 2. The second holder deleted,
+/// its balloon is lost and its row not found, and it is never moved to the first holder or removed;
+/// undone, both read item 2 again. With HL-300 a phantom, both read BL-200's row. Every model edit
+/// is made with the drawing closed.
+#[test]
+fn balloons_on_the_assembly_sheet_read_their_holders_row() {
+    let (mut s, [_, _, first, second, block]) = assembly_sheet();
+    run(&mut s, "assembly.bom.renumber", json!({"levels": "top"}));
+    run(&mut s, "drawing.create", json!({}));
+    let top = run(&mut s, "drawing.view.base", json!({"sheet": "Sheet 1", "view": "top", "scale": "1:2", "position_mm": [150, 150]}))["view"].clone();
+    let parts_list = list(&mut s, json!({"list": {"levels": "top"}}));
+    let drawing = ids::encode(s.drawing("test").unwrap().id);
+    let put = |s: &mut Session, point: [f64; 3], holder: u64, at: [f64; 2]| {
+        let reply = run(s, ADD, json!({"view": top, "edge": {"point": point, "path": [holder, block]}, "at": at}));
+        reply["balloon"].as_str().unwrap().to_string()
+    };
+    let balloons = [put(&mut s, [50.0, 10.0, 40.0], first, [0.0, 60.0]), put(&mut s, [50.0, 50.0, 40.0], second, [40.0, 60.0])];
+    // Each balloon as {status, row_status, item, parts_list, occurrence}.
+    let rows = |s: &mut Session| {
+        balloons.clone().map(|b| {
+            let r = read(s, &b);
+            json!({"status": r["status"], "row_status": r["row_status"], "item": r["item"], "parts_list": r["parts_list"], "occurrence": r["occurrence"]})
+        })
+    };
+    let row =
+        |holder: u64, item: Value| json!({"status": "ok", "row_status": "ok", "item": item, "parts_list": parts_list, "occurrence": [holder, block]});
+    assert_eq!(rows(&mut s), [row(first, json!("2")), row(second, json!("2"))]);
+    let with_drawing_closed = |s: &mut Session, id: &str, p: Value| {
+        run(s, "drawing.close", json!({}));
+        let reply = run(s, id, p);
+        run(s, "drawing.open", json!({"drawing": drawing}));
+        reply
+    };
+
+    // The second holder deleted: its balloon is lost, its row not found; still its own and still there.
+    with_drawing_closed(&mut s, "selection.delete", json!({"occurrences": [second]}));
+    let [kept, gone] = rows(&mut s);
+    assert_eq!(kept, row(first, json!("2")));
+    assert_eq!((&gone["status"], &gone["row_status"]), (&json!("lost"), &json!("not_found")), "{gone}");
+    assert_eq!(gone["occurrence"], json!([second, block]), "never moved to the first holder");
+    assert_eq!(s.drawing("test").unwrap().balloons.len(), 2, "never removed");
+    with_drawing_closed(&mut s, "edit.undo", json!({}));
+    assert_eq!(rows(&mut s), [row(first, json!("2")), row(second, json!("2"))], "undone");
+
+    // HL-300 a phantom: both balloons read BL-200's row, with the item the list gives it.
+    with_drawing_closed(&mut s, "component.metadata.set", json!({"component": "Holder", "bom_type": "phantom"}));
+    let listed = with_drawing_closed(&mut s, "assembly.bom", json!({"levels": "top"}));
+    let block_row = listed["rows"].as_array().unwrap().iter().find(|r| r["part_number"] == "BL-200").unwrap();
+    let item = match &block_row["item"] {
+        Value::Number(n) => json!(n.to_string()),
+        other => other.clone(),
+    };
+    assert!(item.is_string(), "BL-200 has an item on the first level: {listed}");
+    assert_eq!(rows(&mut s), [row(first, item.clone()), row(second, item)]);
+}
+
+/// On the W23 assembly sheet, a balloon on a block inside the hidden second holder is refused.
+/// The refusal keeps the drawing unchanged. A visible holder still accepts a balloon,
+/// and the hidden holder accepts one once its view shows it again.
+#[test]
+fn the_assembly_sheet_refuses_a_balloon_on_its_hidden_second_holder() {
+    let (mut s, [_, _, first, second, block]) = assembly_sheet();
+    run(&mut s, "drawing.create", json!({}));
+    let top = run(
+        &mut s,
+        "drawing.view.base",
+        json!({
+            "sheet": "Sheet 1",
+            "view": "top",
+            "scale": "1:2",
+            "position_mm": [150, 150],
+            "hide": [[second]]
+        }),
+    )["view"]
+        .clone();
+    let view = top.as_str().unwrap().to_owned();
+
+    let on = |holder: u64, point: [f64; 3], at: [f64; 2]| {
+        json!({
+            "view": top,
+            "edge": {"point": point, "path": [holder, block]},
+            "at": at
+        })
+    };
+
+    let before = saved(&s);
+    let error = refused(&mut s, ADD, on(second, [50.0, 50.0, 40.0], [40.0, 60.0]));
+    let reason = format!("view {view} doesn't draw that part: its hide leaves out occurrence path [{second}]");
+    assert!(error.contains(&reason), "{error}");
+    assert_eq!(saved(&s), before, "a refused balloon must not change the drawing");
+
+    let first_balloon = run(&mut s, ADD, on(first, [50.0, 10.0, 40.0], [0.0, 60.0]));
+    assert_eq!(first_balloon["status"], "ok", "{first_balloon}");
+    assert_eq!(first_balloon["occurrence"], json!([first, block]), "{first_balloon}");
+
+    run(&mut s, "drawing.view.edit", json!({"view": top, "set": {"hide": null}}));
+
+    let second_balloon = run(&mut s, ADD, on(second, [50.0, 50.0, 40.0], [40.0, 60.0]));
+    assert_eq!(second_balloon["status"], "ok", "{second_balloon}");
+    assert_eq!(second_balloon["occurrence"], json!([second, block]), "{second_balloon}");
+    assert_ne!(first_balloon["balloon"], second_balloon["balloon"], "different holders keep distinct balloon ids");
 }

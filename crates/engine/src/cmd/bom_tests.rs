@@ -2174,3 +2174,164 @@ fn hostile_quantities_are_refused_without_a_change() {
     assert_eq!(s.doc.to_json(), design);
     assert_eq!(s.undo.len(), undo);
 }
+
+/// The W23 assembly sheet's test assembly (#11773), from its command script: a base plate placed
+/// once, a screw placed four times on it, and a holder placed twice, each holding one block and two
+/// of the screws. Returns the session and the two holders.
+fn assembly_sheet() -> (Session, [u64; 2]) {
+    let script: Value = serde_json::from_str(include_str!("../../../../tests/fixtures/w23-assembly-sheet/assembly.json")).unwrap();
+    let mut s = Session::default();
+    let made = s.run_script(&script).unwrap();
+    let placed = |name: &str| {
+        let step = script["commands"].as_array().unwrap().iter().position(|c| c["as"] == name).unwrap();
+        made[step]["occurrence"].as_u64().unwrap()
+    };
+    let holders = [placed("first_holder"), placed("second_holder")];
+    (s, holders)
+}
+
+/// The assembly sheet's parts list against the hand counts: parts only, the first level, all levels
+/// and one holder's own list. Reading them changes nothing.
+#[test]
+fn the_assembly_sheets_parts_list_matches_the_hand_counts() {
+    let (mut s, _) = assembly_sheet();
+    let undo = s.undo.len();
+    let flat = run(&mut s, "assembly.bom", json!({}));
+    assert_eq!(typed(&flat), [row("BL-200", "normal", 2), row("BP-100", "normal", 1), row("SC-M6", "normal", 8)], "4 + 2 x 2 screws: {flat}");
+    assert_eq!((flat["total_occurrences"].as_u64(), flat["numbered"].as_bool()), (Some(11), Some(false)));
+    let top = run(&mut s, "assembly.bom", json!({"levels": "top"}));
+    assert_eq!(typed(&top), [row("BP-100", "normal", 1), row("HL-300", "normal", 2), row("SC-M6", "normal", 4)], "{top}");
+    assert_eq!(top["total_occurrences"], 7, "1 + 2 + 4");
+    let all = run(&mut s, "assembly.bom", json!({"levels": "all"}));
+    assert_eq!(
+        deep(&all),
+        [
+            deep_row("1", "BP-100", "normal", 1, 1),
+            deep_row("2", "HL-300", "normal", 2, 2),
+            deep_row("2.1", "BL-200", "normal", 1, 2),
+            deep_row("2.2", "SC-M6", "normal", 2, 4),
+            deep_row("3", "SC-M6", "normal", 4, 4),
+        ],
+        "{all}"
+    );
+    assert_eq!(all["total_occurrences"], 13, "1 + 2 + 2 + 4 + 4");
+    let holder = run(&mut s, "assembly.bom", json!({"component": "Holder"}));
+    assert_eq!(typed(&holder), [row("BL-200", "normal", 1), row("SC-M6", "normal", 2)], "{holder}");
+    assert_eq!(s.undo.len(), undo, "a parts list only reads");
+}
+
+/// The assembly sheet's item numbers: renumbered from 10 in tens in one undo step; a new part takes
+/// 31 and keeps it through undo and redo; the second holder deleted keeps every number and leaves 1
+/// block and 6 screws; the first level is numbered on its own; all of it is the same after save and
+/// open, in both formats.
+#[test]
+fn the_assembly_sheets_item_numbers_hold_through_edits_undo_and_reopening() {
+    let dir = scratch("assembly-sheet");
+    let (mut s, holders) = assembly_sheet();
+    let undo = s.undo.len();
+    let numbered = run(&mut s, "assembly.bom.renumber", json!({"start": 10, "step": 10}));
+    let three = [numbered_row("10", "BL-200", ""), numbered_row("20", "BP-100", ""), numbered_row("30", "SC-M6", "")];
+    assert_eq!((numbered["numbered"].as_bool(), numbers(&numbered)), (Some(true), three.to_vec()), "{numbered}");
+    assert_eq!(s.undo.len(), undo + 1, "one undo step");
+
+    // A new part takes the highest number + 1. Undone, it goes with its number; redone, both come back.
+    run(&mut s, "component.create", json!({"name": "Washer", "activate": false}));
+    run(&mut s, "component.metadata.set", json!({"component": "Washer", "part_number": "WS-010", "description": "Washer M6"}));
+    let four =
+        [numbered_row("10", "BL-200", ""), numbered_row("20", "BP-100", ""), numbered_row("30", "SC-M6", ""), numbered_row("31", "WS-010", "")];
+    assert_eq!(numbers(&run(&mut s, "assembly.bom", json!({}))), four);
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(numbers(&run(&mut s, "assembly.bom", json!({}))), three);
+    run(&mut s, "edit.redo", json!({}));
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(numbers(&run(&mut s, "assembly.bom", json!({}))), four, "the washer is 31 again");
+
+    // The second holder deleted: 1 block and 6 screws, every number kept. Undone: 2 and 8 again.
+    run(&mut s, "selection.delete", json!({"occurrences": [holders[1]]}));
+    let fewer = run(&mut s, "assembly.bom", json!({}));
+    assert_eq!(
+        typed(&fewer),
+        [row("BL-200", "normal", 1), row("BP-100", "normal", 1), row("SC-M6", "normal", 6), row("WS-010", "normal", 1)],
+        "{fewer}"
+    );
+    assert_eq!(numbers(&fewer), four, "a model edit keeps the numbers");
+    run(&mut s, "edit.undo", json!({}));
+    let back = run(&mut s, "assembly.bom", json!({}));
+    assert_eq!(typed(&back)[2], row("SC-M6", "normal", 8), "{back}");
+    assert_eq!(numbers(&back), four);
+
+    // The first level numbered on its own, 1 to 4; parts only keeps its numbers.
+    let top = run(&mut s, "assembly.bom.renumber", json!({"levels": "top"}));
+    assert_eq!(
+        numbers(&top),
+        [numbered_row("1", "BP-100", ""), numbered_row("2", "HL-300", ""), numbered_row("3", "SC-M6", ""), numbered_row("4", "WS-010", "")],
+        "{top}"
+    );
+    assert_eq!(numbers(&run(&mut s, "assembly.bom", json!({}))), four, "each view keeps its own numbers");
+    assert_eq!(s.doc.assembly.item_numbers.len(), 2);
+
+    // Saved and opened again, in both formats: the same rows, counts and numbers in every view.
+    for (file, format) in [("assembly.json", "json"), ("assembly.solidcraft", "container")] {
+        let path = dir.join(file);
+        run(&mut s, "file.save_as", json!({"path": path, "format": format}));
+        let mut opened = Session::default();
+        run(&mut opened, "doc.open", json!({"path": path}));
+        for view in [json!({}), json!({"levels": "top"}), json!({"levels": "all"})] {
+            let (was, is) = (run(&mut s, "assembly.bom", view.clone()), run(&mut opened, "assembly.bom", view.clone()));
+            assert_eq!((numbers(&is), deep(&is)), (numbers(&was), deep(&was)), "{format} {view}");
+        }
+        assert_eq!(opened.doc.assembly.item_numbers, s.doc.assembly.item_numbers, "{format}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The assembly sheet with the screw bought: every count stays as counted by hand, and the screw's
+/// rows say purchased. Undone, the rows are normal again.
+#[test]
+fn a_purchased_screw_keeps_the_assembly_sheets_counts() {
+    let (mut s, _) = assembly_sheet();
+    set_type(&mut s, "Screw", "purchased");
+    let flat = run(&mut s, "assembly.bom", json!({}));
+    assert_eq!(typed(&flat), [row("BL-200", "normal", 2), row("BP-100", "normal", 1), row("SC-M6", "purchased", 8)], "{flat}");
+    let top = run(&mut s, "assembly.bom", json!({"levels": "top"}));
+    assert_eq!(typed(&top), [row("BP-100", "normal", 1), row("HL-300", "normal", 2), row("SC-M6", "purchased", 4)], "{top}");
+    let all = run(&mut s, "assembly.bom", json!({"levels": "all"}));
+    assert_eq!(
+        deep(&all),
+        [
+            deep_row("1", "BP-100", "normal", 1, 1),
+            deep_row("2", "HL-300", "normal", 2, 2),
+            deep_row("2.1", "BL-200", "normal", 1, 2),
+            deep_row("2.2", "SC-M6", "purchased", 2, 4),
+            deep_row("3", "SC-M6", "purchased", 4, 4),
+        ],
+        "{all}"
+    );
+    let holder = run(&mut s, "assembly.bom", json!({"component": "Holder"}));
+    assert_eq!(typed(&holder), [row("BL-200", "normal", 1), row("SC-M6", "purchased", 2)], "{holder}");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(typed(&run(&mut s, "assembly.bom", json!({})))[2], row("SC-M6", "normal", 8));
+}
+
+/// The assembly sheet with the holder a phantom: it has no row of its own, and what it holds counts
+/// where it is placed, so the first level lists 2 blocks, 1 plate and 8 screws (4 + 2 x 2). Parts
+/// only doesn't change. Undone, the holder is a row again.
+#[test]
+fn a_phantom_holder_puts_what_it_holds_on_the_assembly_sheets_first_level() {
+    let (mut s, _) = assembly_sheet();
+    set_type(&mut s, "Holder", "phantom");
+    let top = run(&mut s, "assembly.bom", json!({"levels": "top"}));
+    assert_eq!(typed(&top), [row("BL-200", "normal", 2), row("BP-100", "normal", 1), row("SC-M6", "normal", 8)], "{top}");
+    assert_eq!(top["total_occurrences"], 11, "2 + 1 + 8");
+    let flat = run(&mut s, "assembly.bom", json!({}));
+    assert_eq!(typed(&flat), [row("BL-200", "normal", 2), row("BP-100", "normal", 1), row("SC-M6", "normal", 8)], "{flat}");
+    let all = run(&mut s, "assembly.bom", json!({"levels": "all"}));
+    assert_eq!(
+        deep(&all),
+        [deep_row("1", "BL-200", "normal", 2, 2), deep_row("2", "BP-100", "normal", 1, 1), deep_row("3", "SC-M6", "normal", 8, 8)],
+        "{all}"
+    );
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(typed(&run(&mut s, "assembly.bom", json!({"levels": "top"})))[1], row("HL-300", "normal", 2));
+}

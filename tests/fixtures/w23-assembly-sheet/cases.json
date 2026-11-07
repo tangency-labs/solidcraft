@@ -1,0 +1,176 @@
+{
+ "schema": "w23-assembly-sheet-acceptance/1",
+ "purpose": "Recipes 3 to 6 of #11773: what the assembly sheet must show with its parts list, balloon item numbers and revision table. A written contract, checked by validate.py; no command here is run. The engine part of each recipe runs as the native tests named in `native`; the recipes themselves stay NOT RUN until what they show is drawn on paper.",
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/11773",
+ "assembly": "assembly.json",
+ "no_runtime_pass_claimed": true,
+ "ui_workflow_policy": {
+  "model_commands_while_drawing_open": "refused",
+  "model_edit_sequence": ["drawing.close", "the model edit, undo or redo", "drawing.open"],
+  "source": "https://github.com/tangency-labs/solidcraft/pull/8288#issuecomment-6599897742"
+ },
+ "sheet": {"size": "ISO A2 landscape", "paper_mm": [594, 420], "template": "iso-a2-assembly, what drawing.create starts an assembly's drawing on (#12000)", "view": "top", "scale": "1:2", "position_mm": [150, 150]},
+ "hand_counts": {
+  "parts_only": {"BL-200": 2, "BP-100": 1, "SC-M6": 8},
+  "first_level": {"BP-100": 1, "HL-300": 2, "SC-M6": 4},
+  "second_holder_deleted": {
+   "parts_only": {"BL-200": 1, "BP-100": 1, "SC-M6": 6},
+   "first_level": {"BP-100": 1, "HL-300": 1, "SC-M6": 4}
+  }
+ },
+ "already_native": {
+  "crates/engine/src/cmd/bom_tests.rs": [
+   "the_assembly_sheets_parts_list_matches_the_hand_counts",
+   "the_assembly_sheets_item_numbers_hold_through_edits_undo_and_reopening",
+   "a_purchased_screw_keeps_the_assembly_sheets_counts",
+   "a_phantom_holder_puts_what_it_holds_on_the_assembly_sheets_first_level"
+  ],
+  "crates/engine/src/cmd/drawing_balloon_tests.rs": [
+   "balloons_on_the_assembly_sheet_follow_the_model_and_its_revision_rows_stay",
+   "balloons_on_the_assembly_sheet_read_their_holders_row"
+  ],
+  "crates/engine/src/cmd/drawing_table_tests.rs": [
+   "the_assembly_sheet_keeps_its_parts_list_revisions_and_tag_through_the_model"
+  ],
+  "crates/engine/src/cmd/drawing_view_tests.rs": [
+   "the_assembly_sheets_views_keep_what_they_show_through_the_model"
+  ]
+ },
+ "hand_views": {
+  "purpose": "Saved views that choose what they draw (#11873): eight top views of the assembly at 1:1, each one's size worked out by hand from assembly.json, as made, with the second holder moved and with it deleted. A path names occurrences by the script's `as` names. Undo, and save and reopen, give the sizes as made. A view's boundary is read from the display mesh, so the native test allows it to be up to 0.01 mm narrower where a round screw makes the edge, never wider.",
+  "view": "top",
+  "scale": "1:1",
+  "second_holder_moved": [0, 30],
+  "native": ["the_assembly_sheets_views_keep_what_they_show_through_the_model"],
+  "views": [
+   {"name": "everything", "as_made": [120, 80], "second_holder_moved": [120, 100], "second_holder_deleted": [120, 80]},
+   {"name": "the first holder", "source": [["first_holder"]], "as_made": [28, 28], "second_holder_moved": [28, 28], "second_holder_deleted": [28, 28]},
+   {"name": "both holders", "source": [["first_holder"], ["second_holder"]], "as_made": [28, 68], "second_holder_moved": [28, 98], "second_holder_deleted": [28, 28]},
+   {"name": "no base plate", "hide": [["plate"]], "as_made": [106, 68], "second_holder_moved": [106, 98], "second_holder_deleted": [106, 66]},
+   {"name": "the first holder's block", "source": [["first_holder", "block"]], "as_made": [20, 20], "second_holder_moved": [20, 20], "second_holder_deleted": [20, 20]},
+   {"name": "the first holder without its block", "source": [["first_holder"]], "hide": [["first_holder", "block"]], "as_made": [6, 26], "second_holder_moved": [6, 26], "second_holder_deleted": [6, 26]},
+   {"name": "only the second holder", "source": [["second_holder"]], "as_made": [28, 28], "second_holder_moved": [28, 28], "second_holder_deleted": "placeholder"},
+   {"name": "the second holder hidden", "hide": [["second_holder"]], "as_made": [120, 80], "second_holder_moved": [120, 80], "second_holder_deleted": [120, 80]}
+  ]
+ },
+ "cases": [
+  {
+   "id": "W23-AS-03",
+   "title": "The parts list on the sheet shows the hand counts and follows a model edit",
+   "runtime_status": "NOT_RUN",
+   "waits_for": ["#3874: the parts list drawn on paper (text on the sheet)"],
+   "native": ["the_assembly_sheet_keeps_its_parts_list_revisions_and_tag_through_the_model"],
+   "steps": [
+    {"do": "assembly.bom.renumber", "params": {"levels": "top"}, "drawing": "closed"},
+    {"do": "drawing.create", "drawing": "open"},
+    {"do": "drawing.view.base", "params": {"sheet": "Sheet 1", "view": "top", "scale": "1:2", "position_mm": [150, 150]}, "drawing": "open"},
+    {"do": "drawing.table.add", "params": {"sheet": "Sheet 1", "kind": "parts_list", "set": {"list": {"levels": "top"}, "place": {"at": [330, 60]}}}, "drawing": "open", "check": "rows"},
+    {"do": "drawing.close"},
+    {"do": "selection.delete", "params": {"occurrences": ["second_holder"]}, "drawing": "closed"},
+    {"do": "drawing.open", "check": "rows_after_delete"},
+    {"do": "drawing.close"},
+    {"do": "edit.undo", "drawing": "closed"},
+    {"do": "drawing.open", "check": "rows"}
+   ],
+   "expect": {
+    "columns": "the parts list's default columns; these recipes check item, part number, description and quantity",
+    "rows": [
+     {"item": "1", "part_number": "BP-100", "description": "Base plate 120 x 80 x 10", "quantity": 1},
+     {"item": "2", "part_number": "HL-300", "description": "Holder", "quantity": 2},
+     {"item": "3", "part_number": "SC-M6", "description": "Screw M6 x 20", "quantity": 4}
+    ],
+    "rows_after_delete": [
+     {"item": "1", "part_number": "BP-100", "description": "Base plate 120 x 80 x 10", "quantity": 1},
+     {"item": "2", "part_number": "HL-300", "description": "Holder", "quantity": 1},
+     {"item": "3", "part_number": "SC-M6", "description": "Screw M6 x 20", "quantity": 4}
+    ],
+    "item_numbers_kept_through_the_edit": true,
+    "drawing_record_unchanged_by_the_model_edit": true
+   }
+  },
+  {
+   "id": "W23-AS-04",
+   "title": "A balloon per holder shows its row's item number; the deleted holder's balloon is lost, never moved or removed",
+   "runtime_status": "NOT_RUN",
+   "waits_for": ["the balloons and W23-AS-03's parts list drawn on paper (#3874)"],
+   "native": ["balloons_on_the_assembly_sheet_read_their_holders_row", "balloons_on_the_assembly_sheet_follow_the_model_and_its_revision_rows_stay"],
+   "confirmed": "https://github.com/tangency-labs/solidcraft/pull/11881#issuecomment-6626379382",
+   "steps": [
+    {"from": "W23-AS-03", "until": "drawing.table.add"},
+    {"do": "drawing.balloon.add", "params": {"edge": {"point": [50, 10, 40], "path": ["first_holder", "block"]}, "at": [0, 60]}, "drawing": "open", "as": "first_balloon"},
+    {"do": "drawing.balloon.add", "params": {"edge": {"point": [50, 50, 40], "path": ["second_holder", "block"]}, "at": [40, 60]}, "drawing": "open", "as": "second_balloon", "check": "both_ok"},
+    {"do": "drawing.close"},
+    {"do": "selection.delete", "params": {"occurrences": ["second_holder"]}, "drawing": "closed"},
+    {"do": "drawing.open", "check": "second_lost"},
+    {"do": "drawing.close"},
+    {"do": "edit.undo", "drawing": "closed"},
+    {"do": "drawing.open", "check": "both_ok"},
+    {"do": "drawing.close"},
+    {"do": "component.metadata.set", "params": {"component": "Holder", "bom_type": "phantom"}, "drawing": "closed"},
+    {"do": "drawing.open", "check": "holder_phantom"}
+   ],
+   "expect": {
+    "both_ok": {
+     "first_balloon": {"status": "ok", "row": "HL-300", "item": "2", "occurrence": ["first_holder", "block"]},
+     "second_balloon": {"status": "ok", "row": "HL-300", "item": "2", "occurrence": ["second_holder", "block"]}
+    },
+    "second_lost": {
+     "first_balloon": {"status": "ok", "row": "HL-300", "item": "2", "occurrence": ["first_holder", "block"]},
+     "second_balloon": {"status": "lost", "row": "not found", "shown_as": "lost (pink)", "occurrence": ["second_holder", "block"], "moved_to_first_holder": false, "removed": false}
+    },
+    "holder_phantom": {
+     "first_balloon": {"status": "ok", "row": "BL-200", "occurrence": ["first_holder", "block"]},
+     "second_balloon": {"status": "ok", "row": "BL-200", "occurrence": ["second_holder", "block"]}
+    },
+    "row_rule": "A balloon only picks the row its placement is counted in: the row of the longest member path its occurrence path starts with (row_of in crates/doc/src/bom.rs, pinned by row_of_finds_the_row_a_placement_is_counted_in in bom_tests.rs). Through a holder in a first-level list that is HL-300's row, and with HL-300 a phantom it is BL-200's. The item shown is that row's number, which the list's numbering gives and bom_tests.rs checks.",
+    "lost_reads": "the deleted holder's balloon: its reference status lost, and drawing.inspect reports its row as not found"
+   }
+  },
+  {
+   "id": "W23-AS-05",
+   "title": "The revision table numbers 1, 2, 3, keeps 4 as next after row 2 is deleted, and never changes with the model",
+   "runtime_status": "NOT_RUN",
+   "waits_for": ["#3875: the revision table drawn on the sheet"],
+   "native": ["the_assembly_sheet_keeps_its_parts_list_revisions_and_tag_through_the_model", "balloons_on_the_assembly_sheet_follow_the_model_and_its_revision_rows_stay"],
+   "steps": [
+    {"do": "drawing.create", "drawing": "open"},
+    {"do": "drawing.table.add", "params": {"sheet": "Sheet 1", "kind": "revision"}, "drawing": "open"},
+    {"do": "drawing.revision.add", "params": {"set": {"description": "First issue", "designer": "BS", "date": "2026-11-03"}}, "drawing": "open"},
+    {"do": "drawing.revision.add", "params": {"set": {"description": "Withdrawn", "designer": "BS", "date": "2026-11-04"}}, "drawing": "open"},
+    {"do": "drawing.revision.add", "params": {"set": {"description": "Holder moved", "designer": "BS", "date": "2026-11-05"}}, "drawing": "open", "check": "three_rows"},
+    {"do": "drawing.revision.delete", "params": {"row": "revision 2"}, "drawing": "open", "check": "after_delete"},
+    {"do": "drawing.revision.tag.add", "params": {"row": "revision 3", "sheet": "Sheet 1", "at": [200, 120]}, "drawing": "open"},
+    {"do": "drawing.close"},
+    {"do": "occurrence.move", "params": {"occurrence": "second_holder", "space": "world", "translate": [0, 30, 0]}, "drawing": "closed"},
+    {"do": "drawing.open", "check": "after_delete"},
+    {"do": "file.save", "params": {"path": "assembly.solidcraft"}},
+    {"do": "doc.open", "params": {"path": "assembly.solidcraft"}},
+    {"do": "drawing.open", "check": "after_delete"}
+   ],
+   "expect": {
+    "three_rows": {"revisions": ["1", "2", "3"], "next": "4"},
+    "after_delete": {"revisions": ["1", "3"], "next": "4", "tags": [{"revision": "3", "at_mm": [200, 120]}]},
+    "drawing_record_unchanged_by_the_model_edit": true
+   }
+  },
+  {
+   "id": "W23-AS-06",
+   "title": "The sheet exports the same after save and reopen",
+   "runtime_status": "NOT_RUN",
+   "waits_for": ["the parts list, the balloons and the revision table drawn on the sheet (#3874, #3875)", "text on the sheet (B1, #4890)", "DXF and PDF writers as each lands (#4890)"],
+   "native": ["the_assembly_sheet_keeps_its_parts_list_revisions_and_tag_through_the_model"],
+   "steps": [
+    {"from": "W23-AS-05", "until": "end", "with": ["W23-AS-03's parts list", "W23-AS-04's balloons"]},
+    {"do": "drawing.export", "params": {"sheet": "Sheet 1", "format": "svg"}, "as": "before"},
+    {"do": "file.save", "params": {"path": "assembly.solidcraft"}},
+    {"do": "doc.open", "params": {"path": "assembly.solidcraft"}},
+    {"do": "drawing.open"},
+    {"do": "drawing.export", "params": {"sheet": "Sheet 1", "format": "svg"}, "as": "after", "check": "same_export"}
+   ],
+   "expect": {
+    "same_export": {"bytes_equal": ["before", "after"], "formats_now": ["svg"], "formats_later": ["dxf", "pdf"], "png": "written since #4890, not part of this recipe yet"},
+    "on_the_sheet": ["the parts list rows of W23-AS-03", "two balloons showing item 2", "revision rows 1 and 3, tag 3"]
+   }
+  }
+ ]
+}
