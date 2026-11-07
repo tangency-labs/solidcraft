@@ -1675,22 +1675,28 @@ mod tests {
         assert!(app.cam.roll.abs() < 1e-9, "the sketch view stays rolled: {}", app.cam.roll);
         assert!(app.cam.up_dir().z > 0.0 && app.cam.pitch > 0.5, "not looking from above: pitch {}", app.cam.pitch);
         // Off, the upright orbit is the one before: a rolled view keeps its roll and turns about
-        // the world's up axis, about the view centre or a pivot alike.
-        for around in [OrbitAround::ViewCentre, OrbitAround::Origin] {
-            let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
-            assert!(app.preferences.upright_orbit_unrolls, "standing a rolled view up is the default");
-            app.preferences.upright_orbit_unrolls = false;
-            app.preferences.orbit_around = around;
-            app.cam = Camera { target: Vec3::new(2.0, 3.0, 4.0), yaw: 0.4, pitch: 0.5, roll: std::f64::consts::PI, ..Default::default() };
-            let mut expected = app.cam;
-            match around {
-                OrbitAround::Origin => expected.orbit_about(30.0, -20.0, Vec3::ZERO),
-                _ => expected.orbit(30.0, -20.0),
+        // the world's up axis, about the view centre, the origin or the point under the cursor
+        // alike, in orthographic and perspective.
+        let cursor = Vec3::new(5.0, -1.0, 2.0);
+        for fov in [0.0, 0.6] {
+            for around in [OrbitAround::ViewCentre, OrbitAround::Origin, OrbitAround::Cursor] {
+                let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
+                assert!(app.preferences.upright_orbit_unrolls, "standing a rolled view up is the default");
+                app.preferences.upright_orbit_unrolls = false;
+                app.preferences.orbit_around = around;
+                app.viewport.orbit_pivot = Some(cursor);
+                app.cam = Camera { target: Vec3::new(2.0, 3.0, 4.0), yaw: 0.4, pitch: 0.5, roll: std::f64::consts::PI, fov, ..Default::default() };
+                let mut expected = app.cam;
+                match around {
+                    OrbitAround::ViewCentre => expected.orbit(30.0, -20.0),
+                    OrbitAround::Origin => expected.orbit_about(30.0, -20.0, Vec3::ZERO),
+                    OrbitAround::Cursor => expected.orbit_about(30.0, -20.0, cursor),
+                }
+                orbit(&mut app, rect, 10.0, -5.0, None);
+                orbit(&mut app, rect, 20.0, -15.0, None);
+                assert_eq!(app.cam, expected, "the old upright orbit changed ({around:?}, fov {fov})");
+                assert_eq!(app.cam.roll, std::f64::consts::PI);
             }
-            orbit(&mut app, rect, 10.0, -5.0, None);
-            orbit(&mut app, rect, 20.0, -15.0, None);
-            assert_eq!(app.cam, expected, "the old upright orbit changed ({around:?})");
-            assert_eq!(app.cam.roll, std::f64::consts::PI);
         }
     }
 
