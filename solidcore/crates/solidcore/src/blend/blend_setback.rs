@@ -2076,7 +2076,8 @@ pub fn fill_hole_counted(
 #[allow(clippy::struct_excessive_bools)] // the fork's three switches and solidcore's margin
 pub struct Probe {
     /// `m_bFill`: the fill itself, its degrees in [`fill_hole`]'s order: between planes 9
-    /// first, and where 9 proves the conditions unmet no other (the fork's 3843ddb).
+    /// first, and where 9 proves the conditions unmet no other (the fork's 3843ddb);
+    /// beside a curved face from the least degree up.
     pub fill: bool,
     /// `m_bMargin`.
     pub margin: bool,

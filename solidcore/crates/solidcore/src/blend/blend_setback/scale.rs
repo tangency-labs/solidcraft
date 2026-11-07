@@ -402,8 +402,8 @@ mod tests {
             if want == 1.0 {
                 // The r=5, setback=8 corner needs no scale search. Its dense
                 // programme built 430,962 rows and retained 254,037 at peak. Its one
-                // attempt solves degree 9 (18 steps in the fork's 3843ddb) before the
-                // least degree that certifies.
+                // attempt solves degree 9 before the least degree that certifies: three
+                // programmes, 22 steps on x86-64.
                 assert!(result.qp_rows_built <= 10_000);
                 assert!(result.qp_peak_rows_held <= 2_000);
                 assert!(result.qp_steps <= 32);
