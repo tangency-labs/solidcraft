@@ -1212,12 +1212,15 @@ struct ImportDigests {
 struct MeshDigest {
     positions: Arc<[f64]>,
     triangles: Arc<[u32]>,
+    corner_normals: Arc<[f64]>,
     digest: u64,
 }
 
 impl MeshDigest {
     fn matches(&self, mesh: &crate::MeshData) -> bool {
-        Arc::ptr_eq(&self.positions, &mesh.positions) && Arc::ptr_eq(&self.triangles, &mesh.triangles)
+        Arc::ptr_eq(&self.positions, &mesh.positions)
+            && Arc::ptr_eq(&self.triangles, &mesh.triangles)
+            && Arc::ptr_eq(&self.corner_normals, &mesh.corner_normals)
     }
 }
 
@@ -1236,7 +1239,12 @@ impl ImportDigests {
                         .enumerate()
                         .map(|(index, mesh)| {
                             let digest = known.mesh(f.id, index, mesh).unwrap_or_else(|| mesh_content_digest(mesh));
-                            MeshDigest { positions: mesh.positions.clone(), triangles: mesh.triangles.clone(), digest }
+                            MeshDigest {
+                                positions: mesh.positions.clone(),
+                                triangles: mesh.triangles.clone(),
+                                corner_normals: mesh.corner_normals.clone(),
+                                digest,
+                            }
                         })
                         .collect();
                     out.meshes.insert(f.id, digests);
@@ -1265,6 +1273,9 @@ fn mesh_content_digest(mesh: &crate::MeshData) -> u64 {
         coordinate.to_bits().hash(&mut h);
     }
     mesh.triangles.hash(&mut h);
+    for n in mesh.corner_normals.iter() {
+        n.to_bits().hash(&mut h);
+    }
     h.finish()
 }
 
@@ -1356,6 +1367,7 @@ fn feature_json(f: &Feature, steps: &ImportDigests) -> String {
                 digests.push(steps.mesh(f.id, index, mesh).unwrap_or_else(|| mesh_content_digest(mesh)));
                 mesh.positions = Arc::from([]);
                 mesh.triangles = Arc::from([]);
+                mesh.corner_normals = Arc::from([]);
             }
         }
         // Keep the complete definition (including mesh order, names and colors) without
@@ -8276,7 +8288,17 @@ fn mesh_bodies(meshes: &[crate::MeshData]) -> Result<Vec<(String, Body)>> {
     for m in meshes {
         let positions: Vec<Vec3> = m.positions.as_chunks::<3>().0.iter().map(|c| Vec3::new(c[0], c[1], c[2])).collect();
         let triangles: Vec<[u32; 3]> = m.triangles.as_chunks::<3>().0.to_vec();
-        let b = kernel::mesh_body(&positions, &triangles).map_err(|e| DocError::Invalid(format!("mesh `{}`: {e}", m.name)))?;
+        if !m.corner_normals.is_empty() && m.corner_normals.len() != m.triangles.len().saturating_mul(3) {
+            return Err(DocError::Invalid(format!("mesh `{}`: invalid shading normal count", m.name)));
+        }
+        let normals: Vec<[Vec3; 3]> = m
+            .corner_normals
+            .as_chunks::<9>()
+            .0
+            .iter()
+            .map(|c| [Vec3::new(c[0], c[1], c[2]), Vec3::new(c[3], c[4], c[5]), Vec3::new(c[6], c[7], c[8])])
+            .collect();
+        let b = kernel::mesh_body_with_normals(&positions, &triangles, &normals).map_err(|e| DocError::Invalid(format!("mesh `{}`: {e}", m.name)))?;
         out.push((m.name.clone(), b.with_color(m.color)));
     }
     Ok(out)

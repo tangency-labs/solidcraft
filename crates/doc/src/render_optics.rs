@@ -147,8 +147,8 @@ impl OpticalBindings {
         self.0.iter()
     }
     pub fn validate(&self) -> Result<()> {
-        if self.0.len() > 32 || self.0.capacity() > 32 {
-            return Err(DocError::Invalid("at most 32 portable optical targets".into()));
+        if self.0.len() > solidcraft_render::job::MAX_OPTICAL_TARGETS || self.0.capacity() > solidcraft_render::job::MAX_OPTICAL_TARGETS {
+            return Err(DocError::Invalid("at most 128 portable optical targets".into()));
         }
         let mut seen = BTreeSet::new();
         for binding in &self.0 {
@@ -164,7 +164,7 @@ impl OpticalBindings {
     }
     pub fn validate_for_cpu_path(&self, path: bool) -> Result<()> {
         self.validate()?;
-        if self.len() > 8 {
+        if !path && self.len() > 8 {
             return Err(DocError::Invalid("CPU supports at most eight certified optical targets".into()));
         }
         for binding in self.iter() {
@@ -183,11 +183,11 @@ impl OpticalBindings {
             }
             *old = binding;
         } else {
-            if self.0.len() >= 32 {
-                return Err(DocError::Invalid("at most 32 portable optical targets".into()));
+            if self.0.len() >= solidcraft_render::job::MAX_OPTICAL_TARGETS {
+                return Err(DocError::Invalid("at most 128 portable optical targets".into()));
             }
             self.0.try_reserve_exact(1).map_err(|_| DocError::Invalid("optical binding reservation failed".into()))?;
-            if self.0.capacity() > 32 {
+            if self.0.capacity() > solidcraft_render::job::MAX_OPTICAL_TARGETS {
                 return Err(DocError::Invalid("optical capacity exceeds its bound".into()));
             }
             self.0.push(binding);
@@ -202,7 +202,7 @@ impl OpticalBindings {
 }
 impl<'de> Deserialize<'de> for OpticalBindings {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
-        let result = Self(bounded_sequence::<D, SavedOptics, 32>(d)?);
+        let result = Self(bounded_sequence::<D, SavedOptics, { solidcraft_render::job::MAX_OPTICAL_TARGETS }>(d)?);
         result.validate().map_err(serde::de::Error::custom)?;
         Ok(result)
     }
@@ -212,6 +212,25 @@ impl<'de> Deserialize<'de> for OpticalBindings {
 mod advanced_model_contract_tests {
     use super::*;
     use solidcraft_render::glass_model::{Dispersion, GlassModel, ThinFilm};
+    #[test]
+    fn portable_optics_keep_128_targets_and_legacy_cpu_keeps_its_explicit_limit() {
+        let mut bindings = OpticalBindings::default();
+        for feature in 1..=solidcraft_render::job::MAX_OPTICAL_TARGETS {
+            let binding = SavedOptics {
+                target: RenderBodyTarget { definition: "OPUS".into(), feature: feature as u64, component: 0, occurrence_path: Vec::new() },
+                optics: OpticalMaterial::default(),
+            };
+            bindings.set(binding, false).unwrap();
+        }
+        bindings.validate_for_cpu_path(true).unwrap();
+        assert!(bindings.validate_for_cpu().is_err());
+        let raw = serde_json::to_value(&bindings).unwrap();
+        assert_eq!(serde_json::from_value::<OpticalBindings>(raw.clone()).unwrap(), bindings);
+        let mut too_many = raw.as_array().unwrap().clone();
+        too_many.push(too_many[0].clone());
+        assert!(serde_json::from_value::<OpticalBindings>(serde_json::Value::Array(too_many)).is_err());
+    }
+
     #[test]
     fn advanced_optics_keep_every_authored_number_through_saved_and_cpu_lowering() {
         let model = GlassModel {
@@ -238,7 +257,14 @@ mod advanced_model_contract_tests {
     #[test]
     fn caustic_quality_is_portable_between_both_saved_jobs_and_runtime_requests() {
         use crate::render_job::{CpuJob, GpuJob};
-        let caustics = Some(solidcraft_render::job::CausticOptions { photons: 8192, radius_mm: 0.4, max_depth: 12, seed: 381 });
+        let caustics = Some(solidcraft_render::job::CausticOptions {
+            photons: 8192,
+            radius_mm: 0.4,
+            max_depth: 12,
+            seed: 381,
+            area_lights: false,
+            environment: false,
+        });
         let cpu = CpuJob { caustics, path: Some(Default::default()), progressive: Some(Default::default()), ..Default::default() };
         let gpu = GpuJob { caustics, ..Default::default() };
         assert_eq!(cpu.to_runtime(0.0).unwrap().caustics, caustics);

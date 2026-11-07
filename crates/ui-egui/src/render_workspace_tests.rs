@@ -3736,6 +3736,8 @@ fn clicked_setup_save_reload_and_switch_keep_gpu_numeric_intent_without_a_host()
         job: Some(RenderJob::GpuPath {
             transparent_background: true,
             options: Box::new(GpuJob {
+                texture_filtering: false,
+                metal_energy_compensation: false,
                 caustics: None,
                 aging: Default::default(),
                 nested_media: true,
@@ -4316,7 +4318,8 @@ fn embedded_hdr_runtime_requests_preserve_temporary_bindings_without_serializing
 #[test]
 fn cpu_progressive_sample_editor_uses_the_selected_profile_without_rewriting_existing_intent() {
     use solidcraft_engine::render::job::{CpuBudget, CpuProgressiveOptions};
-    for (budget, maximum) in [(CpuBudget::Compact, 64), (CpuBudget::Studio, 1024), (CpuBudget::Workstation, 4096)] {
+    for budget in [CpuBudget::Compact, CpuBudget::Studio, CpuBudget::Workstation] {
+        let maximum = budget.limits().max_samples_per_pixel;
         let mut h = Harness::new();
         h.call("ui.resize", json!({"width":1600,"height":2600}));
         enter(&mut h.app, true).unwrap();
@@ -4364,7 +4367,7 @@ fn cpu_progressive_sample_editor_uses_the_selected_profile_without_rewriting_exi
         );
         h.step(&json!({"click":[field.center().x,field.center().y],"double":true})).unwrap();
         h.step(&json!({"key":"A","cmd":true})).unwrap();
-        h.step(&json!({"text":"4097"})).unwrap();
+        h.step(&json!({"text":(maximum + 1).to_string()})).unwrap();
         h.step(&json!({"key":"Enter"})).unwrap();
         h.frames(3);
         assert_eq!(h.app.render_workspace.view.raytrace.progressive, Some(CpuProgressiveOptions { samples_per_pixel: maximum, seed: 82 }));
@@ -8813,6 +8816,7 @@ fn live_image_imported_mesh_keeps_selected_and_hovered_face_and_body_feedback() 
         FeatureKind::MeshImport {
             file: "feedback-plane.stl".into(),
             meshes: vec![MeshData {
+                corner_normals: std::sync::Arc::from([]),
                 name: "Reference".into(),
                 positions: vec![-2., -2., 0., 2., -2., 0., 2., 2., 0., -2., 2., 0.].into(),
                 triangles: vec![0, 1, 2, 0, 2, 3].into(),
@@ -11972,7 +11976,7 @@ fn cpu_celestial_switch_refuses_incompatible_depth_or_sampling_atomically() {
     for incompatible in ["depth", "adaptive", "transmission"] {
         let mut h = celestial_editor_fixture(true);
         if incompatible == "depth" {
-            h.app.render_workspace.view.max_depth = 17;
+            h.app.render_workspace.view.max_depth = 65;
         } else if incompatible == "transmission" {
             h.app.render_workspace.view.studio.transmission_samples = 4;
         } else {
@@ -12484,7 +12488,7 @@ fn atmosphere_method_adoption_refuses_actual_image_budget_or_depth_without_parti
             .unwrap();
         setups::load(&mut h.app);
         if reason == "depth" {
-            h.app.render_workspace.view.max_depth = 17;
+            h.app.render_workspace.view.max_depth = 65;
         } else {
             h.app.render_workspace.view.raytrace.budget = CpuBudget::Compact;
             h.app.render_workspace.view.raytrace.progressive = Some(CpuProgressiveOptions { samples_per_pixel: 64, seed: 81 });
@@ -14699,8 +14703,10 @@ fn stable_glass_draft_refusals_keep_saved_targets_unknown_identity_and_maps_hdr_
 }
 
 #[test]
-fn stable_glass_draft_capture_keeps_the_existing_cpu_eight_and_gpu_thirty_two_limits() {
-    for (method, limit) in [(ImageMethod::CpuRaytrace, 8), (ImageMethod::GpuRaytrace, 32)] {
+fn stable_glass_draft_capture_enforces_the_cpu_path_and_gpu_optical_limit() {
+    use solidcraft_engine::render::job::MAX_OPTICAL_TARGETS;
+    let limit = MAX_OPTICAL_TARGETS;
+    for method in [ImageMethod::CpuRaytrace, ImageMethod::GpuRaytrace] {
         let mut h = Harness::new();
         h.app.run("solid.box", json!({"body_name":"Optics","length":1,"width":1,"height":1})).unwrap();
         h.app.run("solid.pattern.rectangular", json!({"bodies":["Optics"],"dir1":[1,0,0],"count1":limit+1,"spacing1":3})).unwrap();
@@ -15529,7 +15535,7 @@ fn advanced_glass_lens_save_preserves_caustic_job_drafts_and_refuses_unsaved_opt
     for method in [ImageMethod::CpuRaytrace, ImageMethod::GpuRaytrace] {
         let mut h = advanced_glass_saved_fixture(method);
         let saved = h.app.session.doc.render.setups["Studio"].clone();
-        let quality = CausticOptions { photons: 8192, radius_mm: 0.125, max_depth: 11, seed: 901 };
+        let quality = CausticOptions { photons: 8192, radius_mm: 0.125, max_depth: 11, seed: 901, area_lights: true, environment: true };
         h.app.render_workspace.view.studio.caustics = Some(quality);
         if method == ImageMethod::CpuRaytrace {
             h.app.render_workspace.view.raytrace.progressive = Some(CpuProgressiveOptions { samples_per_pixel: 7, seed: 93 });
@@ -15705,7 +15711,7 @@ fn caustic_quality_survives_cpu_gpu_ui_save_load_and_changes_the_paused_live_req
         let saved = h.app.session.doc.render.setups["Studio"].clone();
         let document = h.app.session.doc.clone();
         let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
-        let quality = CausticOptions { photons: 8192, radius_mm: 0.125, max_depth: 11, seed: 901 };
+        let quality = CausticOptions { photons: 8192, radius_mm: 0.125, max_depth: 11, seed: 901, area_lights: true, environment: true };
         h.app.render_workspace.view.studio.caustics = Some(quality);
         setups::refresh_dirty(&mut h.app);
         assert!(h.app.render_workspace.view.dirty, "the clean-shot fingerprint includes explicit caustic quality");
@@ -15715,10 +15721,10 @@ fn caustic_quality_survives_cpu_gpu_ui_save_load_and_changes_the_paused_live_req
         let mut runtime = json!({});
         if method == ImageMethod::CpuRaytrace {
             cpu::params(&h.app, &mut runtime).unwrap();
-            assert_eq!(runtime["raytrace"]["caustics"], json!(quality), "CPU temporary request capture retains all four quality controls");
+            assert_eq!(runtime["raytrace"]["caustics"], json!(quality), "CPU temporary request capture retains the full caustics options");
         } else {
             studio::params(&h.app, &mut runtime).unwrap();
-            assert_eq!(runtime["caustics"], json!(quality), "GPU temporary request capture retains all four quality controls");
+            assert_eq!(runtime["caustics"], json!(quality), "GPU temporary request capture retains the full caustics options");
         }
         if can_observe_live {
             live::advance(&mut h.app, &h.ctx, 100.0);
@@ -15764,5 +15770,41 @@ fn caustic_quality_survives_cpu_gpu_ui_save_load_and_changes_the_paused_live_req
         assert_eq!(h.app.render_workspace.view.studio.caustics, Some(quality));
         assert_eq!(image_request(&h.app).unwrap()["settings"], json!(expected));
         assert!(h.app.render_workspace.view.job.is_none());
+    }
+}
+
+#[test]
+fn texture_filtering_keeps_exact_cpu_gpu_saved_and_temporary_intent_after_reopen() {
+    for method in [ImageMethod::CpuRaytrace, ImageMethod::GpuRaytrace] {
+        let mut h = advanced_glass_saved_fixture(method);
+        assert!(!h.app.render_workspace.view.studio.texture_filtering);
+        assert!(!h.app.render_workspace.view.studio.metal_energy_compensation);
+        h.app.render_workspace.view.studio.texture_filtering = true;
+        h.app.render_workspace.view.studio.metal_energy_compensation = true;
+        setups::refresh_dirty(&mut h.app);
+        assert!(h.app.render_workspace.view.dirty);
+        let draft = setups::draft(&h.app).unwrap();
+        assert_eq!(json!(draft)["job"]["options"]["texture_filtering"], true);
+        assert_eq!(json!(draft)["job"]["options"]["metal_energy_compensation"], true);
+        let mut runtime = json!({});
+        if method == ImageMethod::CpuRaytrace {
+            cpu::params(&h.app, &mut runtime).unwrap();
+            assert_eq!(runtime["raytrace"]["texture_filtering"], true);
+            assert_eq!(runtime["raytrace"]["metal_energy_compensation"], true);
+        } else {
+            studio::params(&h.app, &mut runtime).unwrap();
+            assert_eq!(runtime["texture_filtering"], true);
+            assert_eq!(runtime["metal_energy_compensation"], true);
+        }
+        setups::save(&mut h.app).unwrap();
+        let path = h.dir.join(format!("filtered-{method:?}.sc"));
+        h.app.run("file.save", json!({"path":path})).unwrap();
+        h.app.run("doc.open", json!({"path":path})).unwrap();
+        h.app.render_workspace.view.name = "Studio".into();
+        enter(&mut h.app, true).unwrap();
+        setups::load(&mut h.app);
+        assert!(h.app.render_workspace.view.studio.texture_filtering);
+        assert!(h.app.render_workspace.view.studio.metal_energy_compensation);
+        assert_eq!(setups::draft(&h.app).unwrap(), draft);
     }
 }

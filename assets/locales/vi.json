@@ -3370,7 +3370,7 @@
   "render.cpu_opaque_required": "Dò tia trên CPU yêu cầu nền đục. Hãy bỏ chọn 'Nền trong suốt' để tiếp tục.",
   "render.cpu_options_pending": "Bảng điều khiển CPU này chưa hỗ trợ chỉnh sửa tự phát xạ, hiệu ứng bề mặt, thủy tinh hoặc bất đẳng hướng. Hãy xóa các tùy chọn API đó trước khi sử dụng.",
   "render.cpu_path_depth": "Độ sâu đường truyền",
-  "render.cpu_path_help": "Tính ánh sáng phản xạ giữa các bề mặt đục và truyền qua các hình kính được hỗ trợ. Cần kết xuất lũy tiến và bóng dò tia. Độ sâu đường đi đếm các bề mặt được chiếu sáng, ranh giới kính và các sự kiện tán xạ từ giao điểm đầu tiên (1–16). Độ sâu 1 chỉ chiếu sáng trực tiếp bề mặt đục; giá trị cao hơn cho phép thêm lần phản xạ hoặc xuyên kính và có thể lâu hơn. Tắt Chiếu sáng gián tiếp để dùng phản xạ tùy chỉnh hoặc dị hướng.",
+  "render.cpu_path_help": "Tính ánh sáng phản xạ giữa các bề mặt đục và truyền qua các hình kính được hỗ trợ. Cần kết xuất lũy tiến và bóng dò tia. Độ sâu đường đi đếm các bề mặt được chiếu sáng, ranh giới kính và các sự kiện tán xạ từ giao điểm đầu tiên (1–64). Độ sâu 1 chỉ chiếu sáng trực tiếp bề mặt đục; giá trị cao hơn cho phép thêm lần phản xạ hoặc xuyên kính và có thể lâu hơn. Tắt Chiếu sáng gián tiếp để dùng phản xạ tùy chỉnh hoặc dị hướng.",
   "render.cpu_path_lighting": "Chiếu sáng gián tiếp",
   "render.cpu_path_optics_reason": "Các thiết lập được giữ nguyên. Tắt Chiếu sáng gián tiếp để dùng phản xạ tùy chỉnh hoặc dị hướng.",
   "render.cpu_point": "Nguồn sáng điểm",

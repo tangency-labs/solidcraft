@@ -791,6 +791,7 @@ fn shared_imported_mesh_inputs_keep_payload_identity_and_invalidate_replacements
                     positions: Arc::from([0., 0., 0., 1., 0., 0., 0., 1., 0.]),
                     triangles: Arc::from([0, 1, 2]),
                     color: None,
+                    corner_normals: Default::default(),
                 }],
             },
             None,
@@ -804,7 +805,7 @@ fn shared_imported_mesh_inputs_keep_payload_identity_and_invalidate_replacements
     Arc::make_mut(&mut doc).occurrences[0].transform = rigid(Vec3::new(10., 0., 0.), Vec3::ZERO, Vec3::Z, 0.3);
     assert!(!model.evaluate_shared(&doc));
     assert!(Arc::ptr_eq(&original, &model.state()));
-    for edit in 0..5 {
+    for edit in 0..6 {
         let FeatureKind::MeshImport { meshes, .. } = &mut Arc::make_mut(&mut doc).feature_mut(feature).unwrap().kind else { panic!("mesh") };
         let mesh = &mut meshes[0];
         match edit {
@@ -812,6 +813,7 @@ fn shared_imported_mesh_inputs_keep_payload_identity_and_invalidate_replacements
             1 => Arc::make_mut(&mut mesh.triangles).swap(1, 2),
             2 => mesh.color = Some([0.2, 0.4, 0.6]),
             3 => mesh.name = "Renamed".into(),
+            4 => mesh.corner_normals = Arc::from([0., 1., 1., 0., 1., 1., 0., 1., 1.]),
             _ => mesh.positions = Arc::from(mesh.positions.to_vec()),
         }
         assert!(model.evaluate_shared(&doc), "mesh edit {edit} must invalidate");
@@ -924,6 +926,7 @@ fn comparing_a_copied_mesh_does_not_read_its_shared_arrays() {
         positions: Arc::from([0., 0., 0., 1., 0., 0., 0., 1., f64::NAN]),
         triangles: Arc::from([0, 1, 2]),
         color: None,
+        corner_normals: Default::default(),
     };
     let copy = mesh.clone();
     assert!(copy == mesh, "a copy shares the arrays and is the same mesh without reading them");
@@ -1651,6 +1654,7 @@ fn imported_meshes() -> Document {
             positions: [0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 4.0].into(),
             triangles: [0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3].into(),
             color: Some([0.2, 0.4, 0.6]),
+            corner_normals: Default::default(),
         })
         .collect();
     let id = doc.add_feature(FeatureKind::MeshImport { file: "tetrahedra.stl".into(), meshes }, Some("Meshes")).unwrap();
@@ -1682,6 +1686,16 @@ fn same_as_fresh(doc: &Document, model: &Model) {
 #[test]
 fn unchanged_mesh_payloads_are_not_read_again_for_rigid_motion() {
     let mut doc = imported_meshes();
+    for mesh in meshes_mut(&mut doc) {
+        mesh.generate_crease_normals(10.0).unwrap();
+        assert!(!mesh.corner_normals.is_empty());
+    }
+    let compact: serde_json::Value = serde_json::from_str(&super::feature_json(&doc.features[0], &super::ImportDigests::default())).unwrap();
+    for mesh in compact[0]["meshes"].as_array().unwrap() {
+        assert_eq!(mesh["positions"], serde_json::json!([]));
+        assert_eq!(mesh["triangles"], serde_json::json!([]));
+        assert!(mesh.get("corner_normals").is_none(), "the fingerprint must hash the retained digest without serializing shading payloads");
+    }
     let mut model = Model::new();
     assert_eq!(counted(|| model.evaluate(&doc)).mesh_digested, 2);
     for k in 1..5 {

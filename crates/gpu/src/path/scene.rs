@@ -225,7 +225,7 @@ pub(super) fn flatten_with_media(scene: &ProductScene, origin: Vec3, cancel: &Ca
         let body_triangles = &triangles[body_start..];
         if body_triangles.iter().any(|t| t.transmission.is_some()) {
             if media_bounds.len() >= solidcraft_render::job::MAX_GPU_DIELECTRICS {
-                return Err(invalid("at most 32 disjoint dielectric bodies are supported"));
+                return Err(invalid("at most 128 disjoint dielectric bodies are supported"));
             }
             let closed = body_triangles.iter().any(|t| t.transmission.is_some_and(|v| v.thin_wall_thickness_mm().is_none()));
             let mut lo = Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
@@ -242,6 +242,7 @@ pub(super) fn flatten_with_media(scene: &ProductScene, origin: Vec3, cancel: &Ca
                 closed,
                 triangles: body_start..triangles.len(),
                 medium: body_index as u32 + 1,
+                name: &body.name,
             });
         }
         vertex_offset = vertex_offset.checked_add(mesh.positions.len() as u32).ok_or_else(|| invalid("vertex offset overflow"))?;

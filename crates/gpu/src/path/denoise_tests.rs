@@ -9,7 +9,7 @@ use solidcraft_render::{
 };
 use std::sync::Arc;
 
-type Guide = [[f64; 4]; 3];
+type Guide = [[f64; 4]; 6];
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
     a.into_iter().zip(b).map(|(x, y)| x * y).sum()
 }
@@ -29,12 +29,16 @@ fn reference(width: usize, input: &[[f64; 4]], guides: &[Guide], step: usize) ->
         .iter()
         .enumerate()
         .map(|(i, &center)| {
-            let [a, n, p] = guides[i];
-            if a[3] == 0.0 || center[3] < 0.999 {
+            let [a, n, p, ar, nr, pr] = guides[i];
+            let optical = a[3] < 0.0;
+            if a[3] == 0.0 || center[3] < 0.999 || (optical && step > 2) {
                 return center;
             }
             let mut result = [0.0; 4];
             let mut total = 0.0;
+            let maximum = |v: [f64; 3]| v.into_iter().fold(0.0, f64::max);
+            let center_peak = maximum(xyz(center));
+            let mut support = Vec::new();
             for (ky, &wy) in kernel.iter().enumerate() {
                 for (kx, &wx) in kernel.iter().enumerate() {
                     let x = (i % width) as isize + (kx as isize - 2) * step as isize;
@@ -43,7 +47,7 @@ fn reference(width: usize, input: &[[f64; 4]], guides: &[Guide], step: usize) ->
                         continue;
                     }
                     let j = y as usize * width + x as usize;
-                    let [b, m, q] = guides[j];
+                    let [b, m, q, br, mr, qr] = guides[j];
                     let value = input[j];
                     if a[3] != b[3] || (value[3] - center[3]).abs() > 0.01 {
                         continue;
@@ -53,13 +57,29 @@ fn reference(width: usize, input: &[[f64; 4]], guides: &[Guide], step: usize) ->
                     let plane = dot(position, xyz(n)).abs() + dot(position, xyz(m)).abs();
                     let scale = (0.05 * p[3].max(q[3]) * step as f64).max(1e-6);
                     let depth = (n[3] - m[3]).abs() / (8.0 * p[3].max(q[3]) * step as f64).max(1e-6);
-                    let color = diff(center, value);
-                    let maximum = |v: [f64; 3]| v.into_iter().fold(0.0, f64::max);
-                    let color_scale = 0.25 + 0.5 * maximum(xyz(center)).max(maximum(xyz(value)));
-                    let weight = wx
-                        * wy
-                        * (-dot(albedo, albedo) / 0.04 - plane / scale - depth - maximum(color.map(f64::abs)) / color_scale).exp()
-                        * dot(xyz(n), xyz(m)).max(0.0).powi(32);
+                    let mut guide_weight = (-dot(albedo, albedo) / 0.04 - plane / scale - depth).exp() * dot(xyz(n), xyz(m)).max(0.0).powi(32);
+                    if ar[3] != br[3] {
+                        continue;
+                    }
+                    if ar[3] != 0.0 {
+                        let da = diff(ar, br);
+                        let dp = diff(qr, pr);
+                        let footprint = pr[3].max(qr[3]) * step as f64;
+                        let plane = dot(dp, xyz(nr)).abs() + dot(dp, xyz(mr)).abs();
+                        let depth = (nr[3] - mr[3]).abs() / (8.0 * footprint).max(1e-6);
+                        guide_weight *=
+                            (-dot(da, da) / 0.04 - plane / (0.05 * footprint).max(1e-6) - depth).exp() * dot(xyz(nr), xyz(mr)).max(0.0).powi(32);
+                    }
+                    let tap_peak = maximum(xyz(value));
+                    if !optical && step == 1 && (1..=3).contains(&kx) && (1..=3).contains(&ky) && i != j && guide_weight >= 0.5 {
+                        support.push(tap_peak);
+                    }
+                    let color = maximum(diff(center, value).map(f64::abs));
+                    let high = center_peak.max(tap_peak);
+                    let bound = 16.0 * (0.25 + center_peak.min(tap_peak));
+                    let contrast = if high <= bound { 1.0 } else { (bound / high).powi(2) };
+                    let color_weight = if optical { 4.0 } else { 1.0 };
+                    let weight = wx * wy * guide_weight * (-color_weight * color / (0.25 + 0.5 * high)).exp() * contrast;
                     for k in 0..3 {
                         result[k] += value[k] * weight;
                     }
@@ -69,13 +89,23 @@ fn reference(width: usize, input: &[[f64; 4]], guides: &[Guide], step: usize) ->
             for v in result.iter_mut().take(3) {
                 *v /= total;
             }
+            if support.len() >= 5 {
+                let support_peak = support.into_iter().fold(0.0, f64::max);
+                let cap = 2.0 * support_peak + 0.25;
+                let peak = maximum(xyz(result));
+                if center_peak > 16.0 * (0.25 + support_peak) && peak > cap {
+                    for v in &mut result[..3] {
+                        *v *= cap / peak;
+                    }
+                }
+            }
             result[3] = center[3];
             result
         })
         .collect()
 }
 fn guide(x: usize, y: usize) -> Guide {
-    [[0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0, 4.0], [x as f64, y as f64, 0.0, 1.0]]
+    [[0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0, 4.0], [x as f64, y as f64, 0.0, 1.0], [0.0; 4], [0.0; 4], [0.0; 4]]
 }
 fn fixture(size: usize) -> (Vec<[f64; 4]>, Vec<Guide>) {
     let mut pixels = Vec::new();
@@ -219,15 +249,15 @@ fn denoise_admission_counts_guides_and_ping_pong_only_when_enabled() {
     let request = request(32);
     let plain = super::super::admission(&scene, &request, JobOptions::default()).unwrap();
     let filtered = super::super::admission(&scene, &request, JobOptions { denoise: true, ..Default::default() }).unwrap();
-    assert_eq!(filtered.pixel_scratch_bytes - plain.pixel_scratch_bytes, 32 * 32 * 80);
-    assert_eq!(filtered.estimated_total_bytes - plain.estimated_total_bytes, 32 * 32 * 80);
+    assert_eq!(filtered.pixel_scratch_bytes - plain.pixel_scratch_bytes, 32 * 32 * 128);
+    assert_eq!(filtered.estimated_total_bytes - plain.estimated_total_bytes, 32 * 32 * 128);
     let large = ImageRequest { width: 2000, height: 2000, ..request.clone() };
     assert!(super::super::admission(&scene, &large, JobOptions::default()).is_ok());
     // The production envelope deliberately admits this former 512 MiB refusal.
     // Still charge the guides/ping-pong in full, and reject outside the new edge.
     let large_plain = super::super::admission(&scene, &large, JobOptions::default()).unwrap();
     let large_filtered = super::super::admission(&scene, &large, JobOptions { denoise: true, ..Default::default() }).unwrap();
-    assert_eq!(large_filtered.pixel_scratch_bytes - large_plain.pixel_scratch_bytes, 2000 * 2000 * 80);
+    assert_eq!(large_filtered.pixel_scratch_bytes - large_plain.pixel_scratch_bytes, 2000 * 2000 * 128);
     assert!(large_filtered.estimated_total_bytes > 512 * 1024 * 1024);
     assert!(large_filtered.estimated_total_bytes <= solidcraft_render::job::GPU_PATH_LIMITS.max_scratch_bytes);
     let excessive = ImageRequest { width: (solidcraft_render::job::GPU_PATH_LIMITS.max_dimension + 1) as u32, ..request.clone() };
@@ -238,7 +268,7 @@ fn denoise_admission_counts_guides_and_ping_pong_only_when_enabled() {
     assert!(serde_json::from_str::<JobOptions>(r#"{"denoise":"true"}"#).is_err());
 }
 #[test]
-fn gpu_atrous_matches_f64_guides_and_leaves_input_unchanged() {
+fn gpu_atrous_matches_f64_with_firefly_line_and_material_boundary() {
     let Some(context) = context() else {
         return;
     };
@@ -249,9 +279,27 @@ fn gpu_atrous_matches_f64_guides_and_leaves_input_unchanged() {
             input[y * 13 + x][0] += 0.8;
         }
     }
+    for y in 0..13 {
+        input[y * 13 + 10] = [256.0, 64.0, 16.0, 1.0];
+    }
+    let isolated = 6 * 13 + 3;
+    let material_boundary = 2 * 13 + 6;
+    input[isolated] = [512.0, 128.0, 32.0, 1.0];
+    input[material_boundary] = input[isolated];
+    // Same body but incompatible albedo. The neighbouring floor cannot
+    // supply support for capping a highlight on this material patch.
+    guides[material_boundary][0] = [1.0; 4];
+    let optical_glint = 2 * 13 + 8;
+    for y in 1..=3 {
+        for x in 7..=9 {
+            guides[y * 13 + x][0][3] = f64::from(f32::from_bits(0xa004_0400));
+        }
+    }
+    input[optical_glint] = [1024.0, 256.0, 64.0, 1.0];
     guides[0][0][3] = 0.0;
     input[1][3] = 0.5;
-    let bytes: Vec<u8> = input.iter().flatten().flat_map(|x| (*x as f32).to_le_bytes()).collect();
+    let samples = 8;
+    let bytes: Vec<u8> = input.iter().flatten().flat_map(|x| (*x as f32 * samples as f32).to_le_bytes()).collect();
     let device = &context.device;
     let make = |label, bytes: &[u8]| {
         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -263,7 +311,7 @@ fn gpu_atrous_matches_f64_guides_and_leaves_input_unchanged() {
     let raw = make("denoise fixture raw", &bytes);
     let dummy = make("denoise unused geometry", &[0; 64]);
     let mut task = Task::new(context.clone(), plane(), request(13), JobOptions::default(), CancelToken::default()).unwrap();
-    task.sample = 1;
+    task.sample = samples;
     let filter = Resources::new(&context, &task.uniform, [&dummy, &dummy, &dummy, &dummy, &dummy], &raw, bytes.len() as u64, false).unwrap();
     let guide_bytes: Vec<u8> = guides.iter().flatten().flatten().flat_map(|x| (*x as f32).to_le_bytes()).collect();
     context.queue.write_buffer(&filter._guides, 0, &guide_bytes);
@@ -271,16 +319,167 @@ fn gpu_atrous_matches_f64_guides_and_leaves_input_unchanged() {
     filter.run_filter(&task, false).unwrap();
     assert_eq!(before, task.read_linear_buffer(&raw).unwrap());
     let actual = task.read_linear_buffer(filter.output()).unwrap();
-    let mut expected = input;
-    for step in [1, 2, 4] {
-        expected = reference(13, &expected, &guides, step);
-    }
+    let first_pass = reference(13, &input, &guides, 1);
+    assert!(first_pass[isolated][0] < 1.5);
+    let expected = reference(13, &reference(13, &first_pass, &guides, 2), &guides, 4);
     for (a, b) in actual.iter().zip(&expected) {
-        for (x, y) in a.iter().zip(b) {
-            assert!((f64::from(*x) - *y).abs() < 2e-5, "{a:?} vs {b:?}");
+        assert_eq!(a[3].to_bits(), (b[3] as f32).to_bits());
+        for (x, y) in a[..3].iter().zip(&b[..3]) {
+            assert!((f64::from(*x) - *y).abs() < 2e-5 * y.abs().max(1.0), "{a:?} vs {b:?}");
         }
     }
+    assert!(actual[isolated][0] < 0.7, "the isolated firefly must come down to its neighbourhood");
+    assert!(actual[6 * 13 + 10][0] > 254.0, "a supported bright line must survive");
+    assert!(actual[material_boundary][0] > 511.0, "incompatible guide support must preserve the material highlight");
+    assert!(actual[optical_glint][0] > 1023.0, "a single optical glint with matching guides must survive");
 }
+#[test]
+fn gpu_optical_filter_preserves_edges_on_the_same_reflected_body() {
+    let Some(context) = context() else {
+        return;
+    };
+    let device = &context.device;
+    let input: Vec<[f32; 4]> = (0..25).map(|i| if i == 12 { [0.8, 0.8, 0.8, 1.0] } else { [0.4, 0.4, 0.4, 1.0] }).collect();
+    let bytes: Vec<_> = input.iter().flatten().flat_map(|x| x.to_le_bytes()).collect();
+    let raw = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("mixed glass edge radiance"),
+        contents: &bytes,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+    });
+    let dummy = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("unused optical edge geometry"),
+        contents: &[0; 64],
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let mut task = Task::new(context.clone(), plane(), request(5), JobOptions::default(), CancelToken::default()).unwrap();
+    task.sample = 1;
+    let filter = Resources::new(&context, &task.uniform, [&dummy, &dummy, &dummy, &dummy, &dummy], &raw, bytes.len() as u64, false).unwrap();
+    for edge in 0..4 {
+        let mut g = guide(0, 0);
+        g[0][3] = f64::from(f32::from_bits(0xa004_0403));
+        g[3] = [0.5, 0.5, 0.5, 2.0];
+        g[4] = [0.0, 0.0, 1.0, 4.0];
+        g[5] = [0.0, 0.0, 0.0, 1.0];
+        let mut guides = vec![g; 25];
+        match edge {
+            0 => guides[12][3] = [1.0, 1.0, 1.0, 2.0],
+            1 => guides[12][4] = [1.0, 0.0, 0.0, 4.0],
+            2 => guides[12][4][3] = 1000.0,
+            _ => guides[12][5][2] = 10.0,
+        }
+        let packed: Vec<_> = guides.iter().flatten().flatten().flat_map(|x| (*x as f32).to_le_bytes()).collect();
+        context.queue.write_buffer(&filter._guides, 0, &packed);
+        filter.run_filter(&task, false).unwrap();
+        let actual = task.read_linear_buffer(filter.output()).unwrap();
+        assert!(actual[12][0] > 0.799, "reflected edge {edge}: {:?}", actual[12]);
+        assert_eq!(task.read_linear_buffer(&raw).unwrap(), input);
+    }
+}
+fn optical_plane(z: f64, albedo: Vec3) -> ProductMesh {
+    let mut body = plane().meshes.remove(0);
+    for point in &mut Arc::make_mut(&mut body.mesh).positions {
+        point.x *= 3.0;
+        point.y *= 3.0;
+        point.z = z;
+    }
+    body.surface = Some(OpaqueSurface::new(albedo, 0.0, 0.7, 1.0).unwrap());
+    body
+}
+fn optical_box() -> Mesh {
+    let faces = [
+        ([[-3., -3., 0.5], [3., -3., 0.5], [3., 3., 0.5], [-3., 3., 0.5]], Vec3::Z),
+        ([[-3., 3., -0.5], [3., 3., -0.5], [3., -3., -0.5], [-3., -3., -0.5]], -Vec3::Z),
+        ([[3., -3., -0.5], [3., 3., -0.5], [3., 3., 0.5], [3., -3., 0.5]], Vec3::X),
+        ([[-3., 3., -0.5], [-3., -3., -0.5], [-3., -3., 0.5], [-3., 3., 0.5]], -Vec3::X),
+        ([[3., 3., -0.5], [-3., 3., -0.5], [-3., 3., 0.5], [3., 3., 0.5]], Vec3::Y),
+        ([[-3., -3., -0.5], [3., -3., -0.5], [3., -3., 0.5], [-3., -3., 0.5]], -Vec3::Y),
+    ];
+    let mut mesh = Mesh::default();
+    for (points, normal) in faces {
+        let start = mesh.positions.len() as u32;
+        mesh.positions.extend(points.map(|[x, y, z]| Vec3::new(x, y, z)));
+        mesh.normals.extend([normal; 4]);
+        mesh.triangles.extend([[start, start + 1, start + 2], [start, start + 2, start + 3]]);
+        mesh.tri_face.extend([0; 2]);
+    }
+    mesh
+}
+
+#[test]
+fn gpu_denoise_optical_guides_track_branches_and_certified_snell_endpoints() {
+    use solidcraft_render::{
+        glass_model::{GlassModel, ThinFilm},
+        job::{AreaLight, AreaLights, StudioLighting, ThinLens},
+        transmission::Transmission,
+    };
+    let Some(context) = context() else { return };
+    let mut image = request(1);
+    let incident = 0.4_f64;
+    image.camera.pitch = std::f64::consts::FRAC_PI_2 - incident;
+    image.camera.yaw = 0.0;
+    image.camera.fov = 0.4;
+    let reflected = optical_plane(6.0, Vec3::new(0.2, 0.4, 0.6));
+    let transmitted = optical_plane(-3.0, Vec3::new(0.7, 0.3, 0.2));
+    let base = optical_plane(0.0, Vec3::ZERO);
+    let options = JobOptions { samples: 1, max_depth: 4, denoise: true, ..Default::default() };
+    let probe = |meshes: Vec<ProductMesh>, options| {
+        let bounds = meshes.iter().fold(solidcraft_geom::Aabb3::EMPTY, |bounds, body| bounds.union(&body.mesh.bounds()));
+        let task = Task::new(context.clone(), ProductScene { meshes, bounds }, image.clone(), options, CancelToken::default()).unwrap();
+        let filter = task.denoiser.as_ref().unwrap();
+        filter.generate_guides(&task).unwrap();
+        assert!(read_guides(&context, &task.failures).iter().all(|word| *word == [0.0; 4]), "guide tracing cannot write production failures");
+        read_guides(&context, &filter._guides)
+    };
+    let tag = |reflection: u32, transmission: u32| 0xa0000000_u32 | (1_u32 << 18) | (reflection << 9) | transmission;
+    let empty = vec![[0.0; 4]; 6];
+    let mut mirror = base.clone();
+    mirror.surface = Some(OpaqueSurface::new(Vec3::new(1.0, 1.0, 1.0), 1.0, 0.045, 1.5).unwrap());
+    let guide = probe(vec![mirror.clone(), reflected.clone()], options);
+    assert_eq!(guide[0], [0.2, 0.4, 0.6, f32::from_bits(tag(2, 0))]);
+    assert_eq!(&guide[1][..3], &[0.0, 0.0, -1.0]);
+    assert!(guide[1][3] < 0.0, "the reflected endpoint is behind the camera");
+    assert!((guide[2][1] - (6.0 * incident.tan()) as f32).abs() < 2e-5);
+    assert!(guide[2][3] >= 1.6, "the endpoint behind the camera retains the primary footprint");
+    let lens = ThinLens { aperture_radius_mm: 0.1, focus_distance_mm: 4.0 };
+    assert_eq!(probe(vec![mirror, reflected.clone()], JobOptions { lens: Some(lens), ..options }), empty);
+
+    let mut thin = base.clone();
+    thin.surface = Some(OpaqueSurface::new(Vec3::ZERO, 0.0, 0.7, 1.5).unwrap());
+    thin.transmission = Some(Transmission::new(Vec3::ZERO, Some(0.0)).unwrap());
+    let thin_scene = vec![thin.clone(), reflected.clone(), transmitted.clone()];
+    let guide = probe(thin_scene.clone(), options);
+    assert_eq!(guide[0], [0.7, 0.3, 0.2, f32::from_bits(tag(2, 3))]);
+    assert_eq!(guide[3], [0.2, 0.4, 0.6, 2.0]);
+    assert_eq!(&guide[4][..3], &[0.0, 0.0, -1.0]);
+    assert_eq!(&guide[1][..3], &[0.0, 0.0, 1.0]);
+    assert!((guide[2][1] - (3.0 * incident.tan()) as f32).abs() < 2e-5);
+    assert_eq!(probe(vec![thin.clone(), transmitted.clone()], options), empty, "both weighted branches need an opaque endpoint");
+    let emitter = AreaLight { center: [0.0, 2.0, 5.0], u: [2.0, 0.0, 0.0], v: [0.0, 2.0, 0.0], radiance: [1.0; 3] };
+    let blocked = StudioLighting { area_lights: AreaLights::new(&[emitter]).unwrap(), ..Default::default() };
+    assert_eq!(probe(thin_scene, JobOptions { lighting: Some(blocked), ..options }), empty);
+    let film = GlassModel { roughness: 0.0, dispersion: None, thin_film: Some(ThinFilm { ior: 1.35, thickness_nm: 200.0 }) };
+    let mut modeled = thin.clone();
+    modeled.transmission = Some(modeled.transmission.unwrap().with_model(film).unwrap());
+    assert_eq!(probe(vec![modeled, reflected.clone(), transmitted.clone()], options), empty);
+    let mut matched = thin.clone();
+    matched.surface = base.surface;
+    let guide = probe(vec![matched, reflected.clone(), transmitted.clone()], options);
+    assert_eq!(guide[0][3].to_bits(), tag(0, 3));
+
+    let mut closed = thin;
+    closed.mesh = Arc::new(optical_box());
+    closed.transmission = Some(Transmission::new(Vec3::ZERO, None).unwrap());
+    let closed_scene = vec![closed, reflected, transmitted];
+    let guide = probe(closed_scene.clone(), JobOptions { nested_media: true, ..options });
+    assert_eq!(guide[0], [0.7, 0.3, 0.2, f32::from_bits(tag(2, 3))]);
+    assert_eq!(guide[3], [0.2, 0.4, 0.6, 2.0]);
+    assert_eq!(&guide[4][..3], &[0.0, 0.0, -1.0]);
+    let internal = (incident.sin() / 1.5).asin();
+    let snell_y = 2.0 * incident.tan() + internal.tan();
+    assert!((f64::from(guide[2][1]) - snell_y).abs() < 2e-5, "Snell displacement {guide:?} vs {snell_y}");
+    assert_eq!(probe(closed_scene, JobOptions { max_depth: 2, ..options }), empty);
+}
+
 #[test]
 fn gpu_denoise_default_false_is_identical_and_true_preserves_raw() {
     let Some(context) = context() else {
@@ -300,13 +499,16 @@ fn gpu_denoise_default_false_is_identical_and_true_preserves_raw() {
         }
         let raw = task.read_linear().unwrap();
         if let Some(filter) = &task.denoiser {
+            use std::sync::atomic::Ordering;
+            assert!(!filter.guides_ready.load(Ordering::Relaxed));
             filter.run(&task).unwrap();
+            assert!(filter.guides_ready.load(Ordering::Relaxed));
             assert_eq!(raw, task.read_linear().unwrap());
             let filtered = task.read_linear_buffer(filter.output()).unwrap();
             assert!(filtered.iter().all(|p| p.iter().all(|v| v.is_finite())));
             let guides = read_guides(&context, &filter._guides);
             assert_eq!(guides[0], [0.0; 4]);
-            let center = (4 * 8 + 4) * 3;
+            let center = (4 * 8 + 4) * 6;
             assert_eq!(guides[center], [0.5, 0.5, 0.5, 1.0]);
             assert_eq!(guides[center + 1], [0.0, 0.0, 1.0, 16.0]);
             assert!((guides[center + 2][0] - 0.2).abs() < 1e-6);

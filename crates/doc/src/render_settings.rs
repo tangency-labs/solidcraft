@@ -883,7 +883,7 @@ mod tests {
             json!({"job":{"method":"gpu_path","options":{"environment":{"kind":"hdr","path":"not-portable.hdr"}}}}),
             json!({"job":{"method":"gpu_path","options":{"exposure_ev":0}}}),
             json!({"job":{"method":"gpu_path","options":{"samples":0}}}),
-            json!({"job":{"method":"gpu_path","options":{"max_depth":17}}}),
+            json!({"job":{"method":"gpu_path","options":{"max_depth":65}}}),
             json!({"job":{"method":"gpu_path","options":{"environment":{"kind":"sky","intensity":101}}}}),
             json!({"job":{"method":"gpu_path","options":{"lighting":{"environment":[-1,0,0]}}}}),
             json!({"camera":Camera { fov: 0.0, ..Default::default() },"job":{"method":"gpu_path","options":{"lens":{"aperture_radius_mm":1,"focus_distance_mm":10}}}}),
@@ -1021,7 +1021,7 @@ mod cpu_budget_tests {
         let old = CpuJob::default();
         assert!(old.path.is_none());
         assert!(serde_json::to_value(&old).unwrap().get("path").is_none());
-        for depth in [1, 8, 16] {
+        for depth in [1, 8, 16, 64] {
             let setup:RenderSetup=serde_json::from_value(json!({"width":8,"height":8,"job":{"method":"cpu_raytrace","options":{"path":{"max_depth":depth},"progressive":{"samples_per_pixel":7,"seed":9}}}})).unwrap();
             setup.validate().unwrap();
             let mut document = crate::Document::default();
@@ -1032,7 +1032,7 @@ mod cpu_budget_tests {
         }
         for raw in [
             json!({"path":{"max_depth":0},"progressive":{"samples_per_pixel":7,"seed":9}}),
-            json!({"path":{"max_depth":17},"progressive":{"samples_per_pixel":7,"seed":9}}),
+            json!({"path":{"max_depth":65},"progressive":{"samples_per_pixel":7,"seed":9}}),
             json!({"path":{"max_depth":8}}),
             json!({"path":{"max_depth":8},"progressive":{"samples_per_pixel":7,"seed":9},"shadows":false}),
         ] {
@@ -1220,7 +1220,9 @@ mod cpu_adaptive_saved_tests {
             serde_json::from_value::<RenderSetup>(cap).unwrap().validate().is_err(),
             "16 pilots cannot be hidden outside Compact's 64-sample cap"
         );
-        for (budget, maximum) in [(CpuBudget::Compact, 64), (CpuBudget::Studio, 1024), (CpuBudget::Workstation, 4096)] {
+        for (budget, maximum) in
+            [(CpuBudget::Compact, 64), (CpuBudget::Studio, 1024), (CpuBudget::Workstation, solidcraft_render::job::MAX_CPU_SAMPLES_PER_PIXEL)]
+        {
             let mut runtime = runtime.clone();
             runtime.budget = budget;
             runtime.progressive = Some(CpuProgressiveOptions { samples_per_pixel: maximum - 16, seed: 81 });

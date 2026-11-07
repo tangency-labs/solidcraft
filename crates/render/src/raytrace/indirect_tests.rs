@@ -122,6 +122,8 @@ fn opaque_path_oblique_and_grazing_coated_response_and_null_mass_match_independe
             let mut density = 0.0;
             let mut sampled = Vec3::ZERO;
             let mut mass = 0.0;
+            let mut sampled_second_moment = 0.0;
+            let mut ndf_second_moment = 0.0;
             for row in 0..side {
                 let u = (f64::from(row) + 0.5) / f64::from(side);
                 for col in 0..side {
@@ -131,28 +133,43 @@ fn opaque_path_oblique_and_grazing_coated_response_and_null_mass_match_independe
                     let phi = TAU * v;
                     let l = Vec3::new((1.0 - u * u).sqrt() * phi.cos(), (1.0 - u * u).sqrt() * phi.sin(), u);
                     let half = unit_direction(view + l).unwrap();
-                    let vh = view.dot(half);
+                    let vndf = |roughness: f64| {
+                        let a2 = roughness.powi(4);
+                        let denominator = 1.0 - half.z * half.z + half.z * half.z * a2;
+                        let lambda = 0.5 * ((1.0 + a2 * (1.0 - cosine * cosine) / (cosine * cosine)).sqrt() - 1.0);
+                        a2 / (PI * denominator * denominator * (1.0 + lambda) * 4.0 * cosine)
+                    };
+                    let independent_pdf = 0.6 * (0.5 * u / PI + 0.5 * vndf(0.6)) + 0.4 * vndf(0.5);
+                    density += independent_pdf * TAU / cells;
+                    let integrand = surface.brdf(Vec3::Z, view, l).unwrap() * u;
+                    quadrature += integrand * (TAU / cells);
                     let ndf = |roughness: f64| {
                         let a2 = roughness.powi(4);
                         let denominator = 1.0 - half.z * half.z + half.z * half.z * a2;
-                        a2 * half.z / (PI * denominator * denominator * 4.0 * vh)
+                        a2 * half.z / (PI * denominator * denominator * 4.0 * view.dot(half))
                     };
-                    let independent_pdf = 0.6 * (0.5 * u / PI + 0.5 * ndf(0.6)) + 0.4 * ndf(0.5);
-                    density += independent_pdf * TAU / cells;
-                    quadrature += surface.brdf(Vec3::Z, view, l).unwrap() * (u * TAU / cells);
+                    let ndf_pdf = 0.6 * (0.5 * u / PI + 0.5 * ndf(0.6)) + 0.4 * ndf(0.5);
+                    ndf_second_moment += integrand.x.powi(2) * TAU / (cells * ndf_pdf);
                     // Enumerate mixture components with their original probability.
-                    // Rejected NDF directions contribute zero mass and zero radiance;
+                    // Rejected directions contribute zero mass and zero radiance;
                     // no retry and no division by the number of accepted samples.
                     for (component, probability) in [(0.2, 0.4), (0.55, 0.3), (0.85, 0.3)] {
                         if let Some(s) = sample(surface, Vec3::Z, Vec3::Z, view, [component, u, v]).unwrap() {
                             mass += probability / cells;
                             sampled += s.weight * (probability / cells);
+                            sampled_second_moment += s.weight.x.powi(2) * (probability / cells);
                             assert!((s.pdf - surface_pdf(surface, Vec3::Z, view, s.direction).unwrap()).abs() < 1e-12 * s.pdf.max(1.0));
                         }
                     }
                 }
             }
-            assert!(mass < 0.99, "grazing NDF null samples must remain in the estimator");
+            assert!(mass < 1.0, "grazing null samples must remain in the estimator");
+            if cosine == 0.02 && metallic == 1.0 {
+                assert!(
+                    sampled_second_moment < 0.8 * ndf_second_moment,
+                    "visible normals second moment {sampled_second_moment}, full NDF {ndf_second_moment}"
+                );
+            }
             assert!((mass - density).abs() < 0.005, "nv={cosine}, metal={metallic}: accepted mass{mass}, independent PDF mass{density}");
             for (actual, expected) in [sampled.x, sampled.y, sampled.z].into_iter().zip([quadrature.x, quadrature.y, quadrature.z]) {
                 assert!((actual - expected).abs() < 0.005, "nv={cosine}, metal={metallic}: sampled{actual}, independent hemisphere{expected}");

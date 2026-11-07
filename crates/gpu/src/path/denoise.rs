@@ -1,8 +1,10 @@
 //! Optional output filtering; never writes the Monte Carlo accumulation buffer.
 use super::{Context, Result, SHADER, TIMEOUT, Task, checked, placeholder_bind, scopes, warm_up};
+use std::sync::atomic::{AtomicBool, Ordering};
 use wgpu::util::DeviceExt;
 
-pub(super) const BYTES_PER_PIXEL: u64 = 80; // three guide vec4s and two colour vec4s
+pub(super) const GUIDE_BYTES_PER_PIXEL: u64 = 96; // two complete surface guides
+pub(super) const BYTES_PER_PIXEL: u64 = GUIDE_BYTES_PER_PIXEL + 32; // two colour vec4s
 const FILTER: &str = include_str!("denoise.wgsl");
 const GUIDES: &str = include_str!("denoise_guides.wgsl");
 #[cfg(test)]
@@ -83,6 +85,7 @@ impl Pipelines {
 
 pub(super) struct Resources {
     adaptive: Option<AdaptiveInput>,
+    guides_ready: AtomicBool,
     guide_pipeline: wgpu::ComputePipeline,
     guide_bind: wgpu::BindGroup,
     filter_pipeline: wgpu::ComputePipeline,
@@ -113,7 +116,7 @@ impl Resources {
                 mapped_at_creation: false,
             })
         };
-        let guides = buffer("denoise first-hit guides", size * 3);
+        let guides = buffer("denoise first-hit guides", size * (GUIDE_BYTES_PER_PIXEL / 16));
         let output = buffer("denoise filtered colour", size);
         let temporary = buffer("denoise intermediate colour", size);
         let [triangles, nodes, environment, textures, failures] = scene;
@@ -148,6 +151,7 @@ impl Resources {
         checked(error_scopes)?;
         Ok(Self {
             adaptive,
+            guides_ready: AtomicBool::new(false),
             guide_pipeline: pipelines.guide.clone(),
             guide_bind,
             filter_pipeline: pipelines.filter.clone(),
@@ -170,7 +174,20 @@ impl Resources {
         self.run_with_input(task, true)
     }
     fn run_with_input(&self, task: &Task, preview: bool) -> Result<()> {
+        // Each job owns immutable scene, camera and material inputs. Once all
+        // guide tiles finish, every checkpoint can reuse them.
+        if !self.guides_ready.load(Ordering::Relaxed) {
+            self.generate_guides(task)?;
+            self.guides_ready.store(true, Ordering::Relaxed);
+        }
+        self.run_filter(task, preview)
+    }
+
+    fn generate_guides(&self, task: &Task) -> Result<()> {
         let pixels = task.request.width * task.request.height;
+        // The guide entry point uses sampling.w for optical transport modes.
+        // Transport dispatches write their own complete uniform block.
+        let guide_flags = u32::from(task.photons.is_some()) | (u32::from(task.optical_resolve.is_some()) << 1);
         let mut budget = super::dispatch::Budget::default();
         let mut offset = 0;
         while offset < pixels {
@@ -180,13 +197,16 @@ impl Resources {
             if let Some(bytes) = parameters.get_mut(12..16) {
                 bytes.copy_from_slice(&offset.to_le_bytes());
             }
+            if let Some(bytes) = parameters.get_mut(28..32) {
+                bytes.copy_from_slice(&guide_flags.to_le_bytes());
+            }
             task.context.queue.write_buffer(&task.uniform, 0, &parameters);
             let started = std::time::Instant::now();
             dispatch(&task.context, &self.guide_pipeline, &self.guide_bind, count)?;
             budget.observe(count, started.elapsed());
             offset += count;
         }
-        self.run_filter(task, preview)
+        task.cancel.check()
     }
 
     fn run_filter(&self, task: &Task, preview: bool) -> Result<()> {

@@ -33,21 +33,38 @@ thresholds scale with the projected pixel footprint. Every pass preserves the
 original coverage. Online convex averaging avoids multiplying HDR radiance by
 large kernel weights.
 
-First-hit guides cannot describe an image seen through refraction or sharp
-reflection. Pixels first hitting glass, metals with roughness below 0.25,
-near-mirror coats with roughness below 0.05, light emitters, background or partial
-coverage bypass the filter. CPU's explicit Mirror override bypasses it as the
-corresponding sharp reflective route, including on a dielectric base colour.
-Glossier coats can be filtered; reflections of fine detail may soften. First-hit
-guides also do not reconstruct depth-of-field correspondences: the centre lens
-ray is used, so out-of-focus boundaries can retain noise or acquire spatial
-bias. Rough glossy effects, texture detail and soft shadows can lose detail.
-This is a biased, optional spatial filter, not a temporal or learned denoiser.
-It cannot guarantee preservation of every lighting or texture feature.
+Extremely bright taps receive a stronger contrast penalty at every scale.
+The first pass can also suppress an isolated bright pixel when at least five
+immediate neighbors agree with its geometry and material guides and every
+supporting neighbor is much dimmer. The suppression scales RGB together to
+retain its hue. A bright neighbor on the same surface can preserve a thin
+highlight. This display heuristic can still attenuate a genuine unresolved
+glint, so keep the raw EXR for radiometry.
 
-CPU admission prepays 48 bytes per pixel for guides plus two 16-byte colour
+Optical guides follow deterministic centre rays beyond supported sharp
+reflections and smooth glass. A guide stores the primary body and the opaque
+endpoints visible along the reflected and transmitted branches. If both
+branches contribute, both endpoint identities must agree between taps. Both
+endpoints retain separate albedo, normal, position, depth and footprint guides.
+The filter multiplies their compatibility weights, so a material or geometric
+edge on either branch prevents cross-edge averaging, even on the same body. Optical
+filtering uses steps 1 and 2 and stronger colour contrast. The isolated-pixel
+suppression is disabled on optical guides to preserve glints.
+
+The bounded trace supports near-perfect metal, the CPU's explicit Mirror
+override, smooth thin glass and an eligible single closed glass body. It
+falls back to bypass if a branch has no compatible opaque endpoint, if the
+path involves unsupported rough, dispersive, coated, nested or scattering
+glass, or if the optical guide cannot be represented. Optical correspondence
+uses captured body IDs 1 through 511 and uses two 48-byte surface records per pixel.
+The deterministic guide does not separate the radiance of the two branches
+or reconstruct depth of field. Emitters, background and partial coverage
+retain their bypass. This is a biased display filter, so fine highlights,
+texture detail and soft shadows still need sample convergence.
+
+CPU admission prepays 96 bytes per pixel for guides plus two 16-byte colour
 buffers. If shared presentation or EXR already admits one linear buffer, the
-additional pixel storage is 64 bytes rather than 80. Bounded guide cursor and
+additional pixel storage is 112 bytes rather than 128. Bounded guide cursor and
 output-task storage is also admitted; there is no retained image per pass.
 The existing CPU resource profile and shared host pool still apply. The shared
 float4 presentation envelope limits filtering to 8192 pixels per side and
@@ -59,11 +76,12 @@ kernels: three visits per image pixel per complete published pass. Guide rays
 retain the existing incremental BVH node/triangle charges, using the same
 cumulative job budget without resetting it between output and transport.
 
-GPU admission keeps 80 additional bytes per pixel for three guide vec4s and two
+GPU admission keeps 128 additional bytes per pixel for six guide vec4s and two
 colour buffers. Adaptive intermediate normalization has its separate admitted
 input. Current GPU job/storage-binding limits apply before allocation. GPU
 guides reuse production intersections and material evaluation; cancellation is
-checked between bounded dispatch tiles. CPU and GPU filters share the numerical
+checked between bounded dispatch tiles. The completed guide buffer is reused
+across checkpoints within the same job. CPU and GPU filters share the numerical
 policy, not bit-identical transport or a common device pipeline.
 
 Preflight names the enabled method, passes, guide/bypass policy, work convention
@@ -77,7 +95,9 @@ oracle, HDR/constant/coverage identity, noise reduction, body/albedo/normal/dept
 edges, production centre-ray guides and bypasses, translated geometry, lens-guide
 identity, false-path byte/work/allocation identity, every filtered prefix,
 quantum independence, raw film/EXR preservation, cancellation and full scratch
-admission. Document/engine/UI tests for offline persistence, explicit CPU wire
-routing, native request metadata and one-undo controls still need qualification
-on the combined source. Executed renderer checks do not establish native
-image-quality, performance or full-project acceptance.
+admission. The integrated CPU renderer suite passes 827 tests (one ignored),
+and the GPU suite passes 260 (three ignored). The combined document, engine
+and UI runs retain previously observed failures outside these rendering tests;
+full-project acceptance is not established. Native 4K comparisons preserve raw
+transport within floating-point precision, but their low sample counts do not
+establish converged image quality. See [OPUS qualification](render-opus-quality.md).

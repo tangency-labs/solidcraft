@@ -1186,9 +1186,9 @@ fn dielectric_branches_sum_inside_each_spatial_and_reflection_attempt() {
                     let before = task.work.used();
                     let poll = task.step(quantum).unwrap();
                     assert!(task.work.used() - before <= 4);
-                    assert!(task.primary_coverage <= u16::from(spatial) * u16::from(attempts));
+                    assert!(task.primary_coverage <= u32::from(spatial) * u32::from(attempts));
                     if task.emit_spatial_pixel {
-                        assert_eq!(task.primary_coverage, u16::from(spatial) * u16::from(attempts), "branches are not coverage samples");
+                        assert_eq!(task.primary_coverage, u32::from(spatial) * u32::from(attempts), "branches are not coverage samples");
                         saw_complete_coverage = true;
                     }
                     if let Some(state) = task.optical.first().and_then(|o| o.pending.as_ref())
@@ -1625,6 +1625,7 @@ fn xyz(a: [f64; 4]) -> [f64; 3] {
 fn cpu_denoise_reference(width: usize, input: &[[f64; 4]], guides: &[DenoiseOracleGuide], step: usize) -> Vec<[f64; 4]> {
     let height = input.len() / width;
     let kernel = [1.0, 4.0, 6.0, 4.0, 1.0];
+    let maximum = |v: [f64; 3]| v.into_iter().fold(0.0, f64::max);
     input
         .iter()
         .enumerate()
@@ -1635,6 +1636,8 @@ fn cpu_denoise_reference(width: usize, input: &[[f64; 4]], guides: &[DenoiseOrac
             }
             let mut result = [0.0; 4];
             let mut total = 0.0;
+            let center_peak = maximum(xyz(center));
+            let mut support = Vec::new();
             for (ky, &wy) in kernel.iter().enumerate() {
                 for (kx, &wx) in kernel.iter().enumerate() {
                     let x = (i % width) as isize + (kx as isize - 2) * step as isize;
@@ -1654,12 +1657,16 @@ fn cpu_denoise_reference(width: usize, input: &[[f64; 4]], guides: &[DenoiseOrac
                     let scale = (0.05 * p[3].max(q[3]) * step as f64).max(1e-6);
                     let depth = (n[3] - m[3]).abs() / (8.0 * p[3].max(q[3]) * step as f64).max(1e-6);
                     let color = diff(center, value);
-                    let maximum = |v: [f64; 3]| v.into_iter().fold(0.0, f64::max);
-                    let color_scale = 0.25 + 0.5 * maximum(xyz(center)).max(maximum(xyz(value)));
-                    let weight = wx
-                        * wy
-                        * (-dot(albedo, albedo) / 0.04 - plane / scale - depth - maximum(color.map(f64::abs)) / color_scale).exp()
-                        * dot(xyz(n), xyz(m)).max(0.0).powi(32);
+                    let peak = maximum(xyz(value));
+                    let guide = (-dot(albedo, albedo) / 0.04 - plane / scale - depth).exp() * dot(xyz(n), xyz(m)).max(0.0).powi(32);
+                    if step == 1 && i != j && (i % width).abs_diff(j % width) <= 1 && (i / width).abs_diff(j / width) <= 1 && guide >= 0.5 {
+                        support.push(peak);
+                    }
+                    let brighter = center_peak.max(peak);
+                    let color_scale = 0.25 + 0.5 * brighter;
+                    let bound = 16.0 * (0.25 + center_peak.min(peak));
+                    let ratio = bound / brighter.max(bound);
+                    let weight = wx * wy * guide * ratio * ratio * (-maximum(color.map(f64::abs)) / color_scale).exp();
                     for k in 0..3 {
                         result[k] += value[k] * weight;
                     }
@@ -1669,6 +1676,14 @@ fn cpu_denoise_reference(width: usize, input: &[[f64; 4]], guides: &[DenoiseOrac
             for v in result.iter_mut().take(3) {
                 *v /= total;
             }
+            let support_peak = support.iter().copied().fold(0.0, f64::max);
+            if support.len() >= 5 && center_peak > 16.0 * (0.25 + support_peak) {
+                let cap = 2.0 * support_peak + 0.25;
+                let factor = cap / maximum(xyz(result)).max(cap);
+                for channel in result.iter_mut().take(3) {
+                    *channel *= factor;
+                }
+            }
             result[3] = center[3];
             result
         })
@@ -1676,7 +1691,15 @@ fn cpu_denoise_reference(width: usize, input: &[[f64; 4]], guides: &[DenoiseOrac
 }
 
 fn denoise_test_guide(x: usize, y: usize) -> job::denoise::Guide {
-    job::denoise::Guide { albedo: [0.5; 3], body: 1, normal: [0.0, 0.0, 1.0], depth: 4.0, position: [x as f32, y as f32, 0.0], footprint: 1.0 }
+    job::denoise::Guide {
+        albedo: [0.5; 3],
+        body: 1,
+        normal: [0.0, 0.0, 1.0],
+        depth: 4.0,
+        position: [x as f32, y as f32, 0.0],
+        footprint: 1.0,
+        reflected: Default::default(),
+    }
 }
 fn oracle_guides(guides: &[job::denoise::Guide]) -> Vec<DenoiseOracleGuide> {
     guides
@@ -1760,6 +1783,61 @@ fn cpu_atrous_matches_independent_f64_gather_preserves_hdr_coverage_and_edges() 
     }
     let bypass = vec![job::denoise::Guide::default(); count];
     assert_eq!(complete_denoise(width, original.clone(), &bypass).0, original);
+}
+
+#[test]
+fn cpu_atrous_removes_an_isolated_hdr_spike_without_spreading_its_peak() {
+    let width = 9;
+    let count = width * width;
+    let center = count / 2;
+    let guides: Vec<_> = (0..count).map(|i| denoise_test_guide(i % width, i / width)).collect();
+    let mut pixels = vec![[0.5, 0.125, 0.0625, 1.0]; count];
+    pixels[center] = [4096.0, 1024.0, 512.0, 1.0];
+    let (actual, visits) = complete_denoise(width as u32, pixels.clone(), &guides);
+    assert_eq!(visits, 3 * count);
+    assert!(actual.iter().all(|p| p[0] <= 1.25));
+    assert!(actual.iter().all(|p| p[1] == 0.25 * p[0] && p[2] == 0.125 * p[0] && p[3] == 1.0));
+    let guides = oracle_guides(&guides);
+    let mut expected: Vec<_> = pixels.into_iter().map(|p| p.map(f64::from)).collect();
+    for step in [1, 2, 4] {
+        expected = cpu_denoise_reference(width, &expected, &guides, step);
+    }
+    for (actual, expected) in actual.iter().zip(expected) {
+        assert!(actual.iter().zip(expected).all(|(a, b)| (f64::from(*a) - b).abs() < 2e-6));
+    }
+}
+
+#[test]
+fn cpu_atrous_preserves_narrow_hdr_highlights_and_requires_compatible_spike_support() {
+    let width = 9;
+    let count = width * width;
+    let center = count / 2;
+    let dark = [0.5, 0.125, 0.0625, 1.0];
+    let bright = [4096.0, 1024.0, 512.0, 1.0];
+    let guides: Vec<_> = (0..count).map(|i| denoise_test_guide(i % width, i / width)).collect();
+    let stripe = (0..count).map(|i| if i % width == width / 2 { bright } else { dark }).collect();
+    let filtered = complete_denoise(width as u32, stripe, &guides).0;
+    assert!(filtered[center][0] > 0.99 * bright[0]);
+    assert!(filtered[center + 1][0] < 1.0);
+
+    let mut pixels = vec![dark; count];
+    pixels[center] = bright;
+    let mut surface_edge = guides.clone();
+    for (i, guide) in surface_edge.iter_mut().enumerate() {
+        if i != center {
+            guide.albedo = [0.75; 3];
+        }
+    }
+    // The same body crosses a guide discontinuity. The fifth compatible
+    // immediate neighbour determines whether the spike can be clamped.
+    for i in [center - width, center - 1, center + 1, center + width] {
+        surface_edge[i].albedo = guides[i].albedo;
+    }
+    let filtered = complete_denoise(width as u32, pixels.clone(), &surface_edge).0;
+    assert!(filtered[center][0] > 0.99 * bright[0]);
+    surface_edge[center + width + 1].albedo = guides[center + width + 1].albedo;
+    let filtered = complete_denoise(width as u32, pixels, &surface_edge).0;
+    assert!(filtered[center][0] <= 1.25);
 }
 
 fn denoised_plane(samples: u32, denoise: bool, output: Option<job::OutputOptions>) -> ImageTask {
@@ -1857,14 +1935,14 @@ fn cpu_denoising_admits_actual_guides_and_colour_scratch_only_when_enabled() {
     let filtered = denoised_plane(4, true, None);
     assert_eq!(plain.denoise.capacity(), 0);
     assert_eq!(filtered.denoise.capacity(), 1);
-    let expected = 169 * 80 + std::mem::size_of::<super::super::denoise::Guides>() as u64 + std::mem::size_of::<job::output::OutputTask>() as u64;
+    let expected = 169 * 128 + std::mem::size_of::<super::super::denoise::Guides>() as u64 + std::mem::size_of::<job::output::OutputTask>() as u64;
     assert_eq!(filtered.admission.estimated_total_bytes - plain.admission.estimated_total_bytes, expected);
     let output = Some(job::OutputOptions { linear_exr: true, ..Default::default() });
     let plain = denoised_plane(4, false, output);
     let filtered = denoised_plane(4, true, output);
     assert_eq!(
         filtered.admission.estimated_total_bytes - plain.admission.estimated_total_bytes,
-        169 * 64 + std::mem::size_of::<super::super::denoise::Guides>() as u64
+        169 * 112 + std::mem::size_of::<super::super::denoise::Guides>() as u64
     );
     let mut request = plain.request.clone();
     request.width = 8193;
@@ -1994,6 +2072,136 @@ fn cpu_denoise_production_guides_use_exact_body_and_material_bypass_policy() {
         }
     }
 }
+
+fn denoise_optical_plane(name: &str, z: f64, color: Vec3) -> crate::ProductMesh {
+    let mesh = solidcraft_geom::Mesh {
+        positions: vec![Vec3::new(-10.0, -10.0, z), Vec3::new(10.0, -10.0, z), Vec3::new(10.0, 10.0, z), Vec3::new(-10.0, 10.0, z)],
+        triangles: vec![[0, 1, 2], [0, 2, 3]],
+        ..Default::default()
+    };
+    crate::ProductMesh {
+        name: name.into(),
+        mesh: std::sync::Arc::new(mesh),
+        surface: Some(OpaqueSurface::new(color, 0.0, 0.5, 1.5).unwrap()),
+        color: [255; 3],
+        opacity: 1.0,
+        faces: Vec::new(),
+        transmission: None,
+    }
+}
+fn denoise_optical_fixture(boundary: Option<job::DielectricBoundary>, path: bool) -> (ProductScene, ImageRequest, RaytraceOptions) {
+    let mut request = request();
+    request.width = 1;
+    request.height = 1;
+    request.camera.target = Vec3::ZERO;
+    request.camera.distance = 3.0;
+    request.camera.fov = 0.5;
+    request.camera.set_view(crate::StandardView::Top);
+    let mut options = RaytraceOptions {
+        denoise: true,
+        shadows: true,
+        lights: Some(Vec::new()),
+        path: path.then_some(job::CpuPathOptions { max_depth: 3 }),
+        progressive: Some(job::CpuProgressiveOptions { samples_per_pixel: 1, seed: 19 }),
+        ..Default::default()
+    };
+    let mut primary = if boundary.as_ref().is_some_and(|boundary| *boundary != job::DielectricBoundary::ThinSheet) {
+        dielectric::tests::box_body(1.0)
+    } else {
+        denoise_optical_plane("Optical primary", 0.0, Vec3::new(0.5, 0.5, 0.5))
+    };
+    if let Some(boundary) = boundary {
+        let mut material = dielectric::tests::input(boundary);
+        material.body_name = primary.name.clone();
+        material.absorption_per_mm = [0.0; 3];
+        options.dielectrics = vec![material];
+    } else if path {
+        primary.surface = Some(OpaqueSurface::new(Vec3::new(0.8, 0.7, 0.6), 1.0, 0.045, 1.5).unwrap());
+    } else {
+        options.reflections = Some(job::ReflectionOptions {
+            samples: 1,
+            bodies: vec![job::ReflectionBody { body: primary.name.clone(), mode: job::ReflectionMode::Mirror }],
+            ..Default::default()
+        });
+    }
+    let meshes = vec![
+        primary,
+        denoise_optical_plane("Reflected receiver", 4.0, Vec3::new(0.75, 0.5, 0.25)),
+        denoise_optical_plane("Transmitted receiver", -1.0, Vec3::new(0.25, 0.5, 0.75)),
+    ];
+    let bounds = meshes.iter().fold(Aabb3::EMPTY, |bounds, body| bounds.union(&body.mesh.bounds()));
+    (ProductScene { meshes, bounds }, request, options)
+}
+fn optical_denoise_guide(scene: ProductScene, mut request: ImageRequest, options: RaytraceOptions) -> job::denoise::Guide {
+    request.raytrace = Some(options.clone());
+    actual_denoise_guides(ImageTask::new(scene, request, CancelToken::default(), options).unwrap())[0]
+}
+
+#[test]
+fn cpu_denoise_optical_guides_follow_explicit_mirror_and_near_perfect_metal() {
+    for path in [false, true] {
+        let (scene, request, options) = denoise_optical_fixture(None, path);
+        let guide = optical_denoise_guide(scene, request.clone(), options);
+        assert_eq!(guide.body, 0xa000_0000 | (1 << 18) | (2 << 9));
+        assert_eq!(guide.albedo, [0.75, 0.5, 0.25]);
+        assert_eq!(guide.position[2], 1.0);
+        assert_eq!(guide.depth, -1.0);
+        assert!(guide.normal[2] < -0.999);
+        assert!(guide.footprint >= request.camera.half_height() as f32, "the reflected endpoint behind the eye keeps the primary footprint");
+    }
+}
+
+#[test]
+fn cpu_denoise_optical_guides_bypass_every_active_coat_on_metal() {
+    for roughness in [0.045, 0.1, 0.5] {
+        let (mut scene, request, options) = denoise_optical_fixture(None, true);
+        scene.meshes[0].surface =
+            scene.meshes[0].surface.map(|surface| surface.with_clear_coat(crate::clear_coat::ClearCoat::new(0.8, roughness, 1.5).unwrap()));
+        assert_eq!(optical_denoise_guide(scene, request, options).body, 0);
+    }
+}
+
+#[test]
+fn cpu_denoise_optical_guides_follow_thin_and_closed_glass_and_bypass_missing_branches() {
+    use job::DielectricBoundary::{ClosedBox, ClosedMesh, ThinSheet};
+    for (boundary, path) in [(ThinSheet, false), (ThinSheet, true), (ClosedBox, false), (ClosedMesh, true)] {
+        let (scene, request, mut options) = denoise_optical_fixture(Some(boundary), path);
+        let guide = optical_denoise_guide(scene.clone(), request.clone(), options.clone());
+        assert_eq!(guide.body, 0xa000_0000 | (1 << 18) | (2 << 9) | 3, "both Fresnel branches must resolve");
+        assert_eq!(guide.reflected.albedo, [0.75, 0.5, 0.25]);
+        assert_eq!(guide.reflected.body, 2);
+        assert_eq!(guide.albedo, [0.25, 0.5, 0.75]);
+        assert_eq!(guide.position[2], -4.0);
+        assert_eq!(guide.depth, 4.0);
+        assert!(guide.normal[2] > 0.999);
+
+        let mut missing = scene.clone();
+        missing.meshes.remove(1);
+        missing.bounds = missing.meshes.iter().fold(Aabb3::EMPTY, |bounds, body| bounds.union(&body.mesh.bounds()));
+        assert_eq!(optical_denoise_guide(missing, request.clone(), options.clone()).body, 0);
+        if let Some(path) = &mut options.path {
+            path.max_depth = if boundary == ThinSheet { 1 } else { 2 };
+            assert_eq!(optical_denoise_guide(scene.clone(), request.clone(), options.clone()).body, 0);
+            options.path.as_mut().unwrap().max_depth = 3;
+            options.dielectrics[0].model = Some(crate::glass_model::GlassModel { roughness: 0.2, ..Default::default() });
+            assert_eq!(optical_denoise_guide(scene.clone(), request.clone(), options.clone()).body, 0);
+            options.dielectrics[0].model = None;
+            options.area_lights = Some(vec![job::RectangleLightOptions {
+                center_mm: [0.0, 0.0, 3.5],
+                edge_u_mm: [8.0, 0.0, 0.0],
+                edge_v_mm: [0.0, -8.0, 0.0],
+                color: [1.0; 3],
+                intensity: 1.0,
+            }]);
+            assert_eq!(optical_denoise_guide(scene.clone(), request.clone(), options.clone()).body, 0);
+            options.area_lights = None;
+        }
+        options.dielectrics[0].ior = 1.0;
+        let guide = optical_denoise_guide(scene, request, options);
+        assert_eq!(guide.body, 0xa000_0000 | (1 << 18) | 3, "matched index has no reflection branch");
+    }
+}
+
 #[test]
 fn cpu_denoise_center_guides_are_translation_stable_and_independent_of_pupil_sampling() {
     let base = denoised_plane(2, true, None);

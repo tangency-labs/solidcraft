@@ -48,6 +48,8 @@ pub struct MeshObject {
     pub name: String,
     pub positions: Vec<Vec3>,
     pub triangles: Vec<[u32; 3]>,
+    /// Optional shading normals at triangle corners; independent of welded geometry.
+    pub corner_normals: Vec<[Vec3; 3]>,
     pub color: Option<[f32; 3]>,
     /// 0 = opaque, 1 = invisible (written as the colour's alpha).
     pub transparency: f32,

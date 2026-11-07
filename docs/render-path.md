@@ -6,7 +6,7 @@ state intended coverage, not a claim that every backend has passed.
 
 Native applications can register `solidcraft_gpu::path::host()` alongside the
 existing CPU image host. `render.backends` then exposes `builtin/gpu-path` with
-Preview, Image, PNG, Pbr, Progressive and Refraction. The browser keeps its CPU image host.
+Preview/Final, Image, PNG, Pbr, Progressive and Refraction. The browser keeps its CPU image host.
 Device discovery follows `SOLIDCRAFT_GPU` and `WGPU_BACKEND`; a device which cannot
 create the compute pipeline does not register an available path executor.
 The native UI retains a factory for the viewport's selected adapter at installation,
@@ -59,12 +59,16 @@ production input. Final PNG and raw EXR remain identical with preview work disab
 ```
 
 `render.preflight` accepts the same input. It resolves the Progressive capability
-to the installed GPU host and performs admission without reserving memory. Start
-checks again and returns the existing session/serial/generation identity. Progress
+to the installed GPU host and validates the captured production representation
+under a temporary bounded work reservation. Check creates no job and releases the
+reservation afterward. Start validates the same conversions and certificates before
+assigning its session/serial/generation identity. Begin currently rebuilds immutable
+uploads and optical certificates; no preparation cache or cross-scene proof reuse
+is claimed. Progress
 reports complete samples per pixel; a partially computed sample is not counted.
 Cancel, status, retained-image ownership and atomic PNG export use the same host
 protocol as CPU jobs. Defaults are 64 samples, depth 8 and seed 0; the bounds are
-1–4096 samples and 1–16 bounces. Sampling controls require `progressive: true`.
+1–65,536 samples and 1–64 events. Sampling controls require `progressive: true`.
 
 Runtime request-only [glass overrides](render-transmission.md) and an optional
 [thin-lens camera](render-thin-lens.md) and [clear coat](render-clear-coat.md) are available through those same commands.
@@ -85,7 +89,7 @@ illumination.
 The original integrator uses software BVH traversal, opaque GGX/Smith/Schlick and
 the symmetric diffuse attenuation defined by `render::surface`. Each hit evaluates
 the three existing directional studio lights with shadow visibility. Continuation
-samples a mixture of cosine-weighted diffuse and GGX normals with the combined
+samples a mixture of cosine-weighted diffuse and visible GGX normals with the combined
 PDF; Russian roulette begins after four hits. There are indirect bounces, but no
 environment illumination in the default legacy lighting profile. All legacy opaque colors use
 linear-sRGB base color, metallic 0, roughness 0.5, IOR 1.5. Explicit face appearances
@@ -101,8 +105,11 @@ and [opaque planar color/normal maps](render-runtime-textures.md) are available
 through explicit job inputs. They do not add saved document fields. An optional bounded edge-aware a-trous
 [denoiser](render-denoise.md) filters progressive and final display images while preserving
 raw accumulation. Optional raw scene-linear EXR masters are retained only for completed
-images, before display filters. Texture LOD/mipmap selection and Final mode remain
-unimplemented by this executor; a path-traced preview does not declare those capabilities.
+images, before display filters. Preview/Image and Final/Image select the same physical
+path producer and preserve authored sample/depth/effect settings. Final is a supported
+image mode, not an automatic quality preset or a convergence certificate. Optional
+`texture_filtering: true` enables the production mip/footprint sampler; omission
+preserves the original LOD0 behavior.
 
 Each job builds a BVH over its immutable captured meshes with a sixteen-bin
 surface-area heuristic on triangle centres; there is no cross-document cache to

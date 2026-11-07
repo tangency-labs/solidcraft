@@ -273,7 +273,7 @@ fn path_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     if let Some(mut path) = app.render_workspace.view.raytrace.path {
         let label = app.tr("render.cpu_path_depth").to_string();
         let response = ui_kit::row(ui, &label, |ui| {
-            let field = ui_kit::number_field_preserving(ui, &mut path.max_depth, 1..=16, 1.0, "");
+            let field = ui_kit::number_field_preserving(ui, &mut path.max_depth, 1..=solidcraft_engine::render::job::MAX_PATH_DEPTH, 1.0, "");
             crate::scenario::publish_target("render:cpu-path-depth", field.rect);
             field
         });
@@ -492,6 +492,8 @@ pub(super) fn params(app: &SolveApp, params: &mut Value) -> Result<(), String> {
     options.sky = None;
     options.volume = app.render_workspace.view.studio.volume;
     options.caustics = app.render_workspace.view.studio.caustics;
+    options.texture_filtering = app.render_workspace.view.studio.texture_filtering;
+    options.metal_energy_compensation = app.render_workspace.view.studio.metal_energy_compensation;
     options.output = super::studio::cpu_output(&app.render_workspace.view);
     options.adaptive = app.render_workspace.view.studio.adaptive.map(Box::new);
     options.denoise = app.render_workspace.view.studio.denoise;

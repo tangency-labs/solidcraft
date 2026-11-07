@@ -111,7 +111,7 @@ impl CameraFilm {
             }
         }
     }
-    pub(super) fn pixel(&self, index: usize) -> Result<([f64; 3], u16, u16)> {
+    pub(super) fn pixel(&self, index: usize) -> Result<([f64; 3], u32, u32)> {
         match self {
             Self::Uniform(film) => film.pixel(index),
             Self::Adaptive(_) => {

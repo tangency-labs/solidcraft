@@ -38,6 +38,11 @@ fn from_local(n: Vec3, local: Vec3) -> Result<Vec3> {
     let tangent = unit_direction(axis.cross(n)).map_err(|_| invalid("CPU path tangent"))?;
     unit_direction(tangent * local.x + n.cross(tangent) * local.y + n * local.z).map_err(|_| invalid("CPU path local direction"))
 }
+fn cosine_direction(n: Vec3, u: [f64; 2]) -> Result<Vec3> {
+    let radius = u[0].sqrt();
+    let phi = TAU * u[1];
+    from_local(n, Vec3::new(radius * phi.cos(), radius * phi.sin(), (1.0 - u[0]).sqrt()))
+}
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Sample {
     pub direction: Vec3,
@@ -45,8 +50,8 @@ pub(super) struct Sample {
     pub weight: Vec3,
 }
 
-/// Exact proposal used by clear_coat::surface_pdf: base is half cosine/half GGX NDF;
-/// a coat selects its own NDF with probability weight/2. Null mass is never retried.
+/// The base mixes cosine and visible GGX normals equally. The coat selects its
+/// own visible normals with probability weight/2. Null mass is never retried.
 pub(super) fn sample(surface: OpaqueSurface, n: Vec3, geometric: Vec3, v: Vec3, u: [f64; 3]) -> Result<Option<Sample>> {
     if u.into_iter().any(|x| !x.is_finite() || !(0.0..1.0).contains(&x)) {
         return Err(invalid("CPU path variates must be in [0,1)"));
@@ -60,20 +65,14 @@ pub(super) fn sample(surface: OpaqueSurface, n: Vec3, geometric: Vec3, v: Vec3, 
     let coat_probability = surface.clear_coat().map_or(0.0, |coat| coat.weight() * 0.5);
     let base_component = (u[0] - coat_probability) / (1.0 - coat_probability);
     let direction = if u[0] >= coat_probability && base_component < 0.5 {
-        let radius = u[1].sqrt();
-        let phi = TAU * u[2];
-        from_local(n, Vec3::new(radius * phi.cos(), radius * phi.sin(), (1.0 - u[1]).sqrt()))?
+        cosine_direction(n, [u[1], u[2]])?
     } else {
         let roughness = if u[0] < coat_probability {
             surface.clear_coat().ok_or_else(|| invalid("CPU coat selection disappeared"))?.roughness()
         } else {
             surface.roughness()
         };
-        let a2 = roughness.powi(4);
-        let cosine = ((1.0 - u[1]) / (1.0 + (a2 - 1.0) * u[1])).sqrt();
-        let sine = (1.0 - cosine * cosine).max(0.0).sqrt();
-        let phi = TAU * u[2];
-        let half = from_local(n, Vec3::new(sine * phi.cos(), sine * phi.sin(), cosine))?;
+        let half = crate::glass_model::visible_normal(v, n, roughness * roughness, [u[1], u[2]]).map_err(|_| invalid("CPU visible GGX normal"))?;
         if v.dot(half) <= 0.0 {
             return Ok(None);
         }
@@ -108,6 +107,14 @@ pub(super) struct LightSample {
     pub pdf: f64,
 }
 impl Rectangle {
+    fn position(self, u: [f64; 2]) -> Vec3 {
+        self.center + self.u * (u[0] - 0.5) + self.v * (u[1] - 0.5)
+    }
+    pub(super) fn emit_photon(self, position: [f64; 2], direction: [f64; 2]) -> Result<(Vec3, Vec3, Vec3)> {
+        // The position PDF is 1/area and the direction PDF is cos(theta)/pi.
+        // Dividing emitted L*cos(theta) by their product gives constant power.
+        Ok((self.position(position), cosine_direction(self.normal, direction)?, self.radiance * (PI * self.area)))
+    }
     /// Use the actual analytic consumer's plane arithmetic for event precision.
     pub(super) fn on_plane(&self, point: Vec3) -> bool {
         self.normal.dot(self.center - point) == 0.0
@@ -150,7 +157,7 @@ impl Rectangle {
         if u.into_iter().any(|x| !x.is_finite() || !(0.0..1.0).contains(&x)) {
             return Err(invalid("CPU emitter variates"));
         }
-        let position = self.center + self.u * (u[0] - 0.5) + self.v * (u[1] - 0.5);
+        let position = self.position(u);
         let pdf = self.pdf(origin, position)?;
         if pdf == 0.0 {
             return Ok(None);
@@ -161,12 +168,20 @@ impl Rectangle {
     }
     /// One-sided exact plane/basis intersection. Geometry wins equal-distance ties.
     pub(super) fn intersect(self, ray: Ray) -> Result<Option<(f64, Vec3)>> {
+        self.intersect_facing(ray, false, ray.interval()[0])
+    }
+    /// Reverse paths evaluate the emitting side from the camera's direction.
+    pub(super) fn intersect_reverse(self, ray: Ray, before_origin: bool) -> Result<Option<(f64, Vec3)>> {
+        let near = if before_origin { -super::MAX_DISTANCE_MM } else { ray.interval()[0] };
+        self.intersect_facing(ray, true, near)
+    }
+    fn intersect_facing(self, ray: Ray, reverse: bool, near: f64) -> Result<Option<(f64, Vec3)>> {
         let denominator = ray.direction().dot(self.normal);
-        if denominator >= 0.0 {
+        if denominator == 0.0 || (denominator > 0.0) != reverse {
             return Ok(None);
         }
         let distance = (self.center - ray.origin()).dot(self.normal) / denominator;
-        let [near, far] = ray.interval();
+        let far = ray.interval()[1];
         if !distance.is_finite() || distance < near || distance > far {
             return Ok(None);
         }

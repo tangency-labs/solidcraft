@@ -425,7 +425,7 @@ fn additional_executor_routes_by_capability_and_survives_document_adoption() {
     session.execute("file.new", &json!({})).unwrap();
     assert_eq!(session.execute("render.preflight", &request).unwrap()["resolved"]["executor"], "test-progressive");
     assert!(session.execute("render.status", &json!({"job":id})).is_err());
-    for bad in [json!({"samples":0}), json!({"max_depth":17}), json!({"seed":-1}), json!({"samples":4097})] {
+    for bad in [json!({"samples":0}), json!({"max_depth":65}), json!({"seed":-1}), json!({"samples":65537})] {
         let mut params = request.clone();
         for (key, value) in bad.as_object().unwrap() {
             params[key] = value.clone();
@@ -2229,8 +2229,9 @@ fn runtime_checked_hdr_keeps_two_stable_glass_targets_and_exact_cpu_options_with
     raster["environment"]["path"] = json!("must-not-open-raster-stable-glass.hdr");
     assert!(s.execute("render.preflight", &raster).unwrap_err().to_string().contains("stable optics require"));
     let mut over_cap = params.clone();
+    let optical_limit = solidcraft_render::job::MAX_OPTICAL_TARGETS;
     over_cap["settings"]["optics"] = json!(
-        (0..9)
+        (0..=optical_limit)
             .map(|i| {
                 let mut row = params["settings"]["optics"][0].clone();
                 row["target"]["definition"] = json!(format!("Unique unknown optical body {i}"));
@@ -2239,7 +2240,7 @@ fn runtime_checked_hdr_keeps_two_stable_glass_targets_and_exact_cpu_options_with
             .collect::<Vec<_>>()
     );
     over_cap["environment"]["path"] = json!("must-not-open-over-cap-stable-glass.hdr");
-    assert!(s.execute("render.preflight", &over_cap).unwrap_err().to_string().contains("at most eight"));
+    assert!(s.execute("render.preflight", &over_cap).unwrap_err().to_string().contains(&format!("at most {optical_limit}")));
     let mut changed_hdr = params.clone();
     changed_hdr["environment"]["expected_sha256"] = json!("0".repeat(64));
     assert!(s.execute("render.preflight", &changed_hdr).unwrap_err().to_string().contains("changed since selection"));
@@ -2277,7 +2278,7 @@ fn saved_cpu_path_maps_glass_and_targeted_aging_reach_real_preflight_and_render_
     s.execute(
         "render.settings.set",
         &json!({"name":"Mixed","set":{"camera":camera,"width":8,"height":8,"job":{"method":"cpu_raytrace","options":{
-            "progressive":{"samples_per_pixel":3,"seed":9},"path":{"max_depth":4},"lights":[],
+            "texture_filtering":true,"progressive":{"samples_per_pixel":3,"seed":9},"path":{"max_depth":4},"lights":[],
             "environment":{"color":[1,1,1],"intensity":1},"output":{"linear_exr":true},
             "aging":[{"kind":"fading","target":panel["stable_target"],"strength":0.25,"coverage":1.0,"upward_bias":0.0}]
         }}}}),
@@ -2301,6 +2302,8 @@ fn saved_cpu_path_maps_glass_and_targeted_aging_reach_real_preflight_and_render_
     let history = (s.revision, s.evaluations, s.undo.len(), s.redo.len());
     let checked = s.execute("render.preflight", &json!({"setup":"Mixed"})).unwrap();
     assert_eq!(checked["textures"]["bodies"], 1);
+    assert_eq!(checked["textures"]["filtering"], true);
+    assert_eq!(checked["request"]["raytrace"]["texture_filtering"], true);
     assert_eq!(checked["request"]["raytrace"]["path"]["max_depth"], 4);
     assert_eq!(checked["request"]["raytrace"]["dielectrics"][0]["body_name"], "Glass");
     assert_eq!(checked["request"]["raytrace"]["dielectrics"][0]["boundary"], "closed_mesh");
@@ -3647,4 +3650,40 @@ fn tessellated_cpu_sheet_saved_and_prospective_bindings_certify_and_render_witho
     assert_eq!(s.doc.render.setups["Sheets"], saved);
     assert!(Arc::ptr_eq(&document, &s.doc) && Arc::ptr_eq(&geometry, &s.model.state()));
     assert_eq!(history, (s.revision, s.evaluations, s.undo.len(), s.redo.len(), s.is_dirty()));
+}
+
+#[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
+#[test]
+fn saved_final_cpu_image_preserves_mode_executor_and_authored_quality_through_start() {
+    let mut session = Session::default();
+    let host = CpuHost::for_platform().unwrap();
+    session.set_render_job_host(Some(host)).unwrap();
+    session.execute("solid.box", &json!({"length":2,"width":3,"height":4})).unwrap();
+    session
+        .execute(
+            "render.settings.set",
+            &json!({"name":"Final OPUS reference","set":{
+            "mode":"final","width":2,"height":2,"job":{"method":"cpu_raytrace","options":{
+                "budget":"workstation","path":{"max_depth":64},"progressive":{"samples_per_pixel":3,"seed":81},
+                "lights":[],"environment":{"color":[0.1,0.2,0.3],"intensity":1},"output":{"linear_exr":true}
+            }}}}),
+        )
+        .unwrap();
+    let params = json!({"setup":"Final OPUS reference"});
+    let before = session.doc.clone();
+    let preflight = session.execute("render.preflight", &params).unwrap();
+    assert_eq!(preflight["resolved"]["profile"]["mode"], "final");
+    assert_eq!(preflight["resolved"]["executor"], "cpu-raytrace");
+    let started = session.execute("render.start", &params).unwrap();
+    let id = serde_json::from_value(started["job"].clone()).unwrap();
+    let job = session.render_job_handle(id).unwrap();
+    let status = job.wait_timeout(std::time::Duration::from_secs(30)).unwrap();
+    assert_eq!(status.progress.phase, solidcraft_render::job::Phase::Completed);
+    assert_eq!(status.resolved.profile.mode, solidcraft_render::RenderMode::Final);
+    assert_eq!(status.resolved.executor.as_str(), "cpu-raytrace");
+    let options = status.request.raytrace.unwrap();
+    assert_eq!(options.path.unwrap().max_depth, 64);
+    assert_eq!(options.progressive.unwrap().samples_per_pixel, 3);
+    assert!(job.frame().unwrap().unwrap().linear_master_info().is_some());
+    assert!(Arc::ptr_eq(&before, &session.doc));
 }

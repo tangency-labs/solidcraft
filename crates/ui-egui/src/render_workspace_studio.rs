@@ -19,6 +19,8 @@ pub(super) struct View {
     pub caustics: Option<solidcraft_engine::render::job::CausticOptions>,
     pub aging: solidcraft_engine::doc::render_aging::SavedAgingStack,
     pub nested_media: bool,
+    pub texture_filtering: bool,
+    pub metal_energy_compensation: bool,
     pub volume: Option<solidcraft_engine::render::job::volume::HomogeneousVolume>,
     pub adaptive: Option<solidcraft_engine::render::job::adaptive::AdaptiveSampling>,
     pub transmission_samples: u32,
@@ -52,6 +54,8 @@ impl Default for View {
             caustics: None,
             aging: Default::default(),
             nested_media: false,
+            texture_filtering: false,
+            metal_energy_compensation: false,
             volume: None,
             adaptive: None,
             transmission_samples: 1,
@@ -102,6 +106,10 @@ pub(super) fn params(app: &SolveApp, params: &mut Value) -> Result<(), String> {
     params["linear_exr"] = json!(view.linear_exr);
     params["aging"] = json!(view.aging);
     params["nested_media"] = json!(view.nested_media);
+    params["texture_filtering"] = json!(view.texture_filtering);
+    if view.metal_energy_compensation {
+        params["metal_energy_compensation"] = json!(true);
+    }
     params["caustics"] = json!(view.caustics);
     params["volume"] = json!(view.volume);
     params["adaptive"] = json!(view.adaptive);

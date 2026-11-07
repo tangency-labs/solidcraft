@@ -17,6 +17,11 @@ use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
 
 pub const MAX_TEXTURE_BINDINGS: usize = 128;
+/// Capture is not residency: each producer still prepays its complete working set.
+/// Native jobs can retain OPUS's 296 MiB of unique float4 source interpretations.
+#[cfg(all(not(target_arch = "wasm32"), target_pointer_width = "64"))]
+pub const MAX_TEXTURE_PIXELS_BYTES: u64 = 512 * 1024 * 1024;
+#[cfg(any(target_arch = "wasm32", not(target_pointer_width = "64")))]
 pub const MAX_TEXTURE_PIXELS_BYTES: u64 = 96 * 1024 * 1024;
 pub const MAX_TEXTURE_SOURCE_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_PLANAR_REPEAT: f64 = 128.0;
@@ -26,6 +31,23 @@ fn invalid(message: impl Into<String>) -> JobError {
 }
 fn v(a: [f64; 3]) -> Vec3 {
     Vec3::new(a[0], a[1], a[2])
+}
+
+/// Preserve the tangent direction and make its length meaningful before averaging.
+/// Invalid/back-facing samples use the same flat fallback as mapped shading.
+pub fn unit_normal_texel(rgb: [f32; 3]) -> [f32; 3] {
+    let signed = v(rgb.map(|channel| 2.0 * f64::from(channel) - 1.0));
+    if signed.z <= 0.0 {
+        return [0.5, 0.5, 1.0];
+    }
+    let Ok(normal) = unit_direction(signed) else { return [0.5, 0.5, 1.0] };
+    [normal.x, normal.y, normal.z].map(|channel| (0.5 * channel + 0.5) as f32)
+}
+
+/// For an average of unit normals, E[|n|²] is one. Its loss of squared
+/// length measures direction variance without an additional texture plane.
+pub fn normal_direction_variance(mean_rgb: [f64; 3]) -> f64 {
+    (1.0 - v(mean_rgb.map(|channel| 2.0 * channel - 1.0)).len2()).clamp(0.0, 1.0)
 }
 
 /// `u` and `v` span one full repeat in world-space millimetres. Image v increases
@@ -146,7 +168,7 @@ impl TextureMap {
     pub fn dimensions(&self) -> [u32; 2] {
         [self.source.info().width, self.source.info().height]
     }
-    #[cfg(feature = "raytrace-cpu")]
+    #[cfg(any(test, feature = "raytrace-cpu"))]
     pub(crate) fn source(&self) -> &TextureSource {
         &self.source
     }
@@ -154,6 +176,11 @@ impl TextureMap {
         self.source.info().role
     }
     pub fn decode(&self, cancel: &CancelToken) -> Result<Vec<f32>> {
+        self.decode_with_source(cancel).map(|(_, linear)| linear)
+    }
+    /// Decode once and retain exact source bytes for compact GPU upload alongside
+    /// normalized linear pixels for mip generation.
+    pub fn decode_with_source(&self, cancel: &CancelToken) -> Result<(crate::texture_input::DecodedTexture, Vec<f32>)> {
         cancel.check()?;
         let decoded = self.source.decode(|| cancel.is_cancelled()).map_err(|e| {
             if cancel.is_cancelled() { JobError::new(ErrorCode::Cancelled, "texture decoding cancelled") } else { invalid(e.to_string()) }
@@ -169,7 +196,7 @@ impl TextureMap {
                 rgba.push(linear as f32);
             }
         }
-        Ok(rgba)
+        Ok((decoded, rgba))
     }
 }
 
@@ -208,12 +235,20 @@ pub struct RuntimeTextures {
     bindings: Vec<TextureBinding>,
     source_bytes: u64,
     pixel_bytes: u64,
+    mip_pixel_bytes: u64,
+    portable_tail_bytes: u64,
+    filtering: bool,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct TextureSummary {
     pub bodies: usize,
     pub encoded_bytes: u64,
     pub linear_pixel_bytes: u64,
+    /// Complete float4 pyramid, including base pixels.
+    pub mip_pixel_bytes: u64,
+    /// GPU pixels for the selected policy, excluding records and upload scratch.
+    pub gpu_pixel_bytes: u64,
+    pub filtering: bool,
 }
 impl RuntimeTextures {
     pub fn new(mut bindings: Vec<TextureBinding>) -> Result<Self> {
@@ -223,6 +258,8 @@ impl RuntimeTextures {
         let mut seen = std::collections::BTreeSet::new();
         let mut source_bytes = 0u64;
         let mut pixel_bytes = 0u64;
+        let mut mip_pixel_bytes = 0u64;
+        let mut portable_tail_bytes = 0u64;
         let mut shared = std::collections::BTreeMap::<([u8; 32], u8), TextureMap>::new();
         for binding in &mut bindings {
             binding.frame.validate()?;
@@ -255,22 +292,65 @@ impl RuntimeTextures {
                 source_bytes = source_bytes.checked_add(map.retained_bytes as u64).ok_or_else(|| invalid("texture source accounting overflow"))?;
                 let decoded = map.source.info().rgba_bytes.checked_mul(4).ok_or_else(|| invalid("texture pixel accounting overflow"))?;
                 pixel_bytes = pixel_bytes.checked_add(decoded).ok_or_else(|| invalid("texture pixel accounting overflow"))?;
+                let [mut width, mut height] = map.dimensions();
+                let mip_start = mip_pixel_bytes;
+                loop {
+                    mip_pixel_bytes = mip_pixel_bytes
+                        .checked_add(u64::from(width) * u64::from(height) * 16)
+                        .ok_or_else(|| invalid("texture mip accounting overflow"))?;
+                    if width == 1 && height == 1 {
+                        break;
+                    }
+                    width = (width / 2).max(1);
+                    height = (height / 2).max(1);
+                }
+                if map.gpu_mip_filtering() {
+                    portable_tail_bytes = portable_tail_bytes
+                        .checked_add(mip_pixel_bytes - mip_start - decoded)
+                        .ok_or_else(|| invalid("portable texture mip accounting overflow"))?;
+                }
                 if source_bytes > MAX_TEXTURE_SOURCE_BYTES || pixel_bytes > MAX_TEXTURE_PIXELS_BYTES {
-                    return Err(invalid("unique texture sources exceed 64 MiB encoded or 96 MiB linear pixels"));
+                    return Err(invalid(format!(
+                        "unique texture sources exceed the host capture limit: {source_bytes}/{} encoded bytes, {pixel_bytes}/{} linear base bytes; select a larger native host or reduce explicitly authored sources",
+                        MAX_TEXTURE_SOURCE_BYTES, MAX_TEXTURE_PIXELS_BYTES
+                    )));
                 }
                 shared.insert(identity, map.clone());
             }
         }
         if source_bytes > MAX_TEXTURE_SOURCE_BYTES || pixel_bytes > MAX_TEXTURE_PIXELS_BYTES {
-            return Err(invalid("unique texture sources exceed 64 MiB encoded or 96 MiB linear pixel budget"));
+            return Err(invalid("unique texture sources exceed this host capture budget"));
         }
-        Ok(Self { bindings, source_bytes, pixel_bytes })
+        Ok(Self { bindings, source_bytes, pixel_bytes, mip_pixel_bytes, portable_tail_bytes, filtering: false })
+    }
+    /// Opt in to anisotropic filtering and compact GPU storage. Otherwise the
+    /// producer preserves its existing sampling policy, including portable mips.
+    pub fn with_filtering(mut self, enabled: bool) -> Self {
+        self.filtering = enabled;
+        self
+    }
+    pub fn filtering(&self) -> bool {
+        self.filtering
     }
     pub fn bindings(&self) -> &[TextureBinding] {
         &self.bindings
     }
     pub fn summary(&self) -> TextureSummary {
-        TextureSummary { bodies: self.bindings.len(), encoded_bytes: self.source_bytes, linear_pixel_bytes: self.pixel_bytes }
+        TextureSummary {
+            bodies: self.bindings.len(),
+            encoded_bytes: self.source_bytes,
+            linear_pixel_bytes: self.pixel_bytes,
+            mip_pixel_bytes: self.mip_pixel_bytes,
+            gpu_pixel_bytes: self.gpu_pixel_bytes(),
+            filtering: self.filtering,
+        }
+    }
+    fn gpu_pixel_bytes(&self) -> u64 {
+        if self.filtering {
+            self.pixel_bytes / 4 + (self.mip_pixel_bytes - self.pixel_bytes) / 2
+        } else {
+            self.pixel_bytes + self.portable_tail_bytes
+        }
     }
     /// Actual/conservative captured source, binding, name and control-header
     /// backing. Available before a CPU or registered executor consumes maps.
@@ -298,7 +378,9 @@ impl RuntimeTextures {
     /// Source snapshots, codec scratch, decoded bytes, staging and device buffer,
     /// plus lookup records. Conservatively includes overlapping preparation.
     pub fn working_bytes(&self) -> u64 {
-        self.source_bytes + self.pixel_bytes * 4 + 64 * 1024 * 1024 + 1024 * 1024
+        // Complete float preparation overlaps one packed host buffer, upload staging
+        // and device residency. The decoder is sequential, never one per source.
+        self.source_bytes + self.mip_pixel_bytes + self.gpu_pixel_bytes() * 3 + 64 * 1024 * 1024 + 8 * 1024 * 1024 + 2 * 1024 * 1024
     }
     pub fn validate_scene(&self, scene: &ProductScene) -> Result<()> {
         for binding in &self.bindings {
@@ -338,6 +420,26 @@ pub fn validate_cpu_options(options: &super::RaytraceOptions) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+/// Approximate a secondary ray's pixel cone by projecting two perpendicular
+/// spans onto the receiver plane. Exact primary ray differentials stay separate.
+#[cfg(feature = "raytrace-cpu")]
+pub(crate) fn secondary_footprint(camera: &crate::Camera, height: u32, distance: f64, direction: Vec3, normal: Vec3) -> Result<Option<[Vec3; 2]>> {
+    let pixel = 2.0 * camera.half_height() / f64::from(height);
+    let diameter = if camera.fov > 0.0 { pixel * distance / camera.distance } else { pixel };
+    if height == 0 || !diameter.is_finite() || diameter < 0.0 {
+        return Err(invalid("invalid texture camera footprint"));
+    }
+    let cosine = normal.dot(direction);
+    if cosine.abs() <= 1e-6 {
+        return Ok(None);
+    }
+    let axis = if direction.z.abs() < 0.9 { Vec3::Z } else { Vec3::X };
+    let tangent = unit_direction(direction.cross(axis)).map_err(|error| invalid(error.to_string()))?;
+    let project = |delta: Vec3| (delta - direction * (normal.dot(delta) / cosine)) * diameter;
+    let footprint = [project(tangent), project(direction.cross(tangent))];
+    Ok(footprint.iter().all(|d| d.is_finite()).then_some(footprint))
 }
 
 /// Independent f64 bilinear reference over the worker's normalized pixels.
@@ -505,6 +607,53 @@ mod tests {
     }
 
     #[test]
+    #[cfg(all(not(target_arch = "wasm32"), target_pointer_width = "64"))]
+    fn opus_texture_inventory_admits_exact_full_pyramids_without_dropping_sources() {
+        let entries = (0_u8..74)
+            .map(|index| {
+                let mut entry = binding();
+                entry.body_index = usize::from(index);
+                entry.body_name = format!("OPUS material {index}");
+                entry.base_color = None;
+                entry.roughness = Some(TextureMap::new(png(512, 512, &[index, 128, 64, 255].repeat(512 * 512)), MapRole::Roughness).unwrap());
+                entry
+            })
+            .collect();
+        let captured = RuntimeTextures::new(entries).unwrap().with_filtering(true);
+        let summary = captured.summary();
+        assert_eq!(summary.bodies, 74);
+        assert_eq!(summary.linear_pixel_bytes, 310_378_496);
+        assert_eq!(summary.mip_pixel_bytes, 413_837_600);
+        assert_eq!(summary.gpu_pixel_bytes, 129_324_176);
+        assert!(summary.gpu_pixel_bytes < 128 * 1024 * 1024);
+        assert!(summary.filtering);
+        assert!(captured.working_bytes() >= summary.mip_pixel_bytes + 3 * summary.gpu_pixel_bytes + summary.encoded_bytes);
+    }
+
+    #[test]
+    #[cfg(feature = "raytrace-cpu")]
+    fn production_filter_smooths_the_major_axis_and_preserves_minor_axis_detail() {
+        let mut entry = binding();
+        entry.frame = PlanarFrame { origin: [0.0; 3], u: [1.0, 0.0, 0.0], v: [0.0, 1.0, 0.0] };
+        let pixels: Vec<_> =
+            (0..64).flat_map(|index| [if index % 2 == 0 { 0 } else { 255 }, if index / 8 % 2 == 0 { 0 } else { 255 }, 0, 255]).collect();
+        let source = TextureMap::new(png(8, 8, &pixels), MapRole::BaseColor).unwrap();
+        entry.base_color = Some(source.clone());
+        let (prepared, _, _) = prepare_cpu_map(source, 3);
+        assert_eq!(prepared.sample([0.0625, 0.0625], 0.0).unwrap(), [0.0; 3]);
+        for u in [-0.9375, 0.0625, 0.17, 12.0625] {
+            let (rgb, _) = prepared.sample_anisotropic([u, 0.0625], [1.0, 0.0], [0.0, 0.03125]).unwrap();
+            assert!((rgb[0] - 0.5).abs() < 1e-10, "{rgb:?}");
+            assert_eq!(rgb[1], 0.0, "minor-axis texel detail must survive");
+        }
+        let camera = crate::Camera { fov: std::f64::consts::FRAC_PI_2, distance: 10.0, ..Default::default() };
+        let front = secondary_footprint(&camera, 100, 20.0, -Vec3::Z, Vec3::Z).unwrap().unwrap();
+        assert!(front.iter().all(|v| (v.len() - 0.4).abs() < 1e-12));
+        assert_eq!(front, secondary_footprint(&camera, 100, 20.0, -Vec3::Z, -Vec3::Z).unwrap().unwrap());
+        assert!(secondary_footprint(&camera, 100, 20.0, Vec3::X, Vec3::Z).unwrap().is_none());
+    }
+
+    #[test]
     fn authored_image_up_coordinates_do_not_invert_the_normal_basis() {
         let mut entry = binding();
         entry.flip_v = true;
@@ -546,8 +695,13 @@ mod tests {
     }
     #[cfg(feature = "raytrace-cpu")]
     fn prepare_cpu_map(map: TextureMap, quantum: usize) -> (cpu_preparation::PreparedMap, u64, u64) {
+        prepare_cpu_map_with_quality(map, quantum, false)
+    }
+
+    #[cfg(feature = "raytrace-cpu")]
+    fn prepare_cpu_map_with_quality(map: TextureMap, quantum: usize, quality: bool) -> (cpu_preparation::PreparedMap, u64, u64) {
         let bytes = cpu_preparation::MapTask::required_bytes(&map).unwrap();
-        let mut task = cpu_preparation::MapTask::new(map, bytes, CancelToken::default()).unwrap();
+        let mut task = cpu_preparation::MapTask::new_with_quality(map, bytes, CancelToken::default(), quality).unwrap();
         assert_eq!(task.working_bytes(), bytes);
         let mut work = 0;
         for _ in 0..100_000 {
@@ -692,6 +846,42 @@ mod tests {
         let a = prepared.sample([0.75, 0.5], 0.0).unwrap()[0];
         let b = prepared.sample([0.75, 0.5], 1.0).unwrap()[0];
         assert!((prepared.sample([0.75, 0.5], 0.5).unwrap()[0] - (a + b) * 0.5).abs() < 1e-15);
+    }
+
+    #[test]
+    #[cfg(feature = "raytrace-cpu")]
+    fn cpu_quality_normal_mips_broaden_only_unresolved_detail() {
+        use crate::{clear_coat::ClearCoat, surface::OpaqueSurface, surface_patterns::ShadingSurface};
+        let roughness = 0.2_f64;
+        let strength = 0.65_f64;
+        let original =
+            OpaqueSurface::new(Vec3::new(0.8, 0.6, 0.4), 0.2, roughness, 1.7).unwrap().with_clear_coat(ClearCoat::new(0.7, 0.2, 1.4).unwrap());
+        let surface = ShadingSurface { surface: original, shading_normal: Vec3::Z };
+        let point = cpu_preparation::MapPoint { position: Vec3::new(1.0, 2.0, 0.0), geometric_normal: Vec3::Z, view_direction: Vec3::Z };
+        // Opposite X directions have signed components (±205, 1, 205)/255.
+        // Their unit mean loses exactly the squared X component.
+        let expected_variance = 205_f64.powi(2) / (2.0 * 205_f64.powi(2) + 1.0);
+        let expected_roughness = (roughness.powi(4) + strength.powi(2) * expected_variance).powf(0.25);
+        for (quality, mixed, normal_strength, lod, expected) in [
+            (true, true, strength, 1.0, expected_roughness),
+            (true, true, strength, 0.0, roughness),
+            (true, false, strength, 1.0, roughness),
+            (true, true, 0.0, 1.0, roughness),
+            (false, true, strength, 1.0, roughness),
+        ] {
+            let second = if mixed { 25 } else { 230 };
+            let map = TextureMap::new(png(2, 1, &[230, 128, 230, 0, second, 128, 230, 255]), MapRole::NormalOpenGl).unwrap();
+            let (prepared, _, _) = prepare_cpu_map_with_quality(map.clone(), 3, quality);
+            let mut binding = binding();
+            binding.normal = Some(map);
+            binding.normal_strength = normal_strength;
+            let mapped = prepared.apply(&binding, point, surface, lod).unwrap().surface;
+            assert!((mapped.roughness() - expected).abs() < 1e-6);
+            assert_eq!(mapped.clear_coat(), original.clear_coat());
+            assert_eq!(mapped.base_color(), original.base_color());
+            assert_eq!(mapped.metallic(), original.metallic());
+            assert_eq!(mapped.dielectric_ior(), original.dielectric_ior());
+        }
     }
 
     #[test]

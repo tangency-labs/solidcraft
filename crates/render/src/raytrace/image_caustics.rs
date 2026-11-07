@@ -1,4 +1,4 @@
-//! Opt-in, bounded delta-source photon density estimate. Every trace, event,
+//! Opt-in, bounded photon density estimate for delta and finite-density sources. Every trace, event,
 //! merge-sort copy, grid lookup and gathered photon cooperates with the job ledger.
 use super::*;
 use crate::glass_model::WAVELENGTHS_NM;
@@ -15,6 +15,7 @@ struct Photon {
     kind: ReceiverKind,
     side: i8,
     source: u32,
+    smooth_chain_events: u8,
 }
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum ReceiverKind {
@@ -32,6 +33,11 @@ struct Sheet {
     ray: Ray,
     hit: super::super::Hit,
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SmoothSource {
+    Rectangle(usize),
+    Environment,
+}
 struct Path {
     ray: Ray,
     cursor: Option<TraceCursor>,
@@ -40,13 +46,14 @@ struct Path {
     emitter_cursor: usize,
     flux: Vec3,
     from: Vec3,
-    media: [usize; 8],
+    media: [usize; job::MAX_NESTED_MEDIA],
     len: usize,
     depth: u8,
     optical: bool,
     channel: Option<u8>,
     source: Option<(Vec3, f64)>,
     source_index: u32,
+    smooth_source: Option<SmoothSource>,
     source_plane: Option<[Vec3; 3]>,
     sheet: Option<Sheet>,
     origin: Option<super::super::origin::Task>,
@@ -197,6 +204,7 @@ fn candidate(
             kind,
             side,
             source: path.source_index,
+            smooth_chain_events: if path.smooth_source.is_some() { path.depth } else { 0 },
         });
     }
     Ok(())
@@ -209,9 +217,29 @@ fn normal_basis(n: Vec3, x: f64, y: f64, z: f64) -> job::Result<Vec3> {
         super::super::unit((if n.z.abs() > 0.9 { Vec3::Y } else { Vec3::Z }).cross(n)).ok_or_else(|| invalid("CPU caustic source basis"))?;
     super::super::unit(tangent * x + n.cross(tangent) * y + n * z).ok_or_else(|| invalid("CPU caustic source direction"))
 }
+pub(super) fn smooth_interface(input: &job::DielectricOptions) -> bool {
+    input.boundary != job::DielectricBoundary::ThinSheet && input.model.unwrap_or_default().roughness == 0.0
+}
+fn bounding_disk(task: &ImageTask, toward: Vec3, [u, v]: [f64; 2]) -> job::Result<Option<(Vec3, f64)>> {
+    let bounds = task.scene.bounds;
+    let center = bounds.min * 0.5 + bounds.max * 0.5;
+    let radius = (bounds.max - bounds.min).len() * 0.5;
+    if !center.is_finite() || !radius.is_finite() || radius <= 0.0 {
+        return Ok(None);
+    }
+    let r = radius * u.sqrt();
+    let phi = TAU * v;
+    let disk = normal_basis(toward, phi.cos(), phi.sin(), 0.0)?;
+    Ok(Some((center + toward * (radius + 1.0) + disk * r, radius)))
+}
 fn emit(map: &mut Task, task: &ImageTask) -> job::Result<()> {
+    let directional = task.lights.lights().len();
     let punctual = task.options.punctual_lights.as_ref().map_or(0, Vec::len);
-    let count = task.lights.lights().len() + punctual;
+    let area = if map.options.area_lights { task.options.area_lights.as_deref().unwrap_or(&[]) } else { &[] };
+    let delta_count = directional + punctual;
+    let local_count = delta_count + area.len();
+    let environment = map.options.environment && (task.environment.is_some() || task.options.sky.is_some() || task.options.environment.is_some());
+    let count = local_count + usize::from(environment);
     if map.ordinal == map.options.photons || count == 0 || task.scene.meshes.is_empty() {
         map.stage = Stage::Sort;
         return Ok(());
@@ -220,25 +248,17 @@ fn emit(map: &mut Task, task: &ImageTask) -> job::Result<()> {
     let [u, v] = map.random(0, 1);
     let normalization = count as f64 / f64::from(map.options.photons);
     let (origin, direction, flux, point_source) = if let Some(light) = task.lights.lights().get(source) {
-        let bounds = task.scene.bounds;
-        let center = bounds.min * 0.5 + bounds.max * 0.5;
-        let radius = (bounds.max - bounds.min).len() * 0.5;
-        if !center.is_finite() || !radius.is_finite() || radius <= 0.0 {
+        let Some((origin, radius)) = bounding_disk(task, light.direction(), [u, v])? else {
             map.finish_path()?;
             return Ok(());
-        }
-        let r = radius * u.sqrt();
-        let phi = TAU * v;
-        let disk = normal_basis(light.direction(), phi.cos(), phi.sin(), 0.0)?;
-        // normal_basis normalizes; retain the actual uniform-disk radius.
-        let origin = center + light.direction() * (radius + 1.0) + disk * r;
+        };
         (origin, -light.direction(), light.color() * (light.intensity() * PI * radius * radius * normalization), None)
-    } else {
+    } else if source < delta_count {
         let light = task
             .options
             .punctual_lights
             .as_ref()
-            .and_then(|lights| lights.get(source - task.lights.lights().len()))
+            .and_then(|lights| lights.get(source - directional))
             .ok_or_else(|| invalid("CPU caustic point source index"))?;
         let origin = Vec3::new(light.position_mm[0], light.position_mm[1], light.position_mm[2]);
         let (direction, density, cone) = if let Some(cone) = light.cone {
@@ -263,6 +283,23 @@ fn emit(map: &mut Task, task: &ImageTask) -> job::Result<()> {
             color * (light.intensity * light.reference_distance_mm.powi(2) * cone * normalization / density),
             Some((origin, light.minimum_distance_mm)),
         )
+    } else if source < local_count {
+        let light = area.get(source - delta_count).ok_or_else(|| invalid("CPU caustic area source index"))?;
+        let light = super::super::indirect::Rectangle::new(light).map_err(error)?;
+        let (origin, direction, power) = light.emit_photon(map.random(0, 16), [u, v]).map_err(error)?;
+        (origin, direction, power * normalization, None)
+    } else {
+        let [x, y] = map.random(0, 16);
+        let x = super::super::indirect::open_stratum(x, 0, 1).map_err(error)?;
+        let y = super::super::indirect::open_stratum(y, 0, 1).map_err(error)?;
+        let (toward, radiance, pdf) = super::indirect_image::environment_sample(task, [x, y])?;
+        let Some((origin, radius)) = bounding_disk(task, toward, [u, v])? else {
+            map.finish_path()?;
+            return Ok(());
+        };
+        // The disk is perpendicular to the sampled incident direction, so
+        // its projected area is constant without an extra cosine factor.
+        (origin, -toward, radiance * (PI * radius * radius * normalization / pdf), None)
     };
     finite_flux(flux)?;
     if flux == Vec3::ZERO {
@@ -286,16 +323,21 @@ fn emit(map: &mut Task, task: &ImageTask) -> job::Result<()> {
         emitter_cursor: 0,
         flux,
         from: origin,
-        media: [0; 8],
+        media: [0; job::MAX_NESTED_MEDIA],
         len: 0,
         depth: 0,
         optical: false,
         channel: None,
         source: point_source,
-        source_index: if source < task.lights.lights().len() {
-            u32::MAX
+        source_index: if (directional..delta_count).contains(&source) {
+            u32::try_from(source - directional).map_err(|_| invalid("CPU caustic source index exceeds its bounded record"))?
         } else {
-            u32::try_from(source - task.lights.lights().len()).map_err(|_| invalid("CPU caustic source index exceeds its bounded record"))?
+            u32::MAX
+        },
+        smooth_source: if source >= local_count {
+            Some(SmoothSource::Environment)
+        } else {
+            source.checked_sub(delta_count).map(SmoothSource::Rectangle)
         },
         source_plane: None,
         sheet: None,
@@ -380,6 +422,9 @@ fn resolve(map: &mut Task, task: &ImageTask, path: &mut Path) -> job::Result<boo
         if let Some(scattering) = input.subsurface.filter(|scattering| scattering.active()) {
             let travel = scattering.free_flight(map.random(path.depth, 8)[0]).map_err(model_error)?;
             if travel < distance {
+                if path.smooth_source.is_some() {
+                    return Ok(true);
+                }
                 let position = path.from + path.ray.direction() * travel;
                 if position == path.from || position == endpoint {
                     return Err(invalid("CPU caustic scattering collision is not representable"));
@@ -434,6 +479,9 @@ fn resolve(map: &mut Task, task: &ImageTask, path: &mut Path) -> job::Result<boo
         return Ok(true);
     };
     let input = task.options.dielectrics.get(index).ok_or_else(|| invalid("CPU caustic optical material missing"))?;
+    if path.smooth_source.is_some() && !smooth_interface(input) {
+        return Ok(true);
+    }
     let model = input.model.unwrap_or_default();
     let thin = input.boundary == job::DielectricBoundary::ThinSheet;
     if model.roughness > 0.0 {
@@ -511,7 +559,7 @@ fn resolve(map: &mut Task, task: &ImageTask, path: &mut Path) -> job::Result<boo
     }
     if !thin && sample.crosses {
         if hit.front_face {
-            *path.media.get_mut(path.len).ok_or_else(|| invalid("CPU caustic stack exceeds eight"))? = index;
+            *path.media.get_mut(path.len).ok_or_else(|| invalid("CPU caustic stack exceeds 16"))? = index;
             path.len += 1;
         } else {
             path.len = path.len.checked_sub(1).ok_or_else(|| invalid("CPU caustic stack underflow"))?;
@@ -654,12 +702,23 @@ fn advance(map: &mut Task, task: &mut ImageTask) -> job::Result<()> {
         Stage::Emitters => {
             let path = map.path.as_mut().ok_or_else(|| invalid("CPU caustic emitter path missing"))?;
             if let Some(input) = task.options.area_lights.as_ref().and_then(|lights| lights.get(path.emitter_cursor)) {
-                if let Some((distance, position)) =
-                    super::super::indirect::Rectangle::new(input).map_err(error)?.intersect(path.ray).map_err(error)?
-                    && path.hit.is_none_or(|hit| distance < hit.geometry.distance)
-                    && path.emitter.is_none_or(|(_, prior, _)| distance < prior)
-                {
-                    path.emitter = Some((path.emitter_cursor, distance, position));
+                let source_launch = path.depth == 0 && path.smooth_source == Some(SmoothSource::Rectangle(path.emitter_cursor));
+                if !source_launch {
+                    let light = super::super::indirect::Rectangle::new(input).map_err(error)?;
+                    let intersection = if path.smooth_source.is_some() {
+                        // Analytic geometry beyond the environment launch disk
+                        // can block the ray even before its first mesh trace.
+                        let before_origin = path.depth == 0 && path.smooth_source == Some(SmoothSource::Environment);
+                        light.intersect_reverse(path.ray, before_origin)
+                    } else {
+                        light.intersect(path.ray)
+                    };
+                    if let Some((distance, position)) = intersection.map_err(error)?
+                        && path.hit.is_none_or(|hit| distance < hit.geometry.distance)
+                        && path.emitter.is_none_or(|(_, prior, _)| distance < prior)
+                    {
+                        path.emitter = Some((path.emitter_cursor, distance, position));
+                    }
                 }
                 path.emitter_cursor += 1;
             } else {
@@ -737,12 +796,14 @@ fn source_allows(task: &ImageTask, photon: Photon, position: Vec3) -> job::Resul
         .ok_or_else(|| invalid("CPU caustic receiver source identity disappeared"))?;
     Ok(position.dist(Vec3::new(input.position_mm[0], input.position_mm[1], input.position_mm[2])) >= input.minimum_distance_mm)
 }
-pub(super) fn gather(task: &ImageTask, cursor: &mut Gather, hit: SharedHit<'_>, view: Vec3) -> job::Result<Option<Vec3>> {
+pub(super) fn gather(task: &ImageTask, cursor: &mut Gather, hit: SharedHit<'_>, view: Vec3, camera_remaining: u8) -> job::Result<Option<Vec3>> {
     let Some(visit) = next(task, cursor, hit.position)? else { return Ok(None) };
     let Some((photon, radius)) = visit else { return Ok(Some(Vec3::ZERO)) };
     let geometric = hit.oriented_geometric_normal();
     if photon.kind != ReceiverKind::Opaque
         || photon.body != hit.body_index
+        // The camera needs a receiver, every glass event, and the emitter endpoint.
+        || (photon.smooth_chain_events != 0 && photon.smooth_chain_events + 1 >= camera_remaining)
         || !source_allows(task, photon, hit.position)?
         || photon.position.dist(hit.position) > radius
         || (photon.position - hit.position).dot(geometric).abs() > radius * 0.1

@@ -115,11 +115,23 @@ pub(super) fn validate_targets(scene: &ProductScene, overrides: &[Override], com
 pub(super) fn capture(scene: &ProductScene, overrides: &[Override], command: &str) -> Result<Option<Arc<RuntimeTextures>>> {
     capture_with_resources(scene, overrides, None, command)
 }
+
+#[cfg(test)]
 pub(super) fn capture_with_resources(
     scene: &ProductScene,
     overrides: &[Override],
     resources: Option<&solidcraft_doc::render_texture_resources::TextureResources>,
     command: &str,
+) -> Result<Option<Arc<RuntimeTextures>>> {
+    capture_with_resources_and_filtering(scene, overrides, resources, command, false)
+}
+
+pub(super) fn capture_with_resources_and_filtering(
+    scene: &ProductScene,
+    overrides: &[Override],
+    resources: Option<&solidcraft_doc::render_texture_resources::TextureResources>,
+    command: &str,
+    filtering: bool,
 ) -> Result<Option<Arc<RuntimeTextures>>> {
     if overrides.is_empty() {
         return Ok(None);
@@ -164,7 +176,7 @@ pub(super) fn capture_with_resources(
             flip_v: input.flip_v,
         });
     }
-    let resources = RuntimeTextures::new(bindings).map_err(|e| bad(command, e.to_string()))?;
+    let resources = RuntimeTextures::new(bindings).map_err(|e| bad(command, e.to_string()))?.with_filtering(filtering);
     resources.validate_scene(scene).map_err(|e| bad(command, e.to_string()))?;
     Ok(Some(Arc::new(resources)))
 }

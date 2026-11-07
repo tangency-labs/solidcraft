@@ -817,7 +817,7 @@ mod tests {
     }
 }
 
-fn visible_normal(v: Vec3, n: Vec3, alpha: f64, u: [f64; 2]) -> Result<Vec3> {
+pub(crate) fn visible_normal(v: Vec3, n: Vec3, alpha: f64, u: [f64; 2]) -> Result<Vec3> {
     let tangent = direction(if n.z.abs() < 0.9 { Vec3::Z.cross(n) } else { Vec3::X.cross(n) })?;
     let bitangent = n.cross(tangent);
     let stretched = direction(Vec3::new(alpha * v.dot(tangent), alpha * v.dot(bitangent), v.dot(n)))?;

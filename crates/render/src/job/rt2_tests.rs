@@ -190,3 +190,24 @@ fn emission_runtime_json_is_bounded_explicit_and_roundtrips() {
     assert_eq!(serde_json::from_str::<RaytraceOptions>("{}").unwrap().emissions, None);
     assert_eq!(serde_json::from_str::<RaytraceOptions>("{\"emissions\":[]}").unwrap().emissions, Some(Vec::new()));
 }
+
+#[test]
+fn opus_quality_limits_are_explicit_finite_and_keep_transport_defaults() {
+    assert_eq!(JobOptions::default().samples, 64);
+    assert_eq!(JobOptions::default().max_depth, 8);
+    let options = JobOptions {
+        samples: MAX_SAMPLES_PER_PIXEL,
+        max_depth: u32::from(MAX_PATH_DEPTH),
+        caustics: Some(CausticOptions { photons: MAX_CAUSTIC_PHOTONS, max_depth: MAX_PATH_DEPTH, ..Default::default() }),
+        ..Default::default()
+    };
+    options.validate().unwrap();
+    assert!(JobOptions { samples: MAX_SAMPLES_PER_PIXEL + 1, ..options }.validate().is_err());
+    assert!(JobOptions { max_depth: u32::from(MAX_PATH_DEPTH) + 1, ..options }.validate().is_err());
+    assert!(CpuPathOptions { max_depth: MAX_PATH_DEPTH }.validate().is_ok());
+    assert!(CpuPathOptions { max_depth: MAX_PATH_DEPTH + 1 }.validate().is_err());
+    assert!(
+        CpuBudget::Workstation.validate_image(3840, 2160, Some(CpuProgressiveOptions { samples_per_pixel: MAX_SAMPLES_PER_PIXEL, seed: 81 })).is_ok()
+    );
+    assert!(CpuBudget::Studio.validate_samples(MAX_SAMPLES_PER_PIXEL).is_err());
+}

@@ -82,6 +82,12 @@ impl RenderJob {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct CpuJob {
+    /// Explicit ray-footprint mip and bounded anisotropic texture filtering.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub texture_filtering: bool,
+    /// Approximate the missing microfacet bounces of rough isotropic conductors.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub metal_energy_compensation: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caustics: Option<solidcraft_render::job::CausticOptions>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -129,6 +135,8 @@ pub struct CpuJob {
 impl Default for CpuJob {
     fn default() -> Self {
         Self {
+            texture_filtering: false,
+            metal_energy_compensation: false,
             caustics: None,
             volume: None,
             sun: None,
@@ -200,6 +208,8 @@ impl CpuJob {
             })
             .transpose()?;
         let options = RaytraceOptions {
+            texture_filtering: self.texture_filtering,
+            metal_energy_compensation: self.metal_energy_compensation,
             caustics: self.caustics,
             volume: self.volume,
             sun: self.sun.map(Box::new),
@@ -233,6 +243,12 @@ impl CpuJob {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct GpuJob {
+    /// Explicit ray-footprint mip and bounded anisotropic texture filtering.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub texture_filtering: bool,
+    /// Approximate the missing microfacet bounces of rough isotropic conductors.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub metal_energy_compensation: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub caustics: Option<solidcraft_render::job::CausticOptions>,
     #[serde(skip_serializing_if = "crate::render_aging::SavedAgingStack::is_empty")]
@@ -269,6 +285,8 @@ impl Default for GpuJob {
     fn default() -> Self {
         let options = JobOptions::default();
         Self {
+            texture_filtering: false,
+            metal_energy_compensation: false,
             caustics: None,
             aging: Default::default(),
             nested_media: options.nested_media,
@@ -317,6 +335,8 @@ impl GpuJob {
             environment.validate()?;
         }
         let options = JobOptions {
+            texture_filtering: self.texture_filtering,
+            metal_energy_compensation: self.metal_energy_compensation,
             caustics: self.caustics,
             aging: self.aging.parameters_only()?,
             nested_media: self.nested_media,

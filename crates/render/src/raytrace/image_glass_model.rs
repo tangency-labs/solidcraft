@@ -78,7 +78,7 @@ fn finish(
     let optical = state.optical.as_mut().ok_or_else(|| invalid("CPU advanced glass stack missing"))?;
     if let Some(enter) = entering {
         if enter {
-            *optical.media.get_mut(optical.len).ok_or_else(|| invalid("CPU advanced glass stack exceeds eight"))? = index;
+            *optical.media.get_mut(optical.len).ok_or_else(|| invalid("CPU advanced glass stack exceeds 16"))? = index;
             optical.len += 1;
         } else {
             optical.len = optical.len.checked_sub(1).ok_or_else(|| invalid("CPU advanced glass stack underflow"))?;

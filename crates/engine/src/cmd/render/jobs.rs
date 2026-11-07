@@ -8,6 +8,10 @@ use solidcraft_render::{
     job::{ImageRequest, Integrator, JobId, RaytraceOptions},
 };
 
+const DENOISE_OUTLIER_POLICY: &str = "suppress isolated high radiance on locally matching guides in display output";
+const DENOISE_OPTICAL_POLICY: &str =
+    "supported sharp reflections and smooth glass use separate reflected and transmitted endpoint geometry and material guides";
+
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct Start {
@@ -53,6 +57,8 @@ struct ProgressiveStart {
     aging: solidcraft_doc::render_aging::SavedAgingStack,
     #[serde(default)]
     nested_media: bool,
+    texture_filtering: bool,
+    metal_energy_compensation: bool,
     volume: Option<solidcraft_render::job::volume::HomogeneousVolume>,
     adaptive: Option<solidcraft_render::job::adaptive::AdaptiveSampling>,
     transmission_samples: Option<u32>,
@@ -194,7 +200,7 @@ fn normalize_saved_job(s: &Session, params: &Value, command: &str) -> Result<Opt
             "lens":options.lens,"lighting":options.lighting,"tone_map":options.tone_map,
             "denoise":options.denoise,"environment":options.environment,
             "finishing":options.finishing,"backdrop":options.backdrop,"linear_exr":options.linear_exr,
-            "caustics":options.caustics,"adaptive":options.adaptive,"transmission_samples":options.transmission_samples,"volume":options.volume,"nested_media":options.nested_media,"aging":options.aging
+            "texture_filtering":options.texture_filtering,"metal_energy_compensation":options.metal_energy_compensation,"caustics":options.caustics,"adaptive":options.adaptive,"transmission_samples":options.transmission_samples,"volume":options.volume,"nested_media":options.nested_media,"aging":options.aging
             })
         }
     };
@@ -430,6 +436,19 @@ pub(crate) fn prepare_with_metadata(
         }
         options.dielectrics = super::optical_bindings::resolve_cpu_path(s, &scene, bindings, options.path.is_some(), command)?;
         options.validate().map_err(job_error)?;
+        // An explicit optical binding owns transmission. Viewport opacity is
+        // only a display proxy and must not enter CPU transport.
+        for optical in &options.dielectrics {
+            let body = scene
+                .meshes
+                .get_mut(optical.body_index)
+                .filter(|body| body.name == optical.body_name)
+                .ok_or_else(|| bad(command, "saved optical target changed during capture"))?;
+            body.opacity = 1.0;
+            for face in &mut body.faces {
+                face.opacity = 1.0;
+            }
+        }
     }
     super::coat_bindings::apply(s, &mut scene, &coats, input.raytrace.as_ref(), command)?;
     if !input.aging.is_empty() {
@@ -519,7 +538,13 @@ pub(crate) fn prepare_with_metadata(
     }
     let textures = if let Some(bindings) = saved_surfaces {
         let overrides = super::surface_bindings::resolve(s, &scene, bindings, command)?;
-        super::textures::capture_with_resources(&scene, &overrides, Some(&s.doc.render.texture_resources), command)?
+        super::textures::capture_with_resources_and_filtering(
+            &scene,
+            &overrides,
+            Some(&s.doc.render.texture_resources),
+            command,
+            input.raytrace.as_ref().is_some_and(|options| options.texture_filtering),
+        )?
     } else {
         None
     };
@@ -536,8 +561,9 @@ pub(crate) fn prepare_with_metadata(
         transparent_background: input.transparent_background,
     };
     let environment_bytes = environment.as_ref().map_or(Ok(0), |e| e.required_bytes()).map_err(|e| bad(command, e.to_string()))?;
-    let submission =
+    let mut submission =
         host.prepare_submission_with_metadata(scene, request, Default::default(), environment, cancel.clone(), retained).map_err(job_error)?;
+    submission.select_image_mode(settings.mode).map_err(job_error)?;
     let request = submission.request();
     let mut admission = submission.admission();
     let retained_lights = request.raytrace.as_ref().map_or(Ok(0), |o| o.retained_bytes()).map_err(job_error)?;
@@ -582,9 +608,11 @@ pub(crate) fn prepare_with_metadata(
     if request.raytrace.as_ref().is_some_and(|options| options.denoise) {
         reply["denoising"] = json!({
             "method":"edge_aware_atrous", "backend":"native_cpu", "passes":3, "steps":[1,2,4],
+            "outlier_policy":DENOISE_OUTLIER_POLICY,
+            "optical_policy":DENOISE_OPTICAL_POLICY,
             "guides":"deterministic_center_ray_albedo_normal_camera_relative_position_depth",
-            "bypass":"glass, sharp CPU mirror overrides, smooth metal/coat, emitter, background and partial coverage first hits",
-            "limitation":"biased spatial filter; first-hit guides do not reconstruct reflection/refraction or depth-of-field correspondences",
+            "bypass":"unsupported or ambiguous optical paths, emitter, background and partial coverage",
+            "limitation":"biased spatial filter; optical guides do not decompose reflected and transmitted radiance or reconstruct depth-of-field correspondences",
             "raw_linear_accumulator_preserved":true,"raw_linear_exr_preserved":true,
             "output_stage":"linear_before_tone_map", "work_units":"one pixel visit per pass, each with at most 25 taps",
             "checkpoints":"every complete published pass uses the same filter"
@@ -715,6 +743,8 @@ fn prepare_progressive(
     options.linear_exr = input.linear_exr;
     options.aging = super::effects::resolve_aging(s, &scene, &input.aging, command)?;
     options.nested_media = input.nested_media;
+    options.texture_filtering = input.texture_filtering;
+    options.metal_energy_compensation = input.metal_energy_compensation;
     options.volume = input.volume;
     options.caustics = input.caustics;
     options.adaptive = input.adaptive;
@@ -794,10 +824,17 @@ fn prepare_progressive(
         height: settings.height,
         background: settings.background,
         transparent_background: input.transparent_background,
-        textures: super::textures::capture_with_resources(&scene, &input.raytrace.textures, Some(&s.doc.render.texture_resources), command)?,
+        textures: super::textures::capture_with_resources_and_filtering(
+            &scene,
+            &input.raytrace.textures,
+            Some(&s.doc.render.texture_resources),
+            command,
+            input.texture_filtering,
+        )?,
     };
     let refraction = input.progressive && scene.has_transmission();
-    let submission = host.prepare_submission_with_metadata(scene, request, options, None, cancel.clone(), retained).map_err(job_error)?;
+    let mut submission = host.prepare_submission_with_metadata(scene, request, options, None, cancel.clone(), retained).map_err(job_error)?;
+    submission.select_image_mode(settings.mode).map_err(job_error)?;
     let request = submission.request();
     let mut admission = submission.admission();
     let retained_options_bytes = options.retained_bytes().map_err(job_error)?;
@@ -815,9 +852,11 @@ fn prepare_progressive(
     if options.denoise {
         reply["denoising"] = json!({
             "method":"edge_aware_atrous", "passes":3, "steps":[1,2,4],
+            "outlier_policy":DENOISE_OUTLIER_POLICY,
+            "optical_policy":DENOISE_OPTICAL_POLICY,
             "guides":"deterministic_center_ray_albedo_normal_position_depth",
-            "bypass":"glass, smooth metal/coat, emitter, background and partial coverage first hits",
-            "limitation":"first-hit guides do not reconstruct reflection/refraction or depth-of-field correspondences",
+            "bypass":"unsupported or ambiguous optical paths, emitter, background and partial coverage",
+            "limitation":"optical guides do not decompose reflected and transmitted radiance or reconstruct depth-of-field correspondences",
             "raw_linear_accumulator_preserved":true, "output_stage":"linear_before_tone_map"
         });
     }

@@ -42,6 +42,24 @@ mod camera_passes {
     }
 
     #[test]
+    fn camera_film_resolves_65536_exact_samples_and_half_coverage() {
+        let samples = crate::job::MAX_SAMPLES_PER_PIXEL;
+        let options = CpuProgressiveOptions { samples_per_pixel: samples, seed: 7 };
+        let budget = crate::job::CpuBudget::Workstation;
+        let bytes = PrimaryFilm::required_bytes(1, 1, options, budget).unwrap();
+        let cancel = CancelToken::default();
+        let mut film = PrimaryFilm::new(1, 1, options, bytes, &cancel, budget).unwrap();
+        film.initialize_one(&cancel, &mut || Ok(())).unwrap();
+        for ordinal in 0..samples {
+            let covered = ordinal % 2 == 0;
+            film.add(0, ordinal, if covered { [2.0, 4.0, 8.0] } else { [0.0; 3] }, covered, &cancel, &mut || Ok(())).unwrap();
+        }
+        assert_eq!(film.pixel(0).unwrap(), ([1.0, 2.0, 4.0], samples / 2, samples));
+        assert!(film.add(0, samples, [0.0; 3], false, &cancel, &mut || Ok(())).is_err());
+        assert_eq!(film.samples(), samples);
+    }
+
+    #[test]
     fn camera_film_cancellation_invalid_radiance_and_work_failure_are_atomic() {
         let mut film = primary();
         let cancel = CancelToken::default();
@@ -334,7 +352,7 @@ mod cpu_adaptive_foundation {
             }
         }
     }
-    type Snapshot = (PreviewStage, u32, Vec<([f64; 3], f64, u16, u16)>);
+    type Snapshot = (PreviewStage, u32, Vec<([f64; 3], f64, u32, u32)>);
     fn snapshot(film: &AdaptiveCameraFilm) -> Option<Snapshot> {
         let pass = film.complete_pass().ok()?;
         let metadata = pass.metadata();
@@ -469,7 +487,7 @@ mod cpu_adaptive_foundation {
         );
         let one = AdaptiveCameraFilm::required_bytes(1, 1, production, options(), CpuBudget::Compact).unwrap();
         let two = AdaptiveCameraFilm::required_bytes(2, 1, production, options(), CpuBudget::Compact).unwrap();
-        assert_eq!(two - one, 70, "64-byte moments plus6-byte exact count/allocation plane, with no snapshot plane");
+        assert_eq!(two - one, 76, "64-byte moments plus12-byte exact count/allocation plane, with no snapshot plane");
         assert!(AdaptiveCameraFilm::new(1, 1, production, options(), CpuBudget::Compact, one - 1, &CancelToken::default()).is_err());
         assert!(AdaptiveCameraFilm::required_bytes(0, 1, production, options(), CpuBudget::Compact).is_err());
         assert!(

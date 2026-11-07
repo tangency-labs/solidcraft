@@ -39,7 +39,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("file.insert_mesh", "Insert Mesh", insert_mesh)
         .at("SOLID", "INSERT")
         .icon("import")
-        .params("path: .3mf, .stl, .obj, .ply (with faces), .glb or .gltf file (its meshes join the design as mesh bodies in a new component named after the file → component, component_name, occurrence; a glTF file's node tree becomes nested components held as one rigid group until component.unlock, a mesh placed again another occurrence, its materials the bodies' appearances, and its metres millimetres); name?; up?: z|y for a glTF file (default y: glTF has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence; z: the file's axes are kept); units?: mm|cm|m|in|ft for an STL or OBJ file, or a PLY file with faces (default mm): the unit its coordinates are in, scaled to millimetres as the file is read (a 3MF or glTF file states its own). The design keeps the millimetre mesh and not the unit, so insert the file again to try another"),
+        .params("path: .3mf, .stl, .obj, .ply (with faces), .glb or .gltf file (its meshes join the design as mesh bodies in a new component named after the file → component, component_name, occurrence; a glTF file's node tree becomes nested components held as one rigid group until component.unlock, a mesh placed again another occurrence, its materials the bodies' appearances, and its metres millimetres); name?; up?: z|y for a glTF file (default y: glTF has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence; z: the file's axes are kept); units?: mm|cm|m|in|ft for an STL or OBJ file, or a PLY file with faces (default mm): the unit its coordinates are in, scaled to millimetres as the file is read (a 3MF or glTF file states its own). The design keeps the millimetre mesh and not the unit, so insert the file again to try another; crease_angle_degrees?: 0..180 (explicitly regenerate angle-weighted shading normals across manifold edges below this crease angle; omitted keeps authored OBJ normals/smoothing groups, or flat shading when absent; geometry stays unchanged)"),
     CommandSpec::new("file.save", "Save", save)
         .icon("save")
         .key("Ctrl+S")
@@ -262,11 +262,18 @@ fn created_bodies(s: &Session, feature: u64) -> Vec<String> {
 /// Add a MeshImport feature for a 3MF, STL, OBJ or glTF file, in a new component named after the
 /// file. A glTF file's nodes become components in it, and its materials the bodies' looks; it is
 /// in metres with Y up, so unless `y_up` is false its component is turned to Z up (#1505).
-fn add_mesh(s: &mut Session, path: &str, name: Option<&str>, y_up: Option<bool>, unit: Option<(&'static str, f64)>) -> Result<Value> {
+fn add_mesh(
+    s: &mut Session,
+    path: &str,
+    name: Option<&str>,
+    y_up: Option<bool>,
+    unit: Option<(&'static str, f64)>,
+    crease_angle: Option<f64>,
+) -> Result<Value> {
     let err = |e: solidcraft_io::IoError| EngineError::Other(format!("{path}: {e}"));
     let bytes = solidcraft_io::vfs::read(path, solidcraft_io::MAX_3MF_BYTES).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let gltf = solidcraft_io::is_gltf_path(path);
-    let (mf, plan, looks) = if gltf {
+    let (mut mf, plan, looks) = if gltf {
         let dir = std::path::Path::new(path).parent().map(std::path::Path::to_path_buf).unwrap_or_default();
         let mut load =
             |name: &str| solidcraft_io::vfs::read(&dir.join(name).to_string_lossy(), solidcraft_io::MAX_GLTF_BYTES).map_err(|e| e.to_string());
@@ -278,6 +285,13 @@ fn add_mesh(s: &mut Session, path: &str, name: Option<&str>, y_up: Option<bool>,
     } else {
         (solidcraft_io::mesh_import_feature_in(&bytes, path, unit.map_or(1.0, |(_, mm)| mm)).map_err(err)?, None, Vec::new())
     };
+    if let Some(angle) = crease_angle
+        && let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = &mut mf.kind
+    {
+        for mesh in meshes {
+            mesh.generate_crease_normals(angle).map_err(|e| bad("file.insert_mesh", e.to_string()))?;
+        }
+    }
     let fname = name.filter(|n| !n.trim().is_empty()).unwrap_or(&mf.name).to_string();
     let cname = import::component_name(path, name);
     let tree = match &plan {
@@ -360,7 +374,16 @@ fn insert_mesh(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let up = mesh_up(p, path, cmd)?;
     let unit = mesh_units(p, path, cmd)?;
-    add_mesh(s, path, str_(p, "name"), up, unit)
+    let crease_angle = match p.get("crease_angle_degrees") {
+        None | Some(Value::Null) => None,
+        Some(value) => Some(
+            value
+                .as_f64()
+                .filter(|v| v.is_finite() && (0.0..=180.0).contains(v))
+                .ok_or_else(|| bad(cmd, "crease_angle_degrees must be between 0 and 180 degrees"))?,
+        ),
+    };
+    add_mesh(s, path, str_(p, "name"), up, unit, crease_angle)
 }
 
 fn insert_step(s: &mut Session, p: &Value) -> Result<Value> {
@@ -437,7 +460,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
         let r = if solidcraft_io::is_step_path(path) {
             add_step(&mut fresh, path, None, &step_options(p, "doc.open")?)?
         } else {
-            add_mesh(&mut fresh, path, None, mesh_up(p, path, "doc.open")?, mesh_units(p, path, "doc.open")?)?
+            add_mesh(&mut fresh, path, None, mesh_up(p, path, "doc.open")?, mesh_units(p, path, "doc.open")?, None)?
         };
         // The design is the file: its component is the one being worked in.
         if let Some(c) = r["component"].as_u64() {
@@ -802,7 +825,7 @@ fn saved_preview(s: &Session) -> Option<solidcraft_io::DesignPreview> {
     for body in &world.bodies {
         let mesh = body.cached_mesh()?;
         bytes =
-            bytes.saturating_add(mesh.positions.len().saturating_mul(24)).saturating_add(mesh.triangles.len().saturating_mul(12)).saturating_add(24);
+            bytes.saturating_add(mesh.positions.len().saturating_mul(24)).saturating_add(mesh.triangles.len().saturating_mul(84)).saturating_add(32);
         triangles = triangles.saturating_add(mesh.triangles.len());
         if bytes > 8 << 20 || triangles > 100_000 {
             return None;
@@ -812,6 +835,7 @@ fn saved_preview(s: &Session) -> Option<solidcraft_io::DesignPreview> {
             positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
             triangles: mesh.triangles.iter().flatten().copied().collect(),
             color: s.doc.body_color(body),
+            corner_normals: mesh.triangles.iter().flatten().filter_map(|&i| mesh.normals.get(i as usize)).flat_map(|n| [n.x, n.y, n.z]).collect(),
         });
     }
     Some(preview)
@@ -1944,6 +1968,41 @@ mod tests {
         let measured = reopened.execute("inspect.measure", &json!({})).unwrap();
         assert!((measured["bodies"][0]["volume_mm3"].as_f64().unwrap() - 12000.).abs() < 1e-6);
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn mesh_import_explicit_crease_normals_are_undoable_and_survive_cached_reopen() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-mesh-normals-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("fold.obj");
+        std::fs::write(&path, "v 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 -0.8660254037844386 0.5\nf 1 2 3\nf 2 1 4\n").unwrap();
+        let mut session = Session::default();
+        let before = session.doc.to_json();
+        for bad_angle in [json!(-1), json!(181), json!("smooth")] {
+            let result = session.execute("file.insert_mesh", &json!({"path":path, "crease_angle_degrees":bad_angle}));
+            assert!(result.unwrap_err().to_string().contains("crease_angle_degrees"));
+            assert_eq!(session.doc.to_json(), before);
+        }
+        session.execute("file.insert_mesh", &json!({"path":path, "crease_angle_degrees":40})).unwrap();
+        let normals = |s: &Session| s.model.state().bodies[0].mesh().normals.clone();
+        let expected = normals(&session);
+        assert!(expected[0].y > 0.2 && expected[0].z > 0.9);
+        session.execute("edit.undo", &json!({})).unwrap();
+        assert!(session.model.state().bodies.is_empty());
+        session.execute("edit.redo", &json!({})).unwrap();
+        assert_eq!(normals(&session), expected);
+        let bytes = session.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap();
+        let cached = solidcraft_io::read_design_geometry(&bytes).expect("shaded mesh retains native cache");
+        assert!(!cached.bodies[0].body.triangle_corner_normals().unwrap().is_empty());
+        let saved_path = dir.join("shaded.sc");
+        std::fs::write(&saved_path, &bytes).unwrap();
+        let mut reopened = Session::default();
+        reopened.execute("doc.open", &json!({"path":saved_path})).unwrap();
+        assert_eq!(normals(&reopened), expected);
+        let doc = solidcraft_io::read_design(&bytes).unwrap();
+        let cold = Session::new(doc);
+        assert_eq!(normals(&cold), expected);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     /// #9170: a design holding a mesh body (an inserted STL) keeps its saved model and opens from
