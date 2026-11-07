@@ -24,6 +24,11 @@ impl PendingFeatureEdit {
         self.feature
     }
 
+    /// Whether the editor still opens once ready (not cancelled).
+    pub(crate) fn opens(&self) -> bool {
+        self.feature.is_some()
+    }
+
     pub(crate) fn then_start(&mut self, command: &str) {
         self.cancel();
         self.next_command = Some(command.to_owned());
