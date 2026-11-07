@@ -2556,6 +2556,8 @@
   "prefs.design_tools.double_click_help": "Or to edit a linked one in place.",
   "prefs.design_tools.ghost": "Show moved parts' old place as a ghost",
   "prefs.design_tools.hole_moves_help": "Picking the face again moves the hole instead of removing it.",
+  "prefs.design_tools.hole_several": "Several holes on one face",
+  "prefs.design_tools.hole_several_help": "Picking elsewhere on a face adds another hole; picking a hole removes it.",
   "prefs.design_tools.hole_snaps_help": "The middle of a face and the centers of its round edges.",
   "prefs.design_tools.imported_files": "Imported files",
   "prefs.design_tools.note": "Note",

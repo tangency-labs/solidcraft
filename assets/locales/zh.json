@@ -2556,6 +2556,8 @@
   "prefs.design_tools.double_click_help": "或就地编辑链接的组件。",
   "prefs.design_tools.ghost": "以虚影显示已移动零件的原位置",
   "prefs.design_tools.hole_moves_help": "再次选择该面会移动孔而非移除孔。",
+  "prefs.design_tools.hole_several": "一个面上多个孔",
+  "prefs.design_tools.hole_several_help": "在面的其他位置选择会再添加一个孔；选择孔会移除该孔。",
   "prefs.design_tools.hole_snaps_help": "面的中点及其圆形边的圆心。",
   "prefs.design_tools.imported_files": "导入的文件",
   "prefs.design_tools.note": "提示",

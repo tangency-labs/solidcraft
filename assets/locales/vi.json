@@ -2556,6 +2556,8 @@
   "prefs.design_tools.double_click_help": "Hoặc để chỉnh sửa thành phần được liên kết tại chỗ.",
   "prefs.design_tools.ghost": "Hiện vị trí cũ của chi tiết đã di chuyển dưới dạng bóng mờ",
   "prefs.design_tools.hole_moves_help": "Chọn lại mặt sẽ di chuyển lỗ thay vì xóa lỗ.",
+  "prefs.design_tools.hole_several": "Nhiều lỗ trên một mặt",
+  "prefs.design_tools.hole_several_help": "Chọn chỗ khác trên mặt sẽ thêm một lỗ; chọn một lỗ sẽ xóa lỗ đó.",
   "prefs.design_tools.hole_snaps_help": "Điểm giữa của mặt và tâm các cạnh tròn của mặt đó.",
   "prefs.design_tools.imported_files": "Tệp đã nhập",
   "prefs.design_tools.note": "Thông báo",
