@@ -8,7 +8,11 @@ use solidcraft_sketch::{Analysis, Budget, ConstraintKind, CurveKind, Hold, Point
 
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, bool_, expr, num, req_expr, req_vec2, str_, string_list, vec2, vec3};
-use crate::schema::sketch::{CancelResult, EditParams, EditResult, ExitParams, FinishResult};
+use crate::schema::sketch::{
+    CancelResult, CoincidentMade, CoincidentParams, CoincidentResult, CollinearParams, ConcentricParams, Constrained, ConstraintResult, EditParams,
+    EditResult, EqualMade, EqualParams, EqualResult, ExitParams, FinishResult, FixOutcome, FixParams, FixResult, HorizontalVerticalParams,
+    MidpointParams, ParallelParams, PerpendicularParams, SymmetryParams, SymmetryResult, TangentParams,
+};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session, SketchEntry, Snapshot};
 
@@ -38,6 +42,17 @@ macro_rules! model_operand_doc {
 
 const EDIT_CONTRACT: TypedContract<EditParams> = TypedContract::new();
 const EXIT_CONTRACT: TypedContract<ExitParams> = TypedContract::new();
+const HORIZONTAL_VERTICAL_CONTRACT: TypedContract<HorizontalVerticalParams> = TypedContract::new();
+const COINCIDENT_CONTRACT: TypedContract<CoincidentParams> = TypedContract::new();
+const TANGENT_CONTRACT: TypedContract<TangentParams> = TypedContract::new();
+const EQUAL_CONTRACT: TypedContract<EqualParams> = TypedContract::new();
+const PARALLEL_CONTRACT: TypedContract<ParallelParams> = TypedContract::new();
+const PERPENDICULAR_CONTRACT: TypedContract<PerpendicularParams> = TypedContract::new();
+const FIX_CONTRACT: TypedContract<FixParams> = TypedContract::new();
+const MIDPOINT_CONTRACT: TypedContract<MidpointParams> = TypedContract::new();
+const CONCENTRIC_CONTRACT: TypedContract<ConcentricParams> = TypedContract::new();
+const COLLINEAR_CONTRACT: TypedContract<CollinearParams> = TypedContract::new();
+const SYMMETRY_CONTRACT: TypedContract<SymmetryParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.create", "Create Sketch", create_sketch)
@@ -141,62 +156,84 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(concat!("p0, p1: overall ends, width", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.point", "Point", draw_point).at("SKETCH", "CREATE").icon("point").enabled(in_sketch).params(concat!("point: [x,y] (each a number or an expression over the design's parameters: the point is then fixed where it comes to and follows them) or a snap: \"mid:<line>\" (held at the line's midpoint), \"on:<curve>:x,y\" (on the curve near x,y), {vertex: [x,y,z]} or {on_edge: [x,y,z]} of the model; id?", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.dimension", "Sketch Dimension", dimension).at("SKETCH", "CREATE").icon("dimension").key("D").enabled(in_sketch).params(
-        "entities: [refs] (a line midpoint is \"mid:line_id\"; a model edge or vertex, {edge: [x,y,z], body?} or {vertex: [x,y,z], body?}, is projected into the sketch first and measured there: a point against the projected edge measures the distance to it), type?: auto|distance|horizontal|distance_x|vertical|distance_y|length|radius|diameter|major|minor|angle, value?: number or expression (default: current; a bare number is in the design's units, e.g. 2 means 2 in in an inch design; give a unit such as \"50 mm\" to override), or `name = expression` (e.g. \"width = 40\"; also `#name = expression`), which adds the user parameter `name` with that expression and dimensions with `name` (refused when the name is taken or reserved; the reply's `defined` names it); text_at?: [x, y]. Two points or a line off the axes: with auto, text_at across from them (between the perpendiculars through them, or a tenth of their distance past) is the distance between them; pulled further past an end, up or down from it horizontal, sideways vertical. Two midpoints: placing text above or below their bounding box measures horizontally, beside it vertically, anywhere else (inside it or past its corners) the distance between them. Two lines: the angle between them (acute, or 180° − it when the value is nearer that) unless text_at picks a sector. A line and a circle or arc: the distance from the line to its edge (the gap, or how far the edge reaches past a line that cuts it; 0 is tangent); dimension the centre point for the distance to the centre. A point and a circle or arc: the distance from the point to its edge (or how far within it a point inside lies). Two circles or arcs: the gap between their edges (or how far they overlap when they cross, or the narrowest gap between them when one lies inside the other), or the centre-to-centre distance when they are the two caps of a slot. An ellipse: a half-axis, the distance from the centre to an axis end (major or minor; with auto, text_at pulled across the major axis gives the major half-axis, pulled out past an end of it the minor one, the minor without text_at; previous_axis?: major|minor, the half-axis an earlier placement chose, kept while text_at is near the boundary between them; the reply's axis names the one chosen; with auto, when a driving dimension already holds one half-axis (or its whole axis), the other one, wherever text_at is; without its major axis line the major half-axis goes to the ellipse's own major end, without its minor axis line the minor half-axis is the minor radius); any other type, radius among them, the minor radius; an ellipse's axis line with auto: its length, the whole axis, wherever text_at is; half_axes?: bool (default true; false: with auto, the minor radius wherever text_at is, as before half-axes, which the Dimension tool sends with Draw ellipses with their axes off). An arc and one of its end points: the arc's length (type arc_length does it from the arc alone). A dimension the sketch already determines is refused (naming what determines it); if_redundant?: \"driven\" places it as a driven (reference) dimension instead. scale_sketch?: bool (the dimension tool sends true): when this is the sketch's first length dimension and nothing in the sketch fixes a size (no other driving length dimension, nothing fixed or projected), the whole sketch scales about its origin to the value instead of distorting. Returns measured in unit (mm or deg), and scaled: the factor when the sketch was scaled",
+        "entities: [refs] (a line midpoint is \"mid:line_id\"; a model edge or vertex, {edge: [x,y,z], body?} or {vertex: [x,y,z], body?}, is projected into the sketch first and measured there: a point against the projected edge measures the distance to it), type?: auto|distance|horizontal|distance_x|vertical|distance_y|length|radius|diameter|major|minor|angle, value?: number or expression (default: current; a bare number is in the design's units, e.g. 2 means 2 in in an inch design; give a unit such as \"50 mm\" to override), or `name = expression` (e.g. \"width = 40\"; also `#name = expression`), which adds the user parameter `name` with that expression and dimensions with `name` (refused when the name is taken or reserved; the reply's `defined` names it); text_at?: [x, y]. Two points or a line off the axes: with auto, text_at across from them (between the perpendiculars through them, or a tenth of their distance past) is the distance between them; pulled further past an end, up or down from it horizontal, sideways vertical. Two midpoints: placing text above or below their bounding box measures horizontally, beside it vertically, anywhere else (inside it or past its corners) the distance between them. Two lines: the angle between them (acute, or 180° − it when the value is nearer that) unless text_at picks a sector. A line and a circle or arc: the distance from the line to its edge (the gap, or how far the edge reaches past a line that cuts it; 0 is tangent); dimension the centre point for the distance to the centre. A point and a circle or arc: the distance from the point to its edge (or how far within it a point inside lies). Two circles or arcs: the gap between their edges (or how far they overlap when they cross, or the narrowest gap between them when one lies inside the other), or the centre-to-centre distance when they are the two caps of a slot. An ellipse: a half-axis, the distance from the centre to an axis end (major or minor; with auto, text_at pulled across the major axis gives the major half-axis, pulled out past an end of it the minor one, the minor without text_at; previous_axis?: major|minor, the half-axis an earlier placement chose, kept while text_at is near the boundary between them; the reply's axis names the one chosen; with auto, when a driving dimension already holds one half-axis (or its whole axis), the other one, wherever text_at is; without its major axis line the major half-axis goes to the ellipse's own major end, without its minor axis line the minor half-axis is the minor radius); any other type, radius among them, the minor radius; an ellipse's axis line with auto: its length, the whole axis, wherever text_at is; half_axes?: bool (default true; false: with auto, the minor radius wherever text_at is, as before half-axes, which the Dimension tool sends with Draw ellipses with their axes off). An arc and one of its end points: the arc's length (type arc_length does it from the arc alone). A dimension the sketch already determines is refused (naming what determines it); if_redundant?: \"driven\" places it as a driven (reference) dimension instead. scale_sketch?: bool (the dimension tool sends the Sketch preference, on by default): when this is the sketch's first length dimension and nothing in the sketch fixes a size (no other driving length dimension, nothing fixed or projected), the whole sketch scales about its origin to the value instead of distorting. Returns measured in unit (mm or deg), and scaled: the factor when the sketch was scaled",
     ),
-    CommandSpec::new("sketch.constraint.horizontal_vertical", "Horizontal/Vertical", c_horizontal_vertical)
+    CommandSpec::new("sketch.constraint.horizontal_vertical", "Horizontal/Vertical", crate::checked!("sketch.constraint.horizontal_vertical", c_horizontal_vertical))
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_hv")
         .enabled(in_sketch)
+        .contract(&HORIZONTAL_VERTICAL_CONTRACT)
+        .output(output_schema_for::<ConstraintResult>)
         .params("line: id | points: [a, b] (point ids or {midpoint: line_id}; accepted midpoints reuse or create a point with a Midpoint constraint); mode?: horizontal|vertical"),
-    CommandSpec::new("sketch.constraint.coincident", "Coincident", c_coincident)
+    CommandSpec::new("sketch.constraint.coincident", "Coincident", crate::checked!("sketch.constraint.coincident", c_coincident))
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_coincident")
         .enabled(in_sketch)
+        .contract(&COINCIDENT_CONTRACT)
+        .output(output_schema_for::<CoincidentResult>)
         .params(concat!("a, b: points (or a line's middle as {midpoint: line}, which becomes a point tied there), a point and a curve or sketch axis (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created), or two distinct lines (joins their closest endpoints), or two circles/arcs (the second lies on the first: concentric and equal, `constraints` lists both)", model_operand_doc!())),
-    CommandSpec::new("sketch.constraint.tangent", "Tangent", c_tangent)
+    CommandSpec::new("sketch.constraint.tangent", "Tangent", crate::checked!("sketch.constraint.tangent", c_tangent))
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_tangent")
         .enabled(in_sketch)
+        .contract(&TANGENT_CONTRACT)
+        .output(output_schema_for::<ConstraintResult>)
         .params(concat!("a, b: curves or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created)", model_operand_doc!())),
-    CommandSpec::new("sketch.constraint.equal", "Equal", c_equal)
+    CommandSpec::new("sketch.constraint.equal", "Equal", crate::checked!("sketch.constraint.equal", c_equal))
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_equal")
         .enabled(in_sketch)
+        .contract(&EQUAL_CONTRACT)
+        .output(output_schema_for::<EqualResult>)
         .params(concat!("a, b: lines or circles/arcs; or curves: [2 to 200 lines or circles/arcs], each made equal to the first, in one step", model_operand_doc!())),
-    CommandSpec::new("sketch.constraint.parallel", "Parallel", c_parallel)
+    CommandSpec::new("sketch.constraint.parallel", "Parallel", crate::checked!("sketch.constraint.parallel", c_parallel))
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_parallel")
         .enabled(in_sketch)
+        .contract(&PARALLEL_CONTRACT)
+        .output(output_schema_for::<ConstraintResult>)
         .params(concat!("a, b: lines or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created)", model_operand_doc!())),
-    CommandSpec::new("sketch.constraint.perpendicular", "Perpendicular", c_perpendicular)
+    CommandSpec::new("sketch.constraint.perpendicular", "Perpendicular", crate::checked!("sketch.constraint.perpendicular", c_perpendicular))
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_perpendicular")
         .enabled(in_sketch)
+        .contract(&PERPENDICULAR_CONTRACT)
+        .output(output_schema_for::<ConstraintResult>)
         .params(concat!("a, b: lines or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created)", model_operand_doc!())),
-    CommandSpec::new("sketch.constraint.fix", "Fix/Unfix", c_fix)
+    CommandSpec::new("sketch.constraint.fix", "Fix/Unfix", crate::checked!("sketch.constraint.fix", c_fix))
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_fix")
         .enabled(in_sketch)
+        .contract(&FIX_CONTRACT)
+        .output(output_schema_for::<FixResult>)
         .params("entity: point or curve | entities: [points and curves]; fixed?: bool (default: fix them all unless all are fixed, then unfix)"),
-    CommandSpec::new("sketch.constraint.midpoint", "MidPoint", c_midpoint)
+    CommandSpec::new("sketch.constraint.midpoint", "MidPoint", crate::checked!("sketch.constraint.midpoint", c_midpoint))
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_midpoint")
         .enabled(in_sketch)
+        .contract(&MIDPOINT_CONTRACT)
+        .output(output_schema_for::<ConstraintResult>)
         .params(concat!("point, line | a, b in pick order: a point and a line (either way round), or two lines whose midpoints meet (the first stays, the second moves)", model_operand_doc!())),
-    CommandSpec::new("sketch.constraint.concentric", "Concentric", c_concentric)
+    CommandSpec::new("sketch.constraint.concentric", "Concentric", crate::checked!("sketch.constraint.concentric", c_concentric))
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_concentric")
         .enabled(in_sketch)
+        .contract(&CONCENTRIC_CONTRACT)
+        .output(output_schema_for::<ConstraintResult>)
         .params(concat!("a, b: two circles/arcs, or a circle/arc and a sketch point (including origin), in either order; the point and the curve's centre become coincident", model_operand_doc!())),
-    CommandSpec::new("sketch.constraint.collinear", "Collinear", c_collinear)
+    CommandSpec::new("sketch.constraint.collinear", "Collinear", crate::checked!("sketch.constraint.collinear", c_collinear))
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_collinear")
         .enabled(in_sketch)
+        .contract(&COLLINEAR_CONTRACT)
+        .output(output_schema_for::<ConstraintResult>)
         .params(concat!("a, b: lines or sketch axes (x / y: the sketch's own axes, unless a curve has that id; an axis becomes a linked construction line on it, reported in created)", model_operand_doc!())),
-    CommandSpec::new("sketch.constraint.symmetry", "Symmetry", c_symmetry)
+    CommandSpec::new("sketch.constraint.symmetry", "Symmetry", crate::checked!("sketch.constraint.symmetry", c_symmetry))
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_symmetry")
         .enabled(in_sketch)
+        .contract(&SYMMETRY_CONTRACT)
+        .output(output_schema_for::<SymmetryResult>)
         .params(concat!("a, b: two points or two curves (lines mirror their ends, circles/arcs their centres); line: symmetry line id, or x / y for the sketch's own axes (a curve with that id wins; an axis becomes a linked construction line on it, reported in created); or point (or a point id as line, \"origin\" too): symmetric about that point, each pair joined by a construction line it is the midpoint of", model_operand_doc!())),
     CommandSpec::new("sketch.construction", "Normal/Construction", construction)
         .at("SKETCH", "CREATE")
@@ -1953,7 +1990,27 @@ fn draw_point(s: &mut Session, p: &Value) -> Result<Value> {
 // ---------------------------------------------------------------------------------------------
 // Constraints
 
-fn constrain(s: &mut Session, p: &Value, cmd: &str, f: impl FnOnce(&mut Sketch) -> Result<ConstraintKind>) -> Result<Value> {
+/// A command's reply as JSON: they build their replies from the types their output schemas
+/// describe, so the two can't drift apart.
+fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
+}
+
+/// [`constrain`], replying as the commands that add one constraint do.
+fn constrain_reply(s: &mut Session, p: &Value, cmd: &str, f: impl FnOnce(&mut Sketch) -> Result<ConstraintKind>) -> Result<Value> {
+    let made = constrain(s, p, cmd, f)?;
+    reply(cmd, ConstraintResult { made, param_warnings: Vec::new() })
+}
+
+/// The constraint a command added and, when the sketch already determined it, what determines it
+/// (see [`constraint_result`], which the other constraint commands build their reply with).
+fn constrained(p: &Value, cmd: &str, id: String, info: Value, by: Option<Vec<String>>) -> Result<Constrained> {
+    let Some(by) = by else { return Ok(Constrained { constraint: id, sketch: info, redundant: None, determined_by: None }) };
+    keep_redundant(p, cmd, &by)?;
+    Ok(Constrained { constraint: id, sketch: info, redundant: Some(true), determined_by: Some(by) })
+}
+
+fn constrain(s: &mut Session, p: &Value, cmd: &str, f: impl FnOnce(&mut Sketch) -> Result<ConstraintKind>) -> Result<Constrained> {
     let mut before = None;
     let mut residual = None;
     let (id, info) = edit(s, p, cmd, true, |sk, _| {
@@ -1972,7 +2029,7 @@ fn constrain(s: &mut Session, p: &Value, cmd: &str, f: impl FnOnce(&mut Sketch) 
         Ok(id)
     })?;
     let by = redundancy(s, p, cmd, before, &info, residual, &id)?;
-    constraint_result(p, cmd, id, info, by, Value::Null)
+    constrained(p, cmd, id, info, by)
 }
 
 /// A sketch entity a constraint is applied to.
@@ -2316,7 +2373,7 @@ impl AlignmentTarget {
 fn c_horizontal_vertical(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.constraint.horizontal_vertical";
     let mode = str_(p, "mode").map(str::to_ascii_lowercase);
-    constrain(s, p, cmd, |sk| {
+    constrain_reply(s, p, cmd, |sk| {
         if let Some(pts) = p.get("points").and_then(Value::as_array) {
             if pts.len() != 2 {
                 return Err(bad(cmd, "`points` needs exactly two point references"));
@@ -2381,7 +2438,8 @@ fn c_coincident(s: &mut Session, p: &Value) -> Result<Value> {
         && let Some(c) = sk.constraints.iter().find(|c| matches!(c.kind, ConstraintKind::Coincident { p, q } if (p, q) == (a, b) || (p, q) == (b, a)))
     {
         let rep = solve(&mut sk.clone());
-        return Ok(json!({"constraint": c.id, "existing": true, "sketch": report_json(&rep)}));
+        let made = CoincidentMade::Existing { constraint: c.id.clone(), existing: true, sketch: report_json(&rep) };
+        return reply(cmd, CoincidentResult { made, param_warnings: Vec::new() });
     }
     let pick = |sk: &mut Sketch| -> Result<ConstraintKind> {
         if let Some((a, b)) = line_points {
@@ -2424,7 +2482,7 @@ fn c_coincident(s: &mut Session, p: &Value) -> Result<Value> {
         let c = curve_or_axis(sk, bref)?.ok_or_else(|| bad(cmd, format!("unknown entity `{bref}`")))?;
         Ok(ConstraintKind::PointOnCurve { p: a, c })
     };
-    constrain(s, p, cmd, |sk| {
+    let made = constrain(s, p, cmd, |sk| {
         let k = pick(sk)?;
         // A line's two ends on each other shrink it to a point, as a line's own end at its
         // middle does (see `c_midpoint`).
@@ -2434,7 +2492,8 @@ fn c_coincident(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, "a line's two ends can't be coincident: the line would shrink to a point"));
         }
         Ok(k)
-    })
+    })?;
+    reply(cmd, CoincidentResult { made: CoincidentMade::Added(made), param_warnings: Vec::new() })
 }
 
 /// `a` and `b` both circles or arcs (two different ones).
@@ -2469,7 +2528,8 @@ fn coincident_circles(s: &mut Session, p: &Value, cmd: &str, a: usize, b: usize)
         apply_in_order(sk, &rep, &[Ent::Curve(a)], Ent::Curve(b), cmd, &ids)?;
         Ok(ids)
     })?;
-    Ok(json!({"constraint": ids[0], "constraints": ids, "sketch": info}))
+    let constraint = ids.first().cloned().unwrap_or_default();
+    reply(cmd, CoincidentResult { made: CoincidentMade::Circles { constraint, constraints: ids, sketch: info }, param_warnings: Vec::new() })
 }
 
 /// Four endpoint pairs, ordered independently of pick order when distances tie.
@@ -2525,7 +2585,7 @@ fn two_curves_or_axes(sk: &mut Sketch, p: &Value, cmd: &str) -> Result<(usize, u
 
 fn c_tangent(s: &mut Session, p: &Value) -> Result<Value> {
     let p = &super::sketch_project::project_operands(s, p, "sketch.constraint.tangent", &["a", "b"])?;
-    constrain(s, p, "sketch.constraint.tangent", |sk| {
+    constrain_reply(s, p, "sketch.constraint.tangent", |sk| {
         two_curves_or_axes(sk, p, "sketch.constraint.tangent")
             .and_then(|ab| two_different("sketch.constraint.tangent", ab))
             .map(|(a, b)| ConstraintKind::Tangent { a, b })
@@ -2536,11 +2596,9 @@ fn c_equal(s: &mut Session, p: &Value) -> Result<Value> {
         return equal_curves(s, p);
     }
     let p = &super::sketch_project::project_operands(s, p, "sketch.constraint.equal", &["a", "b"])?;
-    constrain(s, p, "sketch.constraint.equal", |sk| {
-        two_curves(sk, p, "sketch.constraint.equal")
-            .and_then(|ab| two_different("sketch.constraint.equal", ab))
-            .map(|(a, b)| ConstraintKind::Equal { a, b })
-    })
+    let cmd = "sketch.constraint.equal";
+    let made = constrain(s, p, cmd, |sk| two_curves(sk, p, cmd).and_then(|ab| two_different(cmd, ab)).map(|(a, b)| ConstraintKind::Equal { a, b }))?;
+    reply(cmd, EqualResult { made: EqualMade::Pair(made), param_warnings: Vec::new() })
 }
 
 /// Equal over a list of curves (#4985): each one is made equal to the first, in one edit (one
@@ -2572,11 +2630,11 @@ fn equal_curves(s: &mut Session, p: &Value) -> Result<Value> {
         }
         Ok(out)
     })?;
-    Ok(json!({"constraints": out, "sketch": info}))
+    reply(cmd, EqualResult { made: EqualMade::Curves { constraints: out, sketch: info }, param_warnings: Vec::new() })
 }
 fn c_parallel(s: &mut Session, p: &Value) -> Result<Value> {
     let p = &super::sketch_project::project_operands(s, p, "sketch.constraint.parallel", &["a", "b"])?;
-    constrain(s, p, "sketch.constraint.parallel", |sk| {
+    constrain_reply(s, p, "sketch.constraint.parallel", |sk| {
         two_curves_or_axes(sk, p, "sketch.constraint.parallel")
             .and_then(|ab| two_different("sketch.constraint.parallel", ab))
             .map(|(a, b)| ConstraintKind::Parallel { a, b })
@@ -2584,7 +2642,7 @@ fn c_parallel(s: &mut Session, p: &Value) -> Result<Value> {
 }
 fn c_perpendicular(s: &mut Session, p: &Value) -> Result<Value> {
     let p = &super::sketch_project::project_operands(s, p, "sketch.constraint.perpendicular", &["a", "b"])?;
-    constrain(s, p, "sketch.constraint.perpendicular", |sk| {
+    constrain_reply(s, p, "sketch.constraint.perpendicular", |sk| {
         two_curves_or_axes(sk, p, "sketch.constraint.perpendicular")
             .and_then(|ab| two_different("sketch.constraint.perpendicular", ab))
             .map(|(a, b)| ConstraintKind::Perpendicular { a, b })
@@ -2593,7 +2651,7 @@ fn c_perpendicular(s: &mut Session, p: &Value) -> Result<Value> {
 fn c_concentric(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.constraint.concentric";
     let p = &super::sketch_project::project_operands(s, p, cmd, &["a", "b"])?;
-    constrain(s, p, cmd, |sk| {
+    constrain_reply(s, p, cmd, |sk| {
         let centre = |key: &str| {
             let curve = sk.curves.get(sk.curve_index(p.get(key)?.as_str()?)?)?;
             match curve.kind {
@@ -2610,7 +2668,7 @@ fn c_concentric(s: &mut Session, p: &Value) -> Result<Value> {
 }
 fn c_collinear(s: &mut Session, p: &Value) -> Result<Value> {
     let p = &super::sketch_project::project_operands(s, p, "sketch.constraint.collinear", &["a", "b"])?;
-    constrain(s, p, "sketch.constraint.collinear", |sk| {
+    constrain_reply(s, p, "sketch.constraint.collinear", |sk| {
         two_curves_or_axes(sk, p, "sketch.constraint.collinear")
             .and_then(|ab| two_different("sketch.constraint.collinear", ab))
             .map(|(a, b)| ConstraintKind::Collinear { a, b })
@@ -2654,7 +2712,7 @@ fn c_midpoint(s: &mut Session, p: &Value) -> Result<Value> {
             _ => Err(bad(cmd, "MidPoint needs a point and a line, or two lines")),
         }
     };
-    constrain(s, p, cmd, |sk| {
+    constrain_reply(s, p, cmd, |sk| {
         let k = pick(sk)?;
         // A line's own end at its middle shrinks the line to a point; an angle, tangent or
         // parallel on it afterwards had no direction to hold and threw points millions of
@@ -2770,7 +2828,7 @@ fn c_symmetry(s: &mut Session, p: &Value) -> Result<Value> {
         }
         Ok(out)
     })?;
-    Ok(json!({"constraints": ids, "sketch": info}))
+    reply(cmd, SymmetryResult { constraints: ids, sketch: info, param_warnings: Vec::new() })
 }
 
 /// True when the ends of line `a` mirror (about the line `l`) closer onto the ends of `b` crossed
@@ -2896,9 +2954,9 @@ fn c_fix(s: &mut Session, p: &Value) -> Result<Value> {
                 sk.constraints.retain(|k| !matches!(k.kind, ConstraintKind::Fix { p } if ids.contains(&p)));
             }
         }
-        Ok(json!({"fixed": fix, "changed": n}))
+        Ok(FixOutcome { fixed: fix, changed: n })
     })?;
-    Ok(json!({"result": n, "sketch": info}))
+    reply(cmd, FixResult { result: n, sketch: info, param_warnings: Vec::new() })
 }
 
 // ---------------------------------------------------------------------------------------------

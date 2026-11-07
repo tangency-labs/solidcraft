@@ -27,7 +27,7 @@
 //!   section the viewport shows (no window needed); the ground grid and the origin's axes as the
 //!   window shows them, unless `grid` or `axes` says
 //! - `ui.icon_audit {reset?, stop?}`: collect/drain requested icon names, resolved masters and placeholder flags;
-//! - `ui.panel_fixture {enabled?, preset?}`: opt-in synthetic content in the real panel host;
+//! - `ui.panel_fixture {enabled?, preset?, translucency_percent?}`: opt-in synthetic content in the real panel host;
 //!   `{}` observes the current host, probe and Session without ticking or model commands
 //! - `ui.menu {x?, y?, target?, close?}`: open a context menu at a point (the viewport's marking
 //!   menu, or a browser menu with `target: {type: body|sketch|component, …}`); without a point,
@@ -363,7 +363,7 @@ const MAX_BATCH: usize = 10_000;
 /// Commands that load a file: through `engine.execute` they go to the app's file loader
 /// (`file_load::control`: off the window thread, with progress and Cancel), which a batch would
 /// bypass.
-const LOADS_A_FILE: [&str; 4] = ["doc.open", "file.insert_step", "file.insert_mesh", "pointcloud.insert"];
+const LOADS_A_FILE: [&str; 5] = ["doc.open", "file.insert_step", "file.insert_mesh", "pointcloud.insert", "pointcloud.reload"];
 
 /// Edit in Place, Finish Edit and the next or previous tab go to another design's tab: a batch's
 /// rollback, or a script's later steps, would land in the wrong design.
@@ -385,7 +385,7 @@ pub(crate) fn batch_refusal(steps: &[Value]) -> Option<String> {
     if let Some((i, c)) = steps.iter().enumerate().find_map(|(i, step)| switches_design(step).map(|c| (i, c))) {
         return Some(format!("engine.batch unavailable: step {i} ({c}) switches to another design"));
     }
-    let (i, c) = steps.iter().enumerate().find_map(|(i, step)| command(step).filter(|c| LOADS_A_FILE.contains(c)).map(|c| (i, c)))?;
+    let (i, c) = steps.iter().enumerate().find_map(|(i, step)| LOADS_A_FILE.into_iter().find(|id| is_command(command(step), id)).map(|c| (i, c)))?;
     Some(format!("engine.batch unavailable: step {i} ({c}) loads a file"))
 }
 
@@ -643,22 +643,36 @@ fn dispatch_checked(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &V
 /// A command that switches to another design, checked at `level` before it runs: it runs at the
 /// app's own level, since the session it leaves and the one it brings in each keep theirs.
 fn switch_checked(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value, level: ParamCheck) -> Outcome {
-    let id = command(p).unwrap_or_default();
-    let issues: Vec<String> = solidcraft_engine::schema::issues(id, p.get("params").unwrap_or(&Value::Null)).into_iter().map(|i| i.message).collect();
-    if level == ParamCheck::Strict
-        && let Some(first) = issues.first()
-    {
-        return err(solidcraft_engine::params::bad(id, first.as_str()));
-    }
+    let warnings = match contract_check_before_run(command(p).unwrap_or_default(), p.get("params").unwrap_or(&Value::Null), level) {
+        Ok(warnings) => warnings,
+        Err(e) => return err(e),
+    };
     let mut out = dispatch(app, ctx, method, p);
-    if level == ParamCheck::Warn
-        && !issues.is_empty()
-        && let Outcome::Done(v) = &mut out
-        && let Some(o) = v.get_mut("result").and_then(Value::as_object_mut)
-    {
-        o.insert("param_warnings".into(), json!(issues));
+    if let Outcome::Done(v) = &mut out {
+        add_param_warnings(v, warnings);
     }
     out
+}
+
+/// A call's parameters against its command's contract, for a command that does not run on a
+/// session at `level` (one that switches design, one the file loader runs): `Err` refuses the
+/// call, `Ok` holds the warnings for its result.
+pub(crate) fn contract_check_before_run(id: &str, params: &Value, level: ParamCheck) -> Result<Vec<String>, String> {
+    let issues: Vec<String> = solidcraft_engine::schema::issues(id, params).into_iter().map(|i| i.message).collect();
+    match (level, issues.first()) {
+        (ParamCheck::Strict, Some(first)) => Err(solidcraft_engine::params::bad(id, first.as_str()).to_string()),
+        (ParamCheck::Warn, _) => Ok(issues),
+        _ => Ok(Vec::new()),
+    }
+}
+
+/// Add what `contract_check_before_run` found to a reply's result.
+pub(crate) fn add_param_warnings(reply: &mut Value, warnings: Vec<String>) {
+    if !warnings.is_empty()
+        && let Some(o) = reply.get_mut("result").and_then(Value::as_object_mut)
+    {
+        o.insert("param_warnings".into(), json!(warnings));
+    }
 }
 
 fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) -> Outcome {
@@ -1876,6 +1890,12 @@ mod tests {
             json!({"preset":"x".repeat(4096)}),
             json!({"enabled":false,"preset":"docks"}),
             json!({"enabled":true,"unknown":0}),
+            json!({"preset":"surfaces","translucency_percent":-1}),
+            json!({"preset":"surfaces","translucency_percent":101}),
+            json!({"preset":"surfaces","translucency_percent":"50"}),
+            json!({"preset":"surfaces","translucency_percent":null}),
+            json!({"translucency_percent":50}),
+            json!({"enabled":false,"translucency_percent":50}),
         ] {
             assert!(crate::panel_runtime::control_specimen(&mut app, &params).is_err(), "{params}");
             assert!(app.panel_runtime().is_none());
@@ -1903,6 +1923,7 @@ mod tests {
             ("stack_tabs", 4),
             ("content_fill", 2),
             ("inline", 1),
+            ("surfaces", 6),
         ] {
             let before = crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap()["session"].clone();
             h.step(&json!({"panel_fixture":{"enabled":true,"preset":name}})).unwrap();
@@ -1923,6 +1944,84 @@ mod tests {
             assert!(h.app.panel_runtime().is_none());
             assert!(!h.app.universal_panel_host_enabled());
         }
+    }
+
+    #[test]
+    fn panel_surface_fixture_converts_translucency_without_saving_preferences() {
+        for percent in [0, 50, 100] {
+            let mut h = crate::scenario::Harness::new();
+            let preferences = serde_json::to_value(&h.app.preferences).unwrap();
+            crate::panel_runtime::control_specimen(&mut h.app, &json!({"preset":"surfaces","translucency_percent":percent})).unwrap();
+            h.frames(4);
+            let reply = crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap();
+            let sections = reply["host"]["sections"].as_array().unwrap();
+            assert!(!sections.is_empty());
+            for section in sections {
+                let alpha = section["paint_alpha"].as_u64().unwrap();
+                assert!(
+                    alpha >= ((100 - percent) as f64 * 255.0 / 100.0).ceil() as u64,
+                    "readability protection can only increase the requested opacity: {section}"
+                );
+                assert!(!section["contrast"].is_null(), "every painted surface reports its contrast decision");
+            }
+            assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), preferences);
+        }
+    }
+
+    #[test]
+    fn panel_fixture_live_opacity_updates_retain_controllers_layout_and_document() {
+        let mut h = crate::scenario::Harness::new();
+        crate::panel_runtime::control_specimen(&mut h.app, &json!({"preset":"surfaces","translucency_percent":0})).unwrap();
+        h.frames(4);
+        let document = h.app.session.doc.clone();
+        let model = h.app.session.model.state();
+        let camera = h.app.cam;
+        let preferences = serde_json::to_value(&h.app.preferences).unwrap();
+        let before = crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap();
+        let sections = h
+            .app
+            .universal_panel_frame()
+            .unwrap()
+            .layout
+            .sections
+            .iter()
+            .map(|section| (section.section.clone(), section.outer, section.body, section.surface))
+            .collect::<Vec<_>>();
+        for percent in [50, 100, 0] {
+            let prior = crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap();
+            let updated = crate::panel_runtime::control_specimen(&mut h.app, &json!({"translucency_percent":percent})).unwrap();
+            assert_eq!(updated["runtime"], prior["runtime"], "updating opacity does not tick, dispatch or replace content");
+            h.frames(4);
+            let after = crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap();
+            assert_eq!(after["runtime"]["layout"], before["runtime"]["layout"]);
+            for (old, new) in
+                before["runtime"]["probe"]["controllers"].as_array().unwrap().iter().zip(after["runtime"]["probe"]["controllers"].as_array().unwrap())
+            {
+                assert_eq!(new["controller_identity"], old["controller_identity"]);
+                assert_eq!(new["draft"], old["draft"]);
+                assert_eq!(new["transaction_live"], old["transaction_live"]);
+            }
+            assert_eq!(
+                h.app
+                    .universal_panel_frame()
+                    .unwrap()
+                    .layout
+                    .sections
+                    .iter()
+                    .map(|section| (section.section.clone(), section.outer, section.body, section.surface))
+                    .collect::<Vec<_>>(),
+                sections
+            );
+            assert!(std::sync::Arc::ptr_eq(&document, &h.app.session.doc));
+            assert!(std::sync::Arc::ptr_eq(&model, &h.app.session.model.state()));
+            assert_eq!(h.app.cam, camera);
+            assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), preferences);
+            if percent == 0 {
+                assert!(h.app.universal_panel_frame().unwrap().layout.sections.iter().all(|section| section.paint_alpha == Some(255)));
+            }
+        }
+        h.app.disable_universal_panel_host().unwrap();
+        assert!(crate::panel_runtime::control_specimen(&mut h.app, &json!({"translucency_percent":50})).is_err());
     }
 
     #[test]
@@ -2787,6 +2886,11 @@ mod tests {
         assert_eq!(v["ok"], false, "{v}");
         assert_eq!(v["error"], "engine.batch unavailable: step 1 (doc.open) loads a file", "{v}");
         assert_eq!(inspect(&mut h)["bodies"].as_array().map(Vec::len), Some(0), "nothing may run before the refusal");
+        let v = batch(&mut h, json!({"commands": [{"command": "pointcloud.reload", "params": {"cloud": 1}}]}));
+        assert_eq!(v["error"], "engine.batch unavailable: step 0 (pointcloud.reload) loads a file", "{v}");
+        // In any spelling the engine takes.
+        let v = batch(&mut h, json!({"commands": [{"command": "POINTCLOUD.RELOAD", "params": {"cloud": 1}}]}));
+        assert_eq!(v["error"], "engine.batch unavailable: step 0 (pointcloud.reload) loads a file", "{v}");
     }
 
     #[test]

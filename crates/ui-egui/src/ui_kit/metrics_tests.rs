@@ -156,3 +156,12 @@ fn sample_grid_stretches_each_row_without_clipping_long_descriptions() {
     assert!(cards[1].rect.contains_rect(text_rect));
     assert!(long.0.contains_rect(text_rect), "the complete description must fit its clip");
 }
+
+#[test]
+fn a_tile_taller_than_its_text_area_keeps_the_title_at_the_top() {
+    // #7483: centring a title and a two-row caption taller than the tile put the title's top
+    // above the tile, where it was clipped.
+    let area = egui::Rect::from_min_max(egui::pos2(0.0, 16.0), egui::pos2(100.0, 68.0));
+    assert_eq!(crate::ui_kit::file_view::text_top(area, 40.0), 22.0, "a group that fits is centred");
+    assert_eq!(crate::ui_kit::file_view::text_top(area, 60.0), 16.0, "a taller group starts at the top");
+}
