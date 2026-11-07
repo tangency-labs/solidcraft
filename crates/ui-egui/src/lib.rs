@@ -327,6 +327,7 @@ mod viewport_details;
 mod viewport_layout;
 mod viewport_status;
 mod viewport_status_fixture;
+mod wireframe_silhouettes;
 pub mod workspace;
 
 use std::sync::mpsc::Receiver;
