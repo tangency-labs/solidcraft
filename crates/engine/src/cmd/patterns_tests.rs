@@ -992,6 +992,29 @@ fn copies_of_a_to_object_extrude_follow_the_moved_face() {
     assert!(rel(thick, 2.0 * thin) < 1e-6, "5 mm: {thin} mm³, 10 mm: {thick} mm³ (expected {})", 2.0 * thin);
 }
 
+/// The lid of #11792: a boss (`Extrude1`) joined to a half-ring, and a cut (`Extrude2`) that starts
+/// on the boss's `F5:bottom` face. Mirroring both across the front plane copies the boss and the
+/// cut, so the part gains what the two features added a second time.
+#[test]
+fn mirror_of_a_boss_and_a_cut_from_its_face_makes_both_copies() {
+    let text = include_str!("../../../../examples/regressions/mirror_from_object_lid.json");
+    let open = |through: i64| {
+        let mut value: Value = serde_json::from_str(text).unwrap_or_default();
+        if let Some(features) = value.get_mut("features").and_then(Value::as_array_mut) {
+            features.retain(|f| f.get("id").and_then(Value::as_i64).is_some_and(|id| id <= through));
+        }
+        let doc = solidcraft_doc::Document::from_json(&value.to_string()).unwrap_or_else(|e| panic!("{e}"));
+        Session::opened(doc, None)
+    };
+    let ring = volume(&mut open(4));
+    let mut s = open(6);
+    let lid = volume(&mut s);
+    run(&mut s, "solid.mirror", json!({"features":["Extrude1","Extrude2"],"plane":"XZ"}));
+    let both = volume(&mut s);
+    let want = lid + (lid - ring);
+    assert!(rel(both, want) < 1e-6, "ring {ring} mm³, lid {lid} mm³, mirrored {both} mm³ (expected {want})");
+}
+
 /// A disc with an off-centre hole whose top and bottom edges are chamfered.
 fn disc_with_chamfered_hole() -> Session {
     let mut s = Session::default();
@@ -1239,3 +1262,4 @@ fn circular_pattern_of_a_moved_copy_adds_one_body_per_instance() {
     let far = s.world_state().unwrap().bodies.iter().map(|b| b.mesh().bounds().max.x).fold(f64::MIN, f64::max);
     assert!(far > 20.0, "the repeats follow the redefined Move: {far}");
 }
+
