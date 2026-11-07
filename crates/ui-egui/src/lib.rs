@@ -16,6 +16,7 @@ pub mod ai_connect;
 pub mod bidi;
 pub mod blur;
 pub mod bom_panel;
+pub mod broken_view_preview;
 pub mod browser;
 pub mod browser_canvas;
 pub mod browser_prompts;
