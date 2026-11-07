@@ -98,6 +98,7 @@ fn degree(knots: &[f64], count: usize) -> R<usize> {
 fn bspline_curve(full: &[f64], points: Vec<P3>, weights: Option<Vec<f64>>) -> R<Curve> {
     let degree = degree(full, points.len())?;
     let (knots, multiplicities) = knots_of(full);
+    let (closed, self_intersect) = known_flags(full, degree, &points);
     Ok(Curve::BSpline(Box::new(BSplineCurve {
         degree,
         points,
@@ -105,10 +106,29 @@ fn bspline_curve(full: &[f64], points: Vec<P3>, weights: Option<Vec<f64>>) -> R<
         knots,
         multiplicities,
         form: CurveForm::Unspecified,
-        closed: Logical::Unknown,
-        self_intersect: Logical::Unknown,
+        closed,
+        self_intersect,
         knot_spec: KnotSpec::Unspecified,
     })))
+}
+
+/// What the curve says of itself, to write rather than `.U.`: `closed_curve` where the knots are
+/// clamped (the curve starts at its first control point and ends at its last), whether those
+/// meet; `self_intersect` for a straight segment (a degree-1 spline of two points), which never
+/// crosses itself. Anything else is not known without searching the curve, and stays unknown.
+fn known_flags(full: &[f64], degree: usize, points: &[P3]) -> (Logical, Logical) {
+    let flag = |b: bool| if b { Logical::True } else { Logical::False };
+    let clamped = |ends: &[f64]| ends.len() > degree && ends.iter().all(|k| *k == ends[0]);
+    let (Some(first), Some(last)) = (points.first(), points.last()) else { return (Logical::Unknown, Logical::Unknown) };
+    let (head, tail) = (full.get(..=degree).unwrap_or_default(), full.get(full.len().saturating_sub(degree + 1)..).unwrap_or_default());
+    let closed = if clamped(head) && clamped(tail) {
+        let size = points.iter().flatten().fold(1.0_f64, |m, x| m.max(x.abs()));
+        flag(norm(sub(*first, *last)) <= 1e-12 * size)
+    } else {
+        Logical::Unknown
+    };
+    let straight = degree == 1 && points.len() == 2;
+    (closed, if straight { Logical::False } else { Logical::Unknown })
 }
 
 /// Homogeneous `[x w, y w, z w, w]` as the point and its weight.

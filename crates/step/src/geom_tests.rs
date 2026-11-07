@@ -363,6 +363,43 @@ fn offset_curve_reads_and_round_trips() {
     round_trip_curve(&c, &[]);
 }
 
+/// The `closed_curve` and `self_intersect` a record spline is written with (the last two logicals
+/// of its B_SPLINE_CURVE_WITH_KNOTS).
+fn written_flags(c: &solidcore_record::brep::Curve) -> String {
+    let mut w = Writer::new();
+    let curve = crate::write::topology::curve(c).unwrap_or_else(|e| panic!("{e}"));
+    GeomWriter::new(&mut w).curve(&curve);
+    let text = w.data();
+    // The two logicals after the form (`.UNSPECIFIED.` for every curve written here).
+    let after = text.split(".UNSPECIFIED.,").nth(1).unwrap_or_else(|| panic!("{text}"));
+    after.get(..7).unwrap_or_else(|| panic!("{text}")).to_string()
+}
+
+#[test]
+fn exported_spline_curves_say_when_they_are_closed() {
+    use solidcore_record::brep::Curve as B;
+    // A straight pcurve (a degree-1 spline of two points) is open and does not cross itself.
+    assert_eq!(written_flags(&B::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![[0.0, 0.0, 0.0], [3.0, 4.0, 0.0]] }), ".F.,.F.");
+    // A full circle (rational, quadratic): its first and last control points are one point.
+    let s = std::f64::consts::FRAC_1_SQRT_2;
+    let homogeneous = vec![
+        [1.0, 0.0, 0.0, 1.0],
+        [s, s, 0.0, s],
+        [0.0, 1.0, 0.0, 1.0],
+        [-s, s, 0.0, s],
+        [-1.0, 0.0, 0.0, 1.0],
+        [-s, -s, 0.0, s],
+        [0.0, -1.0, 0.0, 1.0],
+        [s, -s, 0.0, s],
+        [1.0, 0.0, 0.0, 1.0],
+    ];
+    let knots = vec![0.0, 0.0, 0.0, 0.25, 0.25, 0.5, 0.5, 0.75, 0.75, 1.0, 1.0, 1.0];
+    assert_eq!(written_flags(&B::RationalSpline { knots, homogeneous }), ".T.,.U.");
+    // An open curve of three points: its ends are apart; whether it crosses itself is not known.
+    let open = B::Spline { knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], points: vec![[0.0, 0.0, 0.0], [1.0, 2.0, 0.0], [2.0, 0.0, 0.0]] };
+    assert_eq!(written_flags(&open), ".F.,.U.");
+}
+
 #[test]
 fn shared_entities_are_written_once() {
     let c = Arc::new(Curve::Circle {
