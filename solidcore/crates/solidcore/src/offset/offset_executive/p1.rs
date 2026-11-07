@@ -328,17 +328,17 @@ impl OffsetExecutive {
         self.tangency_tol_radians * 180.0 / PI
     }
 
-    /// Takes the geometry creator's constructor tolerance under `kernel`'s fixes
-    /// ([`OffsetGeometryCreation::default_tangency_tol_radians`]): half a degree with
-    /// `Kernel::fixes.offset_four_face_vertex_split` and `offset_closes_loop_gaps` (WR-666),
-    /// else the 2 degrees of
-    /// [`Self::new`] unchanged. Called right after construction by the executives that
+    /// Takes the geometry creator's constructor tolerance
+    /// ([`OffsetGeometryCreation::default_tangency_tol_radians`]): half a degree (WR-666,
+    /// the fork's tangency-labs/smlib@2e1bb8c), not [`Self::new`]'s two degrees. Called
+    /// right after construction by the executives that
     /// `SmApiOffsetBrepFull`, `SmApiShellBrepFull` and `SmBrep::LocalOperation` build.
+    ///
+    /// On the default path since #2981: WR-666's split is the only path, so the creator
+    /// tolerance is always the fork's.
     pub fn use_creator_tangency_tol(&mut self, kernel: &Kernel) {
-        if crate::offset::offset_geometry_creation::four_face_vertex_split(&kernel.fixes) {
-            self.tangency_tol_radians =
-                OffsetGeometryCreation::default_tangency_tol_radians(&kernel.fixes);
-        }
+        let _ = kernel;
+        self.tangency_tol_radians = OffsetGeometryCreation::default_tangency_tol_radians();
     }
 
     /// Offset distance supplied by the geometry creator.

@@ -415,14 +415,9 @@ impl OffsetExecutive {
                     return Err(SolidError::sm_err(OP_SHELL));
                 }
             }
-            // Opt-in (WR-578): with the loop gaps closed, an offset of a solid that is still no
-            // closed solid is refused rather than handed back as it is (as WR-454's opt-in
-            // does for an inset): the gap closing must never turn upstream's refusal into a
-            // success on a broken body
-            if kernel.fixes.offset_closes_loop_gaps
-                && input_is_manifold
-                && !brep_is_manifold_solid(&shell)?
-            {
+            // WR-578 (the loop gaps close on the default path since #2981): a shell of a
+            // solid that is still no closed manifold solid is refused rather than returned
+            if input_is_manifold && !brep_is_manifold_solid(&shell)? {
                 return Err(SolidError::sm_err(OP_SHELL));
             }
             if !brep_is_manifold_solid(&shell)? && !options.create_offset_solid {
@@ -995,16 +990,13 @@ impl OffsetExecutive {
                 }
             }
 
-            // Not upstream (opt-in, fork tangency-labs/smlib 5d428ae and 7ff0a94): close the
+            // (not upstream, the executor's own split flags are the only path since
+            // #2981: fork tangency-labs/smlib 5d428ae, 7ff0a94, 2e1bb8c): close the
             // loop gaps the offset leaves (a local operation's step walls' ends, a solid
             // offset's vertex where two consecutive edges' offsets run parallel), then split
             // the edges that run past a step wall's corner (after WR-531's caps below, in the
             // fork's order)
-            let local = self.operation() == OffsetOperation::LocalOperation;
-            let step_walls = kernel.fixes.local_operation_step_walls && local;
-            if kernel.fixes.offset_closes_loop_gaps || step_walls {
-                self.close_loop_gaps(kernel, original, notifications)?;
-            }
+            self.close_loop_gaps(kernel, original, notifications)?;
 
             // Not upstream (WR-531), opt-in `Kernel::fixes.offset_point_vertex_caps` (the
             // fork's tangency-labs/smlib@d5dadaa): a vertex where one face closes on itself to
@@ -1041,7 +1033,9 @@ impl OffsetExecutive {
                 }
             }
 
-            if step_walls {
+            if kernel.fixes.local_operation_step_walls
+                && self.operation() == OffsetOperation::LocalOperation
+            {
                 self.split_edges_at_step_corners(kernel, notifications)?;
             }
 
@@ -5450,7 +5444,11 @@ mod tests {
             )?;
             Ok(Some(volume))
         };
-        assert_eq!(shell(false, false).unwrap(), None);
+        // The default path (the splits are the only path since #2981): the shell's
+        // stitch still welds the rims wrongly, the offset of the plate is no closed
+        // solid, and the WR-578 guard refuses it (1001)
+        assert_status(shell(false, false), 1001);
+        // the case's own opt-in (stitch at the body's tolerance) builds the closed form
         // 40 x 40 x 10 less the hole, less the cavity: 8.5 high over the inner box (37 x 37)
         // less the hole's offset disk (r 3.5, centre 3.49 from x = 1.5) cut by x = 1.5
         let expected = 4564.924657;
@@ -5464,8 +5462,10 @@ mod tests {
     }
 
     /// tangency-labs/solidcore#380: a closed inward shell of a box whose wall is as thick
-    /// as (or thicker than) the inradius leaves no cavity. Upstream returns the empty
-    /// offset as a success (the fork: the body unhollowed); with the opt-in it fails, and a thinner wall still shells.
+    /// as (or thicker than) the inradius leaves no cavity. The default path (the split
+    /// flags are the only path since #2981) refuses it as no closed solid (1001); with
+    /// WR-454's own opt-in the typed empty-cavity refusal (1007) takes precedence; a
+    /// thinner wall still shells.
     #[test]
     fn issue_380_shell_with_no_cavity_fails_with_the_fix() {
         let shell = |fix: bool, wall: f64| -> Result<Brep> {
@@ -5494,9 +5494,9 @@ mod tests {
             .result
         };
         for wall in [5.0, 6.0] {
-            // upstream: an empty offset is "not a manifold solid", returned as a success
-            let upstream = shell(false, wall).unwrap();
-            assert_eq!(bp1::num_faces(&upstream), 0);
+            // the default path: an offset that is no closed solid is refused (1001)
+            assert_status(shell(false, wall), 1001);
+            // WR-454's opt-in keeps its own typed refusal (1007)
             assert_status(shell(true, wall), 1007);
         }
         let thin = shell(true, 1.0).unwrap();

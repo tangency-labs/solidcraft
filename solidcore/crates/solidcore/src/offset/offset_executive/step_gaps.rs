@@ -310,10 +310,8 @@ impl OffsetExecutive {
         notifications: &mut OffsetNotifications<'_>,
     ) -> Result<()> {
         let approx_tol = self.approximation_tol_3d();
-        // (WR-657, opt-in) the corners whose offset planes no longer meet in one point
-        if kernel.fixes.offset_splits_corner_vertices {
-            self.split_corner_vertices(kernel, original, b, approx_tol, notifications)?;
-        }
+        // (WR-657) the corners whose offset planes no longer meet in one point
+        self.split_corner_vertices(kernel, original, b, approx_tol, notifications)?;
         // (fork ccbf77a) each edge that closed to a point: its offset face and the original
         // face across it
         let mut closed_edges: Vec<(FaceId, Option<FaceId>)> = Vec::new();
