@@ -234,12 +234,7 @@ pub struct OccurrenceKeys(pub Vec<Value>);
 
 impl<'de> Deserialize<'de> for OccurrenceKeys {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        match Value::deserialize(d)? {
-            Value::Array(list) if list.len() > MAX_OCCURRENCES => Err(D::Error::custom(whole("too many occurrences"))),
-            Value::Array(list) if list.iter().all(|v| v.is_number() || v.is_string()) => Ok(OccurrenceKeys(list)),
-            Value::Array(_) => Err(D::Error::custom(whole("an occurrence must be an id or a name"))),
-            _ => Err(D::Error::custom(whole("`occurrences` must list occurrences"))),
-        }
+        occurrence_list(Value::deserialize(d)?).map(OccurrenceKeys)
     }
 }
 
@@ -253,6 +248,45 @@ impl JsonSchema for OccurrenceKeys {
             "type": "array",
             "items": {"type": ["number", "string"]},
             "minItems": 2,
+            "maxItems": MAX_OCCURRENCES
+        })
+    }
+}
+
+/// A list of occurrences as `cmd/motion.rs`'s `occurrences` reads it, with its messages: at most
+/// 10000, each an id or a name. Anything else, `null` included, isn't a list. Whether each
+/// occurrence exists, and that none is the root, stay the handler's to check.
+fn occurrence_list<E: serde::de::Error>(v: Value) -> Result<Vec<Value>, E> {
+    match v {
+        Value::Array(list) if list.len() > MAX_OCCURRENCES => Err(E::custom(whole("too many occurrences"))),
+        Value::Array(list) if list.iter().all(|v| v.is_number() || v.is_string()) => Ok(list),
+        Value::Array(_) => Err(E::custom(whole("an occurrence must be an id or a name"))),
+        _ => Err(E::custom(whole("`occurrences` must list occurrences"))),
+    }
+}
+
+/// The parts a collision check takes, `occurrences` or `against`, as `checked_pairs` in
+/// `cmd/motion_analysis.rs` reads each: through `cmd/motion.rs`'s `occurrences`, so `against`'s
+/// messages name `occurrences` too. Unlike [`OccurrenceKeys`], one part is enough: the handler
+/// counts the two lists together.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PartList(pub Vec<Value>);
+
+impl<'de> Deserialize<'de> for PartList {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        occurrence_list(Value::deserialize(d)?).map(PartList)
+    }
+}
+
+impl JsonSchema for PartList {
+    fn schema_name() -> Cow<'static, str> {
+        "PartList".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "Occurrences, each by id (a number) or name; not the root.",
+            "type": "array",
+            "items": {"type": ["number", "string"]},
             "maxItems": MAX_OCCURRENCES
         })
     }
