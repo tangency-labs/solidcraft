@@ -48,7 +48,7 @@ fn assert_panel_host_preserves_design(h: &mut Harness, exercise: impl FnOnce(&mu
 
 #[test]
 fn universal_panel_host_is_opt_in_and_each_specimen_preserves_design_and_preferences() {
-    for preset in ["docks", "tabs", "collapsed", "floating", "overflow", "pinned"] {
+    for preset in ["docks", "tabs", "collapsed", "floating", "overflow", "pinned", "surfaces"] {
         let mut h = Harness::new();
         h.app.home.open = false;
         h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
@@ -73,6 +73,45 @@ fn universal_panel_host_is_opt_in_and_each_specimen_preserves_design_and_prefere
             assert!(h.app.universal_panel_frame().is_none());
             assert!(rect_of("browser:card").is_some(), "legacy placement returns when opt-in ends");
         });
+    }
+}
+
+#[test]
+fn surface_fixture_routes_real_input_through_short_panel_gaps_at_both_scales_and_directions() {
+    use crate::panel_runtime::egui_rect;
+    use solidcraft_engine::panels::{PanelSurface, Point, Zone};
+    for scale in [1.0, 2.0] {
+        for language in ["en", "ar"] {
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            h.app.preferences.language = language.into();
+            h.call("ui.resize", json!({"width":1600,"height":1100}));
+            h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+            h.settle();
+            h.ctx.set_pixels_per_point(scale);
+            crate::panel_runtime::control_specimen(&mut h.app, &json!({"preset":"surfaces","translucency_percent":100})).unwrap();
+            h.frames(5);
+            let frame = h.app.universal_panel_frame().unwrap();
+            assert_eq!(frame.layout.render_domain, crate::panel_runtime::logical_rect(h.app.viewport.rect.unwrap()));
+            let left = frame.layout.sections.iter().find(|section| section.zone == Zone::Left).unwrap();
+            assert_eq!(left.surface, PanelSurface::Opaque, "the inactive text-heavy editor constrains its tab group");
+            let clear = frame.layout.sections.iter().find(|section| section.instance.0 == "specimen-2").unwrap();
+            assert_eq!(clear.surface, PanelSurface::Translucent);
+            assert!(clear.contrast.is_some(), "effective alpha must have a truthful diagnostic");
+            let body = egui_rect(clear.body.unwrap());
+            let blocked = body.center();
+            let gap = egui::pos2(left.outer.origin.x + left.outer.size.width * 0.5, left.outer.origin.y + left.outer.size.height + 24.0);
+            assert!(!frame.layout.consumes_pointer(Point { x: gap.x, y: gap.y }), "short side content leaves a real gap");
+            let camera = h.app.cam;
+            h.call("ui.move", json!({"x":blocked.x,"y":blocked.y}));
+            h.call("ui.scroll", json!({"x":blocked.x,"y":blocked.y,"delta":120}));
+            assert!(h.app.viewport.mouse.is_none(), "translucent content shields model picking");
+            assert_eq!(h.app.cam, camera, "content wheel cannot reach model navigation");
+            h.call("ui.move", json!({"x":gap.x,"y":gap.y}));
+            assert_eq!(h.app.viewport.mouse, Some(gap), "uncovered points reach the existing picking path");
+            h.call("ui.scroll", json!({"x":gap.x,"y":gap.y,"delta":120}));
+            assert_ne!(h.app.cam.distance.to_bits(), camera.distance.to_bits(), "gap wheel reaches the existing navigation path");
+        }
     }
 }
 
@@ -1836,8 +1875,8 @@ fn compact_layout_is_saved_and_survives_cancel_apply_defaults_and_bad_input() {
     let undo = h.app.session.undo.len();
     let camera = h.app.cam;
     h.call("ui.prefs", json!({"open":"Layout"}));
-    crate::prefs::reveal_preference(&mut h, "dialog:Workspace:Compact");
-    h.step(&json!({"click":{"handle":"dialog:Workspace:Compact"}})).unwrap();
+    crate::prefs::reveal_preference(&mut h, "dialog:Panel style:Compact");
+    h.step(&json!({"click":{"handle":"dialog:Panel style:Compact"}})).unwrap();
     h.call("ui.prefs", json!({"button":"ok"}));
     h.settle();
     assert!(h.app.dialog.is_some(), "changing layout keeps the active tool");

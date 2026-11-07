@@ -102,7 +102,9 @@ The engine rejects a coated body or face selected for an incompatible reflection
 path. Optional opaque path lighting supplies diffuse/specular indirect transport
 through its separate explicit control; it cannot silently absorb incompatible
 selected optical settings. [General Glass](render-cpu-general-glass.md) is an
-explicit Path capability; rough transmission and caustics remain unsupported.
+explicit Path capability. Optional [Glass material models](render-glass-material-models.md)
+add GGX rough transmission, three-band dispersion, one lossless coherent film and
+finite-radius hard-source photon caustics under their separate admission limits.
 
 ## Environment capture
 

@@ -130,13 +130,14 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
     let author_path = match given_path {
         Some(path) => path,
         None if comp == s.active_component => s.active_occurrence_path.clone().unwrap_or_else(|| s.doc.first_path(comp)),
-        None => super::component::placing::placement_of(s, &s.placed_document(), comp, None, "component_path", cmd)?.0,
+        None => super::component::placing::placement_of(s, &s.design_document(), comp, None, "component_path", cmd)?.0,
     };
-    solidcraft_doc::EmbossFace::component_frame(&s.placed_document(), comp, &author_path)?;
+    solidcraft_doc::EmbossFace::component_frame(&s.design_document(), comp, &author_path)?;
     // A copy from another component goes where its original is in the world: its geometry moves
     // from its component's frame (its first placement, where its bodies have their own names)
-    // into the target's.
-    let placed = s.placed_document();
+    // into the target's. The design's placements: an exploded view shown is left out, or the copy
+    // would keep its offset once the view is closed.
+    let placed = s.design_document();
     let target_frame = placed.path_transform(comp, &author_path).ok_or_else(|| bad(cmd, "that path is not a placement of the target"))?;
     let to_target = solidcraft_doc::mat_inverse(&target_frame).ok_or_else(|| bad(cmd, "the target's frame is not invertible"))?;
     let frame_change: BTreeMap<u64, solidcraft_doc::Mat> = feats
@@ -401,6 +402,33 @@ mod tests {
         }
     }
 
+    /// A sketch pasted from another design while an exploded view moves the target is where the
+    /// original is once the target is shown assembled again.
+    #[test]
+    fn foreign_sketch_pasted_while_an_exploded_view_is_shown_keeps_its_world_position() {
+        let mut source = dimensioned_sketch();
+        run(&mut source, "timeline.copy", json!({"features": ["S"]}));
+        let mut target = Session::default();
+        let made = run(&mut target, "component.create", json!({"name": "Target", "activate": false}));
+        let component = made["component"].as_u64().unwrap();
+        let occurrence = made["occurrence"].as_u64().unwrap();
+        run(&mut target, "occurrence.ground", json!({"occurrence": occurrence, "grounded": false}));
+        run(&mut target, "occurrence.move", json!({"occurrence": occurrence, "translate": [100, 20, 30]}));
+        run(&mut target, "component.create", json!({"name": "B", "parent": 0, "activate": false}));
+        let view =
+            run(&mut target, "explode.create", json!({"moves": [{"occurrence": occurrence, "translate": [0, 0, 40]}]}))["view"].as_u64().unwrap();
+        run(&mut target, "explode.show", json!({"view": view}));
+        target.foreign_copy = source.foreign_copy.clone();
+        let id = run(&mut target, "timeline.paste", json!({"from_design": true, "component": component, "component_path": [occurrence]}))["pasted"]
+            [0]["id"]
+            .as_u64()
+            .unwrap();
+        run(&mut target, "explode.show", json!({}));
+        let original = source.world_state().unwrap().sketch(1).unwrap().plane;
+        let pasted = target.world_state().unwrap().sketch(id).unwrap().plane;
+        assert!(pasted.origin.dist(original.origin) < 1e-6, "{original:?} vs {pasted:?}");
+    }
+
     #[test]
     fn foreign_sketch_paste_refuses_external_references_and_bad_parameters_atomically() {
         let mut source = dimensioned_sketch();
@@ -522,6 +550,32 @@ mod tests {
         assert!(copy.min.dist(original.min) < 1e-6 && copy.max.dist(original.max) < 1e-6, "{original:?} vs {copy:?}");
         let state = s.model.state();
         assert_eq!(s.doc.model_body_component(state.body("Block (2)").unwrap()), a);
+    }
+
+    /// An exploded view shown while pasting is display only: once the design is shown assembled
+    /// again, the copy is where the original is, as it is without the view.
+    #[test]
+    fn features_pasted_while_an_exploded_view_is_shown_stay_where_they_were() {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "S", "distance": 5, "body_name": "Block"}));
+        let made = run(&mut s, "component.create", json!({"name": "A", "activate": false}));
+        let (a, at) = (made["component"].as_u64().unwrap(), made["occurrence"].as_u64().unwrap());
+        run(&mut s, "occurrence.ground", json!({"occurrence": at, "grounded": false}));
+        run(&mut s, "occurrence.move", json!({"occurrence": at, "translate": [100, 0, 0], "axis": [0, 0, 1], "angle": "90 deg"}));
+        // An exploded view needs two placements: B stays put.
+        run(&mut s, "component.create", json!({"name": "B", "parent": 0, "activate": false}));
+        let view = run(&mut s, "explode.create", json!({"moves": [{"occurrence": at, "translate": [0, 50, 0]}]}))["view"].as_u64().unwrap();
+        run(&mut s, "explode.show", json!({"view": view}));
+        run(&mut s, "timeline.copy", json!({"features": ["S", "Extrude1"]}));
+        let r = run(&mut s, "timeline.paste", json!({"component": a, "component_path": [at]}));
+        assert_eq!(r["errors"].as_array().map(Vec::len), Some(0), "{r}");
+        run(&mut s, "explode.show", json!({}));
+        let world = s.world_state().unwrap();
+        let (original, copy) = (world.body("Block").unwrap().mesh().bounds(), world.body("Block (2)").unwrap().mesh().bounds());
+        assert!(copy.min.dist(original.min) < 1e-6 && copy.max.dist(original.max) < 1e-6, "{original:?} vs {copy:?}");
     }
 
     /// A sketch attached to a face of a body that isn't copied with it can't be carried into a

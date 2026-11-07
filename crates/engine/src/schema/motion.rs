@@ -454,14 +454,14 @@ pub struct MotionStudyDeleteParams {
 }
 
 /// `study`: an id or a name, with the handler's message for anything else, `null` included.
-fn some_study<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
+pub(super) fn some_study<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
     match Value::deserialize(d)? {
         v @ (Value::Number(_) | Value::String(_)) => Ok(Some(v)),
         _ => Err(D::Error::custom(whole("`study` must be an id or a name"))),
     }
 }
 
-fn study_ref_schema(_: &mut SchemaGenerator) -> Schema {
+pub(super) fn study_ref_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({
         "description": "The motion study, by id (a number) or name. A number is looked up as an id first, text as a name first.",
         "type": ["number", "string"]
