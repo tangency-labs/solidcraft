@@ -1262,4 +1262,3 @@ fn circular_pattern_of_a_moved_copy_adds_one_body_per_instance() {
     let far = s.world_state().unwrap().bodies.iter().map(|b| b.mesh().bounds().max.x).fold(f64::MIN, f64::max);
     assert!(far > 20.0, "the repeats follow the redefined Move: {far}");
 }
-
