@@ -1557,6 +1557,9 @@ const ELEMENTS: &[Element] = &[
     element!("name_cell_with_hint", "dialog:cell:Width", Some("dialog:cell:Width"), |ui, _| {
         name_cell_with_hint(ui, "Width", false, "Double-click to rename");
     }),
+    element!("copy_cell", |ui, _| {
+        copy_cell(ui, "12.500 g", "Mass: 12.500 g", false, "Click to copy");
+    }),
     element!("search_field", |ui, s| {
         search_field(ui, ui.scope_id().with("search"), &mut s.value, "Search");
     }),
