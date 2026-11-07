@@ -1676,6 +1676,11 @@ const ELEMENTS: &[Element] = &[
             count_field(ui, &mut count, &Count { min: 1, max: 10, eval: &|text: &str| text.trim().parse().ok() });
         });
     }),
+    element!("whole_number_field", "dialog:row:Gallery", Some("dialog:Gallery up"), |ui, _| {
+        row(ui, "Gallery", |ui| {
+            whole_number_field(ui, &mut 2_u32, 0..=6, "");
+        });
+    }),
     element!("hint_row", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
         hint_row(ui, "Gallery", &mut s.value, "Value");
     }),
