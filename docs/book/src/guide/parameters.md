@@ -97,8 +97,12 @@ an unchanged field cannot reinterpret it. Computed sizes and tolerances keep the
 precision when written back into editable fields, independently of display precision.
 
 Parameters export to and import from CSV or JSON (`parameters.export`, `parameters.import`).
-In a CSV, a value that starts with `=`, `+`, `-` or `@` is written with a `'` before it, so a
-spreadsheet shows it as text instead of running it as a formula; the import takes the `'` off again.
+In a CSV, a value that a spreadsheet would run as a formula is written with a `'` before it, so the
+spreadsheet shows it as text. That is a value that starts with `=`, `+`, `-` or `@`, their full-width
+forms, a tab or a line break, after any spaces; a plain number such as `-5` is left as it is. The
+import takes the `'` off again. Earlier versions of SolidCraft wrote every value unchanged, so in a CSV
+from one of them, a value whose first character really was a `'` typed before a formula character
+(`'=x`) now imports without it (`=x`).
 **Configurations** (`config.*`) keep a table of rows, each with its own parameter values and
 suppressed features, physical materials and body appearances, switched with `config.activate`.
 The table's Library picker selects material or appearance values. Choose **Follow material**

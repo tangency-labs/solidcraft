@@ -557,8 +557,13 @@ Rows are sorted by part number (rows without one come last) and hold `item`, `pa
 `description`, `revision`, `bom_type`, `count`, `definition` (the component names), `components` (their ids)
 and `properties`, with `total_occurrences` beside them. `path` writes them to a `.csv` file
 (the columns item, part_number, description, revision, count and definition, every field
-quoted, and a field that starts with `=`, `+`, `-` or `@` written with a `'` before it so a
-spreadsheet shows it as text; children follow their row) or a `.json` file. The window lists the same rows, switches
+quoted, and a field that a spreadsheet would run as a formula written with a `'` before it so the
+spreadsheet shows it as text; children follow their row) or a `.json` file. A formula field is one that
+starts with `=`, `+`, `-` or `@`, their full-width forms, a tab or a line break, after any spaces; a
+plain number such as `-5` is not one. A script that reads the CSV sees the `'` too: a part number
+`=1+1` is `'=1+1` in the file. To get the value back, take off one leading `'` when what follows starts
+a formula, as `solidcraft_doc::csv::unguard` does, or read the `.json` file, which holds the values
+unchanged. The window lists the same rows, switches
 between the levels and groupings and shows children under their part, edits a picked row's part
 number, description and revision, and exports them. Changing part properties changes no
 geometry, so it doesn't evaluate the model or re-seat joints again.
