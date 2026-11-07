@@ -46,14 +46,13 @@ const SLOT_BAR: &[u8] = include_bytes!("data/issue_2364_solidcraft_3369_slot_bar
 const PLATE: &[u8] = include_bytes!("data/issue_2364_solidcraft_5158_plate.smb");
 const NOTCHED: &[u8] = include_bytes!("data/issue_2364_solidcraft_1080_notched_block.smb");
 
-/// SolidCraft's rig set at the time (#2364's check): every fix but the five it leaves off.
+/// SolidCraft's rig set at the time (#2364's check): every fix but the four it leaves off.
 fn kernel() -> Kernel {
     let mut f = UpstreamFixes::all();
     f.cone_unbounded_parameterized_as_nurb = false;
     f.ellipse_open_arc_keeps_end_angle = false;
     f.fillet_overflow_crease_along_edge = false;
     f.fillet_refuse_rounds_breaking_through = false;
-    f.shell_one_construction = false;
     Kernel {
         fixes: f,
         ..Kernel::default()
