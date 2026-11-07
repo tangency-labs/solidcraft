@@ -120,6 +120,7 @@ pub mod sketch_clipboard;
 mod sketch_constraints;
 mod sketch_construction;
 mod sketch_create;
+pub(crate) use sketch_create::{AT_MUST, MAX_TEXT_EDITS};
 mod sketch_divide;
 mod sketch_ends;
 mod sketch_equation;

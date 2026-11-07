@@ -2006,6 +2006,8 @@
   "prefs.history": "이력",
   "prefs.history_bar_groups": "이력 막대를 그룹으로 접기",
   "prefs.history_bar_groups_note": "긴 이력에서는 한 컴포넌트의 연속된 특성을 하나의 칩으로 접고, 특성 폴더는 접힌 상태로 시작합니다. 삽입한 STEP 어셈블리는 Group 폴더에 들어갑니다. 끄면 각 특성을 표시하고, 폴더를 펼친 상태로 시작하며, 폴더를 만들지 않습니다.",
+  "prefs.history_folder_kind_icon": "폴더 아이콘을 안의 피처에서 가져오기",
+  "prefs.history_folder_kind_icon_note": "피처가 모두 같은 종류인 기록 폴더는 그 피처의 아이콘을 표시합니다.",
   "prefs.history_group_joints": "이력에서 조인트 묶기",
   "prefs.history_group_joints_note": "조인트가 두 개 이상이면 개수가 표시된 버튼 하나로 묶고, 클릭하면 각 조인트를 표시합니다. 끄면 각 조인트를 하나씩 표시합니다.",
   "prefs.history_origin_bodies": "원점과 바디를 맨 위에 표시",

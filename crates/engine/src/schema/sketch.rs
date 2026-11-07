@@ -338,8 +338,8 @@ pub struct Constrained {
     pub determined_by: Option<Vec<String>>,
 }
 
-/// What `sketch.constraint.horizontal_vertical`, `tangent`, `parallel`, `perpendicular`,
-/// `collinear`, `concentric` and `midpoint` return.
+/// What `sketch.constraint.horizontal_vertical`, `parallel`, `perpendicular`, `collinear`,
+/// `concentric` and `midpoint` return.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ConstraintResult {
     #[serde(flatten)]
@@ -347,6 +347,35 @@ pub struct ConstraintResult {
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// What `sketch.constraint.tangent` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct TangentResult {
+    #[serde(flatten)]
+    pub made: TangentMade,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// What a Tangent call added.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum TangentMade {
+    /// Two curves: one Tangent constraint.
+    Curves(Constrained),
+    /// A curve's end point for `a` or `b` (#12092): the end now lies on the other curve (a
+    /// point-on-curve or, for two end points, a coincident constraint, left out when the end was
+    /// already there) and its curve is tangent there.
+    End {
+        /// The Tangent constraint.
+        constraint: String,
+        /// Every constraint added, the Tangent last.
+        constraints: Vec<String>,
+        /// The sketch's solve: `{solved, dof}`.
+        sketch: Value,
+    },
 }
 
 /// What `sketch.constraint.coincident` returns.
@@ -493,10 +522,11 @@ macro_rules! two_operands {
 }
 
 two_operands! {
-    /// Make two curves, or a curve and a sketch axis, tangent. Two different curves are needed.
+    /// Make two curves, a curve and a sketch axis, or a curve's end point and another curve,
+    /// tangent. Two different curves are needed.
     TangentParams,
-    a: "A curve's id, or `x` / `y` for the sketch's own axis (a curve with that id wins; an axis becomes a linked construction line, reported in `created`), or a model edge.",
-    b: "The other curve, as `a`.",
+    a: "A curve's id, or `x` / `y` for the sketch's own axis (a curve with that id wins; an axis becomes a linked construction line, reported in `created`), or a model edge, or the end point of a line or an arc (such as `l1.end`): that end then lies on the other curve, and its curve is tangent there (`constraints` lists both).",
+    b: "The other curve or end point, as `a`.",
     what: "a curve id, or x / y for a sketch axis"
 }
 
