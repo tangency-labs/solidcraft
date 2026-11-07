@@ -30,6 +30,7 @@ enum ButtonTone {
     Normal,
     Primary,
     Danger,
+    DangerOutlined,
     Selected,
     Ghost,
 }
@@ -58,6 +59,7 @@ fn button_appearance(ui: &Ui, response: Option<&Response>, tone: ButtonTone) -> 
         ButtonTone::Primary | ButtonTone::Selected if bevel => (t.control_fill, t.form_ink),
         ButtonTone::Primary => (t.form_primary_fill, t.on_accent),
         ButtonTone::Danger => (t.form_error, t.on_accent),
+        ButtonTone::DangerOutlined => (t.control_fill, t.form_error),
         ButtonTone::Selected => selected_button_palette(&t),
         ButtonTone::Normal | ButtonTone::Ghost => (t.control_fill, t.form_ink),
     };
@@ -95,6 +97,8 @@ fn button_appearance(ui: &Ui, response: Option<&Response>, tone: ButtonTone) -> 
     }
     let stroke = if focused || hovered || pressed || matches!(tone, ButtonTone::Selected) {
         t.control_border_stroke(t.form_primary)
+    } else if matches!(tone, ButtonTone::DangerOutlined) {
+        t.control_border_stroke(t.form_error)
     } else if matches!(tone, ButtonTone::Primary | ButtonTone::Danger) {
         t.control_border_stroke(fill)
     } else {
@@ -509,6 +513,7 @@ pub(crate) fn button_pair(ui: &mut egui::Ui, key: &str, states: [bool; 2], butto
 /// Shared button variants preserve native sizing and enabled-button translation.
 #[derive(Clone, Copy)]
 pub enum Button {
+    DangerOutlined,
     Normal,
     Primary,
     Small,
@@ -553,6 +558,9 @@ fn button_widget(label: egui::WidgetText, options: Button) -> impl egui::Widget 
         let widget = match options {
             Button::Small => styled_button(ui, label, ButtonTone::Normal).small(),
             Button::Primary => styled_button(ui, label, ButtonTone::Primary),
+            Button::DangerOutlined => styled_button(ui, label, ButtonTone::DangerOutlined)
+                .corner_radius(Tokens::get().control_radius)
+                .min_size(vec2(0.0, Tokens::get().control_height)),
             Button::Ghost => styled_button(ui, label, ButtonTone::Ghost).frame(false),
             Button::SmallSelected => styled_button(ui, label, ButtonTone::Selected).small(),
             _ => styled_button(ui, label, ButtonTone::Normal),

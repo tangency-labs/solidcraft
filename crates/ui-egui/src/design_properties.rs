@@ -36,13 +36,21 @@ pub struct DesignProperties {
     pub fields: Vec<String>,
     /// The last refusal from `document.metadata.set`.
     pub error: Option<String>,
+    /// What the fields were when OK was refused: `error` stays only while they still are.
+    refused: Option<Vec<String>>,
 }
 
 impl DesignProperties {
     pub fn new(app: &SolveApp) -> Self {
         let m = &app.session.doc.metadata;
         let opened: Vec<String> = keys(Owner::Design).map(|k| m.text(k.name).unwrap_or_default().to_string()).collect();
-        DesignProperties { fields: opened.clone(), opened, error: None }
+        DesignProperties { fields: opened.clone(), opened, error: None, refused: None }
+    }
+
+    /// Show why OK was refused, for as long as the fields stay as they are.
+    fn refuse(&mut self, error: String) {
+        self.refused = Some(self.fields.clone());
+        self.error = Some(error);
     }
 
     /// The fields that differ from what the window opened with, as `document.metadata.set`
@@ -70,7 +78,7 @@ fn apply(app: &mut SolveApp, d: &mut DesignProperties) -> bool {
     match app.run("document.metadata.set", serde_json::json!({ "values": values })) {
         Ok(_) => true,
         Err(e) => {
-            d.error = Some(e);
+            d.refuse(e);
             false
         }
     }
@@ -85,6 +93,11 @@ fn preview(v: &Value) -> String {
 /// Draw the window when it is open. Called once per frame.
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut d) = app.design_properties.take() else { return };
+    // A refused OK's message is about the fields it ran with (#641): once they change, it goes.
+    if d.refused.as_ref().is_some_and(|was| *was != d.fields) {
+        d.error = None;
+        d.refused = None;
+    }
     let metadata = app.session.doc.metadata.clone();
     let title = crate::i18n::tr_label("Design Properties");
     let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_design_properties"), "settings", title).fields().show(ctx, true, |ui| {
@@ -553,6 +566,26 @@ mod tests {
         let d = h.app.design_properties.as_ref().expect("still open");
         assert!(d.error.as_deref().is_some_and(|e| e.contains("control character")), "{:?}", d.error);
         assert_eq!(h.app.session.undo.len(), undo + 1);
+        // Correcting the field takes the refusal away before OK is clicked again.
+        h.app.design_properties.as_mut().unwrap().fields[1] = "PN-1".into();
+        h.frames(2);
+        let d = h.app.design_properties.as_ref().expect("still open");
+        assert_eq!(d.error, None, "the message was about the control character, which is gone");
+        // The message is about the fields OK ran with, as a dialog's is about its inputs (#641):
+        // a change to another field takes it away too, and the next OK refuses again.
+        h.app.design_properties.as_mut().unwrap().fields[1] = "bad\u{7}".into();
+        h.frames(2);
+        h.step(&json!({"widget": "OK"})).unwrap();
+        let refused = h.app.design_properties.as_ref().expect("still open").error.clone();
+        assert!(refused.as_deref().is_some_and(|e| e.contains("control character")), "{refused:?}");
+        h.app.design_properties.as_mut().unwrap().fields[0] = "ACME".into();
+        h.frames(2);
+        let d = h.app.design_properties.as_ref().expect("still open");
+        assert_eq!(d.error, None, "the fields differ from the refused ones");
+        h.step(&json!({"widget": "OK"})).unwrap();
+        let d = h.app.design_properties.as_ref().expect("still open: the part number is still refused");
+        assert_eq!(d.error, refused, "the same reason again");
+        assert_eq!(h.app.session.undo.len(), undo + 1, "nothing applied");
     }
 
     #[test]

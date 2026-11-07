@@ -608,6 +608,122 @@ impl PartialEq for Layout {
     }
 }
 
+/// Compare complete arrangements while ignoring generated section/column names.
+/// Ordered groups and every reference to a live or remembered group keep their
+/// identity relationships. Instance IDs, geometry and placement memory stay exact.
+pub fn arrangements_equal(left: &Layout, right: &Layout) -> bool {
+    match (canonical_arrangement(left), canonical_arrangement(right)) {
+        (Some(left), Some(right)) => left == right,
+        _ => false,
+    }
+}
+
+fn arrangement_id(names: &mut BTreeMap<String, String>, id: &str, prefix: &str) -> Option<String> {
+    if let Some(name) = names.get(id) {
+        return Some(name.clone());
+    }
+    if names.len() >= MAX_RESERVED_IDENTITIES {
+        return None;
+    }
+    let name = format!("{prefix}.{}", names.len());
+    names.insert(id.to_string(), name.clone());
+    Some(name)
+}
+
+fn arrangement_location(
+    location: &mut SectionLocation,
+    sections: &mut BTreeMap<String, String>,
+    columns: &mut BTreeMap<String, String>,
+) -> Option<()> {
+    if let SectionLocation::Window { return_to, .. } = location {
+        if let Some(id) = &mut return_to.section {
+            id.0 = arrangement_id(sections, &id.0, "section")?;
+        }
+        if let Some(id) = &mut return_to.column {
+            id.0 = arrangement_id(columns, &id.0, "column")?;
+        }
+        if let Some(join) = &mut return_to.join {
+            join.section.0 = arrangement_id(sections, &join.section.0, "section")?;
+        }
+    }
+    Some(())
+}
+
+fn canonical_arrangement(layout: &Layout) -> Option<Layout> {
+    // Bound every collection and string before copying. The comparison has no
+    // registry and does not allocate geometry or change the authoritative model.
+    if layout.instances.len() > MAX_INSTANCES || layout.sections.len() > MAX_SECTIONS || layout.columns.len() > MAX_SECTIONS {
+        return None;
+    }
+    valid_id(&layout.workspace.0).ok()?;
+    layout.extent_priority_context.validate().ok()?;
+    for column in &layout.columns {
+        valid_id(&column.id.0).ok()?;
+    }
+    for section in &layout.sections {
+        if section.tabs.len() > MAX_TABS {
+            return None;
+        }
+        valid_id(&section.id.0).ok()?;
+        valid_id(&section.active.0).ok()?;
+        section.location.validate().ok()?;
+        if let Some(column) = &section.column {
+            valid_id(&column.0).ok()?;
+        }
+        for instance in &section.tabs {
+            valid_id(&instance.0).ok()?;
+        }
+    }
+    for instance in &layout.instances {
+        valid_id(&instance.id.0).ok()?;
+        valid_id(&instance.kind.0).ok()?;
+        valid_id(&instance.memory.section.0).ok()?;
+        instance.memory.location.validate().ok()?;
+        if let Some(column) = &instance.memory.column {
+            valid_id(&column.0).ok()?;
+        }
+    }
+    let mut sections = BTreeMap::new();
+    let mut columns = BTreeMap::new();
+    for section in &layout.sections {
+        arrangement_id(&mut sections, &section.id.0, "section")?;
+    }
+    for column in &layout.columns {
+        arrangement_id(&mut columns, &column.id.0, "column")?;
+    }
+    let mut canonical = layout.clone();
+    for column in &mut canonical.columns {
+        column.id.0 = arrangement_id(&mut columns, &column.id.0, "column")?;
+    }
+    for section in &mut canonical.sections {
+        section.id.0 = arrangement_id(&mut sections, &section.id.0, "section")?;
+        if let Some(column) = &mut section.column {
+            column.0 = arrangement_id(&mut columns, &column.0, "column")?;
+        }
+        arrangement_location(&mut section.location, &mut sections, &mut columns)?;
+    }
+    for instance in &mut canonical.instances {
+        instance.memory.section.0 = arrangement_id(&mut sections, &instance.memory.section.0, "section")?;
+        if let Some(column) = &mut instance.memory.column {
+            column.0 = arrangement_id(&mut columns, &column.0, "column")?;
+        }
+        arrangement_location(&mut instance.memory.location, &mut sections, &mut columns)?;
+    }
+    for record in &mut canonical.extent_priority_context.records {
+        match &mut record.target {
+            ExtentPriorityTarget::Section(section) | ExtentPriorityTarget::SectionReturn(section) => {
+                section.0 = arrangement_id(&mut sections, &section.0, "section")?;
+            }
+            ExtentPriorityTarget::Memory(_) | ExtentPriorityTarget::MemoryReturn(_) => {}
+        }
+        if let Some(column) = &mut record.column {
+            column.0 = arrangement_id(&mut columns, &column.0, "column")?;
+        }
+    }
+    canonical.extent_priority_context.records.sort_by(|left, right| left.target.cmp(&right.target));
+    Some(canonical)
+}
+
 impl Layout {
     fn latent_priority_overrides(&self) -> impl Iterator<Item = &ExtentPriorityRecord> {
         self.extent_priority_context.overrides().filter(move |record| match &record.target {

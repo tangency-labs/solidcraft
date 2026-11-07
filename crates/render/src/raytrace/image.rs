@@ -369,6 +369,7 @@ pub(crate) fn admit_layout(scene: &ProductScene, request: &ImageRequest, options
     } else {
         0
     };
+    let caustics_bytes = options.caustics.map_or(Ok(0), caustics::Task::required_bytes)?;
     let extra = BvhBuilder::required_bytes(n, n, limits(options.budget))
         .map_err(error)?
         .checked_add(a.triangles.checked_mul(std::mem::size_of::<Look>() as u64).ok_or_else(|| error(TraceError::MemoryLimit))?)
@@ -378,6 +379,7 @@ pub(crate) fn admit_layout(scene: &ProductScene, request: &ImageRequest, options
         .and_then(|v| v.checked_add(aging_bytes))
         .and_then(|v| v.checked_add(optical_bytes))
         .and_then(|v| v.checked_add(general_glass_bytes))
+        .and_then(|v| v.checked_add(caustics_bytes))
         .and_then(|v| v.checked_add(if options.path.is_some() { std::mem::size_of::<indirect_image::State>() as u64 } else { 0 }))
         .and_then(|v| v.checked_add(film_bytes))
         .and_then(|v| v.checked_add(adaptive_bytes))
@@ -597,6 +599,8 @@ fn resume_optical_path(pending: &mut PendingPixel, path: OpticalPath) {
     pending.environment_value = Vec3::ZERO;
 }
 
+#[path = "image_caustics.rs"]
+mod caustics;
 #[path = "image_indirect.rs"]
 mod indirect_image;
 
@@ -604,6 +608,7 @@ pub struct ImageTask {
     maps: Vec<job::textures::cpu_cache::CpuTextureCache>,
     aging: Vec<super::aging::Task>,
     path: Vec<indirect_image::State>,
+    caustics: Vec<caustics::Task>,
     punctual_diagnostics: job::PunctualDiagnostics,
     progressive: Option<Progressive>,
     sampling: Vec<job::adaptive::SamplingReport>,
@@ -866,10 +871,19 @@ impl ImageTask {
                 Ok(Progressive { film, options, target, resolving: false, resolve_pixel: 0 })
             })
             .transpose()?;
+        let mut caustics = Vec::new();
+        if let Some(options) = options.caustics {
+            caustics.try_reserve_exact(1).map_err(|_| error(TraceError::AllocationFailed))?;
+            if caustics.capacity() != 1 {
+                return Err(error(TraceError::MemoryLimit));
+            }
+            caustics.push(caustics::Task::new(options)?);
+        }
         Ok(Self {
             maps,
             aging,
             path,
+            caustics,
             punctual_diagnostics: Default::default(),
             progressive,
             sampling,
@@ -929,6 +943,9 @@ impl ImageTask {
             (Phase::Preparing, done, total)
         } else if self.glass.first().is_some_and(|glass| !glass.ready()) {
             (Phase::Preparing, 0, 1)
+        } else if self.bvh.is_some() && self.caustics.first().is_some_and(|map| !map.ready()) {
+            let (done, total) = self.caustics.first().map_or((0, 1), caustics::Task::progress);
+            (Phase::Preparing, done, total)
         } else if self.bvh.is_some() && self.denoise.first().is_some_and(|guides| !guides.ready()) {
             (
                 Phase::Preparing,
@@ -1913,6 +1930,7 @@ impl ImageTask {
         self.options.volume = None;
         self.pending.release();
         self.path = Vec::new();
+        self.caustics = Vec::new();
         self.request.raytrace = None;
         self.options.lights = None;
         self.options.emissions = None;
@@ -2069,6 +2087,8 @@ impl ImageTask {
                     .ok_or_else(|| invalid("missing environment preparation"))?
                     .prepare_one(|| self.cancel.is_cancelled())
                     .map_err(environment_error)?;
+            } else if self.bvh.is_some() && self.caustics.first().is_some_and(|map| !map.ready()) {
+                caustics::step(self)?;
             } else if self.bvh.is_some() && self.denoise.first().is_some_and(|guides| !guides.ready()) {
                 let bvh = self.bvh.as_ref().ok_or_else(|| invalid("missing CPU guide BVH"))?;
                 self.denoise.first_mut().ok_or_else(|| invalid("missing CPU guide task"))?.step(

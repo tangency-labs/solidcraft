@@ -134,3 +134,42 @@ fn sketches_move_to_the_part_whose_face_they_are_on() {
     let again = run(&mut s, "component.move_sketches.to_parts", json!({"sketches":["OnFace"]}));
     assert_eq!((again["moved"].as_u64(), again["kept"][0]["reason"].as_str()), (Some(0), Some("already in its part")));
 }
+
+/// A sketch moved to its part while an exploded view moves the part saves the same picked point
+/// and guide plane as without the view: the view is display only.
+#[test]
+fn sketches_moved_to_a_part_while_an_exploded_view_is_shown_save_what_they_save_without_it() {
+    let run = |s: &mut Session, c: &str, p: Value| s.execute(c, &p).unwrap_or_else(|e| panic!("{c}: {e}"));
+    let moved = |exploded: bool| {
+        let mut s = Session::default();
+        let part = run(&mut s, "component.create", json!({"name":"Part","parent":0,"grounded":false}));
+        let occurrence = part["occurrence"].as_u64().unwrap();
+        run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Base"}));
+        run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[30,0,0]}));
+        run(&mut s, "component.activate", json!({"component":0}));
+        let world = s.world_state().unwrap();
+        let base = world.body("Base").unwrap();
+        let top = base.body.faces(0.01).unwrap().into_iter().max_by(|a, b| a.centroid.z.total_cmp(&b.centroid.z)).unwrap();
+        let pick = json!({"body": base.name, "index": top.index, "face": [top.centroid.x, top.centroid.y, top.centroid.z], "path": [occurrence]});
+        let on_face = run(&mut s, "sketch.create", json!({"name":"OnFace","plane":pick,"project_edges":false}))["sketch"].as_u64().unwrap();
+        sketch_square(&mut s);
+        // An exploded view needs two placements: B stays put, in both runs.
+        run(&mut s, "component.create", json!({"name":"B","parent":0,"activate":false}));
+        if exploded {
+            let view =
+                run(&mut s, "explode.create", json!({"moves": [{"occurrence": occurrence, "translate": [0, 25, 0]}]}))["view"].as_u64().unwrap();
+            run(&mut s, "explode.show", json!({"view": view}));
+        }
+        run(&mut s, "component.move_sketches.to_parts", json!({}));
+        run(&mut s, "explode.show", json!({}));
+        let solidcraft_doc::FeatureKind::Sketch { plane: solidcraft_doc::PlaneRef::Face { plane, at, .. }, .. } =
+            &s.doc.feature(on_face).unwrap().kind
+        else {
+            panic!("not a face sketch")
+        };
+        (*plane, *at)
+    };
+    let ((plane, at), (assembled_plane, assembled_at)) = (moved(true), moved(false));
+    assert!(at.dist(assembled_at) < 1e-9, "{at:?} vs {assembled_at:?}");
+    assert!(plane.origin.dist(assembled_plane.origin) < 1e-9, "{plane:?} vs {assembled_plane:?}");
+}
