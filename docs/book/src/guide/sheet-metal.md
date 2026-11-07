@@ -208,7 +208,8 @@ line out to the shorter stretch's far edge, in the flat pattern and the DXF: a b
 there cannot fold one stretch up and the next down, while same-side stretches stay one piece. Where
 a cut-out took that far edge away, the cut is clipped to the material that is left: it runs from the
 bend line to the nearest boundary the junction line meets (a notch's edge, for one), so the blank is
-parted as far as its remaining material allows.
+parted as far as its remaining material allows. A straight boundary and a circular one are met
+exactly, so a round notch ends the cut on the arc itself and the DXF splits the arc there.
 `then` is refused on a split edge: bend each segment's far edge in its own
 feature. Stretches that meet within 1e-9 (the junction tolerance, `SEGMENT_JOIN_EPS`) are one
 partition: the junction is snapped shut whatever the two stretches' angle, height or side are, so

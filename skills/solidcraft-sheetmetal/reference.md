@@ -121,8 +121,9 @@ falls back to the edge's own value, then the feature's.
   DXF: a blank joined there cannot fold, one stretch up and the next down. Where a cut-out took that
   far edge away, the cut is clipped to the material that is left: it runs from the bend line to the
   nearest boundary the junction line meets (a notch's edge, for one), so the blank is parted as far
-  as its remaining material allows; a junction with no material left outward of the bend line has
-  nothing to part and is left alone. Same-side stretches stay
+  as its remaining material allows; a line and a circular arc are met exactly, so a round notch ends
+  the cut on the arc itself, which the DXF splits there. A junction with no material left outward of
+  the bend line has nothing to part and is left alone. Same-side stretches stay
   one piece. A junction the command accepts within `SEGMENT_JOIN_EPS` is snapped shut, and a
   stretch narrower than that tolerance is no bend of its own: the run before it takes that stretch
   (its angle and height do not build), so the bends still tile the edge with nothing left uncovered,
@@ -277,7 +278,9 @@ which edge is "the long edge" on a near-square part) before building.
   deleted or merged keeps the surviving stretch's own model parameter name (the name on the value it
   still has; failing that, the name whose span it still covers), and the deleted stretch's name goes
   away. Expressions that read the survivor's name still read its height; a deleted stretch's name
-  never lands on a stretch whose value came from elsewhere.
+  never lands on a stretch whose value came from elsewhere. A segment input is keyed by its edge's
+  pick point, the physical edge, not by the edge's place in the list: reordering the `edges` list
+  keeps every name on its own edge's stretch.
 - **`flip` is per segment:** it sets that bend's side outright: `true` bends it the other way and
   `false` the same way as the feature's `flip`, an override rather than a turn relative to it.
 - **`then` is refused with `segments`:** bend each segment's far edge in its own feature. The

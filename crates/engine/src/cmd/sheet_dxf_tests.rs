@@ -790,3 +790,77 @@ fn a_notch_through_a_junctions_far_edge_still_parts_the_blank() {
     let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
     assert!(errors.is_empty(), "unfold: {errors:?}");
 }
+
+/// A round cut over an opposite-side junction takes the far edge away across the junction: the
+/// material left ends on the circle, so the junction cut runs from the bend line to the arc,
+/// exactly where the circle crosses the junction line, in the flat loop and the DXF. The crossing
+/// is found on the arc itself, not on a 0.001 mm chord of it: dropped, the blank stayed joined
+/// where the folded part separates (FR-7 #5932).
+#[test]
+fn a_round_notch_over_a_junctions_far_edge_ends_the_cut_on_the_arc() {
+    let mut s = plate_in(sheet_of_2mm(), &[]);
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[50,0,2],"segments":[
+            {"from":0,"to":0.5,"angle":"90 deg","height":"20 mm","flip":false},
+            {"from":0.5,"to":1,"angle":"90 deg","height":"20 mm","flip":true}]}],
+            "height":"20 mm","angle":"90 deg"}),
+    );
+    // The flange's far edge is y = 3 − π − 17. A Ø10 round cut centred on the junction there takes
+    // that edge away across the junction and leaves the circle as the material's edge; the
+    // junction line meets it at the circle's top, (50, far + 5).
+    run(&mut s, "sheet.unfold", json!({}));
+    let far = 3.0 - PI - 17.0;
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Notch"}));
+    run(&mut s, "sketch.circle.center", json!({"center":[50, far], "radius":5}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch":"Notch","through_all":true,"operation":"cut","direction":"symmetric"}));
+    let bend = Vec2::new(50.0, 3.0);
+    let on_arc = Vec2::new(50.0, far + 5.0);
+    let cut = |lp: &solidcore_record::Loop2, a: Vec2, b: Vec2| {
+        lp.segs.iter().any(|s| matches!(s, Seg2::Line { a: p, b: q } if p.dist(a) < 1e-6 && q.dist(b) < 1e-6))
+    };
+    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    assert!(
+        regions.iter().any(|r| cut(&r.outer, bend, on_arc) && cut(&r.outer, on_arc, bend)),
+        "the blank is not cut from the bend line to the arc: {:?}",
+        regions.iter().map(|r| r.outer.segs.len()).collect::<Vec<_>>()
+    );
+    // That end is on the circle to rounding error, not the 0.001 mm inside a chord of it.
+    let (centre, radius) = (Vec2::new(50.0, far), 5.0);
+    let slit_end = regions.iter().flat_map(|r| r.outer.segs.iter()).find_map(|seg| match *seg {
+        Seg2::Line { a, b } if a.dist(bend) < 1e-6 => Some(b),
+        _ => None,
+    });
+    let end = slit_end
+        .unwrap_or_else(|| panic!("no junction cut from the bend line: {:?}", regions.iter().map(|r| r.outer.segs.len()).collect::<Vec<_>>()));
+    let off = ((end - centre).len() - radius).abs();
+    assert!(off < 1e-9, "the cut ends {end:?}, off the arc by {off} mm");
+    // The DXF writes both lines on the outline, and splits the arc there: an arc ends at the cut.
+    let es = entities(&export(&mut s, json!({})));
+    let outline: Vec<(Vec2, Vec2)> = es.iter().filter(|e| e.0 == "LINE" && layer_of(e) == "OUTLINE").map(|e| (point(e, 10), point(e, 11))).collect();
+    let near = |p: Vec2, q: Vec2| p.dist(q) < 1e-6;
+    let both_ways = |lines: &[(Vec2, Vec2)], a: Vec2, b: Vec2| {
+        lines.iter().any(|&(p, q)| near(p, a) && near(q, b)) && lines.iter().any(|&(p, q)| near(p, b) && near(q, a))
+    };
+    assert!(both_ways(&outline, bend, end), "the DXF has no junction cut to the arc: {outline:?}");
+    let arcs: Vec<(Vec2, f64, [Vec2; 2])> = es
+        .iter()
+        .filter(|e| e.0 == "ARC" && layer_of(e) == "OUTLINE")
+        .map(|e| {
+            let (c, r) = (point(e, 10), values(e, 40)[0]);
+            let (a0, a1) = (values(e, 50)[0].to_radians(), values(e, 51)[0].to_radians());
+            (c, r, [c + Vec2::from_angle(a0) * r, c + Vec2::from_angle(a1) * r])
+        })
+        .collect();
+    assert!(
+        arcs.iter().any(|&(c, r, ends)| c.dist(centre) < 1e-6 && (r - radius).abs() < 1e-6 && ends.iter().any(|p| p.dist(end) < 1e-6)),
+        "the DXF's arc is not split at the cut: {arcs:?}"
+    );
+    // The cut leaves the part one piece, and refolding then unfolding builds it.
+    run(&mut s, "sheet.refold", json!({}));
+    run(&mut s, "sheet.unfold", json!({}));
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "unfold: {errors:?}");
+}

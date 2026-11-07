@@ -464,24 +464,68 @@ fn clip_junction_slit(lp: &Loop2, at: Vec2, tip: Vec2) -> Option<(Vec2, Vec2)> {
         return None;
     }
     let u = d / len;
-    // Where the junction line crosses the boundary, nearest the bend line first. Free-form segments
-    // follow the 0.001 mm chords the planar booleans use; lines keep their exact ends.
+    // Where the junction line crosses the boundary, nearest the bend line first. A line and a
+    // circular arc are intersected exactly, so the crossing is a point of the curve itself and the
+    // 1e-6 anchor tolerance of `slit_loop` finds it; only free-form segments follow the 0.001 mm
+    // chords the planar booleans use.
     let mut hits: Vec<(f64, Vec2)> = Vec::new();
     for seg in &lp.segs {
-        let pts = seg.polyline(1e-3);
-        for w in pts.windows(2) {
-            let (a, b) = (w[0], w[1]);
-            let e = b - a;
-            let den = u.cross(e);
-            if den.abs() <= 1e-12 {
-                continue;
+        match *seg {
+            Seg2::Line { a, b } => {
+                let e = b - a;
+                let den = u.cross(e);
+                if den.abs() <= 1e-12 {
+                    continue;
+                }
+                let t = (a - at).cross(e) / den;
+                let s = (at - a).cross(u) / e.cross(u);
+                if t < -1e-9 || !(-1e-9..=1.0 + 1e-9).contains(&s) {
+                    continue;
+                }
+                hits.push((t.max(0.0), at + u * t));
             }
-            let t = (a - at).cross(e) / den;
-            let s = (at - a).cross(u) / e.cross(u);
-            if t < -1e-9 || !(-1e-9..=1.0 + 1e-9).contains(&s) {
-                continue;
+            Seg2::Arc { center, radius, start, sweep } => {
+                // The roots of |at + u·t − center|² = radius²: the junction line through the
+                // circle. A root is a crossing only within the arc's sweep.
+                let f = at - center;
+                let b = f.dot(u);
+                let disc = b * b - (f.len2() - radius * radius);
+                if !(disc >= 0.0) || sweep.abs() < 1e-12 {
+                    continue;
+                }
+                let root = disc.sqrt();
+                for t in [-b - root, -b + root] {
+                    if t < -1e-9 {
+                        continue;
+                    }
+                    let turn = ((at + u * t - center).angle() - start) * sweep.signum();
+                    let share = turn.rem_euclid(std::f64::consts::TAU) / sweep.abs();
+                    if share > 1.0 + 1e-9 {
+                        continue;
+                    }
+                    // The crossing on the arc itself, at the angle `split_loop_at` splits it at:
+                    // the returned point is a point of the curve, not a chord's inside of it.
+                    let p = center + Vec2::from_angle(start + sweep * share.clamp(0.0, 1.0)) * radius;
+                    hits.push((t.max(0.0), p));
+                }
             }
-            hits.push((t.max(0.0), at + u * t));
+            _ => {
+                let pts = seg.polyline(1e-3);
+                for w in pts.windows(2) {
+                    let (a, b) = (w[0], w[1]);
+                    let e = b - a;
+                    let den = u.cross(e);
+                    if den.abs() <= 1e-12 {
+                        continue;
+                    }
+                    let t = (a - at).cross(e) / den;
+                    let s = (at - a).cross(u) / e.cross(u);
+                    if t < -1e-9 || !(-1e-9..=1.0 + 1e-9).contains(&s) {
+                        continue;
+                    }
+                    hits.push((t.max(0.0), at + u * t));
+                }
+            }
         }
     }
     hits.sort_by(|a, b| a.0.total_cmp(&b.0));

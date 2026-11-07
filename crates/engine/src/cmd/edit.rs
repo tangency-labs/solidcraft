@@ -1768,14 +1768,17 @@ fn reorder_features(
 }
 
 /// The edge and stretch (`from`, `to`) a `sheet.flange` segment input's key names:
-/// `sheet.flange.edge<edge>.stretch<from bits>.<to bits>.<field>`.
-fn segment_span(key: &str) -> Option<(usize, f64, f64)> {
+/// `sheet.flange.edge<x bits>,<y bits>,<z bits>.stretch<from bits>.<to bits>.<field>`. The edge is
+/// the point the flange was made on, the physical edge itself, so reordering the `edges` list moves
+/// no name onto another edge's stretch.
+fn segment_span(key: &str) -> Option<([u64; 3], f64, f64)> {
     let rest = key.strip_prefix("sheet.flange.edge")?;
     let mut parts = rest.split('.');
-    let edge: usize = parts.next()?.parse().ok()?;
+    let point: Vec<u64> = parts.next()?.split(',').map(|bits| bits.parse().ok()).collect::<Option<_>>()?;
+    let point: [u64; 3] = point.try_into().ok()?;
     let from = f64::from_bits(parts.next()?.strip_prefix("stretch")?.parse::<u64>().ok()?);
     let to = f64::from_bits(parts.next()?.parse::<u64>().ok()?);
-    Some((edge, from, to))
+    Some((point, from, to))
 }
 
 fn input_keys(kind: &FeatureKind) -> Vec<(String, solidcraft_doc::expr::Kind)> {
@@ -1799,22 +1802,41 @@ fn input_keys(kind: &FeatureKind) -> Vec<(String, solidcraft_doc::expr::Kind)> {
         }
     }
     // Every segment's angle and height has the same label ("Segment angle", "Segment height"), so
-    // a name could only be matched by position: inserting or reordering stretches moved a named
-    // height onto another stretch (#5927, #5928). Each segment input is keyed by its edge and by
-    // the stretch it describes (its `from` and `to`, exactly), so a name stays on its own stretch
-    // however the list is reordered. The order is the walk's: angle before height, edges in order,
-    // and only the expressions a segment carries.
+    // a name could only be matched by position: inserting, deleting or reordering stretches or
+    // edges moved a named height onto another stretch (#5927, #5928). Each segment input is keyed
+    // by the edge it is on (the point the flange was made on, the physical edge) and by the stretch
+    // it describes (its `from` and `to`, exactly), so a name stays on its own stretch however the
+    // list is reordered. An edge's own angle and height are keyed by the edge's point for the same
+    // reason: reordering the edges moves no name onto another edge. The order is the walk's: an
+    // edge's angle before its height before its segments, edges in order, and only the expressions
+    // that carry a value.
     if let FeatureKind::SheetFlange { edges, .. } = kind {
+        let mut edge_keys = Vec::new();
         let mut segment_keys = Vec::new();
-        for (edge, e) in edges.iter().enumerate() {
+        for e in edges {
+            let point = format!("{},{},{}", e.point.0.x.to_bits(), e.point.0.y.to_bits(), e.point.0.z.to_bits());
+            if e.angle.is_some() {
+                edge_keys.push(format!("sheet.flange.edge{point}.angle"));
+            }
+            if e.height.is_some() {
+                edge_keys.push(format!("sheet.flange.edge{point}.height"));
+            }
             for s in &e.segments {
-                let stretch = format!("sheet.flange.edge{edge}.stretch{}.{}", s.from.to_bits(), s.to.to_bits());
+                let stretch = format!("sheet.flange.edge{point}.stretch{}.{}", s.from.to_bits(), s.to.to_bits());
                 if s.angle.is_some() {
                     segment_keys.push(format!("{stretch}.angle"));
                 }
                 if s.height.is_some() {
                     segment_keys.push(format!("{stretch}.height"));
                 }
+            }
+        }
+        let mut next = edge_keys.into_iter();
+        for (key, _) in keys.iter_mut() {
+            if (key == "Edge angle" || key == "Edge height")
+                && let Some(unique) = next.next()
+            {
+                *key = unique;
             }
         }
         let mut next = segment_keys.into_iter();
@@ -2000,14 +2022,14 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         if !param_names[i].is_empty() {
             continue;
         }
-        if let Some((edge, from, to)) = segment_span(key) {
+        if let Some((point, from, to)) = segment_span(key) {
             let mut best: Option<(usize, bool, f64)> = None;
             for (k, (old_key, old_label, old_kind, _, old_expression)) in old_inputs.iter().enumerate() {
                 if *old_label != new_labels[i] || old_kind != kind {
                     continue;
                 }
-                let Some((old_edge, old_from, old_to)) = segment_span(old_key) else { continue };
-                if old_edge != edge {
+                let Some((old_point, old_from, old_to)) = segment_span(old_key) else { continue };
+                if old_point != point {
                     continue;
                 }
                 let same_value = *old_expression == new_inputs[i].1;

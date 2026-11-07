@@ -1885,3 +1885,57 @@ fn deleting_a_stretch_keeps_the_surviving_stretches_own_name() {
     assert_eq!(reader["value"].as_f64(), Some(20.0), "{reader}");
     assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
 }
+
+/// Two edges of one flange, each split into stretches with named heights, swapped in the `edges`
+/// list: each name stays on its own physical edge, the point the flange was made on, not on the
+/// list position. Swapping moved the names between the edges' heights, so an expression reading the
+/// 20 mm name read 15 mm (#5927, #5928).
+#[test]
+fn swapping_two_edges_keeps_each_named_height_on_its_own_edge() {
+    fn param(s: &mut Session, name: &str) -> f64 {
+        let list = run(s, "parameters.list", json!({}));
+        list["parameters"].as_array().and_then(|a| a.iter().find(|p| p["name"] == name)).and_then(|p| p["value"].as_f64()).unwrap_or(f64::NAN)
+    }
+    fn segment_names(s: &mut Session) -> Vec<(String, String)> {
+        let f = s.doc.find_feature("Bands").unwrap();
+        f.kind
+            .inputs()
+            .iter()
+            .enumerate()
+            .filter(|(_, (label, _, _))| *label == "Segment height")
+            .map(|(i, (_, expression, _))| (f.param_names[i].clone(), expression.clone()))
+            .collect()
+    }
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name":"AL2","thickness":"2 mm","k_factor":0.5,"bend_radius":"1 mm","active":true}));
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[200,100]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch":"Base"}));
+    // Both edges are split at the same fractions; the y = 0 edge's first stretch is 20 mm, the
+    // y = 100 edge's first is 15 mm.
+    let front = json!({"point":[100,0,2],"segments":[
+        {"from":0,"to":0.5,"height":"20 mm"},{"from":0.5,"to":1,"height":"15 mm"}]});
+    let back = json!({"point":[100,100,2],"segments":[
+        {"from":0,"to":0.5,"height":"15 mm"},{"from":0.5,"to":1,"height":"20 mm"}]});
+    run(&mut s, "sheet.flange", json!({"type":"edge","edges":[front, back],"height":"20 mm","angle":"90 deg","name":"Bands"}));
+    let names = segment_names(&mut s);
+    assert_eq!(names.iter().map(|(_, expression)| expression.as_str()).collect::<Vec<_>>(), ["20 mm", "15 mm", "15 mm", "20 mm"], "{names:?}");
+    run(&mut s, "parameters.rename", json!({"name": names[0].0, "new_name": "Front20"}));
+    run(&mut s, "parameters.rename", json!({"name": names[2].0, "new_name": "Back15"}));
+    assert_eq!((param(&mut s, "Front20"), param(&mut s, "Back15")), (20.0, 15.0));
+    // The same two edges, swapped in the list: the physical edges did not change.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":"Bands","command":"sheet.flange","params":{
+            "type":"edge","edges":[back, front],"height":"20 mm","angle":"90 deg"}}),
+    );
+    assert_eq!(param(&mut s, "Front20"), 20.0, "the name on the y = 0 edge's 20 mm stretch now reads another height: {:?}", segment_names(&mut s));
+    assert_eq!(param(&mut s, "Back15"), 15.0, "the name on the y = 100 edge's 15 mm stretch now reads another height: {:?}", segment_names(&mut s));
+    let names = segment_names(&mut s);
+    assert!(names.iter().any(|(name, expression)| name == "Front20" && expression == "20 mm"), "{names:?}");
+    assert!(names.iter().any(|(name, expression)| name == "Back15" && expression == "15 mm"), "{names:?}");
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+}
