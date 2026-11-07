@@ -36,10 +36,9 @@ renderer into a worker is out of scope for the first integration; worker GPU is 
 2. **Generic traits in craft-libs.** Storage tiers, worker RPC, and GPU dispatch are implemented
    once in craft-libs. Web and native use the same traits; hosts differ (OPFS vs paths, SharedWorker
    vs thread pool).
-3. **Do not duplicate cloud IO.** Authenticated cloud Open/Save uses `craft-cloud` and CollabCraft
-   ([craft-libs #48](https://github.com/storytold/craft-libs/pull/48)). Browser-local tiers
-   (`craft-tier-store`) are separate: hot mirror, warm cache, cold working folder, optional range
-   reads of cloud blobs through CollabCraft without vendor types in generic crates.
+3. **Cloud is SolidCraft's own.** Cloud Open/Save is a separate SolidCraft design, not covered
+   here. Browser-local tiers (`craft-tier-store`) are separate from it: hot mirror, warm cache,
+   cold working folder.
 4. **One worker broker.** A SharedWorker (or dedicated-worker fallback) coordinates storage writes,
    job queues, and shared wasm module compile per origin. Plugins and offload jobs register on the
    broker; do not spawn one SharedWorker per plugin ([#1221 comment thread](https://github.com/bherbruck/solidcraft/issues/1221)).
@@ -61,7 +60,6 @@ Tiers (craft-tier-store)
   Hot   RAM mirror, LRU budget
   Warm  OPFS under craft/<appId>/…  (today: /opfs/ mapping)
   Cold  File System Access project folder (no duplicate bytes in OPFS)
-  Cloud craft-cloud refs, range fetch via CollabCraft API (not in wasm credentials)
 ```
 
 On **desktop**, the same `BlobStore` and job envelopes apply: warm/cold map to normal directories;
@@ -80,8 +78,8 @@ call the same `run(command, args)` JSON.
 
 ## craft-libs crates (reference)
 
-These names follow the craft-libs performance platform design; SolidCraft depends on them as
-published from storytold/craft-libs after cloud contracts land (#48, #52).
+These names follow the craft-libs performance platform design; SolidCraft would depend on them as
+published from storytold/craft-libs.
 
 | Crate | Role |
 |-------|------|
@@ -90,7 +88,7 @@ published from storytold/craft-libs after cloud contracts land (#48, #52).
 | `craft-gpu` | `GpuContext`, `GpuJob`, `GpuProvider`, `ProviderRegistry` (no app WGSL here) |
 | `craft-gpu-wgpu` | wgpu backend: WebGPU on wasm32, Vulkan/DX12/Metal on desktop |
 | `craft-gpu-providers` | Shared readback/composite helpers extracted from Craft app gpu crates |
-| `craft-runtime` | Facade: tier store + worker host + optional `cloud-delegate` hooks |
+| `craft-runtime` | Facade: tier store + worker host |
 
 Generic runtime code must not depend on SolidCraft crates. SolidCraft registers app-specific
 providers and key namespaces only.
@@ -108,7 +106,7 @@ providers and key namespaces only.
 |------|-----------|
 | Desktop agent | `solidcraft-cli mcp` (stdio) or `--connect` to [control protocol](control-protocol.md) |
 | Browser agent | RPC to broker session; dialog-free tools only |
-| IDE bridge | Optional local relay (stdio MCP ↔ tab); not required for CollabCraft-hosted wasm |
+| IDE bridge | Optional local relay (stdio MCP ↔ tab); not required for hosted wasm |
 
 File policy for web agents mirrors MCP folders: design directory, cold tier roots, recovery;
 never `--allow-any-path` in the tab.
@@ -126,9 +124,9 @@ including timeline icon and label); plugins rebuild through WIT `evaluate()` cal
 `run()` JSON. See [plugins.md](plugins.md). Command ids may use a `pluginname.function` prefix to
 avoid collisions.
 
-## CollabCraft deployment
+## Deployment
 
-Static wasm apps on `craft.quasarke.net` ship `craft-worker-host.js` (brotli-precompressed) beside
+Static wasm builds ship `craft-worker-host.js` (brotli-precompressed) beside
 the app bundle. Prefer one global runtime worker per origin once message routing and wasm size are
 budgeted; per-app worker URLs are acceptable for pilots. CSP must allow `worker-src` / SharedWorker.
 
@@ -146,7 +144,7 @@ budgeted; per-app worker URLs are acceptable for pilots. CSP must allow `worker-
 - Moving egui/viewport WebGPU into SharedWorker
 - Second non-wgpu GPU backend in craft-libs
 - **Implementing** parametric `FeatureKind::Plugin` (designed in [plugins.md](plugins.md); follows craft-runtime wiring)
-- Duplicating `craft-cloud` or embedding `craft-nextcloud` in SolidCraft wasm
+- Cloud Open/Save (a separate SolidCraft design)
 
 ## Tests
 

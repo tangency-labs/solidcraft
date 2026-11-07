@@ -100,7 +100,7 @@ Manifest declares **`fallback_policy`**:
 | `suppress_with_warning` | Feature suppressed; user sees clear message |
 | `error_on_rebuild` | Hard fail on eval (strict teams) |
 
-Design files shared in CollabCraft should prefer a policy that **opens safely** (`recorded_mesh` or
+Shared design files should prefer a policy that **opens safely** (`recorded_mesh` or
 `recorded_script`). CI for plugins (#1221) should include: uninstall plugin, reopen file, assert
 document still opens and policy matches manifest.
 
