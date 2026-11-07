@@ -33,6 +33,7 @@ canvas.decal                      reference images, and sketches traced from the
 canvas.delete                     reference images, and sketches traced from them (sketch only)
 canvas.edit                       reference images, and sketches traced from them (sketch only)
 canvas.insert                     reference images, and sketches traced from them (sketch only)
+canvas.straighten                 reference images, and sketches traced from them (sketch only); crates/engine/src/cmd/sketch_canvas.rs tests
 canvas.to_sketch                  reference images, and sketches traced from them (sketch only)
 component.break_link              component links
 component.copies                  a listing of identical copies
