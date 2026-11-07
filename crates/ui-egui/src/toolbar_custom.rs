@@ -407,6 +407,12 @@ pub fn group_index(tab: &str, panel: &str, id: &str) -> usize {
 
 /// Move a command in its panel's drop-down before `before` (None: to the end), within its own
 /// group: a place in another group moves it to the nearest end of its own (#5080).
+/// Whether `id` is one of `panel`'s own commands, which [`move_in_menu`] can reorder. A command
+/// pinned there from another panel is shown in its drop-down but keeps its place (#5080).
+pub fn movable_in_menu(tab: &str, panel: &str, id: &str) -> bool {
+    panel_lists(tab).iter().any(|(p, cmds, _)| *p == panel && cmds.iter().any(|c| c.id == id))
+}
+
 pub fn move_in_menu(app: &mut SolveApp, tab: &str, panel: &str, id: &str, before: Option<&str>) {
     let lists = panel_lists(tab);
     let Some((_, cmds, _)) = lists.iter().find(|(p, ..)| *p == panel) else { return };

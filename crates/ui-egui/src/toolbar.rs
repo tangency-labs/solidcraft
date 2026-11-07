@@ -2282,6 +2282,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                                     &mut paints,
                                     &mut placed,
                                 );
+                                placed.retain(|(id, _)| crate::toolbar_custom::movable_in_menu(&tab, panel, id));
                                 if let Some((id, before)) = menu_drop(ui, &placed, true, &|id| crate::toolbar_custom::group_index(&tab, panel, id)) {
                                     menu_move = Some((*panel, id, before));
                                 }
@@ -2338,6 +2339,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                                     }
                                 }
                             });
+                            placed.retain(|(id, _)| crate::toolbar_custom::movable_in_menu(&tab, panel, id));
                             if let Some((id, before)) = menu_drop(ui, &placed, false, &|id| crate::toolbar_custom::group_index(&tab, panel, id)) {
                                 menu_move = Some((*panel, id, before));
                             }
