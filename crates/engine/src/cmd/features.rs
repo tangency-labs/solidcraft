@@ -673,7 +673,7 @@ pub(super) fn add_feature(s: &mut Session, p: &Value, kind: FeatureKind) -> Resu
 }
 
 /// `add_feature`; `world` is false when `kind` is already in the active component's frame.
-fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, world: bool) -> Result<Value> {
+pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, world: bool) -> Result<Value> {
     let name = str_(p, "name");
     // What a join makes of pieces that share no face (`Touching`): separate unless asked.
     let touching = match p.get("touching") {

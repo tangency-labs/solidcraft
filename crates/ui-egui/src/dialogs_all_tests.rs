@@ -142,6 +142,32 @@ fn primitive_dialog_remembers_values_without_reusing_its_picked_placement() {
 }
 
 #[test]
+fn end_cap_dialog_remembers_its_sizes() {
+    let mut h = Harness::new();
+    h.app.preferences.remember_dialog_values = true;
+    let mut cap = Dialog::for_command(&h.app, "frame.end_cap").unwrap();
+    let Kind::EndCap(c) = &mut cap.kind else { panic!("end cap dialog has the wrong kind") };
+    c.thickness = "8 mm".into();
+    c.direction = 1;
+    c.use_offset = true;
+    c.inset_kind = 1;
+    c.offset = "2 mm".into();
+    c.chamfer = "1 mm".into();
+    c.unresolved = vec![2];
+    remember(&mut h.app, &cap);
+    let recalled = Dialog::for_command(&h.app, "frame.end_cap").unwrap();
+    assert!(
+        matches!(
+            &recalled.kind,
+            Kind::EndCap(c) if c.thickness == "8 mm" && c.direction == 1 && c.use_offset && c.inset_kind == 1
+                && c.offset == "2 mm" && c.chamfer == "1 mm" && c.unresolved.is_empty()
+        ),
+        "{:?}",
+        recalled.kind
+    );
+}
+
+#[test]
 fn command_dialog_remembers_option_fields() {
     let mut h = Harness::new();
     h.app.preferences.remember_dialog_values = true;
@@ -337,7 +363,7 @@ fn check_form(command: &str, labels: &[&str]) {
     for input in &d.inputs {
         assert!(scenario::rect_of(&format!("dialog:field:{}", input.label)).is_some(), "{command}: selection field {}", input.label);
         assert!(
-            nodes.iter().any(|(_, n)| n.role() == egui::accesskit::Role::Button && n.label() == Some(input.label)),
+            nodes.iter().any(|(_, n)| n.role() == egui::accesskit::Role::Button && n.label() == Some(crate::i18n::tr(input.label))),
             "{command}: picker {} is a button",
             input.label
         );
@@ -420,9 +446,11 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
         "Operation" | "Type" | "Orientation" | "Move Type" | "Object Type" | "Rule" | "Rim Edge" | "Catch Direction" | "Shape" | "Holes" | "Size"
         | "Bend Line Position" | "From Snap" | "To Snap" | "Joint" | "Joint 1" | "Joint 2" | "Gear 1" | "Gear 2" | "Pinion" | "Rack" | "Screw"
         | "Nut" | "Cam" | "Follower" | "Anchor" => Role::ComboBox,
+        "Inset By" => Role::ComboBox,
         "Radius" if command == "joint.rack_pinion" => Role::Label,
         "Pitch" | "Form" | "Hand" | "Starts" | "Extent" | "Start" | "End" if command == "solid.thread" => Role::ComboBox,
         "Automatic size" | "Reverse" | "Other side" | "All Lines" | "Mirror" => Role::CheckBox,
+        "Offset" if command == "frame.end_cap" => Role::CheckBox,
         "Animate" => Role::Button,
         "Ratio" if command.starts_with("joint.") && command != "joint.motion_link" => return None,
         _ => Role::TextInput,
@@ -438,6 +466,7 @@ form_case!(revolve, "solid.revolve", ["Angle", "Direction", "Type"]);
 form_case!(shell, "solid.shell", ["Thickness", "Direction"]);
 form_case!(draft, "solid.draft", ["Angle"]);
 form_case!(mirror, "solid.mirror", ["Operation"]);
+form_case!(end_cap, "frame.end_cap", ["Thickness", "Direction", "Offset", "Corner Chamfer"]);
 
 /// The Motion Study's and Motion Trace's hints read in the user's language: the dialogs drew them
 /// as they got them, in English.

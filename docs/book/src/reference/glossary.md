@@ -206,6 +206,19 @@ A dimension can drive the sketch, or be driven by it and only show the value.
 - **Elsewhere:** dimension, dimensional constraint, driving dimension.
 - **For translators:** not a drawing dimension and not a measured value.
 
+### end cap
+
+A plate that closes the open end of a frame member, shaped like the member profile's outer outline
+and set in from its edge.
+
+An end cap is a separate body named after its member. Compare a mounting plate, which is
+rectangular or round and need not follow the profile.
+
+- **In SolidCraft:** `frame.end_cap`; the `frame_end_cap` design-file key.
+- **Don't use:** plug, lid, blank (for the plate).
+- **Elsewhere:** end cap, end plate, cap plate.
+- **For translators:** a closing plate on a tube's end, not a cap of a sketch or surface.
+
 ### equation curve
 
 A sketch curve whose shape comes from formulas over a range of one variable.
