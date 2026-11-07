@@ -113,6 +113,15 @@ impl Drawing {
         self.notes.check(MAX_NOTES, "note", |n| self.check_note(n))
     }
 
+    /// Where in `sheets` the sheet a note with `anchor` is on sits: its own sheet, or its view's.
+    pub fn sheet_of(&self, anchor: &Anchor) -> Option<usize> {
+        let sheet = match anchor {
+            Anchor::Sheet(sheet) => *sheet,
+            _ => self.view(anchor.view()?)?.sheet,
+        };
+        self.sheets.iter().position(|one| one.id == sheet)
+    }
+
     fn check_note(&self, n: &Note) -> Result<()> {
         match &n.anchor {
             Anchor::Sheet(sheet) => {

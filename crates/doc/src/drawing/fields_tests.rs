@@ -4,10 +4,13 @@ use std::sync::Arc;
 use serde_json::json;
 use solidcraft_geom::cell::Format;
 use solidcraft_geom::drawing_sheet::{self, DrawingBorderProfile, Orientation, PaperSize};
+use solidcraft_geom::drawing_view::{NamedView, ProjectedSide};
 use solidcraft_geom::title_block::default_block;
 
 use super::*;
-use crate::drawing::Sheet;
+use crate::drawing::view::{View, ViewPlace};
+use crate::drawing::{Sheet, Source as DrawingSource};
+use crate::drawing_view::{ViewDirection, ViewOverrides};
 use crate::ids::IdSource;
 use crate::metadata::Owner;
 
@@ -30,6 +33,7 @@ fn field(source: Source, key: &str) -> Part {
 }
 
 fn shown(d: &Drawing, sheet: usize, component: Option<Component>, parts: Vec<Part>) -> String {
+    let component = component.map_or(Documented::Nothing, Documented::Present);
     Values { drawing: d, sheet, component }.text(&Content(parts))
 }
 
@@ -137,4 +141,89 @@ fn unknown_fields_and_overrides_are_refused() {
         let refusal = wrong.validate().unwrap_err().to_string();
         assert!(refusal.contains(why), "{refusal}");
     }
+}
+
+/// Each field reads shown, empty or lost: lost only for a component's field when the sheet
+/// documents a component the design no longer has. The paper prints an empty and a lost field
+/// alike, as nothing, as it always has.
+#[test]
+fn each_field_is_shown_empty_or_lost() {
+    let d = drawing();
+    let metadata = Metadata::default();
+    let bracket = Component { name: "Bracket", metadata: &metadata, properties: None, material: None, mass: None };
+    let blank = BTreeMap::from([("finish".to_string(), String::new())]);
+    let state = |component, source, key| Values { drawing: &d, sheet: 0, component }.state(source, key);
+    let present = Documented::Present(bracket);
+    assert_eq!(state(present, Source::Component, "name"), FieldState::Shown("Bracket".into()));
+    assert_eq!(state(present, Source::Component, "material"), FieldState::Empty);
+    let finish = Documented::Present(Component { properties: Some(&blank), ..bracket });
+    assert_eq!(state(finish, Source::Component, "properties.finish"), FieldState::Empty, "an empty value is empty");
+    assert_eq!(state(Documented::Nothing, Source::Component, "name"), FieldState::Empty);
+    assert_eq!(state(Documented::Gone, Source::Component, "name"), FieldState::Lost);
+    assert_eq!(state(Documented::Gone, Source::Component, "mass"), FieldState::Lost);
+    // Only the component's own fields are lost: the drawing's and the sheet's still read.
+    assert_eq!(state(Documented::Gone, Source::Drawing, "name"), FieldState::Shown("Bracket drawing".into()));
+    assert_eq!(state(Documented::Gone, Source::Drawing, "number"), FieldState::Empty);
+    assert_eq!(state(Documented::Gone, Source::Sheet, "name"), FieldState::Shown("Sheet 1".into()));
+    let parts = Content(vec![Part::Text("Material: ".into()), field(Source::Component, "material"), Part::Text(".".into())]);
+    for component in [Documented::Gone, Documented::Nothing, present] {
+        assert_eq!(Values { drawing: &d, sheet: 0, component }.text(&parts), "Material: .");
+    }
+}
+
+/// A sheet's scale is the one its base views share, written as a view's scale is: a projected view's
+/// own scale and another sheet's are not it. Base views at different scales give none, whichever
+/// was placed first and whichever id is lower. A sheet without a base view shows the one scale its
+/// views draw at (projected views of a base on another sheet), and none when they differ or it has
+/// no views.
+#[test]
+fn a_sheets_scale_is_the_one_its_base_views_share() {
+    let mut d = drawing();
+    let scale = |d: &Drawing| [0, 1, 2].map(|at| shown(d, at, None, vec![field(Source::Sheet, "scale")]));
+    assert_eq!(scale(&d), ["", "", ""]);
+    let mut ids = IdSource::seeded(13059);
+    let source = d.allocate_id(&mut ids).unwrap();
+    d.sources.push(DrawingSource { id: source });
+    let [side, front, other, top] = [(); 4].map(|()| d.allocate_id(&mut ids).unwrap());
+    let (first, second) = (d.sheets[0].id, d.sheets[1].id);
+    let view = |id, sheet, kind, scale: &str| {
+        let settings = ViewOverrides { scale: Some(scale.parse().unwrap()), ..ViewOverrides::default() };
+        Arc::new(View { id, sheet, kind, place: ViewPlace::At([150.0, 150.0]), settings, reference_shown_percent: 0.0 })
+    };
+    let base = |named| ViewKind::Base { source, view: ViewDirection::Named(named) };
+    d.add_views([
+        view(side, first, ViewKind::Projected { parent: front, side: ProjectedSide::Right }, "5:1"),
+        view(front, first, base(NamedView::Front), "1:2"),
+        view(other, second, base(NamedView::Front), "1:5"),
+        view(top, first, base(NamedView::Top), "2:1"),
+    ]);
+    d.validate().unwrap();
+    // Front was placed first and Top last; the seed's ids put Top first. Neither decides.
+    assert!(top < front, "the seed's ids disagree with the order the views were placed in");
+    assert_eq!(scale(&d), ["", "1:5", ""], "1:2 and 2:1 on one sheet: no scale of the sheet's");
+    let at = d.views.iter().position(|v| v.id == top).unwrap();
+    let settings = ViewOverrides { scale: Some("1:2".parse().unwrap()), ..d.views[at].settings.clone() };
+    d.views[at] = Arc::new(View { settings, ..(*d.views[at]).clone() });
+    assert_eq!(scale(&d), ["1:2", "1:5", ""], "the scale both base views share; the projected view's 5:1 isn't");
+    // The third sheet holds only projected views of the 1:2 front on the first, placed at points.
+    let third = d.sheets[2].id;
+    let [left, below] = [(); 2].map(|()| d.allocate_id(&mut ids).unwrap());
+    let projected = |id, side| {
+        let kind = ViewKind::Projected { parent: front, side };
+        Arc::new(View {
+            id,
+            sheet: third,
+            kind,
+            place: ViewPlace::At([150.0, 150.0]),
+            settings: ViewOverrides::default(),
+            reference_shown_percent: 0.0,
+        })
+    };
+    d.add_views([projected(left, ProjectedSide::Left), projected(below, ProjectedSide::Below)]);
+    d.validate().unwrap();
+    assert_eq!(scale(&d), ["1:2", "1:5", "1:2"], "a sheet of projected views only: the scale they draw at");
+    let at = d.views.iter().position(|v| v.id == below).unwrap();
+    let settings = ViewOverrides { scale: Some("2:1".parse().unwrap()), ..d.views[at].settings.clone() };
+    d.views[at] = Arc::new(View { settings, ..(*d.views[at]).clone() });
+    assert_eq!(scale(&d), ["1:2", "1:5", ""], "its views draw at 1:2 and 2:1: no scale of the sheet's");
 }

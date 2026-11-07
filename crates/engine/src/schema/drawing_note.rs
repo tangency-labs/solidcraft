@@ -8,7 +8,7 @@ use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
-use solidcraft_geom::cell::{Content, Part};
+use solidcraft_geom::cell::{Content, Part, Source};
 
 use super::drawing_dimension::{CandidateResult, CornerParam, EdgeParam};
 use super::drawing_sheet::sheet_ref;
@@ -158,10 +158,30 @@ pub struct NoteResult {
     pub exact: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub candidates: Vec<CandidateResult>,
+    /// What it says now, each field read for its sheet: a field with no value says nothing.
+    pub text: String,
+    /// Each field it reads, in order, as its sheet reads it now.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<FieldResult>,
     /// What to know about it: a view edited since to leave out what its leader points at.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// One field a note reads.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct FieldResult {
+    /// `component`, `drawing`, `sheet` or `revision`.
+    #[schemars(with = "String")]
+    pub source: Source,
+    pub key: String,
+    /// `shown`; `empty`: its source has no value for it; or `lost`: its sheet documents a
+    /// component the design no longer has.
+    pub state: String,
+    /// What it shows, when shown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
 }

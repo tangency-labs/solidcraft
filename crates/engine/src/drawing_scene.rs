@@ -644,8 +644,10 @@ fn drawn_notes(
         let base =
             DrawnDimension { dimension: note.id, view, kind: ObjectKind::Note, status, group: None, fonts: Vec::new(), why: None, pending: false };
         let (Some(resolved), Some((frame, group))) = (resolved, frame(view)) else { return base };
-        let sheet = d.view(view).and_then(|v| d.sheets.iter().position(|sheet| sheet.id == v.sheet));
-        let text = sheet.and_then(|at| title_block_text::read(&s.doc, tree, d, at, std::iter::once(&note.content)).pop()).unwrap_or_default();
+        let text = d
+            .sheet_of(&note.anchor)
+            .and_then(|at| title_block_text::read(&s.doc, tree, d, at, std::iter::once(&note.content)).pop())
+            .unwrap_or_default();
         let tip = resolved.point.map(|p| frame.to_paper(p));
         // Centred on the view, as its frame is: the scene moves it to the view's centre.
         let paper = crate::drawing_note_paper::note_group(note, &text, tip, LineKind::Thin.width_mm(group), lettering);

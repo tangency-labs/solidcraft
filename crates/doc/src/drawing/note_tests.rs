@@ -190,6 +190,20 @@ fn an_anchor_moves_to_a_view() {
     assert_eq!(Anchor::View(2).view(), Some(2));
 }
 
+/// A note is on its own sheet, or on its view's; a view the drawing doesn't have is on none.
+#[test]
+fn a_note_is_on_its_sheet_or_its_views() {
+    let (mut d, _) = noted();
+    let (sheet, view) = (d.sheets[0].id, d.views[0].id);
+    let mut id_source = IdSource::seeded(SEED + 1);
+    let second = d.allocate_id(&mut id_source).unwrap();
+    d.sheets.insert(0, Arc::new(crate::drawing::Sheet { id: second, name: "Sheet 0".into(), ..(*d.sheets[0]).clone() }));
+    let edge = ModelEdge { body: "B".into(), origin_feature: 4, name: "e".into(), path: vec![] };
+    let anchors = [Anchor::Sheet(second), Anchor::Sheet(sheet), Anchor::View(view), Anchor::Edge { view, edge }];
+    assert_eq!(anchors.map(|anchor| d.sheet_of(&anchor)), [Some(0), Some(1), Some(1), Some(1)]);
+    assert_eq!([Anchor::Sheet(99), Anchor::View(99)].map(|anchor| d.sheet_of(&anchor)), [None, None]);
+}
+
 /// Seeded mutations of a noted drawing's file never panic, and whatever reads again keeps the rules.
 #[test]
 fn mutated_note_files_read_or_are_refused() {

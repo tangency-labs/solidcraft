@@ -18,7 +18,7 @@ use solidcore_record::Vec2;
 use solidcraft_doc::Document;
 use solidcraft_doc::bom::{Mass, Tree};
 use solidcraft_doc::drawing::Drawing;
-use solidcraft_doc::drawing::fields::{Component, Values};
+use solidcraft_doc::drawing::fields::{Component, Documented, Values};
 use solidcraft_geom::cell::{Content, HAlign, Part, Source, Warning, place_lines};
 use solidcraft_geom::paper::text::{Font, TextRun};
 use solidcraft_geom::title_block::{CellKind, TextCell, TitleBlock, TitleBlockLayout};
@@ -87,18 +87,33 @@ pub fn shown(doc: &Document, tree: &mut Tree<'_>, d: &Drawing, at: usize) -> Vec
 /// ([`Values::text`]). The component the sheet documents is weighed in `tree` only when a field reads
 /// its material or mass. A title block's cells and a note's text read their fields by this one rule.
 pub fn read<'c>(doc: &Document, tree: &mut Tree<'_>, d: &Drawing, at: usize, contents: impl Iterator<Item = &'c Content> + Clone) -> Vec<String> {
-    let weighs = contents
-        .clone()
-        .flat_map(|content| &content.0)
-        .any(|part| matches!(part, Part::Field { source: Source::Component, key, .. } if key == "material" || key == "mass"));
+    with_values(doc, tree, d, at, contents.clone(), |values| contents.map(|content| values.text(content)).collect())
+}
+
+/// `answer` given what sheet `at` of `d` reads its fields from ([`Values`]), for `contents`: the
+/// component the sheet documents is weighed in `tree` only when one of them reads its material or
+/// mass. [`read`] and a note's inspect read through this one rule.
+pub fn with_values<'c, R>(
+    doc: &Document,
+    tree: &mut Tree<'_>,
+    d: &Drawing,
+    at: usize,
+    mut contents: impl Iterator<Item = &'c Content>,
+    answer: impl FnOnce(&Values) -> R,
+) -> R {
+    let weighs = contents.any(|content| {
+        content.0.iter().any(|part| matches!(part, Part::Field { source: Source::Component, key, .. } if key == "material" || key == "mass"))
+    });
     // What the model says of the component it documents: a component since deleted has nothing.
     let id = d.sheets.get(at).and_then(|sheet| sheet.documents).map(|documents| documents.component);
     let (mass, materials) = id.filter(|_| weighs).and_then(|id| tree.component(id).ok()).unzip();
     let mass = mass.and_then(|mass| if let Mass::Grams(grams) = mass { Some(format_mass(grams)) } else { None });
     let material = materials.filter(|m| !m.is_empty()).map(|m| m.join("; "));
-    let component = id.and_then(|id| documented(doc, id, material.as_deref(), mass.as_deref()));
-    let values = Values { drawing: d, sheet: at, component };
-    contents.map(|content| values.text(content)).collect()
+    let component = match id {
+        None => Documented::Nothing,
+        Some(id) => documented(doc, id, material.as_deref(), mass.as_deref()).map_or(Documented::Gone, Documented::Present),
+    };
+    answer(&Values { drawing: d, sheet: at, component })
 }
 
 /// Component `id` of the design (0: the design itself) as a title block's fields read it, with

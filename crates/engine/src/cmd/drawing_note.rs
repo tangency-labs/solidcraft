@@ -7,14 +7,17 @@
 use std::sync::Arc;
 
 use serde_json::Value;
+use solidcraft_doc::bom::Tree;
+use solidcraft_doc::drawing::fields::{FieldState, Values};
 use solidcraft_doc::drawing::note::{Anchor, Note};
 use solidcraft_doc::ids;
+use solidcraft_geom::cell::{Content, Part};
 
 use super::CommandSpec;
 use super::drawing_dimension::status_words;
 use super::drawing_view::{check_drawn, drawn_warning};
 use crate::params::bad;
-use crate::schema::drawing_note::{AddParams, AnchorParam, EditParams, EditResult, InspectParams, NoteResult};
+use crate::schema::drawing_note::{AddParams, AnchorParam, EditParams, EditResult, FieldResult, InspectParams, NoteResult};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
@@ -58,8 +61,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<NoteResult>)
         .params(
             "note: its id → {note, record: as saved, status: ok, ambiguous, suppressed or lost, why?, point?: where its leader ends, in the \
-             design's frame, exact, candidates?: [{edge: {body, index}}], warnings?: its view edited since to leave out the part its leader points \
-             at}. A lost reference keeps the note and its text in place, without a \
+             design's frame, exact, candidates?: [{edge: {body, index}}], text: what it says now, its fields read for its sheet, \
+             fields?: [{source, key, state: shown, empty or lost (its sheet documents a component the design no longer has), value?}], \
+             warnings?: its view edited since to leave out the part its leader points at}. A lost reference keeps the note and its text in place, without a \
              leader. Read-only; no model is evaluated.",
         ),
 ];
@@ -132,6 +136,10 @@ fn answer(s: &Session, cmd: &str, id: u64) -> Result<Value> {
     let resolved = s.doc.resolve_notes(&s.model, d, &[id]).map_err(|e| bad(cmd, e.to_string()))?;
     let r = resolved.into_iter().next().ok_or_else(|| bad(cmd, format!("note {} wasn't read", ids::encode(id))))?;
     let (status, why, candidates) = status_words(r.status);
+    let state = s.model.state();
+    let read = |values: &Values| (values.text(&note.content), fields(values, &note.content));
+    let at = d.sheet_of(&note.anchor).ok_or_else(|| bad(cmd, format!("note {} is on no sheet", ids::encode(id))))?;
+    let (text, fields) = crate::title_block_text::with_values(&s.doc, &mut Tree::new(&s.doc, &state), d, at, std::iter::once(&note.content), read);
     let reply = NoteResult {
         note: ids::encode(id),
         record: serde_json::to_value(note).map_err(|e| EngineError::Other(e.to_string()))?,
@@ -140,6 +148,8 @@ fn answer(s: &Session, cmd: &str, id: u64) -> Result<Value> {
         point: r.point.map(|p| [p.x, p.y, p.z]),
         exact: r.exact,
         candidates,
+        text,
+        fields,
         warnings: match (note.anchor.view(), note.anchor.path()) {
             (Some(view), Some(path)) => drawn_warning(d, view, [path]),
             _ => Vec::new(),
@@ -147,6 +157,20 @@ fn answer(s: &Session, cmd: &str, id: u64) -> Result<Value> {
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+/// Each field `content` reads, in order, as `values` read it.
+fn fields(values: &Values, content: &Content) -> Vec<FieldResult> {
+    let field = |part: &Part| {
+        let Part::Field { source, key, .. } = part else { return None };
+        let (state, value) = match values.state(*source, key) {
+            FieldState::Shown(value) => ("shown", Some(value)),
+            FieldState::Empty => ("empty", None),
+            FieldState::Lost => ("lost", None),
+        };
+        Some(FieldResult { source: *source, key: key.clone(), state: state.into(), value })
+    };
+    content.0.iter().filter_map(field).collect()
 }
 
 #[cfg(test)]
