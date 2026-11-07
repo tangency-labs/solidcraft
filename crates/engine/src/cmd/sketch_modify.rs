@@ -1958,14 +1958,25 @@ fn meet_lines(sk: &mut Sketch, p: &Value, cmd: &str) -> Result<()> {
     for c in sk.curves.iter_mut() {
         c.kind.map_points(&|x| if x == nb { na } else { x });
     }
-    let mut kept: Vec<solidcraft_sketch::Constraint> = Vec::with_capacity(sk.constraints.len());
+    // Only a constraint the move changed can now repeat another: such a repeat is said once. Equal
+    // constraints elsewhere in the sketch are not this fillet's to touch.
+    let mut moved: Vec<(solidcraft_sketch::Constraint, bool)> = Vec::with_capacity(sk.constraints.len());
     for mut k in std::mem::take(&mut sk.constraints) {
+        let before = k.kind.clone();
         k.kind.remap(&|x| Some(if x == nb { na } else { x }), &Some);
-        // Two of the same constraint on the one corner say it once.
-        if !kept.iter().any(|x| x.kind == k.kind && x.param == k.param) {
-            kept.push(k);
-        }
+        let changed = k.kind != before;
+        moved.push((k, changed));
     }
+    let same = |a: &solidcraft_sketch::Constraint, b: &solidcraft_sketch::Constraint| a.kind == b.kind && a.param == b.param;
+    let repeats: Vec<bool> = moved
+        .iter()
+        .enumerate()
+        .map(|(i, (k, changed))| {
+            *changed && moved.iter().enumerate().any(|(j, (o, o_changed))| j != i && same(k, o) && (j < i || !*o_changed))
+        })
+        .collect();
+    let kept: Vec<solidcraft_sketch::Constraint> =
+        moved.into_iter().zip(repeats).filter(|(_, repeat)| !repeat).map(|((k, _), _)| k).collect();
     sk.constraints = kept;
     sk.remove_points(&[nb]);
     Ok(())
