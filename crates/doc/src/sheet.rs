@@ -459,7 +459,9 @@ fn slit_loop(lp: &mut Loop2, at: Vec2, tip: Vec2) -> bool {
 /// outward of the bend line: that cut has nothing left to part, an empty stretch of the line rather
 /// than a failed lookup. A re-entrant notch pattern leaves the line crossing material several
 /// times, and each of those stretches is a bridge the folded part separates along, so each one is
-/// returned.
+/// returned. Only the stretch of the line from the bend line out to the junction's own tip belongs
+/// to this junction: past it the line runs on through material the bend never reaches (a C-shaped
+/// blank's other arm, for one), which it does not cut.
 fn clip_junction_slits(lp: &Loop2, at: Vec2, tip: Vec2) -> Vec<(Vec2, Vec2)> {
     let d = tip - at;
     let len = d.len();
@@ -467,6 +469,9 @@ fn clip_junction_slits(lp: &Loop2, at: Vec2, tip: Vec2) -> Vec<(Vec2, Vec2)> {
         return Vec::new();
     }
     let u = d / len;
+    // How far past the tip a crossing may lie and still count: the same 1e-6 mm the slit's own
+    // anchor and endpoint tests use.
+    const SLACK: f64 = 1e-6;
     // Where the junction line crosses the boundary, nearest the bend line first. A line and a
     // circular arc are intersected exactly, so the crossing is a point of the curve itself and the
     // 1e-6 anchor tolerance of `slit_loop` finds it; only free-form segments follow the 0.001 mm
@@ -482,7 +487,7 @@ fn clip_junction_slits(lp: &Loop2, at: Vec2, tip: Vec2) -> Vec<(Vec2, Vec2)> {
                 }
                 let t = (a - at).cross(e) / den;
                 let s = (at - a).cross(u) / e.cross(u);
-                if t < -1e-9 || !(-1e-9..=1.0 + 1e-9).contains(&s) {
+                if t < -1e-9 || t > len + SLACK || !(-1e-9..=1.0 + 1e-9).contains(&s) {
                     continue;
                 }
                 hits.push((t.max(0.0), at + u * t));
@@ -498,7 +503,7 @@ fn clip_junction_slits(lp: &Loop2, at: Vec2, tip: Vec2) -> Vec<(Vec2, Vec2)> {
                 }
                 let root = disc.sqrt();
                 for t in [-b - root, -b + root] {
-                    if t < -1e-9 {
+                    if t < -1e-9 || t > len + SLACK {
                         continue;
                     }
                     let turn = ((at + u * t - center).angle() - start) * sweep.signum();
@@ -523,7 +528,7 @@ fn clip_junction_slits(lp: &Loop2, at: Vec2, tip: Vec2) -> Vec<(Vec2, Vec2)> {
                     }
                     let t = (a - at).cross(e) / den;
                     let s = (at - a).cross(u) / e.cross(u);
-                    if t < -1e-9 || !(-1e-9..=1.0 + 1e-9).contains(&s) {
+                    if t < -1e-9 || t > len + SLACK || !(-1e-9..=1.0 + 1e-9).contains(&s) {
                         continue;
                     }
                     hits.push((t.max(0.0), at + u * t));
@@ -6889,6 +6894,41 @@ mod tests {
         let area: f64 = regions.iter().map(Region2::area).sum();
         assert!((area - (5400.0 - std::f64::consts::PI * 25.0)).abs() < 1e-6);
         assert!((vol(&s.flat_solid().unwrap()) - area * 2.5).abs() < 0.1);
+    }
+
+    #[test]
+    fn a_junction_cut_stops_at_its_own_tip() {
+        // A C-shaped blank: the bar y 0…100, the left arm x 0…30 down to y −40 and the foot
+        // y −40…−30 across to x 200, the flange zone x 30…200 down to its far edge at
+        // y = 3 − (π + 17). The junction line at x = 50 runs from the bend line (50, 3) out to that
+        // far edge; past its tip lies the foot, which the junction does not cut.
+        let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
+        let far = 3.0 - (std::f64::consts::PI + 17.0);
+        let lp = Loop2 {
+            segs: vec![
+                line(Vec2::new(0.0, 100.0), Vec2::new(200.0, 100.0)),
+                line(Vec2::new(200.0, 100.0), Vec2::new(200.0, far)),
+                line(Vec2::new(200.0, far), Vec2::new(30.0, far)),
+                line(Vec2::new(30.0, far), Vec2::new(30.0, -30.0)),
+                line(Vec2::new(30.0, -30.0), Vec2::new(200.0, -30.0)),
+                line(Vec2::new(200.0, -30.0), Vec2::new(200.0, -40.0)),
+                line(Vec2::new(200.0, -40.0), Vec2::new(0.0, -40.0)),
+                line(Vec2::new(0.0, -40.0), Vec2::new(0.0, 100.0)),
+            ],
+        };
+        let at = Vec2::new(50.0, 3.0);
+        let tip = Vec2::new(50.0, far);
+        let slits = clip_junction_slits(&lp, at, tip);
+        assert_eq!(slits.len(), 1, "the junction cut the foot past its own tip: {slits:?}");
+        assert!(
+            slits[0].0.dist(tip) <= 1e-6 && slits[0].1.dist(at) <= 1e-6,
+            "the junction's own cut is not from the bend line to its tip: {slits:?}"
+        );
+        // The foot's own edges are whole: no returned cut crosses y −30…−40 at x = 50.
+        assert!(
+            !slits.iter().any(|(a, b)| (a.x - 50.0).abs() < 1e-6 && (b.x - 50.0).abs() < 1e-6 && a.y < -29.0 && b.y < -29.0),
+            "a cut was returned in the foot, past the junction's tip: {slits:?}"
+        );
     }
 
     #[test]

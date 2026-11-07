@@ -122,7 +122,10 @@ falls back to the edge's own value, then the feature's.
   far edge away, the cut is clipped to the material that is left: it runs from the bend line to the
   nearest boundary the junction line meets (a notch's edge, for one), so the blank is parted as far
   as its remaining material allows; a line and a circular arc are met exactly, so a round notch ends
-  the cut on the arc itself, which the DXF splits there. A junction with no material left outward of
+  the cut on the arc itself, which the DXF splits there. Only the stretch of the line from the bend
+  line out to the junction's own tip belongs to that junction: past the tip the line runs on through
+  material the bend never reaches (another arm of a C-shaped blank, for one), and that material keeps
+  no cut. A junction with no material left outward of
   the bend line has nothing to part and is left alone. Same-side stretches stay
   one piece. A junction the command accepts within `SEGMENT_JOIN_EPS` is snapped shut, and a
   stretch narrower than that tolerance is no bend of its own: the run before it takes that stretch
@@ -280,7 +283,11 @@ which edge is "the long edge" on a near-square part) before building.
   away. Expressions that read the survivor's name still read its height; a deleted stretch's name
   never lands on a stretch whose value came from elsewhere. A segment input is keyed by its edge's
   pick point, the physical edge, not by the edge's place in the list: reordering the `edges` list
-  keeps every name on its own edge's stretch.
+  keeps every name on its own edge's stretch. A pick point that moves by a hair still names the same
+  edge: two picks within the document's pick tolerance (`appearance::pick_tolerance`, 1e-6 mm where
+  no body applies) are the same edge, so redefining with a nudged pick keeps the edge's and its
+  stretches' names; a pick that moved further still takes the nearest edge point on the same feature
+  within a sane bound, and a genuinely different edge keeps its own name.
 - **`flip` is per segment:** it replaces the feature's `flip` outright for that stretch: `false` is
   the default direction and `true` the other one, whatever the feature's `flip` is. It is not a turn
   relative to the feature.

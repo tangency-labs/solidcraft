@@ -920,3 +920,82 @@ fn every_surviving_bridge_of_a_junction_is_cut() {
     let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
     assert!(errors.is_empty(), "unfold: {errors:?}");
 }
+
+/// A junction cut is the junction's own: on a C-shaped blank the junction line runs on past its tip
+/// through the foot, and only the stretch from the bend line to the far edge belongs to this
+/// junction. Cutting past the tip slit the foot, which the DXF carried as a cut in material the
+/// bend never reaches (FR-7 #5932).
+#[test]
+fn a_junction_cut_stops_at_its_own_tip_on_a_c_shaped_blank() {
+    let mut s = sheet_of_2mm();
+    // A C-shaped blank: the bar y 0…100, the left arm x 0…30 down to y −40, the foot y −40…−30
+    // across to x 200 and the opening x 30…200, y −30…0. The flange's edge is the bar's bottom edge
+    // in the opening, x 30…200, so the junction at 20/170 of it is at x = 50.
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Base"}));
+    run(&mut s, "sketch.line", json!({"points":[[0,100],[200,100],[200,0],[30,0],[30,-30],[200,-30],[200,-40],[0,-40]],"closed":true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch":"Base"}));
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[100,0,2],"segments":[
+            {"from":0,"to":20.0/170.0,"angle":"90 deg","height":"20 mm","flip":false},
+            {"from":20.0/170.0,"to":1,"angle":"90 deg","height":"20 mm","flip":true}]}],
+            "height":"20 mm","angle":"90 deg"}),
+    );
+    run(&mut s, "sheet.unfold", json!({}));
+    // The far-edge notch of the fixture, across the junction's far edge (y −17.14): the material
+    // left at x = 50 ends at y −10, while the foot at y −30…−40 lies past the junction's tip.
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Notch"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[49,-18],"p1":[51,-10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch":"Notch","through_all":true,"operation":"cut","direction":"symmetric"}));
+    let bend = Vec2::new(50.0, 3.0);
+    let left = Vec2::new(50.0, -10.0);
+    let cut = |lp: &solidcore_record::Loop2, a: Vec2, b: Vec2| {
+        lp.segs.iter().any(|s| matches!(s, Seg2::Line { a: p, b: q } if p.dist(a) < 1e-6 && q.dist(b) < 1e-6))
+    };
+    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    assert!(
+        regions.iter().any(|r| cut(&r.outer, bend, left) && cut(&r.outer, left, bend)),
+        "the blank is not cut from the bend line to the notch's edge: {:?}",
+        regions.iter().map(|r| r.outer.segs.len()).collect::<Vec<_>>()
+    );
+    // Nothing slits the foot: no cut crosses y −30…−40 at x = 50.
+    let foot_cut = |lp: &solidcore_record::Loop2| {
+        lp.segs.iter().any(|s| match *s {
+            Seg2::Line { a, b } => (a.x - 50.0).abs() < 1e-6 && (b.x - 50.0).abs() < 1e-6 && a.y > -30.5 && a.y < -29.5 && b.y > -40.5 && b.y < -39.5,
+            _ => false,
+        })
+    };
+    assert!(
+        !regions.iter().any(|r| foot_cut(&r.outer)),
+        "the junction cut the foot past its own tip: {:?}",
+        regions.iter().map(|r| r.outer.segs.len()).collect::<Vec<_>>()
+    );
+    // The DXF carries the junction's own cut and no cut across the foot.
+    let outline: Vec<(Vec2, Vec2)> = entities(&export(&mut s, json!({})))
+        .iter()
+        .filter(|e| e.0 == "LINE" && layer_of(e) == "OUTLINE")
+        .map(|e| (point(e, 10), point(e, 11)))
+        .collect();
+    let near = |p: Vec2, q: Vec2| p.dist(q) < 1e-6;
+    let both_ways = |lines: &[(Vec2, Vec2)], a: Vec2, b: Vec2| {
+        lines.iter().any(|&(p, q)| near(p, a) && near(q, b)) && lines.iter().any(|&(p, q)| near(p, b) && near(q, a))
+    };
+    assert!(both_ways(&outline, bend, left), "the DXF has no clipped junction cut: {outline:?}");
+    assert!(
+        !outline.iter().any(|&(a, b)| (a.x - 50.0).abs() < 1e-6
+            && (b.x - 50.0).abs() < 1e-6
+            && a.y < -29.5
+            && a.y > -40.5
+            && b.y < -29.5
+            && b.y > -40.5),
+        "the DXF cuts the foot past the junction's tip: {outline:?}"
+    );
+    // The cut leaves the part one piece, and refolding then unfolding builds it.
+    run(&mut s, "sheet.refold", json!({}));
+    run(&mut s, "sheet.unfold", json!({}));
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "unfold: {errors:?}");
+}

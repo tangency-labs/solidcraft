@@ -1795,6 +1795,60 @@ fn edge_point(key: &str) -> Option<[u64; 3]> {
     Some(point)
 }
 
+/// The pick point a `sheet.flange` key carries, decoded from the bits it stores, and what the key
+/// names after that point: its field, and for a segment its stretch.
+fn key_point(key: &str) -> Option<([f64; 3], &str)> {
+    let rest = key.strip_prefix("sheet.flange.edge")?;
+    let (point, named) = rest.split_once('.')?;
+    let point: Vec<f64> = point.split(',').map(|bits| bits.parse::<u64>().ok().map(f64::from_bits)).collect::<Option<_>>()?;
+    let point: [f64; 3] = point.try_into().ok()?;
+    Some((point, named))
+}
+
+/// How far apart two pick points are.
+fn point_distance(a: [f64; 3], b: [f64; 3]) -> f64 {
+    let d = [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+}
+
+/// Whether two pick points, as the bits a key stores, are within `tol` of each other.
+fn points_within(a: [u64; 3], b: [u64; 3], tol: f64) -> bool {
+    point_distance(a.map(f64::from_bits), b.map(f64::from_bits)) <= tol
+}
+
+/// The tolerance within which two pick points name the same edge: the distance the document lets a
+/// pick miss an edge by and still select it (`appearance::pick_tolerance` of the sheet body the
+/// feature is on), or 1e-6 mm when the model does not hold that body yet. A pick point that moves
+/// by a hair is the same edge, so the names on it stay (#5927, #5928).
+fn edge_pick_tolerance(s: &Session, kind: &FeatureKind) -> f64 {
+    const NONE: f64 = 1e-6;
+    let FeatureKind::SheetFlange { body, edges, .. } = kind else { return NONE };
+    let state = s.model.state();
+    // The body named, else the sheet the first pick point lands on: the one evaluation takes the
+    // feature's body from (`sheet_for`).
+    let sheet = match body {
+        Some(name) => state.sheets.iter().find(|sh| sh.body == name.0),
+        None => edges.first().and_then(|e| {
+            state.sheets.iter().filter_map(|sh| sh.edge_at(e.point.0).map(|at| (sh, at.4))).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(sh, _)| sh)
+        }),
+    };
+    sheet.and_then(|sh| state.body(&sh.body)).map_or(NONE, solidcraft_doc::appearance::pick_tolerance)
+}
+
+/// Whether an old key and a new key name the same input: the same key, or the same field (and, for
+/// a segment, the same stretch) on pick points within `tol` of each other. The keys keep the bits
+/// of their point, so a point that moved by a hair no longer matches as a string; it is the same
+/// edge all the same (#5927, #5928).
+fn keys_match(old_key: &str, key: &str, tol: f64) -> bool {
+    if old_key == key {
+        return true;
+    }
+    match (key_point(old_key), key_point(key)) {
+        (Some((a, named)), Some((b, named_too))) => named == named_too && point_distance(a, b) <= tol,
+        _ => false,
+    }
+}
+
 fn input_keys(kind: &FeatureKind) -> Vec<(String, solidcraft_doc::expr::Kind)> {
     let mut keys: Vec<_> = kind.inputs().into_iter().map(|(label, _, unit)| (label.to_string(), unit)).collect();
     if let FeatureKind::Fillet { style, .. } = kind {
@@ -2020,9 +2074,29 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         .map(|(((key, kind), (label, expression, _)), name)| (key, label.to_string(), kind, name.clone(), expression))
         .collect();
     let keys = input_keys(&new.kind);
+    // Two pick points within the document's own pick tolerance name the same edge: a pick that
+    // moved by a hair keeps the names on its edge and on its stretches, and the expressions that
+    // read them (#5927, #5928). A feature whose body the model does not hold yet falls back to
+    // 1e-6 mm.
+    let tol = edge_pick_tolerance(s, &old.kind);
     let mut param_names: Vec<String> = vec![String::new(); keys.len()];
     for (i, (key, kind)) in keys.iter().enumerate() {
-        if let Some(k) = old_inputs.iter().position(|(old_key, _, old_kind, _, _)| old_key == key && old_kind == kind) {
+        // The old input naming the same input with the nearest point: the exact key, or the same
+        // field (and stretch) on a point within the tolerance.
+        let mut best: Option<(usize, f64)> = None;
+        for (k, (old_key, _, old_kind, _, _)) in old_inputs.iter().enumerate() {
+            if old_kind != kind || !keys_match(old_key, key, tol) {
+                continue;
+            }
+            let distance = match (key_point(old_key), key_point(key)) {
+                (Some((a, _)), Some((b, _))) => point_distance(a, b),
+                _ => 0.0,
+            };
+            if best.is_none_or(|(_, nearest)| distance < nearest) {
+                best = Some((k, distance));
+            }
+        }
+        if let Some((k, _)) = best {
             param_names[i] = old_inputs.remove(k).3.clone();
         }
     }
@@ -2032,7 +2106,8 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     // still has the value it had. Only then does the greatest span overlap on the same edge carry a
     // name. A deleted stretch's name never lands on a stretch whose value came from elsewhere
     // (#5927, #5928). An edge's own angle or height is keyed by its pick point and matched by that
-    // point alone, so an edge deleted and another inserted in one redefine move no name across.
+    // point within the tolerance, so an edge deleted and another inserted in one redefine move no
+    // name across.
     for (i, (key, kind)) in keys.iter().enumerate() {
         if !param_names[i].is_empty() {
             continue;
@@ -2044,7 +2119,9 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                     continue;
                 }
                 let Some((old_point, old_from, old_to)) = segment_span(old_key) else { continue };
-                if old_point != point {
+                // The stretch's edge is its pick point, within the same tolerance: a pick that moved
+                // by a hair keeps the stretch's name (#5927, #5928).
+                if !points_within(old_point, point, tol) {
                     continue;
                 }
                 let same_value = *old_expression == new_inputs[i].1;
@@ -2068,13 +2145,27 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
             continue;
         }
         if let Some(point) = edge_point(key) {
-            // An edge's own angle or height is keyed by the edge's pick point, so the exact-key match
-            // above kept a surviving edge's name. A newly inserted edge has no old input at its
-            // point and keeps the constructor's name: a deleted edge's name never lands on it
-            // (#5927, #5928).
-            if let Some(k) = old_inputs.iter().position(|(old_key, old_label, old_kind, _, _)| {
-                *old_label == new_labels[i] && old_kind == kind && segment_span(old_key).is_none() && edge_point(old_key) == Some(point)
-            }) {
+            // An edge's own angle or height is keyed by the edge's pick point, and the key match
+            // above took a point within the pick tolerance. When no old point was that close, the
+            // nearest edge point on this feature still names the edge the pick moved to, within a
+            // sane bound: twice the tolerance, and a hundredth of a millimetre at least, for a
+            // feature whose body the model does not hold yet. Beyond that bound the nearest point is
+            // not the edge that was picked, and a newly inserted edge keeps the constructor's name:
+            // a deleted edge's name never lands on it (#5927, #5928).
+            let bound = (tol * 2.0).max(1e-2);
+            let mut best: Option<(usize, f64)> = None;
+            for (k, (old_key, old_label, old_kind, _, _)) in old_inputs.iter().enumerate() {
+                if *old_label != new_labels[i] || old_kind != kind || segment_span(old_key).is_some() {
+                    continue;
+                }
+                let Some(old_point) = edge_point(old_key) else { continue };
+                let distance = point_distance(old_point.map(f64::from_bits), point.map(f64::from_bits));
+                if distance > bound || best.is_some_and(|(_, nearest)| distance >= nearest) {
+                    continue;
+                }
+                best = Some((k, distance));
+            }
+            if let Some((k, _)) = best {
                 param_names[i] = old_inputs.remove(k).3.clone();
             }
             continue;

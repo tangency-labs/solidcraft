@@ -1995,3 +1995,149 @@ fn deleting_an_edge_does_not_move_its_named_height_to_another_edge() {
     let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
     assert!(errors.is_empty(), "{errors:?}");
 }
+
+/// A pick point that moves by a hair still names the same edge: the height named on that edge, and
+/// an expression reading it downstream, keep their values. Matching the point by its f64 bits gave
+/// every key a new identity, so the edge's inputs fell back to the constructor's names and the
+/// expression that read the user's name broke (#5927, #5928).
+#[test]
+fn a_pick_point_that_moves_a_hair_keeps_the_edges_name() {
+    fn param(s: &mut Session, name: &str) -> Value {
+        let list = run(s, "parameters.list", json!({}));
+        list["parameters"].as_array().and_then(|a| a.iter().find(|p| p["name"] == name)).cloned().unwrap_or(Value::Null)
+    }
+    fn input_row(s: &mut Session, feature: &str, input: &str) -> Value {
+        let list = run(s, "parameters.list", json!({}));
+        list["parameters"].as_array().and_then(|a| a.iter().find(|p| p["feature"] == feature && p["input"] == input)).cloned().unwrap_or(Value::Null)
+    }
+    // The name on each "Edge height" input of `Bands`, in the walk's order.
+    fn edge_names(s: &mut Session) -> Vec<(String, String)> {
+        let f = s.doc.find_feature("Bands").unwrap();
+        f.kind
+            .inputs()
+            .iter()
+            .enumerate()
+            .filter(|(_, (label, _, _))| *label == "Edge height")
+            .map(|(i, (_, expression, _))| (f.param_names[i].clone(), expression.clone()))
+            .collect()
+    }
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name":"AL2","thickness":"2 mm","k_factor":0.5,"bend_radius":"1 mm","active":true}));
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[200,100]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch":"Base"}));
+    // Two edges with their own heights: 20 mm on the y = 0 edge, 15 mm on the y = 100 edge.
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[100,0,2],"height":"20 mm"},{"point":[100,100,2],"height":"15 mm"}],
+            "height":"20 mm","angle":"90 deg","name":"Bands"}),
+    );
+    let names = edge_names(&mut s);
+    assert_eq!(names.iter().map(|(_, expression)| expression.as_str()).collect::<Vec<_>>(), ["20 mm", "15 mm"], "{names:?}");
+    run(&mut s, "parameters.rename", json!({"name": names[0].0, "new_name": "Front20"}));
+    run(&mut s, "parameters.rename", json!({"name": names[1].0, "new_name": "Back15"}));
+    // A later flange whose height reads the named edge's height.
+    run(&mut s, "sheet.flange", json!({"edges":[[0,50,2]],"height":"Front20","angle":"90 deg","name":"Reader"}));
+    assert_eq!(param(&mut s, "Front20")["value"].as_f64(), Some(20.0), "{:?}", run(&mut s, "parameters.list", json!({})));
+    let reader = input_row(&mut s, "Reader", "Height");
+    assert_eq!(reader["expression"], "Front20");
+    assert_eq!(reader["value"].as_f64(), Some(20.0), "{reader}");
+    // The same physical edge picked a hair away: only the pick point moves.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":"Bands","command":"sheet.flange","params":{
+            "type":"edge","edges":[{"point":[100.001,0,2],"height":"20 mm"},{"point":[100,100,2],"height":"15 mm"}],
+            "height":"20 mm","angle":"90 deg"}}),
+    );
+    let names = edge_names(&mut s);
+    assert_eq!(
+        names,
+        [("Front20".to_string(), "20 mm".to_string()), ("Back15".to_string(), "15 mm".to_string())],
+        "the edge whose pick moved lost its name: {names:?}"
+    );
+    assert_eq!(param(&mut s, "Front20")["value"].as_f64(), Some(20.0), "the named height is gone: {:?}", run(&mut s, "parameters.list", json!({})));
+    assert_eq!(param(&mut s, "Back15")["value"].as_f64(), Some(15.0), "the other edge's name moved: {:?}", run(&mut s, "parameters.list", json!({})));
+    let reader = input_row(&mut s, "Reader", "Height");
+    assert_eq!(reader["expression"], "Front20");
+    assert_eq!(reader["value"].as_f64(), Some(20.0), "the expression reading Front20 broke: {reader}");
+    assert!(reader["error"].is_null(), "{reader}");
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+/// A stretch's name follows its edge through a pick point that moved by a hair, and an edge
+/// inserted in the same redefine keeps the constructor's name rather than taking a name that
+/// belongs to another edge or stretch (#5927, #5928).
+#[test]
+fn a_pick_point_that_moves_a_hair_keeps_its_stretches_name_and_a_new_edge_keeps_its_own() {
+    fn param(s: &mut Session, name: &str) -> Value {
+        let list = run(s, "parameters.list", json!({}));
+        list["parameters"].as_array().and_then(|a| a.iter().find(|p| p["name"] == name)).cloned().unwrap_or(Value::Null)
+    }
+    fn input_row(s: &mut Session, feature: &str, input: &str) -> Value {
+        let list = run(s, "parameters.list", json!({}));
+        list["parameters"].as_array().and_then(|a| a.iter().find(|p| p["feature"] == feature && p["input"] == input)).cloned().unwrap_or(Value::Null)
+    }
+    // The names and expressions of `Lip`'s inputs with `label`, in the walk's order.
+    fn names(s: &mut Session, label: &str) -> Vec<(String, String)> {
+        let f = s.doc.find_feature("Lip").unwrap();
+        f.kind
+            .inputs()
+            .iter()
+            .enumerate()
+            .filter(|(_, (l, _, _))| *l == label)
+            .map(|(i, (_, expression, _))| (f.param_names[i].clone(), expression.clone()))
+            .collect()
+    }
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name":"AL2","thickness":"2 mm","k_factor":0.5,"bend_radius":"1 mm","active":true}));
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[200,100]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch":"Base"}));
+    let segments = json!([{"from":0,"to":0.5,"height":"20 mm"},{"from":0.5,"to":1,"height":"15 mm"}]);
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[100,0,2],"segments":segments}],
+            "height":"20 mm","angle":"90 deg","name":"Lip"}),
+    );
+    let stretches = names(&mut s, "Segment height");
+    assert_eq!(stretches.len(), 2, "{stretches:?}");
+    run(&mut s, "parameters.rename", json!({"name": stretches[1].0, "new_name": "Tall"}));
+    run(&mut s, "sheet.flange", json!({"edges":[[0,50,2]],"height":"Tall","angle":"90 deg","name":"Reader"}));
+    assert_eq!(param(&mut s, "Tall")["value"].as_f64(), Some(15.0));
+    // The y = 0 edge's pick moves by a hair and a genuinely different edge (y = 100) is inserted.
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature":"Lip","command":"sheet.flange","params":{
+            "type":"edge","edges":[{"point":[100.001,0,2],"segments":segments},{"point":[100,100,2],"height":"25 mm"}],
+            "height":"20 mm","angle":"90 deg"}}),
+    );
+    let stretches = names(&mut s, "Segment height");
+    assert!(
+        stretches.iter().any(|(name, expression)| name == "Tall" && expression == "15 mm"),
+        "the stretch lost its name with the pick: {stretches:?}"
+    );
+    assert_eq!(
+        param(&mut s, "Tall")["value"].as_f64(),
+        Some(15.0),
+        "the named stretch height is gone: {:?}",
+        run(&mut s, "parameters.list", json!({}))
+    );
+    let reader = input_row(&mut s, "Reader", "Height");
+    assert_eq!(reader["expression"], "Tall");
+    assert_eq!(reader["value"].as_f64(), Some(15.0), "the expression reading Tall broke: {reader}");
+    assert!(reader["error"].is_null(), "{reader}");
+    // The inserted edge is its own edge: it took neither the moved edge's nor the stretch's name.
+    let edges = names(&mut s, "Edge height");
+    assert_eq!(edges.len(), 1, "the inserted edge's height is not one input: {edges:?}");
+    assert_eq!(edges[0].1, "25 mm", "{edges:?}");
+    assert!(edges[0].0 != "Tall", "the new edge took the stretch's name: {edges:?}");
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+}
