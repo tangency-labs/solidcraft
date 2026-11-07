@@ -13,11 +13,16 @@
 //! - **100 % is true size**: one paper millimetre is (96 / 25.4) × calibration / UI zoom points, so
 //!   the UI scale never changes it ([`true_size`]). The calibration is a preference, set against a
 //!   100 mm bar ([`calibration_bar`]).
-//! - **Sheet colour** (White, Warm, Dark, Auto) is a screen preference; Auto follows the theme. The
-//!   paper moves lighter where it can, else darker, to stand off the backdrop. Nothing here reaches
-//!   the design, undo or a file: print and export are always white.
-//! - **A view's state shows in words and shape**, never colour alone: out of date (dashed), nothing
-//!   to draw (dotted) and can't be drawn (a cross), each with its words beside the view's boundary.
+//! - **Sheet colour** (Follows the theme, White, Blueprint, Prussian Blue) is a screen preference
+//!   (D25 of `docs/design/drawing-ui/decisions.md`). The paper keeps its colour on a neutral stage
+//!   that moves away from it to stand off ([`stage_and_paper`]), and has a very slight rounded corner
+//!   (D29). Nothing here
+//!   reaches the design, undo or a file: print and export are always white.
+//! - **A view's state shows in words and shape**, never colour alone (D26): needs update (dashed),
+//!   nothing to draw (dotted) and can't be drawn (a cross), each with its words beside the view's
+//!   boundary.
+//! - **Hover**: a view's boundary shows only while the pointer is near its edge, so the sheet stays
+//!   clean (D17); any other object shows its box while the pointer is over it.
 
 use std::time::Duration;
 
@@ -45,20 +50,24 @@ const MAX_POINTS: usize = 1 << 22;
 const TOLERANCE_PX: f64 = 0.2;
 /// How close the pointer must come to an object's box to be over it, in points.
 const HOVER_BAND: f64 = 6.0;
+/// The paper's corner radius on screen, in points: very slight (D29).
+const PAPER_CORNER: u8 = 2;
 
 /// The sheet's colour on screen (Preferences › Design › Drawings › Sheet colour).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SheetColour {
-    White,
-    Warm,
-    Dark,
-    /// White in a light theme, Dark in a dark one.
+    /// Follows the theme: White in a light theme, the theme's dark paper in a dark one (a theme
+    /// file may set it: the Blueprint theme's is blueprint blue).
     Auto,
+    White,
+    Blueprint,
+    /// Prussian Blue (Historical): a deeper blue with softer light lines.
+    PrussianBlue,
 }
 
 impl SheetColour {
     /// In the order Preferences lists them.
-    pub const ALL: [SheetColour; 4] = [SheetColour::White, SheetColour::Warm, SheetColour::Dark, SheetColour::Auto];
+    pub const ALL: [SheetColour; 4] = [SheetColour::Auto, SheetColour::White, SheetColour::Blueprint, SheetColour::PrussianBlue];
 
     pub fn parse(s: &str) -> Option<SheetColour> {
         SheetColour::ALL.into_iter().find(|c| c.id() == s)
@@ -67,30 +76,29 @@ impl SheetColour {
     /// Its stored name.
     pub fn id(self) -> &'static str {
         match self {
-            SheetColour::White => "white",
-            SheetColour::Warm => "warm",
-            SheetColour::Dark => "dark",
             SheetColour::Auto => "auto",
+            SheetColour::White => "white",
+            SheetColour::Blueprint => "blueprint",
+            SheetColour::PrussianBlue => "prussian_blue",
         }
     }
 
     fn label(self) -> &'static str {
         match self {
-            SheetColour::White => "ui.sheet_page.colour.white",
-            SheetColour::Warm => "ui.sheet_page.colour.warm",
-            SheetColour::Dark => "ui.sheet_page.colour.dark",
             SheetColour::Auto => "ui.sheet_page.colour.auto",
+            SheetColour::White => "ui.sheet_page.colour.white",
+            SheetColour::Blueprint => "ui.sheet_page.colour.blueprint",
+            SheetColour::PrussianBlue => "ui.sheet_page.colour.prussian_blue",
         }
     }
 
     /// The paper and its ink in a theme (`dark`), before the paper stands off the backdrop.
     pub fn paper(self, t: &Tokens, dark: bool) -> (Color32, Color32) {
         match self {
-            SheetColour::White => (t.paper_white, t.paper_ink),
-            SheetColour::Warm => (t.paper_warm, t.paper_ink),
-            SheetColour::Dark => (t.paper_dark, t.paper_dark_ink),
             SheetColour::Auto if dark => (t.paper_dark, t.paper_dark_ink),
-            SheetColour::Auto => (t.paper_white, t.paper_ink),
+            SheetColour::Auto | SheetColour::White => (t.paper_white, t.paper_ink),
+            SheetColour::Blueprint => (t.paper_blueprint, t.paper_blueprint_ink),
+            SheetColour::PrussianBlue => (t.paper_prussian_blue, t.paper_prussian_blue_ink),
         }
     }
 }
@@ -103,23 +111,45 @@ fn lightness(c: Color32) -> f32 {
 /// How far apart in [`lightness`] the paper and the backdrop must be for the sheet's edge to show.
 pub const STAND_OFF: f32 = 0.06;
 
+/// Lightest and darkest: what the stage, or failing that the paper, moves toward.
+const ENDS: [Color32; 2] = [Color32::WHITE, Color32::BLACK];
+
+/// The first of twenty steps from `from` toward `to`, at most `steps` of them, that stands off `other`.
+fn toward(from: Color32, to: Color32, other: Color32, steps: u8) -> Option<Color32> {
+    (1..=steps.min(20)).map(|k| from.lerp_to_gamma(to, f32::from(k) / 20.0)).find(|c| (lightness(*c) - lightness(other)).abs() >= STAND_OFF)
+}
+
 /// `paper` as shown on `backdrop`: as it is when the two are [`STAND_OFF`] apart, else moved
 /// lighter where that's enough, else darker.
 pub fn stand_off(paper: Color32, backdrop: Color32) -> Color32 {
-    let apart = |c: Color32| (lightness(c) - lightness(backdrop)).abs() >= STAND_OFF;
-    if apart(paper) {
+    if (lightness(paper) - lightness(backdrop)).abs() >= STAND_OFF {
         return paper;
     }
-    let toward = |to: Color32| (1..=20).map(|k| paper.lerp_to_gamma(to, k as f32 / 20.0)).find(|c| apart(*c));
-    toward(Color32::WHITE).or_else(|| toward(Color32::BLACK)).unwrap_or(paper)
+    toward(paper, ENDS[0], backdrop, 20).or_else(|| toward(paper, ENDS[1], backdrop, 20)).unwrap_or(paper)
 }
 
-/// The paper and ink the page draws in, now.
-pub fn paper_and_ink(app: &SolveApp) -> (Color32, Color32) {
+/// The stage behind the sheet and the paper on it (the design's "neutral stage with the paper on
+/// it"): the paper keeps its colour and the stage moves away from it, darker behind a light sheet and
+/// lighter behind a dark one, by at most two fifths of the way, until the two stand
+/// [`STAND_OFF`] apart. Only when that isn't enough does the paper move instead ([`stand_off`]).
+pub fn stage_and_paper(paper: Color32, backdrop: Color32) -> (Color32, Color32) {
+    if (lightness(paper) - lightness(backdrop)).abs() >= STAND_OFF {
+        return (backdrop, paper);
+    }
+    let away = if lightness(paper) >= 0.5 { ENDS[1] } else { ENDS[0] };
+    match toward(backdrop, away, paper, 8) {
+        Some(stage) => (stage, paper),
+        None => (backdrop, stand_off(paper, backdrop)),
+    }
+}
+
+/// The stage, paper and ink the page draws in, now.
+pub fn sheet_colours(app: &SolveApp) -> (Color32, Color32, Color32) {
     let t = Tokens::get();
     let colour = SheetColour::parse(&app.preferences.drawing_sheet_colour).unwrap_or(SheetColour::Auto);
     let (paper, ink) = colour.paper(&t, crate::theme::is_dark());
-    (stand_off(paper, t.viewport_top), ink)
+    let (stage, paper) = stage_and_paper(paper, t.viewport_top);
+    (stage, paper, ink)
 }
 
 /// Points per paper millimetre at 100 %: (96 / 25.4) × `calibration` / `zoom_factor` (the UI scale),
@@ -141,7 +171,7 @@ pub struct Page {
     cam: Camera,
     /// Points per paper millimetre: the zoom, kept as the canvas changes size.
     scale: f64,
-    /// The sheet and the size it was last fitted to: Fit Sheet again when either changes.
+    /// The sheet and the size it was last fitted to: Fit sheet again when either changes.
     fitted: Option<(u64, [u64; 2])>,
     /// The canvas size the sheet was fitted on, while nothing has moved it since: the sheet is
     /// fitted again when the canvas changes size (a window resized, a panel opened).
@@ -258,9 +288,21 @@ fn framed(canvas: Rect, area: Rect, size: Vec2, true_size: f64) -> (Vec2, f64) {
     (Vec2::new(x, y), scale)
 }
 
-/// The part of the canvas no ribbon, Browser or History covers.
+/// The part of the canvas no ribbon, Browser, History or navigation bar covers.
 fn free_area(app: &SolveApp, canvas: Rect) -> Rect {
-    crate::shell::workspace_content(app, crate::shell::content_rect(app, canvas))
+    let area = crate::shell::workspace_content(app, crate::shell::content_rect(app, canvas));
+    // Nor the navigation bar: Fit sheet puts the paper above it (below it when the bar is at the
+    // top), as the design's layout board does. The compass's corner stays free: the sheet has none.
+    let Some(bar) = app.viewport.layout.as_ref().map(|l| l.navigation).filter(|r| r.is_positive() && r.intersects(area)) else {
+        return area;
+    };
+    let mut free = area;
+    if bar.center().y > area.center().y {
+        free.max.y = free.max.y.min(bar.top());
+    } else {
+        free.min.y = free.min.y.max(bar.bottom());
+    }
+    if free.is_positive() { free } else { area }
 }
 
 /// The camera's distance that shows `scale` points per millimetre on a canvas `height` tall.
@@ -286,7 +328,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     page.sheet = Some(sheet);
     let t = Tokens::get();
     let canvas = ui.max_rect();
-    ui.painter().rect_filled(canvas, 0.0, t.viewport_top);
+    let (stage, paper, ink) = sheet_colours(app);
+    ui.painter().rect_filled(canvas, 0.0, stage);
     app.viewport.rect = Some(canvas);
     crate::viewport::refresh_layout(app, ui.ctx());
     let response = ui.allocate_rect(canvas, Sense::click_and_drag());
@@ -342,11 +385,11 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     if page.marks.as_ref().is_none_or(|m| m.generation != view.generation || m.tolerance != tolerance) {
         page.marks = Some(Marks::of(&view.scene, view.generation, tolerance));
     }
-    let (paper, ink) = paper_and_ink(app);
     let painter = ui.painter().with_clip_rect(canvas.intersect(ui.clip_rect()));
     let sheet_rect = at.rect(&Aabb2 { min: Vec2::ZERO, max: size });
-    painter.add(t.shell_shadow().as_shape(sheet_rect, 0));
-    painter.rect_filled(sheet_rect, 0.0, paper);
+    // A very slight rounded corner, on screen only (D29): an export stays square.
+    painter.add(t.shell_shadow().as_shape(sheet_rect, PAPER_CORNER));
+    painter.rect_filled(sheet_rect, PAPER_CORNER, paper);
     let visible = at.visible(canvas);
     if let Some(marks) = &app.drawing_workspace.page.marks {
         marks.paint(&painter, &at, visible, ink, ppp as f32);
@@ -354,11 +397,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     crate::scenario::publish_rect("sheet:paper", sheet_rect);
     let hover = response.hover_pos().filter(|p| !crate::shell::covered(app, *p)).map(|p| at.paper(p));
     let hit = hover.and_then(|p| drawing_scene::hit(&view.objects, p, HOVER_BAND / at.scale));
-    if let Some(hit) = hit
+    if let Some(hit) = hit.filter(outlined)
         && let Some(object) = view.objects.iter().find(|o| o.object == hit.object)
     {
-        let b = object.boundary_mm.unwrap_or(object.bounds_mm);
-        painter.rect_stroke(at.rect(&b), 0.0, Stroke::new(t.space_2 * 0.5, t.accent), egui::StrokeKind::Outside);
+        let r = at.rect(&object.boundary_mm.unwrap_or(object.bounds_mm)).expand(t.space_2);
+        let corners = [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()];
+        painter.extend(egui::Shape::dashed_line(&corners, Stroke::new(t.space_2 * 0.5, t.accent), t.space_4, t.space_2));
     }
     let states = view_states(&painter, &at, &view.views, &view.stale, &view.objects);
     // Views a deferred drawing holds stay out of date without being worked on: their words say so.
@@ -380,15 +424,22 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
         "true_size_points_per_mm": base,
         "visible_mm": [paper_mm.min.x, paper_mm.min.y, paper_mm.max.x, paper_mm.max.y],
         "sheet_colour": app.preferences.drawing_sheet_colour,
+        "stage": hex(stage),
         "paper": hex(paper),
         "ink": hex(ink),
         "generation": view.generation,
         "views": states,
         "working": working,
-        "hover": hit.map(|h| json!({"object": encode(h.object), "kind": kind_name(h.kind), "on_edge": h.on_edge})),
+        "hover": hit.map(|h| json!({"object": encode(h.object), "kind": kind_name(h.kind), "on_edge": h.on_edge, "outlined": outlined(&h)})),
         "error": app.drawing_workspace.page.marks.as_ref().and_then(|m| m.error.clone()),
     }));
     true
+}
+
+/// Whether the hovered object shows its boundary: a view only while the pointer is near its edge,
+/// where it will be grabbed (D17), so the sheet stays clean; anything else while it is under it.
+pub(crate) fn outlined(hit: &drawing_scene::Hit) -> bool {
+    hit.kind != ObjectKind::View || hit.on_edge
 }
 
 fn hex(c: Color32) -> String {
@@ -415,8 +466,8 @@ fn message(ui: &egui::Ui, canvas: Rect, text: &str, colour: Color32) {
 }
 
 /// The words for each view whose state isn't simply drawn and current, drawn beside its boundary
-/// with the boundary's shape: dashed when out of date, dotted when there's nothing to draw, crossed
-/// when it can't be drawn. Returns each view's state for `ui.inspect`.
+/// with the boundary's shape: dashed when it needs an update, dotted when there's nothing to draw,
+/// crossed when it can't be drawn. Returns each view's state for `ui.inspect`.
 fn view_states(painter: &egui::Painter, at: &OnScreen, views: &[drawing_scene::ViewState], stale: &[u64], objects: &[SheetObject]) -> Vec<Value> {
     let t = Tokens::get();
     let mut out = Vec::new();
@@ -454,18 +505,21 @@ fn view_states(painter: &egui::Painter, at: &OnScreen, views: &[drawing_scene::V
                 painter.extend(egui::Shape::dashed_line(&corners, stroke, t.space_8, t.space_4));
             }
         }
-        let text = words.join(" · ");
+        // D26's shape for Needs update, ahead of the words.
+        let mark = if out_of_date { "⟳ " } else { "" };
+        let text = format!("{mark}{}", words.join(" · "));
         let galley = painter.layout_no_wrap(text, egui::FontId::proportional(t.font_label), colour);
-        let at = r.left_top() - vec2(0.0, galley.size().y + t.space_4);
-        let chip = Rect::from_min_size(at, galley.size()).expand(t.space_2);
-        painter.rect_filled(chip, t.space_2, t.panel);
+        let at = r.left_top() + vec2(t.space_4, -(galley.size().y + t.space_8));
+        let chip = Rect::from_min_size(at, galley.size()).expand2(vec2(t.space_4, t.space_2));
+        painter.rect_filled(chip, chip.height() / 2.0, t.panel);
         painter.galley(at, galley, colour);
         crate::scenario::publish_rect(&format!("sheet:view:{}:state", solidcraft_engine::doc::ids::encode(state.view)), chip);
     }
     out
 }
 
-/// What is said beside a view: why it draws nothing, and whether it is out of date. Nothing for a
+/// What is said beside a view: why it draws nothing, and whether it needs an update (D26's
+/// "Needs update"). Nothing for a
 /// view drawn and current.
 pub(crate) fn words(status: &Status, out_of_date: bool) -> Vec<String> {
     let mut words = Vec::new();
@@ -475,7 +529,7 @@ pub(crate) fn words(status: &Status, out_of_date: bool) -> Vec<String> {
         Status::Failed(why) => words.push(crate::i18n::format("ui.sheet_page.failed", &[("reason", why)])),
     }
     if out_of_date {
-        words.push(crate::i18n::tr("ui.sheet_page.out_of_date").to_owned());
+        words.push(crate::i18n::tr("ui.sheet_page.needs_update").to_owned());
     }
     words
 }
@@ -491,15 +545,15 @@ fn hint(painter: &egui::Painter, area: Rect, text: &str) {
     crate::scenario::publish_rect("sheet:working", chip);
 }
 
-/// The zoom readout, typed or dragged, with 100 % and Fit Sheet, at the free canvas's lower right.
+/// The zoom readout, typed or dragged, with Actual size and Fit sheet, at the free canvas's lower right.
 fn zoom_card(app: &mut SolveApp, ui: &mut egui::Ui, canvas: Rect, zoom: f64) {
     let t = Tokens::get();
     let area = free_area(app, canvas);
     let container = Container::new(ui.ctx(), Surface::Panel);
     let frame = container.frame(ui.ctx(), t.panel, crate::frame::Side::Right).inner_margin(4);
     let size = app.drawing_workspace.page.card.map_or(vec2(t.space_24 * 10.0, t.space_24 + 10.0), |r| r.size());
-    let bar = app.viewport.layout.as_ref().map_or(0.0, |l| if l.navigation.is_positive() { l.navigation.height() + t.space_8 } else { 0.0 });
-    let position = pos2(area.right() - size.x - t.space_8, area.bottom() - size.y - t.space_8 - bar).max(area.min);
+    // The free area already stops above the navigation bar.
+    let position = pos2(area.right() - size.x - t.space_8, area.bottom() - size.y - t.space_8).max(area.min);
     let mut percent = shown_percent(zoom);
     let mut chosen = None;
     let card = container.area(egui::Id::new("sc_sheet_zoom")).fixed_pos(position).show(ui.ctx(), |ui| {

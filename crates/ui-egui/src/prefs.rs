@@ -1044,8 +1044,9 @@ preference_settings! {
     /// The template new drawings of an assembly start from: an assembly's built-in, by name (ISO A2
     /// when not set, or set to one this version doesn't have for an assembly).
     assembly_drawing_template: String = template::default_for(true).into(), PAGE_DESIGN;
-    /// The drawing sheet's colour on screen: `auto` (White in a light theme, Dark in a dark one),
-    /// `white`, `warm` or `dark` (`crate::drawing_sheet_page::SheetColour`). Screen only: printed
+    /// The drawing sheet's colour on screen: `auto` (follows the theme: White in a light theme, the
+    /// theme's dark sheet in a dark one), `white`, `blueprint` or `prussian_blue`
+    /// (`crate::drawing_sheet_page::SheetColour`). Screen only: printed
     /// and exported sheets are always white, and nothing reaches the design or undo.
     drawing_sheet_colour: String = "auto".into(), PAGE_DESIGN;
     /// Scales true size on the drawing sheet so 100 % measures 1 mm as 1 mm on this screen, against
@@ -4170,7 +4171,7 @@ fn prepare_preferences(
         return Err("`perspective_fov` must be 15°…90° in radians (0.2618…1.5708)".into());
     }
     if !accepted::drawing_calibration(&new) || crate::drawing_sheet_page::SheetColour::parse(&new.drawing_sheet_colour).is_none() {
-        return Err("`drawing_calibration` must be 0.5…2 and `drawing_sheet_colour` auto, white, warm or dark".into());
+        return Err("`drawing_calibration` must be 0.5…2 and `drawing_sheet_colour` auto, white, blueprint or prussian_blue".into());
     }
     if !accepted::drawing_panel_width(&new)
         || !["top", "bottom", "under_browser"].contains(&new.drawing_sheet_dock.as_str())

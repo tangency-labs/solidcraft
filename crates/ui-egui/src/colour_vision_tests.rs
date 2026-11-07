@@ -481,7 +481,10 @@ const SHADED: [&str; 2] = ["analysis.draft", "analysis.access"];
 /// `every_token_is_measured_or_carries_no_meaning` until it is in a group above or here.
 const NO_MEANING: &[(&str, &str)] = &[
     ("paper_white", "the drawing sheet's paper on screen, a neutral surface; its lines carry the drawing"),
-    ("paper_warm", "the drawing sheet's paper on screen, a neutral surface; its lines carry the drawing"),
+    ("paper_blueprint", "the drawing sheet's paper on screen, a neutral surface; its lines carry the drawing"),
+    ("paper_blueprint_ink", "the drawing's one ink on a blueprint sheet; no category is told by its colour"),
+    ("paper_prussian_blue", "the drawing sheet's paper on screen, a neutral surface; its lines carry the drawing"),
+    ("paper_prussian_blue_ink", "the drawing's one ink on a Prussian blue sheet; no category is told by its colour"),
     ("paper_dark", "the drawing sheet's paper on screen, a neutral surface; its lines carry the drawing"),
     ("paper_ink", "the drawing's one ink on a light sheet, as printed; no category is told by its colour"),
     ("paper_dark_ink", "the drawing's one ink on a dark sheet; no category is told by its colour"),

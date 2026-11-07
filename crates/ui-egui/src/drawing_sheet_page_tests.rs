@@ -101,6 +101,9 @@ fn fit_sheet_shows_the_whole_sheet_and_zoom_stays_in_range() {
     let paper = crate::scenario::rect_of("sheet:paper").unwrap();
     let canvas = h.app.viewport.rect.unwrap();
     assert!(canvas.contains_rect(paper), "{paper:?} in {canvas:?}");
+    // Fitted above the navigation bar, as the design's layout board has it.
+    let bar = h.app.viewport.layout.as_ref().unwrap().navigation;
+    assert!(bar.is_positive() && !paper.intersects(bar), "{paper:?} clear of the navigation bar {bar:?}");
     // A fitted sheet is fitted again when the window changes size, until something moves it.
     h.call("ui.resize", json!({"width": 900, "height": 600}));
     h.frames(4);
@@ -142,7 +145,7 @@ fn fit_sheet_shows_the_whole_sheet_and_zoom_stays_in_range() {
     h.frames(120);
     let zoom = number(&page(&mut h)["zoom"]);
     assert!(zoom > 2.0 && zoom <= 32.0 + 1e-9, "{zoom}");
-    // Fit (F6 runs view.fit), Home and the card's Fit Sheet all frame it again.
+    // Fit (F6 runs view.fit), Home and the card's Fit sheet all frame it again.
     for fit in [json!({"command": "view.fit"}), json!({"command": "view.home"})] {
         set_zoom(&mut h.app, &ctx, 4.0);
         h.frames(2);
@@ -200,13 +203,14 @@ fn sheet_colour_is_screen_only() {
         h.frames(2);
         let p = page(&mut h);
         let (paper, ink) = colour.paper(&t, crate::theme::is_dark());
-        assert_eq!(p["paper"], json!(hex(stand_off(paper, t.viewport_top))), "{colour:?}");
+        let (stage, paper) = stage_and_paper(paper, t.viewport_top);
+        assert_eq!((&p["stage"], &p["paper"]), (&json!(hex(stage)), &json!(hex(paper))), "{colour:?}");
         assert_eq!(p["ink"], json!(hex(ink)), "{colour:?}");
         seen.push(p["paper"].clone());
         assert_eq!(svg(&mut h), first, "{colour:?}");
     }
-    assert_ne!(seen[0], seen[1], "White and Warm differ");
-    assert_ne!(seen[0], seen[2], "White and Dark differ");
+    assert_ne!(seen[1], seen[2], "White and Blueprint differ");
+    assert_ne!(seen[2], seen[3], "Blueprint and Prussian Blue differ");
     assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len()), (doc, undo));
     let bad = h.call("ui.prefs", json!({"drawing_sheet_colour": "blue"}));
     assert_eq!(bad["ok"], false, "{bad}");
@@ -214,26 +218,32 @@ fn sheet_colour_is_screen_only() {
     assert_eq!(bad["ok"], false, "{bad}");
 }
 
-/// Every choice, in either theme, stands off both themes' backdrops, and White is never pure white.
+/// Every choice, in either theme, stands off the stage behind it, and White is never pure white.
 #[test]
 fn every_sheet_colour_stands_off_the_backdrop() {
     for t in [Tokens::light(), Tokens::dark()] {
         for dark in [false, true] {
             for colour in SheetColour::ALL {
                 let (paper, ink) = colour.paper(&t, dark);
-                let shown = stand_off(paper, t.viewport_top);
-                assert!((lightness(shown) - lightness(t.viewport_top)).abs() >= STAND_OFF, "{colour:?} {dark}");
+                let (stage, shown) = stage_and_paper(paper, t.viewport_top);
+                assert!((lightness(shown) - lightness(stage)).abs() >= STAND_OFF, "{colour:?} {dark}");
                 assert!((lightness(shown) - lightness(ink)).abs() > 0.5, "{colour:?} {dark}: ink reads on its paper");
             }
         }
         assert_ne!(t.paper_white, Color32::WHITE);
+        // White keeps its colour in the light theme: the stage behind it goes darker instead.
+        assert_eq!(stage_and_paper(t.paper_white, Tokens::light().viewport_top).1, t.paper_white);
         assert_eq!(SheetColour::Auto.paper(&t, false), SheetColour::White.paper(&t, false));
-        assert_eq!(SheetColour::Auto.paper(&t, true), SheetColour::Dark.paper(&t, true));
+        assert_eq!(SheetColour::Auto.paper(&t, true), (t.paper_dark, t.paper_dark_ink));
     }
+    // "Follows the theme" in the Blueprint theme is its blueprint blue (D24, D25).
+    let blueprint = crate::theme_files::resolve(crate::theme_files::find("blueprint", &[]).unwrap());
+    assert_eq!(SheetColour::Auto.paper(&blueprint, true).0, Tokens::dark().paper_blueprint);
     for colour in SheetColour::ALL {
         assert_eq!(SheetColour::parse(colour.id()), Some(colour));
     }
-    assert_eq!(SheetColour::parse("Dark"), None);
+    assert_eq!(SheetColour::parse("Blueprint"), None);
+    assert_eq!(SheetColour::parse("warm"), None);
 }
 
 fn square(at: Vec2, side: f64) -> Loop2 {
@@ -312,7 +322,7 @@ fn the_plate_sheet_draws_its_lines_and_text() {
     assert!(page(&mut h)["views"].as_array().unwrap().iter().all(|v| v["status"] == "drawn" && v["words"] == json!([])));
 }
 
-/// A view's state is in words beside it: one whose settings changed says it's out of date until it
+/// A view's state is in words beside it: one whose settings changed says it needs an update until it
 /// is drawn again, and one with nothing to show says why.
 #[test]
 fn a_views_state_is_in_words() {
@@ -324,7 +334,7 @@ fn a_views_state_is_in_words() {
     let p = inspect_now(&h);
     let state = p["views"].as_array().unwrap().iter().find(|v| v["view"] == json!(front)).unwrap().clone();
     assert_eq!(state["out_of_date"], true, "{p}");
-    assert_eq!(state["words"], json!(["Out of date"]), "{p}");
+    assert_eq!(state["words"], json!(["Needs update"]), "{p}");
     assert_eq!(p["working"], true);
     settle(&mut h);
     let p = page(&mut h);
@@ -335,8 +345,19 @@ fn a_views_state_is_in_words() {
     let nothing = words(&Status::Placeholder(Unmeasured::NothingChosen), false);
     assert_eq!(nothing, [format!("Nothing to draw: {}", Unmeasured::NothingChosen)]);
     let failed = words(&Status::Failed("too many lines".into()), true);
-    assert_eq!(failed, ["Can't draw this view: too many lines", "Out of date"]);
+    assert_eq!(failed, ["Can't draw this view: too many lines", "Needs update"]);
     assert!(words(&Status::Drawn, false).is_empty());
+}
+
+/// A view shows its boundary only while the pointer is near its edge (D17 of the drawing UI
+/// design); a dimension or the title block shows its box whenever the pointer is over it.
+#[test]
+fn a_view_is_outlined_only_near_its_edge() {
+    let hit = |kind, on_edge| drawing_scene::Hit { object: 1, kind, on_edge };
+    assert!(outlined(&hit(ObjectKind::View, true)));
+    assert!(!outlined(&hit(ObjectKind::View, false)), "inside a view the sheet stays clean");
+    assert!(outlined(&hit(ObjectKind::Dimension, false)));
+    assert!(outlined(&hit(ObjectKind::TitleBlock, false)));
 }
 
 /// Without a drawing open the page shows the workspace's note, and the control channel's sheet
