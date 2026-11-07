@@ -2756,6 +2756,39 @@ impl SheetBody {
         out
     }
 
+    /// The two edges of every bend's zone in the flat (#11488), as (bend number, start, end): first
+    /// where the bend starts, on the side it is bent from, then where it ends, a bend allowance
+    /// further on. Each is the zone's own straight edge (`zone`), and the cut-outs cut it as they
+    /// cut the centre line (`bends`): one entry for every stretch they leave, none where they take
+    /// it whole.
+    pub fn bend_zone_edges(&self) -> Vec<(usize, Vec2, Vec2)> {
+        let cuts = self.cut_outs();
+        let mut out = Vec::new();
+        for (i, f) in self.flanges.iter().enumerate() {
+            let zone = self.zone(f);
+            for off in [0.0, self.allowance(f)] {
+                // How far the zone's straight edges on this line reach along the bend.
+                let on = |q: Vec2| ((q - f.p).dot(f.n) - off).abs() < 1e-6;
+                let mut span: Option<(f64, f64)> = None;
+                for e in &zone.outer.segs {
+                    let Seg2::Line { a, b } = e else { continue };
+                    if !on(*a) || !on(*b) {
+                        continue;
+                    }
+                    let (ua, ub) = ((*a - f.p).dot(f.d), (*b - f.p).dot(f.d));
+                    let (lo, hi) = (ua.min(ub), ua.max(ub));
+                    span = Some(span.map_or((lo, hi), |(x, y)| (x.min(lo), y.max(hi))));
+                }
+                let Some((u0, u1)) = span else { continue };
+                let a = f.p + f.n * off + f.d * u0;
+                for (s0, s1) in clear_of(a, f.d, u1 - u0, &cuts) {
+                    out.push((i + 1, a + f.d * s0, a + f.d * s1));
+                }
+            }
+        }
+        out
+    }
+
     /// The flat bend zones, one per bend.
     pub fn bend_zones(&self) -> Vec<Region2> {
         self.flanges.iter().map(|f| self.zone(f)).collect()
