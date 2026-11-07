@@ -844,6 +844,18 @@ fn a_suppressed_driver_leaves_the_follower_free_and_warns() {
 }
 
 #[test]
+fn a_follower_mimics_the_farthest_driver_still_in_the_urdf() {
+    // J0 drives J1 drives J2; with J0 suppressed J1 is free, so J2 follows J1.
+    let mut s = fan(&["revolute", "revolute", "revolute"]);
+    link(&mut s, "J0", "J1", 2.0, 0.5);
+    link(&mut s, "J1", "J2", 3.0, 0.1);
+    run(&mut s, "joint.edit", json!({"joint": "J0", "suppressed": true}));
+    let p = mimic_package(&s);
+    assert_eq!(mimic_of(&p, "J1"), None, "{}", p.xml);
+    assert_eq!(mimic_of(&p, "J2"), Some(("J1".into(), 3.0, 0.1)), "{}", p.xml);
+}
+
+#[test]
 fn a_driver_that_closes_a_loop_leaves_the_follower_free_and_warns() {
     let mut s = fan(&["revolute", "revolute"]);
     // P0 to P1 closes the loop Hub, P0, P1: the tree leaves this joint out.
@@ -1525,6 +1537,41 @@ fn a_file_url_prefix_writes_to_that_folder() {
     assert!(target.join("r-B.stl").exists());
     let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_dir_all(&other);
+}
+
+#[test]
+fn a_file_url_prefix_is_decoded_like_a_url() {
+    let dir = std::path::Path::new("/somewhere");
+    let place = |prefix: &str| super::mesh_place(prefix, dir).map(|(f, start)| (f.to_string_lossy().to_string(), start));
+    assert_eq!(place("file:///opt/my%20robot/meshes/"), Some(("/opt/my robot/meshes".into(), String::new())));
+    assert_eq!(place("file:///C:/robot/meshes/v1_"), Some(("C:/robot/meshes".into(), "v1_".into())));
+    assert_eq!(place("file:///opt/r%zz/"), None);
+}
+
+#[test]
+fn place_meshes_false_keeps_every_mesh_beside_the_urdf() {
+    let mut s = two_cubes();
+    let dir = temp("prefix-unplaced");
+    let path = dir.join("robot.urdf");
+    run(&mut s, "file.export", json!({"path": path.to_string_lossy(), "mesh_prefix": "meshes/", "place_meshes": false}));
+    let xml = std::fs::read_to_string(&path).unwrap_or_default();
+    assert!(xml.contains(r#"filename="meshes/robot-B.stl""#), "{xml}");
+    assert!(dir.join("robot-B.stl").exists());
+    assert!(!dir.join("meshes").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn file_export_refuses_urdf_choices_of_the_wrong_type() {
+    let mut s = two_cubes();
+    let dir = temp("export-wrong-types");
+    let path = dir.join("r.urdf").to_string_lossy().to_string();
+    for (k, v) in [("mimic", json!("false")), ("collision", json!(1)), ("place_meshes", json!(0)), ("collision", json!("hull"))] {
+        let r = s.execute("file.export", &json!({"path": path, k: v}));
+        assert!(r.is_err(), "{k}: {v}");
+    }
+    assert!(!dir.join("r.urdf").exists());
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]

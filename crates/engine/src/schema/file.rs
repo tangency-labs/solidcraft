@@ -121,6 +121,10 @@ pub struct ExportUrdfParams {
     /// Default: none.
     #[serde(default)]
     pub mesh_prefix: Option<String>,
+    /// Write the meshes where `mesh_prefix` points; false keeps every mesh next to the `.urdf`
+    /// whatever the prefix says. Default: true.
+    #[serde(default)]
+    pub place_meshes: Option<bool>,
     /// The effort limit of joints with none saved (`joint.dynamics`), a positive number. Default: 1000.
     #[serde(default)]
     pub effort: Option<f64>,
@@ -138,7 +142,7 @@ pub struct ExportUrdfParams {
 
 /// Export bodies, or the whole design, to a file. `format` names the format; without it the
 /// path's extension does. STL, OBJ and 3MF take `quality` (and 3MF `objects`); URDF takes
-/// `mesh_prefix`, `effort`, `velocity`, `mimic` and `collision` and exports the whole assembly; design JSON the
+/// `mesh_prefix`, `effort`, `velocity`, `mimic`, `place_meshes` and `collision` and exports the whole assembly; design JSON the
 /// complete document.
 #[derive(Debug, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = export_required)]
@@ -180,6 +184,10 @@ pub struct ExportParams {
     /// URDF only: write motion links as `<mimic>`. Default: true.
     #[serde(default)]
     pub mimic: Option<bool>,
+    /// URDF only: write the meshes where `mesh_prefix` points; false keeps them next to the
+    /// `.urdf`. Default: true.
+    #[serde(default)]
+    pub place_meshes: Option<bool>,
     /// URDF only: what a body with no collision shape of its own becomes: `mesh` or
     /// `convex_hull`. Default: mesh.
     #[serde(default)]
@@ -234,6 +242,7 @@ impl<'de> Deserialize<'de> for ExportParams {
             velocity: None,
             lay_on_print_faces: None,
             mimic: None,
+            place_meshes: None,
             collision: None,
         };
         // The handler reads `path` first and refuses anything but a name it can write to; the
@@ -268,6 +277,11 @@ impl<'de> Deserialize<'de> for ExportParams {
                 None | Some(Value::Null) => None,
                 Some(Value::Bool(b)) => Some(*b),
                 Some(_) => return Err(refuse("`mimic` must be true or false")),
+            };
+            out.place_meshes = match m.get("place_meshes") {
+                None | Some(Value::Null) => None,
+                Some(Value::Bool(b)) => Some(*b),
+                Some(_) => return Err(refuse("`place_meshes` must be true or false")),
             };
             out.collision = match m.get("collision") {
                 None | Some(Value::Null) => None,

@@ -18,10 +18,10 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<ExportMeshParams>(), &["bodies", "path", "quality"]);
     assert_keys(input_schema_for::<ExportStlParams>(), &["bodies", "lay_on_print_faces", "path", "quality"]);
     assert_keys(input_schema_for::<Export3mfParams>(), &["bodies", "lay_on_print_faces", "objects", "path", "quality"]);
-    assert_keys(input_schema_for::<ExportUrdfParams>(), &["collision", "effort", "mesh_prefix", "mimic", "path", "velocity"]);
+    assert_keys(input_schema_for::<ExportUrdfParams>(), &["collision", "effort", "mesh_prefix", "mimic", "path", "place_meshes", "velocity"]);
     assert_keys(
         input_schema_for::<ExportParams>(),
-        &["bodies", "collision", "effort", "format", "lay_on_print_faces", "mesh_prefix", "mimic", "objects", "path", "quality", "velocity"],
+        &["bodies",  "collision",  "effort",  "format",  "lay_on_print_faces",  "mesh_prefix",  "mimic",  "objects",  "path",  "place_meshes",  "quality",  "velocity"],
     );
     assert_keys(
         input_schema_for::<OpenParams>(),

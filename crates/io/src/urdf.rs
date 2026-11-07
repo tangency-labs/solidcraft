@@ -833,7 +833,9 @@ fn resolve_mimics(model: &mut UrdfModel, doc: &Document, warnings: &mut Vec<Stri
             continue;
         };
         // value of b = ratio · value of driver + offset, walking back to the first driver.
+        // The farthest driver in the URDF is free there: every link past it ends outside the URDF.
         let (mut driver, mut ratio, mut offset) = ((l.a, l.ia), l.ratio, l.offset);
+        let mut found = index.get(&driver).map(|&i| (i, ratio, offset));
         let mut seen = BTreeSet::from([(l.b, l.ib)]);
         let mut cycle = false;
         while let Some(prev) = linear.get(&driver) {
@@ -844,12 +846,15 @@ fn resolve_mimics(model: &mut UrdfModel, doc: &Document, warnings: &mut Vec<Stri
             offset += ratio * prev.offset;
             ratio *= prev.ratio;
             driver = (prev.a, prev.ia);
+            if let Some(&i) = index.get(&driver) {
+                found = Some((i, ratio, offset));
+            }
         }
         if cycle {
             warnings.push(format!("motion links form a cycle through `{follower}`: it is left free in the URDF"));
             continue;
         }
-        let Some(&from) = index.get(&driver) else {
+        let Some((from, ratio, offset)) = found else {
             warnings.push(format!("the joint driving `{follower}` is not in the URDF: `{follower}` is left free"));
             continue;
         };
