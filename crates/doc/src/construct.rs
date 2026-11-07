@@ -163,7 +163,21 @@ fn face_of<'a>(st: &'a ModelState, at: Vec3, name: &Option<String>) -> Result<(&
             return Ok((b, fi, at));
         }
     }
+    // A mesh body has no faces to pick: say so, rather than let the pick read as a miss (#11469).
+    if let Some(m) = st.bodies.iter().find(|b| lies_on_mesh(b, at)) {
+        return Err(bad(format!("no face at {at:?}: `{}` is a mesh body, which has no faces; use Convert Mesh to make it a solid first", m.name)));
+    }
     Err(bad(format!("no face at {at:?}")))
+}
+
+/// Does `at` lie on the surface of a mesh body, within the pick tolerance?
+fn lies_on_mesh(b: &ModelBody, at: Vec3) -> bool {
+    let Some((positions, triangles)) = b.body.triangle_mesh() else { return false };
+    let tol = crate::appearance::pick_tolerance(b);
+    triangles.iter().any(|t| {
+        let [a, bb, c] = t.map(|i| positions[i as usize]);
+        crate::appearance::closest_on_triangle(at, a, bb, c).dist(at) <= tol
+    })
 }
 
 /// The edge picked, as a polyline.
