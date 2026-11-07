@@ -165,13 +165,14 @@ pub(crate) fn show(app: &SolveApp, ctx: &egui::Context) {
     let t = crate::theme::Tokens::get();
     let at = egui::pos2(view.left() + 12.0, view.bottom() - 12.0);
     Container::new(ctx, Surface::Toast)
-        .area(egui::Id::new("open_meshing"))
+        .area(egui::Id::unique("open_meshing"))
         .order(egui::Order::Foreground)
         .pivot(egui::Align2::LEFT_BOTTOM)
         .fixed_pos(at)
         .interactable(false)
         .show(ctx, |ui| {
-            Container::popup_frame(ui.style()).fill(t.panel).show(ui, |ui| {
+            let frame = Container::popup_frame(ui.style()).fill(t.panel);
+            Container::show_backing(ui, frame, |ui| {
                 ui.horizontal(|ui| {
                     ui.spinner();
                     ui.label(egui::RichText::new(format!("Loading parts {done}/{total}")).color(t.text));
@@ -216,7 +217,7 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
         }
         if profiling() {
             let ms = began.map_or(0.0, |t| (ctx.input(|i| i.time) - t) * 1000.0);
-            eprintln!("SolidCraft open meshing: all {} bodies shown after {ms:.0} ms", world.bodies.len());
+            solidcraft_engine::note!("SolidCraft open meshing: all {} bodies shown after {ms:.0} ms", world.bodies.len());
         }
         // Framed from outlines and not moved since: frame the meshes.
         if framed == Some(app.cam) {
@@ -278,7 +279,7 @@ pub(crate) fn refresh(app: &mut SolveApp, now: f64) {
     if !m.first_shown && !st.bodies.is_empty() {
         m.first_shown = true;
         if profiling() {
-            eprintln!("SolidCraft open meshing: first {} bodies shown after {:.0} ms", st.bodies.len(), (now - began) * 1000.0);
+            solidcraft_engine::note!("SolidCraft open meshing: first {} bodies shown after {:.0} ms", st.bodies.len(), (now - began) * 1000.0);
         }
     }
     m.shown = Some((done, Arc::new(st)));

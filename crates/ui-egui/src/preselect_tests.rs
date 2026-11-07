@@ -3,8 +3,9 @@
 
 use crate::test_support::app_with_script as app_with;
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::{Sel, Session};
 
 #[test]
@@ -1517,7 +1518,7 @@ pub(crate) fn thread_face(app: &SolveApp, body: &str) -> Sel {
 
 #[test]
 fn thread_size_suggestion_matches_the_feature_for_shafts_and_holes() {
-    for (diameter, internal, expected) in [(8.0, false, "M8"), (20.0, false, "M20"), (5.0, true, "M6")] {
+    for (diameter, internal, expected) in [(8.0, false, "M8"), (20.0, false, "M20"), (5.0, true, "M5")] {
         let mut app = app_with(json!([]));
         if internal {
             app.run("solid.box", json!({"corner":[-10,-10,0],"length":20,"width":20,"height":10})).unwrap();
@@ -1978,6 +1979,47 @@ fn align_snaps_to_centres_and_edge_middles() {
     assert_eq!(p["to"]["snap"], json!("edge_mid"));
 }
 
+/// Align by frames (#6257): a sketch circle or point picked as To is a frame whatever the snap, a
+/// face with the Joint Origin snap is the joint origin the Joint dialog makes of it, and Angle is
+/// sent when given; As Picked builds what it built before.
+#[test]
+fn align_takes_sketch_frames_and_joint_origins() {
+    let mut app = boxed();
+    app.run("sketch.create", json!({"plane": "XY", "name": "S"})).unwrap();
+    app.run("sketch.circle.center", json!({"center": [60, 5], "radius": 3, "id": "ring"})).unwrap();
+    app.run("sketch.point", json!({"point": [70, 5], "id": "p"})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    let sketch = app.session.doc.find_feature("S").unwrap().id;
+    let mut d = start(&mut app, vec![], "solid.align");
+    d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    let bottom = face(&app, Vec3::new(20.0, 15.0, 0.0));
+    d.inputs[1].items = vec![bottom.clone()];
+    d.active = 2;
+    let ring = d
+        .candidate(&app.session, &crate::viewport::Hit::SketchCurve { sketch, id: "ring".into(), straight: false, point: Vec3::new(63.0, 5.0, 0.0) });
+    assert!(ring.is_some(), "the To input takes a sketch circle");
+    d.pick(&app.session, ring.unwrap());
+    let p = apply_commands(&app, &d).unwrap().remove(0).1;
+    assert_eq!(p["to_frame"], json!({"sketch": sketch, "curve": "ring"}));
+    assert!(p["from_face"].is_array() && p.get("from_frame").is_none() && p.get("angle").is_none(), "{p}");
+    // The Joint Origin snap, and a turn.
+    d.extra.insert("from_snap".into(), json!("origin"));
+    if let Kind::Align { angle, .. } = &mut d.kind {
+        *angle = "45".into();
+    }
+    let p = apply_commands(&app, &d).unwrap().remove(0).1;
+    assert_eq!(p["from_frame"], crate::dialogs_assembly::snap_of(&app.session, &bottom).unwrap().param);
+    assert!(p.get("from_face").is_none() && p["angle"] == json!("45"), "{p}");
+    // A sketch point is a frame too, and the command runs.
+    d.inputs[2].items.clear();
+    let at = solidcore_record::Vec2::new(70.0, 5.0);
+    let point = d.candidate(&app.session, &crate::viewport::Hit::SketchPoint { sketch, id: "p".into(), at }).unwrap();
+    d.pick(&app.session, point);
+    assert_eq!(apply_commands(&app, &d).unwrap().remove(0).1["to_frame"], json!({"sketch": sketch, "point": "p"}));
+    let id = apply(&mut app, &d);
+    assert!(app.session.model.result(id).is_some_and(|r| r.error.is_none()));
+}
+
 /// The Align dialog takes a plane (viewport or browser click) and the origin plane stays a plane
 /// in the command, so the bodies follow it when it moves.
 #[test]
@@ -2014,7 +2056,7 @@ fn align_components_input_picks_occurrence_from_viewport_body_and_skips_root_bod
     let second = app.run("occurrence.copy", json!({"component": comp, "translate": [30, 0, 0]})).unwrap()["occurrence"].as_u64().unwrap();
 
     let mut d = start(&mut app, vec![], "solid.align");
-    d.kind = Kind::Align { flip: false, components: true, axes: [true; 3] };
+    d.kind = Kind::Align { flip: false, components: true, axes: [true; 3], angle: String::new() };
     d.inputs[0].label = "Components";
     d.active = 0;
 
@@ -2057,6 +2099,141 @@ fn surface_dialogs_make_their_commands() {
     app.session.execute(&id, &p).unwrap();
     let v = app.session.model.state().bodies.iter().map(|b| b.mesh().measure().volume).fold(0.0, f64::max);
     assert!((v - 30.0 * 20.0 * 2.0).abs() < 1.0, "{v}");
+}
+
+#[test]
+fn fair_surface_dialog_defaults_picks_and_edit_values() {
+    use solidcraft_engine::doc::{BodyName, FeatureKind, IDENTITY};
+    let mut app = app_with(json!([]));
+    let mut d = start(&mut app, vec![Sel::Body { name: "Sheet".into() }], "surface.fair");
+    assert_eq!(d.inputs.len(), 1);
+    assert_eq!(d.inputs[0].accept, crate::selection::BODIES | crate::selection::FACES);
+    let (id, p) = apply_commands(&app, &d).unwrap().remove(0);
+    assert_eq!(id, "surface.fair");
+    assert_eq!(p, json!({"body":"Sheet", "faces":[], "strength":1.0, "iterations":1, "keep_edges":true}));
+    d.inputs[0].items = vec![Sel::Face { body: "Sheet".into(), index: 0, point: Vec3::new(1.0, 2.0, 3.0) }];
+    assert_eq!(apply_commands(&app, &d).unwrap()[0].1["faces"], json!([[1.0, 2.0, 3.0]]));
+    d.inputs[0].items.push(Sel::Body { name: "Other".into() });
+    assert!(apply_commands(&app, &d).is_err());
+    d.inputs[0].items.clear();
+    assert!(apply_commands(&app, &d).is_err());
+
+    let feature = FeatureKind::SurfaceFair {
+        body: BodyName::from("Sheet"),
+        faces: vec![],
+        strength: 0.4,
+        iterations: 7,
+        keep_edges: false,
+        tolerance: "0.2 mm".into(),
+    };
+    let (kind, inputs, extra) = crate::dialogs_surface::for_feature(&app, &feature, &IDENTITY).unwrap();
+    let cmds = if let Kind::Surface(k) = kind {
+        crate::dialogs_surface::commands(&app, &k, &inputs, &extra).unwrap()
+    } else {
+        panic!("expected a surface dialog")
+    };
+    assert_eq!(cmds[0].1, json!({"body":"Sheet", "faces":[], "strength":0.4, "iterations":7, "keep_edges":false, "tolerance":"0.2 mm"}));
+}
+
+#[test]
+fn match_surface_dialog_defaults_picks_and_edit_values() {
+    use solidcraft_engine::doc::kernel::Continuity;
+    use solidcraft_engine::doc::{BodyName, FeatureKind, IDENTITY, Position};
+    let mut app = app_with(json!([{"command":"solid.box", "params":{"length":10,"width":10,"height":10,"body_name":"Target"}}]));
+    let mut d = start(&mut app, vec![Sel::Body { name: "Sheet".into() }], "surface.match");
+    assert_eq!(d.inputs.len(), 3);
+    assert_eq!(d.inputs[0].accept, crate::selection::BODIES | crate::selection::FACES);
+    assert_eq!(d.inputs[1].accept, crate::selection::BODIES | crate::selection::FACES);
+    assert_eq!(d.inputs[2].accept, crate::selection::EDGES);
+    assert!(apply_commands(&app, &d).is_err());
+    d.inputs[1].items = vec![Sel::Body { name: "Target".into() }];
+    assert!(apply_commands(&app, &d).is_err());
+    let point = Vec3::new(5.0, 0.0, 0.0);
+    d.inputs[2].items = vec![crate::dialogs::edge_sel(&app.session, point).unwrap()];
+    let (id, p) = apply_commands(&app, &d).unwrap().remove(0);
+    assert_eq!(id, "surface.match");
+    assert_eq!(p, json!({"body":"Sheet", "faces":[], "target":"Target", "edges":[[5.0,0.0,0.0]], "order":"g2"}));
+    d.inputs[0].items = vec![Sel::Face { body: "Sheet".into(), index: 0, point: Vec3::new(1.0, 2.0, 3.0) }];
+    assert_eq!(apply_commands(&app, &d).unwrap()[0].1["faces"], json!([[1.0, 2.0, 3.0]]));
+    d.inputs[1].items = vec![Sel::Face { body: "Target".into(), index: 0, point: Vec3::new(5.0, 5.0, 10.0) }];
+    assert_eq!(apply_commands(&app, &d).unwrap()[0].1["target"], json!("Target"));
+    d.inputs[1].items = vec![Sel::Body { name: "Other".into() }];
+    assert!(apply_commands(&app, &d).is_err());
+
+    let face = Sel::Face { body: "Sheet".into(), index: 0, point: Vec3::new(1.0, 2.0, 3.0) };
+    let preselected = start(&mut app, vec![face.clone()], "surface.match");
+    assert_eq!(preselected.inputs[0].items, vec![face]);
+    assert!(preselected.inputs[1].items.is_empty());
+
+    let feature = FeatureKind::SurfaceMatch {
+        body: BodyName::from("Sheet"),
+        faces: vec![],
+        target: BodyName::from("Target"),
+        edges: vec![Position(point)],
+        order: Continuity::G3,
+    };
+    let (kind, inputs, extra) = crate::dialogs_surface::for_feature(&app, &feature, &IDENTITY).unwrap();
+    let cmds = if let Kind::Surface(k) = kind {
+        crate::dialogs_surface::commands(&app, &k, &inputs, &extra).unwrap()
+    } else {
+        panic!("expected a surface dialog")
+    };
+    assert_eq!(cmds[0].1, json!({"body":"Sheet", "faces":[], "target":"Target", "edges":[[5.0,0.0,0.0]], "order":"g3"}));
+}
+
+/// A Fair tolerance is a length: a bare value follows the design unit on OK, like Stitch's.
+#[test]
+fn fair_surface_tolerance_is_a_length_in_the_design_unit() {
+    let mut app = app_with(json!([]));
+    app.session.execute("document.units", &json!({"units":"in"})).unwrap();
+    let mut d = start(&mut app, vec![Sel::Body { name: "Sheet".into() }], "surface.fair");
+    if let Kind::Surface(crate::dialogs_surface::Surf::Fair { tolerance, .. }) = &mut d.kind {
+        *tolerance = "0.1".into();
+    } else {
+        panic!("expected the Fair dialog");
+    }
+    let (_, p) = apply_commands(&app, &d).unwrap().remove(0);
+    let sent = p["tolerance"].as_str().unwrap_or_default();
+    let mm = app.session.doc.eval(sent, ValueKind::Length).unwrap();
+    assert!((mm - 2.54).abs() < 1e-9, "{sent} -> {mm}");
+    // Refilling an edit goes through the same length fields.
+    let mut k = d.kind.clone();
+    assert_eq!(crate::length_input::fields(&app.session.doc, &mut k).len(), 1);
+}
+
+/// Edit Feature restores a Fair or Match pick on the body it was saved on, even when another
+/// body has geometry at the same point (here the seam the two boxes share).
+#[test]
+fn fair_and_match_picks_reopen_on_their_saved_bodies() {
+    use solidcraft_engine::doc::kernel::Continuity;
+    use solidcraft_engine::doc::{BodyName, FacePick, FeatureKind, IDENTITY, Position};
+    let app = app_with(json!([
+        {"command":"solid.box", "params":{"corner":[0,0,0],"length":10,"width":10,"height":10,"body_name":"Src"}},
+        {"command":"solid.box", "params":{"corner":[10,0,0],"length":10,"width":10,"height":10,"body_name":"Target","operation":"new"}}
+    ]));
+    // The shared wall is x = 10 and the shared edge runs along it at y = 0.
+    let wall = FacePick(Vec3::new(10.0, 5.0, 5.0));
+    let edge = Position(Vec3::new(10.0, 0.0, 5.0));
+    let fair = FeatureKind::SurfaceFair {
+        body: BodyName::from("Target"),
+        faces: vec![wall],
+        strength: 1.0,
+        iterations: 1,
+        keep_edges: true,
+        tolerance: String::new().into(),
+    };
+    let (_, inputs, _) = crate::dialogs_surface::for_feature(&app, &fair, &IDENTITY).unwrap();
+    assert!(matches!(inputs[0].items.as_slice(), [Sel::Face { body, .. }] if body == "Target"), "{:?}", inputs[0].items);
+    let matched = FeatureKind::SurfaceMatch {
+        body: BodyName::from("Target"),
+        faces: vec![wall],
+        target: BodyName::from("Target"),
+        edges: vec![edge],
+        order: Continuity::G2,
+    };
+    let (_, inputs, _) = crate::dialogs_surface::for_feature(&app, &matched, &IDENTITY).unwrap();
+    assert!(matches!(inputs[0].items.as_slice(), [Sel::Face { body, .. }] if body == "Target"), "{:?}", inputs[0].items);
+    assert!(matches!(inputs[2].items.as_slice(), [Sel::Edge { body, .. }] if body == "Target"), "{:?}", inputs[2].items);
 }
 
 #[test]
@@ -2670,6 +2847,63 @@ fn offset_plane_through_a_picked_vertex() {
     assert!(matches!(reopened.inputs[1].items.as_slice(), [Sel::Vertex { body, .. }] if body == "Box"), "{:?}", reopened.inputs[1].items);
 }
 
+/// Plane at Angle's "Use axis direction only" option shows a Pivot pick and sends both parameters (#12041).
+#[test]
+fn plane_at_angle_direction_only_shows_a_pivot_and_applies() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Box"})).unwrap();
+    h.app.start("construct.plane.at_angle");
+    h.frames(2);
+    let d = h.app.dialog.as_mut().unwrap();
+    assert!(matches!(d.kind, Kind::AnglePlane { direction_only: false, .. }));
+    assert!(!d.inputs.iter().any(|i| i.label == "Pivot"), "{:?}", d.inputs);
+    d.inputs[0].items = vec![Sel::Plane { name: "XY".into() }];
+    d.inputs[1].items = vec![Sel::Axis { name: "Y".into() }];
+    if let Kind::AnglePlane { direction_only, .. } = &mut d.kind {
+        *direction_only = true;
+    }
+    // The dense form adds Pivot once the option is on; mirror that here for the parameter build.
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        crate::dialogs::set_object_accepting(
+            &mut d.inputs,
+            &mut d.active,
+            "Pivot",
+            crate::selection::VERTICES | crate::selection::POINTS | crate::selection::CONSTRUCTION_POINTS,
+            true,
+        );
+        let pivot = d.inputs.iter_mut().find(|i| i.label == "Pivot").expect("Pivot");
+        pivot.items = vec![Sel::Vertex { body: "Box".into(), point: Vec3::new(40.0, 0.0, 0.0) }];
+        if let Kind::AnglePlane { angle, .. } = &mut d.kind {
+            *angle = "90 deg".into();
+        }
+    }
+    let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(
+        commands.first().map(|c| c.1.clone()),
+        Some(json!({
+            "base": "XY",
+            "axis": "Y",
+            "angle": "90 deg",
+            "direction_only": true,
+            "pivot": {"vertex": [40.0, 0.0, 0.0]}
+        }))
+    );
+    let (cmd, params) = commands.into_iter().next().unwrap();
+    h.app.dialog = None;
+    let id = h.app.run(&cmd, params).unwrap()["feature"].as_u64().unwrap();
+    let pl = solidcraft_engine::view::construction_planes(&h.app.session)
+        .into_iter()
+        .find(|(fid, _, _)| *fid == id)
+        .map(|(_, _, pl)| pl)
+        .expect("the plane");
+    assert!(pl.origin.dist(Vec3::new(40.0, 0.0, 40.0)) < 1e-3, "{pl:?}");
+    assert!(pl.normal().cross(Vec3::X).len() < 1e-6, "{pl:?}");
+    let reopened = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    assert!(matches!(reopened.kind, Kind::AnglePlane { direction_only: true, .. }), "{:?}", reopened.kind);
+    assert!(reopened.inputs.iter().any(|i| i.label == "Pivot" && !i.items.is_empty()), "{:?}", reopened.inputs);
+}
+
 /// Plane at Angle draws the tilted plane while its dialog is open, when created and when edited,
 /// and redraws it when the angle changes (it used to show only the picked plane and the label).
 #[test]
@@ -2684,7 +2918,7 @@ fn plane_at_angle_previews_the_tilted_plane_when_edited() {
     assert!(d.previews(), "the edited plane is previewed");
     wait_feature_preview(&mut h);
     let first = h.app.preview.key;
-    if let Kind::AnglePlane { angle } = &mut h.app.dialog.as_mut().unwrap().kind {
+    if let Kind::AnglePlane { angle, .. } = &mut h.app.dialog.as_mut().unwrap().kind {
         *angle = "30 deg".into();
     }
     wait_feature_preview(&mut h);
@@ -3226,5 +3460,402 @@ fn coincident_takes_a_selected_line_midpoint() {
             }
             assert!((middle_y(&h) - 40.0).abs() < 1e-6, "menu {menu}, reverse {reverse}: middle at y {} ({:?})", middle_y(&h), h.app.status);
         }
+    }
+}
+
+/// #3683: a multi-pick field lists its picked items on request, and one of them can be removed
+/// from the dialog without clearing the others.
+#[test]
+fn one_picked_edge_is_removed_from_the_dialog_list() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.frames(2);
+    let edge = |h: &crate::scenario::Harness, p: Vec3| {
+        let st = h.app.session.world_state().unwrap();
+        let m = st.body("Body1").unwrap().mesh();
+        let i = m.edges.iter().position(|e| e.windows(2).any(|w| p.dist_to_segment(w[0], w[1]) < 1e-9)).expect("an edge there");
+        Sel::Edge { body: "Body1".into(), index: i, point: p }
+    };
+    let picks = [Vec3::new(20.0, 0.0, 20.0), Vec3::new(40.0, 15.0, 20.0), Vec3::new(20.0, 30.0, 20.0)].map(|p| edge(&h, p));
+    h.app.session.selection = picks.to_vec();
+    h.app.start("solid.fillet");
+    h.frames(3);
+    let items = |h: &crate::scenario::Harness| h.app.dialog.as_ref().map(|d| d.inputs[0].items.clone()).unwrap_or_default();
+    assert_eq!(items(&h).len(), 3);
+    let label = h.app.dialog.as_ref().unwrap().inputs[0].label;
+    assert!(crate::scenario::handle_at(&format!("dialog:list:{label}:1:remove")).is_none(), "the list starts folded");
+
+    h.step(&json!({"click": {"handle": format!("dialog:list_toggle:{label}")}})).unwrap();
+    h.frames(2);
+    assert!(crate::scenario::handle_at(&format!("dialog:list:{label}:2:remove")).is_some(), "every pick is listed");
+    h.step(&json!({"click": {"handle": format!("dialog:list:{label}:1:remove")}})).unwrap();
+    h.frames(2);
+    let left = items(&h);
+    assert_eq!(left.len(), 2, "{left:?}");
+    assert!(
+        crate::selection::same_item(&left[0], &picks[0]) && crate::selection::same_item(&left[1], &picks[2]),
+        "only the second edge went: {left:?}"
+    );
+
+    // The clear button still clears them all, and folds the list.
+    h.step(&json!({"click": {"handle": format!("dialog:clear:{label}")}})).unwrap();
+    h.frames(2);
+    assert!(items(&h).is_empty());
+    assert_eq!(h.app.dialog.as_ref().unwrap().listed, None);
+}
+
+/// #3683: with Tangent Chain on, removing a row the chain brought takes out the pick that
+/// brought it and its whole chain, as picking that edge again would; ticking Tangent Chain off
+/// and on does not bring it back.
+#[test]
+fn removing_a_tangent_chain_row_removes_its_seed() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    // Round the four upright edges: the top rim is then one tangent loop of lines and arcs.
+    h.app.run("solid.fillet", json!({"edges": [[0, 0, 10], [40, 0, 10], [40, 30, 10], [0, 30, 10]], "radius": 5})).unwrap();
+    h.frames(2);
+    let rim = crate::dialogs::edge_sel(&h.app.session, Vec3::new(20.0, 0.0, 20.0)).unwrap();
+    let other = crate::dialogs::edge_sel(&h.app.session, Vec3::new(20.0, 0.0, 0.0)).unwrap();
+    h.app.session.selection = vec![rim.clone(), other.clone()];
+    h.app.start("solid.fillet");
+    h.frames(3);
+    if let Some(Kind::Fillet { chain, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *chain = true;
+    }
+    h.frames(2);
+    let items = |h: &crate::scenario::Harness| h.app.dialog.as_ref().map(|d| d.inputs[0].items.clone()).unwrap_or_default();
+    let has = |h: &crate::scenario::Harness, x: &Sel| items(h).iter().any(|y| crate::selection::same_item(x, y));
+    assert!(items(&h).len() > 4 && has(&h, &rim) && has(&h, &other), "the rim's chain and the bottom loop's: {:?}", items(&h));
+    // A row of the rim's chain that is not the rim edge picked by hand.
+    let row = {
+        let d = h.app.dialog.as_ref().unwrap();
+        let rows = d.listed_items(&h.app.session, 0);
+        rows.iter()
+            .position(|x| {
+                let Sel::Edge { point, .. } = x else { return false };
+                (point.z - 20.0).abs() < 1e-6 && !crate::selection::same_item(x, &rim)
+            })
+            .expect("a chain row on the rim")
+    };
+    let label = open_list(&mut h, 0);
+    h.step(&json!({"click": {"handle": format!("dialog:list:{label}:{row}:remove")}})).unwrap();
+    h.frames(2);
+    let on_rim =
+        |h: &crate::scenario::Harness| items(h).iter().filter(|x| matches!(x, Sel::Edge { point, .. } if (point.z - 20.0).abs() < 1e-6)).count();
+    assert_eq!(on_rim(&h), 0, "the rim's whole chain went: {:?}", items(&h));
+    assert!(has(&h, &other), "the other pick's chain stays");
+    for on in [false, true] {
+        if let Some(Kind::Fillet { chain, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *chain = on;
+        }
+        h.frames(2);
+        assert_eq!(on_rim(&h), 0, "Tangent Chain {on} does not bring the rim back: {:?}", items(&h));
+    }
+}
+
+/// Open input `i`'s list of picked items in the open dialog (#3683).
+fn open_list(h: &mut crate::scenario::Harness, i: usize) -> &'static str {
+    let label = h.app.dialog.as_ref().unwrap().inputs[i].label;
+    h.step(&json!({"click": {"handle": format!("dialog:list_toggle:{label}")}})).unwrap();
+    h.frames(2);
+    label
+}
+
+/// Move the pointer to a published handle of the dialog.
+fn hover_handle(h: &mut crate::scenario::Harness, handle: &str) {
+    let p = crate::scenario::handle_at(handle).unwrap_or_else(|| panic!("no {handle}"));
+    h.call("ui.move", json!({"x": p.x, "y": p.y}));
+    h.frames(2);
+}
+
+/// #3683: hovering a picked item's row, or its remove button, lights that item in the view as
+/// hovering it there does (and not as picked); leaving the row puts the view back.
+#[test]
+fn hovering_a_picked_row_lights_that_item_in_the_view() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.frames(2);
+    let picks = [Vec3::new(20.0, 0.0, 20.0), Vec3::new(40.0, 15.0, 20.0)].map(|p| crate::dialogs::edge_sel(&h.app.session, p).unwrap());
+    h.app.session.selection = picks.to_vec();
+    h.app.start("solid.fillet");
+    h.frames(3);
+    let label = open_list(&mut h, 0);
+    let lit = |h: &crate::scenario::Harness| h.app.dialog.as_ref().unwrap().list_hover.clone();
+    for handle in [format!("dialog:list:{label}:1"), format!("dialog:list:{label}:1:remove")] {
+        let at = crate::scenario::rect_of(&handle).map(|r| r.left_center() + egui::vec2(8.0, 0.0));
+        let p = at.or_else(|| crate::scenario::handle_at(&handle)).unwrap();
+        h.call("ui.move", json!({"x": p.x, "y": p.y}));
+        h.frames(2);
+        let Sel::Edge { body, index, point } = &picks[1] else { panic!("{:?}", picks[1]) };
+        assert_eq!(lit(&h), Some((0, picks[1].clone())), "{handle}");
+        assert_eq!(
+            h.app.viewport.hover,
+            Some(crate::viewport::Hit::Edge { body: body.clone(), index: *index, mid: *point, point: *point }),
+            "{handle}"
+        );
+        // Lit as a hover: the picked shading gives way to the hover colour on that edge, which a
+        // hover in the view leaves as picked.
+        let lines = |h: &crate::scenario::Harness| crate::viewport::build_highlight(&h.app).merged().lines;
+        let hl = lines(&h);
+        h.app.dialog.as_mut().unwrap().list_hover = None;
+        let picked = lines(&h);
+        h.app.dialog.as_mut().unwrap().list_hover = Some((0, picks[1].clone()));
+        assert_ne!(hl, picked, "{handle}: the row's edge is drawn as hovered");
+    }
+    // Off the rows: nothing in the dialog's list is lit any more.
+    let chip = crate::scenario::handle_at(&format!("dialog:clear:{label}")).unwrap();
+    h.call("ui.move", json!({"x": chip.x - 60.0, "y": chip.y}));
+    h.frames(2);
+    assert_eq!(lit(&h), None);
+    assert_eq!(h.app.viewport.hover, None);
+}
+
+/// #3683: a body or feature row lights what the Browser and timeline rows light: the body, or
+/// the feature's geometry; leaving it puts the view back.
+#[test]
+fn hovering_a_body_or_feature_row_lights_it_as_the_browser_does() {
+    let lit = |h: &crate::scenario::Harness| crate::viewport::build_highlight(&h.app).merged().tris;
+    let mut h = crate::scenario::Harness::new();
+    for (name, x) in [("Block", 0), ("Cutter", 10), ("Other", 20)] {
+        h.app.run("solid.box", json!({"corner": [x, x, x], "length": 20, "width": 20, "height": 20, "body_name": name})).unwrap();
+    }
+    h.app.session.selection.clear();
+    h.app.start("solid.combine");
+    h.frames(2);
+    let d = h.app.dialog.as_mut().unwrap();
+    d.inputs[0].items = vec![Sel::Body { name: "Block".into() }];
+    d.inputs[1].items = vec![Sel::Body { name: "Cutter".into() }, Sel::Body { name: "Other".into() }];
+    h.frames(2);
+    let label = open_list(&mut h, 1);
+    let unlit = lit(&h);
+    hover_handle(&mut h, &format!("dialog:list:{label}:1:remove"));
+    assert_eq!(h.app.dialog.as_ref().unwrap().list_hover, Some((1, Sel::Body { name: "Other".into() })));
+    assert_ne!(lit(&h), unlit, "the body lights up");
+    hover_handle(&mut h, &format!("dialog:clear:{label}"));
+    assert_eq!(h.app.dialog.as_ref().unwrap().list_hover, None);
+    assert_eq!(lit(&h), unlit);
+
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 60, "width": 40, "height": 10})).unwrap();
+    h.app.run("solid.hole", json!({"position": [10, 10, 10], "diameter": 5})).unwrap();
+    h.app.run("solid.hole", json!({"position": [30, 10, 10], "diameter": 5})).unwrap();
+    let holes: Vec<u64> = h.app.session.doc.features.iter().rev().take(2).map(|f| f.id).collect();
+    h.app.session.selection = holes.iter().rev().map(|&id| Sel::Feature { id }).collect();
+    h.app.start("solid.pattern.rectangular");
+    h.frames(3);
+    let label = open_list(&mut h, 0);
+    let unlit = lit(&h);
+    hover_handle(&mut h, &format!("dialog:list:{label}:1:remove"));
+    assert_eq!(h.app.dialog.as_ref().unwrap().list_hover, Some((0, Sel::Feature { id: holes[0] })), "the second hole");
+    assert_ne!(lit(&h), unlit, "the hole's faces light up");
+}
+
+/// #3683: removing a row of any multi-pick field changes what the dialog makes, and its
+/// preview, exactly as taking that item out of the field does: Combine's tool bodies, a Loft's
+/// rails, Sweep's path, Blend Surface's To edges, a rigid group's components and a pattern's
+/// features.
+#[test]
+fn removing_a_row_updates_the_preview_of_every_multi_pick_field() {
+    #[allow(clippy::type_complexity)]
+    let cases: Vec<(&str, Box<dyn Fn(&mut crate::scenario::Harness)>, usize)> = vec![
+        (
+            "solid.combine",
+            Box::new(|h| {
+                for (name, x) in [("Block", 0), ("Cutter", 10), ("Other", 20)] {
+                    h.app.run("solid.box", json!({"corner": [x, x, x], "length": 20, "width": 20, "height": 20, "body_name": name})).unwrap();
+                }
+                h.app.session.selection.clear();
+                h.app.start("solid.combine");
+                let d = h.app.dialog.as_mut().unwrap();
+                d.inputs[0].items = vec![Sel::Body { name: "Block".into() }];
+                d.inputs[1].items = vec![Sel::Body { name: "Cutter".into() }, Sel::Body { name: "Other".into() }];
+            }),
+            1,
+        ),
+        (
+            "solid.loft",
+            Box::new(|h| {
+                for (name, z) in [("Base", 0), ("Top", 40)] {
+                    h.app
+                        .run("sketch.create", json!({"name": name, "plane": {"origin": [0, 0, z], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}))
+                        .unwrap();
+                    h.app.run("sketch.circle.center", json!({"center": [0, 0], "radius": 10})).unwrap();
+                    h.app.run("sketch.finish", json!({})).unwrap();
+                }
+                h.app.run("sketch.create", json!({"plane": "XZ", "name": "R"})).unwrap();
+                h.app.run("sketch.arc.three_point", json!({"start": [10, 0], "end": [10, -40], "through": [15, -20], "id": "out"})).unwrap();
+                h.app.run("sketch.arc.three_point", json!({"start": [-10, 0], "end": [-10, -40], "through": [-15, -20], "id": "back"})).unwrap();
+                h.app.run("sketch.finish", json!({})).unwrap();
+                let id = |h: &crate::scenario::Harness, n: &str| h.app.session.doc.find_feature(n).unwrap().id;
+                let (base, top, rails) = (id(h, "Base"), id(h, "Top"), id(h, "R"));
+                h.app.start("solid.loft");
+                let d = h.app.dialog.as_mut().unwrap();
+                d.inputs[0].items = vec![Sel::Profile { sketch: base, index: 0 }, Sel::Profile { sketch: top, index: 0 }];
+                d.inputs[1].items = ["out", "back"].map(|c| Sel::SketchCurve { id: c.into(), sketch: Some(rails) }).to_vec();
+            }),
+            1,
+        ),
+        (
+            "solid.sweep",
+            Box::new(|h| {
+                h.app.run("sketch.create", json!({"plane": "XY", "name": "P"})).unwrap();
+                h.app.run("sketch.circle.center", json!({"center": [0, 0], "radius": 2})).unwrap();
+                h.app.run("sketch.finish", json!({})).unwrap();
+                h.app.run("sketch.create", json!({"plane": "XZ", "name": "Path"})).unwrap();
+                h.app.run("sketch.line", json!({"points": [[0, 0], [0, -20], [10, -30]], "ids": ["up", "over"]})).unwrap();
+                h.app.run("sketch.finish", json!({})).unwrap();
+                let id = |h: &crate::scenario::Harness, n: &str| h.app.session.doc.find_feature(n).unwrap().id;
+                let (profile, path) = (id(h, "P"), id(h, "Path"));
+                h.app.session.selection.clear();
+                h.app.start("solid.sweep");
+                let d = h.app.dialog.as_mut().unwrap();
+                d.inputs[0].items = vec![Sel::Profile { sketch: profile, index: 0 }];
+                d.inputs[1].items = ["up", "over"].map(|c| Sel::SketchCurve { id: c.into(), sketch: Some(path) }).to_vec();
+            }),
+            1,
+        ),
+        (
+            "surface.blend",
+            Box::new(|h| {
+                h.app.run("solid.box", json!({"length": 40, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "A"})).unwrap();
+                h.app.run("solid.box", json!({"length": 40, "width": 10, "height": 10, "corner": [0, 20, 5], "body_name": "B"})).unwrap();
+                let e = |h: &crate::scenario::Harness, p: Vec3| crate::dialogs::edge_sel(&h.app.session, p).unwrap();
+                let (from, to, to2) = (e(h, Vec3::new(20.0, 10.0, 10.0)), e(h, Vec3::new(20.0, 20.0, 15.0)), e(h, Vec3::new(20.0, 20.0, 5.0)));
+                h.app.session.selection.clear();
+                h.app.start("surface.blend");
+                let d = h.app.dialog.as_mut().unwrap();
+                d.inputs[0].items = vec![from];
+                d.inputs[1].items = vec![to, to2];
+            }),
+            1,
+        ),
+        (
+            "joint.rigid_group",
+            Box::new(|h| {
+                let s = &mut h.app.session;
+                crate::test_support::grounded_boxes(&[("A", 0), ("B", 30), ("C", 60)], |id, p| s.execute(id, &p).unwrap());
+                h.app.session.selection = ["Body1", "Body2", "Body3"].map(|name| Sel::Body { name: name.into() }).to_vec();
+                h.app.start("joint.rigid_group");
+            }),
+            0,
+        ),
+        (
+            "solid.pattern.rectangular",
+            Box::new(|h| {
+                h.app.run("solid.box", json!({"length": 60, "width": 40, "height": 10})).unwrap();
+                h.app.run("solid.hole", json!({"position": [10, 10, 10], "diameter": 5})).unwrap();
+                h.app.run("solid.hole", json!({"position": [30, 10, 10], "diameter": 5})).unwrap();
+                h.app.session.selection = h.app.session.doc.features.iter().rev().take(2).map(|f| Sel::Feature { id: f.id }).collect();
+                h.app.start("solid.pattern.rectangular");
+                h.app.dialog.as_mut().unwrap().inputs[1].items = vec![Sel::Axis { name: "X".into() }];
+            }),
+            0,
+        ),
+    ];
+    for (command, setup, input) in cases {
+        let mut h = crate::scenario::Harness::new();
+        setup(&mut h);
+        h.frames(3);
+        let d = h.app.dialog.clone().unwrap_or_else(|| panic!("{command}: no dialog"));
+        let before = crate::dialogs::preview_commands(&h.app, &d);
+        assert!(before.as_ref().is_ok_and(|c| !c.is_empty()), "{command}: {before:?} {:?}", d.inputs);
+        let mut want = d.clone();
+        let gone = want.inputs[input].items.remove(0);
+        let want = crate::dialogs::preview_commands(&h.app, &want);
+        assert_ne!(before, want, "{command}: the first item counts");
+
+        let label = open_list(&mut h, input);
+        h.step(&json!({"click": {"handle": format!("dialog:list:{label}:0:remove")}})).unwrap();
+        h.frames(2);
+        let d = h.app.dialog.as_ref().unwrap();
+        assert!(!d.inputs[input].items.iter().any(|x| crate::selection::same_item(x, &gone)), "{command}: {:?}", d.inputs[input].items);
+        assert_eq!(crate::dialogs::preview_commands(&h.app, d), want, "{command}");
+    }
+}
+
+/// #3683: with Tangent Chain on, Shell's list shows every face it opens, as its chip counts
+/// them; removing a face the chain brought takes out the pick whose chain holds it.
+#[test]
+fn shell_lists_the_faces_its_chip_counts() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    h.app.run("solid.fillet", json!({"edges":[[20,0,20]],"radius":4})).unwrap();
+    let top = face(&h.app, Vec3::new(20.0, 17.0, 20.0));
+    let back = face(&h.app, Vec3::new(20.0, 30.0, 10.0));
+    start(&mut h.app, vec![top.clone(), back.clone()], "solid.shell");
+    h.frames(3);
+    assert!(h.widget("4 selected").is_some(), "the top's chain of three and the back");
+    let label = open_list(&mut h, 0);
+    let rows = (0..8).take_while(|i| crate::scenario::handle_at(&format!("dialog:list:{label}:{i}:remove")).is_some()).count();
+    assert_eq!(rows, 4, "a row for each face the chip counts");
+    let d = h.app.dialog.as_ref().unwrap();
+    let listed = d.listed_items(&h.app.session, 0);
+    let round = listed.iter().position(|x| !crate::selection::same_item(x, &top) && !crate::selection::same_item(x, &back)).unwrap();
+    h.step(&json!({"click": {"handle": format!("dialog:list:{label}:{round}:remove")}})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![back]);
+    assert!(h.widget("1 selected").is_some());
+}
+
+/// #11663: Fix started with only points selected (no curve to fix them through) gives each of
+/// them its own Fix constraint, so a selection of loose points is not silently dropped.
+#[test]
+fn fix_takes_a_selection_of_only_points() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.point", json!({"point": [10, 10]})).unwrap();
+    h.app.run("sketch.point", json!({"point": [30, 20]})).unwrap();
+    let sid = h.app.session.active_sketch.unwrap();
+    let ids: Vec<String> = h.app.session.doc.sketch(sid).unwrap().points.iter().skip(1).map(|p| p.id.clone()).collect();
+    assert_eq!(ids.len(), 2, "two loose points to select");
+    let fixes = |h: &crate::scenario::Harness| h.app.session.doc.sketch(sid).unwrap().constraints.iter().filter(|c| c.kind.name() == "Fix").count();
+    let before = fixes(&h);
+    h.app.session.selection = ids.iter().map(|id| Sel::SketchPoint { id: id.clone() }).collect();
+    h.app.start("sketch.constraint.fix");
+    assert_eq!(fixes(&h), before + 2, "each selected point got a Fix constraint ({:?})", h.app.status);
+    assert!(h.app.tool.is_none(), "Fix applied at once, no pick tool left running");
+}
+
+/// #11663: a curve of another sketch is named by its sketch, and its bare id could be a curve of
+/// the active one; Fix leaves such a selection to the pick tool and changes nothing.
+#[test]
+fn fix_leaves_a_curve_of_another_sketch_to_the_pick_tool() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[0, 0], [20, 2]], "infer": false, "connect": false})).unwrap();
+    let sid = h.app.session.active_sketch.unwrap();
+    h.app.session.selection = vec![Sel::SketchCurve { id: "l1".into(), sketch: Some(sid + 1000) }];
+    h.app.start("sketch.constraint.fix");
+    assert!(h.app.tool.is_some(), "the pick tool is left to ask ({:?})", h.app.status);
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    assert!(sk.curves.iter().all(|c| !c.fixed), "the active sketch's l1 was not fixed by a bare id");
+}
+
+/// #11663: a box drawn over a sketch takes its dimensions and constraint icons along with its
+/// lines and points. Fix started with that selection fixes the lines and points; it does not fall
+/// back to the pick tool. Hundreds of entities (more than the 200 a constraint pick takes) too.
+#[test]
+fn fix_takes_a_boxed_selection_with_its_dimensions_and_hundreds_of_entities() {
+    for lines in [3, 110] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        for i in 0..lines {
+            let y = 5 * i;
+            h.app.run("sketch.line", json!({"points": [[0, y], [20, y + 2]], "infer": false, "connect": false})).unwrap();
+        }
+        h.app.run("sketch.dimension", json!({"entities": ["l1"], "value": "21 mm"})).unwrap();
+        let sid = h.app.session.active_sketch.unwrap();
+        let sk = h.app.session.doc.sketch(sid).unwrap();
+        let mut selection: Vec<Sel> = sk.curves.iter().map(|c| Sel::SketchCurve { id: c.id.clone(), sketch: None }).collect();
+        selection.extend(sk.points.iter().skip(1).map(|p| Sel::SketchPoint { id: p.id.clone() }));
+        selection.extend(sk.constraints.iter().map(|c| Sel::SketchConstraint { id: c.id.clone() }));
+        assert!(selection.iter().any(|s| matches!(s, Sel::SketchConstraint { .. })), "the box holds the dimension");
+        h.app.session.selection = selection;
+        h.app.start("sketch.constraint.fix");
+        let sk = h.app.session.doc.sketch(sid).unwrap();
+        let loose: Vec<&str> = sk.curves.iter().filter(|c| !c.fixed).map(|c| c.id.as_str()).collect();
+        assert!(loose.is_empty(), "{lines} lines: not fixed {loose:?} ({:?})", h.app.status);
+        assert!(h.app.tool.is_none(), "{lines} lines: Fix applied at once, no pick tool left running");
+        assert!(h.app.session.selection.is_empty(), "{lines} lines: the selection is used up");
     }
 }

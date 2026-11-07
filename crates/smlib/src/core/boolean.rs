@@ -92,9 +92,9 @@ fn operands<'a>(bodies: &[&'a Body]) -> Vec<(&'static str, &'a Body)> {
 }
 
 /// Copies of `bodies`, in order (a body given twice is copied twice, as the capi copies each
-/// operand), all made under the kernel's lock.
+/// operand).
 fn copies(k: &mut Kernel, bodies: &[&Body]) -> SolidResult<Vec<Brep>> {
-    // Under the kernel's lock (`run` holds it), as every body lock is: two never deadlock.
+    // One body's lock at a time, here as everywhere: two calls never deadlock on them.
     let mut out = Vec::with_capacity(bodies.len());
     for b in bodies {
         let c = brep_copy(k, &b.0.lock().unwrap_or_else(PoisonError::into_inner))?;

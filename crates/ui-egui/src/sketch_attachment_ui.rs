@@ -1,11 +1,13 @@
 //! Reviewable sketch-plane rebinding. Saved lost planes are repair guides, never model geometry.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use egui::RichText;
 use serde_json::{Value, json};
+use solidcore_record::{Plane, Vec3};
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::face_anchor::plane_face_anchor;
 use solidcraft_engine::doc::{EmbossFace, FaceAttachmentStatus, FeatureKind, PlaneRef, mat_inverse};
-use solidcraft_engine::geom::{Plane, Vec3};
+use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
 use crate::theme::Tokens;
@@ -176,8 +178,10 @@ pub fn panel(app: &mut SolveApp, ctx: &egui::Context) {
     let spec = solidcraft_engine::find_command("sketch.redefine");
     let command = spec.as_ref().map_or("", |s| crate::i18n::tr_label(s.label));
     let title = crate::i18n::format("sketch_panel.redefine_title", &[("command", command), ("name", name)]);
-    let panel = ui_kit::Panel::new(&title, egui::Id::new("sc_redefine"), anchor, drag_bounds, side, frame);
+    let panel = ui_kit::Panel::new(&title, egui::Id::unique("sc_redefine"), anchor, drag_bounds, side, frame);
+    let mut painted = false;
     let response = panel.window(ctx).show(ctx, |ui| {
+        painted = ui.is_visible() && !ui.is_sizing_pass();
         let (closed, action) = panel.feature(
             ui,
             ui_kit::FeatureOptions {
@@ -258,7 +262,7 @@ pub fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                     let text = if draft.candidate.is_some() { draft.label.as_str() } else { crate::i18n::tr("dialog.select") };
                     let response = ui_kit::selection_field(ui, text, ui_kit::Selection { active: true, filled: draft.candidate.is_some() });
                     if response
-                        .on_hover_text(crate::i18n::tr_label(
+                        .backing_on_hover_text(crate::i18n::tr_label(
                             "Choose a new plane. Sketch geometry and dimensions stay unchanged in its two-dimensional coordinates.",
                         ))
                         .clicked()
@@ -334,7 +338,7 @@ pub fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         cancel |= closed || action == ui_kit::Action::Cancel;
         apply |= action == ui_kit::Action::Ok;
     });
-    app.viewport.dialog_rect = response.map(|r| r.response.rect);
+    app.viewport.dialog_rect = response.filter(|_| !app.universal_panel_host_enabled() || painted).map(|r| r.response.rect);
     if let Some(rect) = app.viewport.dialog_rect {
         crate::scenario::publish_rect("dialog:outer", rect);
         crate::scenario::publish_rect("dialog:card", rect);

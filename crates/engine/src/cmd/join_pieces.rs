@@ -3,6 +3,7 @@
 //! result OK makes, and with the warning a Join apart gets (#4434).
 
 use serde_json::Value;
+use solidcraft_geom::prelude::*;
 
 use crate::Session;
 

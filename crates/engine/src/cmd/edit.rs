@@ -1,5 +1,6 @@
 //! Undo/redo, the timeline, deletion and selection.
 
+use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
@@ -86,7 +87,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("timeline.roll_to", "Roll History Marker", roll_to).icon("rollback")
         .params("position: number of features to keep active, or \"end\" (omit = end) | feature: id|name (the marker goes right after it)"),
     CommandSpec::new("timeline.reorder", "Reorder Feature", reorder).icon("reorder")
-        .params("feature: id|name, position: its new index, active?: bool (true = it ends up before the history marker, false = behind it; other features keep their state); refused when a feature that worked would fail, unless allow_errors?: bool (default false): then made, and broken: [{feature, error}] lists the features it broke"),
+        .params("feature: id|name, position: its new index, active?: bool (true = it ends up before the history marker, false = behind it; other features keep their state); refused when a feature that worked would fail, unless allow_errors?: bool (default false): then made, and broken: [{feature, error}] lists the features it broke → feature, position: its index now, from: its index before, moved: bool, note?: why nothing moved, or that a position past the end meant the last slot"),
     CommandSpec::new("timeline.reorder_many", "Reorder Features", reorder_many).icon("reorder").params(
         "features: [id|name], position: insertion slot in the current history; selected features keep their relative order; active?: bool (as timeline.reorder's); refused when a feature that worked would fail, unless allow_errors?: bool (default false): then made, and broken: [{feature, error}] lists the features it broke",
     ),
@@ -448,22 +449,96 @@ fn group_tree(doc: &solidcraft_doc::Document, roots: &[u64]) -> (std::collection
 }
 
 fn sort_group_features(doc: &mut solidcraft_doc::Document) {
-    let positions: std::collections::BTreeMap<u64, usize> = doc.features.iter().enumerate().map(|(index, feature)| (feature.id, index)).collect();
-    for group in &mut doc.timeline_groups {
+    sort_folder_features(&doc.features, &mut doc.timeline_groups);
+}
+
+fn sort_folder_features(features: &[Feature], folders: &mut [solidcraft_doc::TimelineGroup]) {
+    let positions: std::collections::BTreeMap<u64, usize> = features.iter().enumerate().map(|(index, feature)| (feature.id, index)).collect();
+    for group in folders {
         group.features.sort_by_key(|feature| positions.get(feature).copied().unwrap_or(usize::MAX));
     }
 }
 
 fn require_contiguous_groups(doc: &solidcraft_doc::Document, cmd: &str) -> Result<()> {
     let Some(id) = solidcraft_doc::non_contiguous_timeline_group(&doc.features, &doc.timeline_groups) else { return Ok(()) };
-    let name = doc.timeline_groups.iter().find(|group| group.id == id).map(|group| group.name.as_str()).unwrap_or("unknown");
-    Err(bad(cmd, format!("timeline folder `{name}` must contain one contiguous run of features")))
+    Err(not_contiguous(&doc.timeline_groups, id, cmd))
+}
+
+fn not_contiguous(folders: &[solidcraft_doc::TimelineGroup], id: u64, cmd: &str) -> EngineError {
+    let name = folders.iter().find(|group| group.id == id).map(|group| group.name.as_str()).unwrap_or("unknown");
+    bad(cmd, format!("timeline folder `{name}` must contain one contiguous run of features"))
+}
+
+/// The design's folders once `folder` is added, taking its features and joints out of any other
+/// folder and becoming the parent of the folders `groups` (whose features and joints it then holds
+/// through them), and the first folder that would no longer be one run of features, if any.
+fn folders_with(
+    doc: &solidcraft_doc::Document,
+    mut folder: solidcraft_doc::TimelineGroup,
+    groups: &[u64],
+) -> (Vec<solidcraft_doc::TimelineGroup>, Option<u64>) {
+    let nested = group_feature_ids(doc, groups);
+    folder.features.retain(|feature| !nested.contains(feature));
+    let nested_joints = group_joint_ids(doc, groups);
+    folder.joints.retain(|joint| !nested_joints.contains(joint));
+    let mut next = doc.timeline_groups.clone();
+    for group in &mut next {
+        group.joints.retain(|joint| !folder.joints.contains(joint));
+        group.features.retain(|feature| !folder.features.contains(feature));
+        if groups.contains(&group.id) {
+            group.parent = Some(folder.id);
+        }
+    }
+    next.push(folder);
+    sort_folder_features(&doc.features, &mut next);
+    let broken = solidcraft_doc::non_contiguous_timeline_group(&doc.features, &next);
+    (next, broken)
+}
+
+/// A new folder named `name` holding `features` and `joints`, inside the folder `parent` (`None`:
+/// at the history's root), as `timeline.group` makes it. Returns its id.
+pub(crate) fn new_folder(s: &mut Session, name: &str, features: Vec<u64>, joints: Vec<u64>, parent: Option<u64>, cmd: &str) -> Result<u64> {
+    // Folder names are 1…128 bytes, as `timeline.rename_group` takes them.
+    let mut name = name.trim().to_string();
+    while name.len() > 128 {
+        name.pop();
+    }
+    let name = if name.is_empty() { format!("Folder{}", s.doc.timeline_groups.len() + 1) } else { name };
+    let id = s.doc_mut().allocate_id()?;
+    let (folders, broken) = folders_with(&s.doc, solidcraft_doc::TimelineGroup { id, name, parent, features, joints }, &[]);
+    if let Some(broken) = broken {
+        return Err(not_contiguous(&folders, broken, cmd));
+    }
+    s.doc_mut().timeline_groups = folders;
+    Ok(id)
+}
+
+/// The id a folder that is only being tried out goes by.
+const TRIAL_FOLDER: u64 = u64::MAX;
+
+impl Session {
+    /// Why `timeline.group` would refuse a new folder holding `features` inside the folder
+    /// `parent` (`None` at the history's root), in words for a menu's tooltip; `None` when it
+    /// would make it.
+    pub fn group_refusal(&self, features: &[u64], parent: Option<u64>) -> Option<String> {
+        if features.is_empty() {
+            return Some("No features are selected".into());
+        }
+        let trial = solidcraft_doc::TimelineGroup { id: TRIAL_FOLDER, name: String::new(), parent, features: features.to_vec(), joints: Vec::new() };
+        let (folders, broken) = folders_with(&self.doc, trial, &[]);
+        let broken = broken?;
+        if broken == TRIAL_FOLDER {
+            return Some("The features aren't next to each other in the history".into());
+        }
+        let name = folders.iter().find(|folder| folder.id == broken).map_or("", |folder| folder.name.as_str());
+        Some(format!("Folder {name} would no longer hold one run of features"))
+    }
 }
 
 fn group(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.group";
-    let mut features = group_features(s, p, false, cmd)?;
-    let mut joints = group_joints(s, p, cmd)?;
+    let features = group_features(s, p, false, cmd)?;
+    let joints = group_joints(s, p, cmd)?;
     let groups = group_ids(s, p, false, cmd)?;
     let name = match str_(p, "name").map(str::trim).filter(|name| !name.is_empty()) {
         Some(name) if name.len() <= 128 => name.to_string(),
@@ -480,22 +555,12 @@ fn group(s: &mut Session, p: &Value) -> Result<Value> {
     {
         return Err(bad(cmd, "a new folder cannot contain an ancestor of its parent"));
     }
-    let nested = group_feature_ids(&s.doc, &groups);
-    features.retain(|feature| !nested.contains(feature));
-    let nested_joints = group_joint_ids(&s.doc, &groups);
-    joints.retain(|joint| !nested_joints.contains(joint));
-    let mut next = (*s.doc).clone();
-    for group in &mut next.timeline_groups {
-        group.joints.retain(|joint| !joints.contains(joint));
-        group.features.retain(|feature| !features.contains(feature));
-        if groups.contains(&group.id) {
-            group.parent = Some(id);
-        }
+    let folder = solidcraft_doc::TimelineGroup { id, name: name.clone(), parent, features, joints };
+    let (folders, broken) = folders_with(&s.doc, folder, &groups);
+    if let Some(broken) = broken {
+        return Err(not_contiguous(&folders, broken, cmd));
     }
-    next.timeline_groups.push(solidcraft_doc::TimelineGroup { id, name: name.clone(), parent, features, joints });
-    sort_group_features(&mut next);
-    require_contiguous_groups(&next, cmd)?;
-    *s.doc_mut() = next;
+    s.doc_mut().timeline_groups = folders;
     Ok(json!({"group": id, "name": name, "parent": parent, "groups": groups}))
 }
 
@@ -1276,7 +1341,7 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
 /// an existing index-and-point pair. Unlike Measure, selection keeps the exact face/edge index:
 /// it must not merge a cylinder's patches or a circular rim's arcs into a different item.
 fn selection_item(s: &Session, value: Value) -> Result<Sel> {
-    use solidcraft_geom::Vec3;
+    use solidcore_record::Vec3;
 
     let kind = value.get("type").and_then(Value::as_str);
     if !matches!(kind, Some("face" | "edge")) || (value.get("index").is_some() && value.get("point").is_some()) {
@@ -1520,11 +1585,15 @@ fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.reorder";
     let id = feature_id(s, p.get("feature"), cmd)?;
     let n = s.doc.features.len();
-    let to = num(p, "position").map(|x| x.max(0.0) as usize).ok_or_else(|| bad(cmd, "`position` must be a number"))?.min(n.saturating_sub(1));
+    let asked = num(p, "position").map(|x| x.max(0.0) as usize).ok_or_else(|| bad(cmd, "`position` must be a number"))?;
+    // A position past the end means the last slot; the reply says so (#12140).
+    let to = asked.min(n.saturating_sub(1));
+    let capped = (asked != to).then(|| format!("position {asked} is past the end, so the last slot, {to}, was used"));
     let from = s.doc.feature_index(id).ok_or_else(|| bad(cmd, "feature"))?;
     let active = active_param(p, cmd)?;
     if from == to && active.is_none() {
-        return Ok(json!({"feature": id, "position": to}));
+        let why = capped.map_or_else(|| format!("it is already at position {to}"), |c| format!("{c}, where it already is"));
+        return Ok(json!({"feature": id, "position": to, "from": from, "moved": false, "note": format!("nothing moved: {why}")}));
     }
     let mut next = (*s.doc).clone();
     let f = next.features.remove(from);
@@ -1539,11 +1608,27 @@ fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
     // `allow_errors`: made anyway, with what it broke said (#5962).
     let allow = allow_errors(p, cmd)?;
     if !broken.is_empty() && !allow {
+        // The moved feature itself failing: say why, and only when it moved earlier suggest that
+        // it now comes before something it uses, such as an extrude ahead of its sketch (#12140).
+        // Moved later, it fails for another reason, such as a feature that removed its body.
+        if let Some((_, error)) = broken.iter().find(|(n, _)| *n == name) {
+            let hint = if to < from {
+                "; if it uses a feature that would now come after it, move that feature earlier first"
+            } else {
+                "; a feature it would now come after changes what it works on"
+            };
+            return Err(bad(cmd, format!("moving {name} to position {to} breaks {name} ({error}){hint}")));
+        }
         let list: Vec<String> = broken.iter().map(|(n, e)| format!("{n} ({e})")).collect();
         return Err(bad(cmd, format!("moving {name} there breaks {}", list.join("; "))));
     }
     let marker = next.marker;
     place_marker(s, &mut next, &[id], active, cmd)?;
+    // Never report a move that didn't happen (#12140): the reply gives where the feature is now.
+    let now = next.feature_index(id).ok_or_else(|| bad(cmd, "feature"))?;
+    if now != to {
+        return Err(bad(cmd, format!("{name} would stay at position {now}, not {to}")));
+    }
     if next != *s.doc {
         // The check evaluated the new order: keep its results, so setting the design doesn't
         // evaluate the moved part of the timeline a second time (#6186). Placing the marker
@@ -1553,7 +1638,16 @@ fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
         }
         *s.doc_mut() = next;
     }
-    let mut out = json!({"feature": id, "position": to});
+    let mut out = json!({"feature": id, "position": now, "from": from, "moved": now != from});
+    // With `active`, a feature left in place may still cross the history marker: say which.
+    let stayed = (now == from).then(|| {
+        let what = if s.doc.marker == marker { "nothing moved" } else { "only the history marker moved" };
+        format!("{what}: {name} is already at position {now}")
+    });
+    let note: Vec<String> = [capped, stayed].into_iter().flatten().collect();
+    if !note.is_empty() {
+        out["note"] = json!(note.join("; "));
+    }
     if allow {
         out["broken"] = broken_json(&broken);
     }
@@ -1748,6 +1842,15 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         && let Some(parameters) = params.as_object_mut()
     {
         parameters.entry("convention").or_insert_with(|| json!(convention));
+    }
+    // A thread saved before holes were sized by their nominal diameter keeps the size it had
+    // when it is edited without naming one.
+    if let FeatureKind::Thread { old_auto_size: true, .. } = &old.kind
+        && cid == "solid.thread"
+        && let Some(parameters) = params.as_object_mut()
+        && parameters.get("designation").is_none_or(|d| d.is_null() || d.as_str().is_some_and(|d| d.trim().is_empty()))
+    {
+        parameters.entry("old_auto_size").or_insert_with(|| json!(true));
     }
     // Members keep their names through an edit, unless it gives them another name.
     if let FeatureKind::FrameMember { names, body_name, .. } = &old.kind

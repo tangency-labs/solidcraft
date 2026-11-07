@@ -108,9 +108,6 @@ Times are the commands' own, in seconds, from the case's process; **golden** is 
 | ladder/06-threads/020-external-g-1-2 | a modelled G 1/2 parallel pipe thread (ISO 228-1, 55 deg) on a d20.955 shaft, six turns | analytic | pass | 0.999 | 0.999 |  |
 | ladder/06-threads/015-internal-tr20x4-nut | a modelled internal Tr20x4 thread in a d16 (D1 = d - P) bore through a 40x40x24 block | analytic | pass | 1.074 | 1.074 |  |
 | ladder/06-threads/014-external-buttress-asme-1.5-8 | a modelled 1.5-8 buttress thread (ASME B1.9 basic profile, 7/45 deg) on a 1.5 in shaft, six turns | analytic | pass | 1.098 | 1.098 |  |
-| ladder/06-threads/026-external-s20x4-steep-flank-start-to-shoulder | a modelled S20x4 buttress thread on a d20 shaft down to a d30 shoulder, the steep flank toward the thread's start (down): the 30 deg wall faces the shoulder | analytic | pass | 1.147 | 1.147 |  |
-| ladder/06-threads/025-external-s20x4-steep-flank-end-to-shoulder | a modelled S20x4 buttress thread on a d20 shaft down to a d30 shoulder, the steep flank toward the thread's end (up, the default): the 3 deg wall faces the shoulder | analytic | pass | 1.182 | 1.182 |  |
-| ladder/06-threads/010-part-threaded-boss | the running part with a modelled M16 thread on its d16 boss | analytic | pass | 1.239 | 1.239 |  |
 | ladder/06-threads/003-external-m10-partial-length | a modelled M10 thread over 15 of the 30 mm from the top end (`from`): it stops square in the middle of the face | analytic | pass | 1.339 | 1.339 |  |
 | ladder/06-threads/028-external-tr20x4-chamfer-30-deg-2.5-deep | 011's modelled Tr20x4 thread with chamfered ends at its own angle and depth: 30 deg to the axis, 2.5 mm in from the major diameter | analytic | pass | 1.351 | 1.351 |  |
 | ladder/06-threads/024-internal-rc-1-2-taper | a modelled Rc 1/2 internal taper pipe thread (ISO 7-1) in a d17.6 hole (the tap maker's) through a 13.2 mm plate, from its top face | analytic | pass | 1.554 | 1.554 |  |
@@ -119,15 +116,18 @@ Times are the commands' own, in seconds, from the case's process; **golden** is 
 | ladder/06-threads/005-internal-m10-through | a modelled internal M10 thread in a d8.5 (tap drill) hole through a 30x30x20 block | analytic | pass | 1.791 | 1.791 |  |
 | ladder/06-threads/023-external-1-2-npt | a modelled 1/2-14 NPT taper pipe thread (ASME B1.20.1, 60 deg, 1 in 16) on its 0.840 in pipe, its effective thread L2 from the end | analytic | pass | 1.850 | 1.850 |  |
 | ladder/06-threads/009-thread-runout-length | 004's M10 thread run from the free top end, vanishing over a 3 mm (2 P) runout before the d16 shoulder | analytic | pass | 2.142 | 2.142 |  |
-| ladder/06-threads/004-external-m10-to-shoulder | a modelled M10 thread on a d10 shaft running down to a d16 shoulder: it stops clear of it, the collar whole | analytic | pass | 2.202 | 2.202 |  |
-| ladder/06-threads/007-external-m10-at-filleted-shoulder | a modelled M10 thread on a d10 shaft whose root at the d16 shoulder has an r1 fillet: it stops clear of the fillet | analytic | pass | 2.250 | 2.250 |  |
 | ladder/06-threads/016-external-m10-left-hand | 001's modelled M10 thread, left-handed: the same volume, turning the other way | analytic | pass | 2.587 | 2.587 |  |
 | ladder/06-threads/001-external-m10-full | a modelled M10 thread over the whole of a d10 x 30 cylinder | analytic | pass | 2.722 | 2.722 |  |
 | ladder/06-threads/006-external-m10-into-chamfer | a d10 x 30 cylinder with a 1 mm chamfer on top, then a modelled M10 thread over its cylinder face, running out through the chamfer | analytic | pass | 2.753 | 2.753 |  |
+| ladder/06-threads/010-part-threaded-boss | the running part with a modelled M16 thread on its d16 boss | analytic | pass | 2.787 | 2.787 |  |
 | ladder/06-threads/027-external-m10-chamfered-start | 001's modelled M10 thread with ISO 4753's chamfered end at the end it starts from only (`tip: start`, from the top) | analytic | pass | 3.107 | 3.107 |  |
+| ladder/06-threads/025-external-s20x4-steep-flank-end-to-shoulder | a modelled S20x4 buttress thread on a d20 shaft down to a d30 shoulder, the steep flank toward the thread's end (up, the default): the 3 deg wall faces the shoulder | analytic | pass | 3.114 | 3.114 |  |
 | ladder/06-threads/017-external-m10-chamfered-tip | 001's modelled M10 thread with ISO 4753's chamfered end at both free ends: a 45 deg cone down to the external minor diameter d3, cut after the groove | analytic | pass | 3.390 | 3.390 |  |
+| ladder/06-threads/026-external-s20x4-steep-flank-start-to-shoulder | a modelled S20x4 buttress thread on a d20 shaft down to a d30 shoulder, the steep flank toward the thread's start (down): the 30 deg wall faces the shoulder | analytic | pass | 3.470 | 3.470 |  |
 | ladder/06-threads/002-external-m10x1-fine | a modelled fine M10x1 thread over a d10 x 30 cylinder | analytic | pass | 4.222 | 4.222 |  |
 | ladder/06-threads/008-multi-start-thread | a two-start M10 thread (lead 3, pitch 1.5) over a d10 x 30 cylinder | analytic | pass | 4.423 | 4.423 |  |
+| ladder/06-threads/007-external-m10-at-filleted-shoulder | a modelled M10 thread on a d10 shaft whose root at the d16 shoulder has an r1 fillet: it reaches the fillet at every angle, the fillet whole | analytic | pass | 5.496 | 5.496 |  |
+| ladder/06-threads/004-external-m10-to-shoulder | a modelled M10 thread on a d10 shaft running down to a d16 shoulder: it reaches the shoulder at every angle, the collar whole | analytic | pass | 5.740 | 5.740 |  |
 | ladder/06-threads/018-external-m10-both-hands | 001's modelled M10 thread cut both ways: a right- and a left-handed groove crossing on a d10 x 30 cylinder | analytic | pass | 15.346 | 15.346 |  |
 | ladder/07-fillets/008-constant-r1e-3 | a constant 1e-3 mm round on the top front edge | analytic | pass | 0.018 | 0.018 |  |
 | ladder/07-fillets/007-variable-r5-to-1e-3 | a variable round on the top front edge, r5 down to 1e-3 mm | analytic | pass | 0.022 | 0.022 |  |
@@ -183,8 +183,8 @@ Times are the commands' own, in seconds, from the case's process; **golden** is 
 | ladder/10-patterns-and-mirrors/008-part-vents | the running part with a d3 vent hole in its top patterned 4 times at 5 mm | analytic | pass | 3.010 | 3.010 |  |
 | ladder/11-cumulative-parts/001-bracket | an L bracket: concave r5 round, 5 mm outer chamfer, a hole in each leg | analytic | pass | 0.143 | 0.143 |  |
 | ladder/11-cumulative-parts/002-flange | a revolved flange and hub with a bore, six bolt holes, a hub chamfer and a hub-root round | analytic | pass | 1.040 | 1.040 |  |
-| ladder/11-cumulative-parts/003-threaded-flange | the flange with a modelled M30 thread on its hub, between the round and the chamfer, and M8 tapped holes in the disk | analytic | pass | 3.758 | 3.758 |  |
 | ladder/11-cumulative-parts/004-housing | the running part with every tier: back wall, boss, slot, spline window, tapped holes, rounds, chamfers, shell, vents, and a modelled M16 thread on the boss | analytic | pass | 4.129 | 4.129 |  |
+| ladder/11-cumulative-parts/003-threaded-flange | the flange with a modelled M30 thread on its hub, between the round and the chamfer, and M8 tapped holes in the disk | analytic | pass | 7.150 | 7.150 |  |
 | ladder/12-sheet-metal/001-base-flange | a 100 x 60 base flange, 2 mm sheet | analytic | pass | 0.003 | 0.003 |  |
 | ladder/12-sheet-metal/002-edge-flange-90 | a 20 mm 90 deg edge flange along the base's front edge | analytic | pass | 0.006 | 0.006 |  |
 | ladder/12-sheet-metal/010-fold-90 | 001's base folded 90 deg up along a sketch line across it at x = 70 | analytic | pass | 0.006 | 0.006 |  |

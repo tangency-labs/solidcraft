@@ -2,10 +2,11 @@
 //! a laser-cutting shop can use it as it is: layers by role, bend notes, letters cut or etched,
 //! one file per sheet body.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::{PI, TAU};
 
 use serde_json::{Value, json};
-use solidcraft_geom::{Seg2, Vec2};
+use solidcore_record::{Seg2, Vec2};
 
 use crate::Session;
 
@@ -103,7 +104,7 @@ fn point(e: &Entity, code: i32) -> Vec2 {
 }
 
 /// All loops of the flat pattern (outlines, cut-outs, islands).
-fn loops(s: &Session) -> Vec<solidcraft_geom::Loop2> {
+fn loops(s: &Session) -> Vec<solidcore_record::Loop2> {
     let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
     regions.iter().flat_map(|r| std::iter::once(r.outer.clone()).chain(r.holes.clone())).collect()
 }
@@ -345,7 +346,7 @@ fn the_flat_pattern_is_on_layers_by_role_and_inner_contours_come_first() {
     // OUTLINE: the tray's outer contour alone, one entity for each of its segments (lines and arcs).
     let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
     let plate =
-        regions.iter().max_by(|a, b| a.area().total_cmp(&b.area())).map(|r| r.outer.clone()).unwrap_or(solidcraft_geom::Loop2 { segs: Vec::new() });
+        regions.iter().max_by(|a, b| a.area().total_cmp(&b.area())).map(|r| r.outer.clone()).unwrap_or(solidcore_record::Loop2 { segs: Vec::new() });
     assert_eq!(on("OUTLINE").len(), solidcraft_io::loop_shapes(&plate).len());
     assert!(on("OUTLINE").iter().all(|e| e.0 == "LINE" || e.0 == "ARC"), "{:?}", on("OUTLINE").iter().map(|e| &e.0).collect::<Vec<_>>());
     // CUT: what is cut out inside it that is no text: the Ø5 hole as one CIRCLE, the slot's four lines.

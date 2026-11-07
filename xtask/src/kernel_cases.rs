@@ -35,6 +35,9 @@ pub(crate) struct Options {
     /// `--validation MODE`: when SMLib's full check runs on the cases' features (each_step,
     /// each_feature, off; the CLI's default, each_feature, when not given).
     validation: Option<String>,
+    /// `--export DIR`: each case's corpus entry for solidcore's rig into DIR (`solidcraft-cli
+    /// kernel-cases --export`), then DIR/manifest.json; no report is written.
+    pub(crate) export: Option<PathBuf>,
 }
 
 /// The run's options; `out` is its output folder unless `--out` gives one.
@@ -54,7 +57,11 @@ pub(crate) fn options(rest: &[&str], out: &str) -> Result<Options, String> {
     if let Some(v) = validation.as_deref().filter(|v| !["each_step", "each_feature", "off"].contains(v)) {
         return Err(format!("--validation must be each_step, each_feature or off, not `{v}`"));
     }
-    Ok(Options { cli: arg("--cli"), area: arg("--area"), timeout: Duration::from_secs(secs), jobs, out, known_failing, validation })
+    let export = arg("--export").map(|p| {
+        let p = PathBuf::from(p);
+        if p.is_absolute() { p } else { root().join(p) }
+    });
+    Ok(Options { cli: arg("--cli"), area: arg("--area"), timeout: Duration::from_secs(secs), jobs, out, known_failing, validation, export })
 }
 
 /// Every case's full result as JSON, into the run's output folder.
@@ -150,6 +157,25 @@ fn run_case(o: &Options, case: &Path) -> Value {
     cmd.current_dir(root()).args(["kernel-cases", "--json"]).arg(dumps);
     if let Some(v) = &o.validation {
         cmd.arg(format!("--validation={v}"));
+    }
+    if let Some(d) = &o.export {
+        // This run's entry replaces the last one's; a case that hangs or crashes now leaves none,
+        // so the manifest marks it, never an entry from an earlier run.
+        if let Ok(under) = case.strip_prefix(root().join("tests/kernel-cases")) {
+            // Case ids hold dots (`m5x0.7`): the names are built whole, never by extension.
+            let entry = d.join(under);
+            let id = entry.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+            for stale in [entry.with_file_name(format!("{id}.json")), entry.with_file_name(format!("{id}.bodies.json.gz"))] {
+                if let Err(e) = std::fs::remove_file(&stale)
+                    && e.kind() != std::io::ErrorKind::NotFound
+                {
+                    eprintln!("kernel-cases: {}: {e}", stale.display());
+                }
+            }
+        }
+        let mut export = std::ffi::OsString::from("--export=");
+        export.push(d);
+        cmd.arg(export);
     }
     cmd.arg(&rel).stdout(Stdio::piped()).stderr(Stdio::piped());
     let base = |status: &str, error: String| {
@@ -405,6 +431,10 @@ pub fn run(rest: &[&str]) -> Result<(), String> {
     }
     let results = run_all(&o, &list);
     save_results(&o, &results)?;
+    if let Some(d) = &o.export {
+        println!("{}", crate::kernel_corpus::manifest(d, &results, None)?);
+        return Ok(());
+    }
     if let Some(file) = &o.known_failing {
         // A gate run grades the run against its baseline, and writes no report; its results.json
         // is still saved above.
@@ -595,7 +625,7 @@ fn coverage(registry: &[(String, bool)], used: &[String], exempt_text: &str) -> 
         if used.iter().any(|u| u == id) {
             covered += 1;
         } else if !listed.iter().any(|e| e.id == id) {
-            problems.push(format!("NO CASE: {id} (add a case under tests/kernel-cases/, or a line to EXEMPT)"));
+            problems.push(format!("NO CASE: {id} (tests/kernel-cases/ takes no new cases: add a line to EXEMPT naming where it is tested)"));
         }
     }
     if !problems.is_empty() {
@@ -609,6 +639,75 @@ fn run_coverage(o: &Options, dir: &Path) -> Result<String, String> {
     let file = dir.join("EXEMPT");
     let text = std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
     coverage(&registry(o)?, &used_commands(dir)?, &text).map_err(|e| format!("{}: {e}", file.display()))
+}
+
+/// The committed list of the rig's cases. New kernel cases go to solidcore's corpus, so this
+/// list only shrinks: `cargo xtask lists` fails on a case it does not name, and on a line whose
+/// case is gone (the pull request that deletes a case removes its line).
+pub const CASES_LIST: &str = "tests/kernel-cases/CASES";
+
+/// Where a new kernel case goes instead, for the check's failure message.
+const NEW_CASES_GO: &str = "tests/kernel-cases/ takes no new cases. A kernel case goes to solidcore's corpus, \
+crates/solidcore/tests/kernel_cases/<area>/ in tangency-labs/solidcore: draft it here as a recipe, export it with \
+`cargo xtask kernel-cases --area <area> --export DIR` and add DIR/<area>/<case>.json (and its .bodies.json.gz) there, \
+or write the entry by hand as that folder's README describes; then delete the draft. A case about a command, the UI \
+or a product rule is a test in its area's existing test file here (CONTRIBUTING.md, \"Tests\").";
+
+/// `cargo xtask lists`: every case directory under `tests/kernel-cases/` is in [`CASES_LIST`],
+/// and every line there is a case.
+pub fn check_cases_list(root: &Path) -> Result<(), String> {
+    let dir = root.join("tests/kernel-cases");
+    let mut found = Vec::new();
+    case_dirs(&dir, &dir, &mut found)?;
+    let file = root.join(CASES_LIST);
+    let text = std::fs::read_to_string(&file).map_err(|e| format!("{CASES_LIST}: {e}"))?;
+    cases_listed(&text, &found).map_err(|e| format!("{CASES_LIST}: {e}"))
+}
+
+/// Every directory under `dir` that holds a `recipe.json` (a rig case or a ladder case), as its
+/// path relative to `base` with `/` separators.
+fn case_dirs(dir: &Path, base: &Path, out: &mut Vec<String>) -> Result<(), String> {
+    for entry in std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        if path.join("recipe.json").is_file() {
+            out.push(path.strip_prefix(base).unwrap_or(&path).to_string_lossy().replace('\\', "/"));
+        }
+        case_dirs(&path, base, out)?;
+    }
+    Ok(())
+}
+
+/// The list `text` (one case a line, sorted, none twice; `#` starts a comment) against the cases
+/// `found`: fails on a case it does not list, and on a listed case that is not there.
+fn cases_listed(text: &str, found: &[String]) -> Result<(), String> {
+    let mut listed: Vec<&str> = Vec::new();
+    for (n, line) in text.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some(prev) = listed.last()
+            && *prev >= line
+        {
+            let what = if *prev == line { "a repeat" } else { "out of order" };
+            return Err(format!("line {}: {line} is {what} after {prev}: keep the list sorted, one case a line", n + 1));
+        }
+        listed.push(line);
+    }
+    let mut new: Vec<&str> = found.iter().map(String::as_str).filter(|c| listed.binary_search(c).is_err()).collect();
+    new.sort_unstable();
+    let gone: Vec<&str> = listed.iter().copied().filter(|l| !found.iter().any(|c| c == l)).collect();
+    let mut problems = Vec::new();
+    if !new.is_empty() {
+        problems.push(format!("NEW CASE: {}\n{NEW_CASES_GO}", new.join(", ")));
+    }
+    if !gone.is_empty() {
+        problems.push(format!("listed but not a case (remove its line): {}", gone.join(", ")));
+    }
+    if problems.is_empty() { Ok(()) } else { Err(problems.join("\n")) }
 }
 
 #[cfg(test)]
@@ -641,8 +740,13 @@ mod tests {
         assert!(options(&["--route", "boolean=solidcore"], "x").is_err());
         assert!(options(&["--kernel", "smlib"], "x").is_err());
         assert!(options(&["--kernel", "solidcore", "--known-failing", "/k"], "x").is_err());
-        let o = options(&["--known-failing", "/k", "--out", "/r"], "x").unwrap();
-        assert_eq!((o.known_failing, o.out), (Some(PathBuf::from("/k")), PathBuf::from("/r")));
+        let dir = std::env::current_dir().unwrap();
+        let known = dir.join("known.txt");
+        let out = dir.join("result");
+        let o = options(&["--known-failing", known.to_str().unwrap(), "--out", out.to_str().unwrap()], "x").unwrap();
+        assert_eq!((o.known_failing, o.out), (Some(known), out));
+        let o = options(&["--known-failing", "known.txt", "--out", "result"], "x").unwrap();
+        assert_eq!((o.known_failing, o.out), (Some(root().join("known.txt")), PathBuf::from("result")));
     }
 
     fn gate_on(text: &str, cases: &[(&str, &str)]) -> Result<String, String> {
@@ -707,5 +811,21 @@ mod tests {
         assert!(covered.contains("EXEMPT lists solid.cone, which a case now uses"), "{covered}");
         let gone = coverage(&registry, &used, "view.fit  camera only\nview.gone  removed\n[to cover]\nsolid.cone  x\n").unwrap_err();
         assert!(gone.contains("view.gone, which is not a registry command"), "{gone}");
+    }
+
+    /// The case list only shrinks: a new case directory fails with where kernel cases go now, a
+    /// deleted case still listed fails, and the list stays sorted with no case twice.
+    #[test]
+    fn the_case_list_fails_on_a_new_case_and_on_a_gone_one() {
+        let found = |cases: &[&str]| cases.iter().map(|c| c.to_string()).collect::<Vec<_>>();
+        let list = "# header\nbooleans/1-a\nladder/01-tier/001-box\n";
+        assert!(cases_listed(list, &found(&["ladder/01-tier/001-box", "booleans/1-a"])).is_ok());
+        let new = cases_listed(list, &found(&["booleans/1-a", "booleans/2-b", "ladder/01-tier/001-box"])).unwrap_err();
+        assert!(new.contains("NEW CASE: booleans/2-b"), "{new}");
+        assert!(new.contains("crates/solidcore/tests/kernel_cases/"), "{new}");
+        let gone = cases_listed(list, &found(&["booleans/1-a"])).unwrap_err();
+        assert!(gone.contains("remove its line): ladder/01-tier/001-box"), "{gone}");
+        assert!(cases_listed("b\na\n", &found(&["a", "b"])).unwrap_err().contains("out of order"));
+        assert!(cases_listed("a\na\n", &found(&["a"])).unwrap_err().contains("a repeat"));
     }
 }

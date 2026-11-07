@@ -4,7 +4,7 @@ use super::{HdrDecodeTask, HdrSource, HdrTaskPoll};
 use crate::job::{CancelToken, ErrorCode, JobError, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 use std::{
     f64::consts::{PI, TAU},
     sync::Arc,
@@ -39,7 +39,7 @@ impl SkyGradient {
         }
         Ok(())
     }
-    fn evaluate(self, z: f64) -> [f32; 3] {
+    pub(crate) fn evaluate(self, z: f64) -> [f32; 3] {
         let endpoint = if z >= 0.0 { self.zenith } else { self.ground };
         let blend = z.abs().sqrt() as f32;
         std::array::from_fn(|i| self.horizon[i] * (1.0 - blend) + endpoint[i] * blend)

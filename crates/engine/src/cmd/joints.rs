@@ -3,13 +3,15 @@
 //! joint graph and moves the occurrences it places; the session re-solves after any edit too,
 //! so joints follow the geometry their origins snap to.
 
+use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::expr::{self, Kind};
 use solidcraft_doc::joints::cam::{self, Cam, CamProfile, Follower};
 use solidcraft_doc::joints::{self, Coupling, Joint, JointExprs, JointKind, JointOrigin, MotionLink, NamedOrigin, Size, Snap, XRef};
-use solidcraft_geom::{Aabb3, Vec3};
+use solidcraft_geom::Aabb3;
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, num, str_, vec3};
@@ -496,7 +498,7 @@ fn same_frame(s: &Session, o: &JointOrigin, at: Vec3, z: Vec3) -> bool {
 const MAX_FACE_NAME: usize = 16_384;
 
 /// The component an occurrence places (0 for the root, or an unknown occurrence).
-fn component_of(s: &Session, occurrence: u64) -> u64 {
+pub(crate) fn component_of(s: &Session, occurrence: u64) -> u64 {
     if occurrence == 0 { 0 } else { s.doc.occurrences.iter().find(|o| o.id == occurrence).map_or(0, |o| o.component) }
 }
 
@@ -618,12 +620,13 @@ pub(crate) fn joint_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result<u64>
 /// A joint value: numbers are degrees for angles and mm for distances; text is an expression.
 pub(crate) fn value(s: &Session, v: &Value, angle: bool, cmd: &str) -> Result<f64> {
     let kind = if angle { Kind::Angle } else { Kind::Length };
+    // A number out of range says so, rather than that it is not a number (#9625).
     let e = match v {
         Value::Number(n) => n.as_f64().filter(|x| x.is_finite() && x.abs() < 1e9).map(|x| x.to_string()),
         Value::String(t) => Some(t.clone()),
         _ => None,
     }
-    .ok_or_else(|| bad(cmd, "values must be numbers or expressions"))?;
+    .ok_or_else(|| bad(cmd, format!("a joint value {}", crate::params::expr_problem(Some(v)))))?;
     s.doc.eval(&e, kind).map_err(|e| bad(cmd, e.to_string()))
 }
 
@@ -892,11 +895,27 @@ fn kind_param(p: &Value, cmd: &str) -> Result<JointKind> {
         .ok_or_else(|| bad(cmd, "`type` must be rigid, revolute, slider, cylindrical, pin_slot, planar, ball, parallel, perpendicular, angle, point_on_plane, point_on_line or line_on_plane"))
 }
 
-fn new_joint_name(s: &Session, p: &Value) -> String {
-    str_(p, "name").map(str::to_string).unwrap_or_else(|| {
+fn new_joint_name(s: &Session, p: &Value, kind: JointKind) -> String {
+    str_(p, "name").map(str::trim).filter(|n| !n.is_empty()).map(str::to_string).unwrap_or_else(|| {
+        let label = match kind {
+            JointKind::Rigid => "Rigid",
+            JointKind::Revolute => "Revolute",
+            JointKind::Slider => "Slider",
+            JointKind::Cylindrical => "Cylindrical",
+            JointKind::PinSlot => "Pin_slot",
+            JointKind::Planar => "Planar",
+            JointKind::Ball => "Ball",
+            JointKind::Parallel => "Parallel",
+            JointKind::Perpendicular => "Perpendicular",
+            JointKind::Angle => "Angle",
+            JointKind::PointOnPlane => "Point_on_plane",
+            JointKind::PointOnLine => "Point_on_line",
+            JointKind::LineOnPlane => "Line_on_plane",
+        };
+        let prefix = format!("{label} Joint");
         let names: std::collections::BTreeSet<_> = s.doc.assembly.joints.iter().map(|j| j.name.as_str()).collect();
-        let number = (1..=s.doc.assembly.joints.len().saturating_add(1)).find(|n| !names.contains(format!("Joint{n}").as_str())).unwrap_or(1);
-        format!("Joint{number}")
+        let number = (1..=s.doc.assembly.joints.len().saturating_add(1)).find(|n| !names.contains(format!("{prefix}{n}").as_str())).unwrap_or(1);
+        format!("{prefix}{number}")
     })
 }
 
@@ -906,7 +925,7 @@ fn joint(s: &mut Session, p: &Value) -> Result<Value> {
     let a = origin_param(s, p.get("a"), cmd)?;
     let b = origin_param(s, p.get("b"), cmd)?;
     let id = s.doc_mut().allocate_id()?;
-    let name = new_joint_name(s, p);
+    let name = new_joint_name(s, p, kind);
     let offset = match p.get("offset") {
         Some(v) => value(s, v, false, cmd)?,
         None => 0.0,
@@ -958,7 +977,7 @@ fn as_built(s: &mut Session, p: &Value) -> Result<Value> {
     let fa = side(oa)?;
     let fb = side(ob)?;
     let id = s.doc_mut().allocate_id()?;
-    let name = new_joint_name(s, p);
+    let name = new_joint_name(s, p, kind);
     let n = kind.dofs().len();
     let j = Joint {
         id,

@@ -82,7 +82,7 @@ mod tests {
     fn select_face(app: &mut crate::SolveApp, point: [f64; 3]) -> usize {
         let world = crate::open_meshing::session_world(&app.session);
         let body = world.body("Block").unwrap();
-        let p = solidcraft_engine::geom::Vec3::new(point[0], point[1], point[2]);
+        let p = solidcore_record::Vec3::new(point[0], point[1], point[2]);
         let index = solidcraft_engine::doc::appearance::face_index_at(body, p).unwrap();
         app.session.selection = vec![Sel::Face { body: "Block".into(), index, point: p }];
         index

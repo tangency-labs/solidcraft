@@ -1,6 +1,6 @@
-//! Point clouds (#5151): with the GPU viewport their points are drawn in the 3D pass
-//! (depth-tested with the model), coloured and filtered by the shaders; the CPU viewport draws
-//! some of them over its image.
+//! Point clouds (#5151): with the GPU viewport their points, segments and triangles are drawn in
+//! the 3D pass (depth-tested with the model), coloured and filtered by the shaders; the CPU
+//! viewport draws some of their points over its image.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -8,9 +8,9 @@ use std::sync::Arc;
 
 use egui::{Painter, Shape};
 use solidcraft_engine::doc::point_cloud::Keep;
-use solidcraft_engine::doc::point_cloud::{ColorBy, PLAIN, PointCloud, Source, byte};
+use solidcraft_engine::doc::point_cloud::{ColorBy, On, PLAIN, PointCloud, Source, byte};
 use solidcraft_engine::doc::point_cloud_distribution::color_range_by;
-use solidcraft_gpu::view::{CloudFilter, CloudStyle, ColorMode, Dot, FILTERS, GpuCloud, cloud_dot};
+use solidcraft_gpu::view::{Cell, CloudFilter, CloudStyle, ColorMode, FILTERS, GpuCloud, cloud_cell};
 
 use crate::SolveApp;
 use crate::browser::point_cloud_tracks::{Ask, Paint, Tracks};
@@ -35,7 +35,12 @@ struct Key {
 
 impl Key {
     fn of(c: &PointCloud) -> Key {
-        let mut data = vec![Arc::as_ptr(c.points.values()).cast::<f32>() as usize, Arc::as_ptr(&c.colors.0).cast::<u8>() as usize];
+        let mut data = vec![
+            Arc::as_ptr(c.points.values()).cast::<f32>() as usize,
+            Arc::as_ptr(&c.colors.0).cast::<u8>() as usize,
+            Arc::as_ptr(&c.complex.segments.0).cast::<u32>() as usize,
+            Arc::as_ptr(&c.complex.triangles.0).cast::<u32>() as usize,
+        ];
         data.extend(c.complex.columns.iter().map(|k| Arc::as_ptr(&k.values.0).cast::<f32>() as usize));
         Key {
             data,
@@ -50,9 +55,12 @@ impl Key {
     }
 }
 
+/// Records of a cloud's dots, segments and triangles.
+type Records = [Arc<Vec<u8>>; 3];
+
 thread_local! {
     /// Records by cloud id: what they were made from, their version and bytes.
-    static RECORDS: RefCell<HashMap<u64, (Key, u64, Arc<Vec<u8>>)>> = RefCell::new(HashMap::new());
+    static RECORDS: RefCell<HashMap<u64, (Key, u64, Records)>> = RefCell::new(HashMap::new());
     static VERSION: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     /// By cloud id, the values its coloured property takes over what is kept, worked out off the
     /// frame (one worker a cloud, so that each keeps its own geometry).
@@ -77,45 +85,107 @@ pub(crate) fn color_range(ctx: &egui::Context, c: &PointCloud) -> Option<[f64; 2
     })
 }
 
-fn records(c: &PointCloud) -> Arc<Vec<u8>> {
+fn records(c: &PointCloud) -> Records {
+    let world: Vec<[f32; 3]> = (0..c.len())
+        .map(|i| {
+            // Placed in double precision: the cloud's origin may be far from the design's.
+            let w = c.world_point(i).unwrap_or_default();
+            [w.x as f32, w.y as f32, w.z as f32]
+        })
+        .collect();
     let plain = PLAIN.map(byte);
     let single = c.color.unwrap_or(PLAIN).map(byte);
-    let own = |i: usize| match c.color_by {
+    let own = |i: u32| match c.color_by {
         ColorBy::Single => single,
-        ColorBy::File => c.colors.get(i).unwrap_or(plain),
+        ColorBy::File => c.colors.get(i as usize).unwrap_or(plain),
         ColorBy::Height | ColorBy::Property => plain,
     };
     // The coloured property, then the filtered ones.
-    let sources: [Option<Source>; 1 + FILTERS] = std::array::from_fn(|k| {
-        let name = if k == 0 { c.colored_property() } else { c.filters.get(k - 1).map(|f| f.property.as_str()) };
-        name.and_then(|n| c.source(n))
-    });
-    let mut out = Vec::with_capacity(c.len() * solidcraft_gpu::view::DOT_SIZE);
-    for i in 0..c.len() {
-        // Placed in double precision: the cloud's origin may be far from the design's.
-        let w = c.world_point(i).unwrap_or_default();
-        let at = [w.x as f32, w.y as f32, w.z as f32];
+    let names: [Option<&str>; 1 + FILTERS] =
+        std::array::from_fn(|k| if k == 0 { c.colored_property() } else { c.filters.get(k - 1).map(|f| f.property.as_str()) });
+    let complex = &c.complex;
+    let width = complex.column("width", On::Segment).map(|k| &k.values.0[..]);
+    let height = complex.column("height", On::Segment).map(|k| &k.values.0[..]);
+    let mut out: [Vec<u8>; 3] = Default::default();
+    let mut used = vec![false; c.len()];
+    // Each point's one segment in and one segment out, when it has exactly one of each: a bead
+    // runs through it, and its two segments meet there mitred.
+    let (mut into, mut out_of) = (vec![None; c.len()], vec![None; c.len()]);
+    for ends in complex.segments.0.as_chunks::<2>().0 {
+        let [a, b] = ends.map(|i| i as usize);
+        if let Some(slot) = out_of.get_mut(a) {
+            *slot = if slot.is_none() { Some(Some(b)) } else { Some(None) };
+        }
+        if let Some(slot) = into.get_mut(b) {
+            *slot = if slot.is_none() { Some(Some(a)) } else { Some(None) };
+        }
+    }
+    let through = |links: &[Option<Option<usize>>], at: u32| links.get(at as usize).copied().flatten().flatten().and_then(|k| world.get(k).copied());
+    for (kind, on, n) in [(1usize, On::Segment, 2usize), (2, On::Triangle, 3)] {
+        let indices = if n == 2 { &complex.segments.0 } else { &complex.triangles.0 };
+        let sources = names.map(|name| name.and_then(|n| c.source(n, on)));
+        for (e, ids) in indices.chunks_exact(n).enumerate() {
+            let at = |k: usize| ids.get(k.min(n - 1)).copied().unwrap_or(0);
+            let corners = [at(0), at(1), at(2)];
+            for i in corners {
+                if let Some(u) = used.get_mut(i as usize) {
+                    *u = true;
+                }
+            }
+            let mut cell =
+                Cell { corners: corners.map(|i| world.get(i as usize).copied().unwrap_or_default()), rgb: own(corners[0]), ..Default::default() };
+            let values = sources.map(|s| {
+                s.map(|s| match s {
+                    Source::Coordinate(k) => cell.corners.map(|p| p[k]),
+                    Source::Corners(v) => corners.map(|i| v.get(i as usize).copied().unwrap_or(0.0)),
+                    Source::Element(v) => [v.get(e).copied().unwrap_or(0.0); 3],
+                })
+            });
+            if on == On::Segment {
+                let [a, b] = [corners[0], corners[1]];
+                // The point before `a` only when `a` is passed through, not where beads branch.
+                let joined = |at: u32| matches!((into.get(at as usize), out_of.get(at as usize)), (Some(Some(Some(_))), Some(Some(Some(_)))));
+                let before = through(&into, a).filter(|_| joined(a));
+                let after = through(&out_of, b).filter(|_| joined(b));
+                cell.neighbours = [before.unwrap_or(cell.corners[0]), after.unwrap_or(cell.corners[1])];
+                cell.size = [width.and_then(|w| w.get(e)).copied().unwrap_or(0.0), height.and_then(|h| h.get(e)).copied().unwrap_or(0.0)];
+            }
+            fill(&mut cell, values);
+            cloud_cell(&mut out[kind], &cell);
+        }
+    }
+    // The points drawn as dots: those no segment or triangle ends on.
+    let sources = names.map(|name| name.and_then(|n| c.source(n, On::Point)));
+    for (i, p) in world.iter().enumerate() {
+        if used.get(i).copied().unwrap_or(false) {
+            continue;
+        }
+        let mut cell = Cell { corners: [*p; 3], rgb: own(i as u32), ..Default::default() };
         let values = sources.map(|s| {
             s.map(|s| match s {
-                Source::Coordinate(k) => at.get(k).copied().unwrap_or(0.0),
-                Source::Column(v) => v.get(i).copied().unwrap_or(0.0),
+                Source::Coordinate(k) => [p[k]; 3],
+                Source::Corners(v) | Source::Element(v) => [v.get(i).copied().unwrap_or(0.0); 3],
             })
         });
-        let mut dot = Dot { at, rgb: own(i), ..Default::default() };
-        let [value, filtered @ ..] = values;
-        if let Some(v) = value {
-            dot.value = v;
-            dot.has |= 1 << FILTERS;
-        }
-        for (k, f) in filtered.into_iter().enumerate() {
-            if let (Some(f), Some(slot)) = (f, dot.filtered.get_mut(k)) {
-                *slot = f;
-                dot.has |= 1 << k;
-            }
-        }
-        cloud_dot(&mut out, &dot);
+        fill(&mut cell, values);
+        cloud_cell(&mut out[0], &cell);
     }
-    Arc::new(out)
+    out.map(Arc::new)
+}
+
+/// The coloured value and the filtered values of a cell, where it has them.
+fn fill(cell: &mut Cell, values: [Option<[f32; 3]>; 1 + FILTERS]) {
+    let [value, filtered @ ..] = values;
+    if let Some(v) = value {
+        cell.value = v;
+        cell.has |= 1 << FILTERS;
+    }
+    for (k, f) in filtered.into_iter().enumerate() {
+        if let Some(f) = f {
+            cell.filtered[k] = f;
+            cell.has |= 1 << k;
+        }
+    }
 }
 
 /// The cloud as it is drawn now: a filter `playing` in the Edit Point Cloud card at its range
@@ -172,7 +242,7 @@ pub fn gpu_clouds(app: &SolveApp, ctx: &egui::Context) -> Vec<GpuCloud> {
         solidcraft_engine::view::shown_point_clouds(&app.session)
             .map(|c| {
                 let key = Key::of(c);
-                let (version, dots) = match m.get(&c.id) {
+                let (version, [dots, segments, triangles]) = match m.get(&c.id) {
                     Some((k, version, records)) if *k == key => (*version, records.clone()),
                     _ => {
                         let version = VERSION.with(|v| {
@@ -185,7 +255,7 @@ pub fn gpu_clouds(app: &SolveApp, ctx: &egui::Context) -> Vec<GpuCloud> {
                     }
                 };
                 let playing = |k: usize| app.tree.cloud_panel.as_ref().and_then(|p| p.playing(c.id, k));
-                GpuCloud { id: c.id, version, dots, style: style(ctx, c, playing) }
+                GpuCloud { id: c.id, version, dots, segments, triangles, style: style(ctx, c, playing) }
             })
             .collect()
     })
@@ -234,8 +304,8 @@ mod tests {
         assert!(crate::browser::is_open(&h.app, "point_clouds", true));
         let first = gpu_clouds(&h.app, &h.ctx);
         assert_eq!(first.len(), 1);
-        let size = solidcraft_gpu::view::DOT_SIZE;
-        assert_eq!(first[0].dots.len(), 2 * size);
+        let size = solidcraft_gpu::view::CELL_SIZE;
+        assert_eq!((first[0].dots.len(), first[0].segments.len()), (2 * size, 0));
         // The second point: at x = 10, green.
         assert_eq!(&first[0].dots[size..size + 4], &10f32.to_le_bytes());
         assert_eq!(&first[0].dots[2 * size - 4..2 * size - 1], &[0, 255, 0]);
@@ -270,13 +340,9 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("solidcraft-ui-cloud-play-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("t.ply");
-        // Eleven points, x and t both running 0 to 10.
-        let mut ply = String::from(
-            "ply\nformat ascii 1.0\nelement vertex 11\nproperty float x\nproperty float y\nproperty float z\nproperty float t\nend_header\n",
-        );
-        for i in 0..=10 {
-            ply += &format!("{i} 0 0 {i}\n");
-        }
+        // One segment, x and t both running 0 to 10 along it.
+        let ply = "ply\nformat ascii 1.0\nelement vertex 2\nproperty float x\nproperty float y\nproperty float z\nproperty float t\n\
+                   element edge 1\nproperty int vertex1\nproperty int vertex2\nend_header\n0 0 0 0\n10 0 0 10\n0 1\n";
         std::fs::write(&path, ply).unwrap();
         let id = h.app.run("pointcloud.insert", serde_json::json!({"path": path.to_string_lossy()})).unwrap()["cloud"].as_u64().unwrap();
         // Filtered by x, not by t: the range is what is kept of t, 2 to 4, once worked out.

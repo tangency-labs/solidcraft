@@ -6,11 +6,13 @@
 //! modelled thread, #3745), so it is made on a worker thread, and picks scan the mesh until it
 //! is there: a scan takes a few milliseconds, the index a frame never waits for.
 
+use solidcraft_engine::geom::prelude::*;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use egui::{Pos2, vec2};
-use solidcraft_engine::geom::{Mesh, MeshIndex, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_engine::geom::{Mesh, MeshIndex};
 
 use crate::viewport::Proj;
 

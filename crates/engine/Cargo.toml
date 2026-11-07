@@ -35,6 +35,7 @@ name = "sketch_target_bench"
 required-features = ["solver-profiling"]
 
 [dependencies]
+solidcore-record = { workspace = true }
 solidcraft-geom = { workspace = true }
 solidcraft-sketch = { workspace = true }
 solidcraft-kernel = { workspace = true }
@@ -62,4 +63,8 @@ solidcraft-sketch = { workspace = true, features = ["solver-profiling"] }
 
 [[example]]
 name = "render_resource_workflow"
+required-features = ["raytrace-cpu"]
+
+[[example]]
+name = "wood_texture_workflow"
 required-features = ["raytrace-cpu"]

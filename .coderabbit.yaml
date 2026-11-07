@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+reviews:
+  auto_review:
+    # Dependabot bumps are checked by CI; skip CodeRabbit reviews on them.
+    ignore_usernames:
+      - "dependabot[bot]"
+  path_instructions:
+    - path: "**"
+      instructions: |
+        Project rule: don't change anyone's existing defaults unless the change is purely additive and belongs in the application.
+        Flag any change to something a user already relies on: a default setting or preference value, what a command or tool does when used the usual way, the UI's default layout or behaviour, a keyboard or mouse shortcut, or the result an existing saved design rebuilds to.
+        Don't flag purely additive changes: a new command, a new setting whose default keeps today's behaviour, or a new option that appears only when someone chooses it. Don't flag bug fixes that only turn a crash or an error into the result the feature always promised.
+        When you flag one, start the comment with "Changes a default:", say what a user sees before and after, whether a setting keeps the old behaviour, and whether the PR description's `Changes a default:` line says so.
+  pre_merge_checks:
+    custom_checks:
+      - name: "Existing defaults unchanged"
+        mode: "warning"
+        instructions: |
+          Pass if the pull request changes no default a user already relies on (default setting or preference values, what a command or tool does when used the usual way, the UI's default layout or behaviour, shortcuts, or the result an existing saved design rebuilds to), or if its changes are purely additive.
+          Fail otherwise, naming each changed default and what a user sees before and after. Also fail if the description says `Changes a default: no` while the code changes one.

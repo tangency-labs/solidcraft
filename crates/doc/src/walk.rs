@@ -5,7 +5,7 @@
 //! traits here carry the walks through the types the fields have: options, lists, arrays, planes
 //! and construction definitions.
 
-pub(crate) use solidcraft_geom::Vec3;
+pub(crate) use solidcore_record::Vec3;
 
 pub(crate) use crate::ProfileSel;
 use crate::construct::{AxisDef, GeoRef, PointDef};
@@ -42,6 +42,7 @@ impl Walk for i8 {}
 impl Walk for f64 {}
 impl Walk for usize {}
 impl Walk for u32 {}
+impl Walk for crate::newer_file::RawFeature {}
 impl Walk for ProfileSel {}
 impl Walk for std::collections::BTreeMap<String, String> {}
 impl Walk for crate::frame::Anchor {}
@@ -54,6 +55,7 @@ impl Walk for solidcraft_kernel::DraftCorner {}
 impl Walk for crate::document::Direction {}
 impl Walk for crate::document::FilletFit {}
 impl Walk for crate::document::FilletCorner {}
+impl Walk for crate::document::FilletTurn {}
 impl Walk for crate::document::MeshData {}
 impl Walk for crate::document::RevolveConvention {}
 impl Walk for crate::document::RailFit {}
@@ -67,6 +69,8 @@ impl Walk for crate::thread_forms::ThreadForm {}
 impl Walk for crate::thread_forms::ThreadHand {}
 impl Walk for crate::thread_forms::ThreadTip {}
 impl Walk for crate::thread_forms::SteepFlank {}
+// An Align frame's joint origin: picks in its component's coordinates, found by their names.
+impl Walk for Box<crate::joints::JointOrigin> {}
 
 /// A reference walks itself: a sketch, a feature or a body.
 macro_rules! reference {
@@ -407,9 +411,12 @@ impl PlaneRef {
                 base.walk_feature_refs(f, depth + 1);
                 point.walk_feature_refs(f, depth + 1);
             }
-            Self::AtAngle { base, line, .. } => {
+            Self::AtAngle { base, line, pivot, .. } => {
                 base.walk_feature_refs(f, depth + 1);
                 if let Some(g) = line {
+                    g.walk_feature_refs(f, depth + 1);
+                }
+                if let Some(g) = pivot {
                     g.walk_feature_refs(f, depth + 1);
                 }
             }
@@ -444,9 +451,12 @@ impl PlaneRef {
                 base.walk_feature_refs_mut(f, depth + 1);
                 point.walk_feature_refs_mut(f, depth + 1);
             }
-            Self::AtAngle { base, line, .. } => {
+            Self::AtAngle { base, line, pivot, .. } => {
                 base.walk_feature_refs_mut(f, depth + 1);
                 if let Some(g) = line {
+                    g.walk_feature_refs_mut(f, depth + 1);
+                }
+                if let Some(g) = pivot {
                     g.walk_feature_refs_mut(f, depth + 1);
                 }
             }

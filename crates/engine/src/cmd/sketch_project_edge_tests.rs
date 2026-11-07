@@ -3,7 +3,8 @@
 //! is taken for it when it is split or gone: the sketch fails, asking for the edge again.
 
 use serde_json::{Value, json};
-use solidcraft_geom::{Vec2, Vec3};
+use solidcore_record::{Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{Link, LinkSource, Shape};
 
 use crate::Session;

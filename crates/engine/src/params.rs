@@ -1,8 +1,8 @@
 //! Helpers to read hostile JSON parameters.
 
 use serde_json::Value;
+use solidcore_record::{Vec2, Vec3};
 use solidcraft_doc::Expr;
-use solidcraft_geom::{Vec2, Vec3};
 
 use crate::{EngineError, Result, kernel};
 
@@ -88,14 +88,16 @@ pub fn req_expr(cmd: &str, p: &Value, k: &str) -> Result<Expr> {
 }
 
 /// The most names a list parameter may carry.
-const MAX_STRING_LIST: usize = 10_000;
+pub(crate) const MAX_STRING_LIST: usize = 10_000;
 
 /// The command name for a caller that does not know it: the engine names the command that ran
 /// when the error reaches it.
 pub const UNKNOWN_COMMAND: &str = "";
 
-/// A short description of a value that is not a name, for the message that refuses it.
-fn json_brief(v: &Value) -> String {
+/// A short description of a value that is not a name, for the message that refuses it. The
+/// schema contracts quote it too (`schema::config::NameList`), so strict refuses with the same
+/// words.
+pub(crate) fn json_brief(v: &Value) -> String {
     match v {
         Value::Null => "null".to_string(),
         Value::Bool(b) => b.to_string(),

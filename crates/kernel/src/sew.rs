@@ -10,12 +10,15 @@
 //! body from. No tolerance stitching is involved: two sheets of material meeting along one
 //! geometric edge keep an edge each.
 
+use solidcraft_geom::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use solidcore_record::Vec3;
+use solidcore_record::brep::{self as b, Curve2};
+use solidcraft_geom::Ring;
 use solidcraft_geom::brep::eval::{SurfaceEval, face_flux};
-use solidcraft_geom::brep::{self as b, Curve2, pcurve};
-use solidcraft_geom::{Ring, Vec3};
+use solidcraft_geom::brep::pcurve;
 
 use crate::body::Body;
 use crate::{KernelError, Result, guard};
@@ -1379,7 +1382,7 @@ pub(crate) fn assemble(parts: Parts, solid: bool) -> Result<Assembled> {
     // keeps it, and an edge the caller gave a pcurve for keeps the parameter that pcurve is on.
     let mut frames_of: Vec<Vec<b::Frame>> = vec![Vec::new(); edges.len()];
     for f in &faces {
-        let Some(frame) = b::form::frame_of(&f.surface) else { continue };
+        let Some(frame) = solidcraft_geom::brep::form::frame_of(&f.surface) else { continue };
         for u in f.loops.iter().flatten() {
             if let Some(slot) = frames_of.get_mut(u.edge as usize) {
                 slot.push(frame.clone());
@@ -1390,8 +1393,8 @@ pub(crate) fn assemble(parts: Parts, solid: bool) -> Result<Assembled> {
     let mut forms: Vec<Option<(b::Curve, [f64; 2])>> = Vec::with_capacity(edges.len());
     for ((e, frames), given) in edges.iter().zip(&frames_of).zip(&given_on) {
         if let Some(form) = &e.nurbs {
-            let on_label =
-                b::curve_interval(&e.curve, Some(form), e.interval).ok_or_else(|| fail("an edge's NURBS form does not evaluate".into()))?;
+            let on_label = solidcraft_geom::brep::label::curve_interval(&e.curve, Some(form), e.interval)
+                .ok_or_else(|| fail("an edge's NURBS form does not evaluate".into()))?;
             labels.push((e.curve.clone(), on_label));
             forms.push(Some((form.clone(), e.interval)));
             continue;
@@ -1402,7 +1405,7 @@ pub(crate) fn assemble(parts: Parts, solid: bool) -> Result<Assembled> {
             continue;
         }
         let (label, interval, form) =
-            b::form::edge(&e.curve, e.interval, frames.iter(), tol).ok_or_else(|| fail("an arc of more than one turn".into()))?;
+            solidcraft_geom::brep::form::edge(&e.curve, e.interval, frames.iter(), tol).ok_or_else(|| fail("an arc of more than one turn".into()))?;
         labels.push((label, interval));
         forms.push(form);
     }
@@ -1432,8 +1435,9 @@ pub(crate) fn assemble(parts: Parts, solid: bool) -> Result<Assembled> {
                     .iter()
                     .map(|l| l.iter().filter_map(|&(e, forward, _)| labels.get(e as usize).map(|(c, i)| (c, *i, forward))).collect())
                     .collect();
-                let extent = b::form::extent(&f.surface, &boundary).ok_or_else(|| fail(format!("face {fi}: its boundary is not on its surface")))?;
-                Some(b::form::surface(&f.surface, extent).ok_or_else(|| fail(format!("face {fi}: more than one turn")))?)
+                let extent = solidcraft_geom::brep::form::extent(&f.surface, &boundary)
+                    .ok_or_else(|| fail(format!("face {fi}: its boundary is not on its surface")))?;
+                Some(solidcraft_geom::brep::form::surface(&f.surface, extent).ok_or_else(|| fail(format!("face {fi}: more than one turn")))?)
             }
             _ => None,
         };
@@ -1636,7 +1640,7 @@ fn domain_of(surface: &b::Surface, pcs: &[Vec<Curve2>]) -> Option<[[f64; 2]; 2]>
             }
         }
     }
-    let natural = surface.natural();
+    let natural = solidcraft_geom::brep::label::surface_natural(surface);
     let mut out = [[0.0; 2]; 2];
     for d in 0..2 {
         let (mut a, mut z) = (lo[d], hi[d]);

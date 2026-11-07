@@ -1,6 +1,6 @@
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_engine::Session;
-use solidcraft_engine::geom::Vec3;
 
 use super::*;
 use crate::Services;

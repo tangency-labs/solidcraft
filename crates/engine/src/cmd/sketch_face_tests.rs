@@ -1,6 +1,7 @@
 use crate::Session;
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 fn run(s: &mut Session, command: &str, params: Value) -> Value {
     s.execute(command, &params).unwrap_or_else(|error| panic!("{command} {params}: {error}"))
@@ -417,6 +418,8 @@ fn angled_attachment_tracks_source_plane_and_reopens() {
         axis_dir: Vec3::X,
         angle: "90 deg".into(),
         line: None,
+        direction_only: false,
+        pivot: None,
     };
     s.refresh();
     let height = s.doc.find_feature("BaseFeature").unwrap().param_names[2].clone();
@@ -526,7 +529,7 @@ fn rounded_enclosure_shell_side_and_floor_attach_through_width_wall_and_reopen()
         assert!(!mesh.contains(Vec3::new(49., 0., 12.)), "USB must remain open after resize/reopen");
         assert!(mesh.contains(Vec3::new(49., 15., 12.)), "adjacent right wall remains solid");
         assert!(mesh.contains(Vec3::new(-49., 0., 12.)), "opposite wall must stay solid");
-        let seed = state.sketch(floor).unwrap().plane.to_world(solidcraft_geom::Vec2::new(40., 20.)) + Vec3::Z * 6.;
+        let seed = state.sketch(floor).unwrap().plane.to_world(solidcore_record::Vec2::new(40., 20.)) + Vec3::Z * 6.;
         assert!(mesh.contains(seed), "seed boss starts on current floor");
         for shift in [Vec3::ZERO, Vec3::new(-80., 0., 0.), Vec3::new(0., -40., 0.), Vec3::new(-80., -40., 0.)] {
             assert!(mesh.contains(seed + shift), "each patterned boss must survive resize/reopen at {:?}", seed + shift);

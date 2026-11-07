@@ -5,7 +5,9 @@
 //! have a direction (planar faces, straight edges), the angle.
 
 use serde_json::{Value, json};
-use solidcraft_geom::{Mesh, UnitVec3, Vec3};
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
+use solidcraft_geom::{Mesh, UnitVec3};
 
 use super::measure_shape::{Shape, Slot, add_round, centre};
 use crate::params::bad;
@@ -216,7 +218,7 @@ fn sketch_curve(ss: &solidcraft_doc::SolvedSketch, id: &str) -> Option<Item> {
 /// A profile (closed region of a sketch): its area, and when it is a circle or a slot, its
 /// sizes.
 fn profile(ss: &solidcraft_doc::SolvedSketch, index: usize) -> Option<Item> {
-    use solidcraft_geom::{Seg2, Vec2};
+    use solidcore_record::{Seg2, Vec2};
     let pr = ss.profiles.get(index)?;
     let outline: Vec<Vec3> = pr.region.outer.polyline(1e-3).iter().map(|p| ss.plane.to_world(*p)).collect();
     let mut json = json!({"type": "profile", "area_mm2": pr.region.area()});
@@ -348,7 +350,10 @@ fn describe(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<I
             let m = b.mesh();
             let patch = m.surface_patch(*index);
             let tris = patch.iter().flat_map(|f| face_tris(&m, *f)).collect::<Vec<_>>();
-            let area: f64 = tris.iter().map(|[a, b, c]| (*b - *a).cross(*c - *a).len() * 0.5).sum();
+            let on_mesh: f64 = tris.iter().map(|[a, b, c]| (*b - *a).cross(*c - *a).len() * 0.5).sum();
+            // A curved face is measured on the surface it lies on, not on the triangles of
+            // the display mesh, which run inside the curve.
+            let area = super::measure_exact::patch_area(&b.body, &m, &patch).unwrap_or(on_mesh);
             let normals: Vec<UnitVec3> = tris.iter().filter_map(|[a, b, c]| (*b - *a).cross(*c - *a).unit()).collect();
             let planar = normals.first().copied().filter(|n0| normals.iter().all(|n| n.dot(*n0) > 1.0 - 1e-6));
             let mut json = json!({"type": "face", "area_mm2": area, "planar": planar.is_some()});
@@ -378,7 +383,12 @@ fn describe(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<I
             let closed = crate::cmd::inspect::encloses_volume(&body.body);
             let m = body.mesh();
             let tris: Vec<[Vec3; 3]> = m.triangles.iter().filter_map(|t| m.tri(t)).collect();
-            let v = m.measure().volume;
+            let definitions = s.model.state();
+            let v = if definitions.sheets.iter().any(|sheet| sheet.body == body.definition_name() && !sheet.perforations.is_empty()) {
+                super::inspect::measure_body(body, Some(&definitions)).ok()?.volume
+            } else {
+                m.measure().volume
+            };
             plain(Geo::Tris(tris), None, json!({"type": "body", "name": name, "closed": closed, "volume_mm3": closed.then_some(v)}))
         }
         Sel::SketchCurve { id, sketch } => sketch_curve(sketch_of(s, st, *sketch, |sk| sk.curve_index(id).is_some())?, id),

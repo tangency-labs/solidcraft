@@ -1,9 +1,10 @@
 //! Tessellation of trimmed loft faces after a boolean: no triangle may leave the face.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::FRAC_PI_2;
 
+use solidcore_record::{Loop2, Plane, Seg2, Vec2, Vec3};
 use solidcraft_geom::brep::eval::SurfaceEval;
-use solidcraft_geom::{Loop2, Plane, Seg2, Vec2, Vec3};
 
 use crate::*;
 

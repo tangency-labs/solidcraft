@@ -1,10 +1,11 @@
 use crate::Session;
 use serde_json::{Value, json};
+use solidcore_record::Vec3;
 use solidcraft_doc::{
     FeatureKind,
     config::{Column, FaceCertificate},
 };
-use solidcraft_geom::Vec3;
+use solidcraft_geom::prelude::*;
 
 fn run(session: &mut Session, command: &str, params: Value) -> Value {
     session.execute(command, &params).unwrap_or_else(|error| panic!("{command} {params}: {error}"))

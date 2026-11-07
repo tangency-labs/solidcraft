@@ -2,8 +2,9 @@
 //! window thread, shown above History, copied on a click.
 
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::scenario::Harness;
 
@@ -128,6 +129,24 @@ fn two_points_show_their_distance() {
     h.app.session.selection = [[0.0, 0.0, 0.0], [10.0, 20.0, 30.0]].map(|p| Sel::Vertex { body: "Body1".into(), point: p.into() }).to_vec();
     let rows = readout(&mut h);
     assert!(rows.contains(&row("Distance", crate::prefs::show_mm(&h.app, 1400f64.sqrt(), 1))), "{rows:?}");
+}
+
+/// A circle and a line: the distance from the line to the circle's centre is named so.
+#[test]
+fn a_circle_and_a_line_show_the_distance_from_the_line_to_the_centre() {
+    let mut h = harness();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center": [0, 0], "radius": 5})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[20, 0], [30, 0]]})).unwrap();
+    h.app.session.selection = ["c1", "l1"].into_iter().map(|id| Sel::SketchCurve { id: id.into(), sketch: None }).collect();
+    let rows = readout(&mut h);
+    assert!(rows.contains(&row("Line to center", crate::prefs::show_mm(&h.app, 20.0, 1))), "{rows:?}");
+    assert!(!rows.iter().any(|(l, _)| l == crate::i18n::tr("Centre to centre")), "{rows:?}");
+
+    h.app.run("sketch.circle.center", json!({"center": [50, 0], "radius": 5})).unwrap();
+    h.app.session.selection = ["c1", "c2"].into_iter().map(|id| Sel::SketchCurve { id: id.into(), sketch: None }).collect();
+    let rows = readout(&mut h);
+    assert!(rows.iter().any(|(l, _)| l == crate::i18n::tr("Centre to centre")), "two circles still measure centre to centre: {rows:?}");
 }
 
 #[test]

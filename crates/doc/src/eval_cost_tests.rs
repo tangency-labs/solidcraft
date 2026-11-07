@@ -4,25 +4,29 @@
 //! component into its frame, and every evaluation wrote every imported STEP file out again to
 //! fingerprint it, so each sketch command took longer the more parts were inserted.
 
+use solidcraft_geom::prelude::*;
 use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use solidcraft_geom::{Plane, Vec2, Vec3};
+use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_kernel as kernel;
 use solidcraft_sketch::Sketch;
 
 use crate::eval::{PlacementReads, body_world, hash_placement, placement_digest};
 use crate::*;
 
-/// Work counted on this thread: bodies moved, STEP texts digested, joint faces and bodies
+/// Work counted on this thread: bodies moved, STEP/mesh contents digested, joint faces and bodies
 /// measured, bodies searched for by name, features searched for by id, bodies a cut (or
-/// intersect) ran its booleans on, bodies searched for the cylinder a tap marking lies on, and
-/// bodies whose faces a tapped hole read for its wall.
+/// intersect) ran its booleans on, bodies searched for the cylinder a tap marking lies on,
+/// bodies whose faces a tapped hole read for its wall, intersects run to find a pattern's copies
+/// that cut nothing, and the tools a cut of many tools is made with (one when they are cut in one
+/// go), and face surfaces classified for a hole's direction.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Counts {
     pub moved: usize,
     pub digested: usize,
+    pub mesh_digested: usize,
     pub joint_faces: usize,
     pub measures: usize,
     pub body_searches: usize,
@@ -30,6 +34,9 @@ pub(super) struct Counts {
     pub cut: usize,
     pub cylinder_search: usize,
     pub tapped_wall: usize,
+    pub miss_intersects: usize,
+    pub cut_tools: usize,
+    pub surfaces: usize,
 }
 
 thread_local! {
@@ -37,6 +44,7 @@ thread_local! {
         Cell::new(Counts {
             moved: 0,
             digested: 0,
+            mesh_digested: 0,
             joint_faces: 0,
             measures: 0,
             body_searches: 0,
@@ -44,6 +52,9 @@ thread_local! {
             cut: 0,
             cylinder_search: 0,
             tapped_wall: 0,
+            miss_intersects: 0,
+            cut_tools: 0,
+            surfaces: 0,
         })
     };
 }
@@ -1278,6 +1289,7 @@ fn marking(p: Vec3) -> FeatureKind {
         chamfer_angle: None,
         chamfer_depth: None,
         steep_flank: Default::default(),
+        old_auto_size: false,
     }
 }
 
@@ -1481,4 +1493,346 @@ fn a_hole_into_a_rim_still_bores_its_sheet_beside_far_ones() {
     let removed = whole - volume(&work.model, &near);
     let bore = std::f64::consts::PI * (d / 2.0).powi(2) * 60.0;
     assert!((removed - bore).abs() < 0.02 * bore, "removed {removed} of {bore}");
+}
+
+/// A 1.5 mm disc of 50 mm radius with a 3.5 mm through hole at `radius` on X, patterned `count`
+/// times around Z (#9007). The pattern's id.
+fn disc_with_hole_pattern(doc: &mut Document, radius: f64, count: usize) -> u64 {
+    let disc = FeatureKind::Cylinder {
+        base: point_expr(Vec3::ZERO),
+        axis: Dir(Vec3::Z),
+        radius: "50".into(),
+        height: "1.5".into(),
+        operation: Operation::NewBody,
+        references: Vec::new(),
+    };
+    doc.add_feature(disc, Some("Disc")).unwrap();
+    let hole: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "hole", "position": [radius, 0, 1.5], "direction": [0, 0, -1], "diameter": "3.5",
+    }))
+    .unwrap();
+    let hole = doc.add_feature(hole, Some("Hole")).unwrap();
+    hole_pattern(doc, hole, count)
+}
+
+fn hole_pattern(doc: &mut Document, hole: u64, count: usize) -> u64 {
+    let pattern: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "pattern", "features": [hole],
+        "pattern": {"type": "circular", "origin": [0, 0, 0], "axis": [0, 0, 1], "count": count.to_string(), "angle": "360 deg"},
+    }))
+    .unwrap();
+    doc.add_feature(pattern, None).unwrap()
+}
+
+fn disc_volume(model: &Model) -> f64 {
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 1);
+    kernel::measure(&st.bodies[0].body).unwrap().volume
+}
+
+#[test]
+fn a_circular_pattern_of_a_through_hole_cuts_its_copies_at_once() {
+    // The copies' tools run twice the disc's size along Z, so the kernel's box test, which
+    // grows each box by a share of the tool's size, finds them meeting (#9007); they are still
+    // 4.3 mm apart, centre to centre, and are cut in one go. No copy is intersected with the
+    // disc to see whether it takes material: each passes through the disc's material.
+    let mut doc = Document::new("sieve");
+    let pattern = disc_with_hole_pattern(&mut doc, 20.0, 29);
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+    assert_eq!((work.cut_tools, work.miss_intersects), (1, 0), "{work:?}");
+    let hole = std::f64::consts::PI * 1.75 * 1.75 * 1.5;
+    let disc = std::f64::consts::PI * 2500.0 * 1.5;
+    let v = disc_volume(&model);
+    assert!((v - (disc - 29.0 * hole)).abs() < 1e-3 * hole, "{v}");
+    // The same copies again, landing in the holes cut already: each is intersected, and each
+    // still counts as a copy that removes no material.
+    let hole_id = doc.features.iter().find(|f| f.name == "Hole").unwrap().id;
+    hole_pattern(&mut doc, hole_id, 29);
+    let work = counted(|| model.evaluate(&doc));
+    let again = model.results.last().unwrap();
+    assert!(again.error.is_none(), "{again:?}");
+    // (The kernel may add a note on a retry of a boolean on faces that lie on each other.)
+    assert!(again.warning.as_deref().is_some_and(|w| w.starts_with("28 of 28 cut copies remove no material")), "{again:?}");
+    assert_eq!(work.miss_intersects, 28, "{work:?}");
+    assert!((disc_volume(&model) - v).abs() < 1e-3 * hole);
+    assert!(model.results.iter().any(|r| r.id == pattern && r.warning.is_none()));
+}
+
+#[test]
+fn copies_of_a_hole_that_come_close_are_cut_one_by_one() {
+    // At 8.5 mm radius, 16 copies of a 3.5 mm hole overlap their neighbours: they are not apart,
+    // and each is cut on its own, as before.
+    let mut doc = Document::new("crowded");
+    disc_with_hole_pattern(&mut doc, 8.5, 16);
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+    assert_eq!((work.cut_tools, work.miss_intersects), (15, 0), "{work:?}");
+    // At 9 mm they come within 0.012 mm of each other without touching: their exact shapes are
+    // apart, so they are cut in one go, and all 16 holes are cut.
+    let mut doc = Document::new("close");
+    disc_with_hole_pattern(&mut doc, 9.0, 16);
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+    assert_eq!((work.cut_tools, work.miss_intersects), (1, 0), "{work:?}");
+    let hole = std::f64::consts::PI * 1.75 * 1.75 * 1.5;
+    let disc = std::f64::consts::PI * 2500.0 * 1.5;
+    let v = disc_volume(&model);
+    assert!((v - (disc - 16.0 * hole)).abs() < 1e-3 * hole, "{v}");
+}
+
+/// A ring (25 mm outside, 16 mm bore, 55 mm high) with a blind groove, 8 mm wide and 30 mm deep,
+/// cut into its bore from below, in a circular pattern of ten about Z: their boxes, grown as the
+/// kernel grows them, meet, their exact shapes are 1.9 mm apart. The ring's faces counted as its
+/// surfaces are, and the work.
+fn grooved_ring_faces() -> (usize, Counts) {
+    let mut doc = Document::new("grooves");
+    let cylinder = |base: Vec3, radius: &str, height: &str, operation: Operation| FeatureKind::Cylinder {
+        base: point_expr(base),
+        axis: Dir(Vec3::Z),
+        radius: radius.into(),
+        height: height.into(),
+        operation,
+        references: Vec::new(),
+    };
+    doc.add_feature(cylinder(Vec3::ZERO, "25", "55", Operation::NewBody), Some("Ring")).unwrap();
+    doc.add_feature(cylinder(Vec3::new(0.0, 0.0, -1.0), "16", "57", Operation::Cut), Some("Bore")).unwrap();
+    let groove = doc.add_feature(cylinder(Vec3::new(16.0, 0.0, -1.0), "4", "31", Operation::Cut), Some("Groove")).unwrap();
+    hole_pattern(&mut doc, groove, 10);
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 1);
+    (kernel::measure(&st.bodies[0].body).unwrap().merged.faces, work)
+}
+
+#[test]
+fn copies_that_notch_the_same_round_face_cut_at_once_leave_the_faces_of_one_by_one() {
+    // The ten grooves notch the same round bore. Cut all in one go, they leave it in as many
+    // faces as cutting them one after another does (#9007).
+    let (patterned, work) = grooved_ring_faces();
+    let cut = |a: kernel::Body, b: &kernel::Body| kernel::boolean(&a, b, kernel::BoolOp::Cut).unwrap().unwrap();
+    let ring =
+        cut(kernel::cylinder(Vec3::ZERO, Vec3::Z, 25.0, 55.0).unwrap(), &kernel::cylinder(Vec3::new(0.0, 0.0, -1.0), Vec3::Z, 16.0, 57.0).unwrap());
+    let groove = kernel::cylinder(Vec3::new(16.0, 0.0, -1.0), Vec3::Z, 4.0, 31.0).unwrap();
+    let one_by_one = (0..10).fold(ring, |ring, k| {
+        let copy = kernel::transform(&groove, Vec3::ZERO, Vec3::ZERO, Vec3::Z, (36.0 * k as f64).to_radians()).unwrap();
+        cut(ring, &copy)
+    });
+    assert_eq!(patterned, kernel::measure(&one_by_one).unwrap().merged.faces);
+    assert_eq!(work.cut_tools, 1, "{work:?}");
+}
+
+#[test]
+fn tools_are_apart_only_when_they_neither_meet_nor_nest() {
+    let rod = |x: f64, y: f64, r: f64| kernel::cylinder(Vec3::new(x, y, -100.0), Vec3::Z, r, 200.0).unwrap();
+    // Long rods whose boxes, grown as the kernel grows them, meet: 0.5 mm apart.
+    assert!(super::tools_clearly_apart(&[rod(0.0, 0.0, 1.0), rod(2.5, 0.0, 1.0)]));
+    // Touching, crossing and nested rods are not apart.
+    assert!(!super::tools_clearly_apart(&[rod(0.0, 0.0, 1.0), rod(2.0, 0.0, 1.0)]));
+    assert!(!super::tools_clearly_apart(&[rod(0.0, 0.0, 1.0), rod(1.5, 0.0, 1.0)]));
+    assert!(!super::tools_clearly_apart(&[rod(0.0, 0.0, 3.0), rod(0.5, 0.0, 1.0)]));
+    let tube = kernel::boolean(&rod(0.0, 0.0, 5.0), &rod(0.0, 0.0, 4.0), kernel::BoolOp::Cut).unwrap().unwrap();
+    assert!(!super::tools_clearly_apart(&[tube.clone(), rod(0.0, 0.0, 4.5)]));
+    // A rod in the tube's bore, clear of its wall, is apart from it.
+    assert!(super::tools_clearly_apart(&[tube, rod(0.0, 0.0, 3.0)]));
+}
+
+fn imported_meshes() -> Document {
+    let mut doc = Document::new("reference meshes");
+    let comp = doc.add_component(Some("Part"), 0).unwrap();
+    let meshes = (0..2)
+        .map(|i| MeshData {
+            name: format!("Mesh{i}"),
+            positions: [0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 4.0].into(),
+            triangles: [0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3].into(),
+            color: Some([0.2, 0.4, 0.6]),
+        })
+        .collect();
+    let id = doc.add_feature(FeatureKind::MeshImport { file: "tetrahedra.stl".into(), meshes }, Some("Meshes")).unwrap();
+    doc.feature_mut(id).unwrap().component = comp;
+    doc
+}
+
+fn meshes_mut(doc: &mut Document) -> &mut Vec<MeshData> {
+    let FeatureKind::MeshImport { meshes, .. } = &mut doc.features[0].kind else { panic!("mesh fixture") };
+    meshes
+}
+
+fn same_as_fresh(doc: &Document, model: &Model) {
+    let mut fresh = Model::new();
+    fresh.no_cache = true;
+    fresh.evaluate(doc);
+    assert_eq!(model.results.iter().map(|r| r.fingerprint).collect::<Vec<_>>(), fresh.results.iter().map(|r| r.fingerprint).collect::<Vec<_>>());
+    let (actual, expected) = (model.state(), fresh.state());
+    assert_eq!(actual.bodies.len(), expected.bodies.len());
+    for (a, b) in actual.bodies.iter().zip(&expected.bodies) {
+        assert_eq!(a.name, b.name);
+        assert_eq!(a.mesh().positions, b.mesh().positions);
+        assert_eq!(a.mesh().triangles, b.mesh().triangles);
+        assert_eq!(a.body.color(), b.body.color());
+    }
+    assert!(model.results.iter().all(|r| r.error.is_none()));
+}
+
+#[test]
+fn unchanged_mesh_payloads_are_not_read_again_for_rigid_motion() {
+    let mut doc = imported_meshes();
+    let mut model = Model::new();
+    assert_eq!(counted(|| model.evaluate(&doc)).mesh_digested, 2);
+    for k in 1..5 {
+        doc = doc.clone(); // Undo/preview copies share the arrays, not the document itself.
+        doc.occurrences[0].transform = rigid(Vec3::new(f64::from(k), 2.0, 3.0), Vec3::ZERO, Vec3::Z, 0.1 * f64::from(k));
+        assert_eq!(
+            counted(|| {
+                model.evaluate(&doc);
+                assert!(model.is_current(&doc));
+            })
+            .mesh_digested,
+            0
+        );
+        assert_eq!(model.last_recomputed, 0);
+        same_as_fresh(&doc, &model);
+    }
+    let saved = serde_json::to_string(&doc).unwrap();
+    let reopened: Document = serde_json::from_str(&saved).unwrap();
+    assert_eq!(counted(|| model.evaluate(&reopened)).mesh_digested, 2, "new array identities must be checked");
+    assert_eq!(model.last_recomputed, 0, "equal content has equal fingerprints");
+    same_as_fresh(&reopened, &model);
+}
+
+#[test]
+fn mesh_payload_edits_invalidate_the_cache_and_undo_restores_the_geometry() {
+    let mut doc = imported_meshes();
+    let original = doc.clone();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let fingerprint = model.results[0].fingerprint;
+    Arc::make_mut(&mut meshes_mut(&mut doc)[0].positions)[3] = 5.0;
+    assert!(!model.is_current(&doc));
+    assert_eq!(counted(|| model.evaluate(&doc)).mesh_digested, 1);
+    assert_ne!(model.results[0].fingerprint, fingerprint);
+    same_as_fresh(&doc, &model);
+    let edited = doc.clone();
+    Arc::make_mut(&mut meshes_mut(&mut doc)[0].triangles).swap(0, 1);
+    assert_eq!(counted(|| model.evaluate(&doc)).mesh_digested, 1);
+    same_as_fresh(&doc, &model);
+    for restored in [&original, &edited, &original] {
+        model.evaluate(restored);
+        same_as_fresh(restored, &model);
+    }
+    assert_eq!(model.results[0].fingerprint, fingerprint);
+}
+
+#[test]
+fn mesh_metadata_and_order_remain_part_of_the_fingerprint() {
+    let mut doc = imported_meshes();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    for edit in 0..7 {
+        let before = model.results[0].fingerprint;
+        match edit {
+            0 => meshes_mut(&mut doc)[0].name = "Renamed".into(),
+            1 => meshes_mut(&mut doc)[0].color = Some([0.8, 0.1, 0.3]),
+            2 => doc.features[0].name = "Renamed feature".into(),
+            3 => meshes_mut(&mut doc).swap(0, 1),
+            4 => {
+                meshes_mut(&mut doc).pop();
+            }
+            5 => {
+                let mesh = meshes_mut(&mut doc)[0].clone();
+                meshes_mut(&mut doc).push(MeshData { name: "Added".into(), ..mesh });
+            }
+            _ => {
+                let FeatureKind::MeshImport { file, .. } = &mut doc.features[0].kind else { panic!("mesh fixture") };
+                *file = "renamed.stl".into();
+            }
+        }
+        assert!(!model.is_current(&doc));
+        let work = counted(|| model.evaluate(&doc));
+        if edit < 3 || edit == 6 {
+            assert_eq!(work.mesh_digested, 0, "metadata alone: {edit}");
+        }
+        assert_ne!(model.results[0].fingerprint, before, "edit {edit}");
+        same_as_fresh(&doc, &model);
+    }
+}
+
+#[test]
+fn an_added_and_deleted_sketch_entity_keeps_its_fingerprint() {
+    let mut doc = Document::new("sketch fingerprint");
+    let id = doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(10.0, 0.0)), None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let key = model.state().sketch_keys.get(&id).copied();
+    let json = super::feature_json(doc.feature(id).unwrap(), &super::ImportDigests::default());
+
+    // Make and delete an id: the counters advance, but the geometry is the same.
+    {
+        let sk = doc.sketch_mut(id).unwrap();
+        let a = sk.add_point(Vec2::new(2.0, 2.0), None).unwrap();
+        let b = sk.add_point(Vec2::new(3.0, 2.0), None).unwrap();
+        let line = sk.add_line_pts(a, b, None).unwrap();
+        sk.remove_curves(&[line]);
+        sk.remove_points(&[b]);
+        sk.remove_points(&[a]);
+    }
+
+    let json_after = super::feature_json(doc.feature(id).unwrap(), &super::ImportDigests::default());
+    assert_eq!(json, json_after, "deleted ids are not geometry");
+    model.evaluate(&doc);
+    assert_eq!(model.state().sketch_keys.get(&id).copied(), key);
+    assert_eq!((model.last_recomputed, model.last_restored), (0, 0));
+}
+
+#[test]
+fn a_hole_skips_the_parts_its_line_cannot_reach() {
+    use solidcraft_geom::Aabb3;
+    let unit = Aabb3 { min: Vec3::ZERO, max: Vec3::new(1.0, 1.0, 1.0) };
+    // Down through the box, from above and from below (the line runs both ways).
+    assert!(super::line_meets_box(Vec3::new(0.5, 0.5, 5.0), Vec3::new(0.0, 0.0, -1.0), &unit));
+    assert!(super::line_meets_box(Vec3::new(0.5, 0.5, -5.0), Vec3::new(0.0, 0.0, -1.0), &unit));
+    // Beside it, parallel to a side: a zero direction component keeps the line out of the slab.
+    assert!(!super::line_meets_box(Vec3::new(2.0, 0.5, 5.0), Vec3::new(0.0, 0.0, -1.0), &unit));
+    // Slanted past a corner, and slanted through it.
+    assert!(!super::line_meets_box(Vec3::new(3.0, 0.0, 0.0), Vec3::new(1.0, 1.0, 0.0), &unit));
+    assert!(super::line_meets_box(Vec3::new(-1.0, -1.0, 0.5), Vec3::new(1.0, 1.0, 0.0), &unit));
+    // Touching a face counts; an empty box never meets.
+    assert!(super::line_meets_box(Vec3::new(1.0, 0.5, 9.0), Vec3::new(0.0, 0.0, 1.0), &unit));
+    assert!(!super::line_meets_box(Vec3::new(0.5, 0.5, 0.5), Vec3::new(0.0, 0.0, 1.0), &Aabb3::EMPTY));
+}
+
+#[test]
+fn a_hole_classifies_the_faces_it_reads_not_every_face_of_the_design() {
+    // Forty separate cylinders, three faces each. A hole placed on the top of one drills down,
+    // and finding that out reads the nearest face only: it used to classify every face of every
+    // body first, which in an assembly of hundreds of imported parts took seconds per hole.
+    let mut doc = Document::new("hole direction work");
+    for k in 0..40 {
+        let kind = FeatureKind::Cylinder {
+            base: point_expr(Vec3::new(10.0 * f64::from(k), 0.0, 0.0)),
+            axis: Dir(Vec3::Z),
+            radius: "2".into(),
+            height: "10".into(),
+            operation: Operation::NewBody,
+            references: Vec::new(),
+        };
+        doc.add_feature(kind, None).unwrap();
+    }
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 40);
+    let mut dir = None;
+    let work = counted(|| dir = super::hole_direction_at(&st, Vec3::new(250.5, 0.5, 10.0), &[]));
+    let dir = dir.unwrap();
+    assert!((dir - Vec3::new(0.0, 0.0, -1.0)).len() < 1e-9, "drills down into the top: {dir:?}");
+    assert!(work.surfaces <= 2, "classified {} face surfaces for one hole", work.surfaces);
+    // A point on a side wall drills into that wall.
+    let side = super::hole_direction_at(&st, Vec3::new(252.0, 0.0, 5.0), &[]).unwrap();
+    assert!((side - Vec3::new(-1.0, 0.0, 0.0)).len() < 1e-6, "into the side wall: {side:?}");
 }

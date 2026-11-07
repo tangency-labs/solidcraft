@@ -42,6 +42,31 @@ fn checkbox_keyboard_pointer_disabled_and_mixed() {
     }
 }
 
+#[test]
+fn wrapped_checkbox_keeps_full_label_and_clicks_on_its_last_line() {
+    for enabled in [false, true] {
+        let ctx = crate::fonts::test_context();
+        let label = "A long translated checkbox label remains readable and clickable on its final line";
+        let target = std::cell::Cell::new(Rect::NOTHING);
+        let mut value = false;
+        let mut draw = |ui: &mut Ui| {
+            ui.set_width(180.0);
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+            ui.add_enabled_ui(enabled, |ui| {
+                target.set(checkbox(ui, label, &mut value).rect);
+            });
+        };
+        frame(&ctx, vec![], &mut draw);
+        let rect = target.get();
+        assert!(rect.height() > Tokens::get().control_height);
+        assert!(rect.width() <= 180.0);
+        let at = rect.left_bottom() + vec2(Tokens::get().space_24, -2.0);
+        frame(&ctx, pointer(at, true), &mut draw);
+        frame(&ctx, pointer(at, false), &mut draw);
+        assert_eq!(value, enabled, "a wrapped checkbox preserves native disabled and click behavior");
+    }
+}
+
 fn checkbox_shapes(output: &egui::FullOutput) -> Vec<(Rect, Vec<egui::epaint::ClippedShape>)> {
     let t = Tokens::get();
     output
@@ -248,7 +273,9 @@ fn actual_config_appearance_preferences_and_menu_boxes_and_ticks_match_at_1x_2x(
                 appearance.local.overwrite = true;
                 app.ui.pick_bodies = true;
                 if name == "preferences" {
-                    crate::prefs::open_at(&mut app, crate::prefs::PAGE_GRAPHICS);
+                    // Find the redesigned Layout checkbox by its current visible label.
+                    crate::prefs::open_at(&mut app, crate::prefs::PAGE_LAYOUT);
+                    app.prefs_window.filter = app.tr("prefs.layout_page.active_commands").to_string();
                 }
                 let mut textures = HashMap::new();
                 let mut final_output = None;
@@ -434,11 +461,11 @@ fn checkbox_accessibility_preserves_label_checked_and_mixed_metadata() {
             }
         }
         let before = before.expect("checkbox gains keyboard focus");
-        assert_eq!(before.typ, egui::WidgetType::Checkbox);
+        assert_eq!(before.role, egui::Role::CheckBox);
         assert_eq!(before.label.as_deref(), Some("Enabled"));
         assert_eq!(before.selected, if mixed { None } else { Some(false) });
         let after = after.expect("activation publishes the changed checked state");
-        assert_eq!(after.typ, egui::WidgetType::Checkbox);
+        assert_eq!(after.role, egui::Role::CheckBox);
         assert_eq!(after.label.as_deref(), Some("Enabled"));
         assert_eq!(after.selected, Some(true));
     }

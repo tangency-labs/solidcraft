@@ -367,7 +367,7 @@ fn issues_are_read_from_the_commands_own_contract() {
     assert_eq!(messages(&issues), ["unknown key `operaton`; did you mean `operation`?"]);
     assert_eq!(issues, box_contract().check(&json!({"length": 1, "width": 1, "height": 1, "operaton": "cut"})));
     // No contract, or no such command: nothing to say.
-    assert!(super::issues("solid.fillet", &json!({"nonsense": 1})).is_empty());
+    assert!(super::issues("solid.chamfer", &json!({"nonsense": 1})).is_empty());
     assert!(super::issues("no.such", &json!({"nonsense": 1})).is_empty());
 }
 
@@ -479,6 +479,11 @@ pub(super) fn conforms(root: &Value, node: &Value, v: &Value) -> bool {
     {
         return false;
     }
+    if let Some(branches) = node.get("allOf").and_then(Value::as_array)
+        && !branches.iter().all(|b| conforms(root, b, v))
+    {
+        return false;
+    }
     if node.get("not").is_some_and(|n| conforms(root, n, v)) {
         return false;
     }
@@ -500,8 +505,15 @@ pub(super) fn conforms(root: &Value, node: &Value, v: &Value) -> bool {
     if !typed {
         return false;
     }
+    // `prefixItems` checks the leading elements; `items` then covers the rest.
+    let prefix = node.get("prefixItems").and_then(Value::as_array);
+    if let (Some(prefix), Some(a)) = (prefix, v.as_array())
+        && !prefix.iter().zip(a).all(|(p, x)| conforms(root, p, x))
+    {
+        return false;
+    }
     if let (Some(items), Some(a)) = (node.get("items"), v.as_array())
-        && !a.iter().all(|x| conforms(root, items, x))
+        && !a.iter().skip(prefix.map_or(0, Vec::len)).all(|x| conforms(root, items, x))
     {
         return false;
     }
@@ -774,7 +786,7 @@ fn face_and_edge_refs_match_the_pick_readers() {
     assert!(parse::<EdgeRef>(json!({"body": "A", "index": 1.0})).is_none());
     assert_eq!(edge_schema["anyOf"][2]["properties"]["index"]["type"], "integer");
     assert_eq!(parse::<EdgeRef>(json!({"body": "A", "index": 4})), Some(EdgeRef::Index { body: "A".into(), index: 4 }));
-    assert_eq!(parse::<FaceRef>(json!({"point": [1, 2, 3]})), Some(FaceRef::Point(solidcraft_geom::Vec3::new(1.0, 2.0, 3.0))));
+    assert_eq!(parse::<FaceRef>(json!({"point": [1, 2, 3]})), Some(FaceRef::Point(solidcore_record::Vec3::new(1.0, 2.0, 3.0))));
 }
 
 /// The pick lists take 1 to 1000 picks, as `face_points` and `edge_points` do, and so do their

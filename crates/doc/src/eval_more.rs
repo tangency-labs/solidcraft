@@ -5,9 +5,10 @@ use super::*;
 use crate::EmbossFace;
 use crate::apply_point;
 use crate::sheet;
-use solidcraft_geom::{Aabb3, Loop2, Ring, Seg2};
+use solidcore_record::{Loop2, Seg2};
+use solidcraft_geom::{Aabb3, Ring};
 
-pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
+pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
     match &f.kind {
         FeatureKind::Emboss { sketch, profiles, depth, deboss, targets, face } => {
             let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?;
@@ -58,7 +59,20 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             if st.bodies.is_empty() {
                 return Err(DocError::Invalid("there is no body to emboss".into()));
             }
-            apply_op(doc, st, f, tools, if *deboss { Operation::Cut } else { Operation::Join }, &crate::plain(targets))
+            // #10940: an emboss or deboss whose tool lies clear of the body (a sketch on the far
+            // side of the material, a depth that stops short) used to report success and change
+            // nothing. Say so: the body is compared before and after, as the command's reply does.
+            let before: Vec<Body> = st.bodies.iter().map(|b| b.body.clone()).collect();
+            apply_op(doc, st, f, tools, if *deboss { Operation::Cut } else { Operation::Join }, &crate::plain(targets))?;
+            let unchanged = st.bodies.len() == before.len() && st.bodies.iter().zip(&before).all(|(b, old)| old.same(&b.body));
+            if unchanged {
+                let what = if *deboss { "deboss" } else { "emboss" };
+                append_warning(
+                    warning,
+                    format!("the {what} changed nothing; check where its profile lies, which side of the face the sketch is on, and the depth"),
+                );
+            }
+            Ok(())
         }
         FeatureKind::Rib { .. } => {
             let tools = rib_tools(vals, st, f, None)?;
@@ -88,17 +102,26 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             }
             Ok(())
         }
-        FeatureKind::Align { bodies, from, to, from_normal, to_normal, flip, from_plane, to_plane, axes } => {
+        FeatureKind::Align { bodies, from, to, from_normal, to_normal, flip, from_plane, to_plane, axes, from_frame, to_frame, angle } => {
             // A plane on either side is worked out now, so the bodies follow it when it moves.
             let (mut from, mut from_normal) = (from.0, from_normal.and_then(|n| n.normalized()));
             if let Some(p) = from_plane {
                 let pl = doc.resolve_plane_in(vals, p, 0, Some(&*st))?;
                 (from, from_normal) = (pl.origin, Some(pl.normal()));
             }
-            let target = to_plane.as_ref().map(|p| doc.resolve_plane_in(vals, p, 0, Some(&*st))).transpose()?;
-            let (to, to_normal) = match &target {
-                Some(pl) => (pl.origin, Some(pl.normal())),
-                None => (to.0, to_normal.and_then(|n| n.normalized())),
+            // So is a frame (#6257): its origin and z, found again from the geometry.
+            if let Some(fr) = from_frame {
+                let (o, z) = fr.resolve(doc, st)?;
+                (from, from_normal) = (o, Some(z));
+            }
+            let target = match to_frame {
+                Some(_) => None,
+                None => to_plane.as_ref().map(|p| doc.resolve_plane_in(vals, p, 0, Some(&*st))).transpose()?,
+            };
+            let (to, to_normal) = match (to_frame, &target) {
+                (Some(fr), _) => fr.resolve(doc, st).map(|(o, z)| (o, Some(z)))?,
+                (None, Some(pl)) => (pl.origin, Some(pl.normal())),
+                (None, None) => (to.0, to_normal.and_then(|n| n.normalized())),
             };
             let mut m = translation(Vec3::ZERO);
             if let (Some(a), Some(b)) = (from_normal, to_normal) {
@@ -142,6 +165,19 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             m[3][0] += d.x;
             m[3][1] += d.y;
             m[3][2] += d.z;
+            // Then the turn about the target's direction, through where `from` landed.
+            if let Some(e) = angle {
+                let a = val(vals, e, Kind::Angle)?;
+                if !a.is_finite() {
+                    return Err(DocError::Invalid("the Align angle is not a finite number".into()));
+                }
+                let n = to_normal.ok_or_else(|| {
+                    DocError::Invalid("an Align angle turns about the target's direction: move onto a frame, a face or a plane".into())
+                })?;
+                if a.abs() > 1e-12 {
+                    m = crate::mat_mul(&rotation(apply_point(&m, from), n, a), &m);
+                }
+            }
             if bodies.is_empty() {
                 return Err(DocError::Invalid("no bodies to align".into()));
             }
@@ -1405,7 +1441,8 @@ const MAX_CONE_SIZE: f64 = 1e7;
 /// of `top_radius` `height` along `axis` (a negative height goes the other way). A top radius of
 /// 0 (or below a micrometre) makes a full cone ending in an apex. Built, as the torus is, by
 /// revolving its half section, a trapezoid (a triangle for a full cone) with an edge on the axis.
-pub(super) fn cone(base: Vec3, axis: Vec3, radius: f64, top_radius: f64, height: f64) -> Result<Body> {
+/// Its faces are named `bottom`, `side` and `top` ([`crate::lineage::cone_roles`]).
+pub(super) fn cone(base: Vec3, axis: Vec3, radius: f64, top_radius: f64, height: f64) -> Result<Traced> {
     let in_range = |v: f64| v.is_finite() && v.abs() <= MAX_CONE_SIZE;
     if !(in_range(base.x) && in_range(base.y) && in_range(base.z)) {
         return Err(DocError::Invalid("the cone's base is out of range".into()));
@@ -1439,14 +1476,16 @@ pub(super) fn cone(base: Vec3, axis: Vec3, radius: f64, top_radius: f64, height:
         (Some(b), true) => b,
         _ => return Err(DocError::Invalid("the cone could not be built".into())),
     };
+    // Read off the revolve's own history; moving the body keeps its faces' order.
+    let roles = crate::lineage::cone_roles(&body);
     if (dir - Vec3::Z).len() < 1e-12 && base.len() == 0.0 {
-        return Ok(body);
+        return Ok(Traced::made(body, roles));
     }
     // A rotation taking +Z onto the axis (x and y square to it, right-handed), then the base.
     let x = Plane::from_normal(base, dir).ok_or_else(|| DocError::Invalid("the cone's axis has no direction".into()))?.x;
     let y = dir.cross(x);
     let m = [[x.x, x.y, x.z, 0.0], [y.x, y.y, y.z, 0.0], [dir.x, dir.y, dir.z, 0.0], [base.x, base.y, base.z, 1.0]];
-    Ok(kernel::transform_matrix(&body, m)?)
+    Ok(Traced::made(kernel::transform_matrix(&body, m)?, roles))
 }
 
 /// A primitive tool's exact geometry, for [`sheet_primitive_cut`].
@@ -2295,11 +2334,16 @@ pub(super) fn plastic_eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &F
                 _ => false,
             };
             let (Some(_), Some(_), false) = (outer, openings.first(), alike) else {
+                // A solid box top has no opening: Shell that face first, then pick the rim
+                // around the cavity (#10437).
                 let what = match (loops.len(), openings.len()) {
-                    (0 | 1, _) => "pick the rim face of a shelled body (a face with an inner and an outer edge)".to_string(),
-                    (_, 0) => "pick the rim face of a shelled body: this face's inner edges are where other features stand on it, not an opening"
+                    (0 | 1, _) => "Lip needs the rim of a shelled body: Shell a face open first, then pick the rim around that opening (a face with an outer edge and an inner hole)"
                         .to_string(),
-                    (_, k) => format!("pick the rim face of a shelled body (round one opening): this face has {k} openings alike in size"),
+                    (_, 0) => "Lip needs a rim around an opening: this face's inner edges are where other features stand on it, not a shell cavity. Shell a face open, then pick that rim"
+                        .to_string(),
+                    (_, k) => format!(
+                        "Lip needs one clear opening as the rim: this face has {k} openings alike in size (for example a plate of holes). Shell one cavity, or pick a rim that rings a single opening"
+                    ),
                 };
                 return Err(DocError::Invalid(what));
             };

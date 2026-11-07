@@ -23,7 +23,11 @@ mod app_icon;
 mod come_forward;
 mod control_server;
 #[cfg(target_os = "linux")]
+mod desktop_chooser;
+#[cfg(target_os = "linux")]
 mod desktop_theme;
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+mod desktop_transparency;
 mod device_lost;
 #[cfg(target_os = "windows")]
 mod native_crash;
@@ -75,7 +79,7 @@ fn mark(step: &str) {
     static START: std::sync::OnceLock<(std::time::Instant, bool)> = std::sync::OnceLock::new();
     let (start, on) = START.get_or_init(|| (std::time::Instant::now(), solidcraft_engine::geom::env::var_os("PROFILE_STARTUP").is_some()));
     if *on {
-        eprintln!("startup {:>6.0} ms  {step}", start.elapsed().as_secs_f64() * 1000.0);
+        solidcraft_engine::note!("startup {:>6.0} ms  {step}", start.elapsed().as_secs_f64() * 1000.0);
     }
 }
 
@@ -240,6 +244,12 @@ impl eframe::App for App {
             menu.tick(&mut self.solve, ctx);
         }
         self.solve.logic(ctx);
+        // The file chooser that opened is not the desktop's own: the user has to be told (#10159).
+        #[cfg(target_os = "linux")]
+        if let Some(reason) = desktop_chooser::take_reason() {
+            let text = self.solve.tr(reason).to_string();
+            self.solve.set_status(text, false);
+        }
         self.dialog_folder.design(self.solve.session.path.as_deref());
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
         if !self.solve.file_picker_busy() {
@@ -272,13 +282,20 @@ impl eframe::App for App {
         let now = std::time::Instant::now();
         if self.prefs_writer.due(ui.input(|i| i.events.iter().any(changes_settings)), now)
             && let Some(storage) = frame.storage_mut()
-            && let Some(wait) = self.prefs_writer.store(storage, self.solve.prefs(), now)
+            && let Ok(prefs) = self.prefs_for_storage(storage)
+            && let Some(wait) = self.prefs_writer.store(storage, prefs, now)
         {
             ui.ctx().request_repaint_after(wait);
         }
     }
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        let prefs = self.solve.prefs();
+        let prefs = match self.prefs_for_storage(storage) {
+            Ok(prefs) => prefs,
+            Err(reason) => {
+                log::warn!("Settings were not written: {reason}");
+                return;
+            }
+        };
         storage.set_string(solidcraft_ui_egui::prefs::STORAGE_KEY, prefs.clone());
         self.prefs_writer.written = Some(prefs);
     }
@@ -293,6 +310,8 @@ impl eframe::App for App {
             log::warn!("a picture was still being drawn as the app closed");
         }
         solidcraft_ui_egui::recovery_ui::close(&mut self.solve);
+        // A GPU path tracer setup still running did not stop the app (#9236).
+        solidcraft_ui_egui::render_workspace::close(&mut self.solve);
         solidcraft_ui_egui::open_elsewhere::close(&mut self.solve);
         // Before a restart (`Drop for App`) starts the next instance, which would otherwise get
         // nothing from the 3D mouse driver (`solidcraft_3dx_client::stop`).
@@ -349,6 +368,14 @@ struct LostWatch {
 }
 
 impl App {
+    fn prefs_for_storage(&self, storage: &dyn eframe::Storage) -> Result<String, String> {
+        self.solve.try_prefs().or_else(|reason| {
+            log::warn!("Panel layout changes were not saved: {reason}");
+            let previous = solidcraft_ui_egui::prefs::stored(|key| storage.get_string(key));
+            self.solve.prefs_with_stored_panel_layout(previous.as_deref())
+        })
+    }
+
     /// The graphics device was lost (#4172): the window can't draw again, so close, keeping
     /// unsaved changes for recovery as a forced quit does (the window can't ask about them), and
     /// start again once closed ([`device_lost::restart`]).
@@ -356,7 +383,7 @@ impl App {
         let Some(gpu) = self.gpu.as_mut().filter(|g| g.lost_at.is_none() && g.lost.is_lost()) else { return };
         let reason = gpu.lost.reason().unwrap_or_default();
         log::error!("graphics: the device was lost ({reason}); closing to start again");
-        eprintln!("SolidCraft graphics: the device was lost ({reason}); starting again");
+        solidcraft_engine::note!("SolidCraft graphics: the device was lost ({reason}); starting again");
         solidcraft_engine::crash::phase(&format!("graphics device lost: {reason}"));
         gpu.lost_at = Some(device_lost::now_secs());
         gpu.reason = reason;
@@ -469,12 +496,19 @@ fn fullscreen_content_insets(raw: &mut egui::RawInput, title_height: f32, zoom: 
 
 fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services {
     let parent = rfd::AsyncFileDialog::new().set_parent(cc);
+    // The file chooser that opens may not be the desktop's own: the user is told when it does
+    // not (#10159).
+    #[cfg(target_os = "linux")]
+    let chooser_ctx = cc.egui_ctx.clone();
     let open_parent = parent.clone();
     let program_parent = parent.clone();
     let file_parent = parent.clone();
     let (open_folder, file_folder, save_folder) = (folder.clone(), folder.clone(), folder.clone());
     Services {
         pick_open: Some(Box::new(move |first: &[&str]| {
+            // The chooser that opens may not be the desktop's own (#10159).
+            #[cfg(target_os = "linux")]
+            desktop_chooser::note_opening(&chooser_ctx);
             // The file type the command reads comes first, so the picker opens on it (#1801).
             let mut dialog = open_folder.start(open_parent.clone());
             if !first.is_empty() {
@@ -539,6 +573,10 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
         desktop_dark: Some(desktop_theme::start(&cc.egui_ctx)),
         #[cfg(not(target_os = "linux"))]
         desktop_dark: None,
+        #[cfg(any(target_os = "windows", target_os = "macos"))]
+        reduce_transparency: Some(desktop_transparency::cached(&cc.egui_ctx)),
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        reduce_transparency: None,
         http_get: Some(std::sync::Arc::new(http_get)),
         http_download: Some(std::sync::Arc::new(http_download)),
         // Already an installed app: only the browser build offers to install.
@@ -779,6 +817,28 @@ fn graphics() -> Option<serde_json::Value> {
     graphics_path().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
 }
 
+fn restore_preferences(app: &mut SolveApp, stored_ui: Option<&str>, saved_graphics: Option<&serde_json::Value>, safe_mode: bool) {
+    if let Some(p) = stored_ui.filter(|_| !safe_mode) {
+        app.load_prefs(p);
+    }
+    // Even safe mode edits the real graphics.json. Keep its choices in Preferences so an
+    // anti-aliasing change cannot erase them; safe mode's renderer still uses its own defaults.
+    restore_graphics_preferences(app, saved_graphics);
+}
+
+/// Restore startup choices after loading the separately saved UI preferences.
+fn restore_graphics_preferences(app: &mut SolveApp, saved: Option<&serde_json::Value>) {
+    app.preferences.graphics_adapter = saved.and_then(|v| v.get("adapter").and_then(serde_json::Value::as_str)).unwrap_or_default().to_string();
+    // graphics.json chooses the window before app.ron is loaded. Reflect that saved choice,
+    // not the current session's window system (which an environment override may change).
+    app.preferences.window_system = saved
+        .and_then(|v| v.get("window_system").and_then(serde_json::Value::as_str))
+        .map(str::trim)
+        .filter(|choice| matches!(*choice, "wayland" | "x11"))
+        .unwrap_or("auto")
+        .to_string();
+}
+
 /// The graphics backend preference (`graphics.json`'s `backend`: `auto`, `dx12`, `vulkan`, `gl`).
 fn backend_preference() -> Option<String> {
     graphics().and_then(|v| v.get("backend").and_then(serde_json::Value::as_str).map(str::to_string))
@@ -948,7 +1008,7 @@ fn main() -> eframe::Result {
     if let Some(value) = max_file_size {
         let applied = startup::max_file_size(value.as_deref()).and_then(|bytes| solidcraft_engine::io::limits::set_override(Some(bytes)));
         if let Err(error) = applied {
-            eprintln!("SolidCraft: {error}");
+            solidcraft_engine::note!("SolidCraft: {error}");
             return Err(eframe::Error::AppCreation(std::io::Error::other(error).into()));
         }
     }
@@ -980,7 +1040,7 @@ fn main() -> eframe::Result {
     let fallback_note = std::env::var(startup::FALLBACK_NOTE_ENV).ok().map(|s| s.chars().take(4096).collect::<String>());
     if let Some(note) = &fallback_note {
         log::warn!("{note}");
-        eprintln!("SolidCraft: {note}");
+        solidcraft_engine::note!("SolidCraft: {note}");
         notes.push(note.clone());
     }
     let saved_samples = if safe_mode { None } else { msaa() };
@@ -997,6 +1057,8 @@ fn main() -> eframe::Result {
             solidcraft_engine::crash::install(dir, build)
         })
         .unwrap_or_default();
+    // The recovery folder also holds the reopen guard marker (#5064); read once, reused below.
+    let recovery_dir = solidcraft_engine::recovery::default_dir();
     // A crash in native code (a graphics driver) says where it happened: the exception or signal
     // and the module on Windows and macOS, and on every system the startup step the app was in.
     #[cfg(target_os = "windows")]
@@ -1079,6 +1141,10 @@ fn main() -> eframe::Result {
             solidcraft_ui_egui::fonts::load_system_fonts_in_background(&cc.egui_ctx);
             mark("fonts");
             let dialog_folder = DialogFolder::default();
+            // The file chooser that opens may not be the desktop's own: the session bus is asked
+            // now, so the answer is there when a file is opened (#10159).
+            #[cfg(target_os = "linux")]
+            desktop_chooser::start(&cc.egui_ctx);
             let mut app = SolveApp::new(Session::default(), services(cc, &dialog_folder));
             app.apply_off_thread = Some(solidcraft_ui_egui::dialogs::APPLY_AT_ONCE);
             app.custom_titlebar = custom_titlebar;
@@ -1087,21 +1153,20 @@ fn main() -> eframe::Result {
                 // Windows: the taskbar button shows the mark even when slow first frames keep the
                 // taskbar waiting for the window's icon.
                 if !native_frame::set_class_icon(cc) {
-                    eprintln!("SolidCraft window: no class icon; the taskbar may show a generic one");
+                    solidcraft_engine::note!("SolidCraft window: no class icon; the taskbar may show a generic one");
                 }
                 // The OS hit test offers the resize border, at the window's DPI, from the first
                 // message (#1381).
                 app.native_resize_border = custom_titlebar && native_frame::install(cc);
                 if custom_titlebar && !app.native_resize_border {
-                    eprintln!("SolidCraft window: no native resize border; egui edge zones instead");
+                    solidcraft_engine::note!("SolidCraft window: no native resize border; egui edge zones instead");
                 }
             }
             app.integrated_titlebar = cfg!(target_os = "macos");
             app.cpu_meshing = safe_mode;
             app.graphics_fallback = fallback_note.clone();
-            if let Some(p) = cc.storage.and_then(|s| solidcraft_ui_egui::prefs::stored(|k| s.get_string(k))).filter(|_| !safe_mode) {
-                app.load_prefs(&p);
-            }
+            let stored_ui = cc.storage.and_then(|s| solidcraft_ui_egui::prefs::stored(|k| s.get_string(k)));
+            restore_preferences(&mut app, stored_ui.as_deref(), graphics().as_ref(), safe_mode);
             if let Some(path) = &theme_file
                 && let Err(e) = solidcraft_ui_egui::prefs::follow_theme_file_for_run(&mut app, path)
             {
@@ -1114,10 +1179,6 @@ fn main() -> eframe::Result {
                 lost_at: None,
                 reason: String::new(),
             });
-            if !safe_mode {
-                app.preferences.graphics_adapter =
-                    graphics().and_then(|v| v.get("adapter").and_then(serde_json::Value::as_str).map(str::to_string)).unwrap_or_default();
-            }
             if let Some(rs) = &cc.wgpu_render_state {
                 app.services.graphics_adapters = rs
                     .available_adapters
@@ -1129,9 +1190,10 @@ fn main() -> eframe::Result {
                     .collect();
                 let info = rs.adapter.get_info();
                 if !app.preferences.graphics_adapter.is_empty() && !info.name.eq_ignore_ascii_case(app.preferences.graphics_adapter.as_str()) {
-                    eprintln!(
+                    solidcraft_engine::note!(
                         "SolidCraft graphics: preferred adapter {:?} was not used; using {:?} instead",
-                        app.preferences.graphics_adapter, info.name
+                        app.preferences.graphics_adapter,
+                        info.name
                     );
                 }
                 let samples = scene_msaa_request(saved_samples);
@@ -1139,7 +1201,7 @@ fn main() -> eframe::Result {
                     eframe::egui_wgpu::supported_msaa_samples(&rs.adapter, &rs.device, rs.target_format, depth)
                 });
                 let scene_samples = scene_samples(info.backend, u32::from(samples), &supported);
-                eprintln!("SolidCraft graphics: {:?}, MSAA {scene_samples}x (requested {}x)", rs.adapter.get_info().backend, samples);
+                solidcraft_engine::note!("SolidCraft graphics: {:?}, MSAA {scene_samples}x (requested {}x)", rs.adapter.get_info().backend, samples);
                 solidcraft_engine::crash::phase("viewport pipelines (shader compile)");
                 let scene_samples = app.set_wgpu_split(rs, depth_bits, STENCIL_BITS, scene_samples);
                 app.msaa_supported = supported;
@@ -1190,8 +1252,25 @@ fn main() -> eframe::Result {
             };
             // No design given: the designs open at the last quit, when the preference asks (#5542).
             // Not when driven over the control channel, whose clients expect a fresh design.
-            let files =
-                if files.is_empty() && !sample && control_port.is_none() { solidcraft_ui_egui::documents::designs_to_reopen(&app) } else { files };
+            // A design that stopped the last session while it was being reopened is skipped this
+            // time, so one bad file cannot brick every launch (#5064).
+            app.reopen_guard_dir = recovery_dir.clone();
+            let files = if files.is_empty() && !sample && control_port.is_none() {
+                let (reopen, skipped) = solidcraft_ui_egui::documents::reopen_plan(&app, recovery_dir.as_deref());
+                if !skipped.is_empty() {
+                    let names: Vec<String> = skipped
+                        .iter()
+                        .map(|p| std::path::Path::new(p).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.clone()))
+                        .collect();
+                    notes.push(format!(
+                        "The last session stopped while reopening {}. It was not reopened this time; open it yourself if you need it.",
+                        names.join(", ")
+                    ));
+                }
+                reopen
+            } else {
+                files
+            };
             for f in &files {
                 app.open_path_async(f);
             }
@@ -1207,9 +1286,9 @@ fn main() -> eframe::Result {
                 app.home.show(rev);
             }
             // Autosave, and offer what crashed sessions left behind.
-            if let Some(dir) = solidcraft_engine::recovery::default_dir() {
+            if let Some(dir) = recovery_dir.as_ref() {
                 let every = if app.autosave_minutes > 0.0 { app.autosave_minutes * 60.0 } else { f64::MAX / 4.0 };
-                solidcraft_ui_egui::recovery_ui::start(&mut app, &dir, std::time::Duration::from_secs_f64(every.min(1e9)));
+                solidcraft_ui_egui::recovery_ui::start(&mut app, dir, std::time::Duration::from_secs_f64(every.min(1e9)));
                 // Safe mode keeps autosaving but offers nothing: the entries wait for a normal start.
                 if safe_mode {
                     app.recoverable.clear();
@@ -1283,7 +1362,7 @@ fn wgpu_options(cpu: bool, preference: Option<&str>) -> eframe::egui_wgpu::WgpuC
         let retry = std::env::var(startup::RETRY_BACKEND_ENV).ok();
         let preference = if cpu { preference } else { retry.as_deref().or(preference) };
         if let Some(backends) = startup::choose_backends(cfg!(target_os = "windows"), env_set, cpu, preference, startup::has_hardware_adapter) {
-            eprintln!("SolidCraft graphics: starting {backends:?}");
+            solidcraft_engine::note!("SolidCraft graphics: starting {backends:?}");
             setup.instance_descriptor.backends = backends;
         }
         let intel_mac = cfg!(all(target_os = "macos", target_arch = "x86_64"));
@@ -1309,7 +1388,7 @@ fn wgpu_options(cpu: bool, preference: Option<&str>) -> eframe::egui_wgpu::WgpuC
 /// event loop or a failed device; each retry advances through the APIs, then software once.
 fn no_window(error: eframe::Error, tried_cpu: bool, failed: eframe::wgpu::Backends, settings: Option<&std::path::Path>) -> eframe::Result {
     log::error!("the window could not open: {error}");
-    eprintln!("SolidCraft: the window could not open: {error}");
+    solidcraft_engine::note!("SolidCraft: the window could not open: {error}");
     // This failure was handled, so neither the marker nor the journal should call it a crash.
     if let Some(dir) = settings {
         startup::started(dir);
@@ -1322,7 +1401,7 @@ fn no_window(error: eframe::Error, tried_cpu: bool, failed: eframe::wgpu::Backen
         let previous = std::env::var(startup::FALLBACK_NOTE_ENV).unwrap_or_default();
         let note = startup::fallback_note(&previous, failed, next, &error.to_string());
         log::warn!("{note}");
-        eprintln!("SolidCraft: {note}");
+        solidcraft_engine::note!("SolidCraft: {note}");
         let mut command = std::process::Command::new(exe);
         command.args(std::env::args_os().skip(1)).env(startup::FALLBACK_NOTE_ENV, note);
         if next == "cpu" {
@@ -1397,6 +1476,47 @@ fn prefer_x11(display: bool, wayland_display: bool, desktop: Option<&str>, wayla
     display && !(niri && wayland_display)
 }
 
+#[cfg(all(unix, not(target_os = "macos")))]
+const CHOOSER_NO_SESSION_BUS: &str = "file.open.portal_fallback.no_session_bus";
+#[cfg(all(unix, not(target_os = "macos")))]
+const CHOOSER_NO_PORTAL_SERVICE: &str = "file.open.portal_fallback.no_portal_service";
+#[cfg(all(unix, not(target_os = "macos")))]
+const CHOOSER_XWAYLAND: &str = "file.open.portal_fallback.xwayland";
+
+/// Whether the chooser that opens is NOT the desktop's own, and why.
+///
+/// `rfd` opens the file chooser through the XDG desktop portal; when the portal is not there it
+/// falls back to zenity, which opens a window that does not belong to SolidCraft and that the
+/// application never mentions. The application has to know that: this decision is what the warning
+/// is built on.
+///
+/// * `dbus_session`: the session bus is there (`DBUS_SESSION_BUS_ADDRESS`).
+/// * `portal_service`: the file chooser portal answers on it.
+/// * `wayland_display`: a Wayland session runs (`WAYLAND_DISPLAY`).
+/// * `x11_display`: the window is an X11 one (`DISPLAY`, or XWayland).
+///
+/// `None` means the desktop's own chooser is the one that opens and there is nothing to say;
+/// `Some` carries the reason to report.
+#[cfg(all(unix, not(target_os = "macos")))]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn desktop_chooser_fallback(dbus_session: bool, portal_service: bool, wayland_display: bool, x11_display: bool) -> Option<&'static str> {
+    // Without a session bus there is no bus to reach the portal on, so the chooser is not the
+    // desktop's own whatever else is there.
+    if !dbus_session {
+        return Some(CHOOSER_NO_SESSION_BUS);
+    }
+    // The bus is there but the portal does not answer on it: `rfd` falls back to zenity.
+    if !portal_service {
+        return Some(CHOOSER_NO_PORTAL_SERVICE);
+    }
+    // Under XWayland the window is an X11 one while the session is a Wayland one, and the portal
+    // refuses to parent its chooser to an X11 window: `rfd` falls back to zenity.
+    if wayland_display && x11_display {
+        return Some(CHOOSER_XWAYLAND);
+    }
+    None
+}
+
 #[cfg(all(test, unix, not(target_os = "macos")))]
 mod backend_tests {
     use super::prefer_x11;
@@ -1430,6 +1550,30 @@ mod backend_tests {
         // Wayland chosen on GNOME keeps native Wayland; X11 chosen on niri goes through XWayland.
         assert!(!prefer_x11(true, true, Some("GNOME"), over(Some("wayland"))));
         assert!(prefer_x11(true, true, Some("niri"), over(Some("x11"))));
+    }
+
+    /// The file chooser must say when it is NOT the desktop's own: `rfd` falls back to zenity
+    /// when the XDG portal is not there, and the user gets a foreign window with no explanation.
+    #[test]
+    fn the_file_picker_says_when_it_is_not_the_desktops_own_chooser() {
+        use super::desktop_chooser_fallback;
+        // The normal case: the portal is there, the desktop's own chooser opens, nothing to say.
+        assert_eq!(desktop_chooser_fallback(true, true, true, false), None);
+        // No session bus: the portal can not be reached at all, so `rfd` falls back to zenity.
+        assert!(
+            desktop_chooser_fallback(false, true, true, false).is_some(),
+            "without a D-Bus session bus the file chooser is not the desktop's own: the user has to be told"
+        );
+        // The bus is there but the portal service is not: same fallback, same warning.
+        assert!(
+            desktop_chooser_fallback(true, false, true, false).is_some(),
+            "without the desktop portal service the file chooser is not the desktop's own: the user has to be told"
+        );
+        // XWayland: the parent window is an X11 one and the portal refuses it, so `rfd` falls back.
+        assert!(
+            desktop_chooser_fallback(true, true, true, true).is_some(),
+            "under XWayland the portal rejects the parent window: the user has to be told"
+        );
     }
 
     #[test]
@@ -1663,7 +1807,7 @@ mod viewport_tests {
                 viewport.fullscreen = Some(fullscreen);
                 viewport.native_pixels_per_point = Some(retina);
                 super::fullscreen_content_insets(&mut raw, 32.0, zoom);
-                let _ = ctx.run_ui(raw, |ui| super::content_ui(app, ui));
+                ctx.run_ui(raw, |ui| super::content_ui(app, ui)).textures_delta.clear();
             };
             // Enter, leave, and enter again: no stale inset when returning to a normal window.
             for fullscreen in [false, true, false, true] {
@@ -1709,6 +1853,88 @@ mod viewport_tests {
 
 #[cfg(test)]
 mod msaa_tests {
+    /// Safe mode uses default UI settings but edits the real graphics.json for the next start.
+    #[test]
+    fn safe_mode_preserves_graphics_choices_when_changing_antialiasing() {
+        use serde_json::{Value, json};
+        use solidcraft_ui_egui::scenario::Harness;
+
+        for choice in ["wayland", "x11"] {
+            let mut h = Harness::new();
+            let path = h.dir.join("graphics.json");
+            let saved = json!({"window_system": choice, "adapter": "Selected GPU", "backend": "vulkan", "msaa": 8});
+            std::fs::write(&path, saved.to_string()).unwrap();
+            h.app.services.graphics_path = Some(path.to_string_lossy().into_owned());
+            let defaults = h.app.preferences.clone();
+            let stored_ui = json!({"preferences": {"window_system": "auto", "graphics_adapter": "Stale GPU", "msaa": 2,
+                "display_quality": "fine"}})
+            .to_string();
+            super::restore_preferences(&mut h.app, Some(&stored_ui), Some(&saved), true);
+
+            assert_eq!(h.app.preferences.window_system, choice);
+            assert_eq!(h.app.preferences.graphics_adapter, "Selected GPU");
+            assert_eq!(h.app.preferences.msaa, defaults.msaa, "safe mode ignores saved anti-aliasing");
+            assert_eq!(h.app.preferences.display_quality, defaults.display_quality, "safe mode ignores saved UI settings");
+            assert_eq!(serde_json::from_str::<Value>(&std::fs::read_to_string(&path).unwrap()).unwrap(), saved, "startup does not write settings");
+
+            assert_eq!(h.call("ui.prefs", json!({"open": "Graphics"}))["ok"], true);
+            assert_eq!(h.call("ui.prefs", json!({"msaa": 1}))["ok"], true);
+            assert_eq!(h.call("ui.prefs", json!({"button": "ok"}))["ok"], true);
+            let after: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            assert_eq!(after, json!({"window_system": choice, "adapter": "Selected GPU", "backend": "vulkan", "msaa": 1}));
+
+            let mut normal = Harness::new();
+            super::restore_preferences(&mut normal.app, Some(&stored_ui), Some(&after), false);
+            assert_eq!(normal.app.preferences.window_system, choice);
+            assert_eq!(normal.app.preferences.graphics_adapter, "Selected GPU");
+            assert_eq!(normal.app.preferences.display_quality, "fine", "normal startup still restores UI settings");
+        }
+    }
+
+    #[test]
+    fn missing_or_invalid_startup_window_system_uses_automatic() {
+        use serde_json::json;
+
+        for saved in [None, Some(json!(null)), Some(json!({})), Some(json!({"window_system": 7})), Some(json!({"window_system": "unknown"}))] {
+            let mut app = super::SolveApp::new(super::Session::default(), super::Services::default());
+            app.preferences.window_system = "wayland".into();
+            super::restore_graphics_preferences(&mut app, saved.as_ref());
+            assert_eq!(app.preferences.window_system, "auto", "{saved:?}");
+        }
+    }
+
+    /// A manual graphics.json choice wins over stale app.ron preferences and survives an
+    /// unrelated graphics edit (#10116), including on a fresh launch with no saved UI state.
+    #[test]
+    fn startup_window_system_survives_changing_antialiasing() {
+        use serde_json::{Value, json};
+        use solidcraft_ui_egui::scenario::Harness;
+
+        for choice in ["wayland", "x11", "auto", " wayland ", " x11 "] {
+            for stale in [None, Some("auto"), Some("wayland"), Some("x11")] {
+                let mut h = Harness::new();
+                if let Some(stale) = stale {
+                    h.app.load_prefs(&json!({"preferences": {"window_system": stale}}).to_string());
+                }
+                let path = h.dir.join("graphics.json");
+                std::fs::write(&path, json!({"window_system": choice, "backend": "vulkan", "adapter": "Selected GPU", "msaa": 4}).to_string())
+                    .unwrap();
+                h.app.services.graphics_path = Some(path.to_string_lossy().into_owned());
+                let saved: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+                super::restore_graphics_preferences(&mut h.app, Some(&saved));
+
+                let result = h.call("ui.prefs", json!({"msaa": 2}));
+                assert_eq!(result["ok"], true, "{result}");
+                let after: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+                assert_eq!(after["window_system"], choice.trim(), "saved choice {choice:?}, stale UI choice {stale:?}");
+                assert_eq!(result["result"]["window_system"], choice.trim());
+                assert_eq!(after["msaa"], 2);
+                assert_eq!(after["backend"], "vulkan");
+                assert_eq!(after["adapter"], "Selected GPU");
+            }
+        }
+    }
+
     #[test]
     fn first_launch_adopts_the_previous_release_settings() {
         let d = std::env::temp_dir().join(format!("solidcraft-adopt-settings-{}", std::process::id()));

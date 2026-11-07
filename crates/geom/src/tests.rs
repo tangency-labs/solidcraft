@@ -1,4 +1,5 @@
 use crate::*;
+use solidcore_record::{MAX_BEZIER_CTRL, Plane, Seg2, Vec2, Vec3};
 
 fn cube_mesh(s: f64) -> Mesh {
     let p = |x: f64, y: f64, z: f64| Vec3::new(x * s, y * s, z * s);
@@ -221,75 +222,30 @@ fn helix(pieces: usize) -> Mesh {
     m
 }
 
-/// The tangent chain of a helix of `pieces` pieces: every piece of it joins, and how long finding
-/// the chain took. The mesh is built before the clock starts.
-fn helix_chain(pieces: usize) -> std::time::Duration {
+/// The tangent chain of a helix of `pieces` pieces: every piece of it joins, and how many edges
+/// finding the chain looked at ([`crate::mesh::CHAIN_CANDIDATES`]).
+fn helix_chain(pieces: usize) -> usize {
     let m = helix(pieces);
-    let began = std::time::Instant::now();
+    let before = crate::mesh::CHAIN_CANDIDATES.with(std::cell::Cell::get);
     let chain = m.tangent_chain(pieces / 2, 2f64.to_radians());
-    let took = began.elapsed();
+    let looked = crate::mesh::CHAIN_CANDIDATES.with(std::cell::Cell::get) - before;
     let mut sorted = chain.clone();
     sorted.sort_unstable();
     assert_eq!(sorted, (0..pieces).collect::<Vec<_>>(), "every piece of the helix is in the chain");
-    took
-}
-
-/// Whether a job four times the size took at most about twice linear: `pair` times the small job,
-/// then the big one. Linear is 4x, the quadratic that the bug cost 16x or more, so eight times the
-/// small time is the limit. The load of the other test binaries can rise between the two runs, so a
-/// pair that misses is measured again, up to three times. Load only ever slows a run, so each size
-/// keeps its fastest time and the ratio is taken of those: a retry cannot pass a regression on a
-/// small run that a spike happened to slow, once an earlier small run was fast.
-///
-/// `slack` is the room the noise of a busy machine gets, on top of the ratio.
-fn scales_linearly(mut pair: impl FnMut() -> (std::time::Duration, std::time::Duration), slack: std::time::Duration) -> Result<(), String> {
-    let limit = |small: f64| 8.0 * small + slack.as_secs_f64();
-    let (mut small, mut big) = (f64::INFINITY, f64::INFINITY);
-    let mut runs = Vec::new();
-    for _ in 0..3 {
-        let (s, b) = pair();
-        small = small.min(s.as_secs_f64());
-        big = big.min(b.as_secs_f64());
-        runs.push(format!("{s:?} then {b:?}"));
-        if big < limit(small) {
-            return Ok(());
-        }
-    }
-    Err(format!("{}; fastest {small:.3} s and {big:.3} s, limit {:.3} s", runs.join(", "), limit(small)))
-}
-
-#[test]
-fn scales_linearly_keeps_each_sizes_fastest_run() {
-    let pairs = |p: Vec<(u64, u64)>| {
-        let mut p = p.into_iter().map(|(s, b)| (std::time::Duration::from_millis(s), std::time::Duration::from_millis(b)));
-        move || p.next().unwrap_or((std::time::Duration::from_secs(1), std::time::Duration::from_secs(1)))
-    };
-    let slack = std::time::Duration::from_millis(0);
-    // Linear: four times the work, four times the time.
-    assert!(scales_linearly(pairs(vec![(5, 20)]), slack).is_ok());
-    // A big run slowed by load, then a quiet pair.
-    assert!(scales_linearly(pairs(vec![(5, 80), (5, 20)]), slack).is_ok());
-    // A quadratic cost (16x) whose later small runs a spike slowed: the fast first one still counts.
-    let r = scales_linearly(pairs(vec![(5, 80), (15, 80), (15, 80)]), slack);
-    assert!(r.as_ref().is_err_and(|e| e.contains("fastest 0.005 s and 0.080 s, limit 0.040 s")), "{r:?}");
+    looked
 }
 
 /// #3745: the tangent chain of a long helix (a thread's crest, in many edge pieces) is found
 /// without scanning every edge for every edge of it: hovering a threaded part's edge looked for
 /// its rim this way, and took seconds inside the frame. Every piece joins, in edge order.
 ///
-/// A ratio and not a limit: a test must not depend on wall-clock timing (CONTRIBUTING.md), the
-/// machine is busy. Four times the pieces must not cost sixteen times the time.
+/// The edges looked at are counted, not the time taken, so a busy machine can't fail it (#9901).
+/// Four times the pieces: linear is four times the edges, the scan sixteen times; at most eight.
 #[test]
 fn a_long_helical_tangent_chain_is_found_quickly() {
-    /// The room the noise of a run on a busy machine gets, on top of the ratio: the chain of 750
-    /// pieces takes a fraction of a second, so this is the noise of one run and not a change of
-    /// scale.
-    const SLACK: std::time::Duration = std::time::Duration::from_millis(20);
     let pieces = 3_000usize;
-    if let Err(missed) = scales_linearly(|| (helix_chain(pieces / 4), helix_chain(pieces)), SLACK) {
-        panic!("{pieces} pieces took {missed}");
-    }
+    let (small, big) = (helix_chain(pieces / 4), helix_chain(pieces));
+    assert!(small > 0 && big <= 8 * small, "{} pieces looked at {small} edges, {pieces} looked at {big}", pieces / 4);
 }
 
 #[test]
@@ -334,7 +290,7 @@ fn surface_patches_cross_only_hidden_seams() {
 
 #[test]
 fn cubic_and_conic_segments_measure_exactly() {
-    use crate::{Loop2, Seg2, Vec2};
+    use solidcore_record::{Loop2, Seg2, Vec2};
     // An ellipse (a = 5, b = 3) as four quarter conics: area π a b.
     let w = std::f64::consts::FRAC_1_SQRT_2;
     let (a, b) = (5.0, 3.0);
@@ -389,7 +345,7 @@ fn cubic_and_conic_segments_measure_exactly() {
 
 #[test]
 fn split_at_and_closest_param() {
-    use crate::{Seg2, Vec2};
+    use solidcore_record::{Seg2, Vec2};
     let w = std::f64::consts::FRAC_1_SQRT_2;
     let quarter = Seg2::Conic { a: Vec2::new(10.0, 0.0), apex: Vec2::new(10.0, 10.0), b: Vec2::new(0.0, 10.0), w };
     for t in [0.2, 0.5, 0.8] {

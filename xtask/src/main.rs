@@ -11,12 +11,14 @@ mod features;
 mod i18n;
 mod icons;
 mod kernel_cases;
+mod kernel_corpus;
 mod kernel_ladder;
 mod known_failing;
 mod layers;
 mod licences;
 mod lists;
 mod mesh_decisions;
+mod params;
 mod pending;
 mod render_assets;
 mod skills;
@@ -49,7 +51,7 @@ commands:
                   replay the reference tests (tests/oracle/*/recipe.json), compare with each
                   case's expected.json and write docs/oracle.md (--cli: a solidcraft-cli
                   already built, instead of cargo run --release)
-  kernel-cases [--area AREA] [--cli BIN] [--timeout S] [--jobs N] [--out DIR] [--known-failing FILE] [--validation MODE] [--coverage]
+  kernel-cases [--area AREA] [--cli BIN] [--timeout S] [--jobs N] [--out DIR] [--known-failing FILE] [--validation MODE] [--coverage] [--export DIR]
                   the kernel regression rig: run every case in tests/kernel-cases/<area>/<id>/ on
                   solidcore (one process each, killed after --timeout, default 180 s), grade it against
                   the case's own answer and write docs/kernel-cases.md; DIR (default
@@ -70,6 +72,10 @@ commands:
                   --coverage: instead of running cases, fail on a registry command (the CLI's
                   `commands`, planned ones aside) that no recipe.json under tests/kernel-cases/
                   uses and tests/kernel-cases/EXEMPT does not list, and on a stale EXEMPT line
+                  --export DIR: instead of the report, the corpus for solidcore's rig: each case's
+                  kernel operations, operand records, fix set and expected values in
+                  DIR/<area>/<case>.json and DIR/manifest.json, every case not expressible as
+                  kernel input listed with its reasons; with --ladder too
   known-failing --junit PATH... [--list FILE]
                   grade a nextest run's junit report (a file, or every .xml under a directory)
                   against the tests known to fail today on the default kernel,
