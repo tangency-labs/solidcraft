@@ -98,6 +98,7 @@ mod render;
 pub(crate) use render::{PreparedCapture, prepare_capture_with_metadata, render_cancel_params};
 pub(crate) use render_ui::batch_request;
 mod render_ui;
+mod reverse;
 #[cfg(test)]
 mod script_tests;
 mod sheet;
@@ -374,6 +375,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(diagnostics::COMMANDS.iter());
     v.extend(render::COMMANDS.iter());
     v.extend(render_ui::COMMANDS.iter());
+    v.extend(reverse::COMMANDS.iter());
     v
 }
 
