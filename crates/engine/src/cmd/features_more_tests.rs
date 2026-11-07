@@ -2704,3 +2704,28 @@ fn an_emboss_that_works_has_no_warning() {
         run(&mut s, "edit.undo", json!({}));
     }
 }
+
+/// #9969: a cut whose tool lies clear of the body reported "operation complete" and changed
+/// nothing, with no warning. It now says it removed no material; a cut that works says nothing.
+#[test]
+fn a_cut_that_removes_nothing_says_so() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10}));
+    let before = volume(&mut s);
+    // A square drawn 100 mm beside the box: its prism never meets the body.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [100, 100], "p1": [110, 110]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let reply = run(&mut s, "solid.extrude", json!({"direction": "negative", "distance": 5, "operation": "cut"}));
+    let warning = reply["warning"].as_str().unwrap_or_default();
+    assert!(warning.contains("the cut removes no material"), "{reply}");
+    assert!((volume(&mut s) - before).abs() < 1e-9 * before);
+    // The same cut over the box takes material and says nothing.
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [20, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let reply = run(&mut s, "solid.extrude", json!({"direction": "negative", "distance": 5, "operation": "cut"}));
+    assert!(reply["warning"].is_null(), "{reply}");
+    assert!(volume(&mut s) < before - 400.0);
+}

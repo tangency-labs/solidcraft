@@ -7498,7 +7498,19 @@ fn eval_feature(
             // A Join extrude to an object joins that object too (#6424): the tool and the body
             // it runs to are one body, not only the body the profile was sketched on.
             let extra: Vec<String> = if *operation == Operation::Join { to_body.into_iter().collect() } else { Vec::new() };
-            apply_traced_with(doc, st, f, tools, *operation, &crate::plain(targets), &extra)
+            // #9969: a cut whose tool lies clear of the body (a profile drawn beside it, a
+            // distance that stops short, the wrong direction) reported success and changed
+            // nothing. Say so, as a hole does (#10701): the bodies are compared before and after.
+            let before: Option<Vec<Body>> = (*operation == Operation::Cut).then(|| st.bodies.iter().map(|b| b.body.clone()).collect());
+            apply_traced_with(doc, st, f, tools, *operation, &crate::plain(targets), &extra)?;
+            if let Some(before) = before
+                && !before.is_empty()
+                && st.bodies.len() == before.len()
+                && st.bodies.iter().zip(&before).all(|(b, old)| old.same(&b.body))
+            {
+                append_warning(warning, "the cut removes no material; check where its profile lies, the direction and the distance".into());
+            }
+            Ok(())
         }
         FeatureKind::Hole { thread, thread_depth, diameter, hand, modeled, ease_out, .. } => {
             let thread_depth = thread_depth.as_ref().map(|d| val(vals, d, Kind::Length)).transpose()?;
