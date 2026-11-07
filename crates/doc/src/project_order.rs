@@ -479,6 +479,19 @@ mod tests {
             };
             assert!(c1.dist(v(8., 8.)) < 1e-9 && c2.dist(v(8., 20.)) < 1e-9, "shift {s}: both arcs are refitted: {out:?}");
             assert!(b1.dist(*b2) < 1e-4, "shift {s}: {out:?}");
+            // The lines on the arcs' other ends move with them: the whole outline stays closed.
+            let ends = |g: &LinkGeom| match *g {
+                LinkGeom::Line(s, t) => vec![s, t],
+                LinkGeom::Arc { c, a, b } => vec![a, c + (b - c).normalized().unwrap_or(Vec2::X) * c.dist(a)],
+                _ => Vec::new(),
+            };
+            for (i, g) in out.iter().enumerate() {
+                for e in ends(g) {
+                    let gap =
+                        out.iter().enumerate().filter(|(j, _)| *j != i).flat_map(|(_, h)| ends(h)).map(|x| x.dist(e)).fold(f64::INFINITY, f64::min);
+                    assert!(gap < 1e-9, "shift {s}: gap {gap} at {e:?}: {out:?}");
+                }
+            }
         }
     }
 
