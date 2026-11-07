@@ -1559,7 +1559,7 @@ fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
     // whichever edge is nearest (#783). Each body's edges are worked out once.
     let named = str_(p, "body").filter(|n| st.body(n).is_some());
     // Per body: its size, its edges' polylines and which of them are seams.
-    let mut candidates: Option<Vec<(f64, Vec<Vec<Vec3>>, Vec<bool>)>> = None;
+    let mut candidates: Option<Vec<(f64, Vec<Vec<Vec3>>, Vec<bool>, Option<solidcraft_geom::Mesh>)>> = None;
     let mut out = Vec::new();
     for e in a {
         let pt = match edge_ref_form(e).map_err(|why| bad(cmd, why))? {
@@ -1588,15 +1588,16 @@ fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
                         // meeting) can't be blended either: nobody means it by a pick.
                         Ok(m) => Some((
                             size,
-                            m.edges,
+                            m.edges.clone(),
                             m.seams
                                 .iter()
                                 .zip(&m.smooth_edges)
                                 .map(|(s, t)| *s || *t)
                                 .chain(m.seams.iter().skip(m.smooth_edges.len()).copied())
                                 .collect(),
+                            Some(m),
                         )),
-                        Err(_) => b.body.edges(tol).ok().map(|edges| (size, edges.into_iter().map(|e| e.points).collect(), Vec::new())),
+                        Err(_) => b.body.edges(tol).ok().map(|edges| (size, edges.into_iter().map(|e| e.points).collect(), Vec::new(), None)),
                     }
                 })
                 .collect()
@@ -1609,12 +1610,16 @@ fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
         // of opposite counts as carrying on (edges at a real corner are far from opposite).
         let mut nearest = f64::INFINITY;
         let mut near = Vec::new();
-        for (size, edges, seams) in bodies.iter() {
+        for (size, edges, seams, mesh) in bodies.iter() {
             for (i, points) in edges.iter().enumerate() {
                 let d = points.windows(2).filter_map(|w| Some(pt.dist_to_segment(*w.first()?, *w.get(1)?))).fold(f64::INFINITY, f64::min);
                 nearest = nearest.min(d);
                 if d <= size * 0.05 + 1e-3 {
-                    near.push((d, seams.get(i).copied().unwrap_or(false), leaving(points, pt)));
+                    // Where two faces meet tangentially (a flat wall running into a round one)
+                    // there is nothing to blend, so nobody means the edge by the pick (#12215).
+                    // Decided only for the edges near the pick: it reads the faces' normals.
+                    let tangent = seams.get(i).copied().unwrap_or(false) || mesh.as_ref().is_some_and(|m| m.tangent_join(i, TANGENT_JOIN));
+                    near.push((d, tangent, leaving(points, pt)));
                 }
             }
         }
@@ -1643,6 +1648,9 @@ fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
     }
     Ok(out)
 }
+
+/// Faces meeting at less than this angle (radians, 2°) meet tangentially, as a tangent chain reads them.
+const TANGENT_JOIN: f64 = 2.0 * std::f64::consts::PI / 180.0;
 
 /// The direction an edge's polyline leaves `pt` in, when `pt` is one of its ends; `None` when
 /// the edge runs on through `pt`.

@@ -466,6 +466,11 @@ impl Mesh {
         rim.sort_unstable();
         rim
     }
+    /// Whether the two faces at edge `i` meet tangentially (within `max_angle` radians) there: the
+    /// join [`Mesh::tangent_chain`] passes through. A crease the model protects is never one.
+    pub fn tangent_join(&self, i: usize, max_angle: f64) -> bool {
+        self.smooth_seam(i, max_angle.cos())
+    }
     /// Whether the two faces at edge `i` meet tangentially there (a smooth seam, with no corner).
     fn smooth_seam(&self, i: usize, cos: f64) -> bool {
         if self.sharp_edges.get(i).copied().unwrap_or(false) {
