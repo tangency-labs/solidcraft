@@ -222,7 +222,10 @@ fn move3d(s: &mut Session, p: &Value) -> Result<Value> {
             let moved = sk.clone();
             let rep = sk.solve_wires_with(Some(&point), false);
             let held = sk.wire_point_at(&point).is_some_and(|at| at.dist(to) < 1e-6);
-            if !held || rep.failing.iter().any(|id| held_before.contains(id)) {
+            // A group too large to solve, or out of time, leaves its points where the move put
+            // them without listing its constraints: check them again.
+            let held_after = sk.wire_constraints_holding();
+            if !held || rep.failing.iter().any(|id| held_before.contains(id)) || held_before.iter().any(|id| !held_after.contains(id)) {
                 return Err(bad(cmd, "the sketch's 3D constraints cannot hold the point there"));
             }
             if let Some(why) = super::sketch::wire_collapse(&moved, sk) {
@@ -378,7 +381,7 @@ fn off_traces<'a>(doc: &solidcraft_doc::Document, id: u64, mut wires: impl Itera
 
 /// [`solidcraft_sketch::Sketch::join_drawn_ends`] for curves `ids`, leaving out the joins to a
 /// motion trace's curve (a solve would move it, and the motion would put it back).
-fn join_in(sk: &mut solidcraft_sketch::Sketch, doc: &solidcraft_doc::Document, id: u64, ids: &[String]) -> Result<Vec<String>> {
+pub(super) fn join_in(sk: &mut solidcraft_sketch::Sketch, doc: &solidcraft_doc::Document, id: u64, ids: &[String]) -> Result<Vec<String>> {
     // A sketch's curves drawn before 3D constraints are joined with the first one drawn after.
     let mut joints = join_all(sk, doc, id)?;
     joints.extend(sk.join_drawn_ends(ids)?);

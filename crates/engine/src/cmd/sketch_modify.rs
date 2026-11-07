@@ -3700,6 +3700,7 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
     let rotate_constraints = bool_(p, "rotate_constraints").unwrap_or(true);
     let selection = string_list(cmd, p, "entities")?;
     let (planar, drawn) = if copy { drawn_copy_selection(s, p, selection)? } else { (selection, Vec::new()) };
+    let target = sketch_store::target(s, p, cmd)?;
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let (mut cs, mut ps) =
             if planar.is_empty() && !drawn.is_empty() { (Vec::new(), Vec::new()) } else { entities(sk, &json!({"entities": planar}), cmd)? };
@@ -3731,7 +3732,7 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
             }
             // Copied 3D curves are joined where they meet, as drawn ones are (#10608).
             if !wires.is_empty() {
-                sk.join_drawn_ends(&wires)?;
+                super::sketch_3d::join_in(sk, doc, target, &wires)?;
             }
             ids.extend(wires);
             return Ok(ids);

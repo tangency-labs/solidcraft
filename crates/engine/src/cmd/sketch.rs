@@ -4115,7 +4115,7 @@ fn solve_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let st = s.model.state();
     let ss = st.sketch(id).ok_or_else(|| EngineError::Other("the sketch has not been evaluated".into()))?;
     Ok(
-        json!({"status": ss.report.status, "dof": ss.report.shown_dof(), "failing": ss.report.failing, "wires_solve": ss.report.wires, "profiles": ss.profiles.len()}),
+        json!({"status": ss.report.status, "dof": ss.report.shown_dof(), "planar_dof": ss.report.dof, "failing": ss.report.failing, "wires_solve": ss.report.wires, "profiles": ss.profiles.len()}),
     )
 }
 

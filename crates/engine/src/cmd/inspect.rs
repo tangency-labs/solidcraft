@@ -305,6 +305,7 @@ fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Opti
         "status": ss.report.status,
         "dof": ss.report.shown_dof(),
         "fully_constrained": ss.report.shown_dof() == 0,
+        "planar_dof": ss.report.dof,
         "failing": ss.report.failing,
         // The 3D constraints' solve (#10608): its freedoms are in `dof`, its failures here.
         "wires_solve": ss.report.wires,
