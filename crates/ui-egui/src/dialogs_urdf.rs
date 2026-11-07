@@ -11,13 +11,26 @@ pub struct UrdfExport {
     pub effort: String,
     pub velocity: String,
     pub mimic: bool,
+    /// Write the meshes where `mesh_prefix` points (`place_meshes`).
+    pub place_meshes: bool,
     /// A body with no collision shape of its own becomes a convex hull, not the full mesh.
     pub hulls: bool,
 }
 
+/// The form as last chosen: the remembered choices, the rest empty.
+fn remembered(app: &SolveApp) -> UrdfExport {
+    UrdfExport { mimic: app.preferences.urdf_mimic, place_meshes: app.preferences.urdf_place_meshes, ..Default::default() }
+}
+
+/// File › Export URDF…: the options dialog, or with `urdf_export_dialog` off straight to the
+/// save picker as before, with the options last chosen.
 pub fn open(app: &mut SolveApp) {
-    let form = UrdfExport { mimic: app.preferences.urdf_mimic, ..Default::default() };
-    app.dialog = Some(Dialog::new(Kind::UrdfExport(form), Vec::new()));
+    let form = remembered(app);
+    if app.preferences.urdf_export_dialog {
+        app.dialog = Some(Dialog::new(Kind::UrdfExport(form), Vec::new()));
+    } else if let Err(e) = run(app, &form) {
+        app.set_status(e, true);
+    }
 }
 
 pub fn rows(ui: &mut egui::Ui, f: &mut UrdfExport) -> bool {
@@ -27,14 +40,14 @@ pub fn rows(ui: &mut egui::Ui, f: &mut UrdfExport) -> bool {
     crate::ui_kit::text(ui, crate::i18n::tr_label("urdf.fallback_help"), crate::ui_kit::Text::Note("urdf_fallback"));
     let r = crate::ui_kit::checkbox(ui, crate::i18n::tr_label("Couple motion links"), &mut f.mimic);
     crate::scenario::publish_handle("dialog:urdf:mimic", r.rect.center());
+    crate::ui_kit::checkbox(ui, crate::i18n::tr_label("urdf.place_meshes"), &mut f.place_meshes);
     crate::ui_kit::checkbox(ui, crate::i18n::tr_label("Convex hull collision"), &mut f.hulls);
     enter
 }
 
 /// The parameters of `file.export`, or what is wrong with the form.
 pub fn params(f: &UrdfExport, path: &str) -> Result<Value, String> {
-    let mut p =
-        json!({"path": path, "format": "urdf", "mimic": f.mimic, "place_meshes": true, "collision": if f.hulls { "convex_hull" } else { "mesh" }});
+    let mut p = json!({"path": path, "format": "urdf", "mimic": f.mimic, "place_meshes": f.place_meshes, "collision": if f.hulls { "convex_hull" } else { "mesh" }});
     if !f.mesh_prefix.trim().is_empty() {
         p["mesh_prefix"] = json!(f.mesh_prefix.trim());
     }
@@ -52,6 +65,7 @@ pub fn params(f: &UrdfExport, path: &str) -> Result<Value, String> {
 pub fn run(app: &mut SolveApp, f: &UrdfExport) -> Result<(), String> {
     params(f, "")?;
     app.preferences.urdf_mimic = f.mimic;
+    app.preferences.urdf_place_meshes = f.place_meshes;
     let form = f.clone();
     let name = format!("{}.urdf", app.session.doc.name);
     app.pick_save(&name, &["urdf"], move |app, path| {
@@ -84,7 +98,7 @@ mod tests {
     use super::*;
 
     fn form() -> UrdfExport {
-        UrdfExport { mimic: true, ..Default::default() }
+        UrdfExport { mimic: true, place_meshes: true, ..Default::default() }
     }
 
     #[test]
@@ -95,7 +109,14 @@ mod tests {
 
     #[test]
     fn the_dialog_passes_every_option_to_file_export() {
-        let f = UrdfExport { mesh_prefix: "package://r/meshes/".into(), effort: "5".into(), velocity: "2.5".into(), mimic: false, hulls: true };
+        let f = UrdfExport {
+            mesh_prefix: "package://r/meshes/".into(),
+            effort: "5".into(),
+            velocity: "2.5".into(),
+            mimic: false,
+            place_meshes: true,
+            hulls: true,
+        };
         let p = params(&f, "r.urdf").unwrap();
         assert_eq!(
             p,
@@ -140,6 +161,34 @@ mod tests {
             h.app.run("joint.create", json!({"type": "revolute", "a": {"occurrence": "H:1", "face": [5, 5, 10]}, "b": b, "name": name})).unwrap();
         }
         h.app.run("joint.gear", json!({"a": "A", "b": "B", "ra": 10, "rb": 20})).unwrap();
+    }
+
+    #[test]
+    fn with_the_dialog_preference_off_export_goes_straight_to_the_save_picker() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        h.app.preferences.urdf_export_dialog = false;
+        let dir = h.dir.clone();
+        h.app.services.pick_save = Some(Box::new(move |_, _| Box::pin(std::future::ready(Some(dir.join("r.urdf").to_string_lossy().into_owned())))));
+        open(&mut h.app);
+        assert!(h.app.dialog.is_none());
+        h.settle();
+        assert!(h.dir.join("r.urdf").exists() && h.dir.join("r-base.stl").exists());
+    }
+
+    #[test]
+    fn mesh_placement_off_keeps_the_meshes_beside_the_urdf_and_is_remembered() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let dir = h.dir.clone();
+        h.app.services.pick_save = Some(Box::new(move |_, _| Box::pin(std::future::ready(Some(dir.join("r.urdf").to_string_lossy().into_owned())))));
+        run(&mut h.app, &UrdfExport { mesh_prefix: "meshes/".into(), place_meshes: false, ..Default::default() }).unwrap();
+        h.settle();
+        assert!(h.dir.join("r-base.stl").exists() && !h.dir.join("meshes").exists());
+        assert!(!h.app.preferences.urdf_place_meshes);
+        run(&mut h.app, &UrdfExport { mesh_prefix: "meshes/".into(), place_meshes: true, ..Default::default() }).unwrap();
+        h.settle();
+        assert!(h.dir.join("meshes/r-base.stl").exists());
     }
 
     fn export(h: &mut crate::scenario::Harness, mimic: bool) -> String {
