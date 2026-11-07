@@ -190,6 +190,21 @@ pub(crate) fn row<R>(ui: &mut Ui, text: &str, control: impl FnOnce(&mut Ui) -> R
     sized_row(ui, text, row_height(), control)
 }
 
+/// Aligned label/value row for read-only text (what a sketch is on now): the value wraps in the
+/// control column and the row grows to hold every line, so a long value is never clipped.
+/// One line keeps the 28 pt row. Tokens: `row, font_label, form_ink, space_8`.
+pub(crate) fn value_row(ui: &mut Ui, text: &str, value: &str) -> Response {
+    let t = Tokens::get();
+    let font = egui::FontId::proportional(t.font_label);
+    let width = dimension(ui.available_width());
+    let label_width = label_column(ui, text, width);
+    let gutter = if label_width > 0.0 { label_gap(ui, width) } else { 0.0 };
+    let value_width = (width - label_width - gutter).max(0.0);
+    let lines = ui.painter().layout(value.to_owned(), font, t.form_ink, value_width).size().y;
+    let height = row_height().max(lines + t.space_8);
+    sized_row(ui, text, height, |ui| ui.add(egui::Label::new(RichText::new(value).size(t.font_label).color(t.form_ink)).wrap()))
+}
+
 /// Semantic ink for a form's explanatory message.
 #[derive(Clone, Copy)]
 pub(crate) enum StatusTone {
