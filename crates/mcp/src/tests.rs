@@ -557,6 +557,22 @@ fn export_tool_writes_a_urdf_package() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `format` accepts every format the extension does: iges, igs and stp were refused (#11806).
+#[test]
+fn export_tool_format_argument_accepts_iges() {
+    let mut s = server();
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}));
+    let dir = std::env::temp_dir().join(format!("solidcraft-mcp-iges-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for (format, expect) in [("iges", "Iges"), ("igs", "Iges"), ("stp", "Step")] {
+        let path = dir.join(format!("part-{format}.out"));
+        let r = tool(&mut s, "export", json!({"path": path.to_string_lossy(), "format": format}));
+        assert_eq!(r["format"], expect, "{format}: {r}");
+        assert!(std::fs::metadata(&path).unwrap().len() > 0, "{format}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Box → fillet → hole in one batch, then verify with measure / inspect_design and look at it.
 #[test]
 fn agent_builds_box_fillet_hole() {
