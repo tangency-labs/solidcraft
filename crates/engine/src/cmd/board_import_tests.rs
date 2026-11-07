@@ -1,7 +1,7 @@
 use std::f64::consts::PI;
 
 use serde_json::{Value, json};
-use solidcore_record::Vec2;
+use solidcore_record::{Vec2, Vec3};
 use solidcraft_io::{DrillArc, DrillHit, DrillSlot, Drills, Geom2};
 
 use super::{Board, Origin, build_board};
@@ -80,6 +80,16 @@ fn a_board_with_four_holes_has_the_volume_of_the_board_less_the_holes() {
     assert_eq!(chain["active"], json!("material"), "{chain}");
     let faces = &s.doc.appearances.faces;
     assert_eq!(faces.iter().filter(|f| f.body == "Board").count(), 2 + 4, "top, bottom and four plated walls: {faces:?}");
+    // On the evaluated board, the faces seen at those points are the ones coloured.
+    s.refresh();
+    let st = s.model.state();
+    let board = st.bodies.iter().find(|b| b.name == "Board").unwrap_or_else(|| panic!("no Board"));
+    let colours = s.doc.face_colors(board);
+    for (z, want) in [(1.6, [0x1d, 0x6b, 0x40]), (0.0, [0x1d, 0x6b, 0x40])] {
+        let face = solidcraft_doc::appearance::face_index_at(board, Vec3::new(15.0, 10.0, z)).unwrap_or_else(|| panic!("no face at z {z}"));
+        let look = colours.iter().find(|(i, _)| *i == face).map(|(_, l)| l.color);
+        assert_eq!(look, Some(want), "the mask at z {z}: {colours:?}");
+    }
 }
 
 const RECTANGLE_GERBER: &str = "\
