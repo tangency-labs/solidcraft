@@ -1785,52 +1785,83 @@ fn section_segments(plane: &Plane, m: &Mesh, face: Option<u32>) -> (Vec<(Vec2, V
 }
 
 /// Re-fit each circle and arc of a fitted section through the exact section points near it.
-/// The outline stays closed: a line meeting an arc's end moves with it. Where the arc meets
-/// another curve, the refit stands only if that end moves less than a profile joins ends
-/// across; else the arc keeps its fit, since moving the other curve's end would take it off
-/// its circle.
+/// The outline stays closed: a line meeting an arc's end moves with it. Where two arcs meet,
+/// their refits stand only while their ends stay within the distance a profile joins ends
+/// across; else both keep their fits, since moving an arc's end would take it off its circle.
 fn refine_rounds(mut v: Vec<LinkGeom>, exact: &[Vec2], size: f64) -> Vec<LinkGeom> {
     // Ends this close meet: the fit joins crossings this close into one point.
     let meet = size * 1e-7;
+    let ends = |h: &LinkGeom| match *h {
+        LinkGeom::Arc { a, b, .. } => Some([a, b]),
+        _ => None,
+    };
     let fitted = v.clone();
-    for i in 0..v.len() {
-        let Some(g) = v.get(i).cloned() else { continue };
-        let LinkGeom::Arc { a: a0, b: b0, .. } = g else {
-            if let Some(slot) = v.get_mut(i) {
-                *slot = refine_round(g, exact, size * 2e-3);
-            }
-            continue;
-        };
-        let refined = refine_round(g, exact, size * 2e-3);
-        let LinkGeom::Arc { a: a1, b: b1, .. } = refined else { continue };
-        // Another curve's end that met this end as fitted, where that curve ends now (it may
-        // have been refitted already).
-        let ends = |h: &LinkGeom| match *h {
-            LinkGeom::Line(s, t) | LinkGeom::Arc { a: s, b: t, .. } => Some([s, t]),
-            _ => None,
-        };
-        let tears = |e0: Vec2, e1: Vec2| {
-            fitted.iter().zip(&v).enumerate().filter(|(j, (h, _))| *j != i && !matches!(h, LinkGeom::Line(..))).any(|(_, (h, now))| {
-                let (Some(was), Some(now)) = (ends(h), ends(now)) else { return false };
-                was.iter().zip(now).any(|(w, n)| w.dist(e0) <= meet && n.dist(e1) > solidcraft_sketch::ENDPOINT_JOIN_TOL)
-            })
-        };
-        if tears(a0, a1) || tears(b0, b1) {
-            continue;
-        }
-        for h in v.iter_mut() {
-            if let LinkGeom::Line(s, t) = h {
-                for end in [s, t] {
-                    if end.dist(a0) <= meet {
-                        *end = a1;
-                    } else if end.dist(b0) <= meet {
-                        *end = b1;
+    // Each arc's refit, and whether it stands.
+    let refits: Vec<Option<LinkGeom>> =
+        fitted.iter().map(|g| matches!(g, LinkGeom::Arc { .. }).then(|| refine_round(g.clone(), exact, size * 2e-3))).collect();
+    let mut stands: Vec<bool> = refits.iter().map(Option::is_some).collect();
+    // Where two arcs met as fitted: (arc, its end, other arc, its end).
+    let mut joints = Vec::new();
+    for (i, gi) in fitted.iter().enumerate() {
+        for (j, gj) in fitted.iter().enumerate().skip(i + 1) {
+            let (Some(ei), Some(ej)) = (ends(gi), ends(gj)) else { continue };
+            for (ki, pi) in ei.iter().enumerate() {
+                for (kj, pj) in ej.iter().enumerate() {
+                    if pi.dist(*pj) <= meet {
+                        joints.push((i, ki, j, kj));
                     }
                 }
             }
         }
-        if let Some(slot) = v.get_mut(i) {
-            *slot = refined;
+    }
+    // Take back both refits at a joint they would tear, until no joint tears.
+    let end_now = |stands: &[bool], i: usize, k: usize| {
+        let g = if stands.get(i).copied().unwrap_or(false) { refits.get(i).and_then(Option::as_ref) } else { fitted.get(i) };
+        g.and_then(ends).and_then(|e| e.get(k).copied())
+    };
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for &(i, ki, j, kj) in &joints {
+            let (Some(p), Some(q)) = (end_now(&stands, i, ki), end_now(&stands, j, kj)) else { continue };
+            if p.dist(q) > solidcraft_sketch::ENDPOINT_JOIN_TOL {
+                for k in [i, j] {
+                    if let Some(s) = stands.get_mut(k).filter(|s| **s) {
+                        *s = false;
+                        changed = true;
+                    }
+                }
+            }
+        }
+    }
+    for (i, g) in fitted.iter().enumerate() {
+        match g {
+            LinkGeom::Arc { a: a0, b: b0, .. } => {
+                let (true, Some(refined @ LinkGeom::Arc { a: a1, b: b1, .. })) =
+                    (stands.get(i).copied().unwrap_or(false), refits.get(i).and_then(Option::as_ref))
+                else {
+                    continue;
+                };
+                for h in v.iter_mut() {
+                    if let LinkGeom::Line(s, t) = h {
+                        for end in [s, t] {
+                            if end.dist(*a0) <= meet {
+                                *end = *a1;
+                            } else if end.dist(*b0) <= meet {
+                                *end = *b1;
+                            }
+                        }
+                    }
+                }
+                if let Some(slot) = v.get_mut(i) {
+                    *slot = refined.clone();
+                }
+            }
+            _ => {
+                if let Some(slot) = v.get_mut(i) {
+                    *slot = refine_round(g.clone(), exact, size * 2e-3);
+                }
+            }
         }
     }
     v
