@@ -50,6 +50,44 @@ pub struct BodyListParams {
 #[schemars(deny_unknown_fields)]
 pub struct ModelThreadsParams {}
 
+/// List the timeline features that built each body (#11945).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct BodyFeaturesParams {
+    /// One body, by name (a placed copy's name means the body it shows); every body when left out.
+    #[serde(default)]
+    pub body: Option<String>,
+}
+
+/// What `model.body_features` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ModelBodyFeatures {
+    /// The bodies, in the model's order (the one asked for alone).
+    pub bodies: Vec<BodyFeatures>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// A body and the features that built it.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct BodyFeatures {
+    /// The body's name.
+    pub body: String,
+    /// In timeline order: the feature that created it, every later one that changed its
+    /// geometry, and those of the bodies consumed into it (a Combine's tools, a body joined in).
+    pub features: Vec<BodyFeature>,
+}
+
+/// A timeline feature.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct BodyFeature {
+    /// The feature's id.
+    pub id: u64,
+    /// Its name in the timeline.
+    pub name: String,
+}
+
 /// What `model.edges` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ModelEdges {

@@ -12,19 +12,24 @@ use solidcraft_sketch::CurveKind;
 use super::CommandSpec;
 use crate::params::{bad, bool_, str_, string_list};
 use crate::schema::inspect::{
-    BodyListParams, FaceCylinder, ModelEdge, ModelEdges, ModelFace, ModelFaces, ModelThread, ModelThreads, ModelThreadsParams,
+    BodyFeaturesParams, BodyListParams, FaceCylinder, ModelBodyFeatures, ModelEdge, ModelEdges, ModelFace, ModelFaces, ModelThread, ModelThreads,
+    ModelThreadsParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 const BODY_LIST_CONTRACT: TypedContract<BodyListParams> = TypedContract::new();
 const THREADS_CONTRACT: TypedContract<ModelThreadsParams> = TypedContract::new();
+const BODY_FEATURES_CONTRACT: TypedContract<BodyFeaturesParams> = TypedContract::new();
 
 #[path = "appearance_chain.rs"]
 mod appearance_chain;
 
 #[path = "appearance_gestures.rs"]
 pub(super) mod appearance_gestures;
+
+#[path = "body_features.rs"]
+mod body_features;
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("inspect.colored_components", "Component Colors", colored_components)
@@ -65,6 +70,15 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&THREADS_CONTRACT)
         .output(output_schema_for::<ModelThreads>),
+    CommandSpec::new("model.body_features", "List Body Features", crate::checked!("model.body_features", body_features::model_body_features))
+        .icon("inspect")
+        .noundo()
+        .contract(&BODY_FEATURES_CONTRACT)
+        .output(output_schema_for::<ModelBodyFeatures>)
+        .params(
+            "body?: name (a placed copy's name means the body it shows; default every body) → bodies: [{body, features: [{id, name}]}], \
+             in timeline order the feature that created each body, every later one that changed it, and those of bodies consumed into it. Read-only",
+        ),
     CommandSpec::new("material.assign", "Physical Material", physical_material)
         .at("SOLID", "MODIFY")
         .icon("material")

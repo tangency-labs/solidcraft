@@ -1128,7 +1128,8 @@ fn vertical_group_row(
         painter.multiply_opacity(0.42);
     }
     let icon = Rect::from_center_size(pos2(rect.left() + 27.5 + offset, rect.center().y), vec2(17.0, 17.0));
-    icons::paint_icon(&painter, icon, "feature_group", f32::from(t.icon.a()) / 255.0);
+    let kind = crate::timeline::folder_kind_icon(app, group.id).unwrap_or("feature_group");
+    icons::paint_icon(&painter, icon, kind, f32::from(t.icon.a()) / 255.0);
     if suppressed {
         painter.line_segment([icon.left_bottom(), icon.right_top()], Stroke::new(1.5, t.text_dim));
     }
@@ -1174,6 +1175,7 @@ fn vertical_group_row(
             crate::context_menu::start_rename(app, crate::context_menu::RenameWhat::TimelineGroup(group.id), rect.center());
             ui.close();
         }
+        crate::timeline::edit_holes_item(app, ui, group.id);
         ui.separator();
         selection_actions(app, ui, &table.groups, false);
     });
