@@ -283,6 +283,12 @@ fn a_constraint_to_another_components_sketch_projects_what_it_ties_to() {
     assert!(links(&s).iter().any(|l| matches!(&l.source, LinkSource::SketchPoint { point, .. } if point == "rail.start")));
     let (start, _) = line_of(&s, "l1");
     assert!(start.dist(Vec2::new(0.0, 40.0)) < 1e-6, "{start:?}");
+
+    // A constraint that fails after its operand was projected (`a` names nothing) leaves no
+    // projection behind: the failed command puts the design back as it was.
+    let before = s.doc.to_json();
+    assert!(s.execute("sketch.constraint.coincident", &json!({"a": "nothing", "b": {"sketch": "Guide", "point": "rail.end"}})).is_err());
+    assert_eq!(s.doc.to_json(), before, "no projection of rail.end is left");
 }
 
 /// An edge of a mirrored body is constrained to like any other body's edge (#6348). The plate

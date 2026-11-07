@@ -859,7 +859,9 @@ fn symmetry_args(picks: &[Value], sketch: Option<&solidcraft_engine::sketch::Ske
         Some(id) => sketch.and_then(|sk| sk.curve_index(id).and_then(|i| sk.curves.get(i))),
         None => None,
     };
-    let is_line = |v: &Value| matches!(v.as_str(), Some("x" | "y")) || curve(v).is_some();
+    // A curve of another sketch or a body's edge, picked to be projected, is a line too.
+    let projected_line = |v: &Value| v.get("curve").is_some() || v.get("edge").is_some();
+    let is_line = |v: &Value| matches!(v.as_str(), Some("x" | "y")) || curve(v).is_some() || projected_line(v);
     let is_axis = |v: &Value| matches!(v.as_str(), Some("x" | "y")) || curve(v).is_some_and(|c| c.construction || c.centerline);
     let only = |f: &dyn Fn(&Value) -> bool| {
         let hits: Vec<usize> = (0..picks.len()).filter(|i| picks.get(*i).is_some_and(f)).collect();
