@@ -7,21 +7,53 @@ use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, num, str_, vec2};
+use crate::schema::canvas::{
+    CanvasCalibrateParams, CanvasCalibrated, CanvasDecalParams, CanvasDeleteParams, CanvasDeleted, CanvasEditParams, CanvasEdited,
+    CanvasInsertParams, CanvasPlaced,
+};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
+const INSERT_CONTRACT: TypedContract<CanvasInsertParams> = TypedContract::new();
+const DECAL_CONTRACT: TypedContract<CanvasDecalParams> = TypedContract::new();
+const EDIT_CONTRACT: TypedContract<CanvasEditParams> = TypedContract::new();
+const CALIBRATE_CONTRACT: TypedContract<CanvasCalibrateParams> = TypedContract::new();
+const DELETE_CONTRACT: TypedContract<CanvasDeleteParams> = TypedContract::new();
+
+/// A canvas command's reply, built from its schema's type so the two can't drift apart.
+fn canvas_reply(cmd: &str, r: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(r).map_err(|e| bad(cmd, e.to_string()))
+}
+
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("canvas.insert", "Canvas", add_canvas)
+    CommandSpec::new("canvas.insert", "Canvas", crate::checked!("canvas.insert", add_canvas))
         .at("SKETCH", "INSERT")
         .icon("canvas")
+        .contract(&INSERT_CONTRACT)
+        .output(output_schema_for::<CanvasPlaced>)
         .params("path | data (base64 PNG or JPEG); plane?: XY|XZ|YZ|{face: [x,y,z]}|… (default XY); center?: [x,y] on the plane, or at?: [x,y,z]; width?: mm (default 100); angle?: deg; opacity?: 0…1 (default 0.5); flip?; name?"),
-    CommandSpec::new("canvas.decal", "Decal", add_decal)
+    CommandSpec::new("canvas.decal", "Decal", crate::checked!("canvas.decal", add_decal))
         .at("SKETCH", "INSERT")
         .icon("decal")
+        .contract(&DECAL_CONTRACT)
+        .output(output_schema_for::<CanvasPlaced>)
         .params("path | data; face: [x,y,z] on a planar face (the image is centred there), or the picked face as sketch.create's plane takes it ({face, body, index, path?}); width?: mm; angle?: deg; opacity?: (default 1)"),
-    CommandSpec::new("canvas.edit", "Edit Canvas", edit_canvas).at("SKETCH", "INSERT").icon("canvas").params("canvas: id or name; center?, width?, angle?: deg, opacity?, flip?, visible?, name?"),
-    CommandSpec::new("canvas.calibrate", "Calibrate Canvas", calibrate).icon("measure")
+    CommandSpec::new("canvas.edit", "Edit Canvas", crate::checked!("canvas.edit", edit_canvas))
+        .at("SKETCH", "INSERT")
+        .icon("canvas")
+        .contract(&EDIT_CONTRACT)
+        .output(output_schema_for::<CanvasEdited>)
+        .params("canvas: id or name; center?, width?, angle?: deg, opacity?, flip?, visible?, name?"),
+    CommandSpec::new("canvas.calibrate", "Calibrate Canvas", crate::checked!("canvas.calibrate", calibrate))
+        .icon("measure")
+        .contract(&CALIBRATE_CONTRACT)
+        .output(output_schema_for::<CanvasCalibrated>)
         .params("canvas: id or name; a, b: two points on the canvas plane [x,y]; distance: their true distance (mm): scales the image about a"),
-    CommandSpec::new("canvas.delete", "Delete Canvas", delete_canvas).icon("delete").params("canvas: id or name"),
+    CommandSpec::new("canvas.delete", "Delete Canvas", crate::checked!("canvas.delete", delete_canvas))
+        .icon("delete")
+        .contract(&DELETE_CONTRACT)
+        .output(output_schema_for::<CanvasDeleted>)
+        .params("canvas: id or name"),
 ];
 
 fn image_bytes(p: &Value, cmd: &str) -> Result<Vec<u8>> {
@@ -79,7 +111,7 @@ fn make(s: &mut Session, p: &Value, cmd: &str, decal: bool) -> Result<Value> {
         visible: true,
         component,
     });
-    Ok(json!({"canvas": id, "name": name, "pixels": pixels}))
+    canvas_reply(cmd, CanvasPlaced { canvas: id, name, pixels, param_warnings: Vec::new() })
 }
 
 fn add_canvas(s: &mut Session, p: &Value) -> Result<Value> {
@@ -136,7 +168,7 @@ fn edit_canvas(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(n) = str_(p, "name").filter(|n| !n.trim().is_empty()) {
         c.name = n.to_string();
     }
-    Ok(json!({"canvas": c.id}))
+    canvas_reply(cmd, CanvasEdited { canvas: c.id, param_warnings: Vec::new() })
 }
 
 fn calibrate(s: &mut Session, p: &Value) -> Result<Value> {
@@ -153,13 +185,14 @@ fn calibrate(s: &mut Session, p: &Value) -> Result<Value> {
     let c = s.doc_mut().canvases.get_mut(i).ok_or_else(|| bad(cmd, "canvas"))?;
     c.width *= k;
     c.center = a + (c.center - a) * k;
-    Ok(json!({"canvas": c.id, "width": c.width}))
+    canvas_reply(cmd, CanvasCalibrated { canvas: c.id, width: c.width, param_warnings: Vec::new() })
 }
 
 fn delete_canvas(s: &mut Session, p: &Value) -> Result<Value> {
-    let i = find(s, p, "canvas.delete")?;
+    let cmd = "canvas.delete";
+    let i = find(s, p, cmd)?;
     let c = s.doc_mut().canvases.remove(i);
-    Ok(json!({"deleted": c.id}))
+    canvas_reply(cmd, CanvasDeleted { deleted: c.id, param_warnings: Vec::new() })
 }
 
 #[cfg(test)]

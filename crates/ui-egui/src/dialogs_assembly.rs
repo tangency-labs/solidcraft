@@ -5,6 +5,8 @@
 //! before the click. Joints and drives preview on the placed (world) model: the moving
 //! component shows where it goes, and with Animate the joint plays its motion.
 
+use std::collections::HashSet;
+
 use crate::fonts::RichTextExt as _;
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{choice_row, expr_row, text_row};
@@ -178,6 +180,7 @@ impl Searched {
 /// The Joint and As-built Joint dialogs.
 #[derive(Clone, Debug)]
 pub struct JointForm {
+    pub name: String,
     pub as_built: bool,
     /// Editing this joint (its origins stay; type, alignment and limits change).
     pub editing: Option<u64>,
@@ -202,6 +205,8 @@ pub struct JointForm {
     pub found_note: Option<String>,
     /// The design and the joint (as the dialog had it) the found limits are for.
     pub searched: Option<Searched>,
+    /// Edit Joint Limits: open the Limits section when the dialog first draws.
+    pub show_limits: bool,
     pub animate: bool,
     /// Animation phase, 0…1.
     pub phase: f64,
@@ -211,6 +216,7 @@ pub struct JointForm {
 impl JointForm {
     fn new(as_built: bool, doc: &solidcraft_engine::doc::Document) -> JointForm {
         JointForm {
+            name: String::new(),
             as_built,
             editing: None,
             kind: 0,
@@ -224,6 +230,7 @@ impl JointForm {
             found: Vec::new(),
             found_note: None,
             searched: None,
+            show_limits: false,
             animate: false,
             phase: 0.0,
             hover: None,
@@ -494,11 +501,20 @@ fn nearest_pick(own: &[&solidcraft_engine::doc::ModelBody], p: Vec3, edges: bool
     best.map(|(_, sel)| sel)
 }
 
+/// Default name for a new joint based on its type (e.g. "Planar Joint1", "Revolute Joint1").
+pub(crate) fn default_joint_name(doc: &solidcraft_engine::doc::Document, kind: JointKind) -> String {
+    let prefix = format!("{} Joint", kind_label(kind));
+    let names: std::collections::BTreeSet<_> = doc.assembly.joints.iter().map(|j| j.name.as_str()).collect();
+    let number = (1..=doc.assembly.joints.len().saturating_add(1)).find(|n| !names.contains(format!("{prefix}{n}").as_str())).unwrap_or(1);
+    format!("{prefix}{number}")
+}
+
 /// The Edit Joint dialog for a joint (by id). Its two sides show as the Joint dialog's do, each
 /// pre-filled with the pick it sits on.
 pub fn edit_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
     let j = app.session.doc.assembly.joints.iter().find(|j| j.id == id)?;
     let mut f = JointForm::new(false, &app.session.doc);
+    f.name = j.name.clone();
     f.editing = Some(id);
     f.sides = [side_pick(app, &j.a), side_pick(app, &j.b)];
     let mut inputs = side_inputs();
@@ -522,7 +538,15 @@ pub fn edit_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
     Some(Dialog::new(Kind::Assembly(Asm::Joint(Box::new(f))), inputs))
 }
 
-/// The Drive Joints dialog on a joint (by id).
+/// Edit Joint with its Limits section open (the browser's Edit Joint Limits).
+pub fn edit_joint_limits(app: &SolveApp, id: u64) -> Option<Dialog> {
+    let mut d = edit_joint(app, id)?;
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        f.show_limits = true;
+    }
+    Some(d)
+}
+
 /// Edit Joint with its motion playing (the browser's Animate Joint).
 pub fn animate_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
     let mut d = edit_joint(app, id)?;
@@ -560,6 +584,7 @@ pub fn occurrence_bounds(s: &Session, occs: &[u64]) -> Aabb3 {
     bb
 }
 
+/// The Drive Joints dialog on a joint (by id).
 pub fn drive_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
     let joint = app.session.doc.assembly.joints.iter().position(|j| j.id == id)?;
     Some(Dialog::new(Kind::Assembly(Asm::Drive { joint, values: current_values(&app.session, joint), focus: true }), vec![]))
@@ -813,6 +838,8 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 (f.search, f.found_note, f.searched) = (None, None, None);
                 f.found.clear();
             }
+            let hint = default_joint_name(&app.session.doc, f.joint_kind());
+            enter |= text_row(ui, "Name", &mut f.name, &hint).0;
             f.fit_limits(&app.session.doc);
             if !f.as_built {
                 enter |= expr_row(ui, "Angle", &mut f.angle);
@@ -837,6 +864,10 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                         f.animate = !f.animate;
                     }
                 });
+                if std::mem::take(&mut f.show_limits) {
+                    let id = ui.make_persistent_id("joint_limits");
+                    ui.ctx().data_mut(|d| d.insert_persisted(id, true));
+                }
                 crate::ui_kit::section(ui, "joint_limits", "Limits", false, |ui| {
                     let found = f.found.clone();
                     for (i, (on, lo, hi)) in f.limits.iter_mut().enumerate() {
@@ -921,7 +952,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 form_row(ui, &capital(name), |ui| {
                     if i == 0 {
                         // Typing replaces the value at once, as in the other dialogs' value boxes.
-                        let id = egui::Id::new("sc_drive_value");
+                        let id = egui::Id::unique("sc_drive_value");
                         let r = crate::ui_kit::cell_editor(ui, id, v, "", false);
                         crate::params_dialog::complete(ui, &r, v);
                         if std::mem::take(focus) {
@@ -1484,10 +1515,14 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
         Asm::Joint(f) => {
             let kind = TYPES.get(f.kind).copied().unwrap_or("rigid");
             let jk = f.joint_kind();
+            let custom_name = f.name.trim();
             let limits: Vec<Value> =
                 f.limits.iter().take(jk.dofs().len()).map(|(on, lo, hi)| if *on { json!([lo, hi]) } else { Value::Null }).collect();
             if let Some(id) = f.editing {
                 let mut p = json!({"joint": id, "type": kind, "flip": f.flip, "offset": f.offset[2]});
+                if !custom_name.is_empty() {
+                    p["name"] = json!(custom_name);
+                }
                 // The angle only when the user changed it: a side moved without it turns B as joint.create would.
                 if f.angle != f.angle_shown {
                     p["angle"] = json!(f.angle);
@@ -1516,6 +1551,9 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                     return Err("select two components".into());
                 }
                 let mut p = json!({"type": kind, "a": occs.first(), "b": occs.get(1), "limits": limits});
+                if !custom_name.is_empty() {
+                    p["name"] = json!(custom_name);
+                }
                 if let Some(x) = sel_items(inputs, 1).first().and_then(|x| snap_of(s, x)) {
                     p["at"] = x.param;
                 }
@@ -1530,7 +1568,10 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             // Picked origins mate by default (the engine's default: B's z opposite A's, faces
             // meet face to face, a pin goes into its hole); the dialog's Flip is the command's
             // `flip`, which turns B the other way.
-            let p = json!({"type": kind, "a": a_param, "b": b.param, "flip": f.flip, "offset": f.offset[2], "angle": f.angle, "limits": limits});
+            let mut p = json!({"type": kind, "a": a_param, "b": b.param, "flip": f.flip, "offset": f.offset[2], "angle": f.angle, "limits": limits});
+            if !custom_name.is_empty() {
+                p["name"] = json!(custom_name);
+            }
             cmd("joint.create", p)
         }
         Asm::JointOrigin { name, .. } => {
@@ -1829,25 +1870,142 @@ fn timeline_joint_items(app: &SolveApp, ids: Option<&[u64]>) -> Vec<(u64, String
         .collect()
 }
 
-/// Joints after the features in the timeline: double-click edits, the menu drives, suppresses
-/// or deletes. Returns the x after them.
-pub fn timeline_joints(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter, x: f32, r: egui::Rect) -> f32 {
-    timeline_joint_tiles(app, ui, p, x, r, None)
+/// More joints than this (an imported assembly makes one per placed part) start grouped in the
+/// timeline as one button with their count, from the second joint on; clicking it shows each joint.
+const JOINT_GROUP_MIN: usize = 1;
+/// The browser-state key that remembers the timeline's joints were shown one by one.
+const JOINTS_KEY: &str = "timeline_joints";
+/// The History key that remembers a folder's joints were shown one by one, before its id.
+pub(crate) const FOLDER_JOINTS_KEY: &str = "timeline_joints:";
+
+/// Which joints a row of joint chips in the History bar shows: those no feature folder holds
+/// (after the features), or a folder's (an import's rigid group, see `timeline_folders`).
+#[derive(Clone, Copy)]
+pub(crate) enum JointRun<'a> {
+    Loose,
+    Folder { id: u64, name: &'a str },
 }
 
-pub(crate) fn timeline_joint_tiles(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter, mut x: f32, r: egui::Rect, ids: Option<&[u64]>) -> f32 {
+impl JointRun<'_> {
+    /// The key that remembers the joints were shown one by one: in the browser's state for the
+    /// joints after the history, in the design's History choices for a folder's.
+    fn key(self) -> String {
+        match self {
+            Self::Loose => JOINTS_KEY.to_string(),
+            Self::Folder { id, .. } => format!("{FOLDER_JOINTS_KEY}{id}"),
+        }
+    }
+
+    /// The scenario handle of their grouped chip.
+    fn handle(self) -> String {
+        match self {
+            Self::Loose => "timeline:joints".to_string(),
+            Self::Folder { name, .. } => format!("timeline-folder-joints:{name}"),
+        }
+    }
+}
+
+/// Whether `count` joints group as one button: from the second joint, once the preference is on
+/// (Preferences > Layout, "Group joints in the History"; off by default, which shows each joint).
+fn grouped(app: &SolveApp, count: usize) -> bool {
+    count > JOINT_GROUP_MIN && app.preferences.history_group_joints
+}
+
+fn joints_open(app: &SolveApp, count: usize, run: JointRun) -> bool {
+    !grouped(app, count)
+        || match run {
+            JointRun::Loose => crate::browser::is_open(app, &run.key(), false),
+            // Folder ids are numbered in each design: its choice stays with the design, as the
+            // folder's own fold does.
+            JointRun::Folder { .. } => crate::history_folds::is_open(app, &run.key(), false),
+        }
+}
+
+fn toggle_joints(app: &mut SolveApp, run: JointRun) {
+    match run {
+        JointRun::Loose => crate::browser::toggle(app, &run.key(), false),
+        JointRun::Folder { .. } => {
+            let open = crate::history_folds::is_open(app, &run.key(), false);
+            crate::history_folds::set_open(app, &run.key(), !open);
+        }
+    }
+}
+
+/// The button that stands for `count` grouped joints, its top left at `at` (see
+/// `HistoryGroupChip`). Returns its width and whether it was clicked.
+fn joint_group_button(
+    ui: &mut egui::Ui,
+    p: &egui::Painter,
+    at: egui::Pos2,
+    count: usize,
+    open: bool,
+    accent: crate::theme::TabAccent,
+    run: JointRun,
+) -> (f32, bool) {
+    let chip = crate::ui_kit::HistoryGroupChip {
+        icon: "joint",
+        name: "",
+        count,
+        open,
+        selected: false,
+        hovered: false,
+        dim: false,
+        error: false,
+        warning: false,
+        accent,
+    };
+    let br = egui::Rect::from_min_size(at, chip.size(p));
+    let resp = ui.interact(br, ui.scope_id().with(("joint_group", run.key())), egui::Sense::click());
+    let handle = run.handle();
+    crate::scenario::publish_handle(&handle, br.center());
+    crate::scenario::publish_target(&format!("{handle}_arrow"), crate::ui_kit::HistoryGroupChip::well(br));
+    let pointer = resp.hover_pos();
+    let on_arrow = crate::ui_kit::HistoryGroupChip::on_arrow(br, pointer);
+    crate::scenario::publish_count(&format!("{handle}_arrow_hot"), f64::from(u8::from(on_arrow)));
+    chip.paint(p, br, pointer);
+    let tip = if open { "click to group them" } else { "click to show each one" };
+    let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(format!("{count} joints: {tip}"));
+    (br.width(), resp.clicked())
+}
+
+/// Joints after the features in the timeline, except those a feature folder holds (`held`):
+/// double-click edits, the menu drives, suppresses or deletes. Returns the x after them.
+pub fn timeline_joints(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter, x: f32, r: egui::Rect, held: &HashSet<u64>) -> f32 {
+    let loose: Vec<u64> = app.session.doc.assembly.joints.iter().map(|j| j.id).filter(|id| !held.contains(id)).collect();
+    if loose.is_empty() {
+        return x;
+    }
+    joint_chips(app, ui, p, x + 8.0, r, &loose, JointRun::Loose)
+}
+
+/// The joints `ids` as chips from `x` on, grouped into one chip (open to show each) when there
+/// are many. Returns the x after them.
+pub(crate) fn joint_chips(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter, mut x: f32, r: egui::Rect, ids: &[u64], set: JointRun) -> f32 {
     let t = Tokens::get();
-    let joints = timeline_joint_items(app, ids);
+    let wanted: HashSet<u64> = ids.iter().copied().collect();
+    let joints: Vec<(u64, String, JointKind, bool)> =
+        app.session.doc.assembly.joints.iter().filter(|j| wanted.contains(&j.id)).map(|j| (j.id, j.name.clone(), j.kind, j.suppressed)).collect();
     if joints.is_empty() {
         return x;
     }
-    x += 8.0;
+    if grouped(app, joints.len()) {
+        let open = joints_open(app, joints.len(), set);
+        let accent = crate::theme::TabAccent::for_tab(&t, &app.ui.tab);
+        let (width, clicked) = joint_group_button(ui, p, egui::pos2(x, r.top() + 6.0), joints.len(), open, accent, set);
+        if clicked {
+            toggle_joints(app, set);
+        }
+        x += width + 4.0;
+        if !open {
+            return x;
+        }
+    }
     let mut open: Option<Dialog> = None;
     let mut run: Option<(&'static str, Value)> = None;
     for (id, name, kind, suppressed) in joints {
         let br = egui::Rect::from_min_size(egui::pos2(x, r.top() + 6.0), vec2(28.0, 28.0));
         crate::scenario::publish_handle(&format!("timeline-joint:{name}"), br.center());
-        let resp = ui.interact(br, ui.id().with(("joint", id)), egui::Sense::click());
+        let resp = ui.interact(br, ui.scope_id().with(("joint", id)), egui::Sense::click());
         let bg = if app.tree.picked_joints.contains(&id) {
             t.accent_soft
         } else if resp.hovered() {
@@ -1899,7 +2057,30 @@ pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Op
     }
     if ids.is_none() {
         ui.add_space(4.0);
-        ui.label(egui::RichText::new("JOINTS").size(crate::theme::Tokens::get().font_micro).semibold().color(t.text_dim));
+        if grouped(app, joints.len()) {
+            let shown = joints_open(app, joints.len(), JointRun::Loose);
+            let header = format!("JOINTS ({})", joints.len());
+            let clicked = ui
+                .horizontal(|ui| {
+                    let (rect, _) = ui.allocate_exact_size(vec2(t.form_section_icon_size, t.form_section_icon_size), egui::Sense::hover());
+                    let fold = crate::ui_kit::disclosure_button_at(ui, rect, shown, &header);
+                    let response = ui.add(
+                        egui::Label::new(egui::RichText::new(&header).size(crate::theme::Tokens::get().font_micro).semibold().color(t.text_dim))
+                            .sense(egui::Sense::click()),
+                    );
+                    crate::scenario::publish_handle("timeline:joints", response.rect.center());
+                    fold.clicked() || response.clicked()
+                })
+                .inner;
+            if clicked {
+                toggle_joints(app, JointRun::Loose);
+            }
+            if !shown {
+                return;
+            }
+        } else {
+            ui.label(egui::RichText::new("JOINTS").size(crate::theme::Tokens::get().font_micro).semibold().color(t.text_dim));
+        }
     }
     let mut open = None;
     let mut run = None;
@@ -1971,7 +2152,7 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
     let folder_shown = !app.session.folder_hidden(key);
     let r = draw_row(
         ui,
-        ui.id().with(key),
+        ui.scope_id().with(key),
         &Row { depth, fold: Some(open), eye: Some(folder_shown), icon: "folder", label: "Joints", dim: !folder_shown, ..Default::default() },
     );
     if r.eye {
@@ -1988,7 +2169,7 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
         let selected = app.tree.picked_joints.contains(&id);
         let r = draw_row(
             ui,
-            ui.id().with(("joint", id)),
+            ui.scope_id().with(("joint", id)),
             &Row {
                 depth: depth + 1,
                 eye: Some(visible),
@@ -2060,7 +2241,7 @@ pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key
     }
     let key = format!("{key}/joints");
     let open = is_open(app, &key, false);
-    let r = draw_row(ui, ui.id().with(&key), &Row { depth, fold: Some(open), icon: "folder", label: "Joints", ..Default::default() });
+    let r = draw_row(ui, ui.scope_id().with(&key), &Row { depth, fold: Some(open), icon: "folder", label: "Joints", ..Default::default() });
     if r.fold || r.clicked {
         toggle(app, &key, false);
     }
@@ -2076,7 +2257,7 @@ pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key
         let selected = app.tree.picked_joints.contains(&id);
         let r = draw_row(
             ui,
-            ui.id().with((&key, "joint", id)),
+            ui.scope_id().with((&key, "joint", id)),
             &Row {
                 depth: depth + 1,
                 eye: Some(visible),
@@ -2265,31 +2446,175 @@ pub fn drawn_joints(app: &SolveApp) -> Vec<(u64, bool)> {
         .collect()
 }
 
-/// Joint glyphs in the viewport: a ring where the joint sits, its motion axis, and its limits
-/// (ticks on the ring for a turn, along the axis for a slide). Glyphs are only drawn; they are
-/// never picked in the viewport.
-pub fn joint_glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
+thread_local! {
+    /// The size (box diagonal) of each occurrence's bodies, for the design revision it was found in.
+    static OCCURRENCE_SIZES: std::cell::RefCell<Option<(u64, std::collections::HashMap<u64, f64>)>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The size (box diagonal, mm) of each occurrence's bodies, including those of the occurrences
+/// inside it; occurrence 0 is the root's own bodies. Found once per design revision, in one
+/// pass over the bodies, as [`occurrence_bounds`] would find it for each occurrence.
+fn occurrence_sizes(s: &Session) -> std::collections::HashMap<u64, f64> {
+    let rev = s.revision;
+    if let Some(v) = OCCURRENCE_SIZES.with(|o| o.borrow().as_ref().filter(|(k, _)| *k == rev).map(|(_, v)| v.clone())) {
+        return v;
+    }
+    let model = s.model.state();
+    let Ok(world) = s.world_state() else { return std::collections::HashMap::new() };
+    let mut boxes: std::collections::HashMap<u64, Aabb3> = std::collections::HashMap::new();
+    for (name, _, path, _) in s.doc.body_frames(&model) {
+        let Some(b) = world.body(&name) else { continue };
+        let bb = b.mesh().bounds();
+        let owners: Vec<u64> = if path.is_empty() { vec![0] } else { path.clone() };
+        for o in owners {
+            let e = boxes.entry(o).or_default();
+            *e = e.union(&bb);
+        }
+    }
+    let v: std::collections::HashMap<u64, f64> = boxes.into_iter().filter(|(_, b)| !b.is_empty()).map(|(o, b)| (o, b.diagonal())).collect();
+    OCCURRENCE_SIZES.with(|o| *o.borrow_mut() = Some((rev, v.clone())));
+    v
+}
+
+/// A joint glyph's axis half-length is at most this share of the view height ...
+const GLYPH_VIEW_SHARE: f64 = 0.05;
+/// ... and at most this share of the smaller joined part's size, so zoomed out the glyphs
+/// shrink with the parts they join instead of covering them (#6404).
+const GLYPH_PART_SHARE: f64 = 0.25;
+/// The half size (screen points) of a rigid joint's square mark.
+const RIGID_MARK: f32 = 3.5;
+
+/// How one joint's glyph is drawn.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct JointGlyph {
+    pub id: u64,
+    pub picked: bool,
+    /// A rigid joint has no motion: a small square, no axis or ring.
+    pub rigid: bool,
+    /// Half the motion axis (world mm); the ring's radius is half of it.
+    pub len: f64,
+    /// Lies on a glyph drawn before it (zoomed out, joints piled up): drawn faint.
+    pub faded: bool,
+    pub centre: Pos2,
+}
+
+/// The glyphs to draw, in drawing order: picked joints first, then moving joints, then rigid
+/// ones. Each is sized to the view and to the parts it joins; one whose centre falls inside a
+/// glyph planned before it is faded, unless it is picked.
+pub(crate) fn joint_glyph_plan(app: &SolveApp, proj: &Proj) -> Vec<JointGlyph> {
     let drawn = drawn_joints(app);
     if drawn.is_empty() {
-        return;
+        return Vec::new();
     }
-    let t = Tokens::get();
     let frames = joint_frames_world(&app.session);
-    let len = app.cam.half_height() * 2.0 * 0.05;
+    let sizes = occurrence_sizes(&app.session);
+    let view_len = app.cam.half_height() * 2.0 * GLYPH_VIEW_SHARE;
     let at = |m: &solidcraft_engine::doc::Mat, x: f64, y: f64, z: f64| solidcraft_engine::doc::apply_point(m, Vec3::new(x, y, z));
+    let mut plan = Vec::new();
     for (id, picked) in drawn {
         let Some(j) = app.session.doc.assembly.joints.iter().find(|j| j.id == id) else { continue };
         let Some((_, m)) = frames.iter().find(|(f, _)| *f == id) else { continue };
-        let col = if picked {
+        let Some(centre) = proj.to_screen(at(m, 0.0, 0.0, 0.0)) else { continue };
+        let part = [j.a.occurrence, j.b.occurrence]
+            .iter()
+            .filter_map(|o| sizes.get(o).copied())
+            .filter(|d| d.is_finite() && *d > 0.0)
+            .fold(f64::INFINITY, f64::min);
+        let len = view_len.min(part * GLYPH_PART_SHARE);
+        plan.push((JointGlyph { id, picked, rigid: j.kind == JointKind::Rigid, len, faded: false, centre }, *m));
+    }
+    plan.sort_by_key(|(g, _)| (!g.picked, g.rigid));
+    // Screen reach of each glyph: its ring (or a rigid mark), for the overlap test.
+    let reach = |g: &JointGlyph, m: &solidcraft_engine::doc::Mat| -> f32 {
+        if g.rigid {
+            return RIGID_MARK;
+        }
+        let r = g.len * 0.5;
+        [(r, 0.0, 0.0), (0.0, r, 0.0)]
+            .iter()
+            .filter_map(|p| proj.to_screen(at(m, p.0, p.1, p.2)))
+            .map(|q| q.distance(g.centre))
+            .fold(RIGID_MARK, f32::max)
+    };
+    let mut placed: Vec<(Pos2, f32)> = Vec::new();
+    for (g, m) in &mut plan {
+        let r = reach(g, m);
+        g.faded = !g.picked && placed.iter().any(|(c, rc)| c.distance(g.centre) < rc.max(r));
+        if !g.faded {
+            placed.push((g.centre, r));
+        }
+    }
+    plan.into_iter().map(|(g, _)| g).collect()
+}
+
+/// How near (screen points) the pointer must come to a glyph's centre for its tooltip.
+const GLYPH_TIP_REACH: f32 = 8.0;
+
+/// The joint whose glyph the pointer at `pos` is on: the nearest centre within reach, and of
+/// glyphs on the same spot the one drawn on top (#6404).
+pub(crate) fn joint_glyph_at(plan: &[JointGlyph], pos: Pos2) -> Option<u64> {
+    plan.iter().map(|g| (g.id, g.centre.distance(pos))).filter(|(_, d)| *d <= GLYPH_TIP_REACH).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(id, _)| id)
+}
+
+/// A glyph's tooltip: the joint's name and type, e.g. "Glue (Rigid)", or the name alone when it says the type ("Rigid 7"), so the square, ring and
+/// axis explain themselves (#6404).
+pub(crate) fn joint_glyph_tip(app: &SolveApp, id: u64) -> Option<String> {
+    let j = app.session.doc.assembly.joints.iter().find(|j| j.id == id)?;
+    let kind = app.tr(kind_label(j.kind));
+    // A name that already says the type ("Rigid 7") is enough on its own.
+    Some(if j.name.to_lowercase().contains(&kind.to_lowercase()) { j.name.clone() } else { format!("{} ({kind})", j.name) })
+}
+
+/// Joint glyphs in the viewport: a ring where a moving joint sits, its motion axis and its
+/// limits (ticks on the ring for a turn, along the axis for a slide); a small square for a rigid
+/// joint. Glyphs are never picked in the viewport; hovering one names the joint and its type.
+pub fn joint_glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
+    let plan = joint_glyph_plan(app, proj);
+    if plan.is_empty() {
+        return;
+    }
+    let ctx = painter.ctx();
+    let pointer = ctx
+        .input(|i| if i.pointer.any_down() { None } else { i.pointer.hover_pos() })
+        .filter(|p| painter.clip_rect().contains(*p) && !crate::shell::covered(app, *p));
+    if let Some(p) = pointer
+        && let Some(id) = joint_glyph_at(&plan, p)
+        && let Some(tip) = joint_glyph_tip(app, id)
+    {
+        egui::containers::Tooltip::always_open(
+            ctx.clone(),
+            painter.layer_id(),
+            egui::Id::unique(("joint_glyph_tip", id)),
+            egui::PopupAnchor::Pointer,
+        )
+        .show(|ui| ui.label(tip));
+    }
+    let t = Tokens::get();
+    let frames = joint_frames_world(&app.session);
+    let at = |m: &solidcraft_engine::doc::Mat, x: f64, y: f64, z: f64| solidcraft_engine::doc::apply_point(m, Vec3::new(x, y, z));
+    // Back to front, so the glyphs drawn first in the plan end up on top.
+    for g in plan.iter().rev() {
+        let Some(j) = app.session.doc.assembly.joints.iter().find(|j| j.id == g.id) else { continue };
+        let Some((_, m)) = frames.iter().find(|(f, _)| *f == g.id) else { continue };
+        crate::scenario::publish_handle(&format!("joint-glyph:{}", j.name), g.centre);
+        let col = if g.picked {
             t.sel_edge
         } else if j.suppressed {
             t.text_dim
         } else {
             t.accent
         };
-        let width = if picked { 2.5 } else { 1.5 };
+        let col = if g.faded { col.gamma_multiply(0.3) } else { col };
+        let width = if g.picked { 2.5 } else { 1.5 };
         let stroke = Stroke::new(width, col);
-        let Some(c) = proj.to_screen(at(m, 0.0, 0.0, 0.0)) else { continue };
+        let c = g.centre;
+        if g.rigid {
+            let half = if g.picked { RIGID_MARK + 1.0 } else { RIGID_MARK };
+            let fill = if g.faded { t.panel.gamma_multiply(0.3) } else { t.panel };
+            painter.rect(egui::Rect::from_center_size(c, vec2(half * 2.0, half * 2.0)), 0.0, fill, stroke, egui::StrokeKind::Middle);
+            continue;
+        }
+        let len = g.len;
         // The motion axis (z), both ways.
         if let (Some(a), Some(b)) = (proj.to_screen(at(m, 0.0, 0.0, -len)), proj.to_screen(at(m, 0.0, 0.0, len))) {
             painter.line_segment([a, b], stroke);
@@ -2306,6 +2631,7 @@ pub fn joint_glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
             painter.add(egui::Shape::line(ring, stroke));
         }
         // Limits: ticks across the ring for a turn, across the axis (or slot) for a slide.
+        let warning = if g.faded { t.warning.gamma_multiply(0.3) } else { t.warning };
         for (i, lim) in j.limits.iter().enumerate() {
             let Some((lo, hi)) = lim else { continue };
             let name = j.kind.dofs().get(i).copied().unwrap_or("");
@@ -2320,13 +2646,18 @@ pub fn joint_glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
                     _ => continue,
                 };
                 if let (Some(p), Some(q)) = (proj.to_screen(at(m, p.0, p.1, p.2)), proj.to_screen(at(m, q.0, q.1, q.2))) {
-                    painter.line_segment([p, q], Stroke::new(width, t.warning));
+                    painter.line_segment([p, q], Stroke::new(width, warning));
                 }
             }
         }
-        painter.circle(c, if picked { 4.5 } else { 3.5 }, t.panel, stroke);
+        let fill = if g.faded { t.panel.gamma_multiply(0.3) } else { t.panel };
+        painter.circle(c, if g.picked { 4.5 } else { 3.5 }, fill, stroke);
     }
 }
+
+#[cfg(test)]
+#[path = "joint_glyph_tests.rs"]
+mod joint_glyph_tests;
 
 #[cfg(test)]
 #[path = "joint_browser_tests.rs"]

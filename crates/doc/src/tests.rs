@@ -39,6 +39,7 @@ fn plate_doc() -> (Document, u64) {
                 distance2: None,
                 start_offset: None,
                 through_all: false,
+                second_follows_first: false,
                 taper: None,
                 corner: Default::default(),
                 to: None,
@@ -103,6 +104,35 @@ fn set_back_reports_restored_features() {
     // No change: nothing recomputed and nothing restored.
     m.evaluate(&doc);
     assert_eq!((m.last_recomputed, m.last_restored), (0, 0));
+}
+
+/// Adding a line and deleting it again leaves the solved geometry as it was: the extrude and
+/// everything after it take their earlier results from the cache.
+#[test]
+fn a_sketch_line_added_and_deleted_restores_the_extrude() {
+    let (mut doc, s) = plate_doc();
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    assert_eq!((m.last_recomputed, m.last_restored), (2, 0));
+
+    let (a, b, line) = {
+        let sk = doc.sketch_mut(s).unwrap();
+        let a = sk.add_point(Vec2::new(5.0, 5.0), None).unwrap();
+        let b = sk.add_point(Vec2::new(6.0, 5.0), None).unwrap();
+        (a, b, sk.add_line_pts(a, b, None).unwrap())
+    };
+    m.evaluate(&doc);
+    assert_eq!((m.last_recomputed, m.last_restored), (2, 0));
+
+    {
+        let sk = doc.sketch_mut(s).unwrap();
+        sk.remove_curves(&[line]);
+        sk.remove_points(&[b]);
+        sk.remove_points(&[a]);
+    }
+    m.evaluate(&doc);
+    assert_eq!((m.last_recomputed, m.last_restored), (0, 2));
+    assert!(rel(measure(&m.state().bodies[0].body).unwrap().volume, 24000.0) < 1e-9);
 }
 
 /// Setting a parameter back restores every feature on a design whose states are large next to
@@ -316,6 +346,7 @@ fn box_fillet_cut_timeline() {
                 distance2: None,
                 start_offset: None,
                 through_all: false,
+                second_follows_first: false,
                 taper: None,
                 corner: Default::default(),
                 to: None,
@@ -631,6 +662,26 @@ fn a_folder_naming_missing_or_repeated_features_still_opens() {
     assert_eq!(opened.timeline_groups[1].features, vec![c], "no missing feature, nor one the first folder holds");
     assert!(opened.timeline_groups[1].joints.is_empty());
     assert_eq!(opened.timeline_groups.iter().map(|g| g.name.as_str()).collect::<Vec<_>>(), ["Repeats", "Stale"], "both folders are kept");
+}
+
+/// Timeline folders nested 10 000 deep open at once: each folder's chain of parents is walked
+/// once, not again for every folder inside it (a 588 KB design took over three minutes). A
+/// cycle is still refused.
+#[test]
+fn deeply_nested_timeline_folders_open_and_a_cycle_does_not() {
+    let mut doc = Document::new("nested folders");
+    let n = 10_000u64;
+    doc.timeline_groups = (0..n)
+        .map(|i| TimelineGroup { id: 100 + i, name: "f".into(), parent: (i + 1 < n).then_some(101 + i), features: vec![], joints: vec![] })
+        .collect();
+    let started = std::time::Instant::now();
+    let opened = Document::from_json(&doc.to_json()).expect("the design opens");
+    assert_eq!(opened.timeline_groups.len(), n as usize);
+    assert!(started.elapsed() < std::time::Duration::from_secs(20), "{:?}", started.elapsed());
+    doc.timeline_groups =
+        (0..3).map(|i| TimelineGroup { id: 100 + i, name: "f".into(), parent: Some(100 + (i + 1) % 3), features: vec![], joints: vec![] }).collect();
+    let refused = Document::from_json(&doc.to_json()).unwrap_err().to_string();
+    assert!(refused.contains("cyclic timeline folders"), "{refused}");
 }
 
 /// A marker after the last feature leaves every feature active, as no marker does, so a feature
@@ -1101,6 +1152,7 @@ fn an_extruded_ellipse_or_spline_is_one_wall_named_by_its_curve() {
             distance2: None,
             start_offset: None,
             through_all: false,
+            second_follows_first: false,
             taper: None,
             corner: Default::default(),
             to: None,

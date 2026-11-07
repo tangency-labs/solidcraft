@@ -322,12 +322,38 @@ pub struct RenderTarget {
     pub ordinal: usize,
     /// Its name, with its component's path when it is in one.
     pub name: String,
+    /// Its saved definition, feature and occurrence identity; `null` when no stable target exists.
+    pub stable_target: Option<StableRenderTarget>,
     /// Its colour: red, green and blue, 0 to 255.
     pub color: [u8; 3],
     /// How opaque it is: 1 is solid.
     pub opacity: f64,
     /// Its PBR look; `null` when it has none.
     pub pbr: Option<Pbr>,
+}
+
+/// A stable body identity accepted by saved surface, optical and clear-coat bindings.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct StableRenderTarget {
+    /// The saved body definition's name.
+    pub definition: String,
+    /// The feature that produced the body.
+    pub feature: u64,
+    /// The owning component, or 0 for the root definition.
+    pub component: u64,
+    /// The ordered occurrence ids from the root; empty for a root definition.
+    pub occurrence_path: Vec<u64>,
+}
+
+impl From<&solidcraft_doc::render_surface::RenderBodyTarget> for StableRenderTarget {
+    fn from(target: &solidcraft_doc::render_surface::RenderBodyTarget) -> Self {
+        Self {
+            definition: target.definition.clone(),
+            feature: target.feature,
+            component: target.component,
+            occurrence_path: target.occurrence_path.clone(),
+        }
+    }
 }
 
 /// A body's PBR look.

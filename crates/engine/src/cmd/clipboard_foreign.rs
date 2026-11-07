@@ -18,7 +18,7 @@ fn independent_plane(plane: &PlaneRef, depth: usize) -> Result<()> {
     }
     match plane {
         PlaneRef::Origin { .. } | PlaneRef::Custom { .. } | PlaneRef::Placed { .. } => Ok(()),
-        PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } | PlaneRef::AtAngle { base, line: None, .. } => {
+        PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } | PlaneRef::AtAngle { base, line: None, pivot: None, .. } => {
             independent_plane(base, depth + 1)
         }
         _ => Err(bad(CMD, "the copied sketch's plane depends on model geometry; convert it to a fixed plane before pasting into another design")),

@@ -279,7 +279,7 @@ mean something else, it needs a format change. **Add one file, and edit nothing 
    change's file, or any `v<N>/` folder: those are fixed once released.
 
 That's all. The build counts the files: while any are pending it writes the next format number,
-which no release reads, so a release refuses a design that has your change instead of losing it.
+which no release reads, so a release warns about a design that has your change and keeps what it can't read of it.
 A file also lists the pending changes it has (`format_pending`), so a later development build
 runs only the steps that file is missing. Two pull requests that each add a change merge without
 a conflict. `crates/doc/src/format/pending/README.md` has an example.

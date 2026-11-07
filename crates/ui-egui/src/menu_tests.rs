@@ -1486,7 +1486,7 @@ fn menus_near_the_window_corner_open_inward() {
             assert_eq!(h.call("ui.menu", json!({}))["result"]["open"], true, "{scale} {target:?}");
             // An auto-sized menu takes a few frames to settle its size.
             h.frames(3);
-            let r = h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_context_menu"))).unwrap();
+            let r = h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_context_menu"))).unwrap();
             assert!(screen.contains_rect(r), "{scale} {target:?}: {r:?} outside {screen:?}");
             // Below and right of the cursor where it fits, else ending at it.
             let x = if at.x + r.width() <= screen.right() { at.x } else { at.x - r.width() };
@@ -1636,6 +1636,7 @@ fn every_context_target_has_identified_icon_rows_including_submenus() {
         Target::Canvas { id: 1 },
         Target::Section,
         Target::Folder { component: 0, folder: "bodies".into(), scope: "c0".into() },
+        Target::Timeline { feature },
     ] {
         let rows = context_menu::items(&app, &target);
         assert!(!rows.is_empty(), "unexercised target: {target:?}");
@@ -2194,4 +2195,118 @@ fn insert_design_offers_the_other_open_designs_then_browse() {
     assert!(!menu_open(&h.app));
     h.frames(3);
     assert_eq!(linked(&h.app, "plate.solidcraft"), 2);
+}
+
+/// `ui.menu` opens a menu only on something the design has, as a right-click can (#10745).
+#[test]
+fn ui_menu_refuses_a_target_the_design_does_not_have() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "Blk"})).unwrap();
+    let group = h.app.run("browser.group", json!({"component": 0, "folder": "bodies", "items": ["Blk"]})).unwrap()["group"].as_u64().unwrap();
+    let bad_group = format!("no group {group} under `c7`");
+    // A plane menu is for construction geometry only, not the box.
+    let block = h.app.session.doc.features[0].id;
+    let bad_plane = format!("no plane `{block}`");
+    // A part's folders are drawn under its placement, never under a `c<id>` row of its own.
+    let part = h.app.run("component.create", json!({"name": "Part"})).unwrap()["component"].as_u64().unwrap();
+    let placement = h.app.session.doc.occurrence_of(part).unwrap().id;
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    let bad_part = format!("no `bodies` folder of component {part} under `c{part}`");
+    // A placement spelt another way (`o:012` for `o:12`) isn't the row's key either.
+    let bad_alias = format!("no `bodies` folder of component {part} under `o:0{placement}`");
+    h.frames(2);
+    for (target, error) in [
+        (json!({"type": "body", "name": "NoSuchBody"}), "no body `NoSuchBody`"),
+        (json!({"type": "component", "id": 999}), "no component `999`"),
+        (json!({"type": "joint", "id": 7}), "no joint `7`"),
+        (json!({"type": "timeline", "feature": 999}), "no feature `999`"),
+        (json!({"type": "section"}), "no section"),
+        (json!({"type": "folder", "component": 0, "folder": "drawings", "scope": "c0"}), "no `drawings` folder of component 0 under `c0`"),
+        (json!({"type": "folder", "component": 0, "folder": "bodies", "scope": "o:999"}), "no `bodies` folder of component 0 under `o:999`"),
+        (json!({"type": "group", "id": group, "scope": "c7"}), bad_group.as_str()),
+        (json!({"type": "plane", "id": block}), bad_plane.as_str()),
+        (json!({"type": "folder", "component": part, "folder": "bodies", "scope": format!("c{part}")}), bad_part.as_str()),
+        (json!({"type": "folder", "component": part, "folder": "bodies", "scope": format!("o:0{placement}")}), bad_alias.as_str()),
+    ] {
+        let reply = h.call("ui.menu", json!({"x": 150, "y": 400, "target": target}));
+        assert_eq!(reply["error"], error, "{target}");
+        assert_eq!(h.call("ui.menu", json!({}))["result"], json!({"open": false, "pending": false}), "{target}");
+    }
+    for target in [
+        json!({"type": "body", "name": "Blk"}),
+        json!({"type": "folder", "component": 0, "folder": "bodies", "scope": "c0"}),
+        json!({"type": "group", "id": group, "scope": "c0"}),
+        json!({"type": "folder", "component": part, "folder": "bodies", "scope": format!("o:{placement}")}),
+    ] {
+        assert_eq!(h.call("ui.menu", json!({"x": 150, "y": 400, "target": target}))["ok"], true, "{target}");
+        assert_eq!(h.call("ui.menu", json!({}))["result"]["open"], true, "{target}");
+        h.call("ui.menu", json!({"close": true}));
+    }
+}
+
+/// The History bar's feature menu is the shared context menu: `ui.menu` reports it after a
+/// right-click, `ui.menuPick` runs its items, and a `timeline` target opens it (#10745).
+#[test]
+fn the_history_bar_feature_menu_is_reported_and_picked() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "Blk"})).unwrap();
+    h.frames(3);
+    let (id, name) = (h.app.session.doc.features[0].id, h.app.session.doc.features[0].name.clone());
+    let labels = |menu: &serde_json::Value| -> Vec<String> {
+        menu["items"].as_array().into_iter().flatten().filter_map(|i| i["label"].as_str()).map(str::to_string).collect()
+    };
+    let settle = |h: &mut crate::scenario::Harness| {
+        for _ in 0..500 {
+            if h.app.deferred.is_none() && h.app.deferred_queue.is_empty() {
+                break;
+            }
+            h.frames(1);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        h.frames(1);
+    };
+
+    h.step(&json!({"click": {"handle": format!("timeline:{name}")}, "button": "right"})).unwrap();
+    let menu = h.call("ui.menu", json!({}))["result"].clone();
+    assert_eq!(menu["target"], json!({"type": "timeline", "feature": id}), "{menu}");
+    let shown = labels(&menu);
+    for label in ["Edit Feature", "Rename", "Suppress Features", "Roll History Marker Here", "Find in Browser", "Copy", "Paste", "Delete"] {
+        assert!(shown.iter().any(|l| l == label), "no `{label}` in {shown:?}");
+    }
+    assert_eq!(h.call("ui.menuPick", json!({"item": "Suppress Features"}))["ok"], true);
+    settle(&mut h);
+    assert!(h.app.session.doc.feature(id).unwrap().suppressed, "Suppress Features suppressed it");
+
+    // A target opens the same menu, as the right-click did.
+    h.call("ui.menu", json!({"x": 400, "y": 900, "target": {"type": "timeline", "feature": id}}));
+    let menu = h.call("ui.menu", json!({}))["result"].clone();
+    assert!(labels(&menu).iter().any(|l| l == "Unsuppress Features"), "{menu}");
+    assert_eq!(h.call("ui.menuPick", json!({"item": "Unsuppress Features"}))["ok"], true);
+    settle(&mut h);
+    assert!(!h.app.session.doc.feature(id).unwrap().suppressed);
+    h.call("ui.menu", json!({"x": 400, "y": 900, "target": {"type": "timeline", "feature": id}}));
+    assert_eq!(h.call("ui.menuPick", json!({"item": "Find in Browser"}))["ok"], true);
+    assert_eq!(h.app.session.selection, vec![solidcraft_engine::Sel::Body { name: "Blk".into() }]);
+
+    // After the history marker, Delete and the delete of everything after the marker are two
+    // items with their own ids, so each can be picked.
+    h.app.run("timeline.roll_to", json!({"position": 0})).unwrap();
+    settle(&mut h);
+    h.call("ui.menu", json!({"x": 400, "y": 900, "target": {"type": "timeline", "feature": id}}));
+    let menu = h.call("ui.menu", json!({}))["result"].clone();
+    let ids: Vec<&str> = menu["items"].as_array().into_iter().flatten().filter_map(|i| i["id"].as_str()).collect();
+    assert_eq!(ids.iter().filter(|i| **i == "ui.deleteFeatures").count(), 1, "{ids:?}");
+    assert_eq!(ids.iter().filter(|i| **i == "ui.deleteAfterMarker").count(), 1, "{ids:?}");
+    assert_eq!(h.call("ui.menuPick", json!({"item": "ui.deleteAfterMarker"}))["ok"], true);
+    for _ in 0..500 {
+        if h.app.delete_check.is_none() && h.app.deferred.is_none() && h.app.deferred_queue.is_empty() {
+            break;
+        }
+        h.frames(1);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    h.frames(2);
+    assert!(h.app.session.doc.feature(id).is_none(), "the features after the marker are deleted");
 }

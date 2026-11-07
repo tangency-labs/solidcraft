@@ -156,67 +156,11 @@ impl PackageWriter {
     }
 }
 
-/// Counts what is written without keeping it.
-#[derive(Default)]
-struct Measure {
-    position: u64,
-    length: u64,
-}
-
-impl Write for Measure {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        self.position = self.position.saturating_add(bytes.len() as u64);
-        self.length = self.length.max(self.position);
-        Ok(bytes.len())
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-impl Seek for Measure {
-    fn seek(&mut self, position: SeekFrom) -> std::io::Result<u64> {
-        let target = match position {
-            SeekFrom::Start(n) => Some(n),
-            SeekFrom::End(n) => self.length.checked_add_signed(n),
-            SeekFrom::Current(n) => self.position.checked_add_signed(n),
-        };
-        self.position = target.ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "seek out of range"))?;
-        Ok(self.position)
-    }
-}
-
-/// Room kept in a design file for everything besides one large embedded STEP source.
-const STEP_RESERVE: usize = 4 << 20;
-
-/// Can an import's STEP text be saved in a design? It must be no larger than an import
-/// accepts, and, compressed as a save stores it, leave room in a design file for the rest of
-/// the design. Checked when the file is imported, so it never imports and then fails to save.
-pub fn check_step_storable(step: &str) -> Result<()> {
-    let limit = max_design().saturating_sub(STEP_RESERVE);
+/// Can an import's STEP text be imported? The limit of a file being imported is the limit of
+/// its format, not the design file's (#2721): a STEP within the import limit is imported, and
+/// the design file limit applies to the design that is saved, which refuses it there.
+pub fn check_step_importable(step: &str) -> Result<()> {
     crate::limits::check(crate::limits::Kind::Step, step.len() as u64).map_err(|e| IoError::Invalid(format!("STEP {e}")))?;
-    // Deflate adds at most a few bytes per 16 KiB block: smaller text always fits.
-    if step.len() <= limit - (limit >> 10) {
-        return Ok(());
-    }
-    let mut zip = zip::ZipWriter::new(Measure::default());
-    let options = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated)
-        .compression_level(Some(STEP_LEVEL))
-        .large_file(step.len() as u64 >= u64::from(u32::MAX));
-    zip.start_file("blobs/source.step", options).map_err(invalid)?;
-    zip.write_all(step.as_bytes()).map_err(invalid)?;
-    let compressed = usize::try_from(zip.finish().map_err(invalid)?.length).unwrap_or(usize::MAX);
-    if compressed > limit {
-        return Err(IoError::Invalid(format!(
-            "STEP file too large to save in a design: {} MB of STEP text compresses to {} MB, over the {} MB a design file may hold. \
-             The design file limit counts here too: {}",
-            step.len() >> 20,
-            compressed >> 20,
-            limit >> 20,
-            crate::limits::how_to_raise()
-        )));
-    }
     Ok(())
 }
 
@@ -334,19 +278,37 @@ fn write_container(
     if !clouds.is_empty() {
         replacements.insert("point_clouds".into(), Value::Array(clouds));
     }
-    if !doc.render.resources.is_empty() {
-        let mut resources = Map::new();
-        for (id, resource) in doc.render.resources.iter() {
-            let blob = writer.blob(resource.bytes(), "hdr", false)?;
-            resources.insert(id.to_string(), json!({"kind":"radiance_hdr","data":"","hdr_blob":blob}));
+    if !doc.render.resources.is_empty() || !doc.render.texture_resources.is_empty() {
+        let mut changes = Map::new();
+        if !doc.render.resources.is_empty() {
+            let mut resources = Map::new();
+            for (id, resource) in doc.render.resources.iter() {
+                let blob = writer.blob(resource.bytes(), "hdr", false)?;
+                resources.insert(id.to_string(), json!({"kind":"radiance_hdr","data":"","hdr_blob":blob}));
+            }
+            changes.insert("resources".into(), Value::Object(resources));
         }
-        let render = replace(doc.render.as_ref(), fields([("resources", Value::Object(resources))])).map_err(invalid)?;
+        if !doc.render.texture_resources.is_empty() {
+            let mut resources = Map::new();
+            for (id, resource) in doc.render.texture_resources.iter() {
+                let blob = writer.blob(resource.bytes(), "texture", false)?;
+                resources.insert(id.to_string(), json!({"kind":"opaque_texture","data":"","texture_blob":blob,"provenance":resource.provenance()}));
+            }
+            changes.insert("texture_resources".into(), Value::Object(resources));
+        }
+        let render = replace(doc.render.as_ref(), changes).map_err(invalid)?;
         replacements.insert("render".into(), render);
     }
-    let metadata = replace(doc, replacements).map_err(invalid)?;
+    let mut metadata = replace(doc, replacements).map_err(invalid)?;
+    solidcraft_doc::newer_file::restore(doc, &mut metadata);
     let metadata = serde_json::to_vec(&metadata).map_err(invalid)?;
     writer.part("document.json", &metadata, true)?;
-    writer.part("container.json", &serde_json::to_vec(&json!({"format": VERSION})).map_err(invalid)?, false)?;
+    // What a newer build's file holds beside the design goes back as it came.
+    let container = doc.newer_file.as_ref().and_then(|file| file.container.clone()).unwrap_or_else(|| json!({"format": VERSION}));
+    writer.part("container.json", &serde_json::to_vec(&container).map_err(invalid)?, false)?;
+    for (name, bytes) in doc.newer_file.iter().flat_map(|file| &file.parts) {
+        writer.part(name, bytes, true)?;
+    }
     // The model cache is optional: one that does not fit the container keeps fewer states, or is
     // left out, never a failed save.
     let cache = geometry.and_then(|g| native_cache::encode_model(g, &metadata, writer.space(2, budget)).ok());
@@ -815,18 +777,122 @@ fn is_container_source(source: &mut FileSource) -> Result<bool> {
     Ok(is_design_container(&prefix))
 }
 
+/// A newer build's container: a feature, picture or point cloud whose payload doesn't read here
+/// is kept as the file has it, and so is every part this build has no use for.
+fn hydrate_newer<R: Read + Seek>(doc: &mut Document, metadata: &Value, container: Value, reader: &mut PackageReader<R>) -> Result<()> {
+    let file = Arc::make_mut(doc.newer_file.as_mut().ok_or_else(|| invalid("not a newer design"))?);
+    for (index, feature) in doc.features.iter_mut().enumerate() {
+        let Some(value) = metadata.get("features").and_then(|v| v.get(index)) else { continue };
+        let readable = match &mut feature.kind {
+            FeatureKind::Import { .. } => reader.blob(value, "step_blob", "step").map(|_| ()),
+            FeatureKind::MeshImport { meshes, .. } => {
+                let mut check = meshes.clone();
+                check.iter_mut().enumerate().try_for_each(|(i, mesh)| {
+                    let value = value.get("meshes").and_then(|v| v.get(i)).ok_or_else(|| invalid("missing mesh metadata"))?;
+                    decode_mesh(reader.blob(value, "mesh_blob", "mesh")?, mesh)
+                })
+            }
+            _ => Ok(()),
+        };
+        if let Err(why) = readable {
+            file.not_understood.push(format!("feature `{}` ({why})", feature.name));
+            feature.kind = FeatureKind::NewerFileFeature { raw: solidcraft_doc::newer_file::RawFeature(Box::new(value.clone())) };
+        }
+    }
+    let canvases_read = doc.canvases.iter().enumerate().all(|(i, canvas)| {
+        canvas.data.is_empty()
+            && matches!(canvas.format.as_str(), "png" | "jpeg")
+            && metadata.get("canvases").and_then(|v| v.get(i)).is_some_and(|v| reader.blob(v, "image_blob", &canvas.format).is_ok())
+    });
+    if !canvases_read {
+        doc.canvases.clear();
+        file.keep_section("canvases", metadata.get("canvases").cloned().unwrap_or_default(), Some(json!([])), "pictures this version can't read");
+    }
+    let clouds_read = doc.point_clouds.iter().enumerate().all(|(i, cloud)| {
+        let mut check = cloud.clone();
+        metadata.get("point_clouds").and_then(|v| v.get(i)).is_some_and(|v| match reader.blob(v, "points_blob", "points") {
+            Ok(bytes) => decode_cloud(bytes, &mut check).is_ok(),
+            Err(_) => false,
+        })
+    });
+    if !clouds_read {
+        doc.point_clouds.clear();
+        file.keep_section("point_clouds", metadata.get("point_clouds").cloned().unwrap_or_default(), None, "point clouds this version can't read");
+    }
+    // The container's own note, when it says something this build doesn't know.
+    if !is_known_container(&container) {
+        file.container = Some(container);
+    }
+    // A blob a typed record uses comes back from that record; others only for what is kept.
+    let names: Vec<String> = reader.zip.file_names().filter_map(|name| name.ok().map(|name| name.into_owned())).collect();
+    for name in names {
+        let ours = matches!(name.as_str(), "document.json" | "container.json") || name.starts_with("cache/");
+        let unused_blob = name.starts_with("blobs/") && !file.mentions(&name) && !foreign_mentions(&doc.features, &name);
+        if !ours && !unused_blob {
+            file.parts.push((name.clone(), reader.limited_part(&name, part_limit(&name))?.into()));
+        }
+    }
+    // Looking counts against what a design may expand to only once: the reads below are the real ones.
+    reader.hydrated = 0;
+    Ok(())
+}
+
+/// A `container.json` that says only a format this build writes or wrote.
+fn is_known_container(container: &Value) -> bool {
+    *container == json!({"format": VERSION})
+        || *container == json!({"format": LEGACY_VERSION})
+        || container.get("content").is_some_and(|c| c == "drawing")
+}
+
+/// A container format of ours, this build's or a later one's: `solidcraft-container/N`.
+pub(crate) fn is_container_version(format: &str) -> bool {
+    format == LEGACY_VERSION || format.strip_prefix("solidcraft-container/").is_some_and(|n| n.parse::<u32>().is_ok())
+}
+
+/// Whether a feature this build couldn't read refers to this blob.
+fn foreign_mentions(features: &[solidcraft_doc::Feature], name: &str) -> bool {
+    fn names(value: &Value, name: &str) -> bool {
+        match value {
+            Value::String(s) => s == name,
+            Value::Array(a) => a.iter().any(|x| names(x, name)),
+            Value::Object(o) => o.values().any(|x| names(x, name)),
+            _ => false,
+        }
+    }
+    features.iter().any(|f| matches!(&f.kind, FeatureKind::NewerFileFeature { raw } if names(&raw.0, name)))
+}
+
 fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Document> {
     if drawing::container_kind(reader)? == FileKind::Drawing {
         return Err(IoError::Invalid("this file is a SolidCraft drawing, not a design: open it as a drawing".into()));
     }
     let bytes = reader.document(max_design())?;
-    check_hdr_manifest(&bytes)?;
     let mut metadata: Value = serde_json::from_slice(&bytes).map_err(invalid)?;
+    // A newer build's file opens whatever it holds: what doesn't read here is kept (`newer_file`).
+    let container: Value = serde_json::from_slice(&reader.limited_part("container.json", 4096)?).map_err(invalid)?;
+    let newer_container = !is_known_container(&container);
+    let newer = newer_container || std::str::from_utf8(&bytes).is_ok_and(solidcraft_doc::format::says_newer);
     // HDR's typed JSON representation is deliberately strict: no empty placeholders or
-    // container-only blob fields may reach the document deserializer.
-    let hydrated_hdr = hydrate_hdr_resources(&mut metadata, reader)?;
+    // container-only blob fields may reach the document deserializer. A newer build's section that
+    // doesn't pass stays as it is, which the document reader then leaves out.
+    let hydrated = if newer {
+        let mut copy = metadata.clone();
+        let done = check_hdr_manifest(&bytes).and_then(|()| check_texture_manifest(&bytes)).and_then(|()| {
+            let hdr = hydrate_hdr_resources(&mut copy, reader)?;
+            Ok(hydrate_texture_resources(&mut copy, reader)? || hdr)
+        });
+        if done.is_ok() {
+            metadata = copy;
+        }
+        done.unwrap_or(false)
+    } else {
+        check_hdr_manifest(&bytes)?;
+        check_texture_manifest(&bytes)?;
+        let hdr = hydrate_hdr_resources(&mut metadata, reader)?;
+        hydrate_texture_resources(&mut metadata, reader)? || hdr
+    };
     let hydrated_text;
-    let text = if hydrated_hdr {
+    let text = if hydrated {
         hydrated_text = serde_json::to_string(&metadata).map_err(invalid)?;
         &hydrated_text
     } else {
@@ -835,6 +901,16 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
     // Migrations and all document validation run on the small parametric metadata.
     // Binary arrays have their own equivalent numeric/index validation below.
     let mut doc = Document::from_json(text)?;
+    if newer_container && doc.newer_file.is_none() {
+        let current = solidcraft_doc::format::FORMAT;
+        let says = container.get("format").and_then(Value::as_str).unwrap_or("a later container").to_string();
+        let mut file = solidcraft_doc::newer_file::NewerFile::default();
+        (file.format, file.reads_up_to, file.unknown_changes) = (current, current, vec![says]);
+        doc.newer_file = Some(Arc::new(file));
+    }
+    if doc.newer_file.is_some() {
+        hydrate_newer(&mut doc, &metadata, container, reader)?;
+    }
     for (index, feature) in doc.features.iter_mut().enumerate() {
         let value = metadata.get("features").and_then(|v| v.get(index)).ok_or_else(|| invalid("missing feature metadata"))?;
         match &mut feature.kind {
@@ -992,6 +1068,135 @@ fn hydrate_hdr_resources<R: Read + Seek>(metadata: &mut Value, reader: &mut Pack
     Ok(!resources.is_empty())
 }
 
+/// Texture manifests are checked before Value allocation, including duplicate keys,
+/// bounded provenance and strict empty-payload/blob markers.
+fn check_texture_manifest(bytes: &[u8]) -> Result<()> {
+    use serde::{
+        Deserialize,
+        de::{MapAccess, Visitor},
+    };
+    use solidcraft_doc::{
+        render_resources::HdrId,
+        render_texture_resources::{MAX_TEXTURE_RESOURCES, TextureProvenance},
+    };
+    #[derive(Default, Deserialize)]
+    struct Render {
+        #[serde(default, deserialize_with = "resources")]
+        texture_resources: (),
+    }
+    #[derive(Deserialize)]
+    struct Metadata {
+        #[serde(default)]
+        render: Render,
+    }
+    fn marker<'de, D: serde::Deserializer<'de>>(d: D, field: &'static str) -> std::result::Result<(), D::Error> {
+        let raw = <&serde_json::value::RawValue>::deserialize(d)?;
+        let maximum = match field {
+            "kind" => 14,
+            "data" => 0,
+            _ => 78,
+        };
+        if raw.get().len() > maximum * 6 + 2 {
+            return Err(serde::de::Error::custom("texture metadata marker exceeds its budget"));
+        }
+        let value: String = serde_json::from_str(raw.get()).map_err(serde::de::Error::custom)?;
+        let valid = match field {
+            "kind" => value == "opaque_texture",
+            "data" => value.is_empty(),
+            _ => value
+                .strip_prefix("blobs/")
+                .and_then(|v| v.strip_suffix(".texture"))
+                .is_some_and(|v| v.len() == 64 && v.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))),
+        };
+        if valid { Ok(()) } else { Err(serde::de::Error::custom("invalid texture metadata marker")) }
+    }
+    fn kind<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<(), D::Error> {
+        marker(d, "kind")
+    }
+    fn data<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<(), D::Error> {
+        marker(d, "data")
+    }
+    fn blob<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<(), D::Error> {
+        marker(d, "blob")
+    }
+    fn provenance<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<(), D::Error> {
+        let raw = <&serde_json::value::RawValue>::deserialize(d)?;
+        if raw.get().len() > 48 * 1024 {
+            return Err(serde::de::Error::custom("texture provenance exceeds its budget"));
+        }
+        let value: TextureProvenance = serde_json::from_str(raw.get()).map_err(serde::de::Error::custom)?;
+        value.validate().map_err(serde::de::Error::custom)
+    }
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Entry {
+        #[serde(deserialize_with = "kind")]
+        kind: (),
+        #[serde(deserialize_with = "data")]
+        data: (),
+        #[serde(deserialize_with = "blob")]
+        texture_blob: (),
+        #[serde(deserialize_with = "provenance")]
+        provenance: (),
+    }
+    fn resources<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<(), D::Error> {
+        struct Resources;
+        impl<'de> Visitor<'de> for Resources {
+            type Value = ();
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("unique bounded texture blob references")
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<(), A::Error> {
+                let mut keys = BTreeSet::new();
+                while let Some(id) = map.next_key::<HdrId>()? {
+                    if keys.len() >= MAX_TEXTURE_RESOURCES || !keys.insert(id) {
+                        return Err(serde::de::Error::custom("too many or duplicate embedded texture resources"));
+                    }
+                    let Entry { kind: (), data: (), texture_blob: (), provenance: () } = map.next_value()?;
+                }
+                Ok(())
+            }
+        }
+        d.deserialize_map(Resources)
+    }
+    let Metadata { render: Render { texture_resources: () } } = serde_json::from_slice(bytes).map_err(invalid)?;
+    Ok(())
+}
+fn hydrate_texture_resources<R: Read + Seek>(metadata: &mut Value, reader: &mut PackageReader<R>) -> Result<bool> {
+    use solidcraft_doc::{
+        render_resources::{HdrId, encode_hdr_base64},
+        render_texture_resources::{MAX_TEXTURE_BYTES, MAX_TEXTURE_RESOURCE_BYTES, MAX_TEXTURE_RESOURCES},
+    };
+    let Some(resources) = metadata.get_mut("render").and_then(|render| render.get_mut("texture_resources")) else {
+        return Ok(false);
+    };
+    let resources = resources.as_object_mut().ok_or_else(|| invalid("texture resources must be an object"))?;
+    if resources.len() > MAX_TEXTURE_RESOURCES {
+        return Err(invalid("at most 32 embedded texture resources"));
+    }
+    let mut total = 0usize;
+    for (key, value) in resources.iter_mut() {
+        let id: HdrId = serde_json::from_value(Value::String(key.clone())).map_err(invalid)?;
+        if !value.as_object().is_some_and(|fields| fields.len() == 4)
+            || value.get("kind").and_then(Value::as_str) != Some("opaque_texture")
+            || value.get("data").and_then(Value::as_str) != Some("")
+        {
+            return Err(invalid("texture metadata requires opaque_texture, empty data, provenance and one blob"));
+        }
+        let remaining = MAX_TEXTURE_RESOURCE_BYTES.saturating_sub(total).min(MAX_TEXTURE_BYTES);
+        let bytes = reader.limited_blob(value, "texture_blob", "texture", remaining)?;
+        if HdrId::of(bytes) != id {
+            return Err(invalid("texture resource key does not match its blob hash"));
+        }
+        total = total.checked_add(bytes.len()).ok_or_else(|| invalid("texture resource size overflow"))?;
+        let encoded = encode_hdr_base64(bytes).map_err(invalid)?;
+        let fields = value.as_object_mut().ok_or_else(|| invalid("invalid texture metadata"))?;
+        fields.remove("texture_blob");
+        fields.insert("data".into(), Value::String(encoded));
+    }
+    Ok(!resources.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1101,7 +1306,7 @@ mod tests {
             records: json!({
                 "features": [{"id": 1, "fingerprint": "0000000000000000", "ms": 0.0, "skipped": false, "state": 0}],
                 "states": [state], "model_bodies": records, "names": [{"faces": [], "info": []}], "sketches": [], "sheets": [],
-                "rounds": [], "sketch_key_sets": [{"set": [], "drop": []}],
+                "threads": [], "rounds": [], "sketch_key_sets": [{"set": [], "drop": []}],
             }),
             bodies,
         }
@@ -1356,7 +1561,7 @@ mod tests {
         solidcraft_doc::SavedModel {
             records: json!({
                 "features": features, "states": states, "model_bodies": records, "names": [{"faces": [], "info": []}], "sketches": [],
-                "sheets": [], "validation": "each_feature", "rounds": [], "sketch_key_sets": [{"set": [], "drop": []}],
+                "sheets": [], "threads": [], "validation": "each_feature", "rounds": [], "sketch_key_sets": [{"set": [], "drop": []}],
             }),
             bodies,
         }
@@ -1484,18 +1689,23 @@ mod tests {
             assert!(read_design_preview(&bytes).is_none());
             assert_eq!(crate::read_design(&bytes).unwrap().to_json(), doc.to_json());
         }
-        // A cache of the format before sketch-key sets (/4) is a miss, and so are records of
-        // that shape (each state's keys inline) under the current format: never misread.
+        // A cache of the format before sketch-key sets (/4) or before the tap markings were
+        // written once (/8) is a miss, and so are records of those shapes (each state's keys or
+        // markings inline) under the current format: never misread.
         let manifest: Value = serde_json::from_slice(&original["cache/model.json"]).unwrap();
         let mut older = manifest.clone();
         older["format"] = json!("solidcraft-model-cache/4");
+        let mut before_markings = manifest.clone();
+        before_markings["format"] = json!("solidcraft-model-cache/8");
+        let mut markings_inline = manifest.clone();
+        markings_inline["model"].as_object_mut().unwrap().remove("threads");
         let mut inline = manifest.clone();
         let model = inline["model"].as_object_mut().unwrap();
         model.remove("sketch_key_sets");
         let state = model["states"][0].as_object_mut().unwrap();
         state.remove("sketch_key_set");
         state.insert("sketch_keys".into(), json!([]));
-        for manifest in [older, inline] {
+        for manifest in [older, before_markings, markings_inline, inline] {
             let mut entries = original.clone();
             entries.insert("cache/model.json".into(), serde_json::to_vec(&manifest).unwrap());
             let bytes = package(&entries);
@@ -1666,6 +1876,60 @@ mod tests {
             component: 0,
         });
         doc
+    }
+
+    /// A newer build's container: its feature this build can't read, that feature's blob, a part
+    /// this build has never heard of and a payload in a newer encoding all open and save back.
+    #[test]
+    fn a_newer_builds_container_opens_and_saving_keeps_all_it_holds() {
+        let doc = document();
+        let mut entries = parts(&write_design_container(&doc).unwrap());
+        let mut metadata: Value = serde_json::from_slice(&entries["document.json"]).unwrap();
+        let newer = solidcraft_doc::format::format_string(solidcraft_doc::format::FORMAT + 1);
+        metadata["format"] = json!(newer);
+        let payload = b"a future payload".to_vec();
+        let blob = format!("blobs/{}.lattice", digest(&payload));
+        let future = json!({"id": 9000, "name": "Lattice1", "type": "gyroid_lattice", "lattice_blob": blob});
+        metadata["features"].as_array_mut().unwrap().push(future.clone());
+        metadata["future_section"] = json!({"keep": true});
+        entries.insert("document.json".into(), serde_json::to_vec(&metadata).unwrap());
+        entries.insert(blob.clone(), payload.clone());
+        entries.insert("future/notes.bin".into(), b"more".to_vec());
+        // This blob nothing names any more: it doesn't stay around.
+        entries.insert(format!("blobs/{}.lattice", digest(b"orphan")), b"orphan".to_vec());
+
+        let opened = crate::read_design(&package(&entries)).unwrap();
+        assert_eq!(opened.features.len(), doc.features.len() + 1);
+        assert!(opened.newer_file.as_ref().unwrap().not_understood.iter().any(|what| what.contains("Lattice1")));
+        assert_eq!(opened.features[0], doc.features[0]);
+
+        let resaved = parts(&write_design_container(&opened).unwrap());
+        let again: Value = serde_json::from_slice(&resaved["document.json"]).unwrap();
+        assert_eq!(again["format"], json!(newer));
+        assert_eq!(again["features"].as_array().unwrap().last().unwrap(), &future);
+        assert_eq!(again["future_section"], json!({"keep": true}));
+        assert_eq!(resaved[&blob], payload);
+        assert_eq!(resaved["future/notes.bin"], b"more");
+        assert!(!resaved.contains_key(&format!("blobs/{}.lattice", digest(b"orphan"))));
+        // And again: nothing is lost on the way round, the design's own blobs included.
+        let twice = crate::read_design(&write_design_container(&opened).unwrap()).unwrap();
+        assert_eq!(twice, opened);
+
+        // A payload in an encoding this build doesn't have costs its feature, not the design.
+        let mut entries = entries.clone();
+        let mesh = metadata["features"].as_array().unwrap().iter().flat_map(|f| f["meshes"].as_array().into_iter().flatten()).next().unwrap();
+        let mesh_blob = mesh["mesh_blob"].as_str().unwrap().to_string();
+        let mut encoded = entries[&mesh_blob].clone();
+        encoded[0] ^= 0xff;
+        let renamed = format!("blobs/{}.mesh", digest(&encoded));
+        entries.remove(&mesh_blob);
+        entries.insert(renamed.clone(), encoded.clone());
+        let text = String::from_utf8(entries["document.json"].clone()).unwrap().replace(&mesh_blob, &renamed);
+        entries.insert("document.json".into(), text.into_bytes());
+        let opened = crate::read_design(&package(&entries)).unwrap();
+        let said = &opened.newer_file.as_ref().unwrap().not_understood;
+        assert!(said.iter().any(|what| what.contains("unsupported mesh blob version")), "{said:?}");
+        assert_eq!(parts(&write_design_container(&opened).unwrap())[&renamed], encoded);
     }
 
     fn parts(bytes: &[u8]) -> BTreeMap<String, Vec<u8>> {
@@ -1865,7 +2129,13 @@ mod tests {
         entries.insert("../escape".into(), vec![]);
         assert!(crate::read_design(&package(&entries)).is_err());
         entries.remove("../escape");
-        entries.insert("container.json".into(), br#"{"format":"solidcraft-container/999"}"#.to_vec());
+        // A later container still holds a design: it opens, says so, and saving keeps its note.
+        entries.insert("container.json".into(), br#"{"format":"solidcraft-container/999","more":1}"#.to_vec());
+        let later = crate::read_design(&package(&entries)).unwrap();
+        assert!(later.newer_file.as_ref().unwrap().notice().contains("solidcraft-container/999"));
+        let resaved = parts(&write_design_container(&later).unwrap());
+        assert_eq!(resaved["container.json"], entries["container.json"]);
+        entries.insert("container.json".into(), br#"{"format":"another-tool/1"}"#.to_vec());
         assert!(crate::read_design(&package(&entries)).unwrap_err().to_string().contains("unsupported container version"));
         for length in (0..bytes.len()).step_by(17) {
             assert!(crate::read_design(&bytes[..length]).is_err());
@@ -2064,11 +2334,27 @@ mod tests {
         }
     }
 
+    /// #2721: the limit of a file being imported is the limit of its format, not the design
+    /// file's. A STEP within the import limit (512 MB) is not refused by the design limit
+    /// (256 MB): that one applies to the design that is saved, which refuses it there.
     #[test]
-    fn step_that_cannot_be_saved_even_compressed_is_refused_at_import() {
+    fn a_step_within_the_import_limit_is_not_refused_by_the_design_limit() {
+        let step = padded_step(500 << 20, true);
+        assert!(step.len() <= crate::MAX_STEP_BYTES, "the STEP is within the import limit");
+        check_step_importable(&step).unwrap_or_else(|e| panic!("a STEP within the import limit is refused: {e}"));
+    }
+
+    /// #3221: a STEP that no design file may hold is refused with a clear message, when the
+    /// design is saved: the import limit governs the import and the design file limit governs
+    /// the design (#2721).
+    #[test]
+    fn step_that_cannot_be_saved_even_compressed_is_refused_when_the_design_is_saved() {
         let step = padded_step(crate::MAX_DESIGN_BYTES + (80 << 20), true);
-        let message = crate::step_import_feature(step.as_bytes(), "noisy.step").err().unwrap().to_string();
-        assert!(message.contains("too large to save in a design"), "{message}");
+        let mut doc = Document::new("Noisy import");
+        doc.add_feature(FeatureKind::Import { file: "noisy.step".into(), step: step.into(), components: Vec::new(), skip: Vec::new() }, None)
+            .unwrap();
+        let message = write_design_container(&doc).err().unwrap().to_string();
+        assert!(message.contains("the design would be") && message.contains("a design file may hold"), "{message}");
     }
 
     #[test]
@@ -2261,6 +2547,93 @@ mod tests {
         let duplicate = format!("{{\"render\":{{\"resources\":{{\"{id}\":{entry},\"{id}\":{entry}}}}}}}");
         entries.insert("document.json".into(), duplicate.into_bytes());
         assert!(crate::read_design(&package(&entries)).unwrap_err().to_string().contains("duplicate"));
+    }
+
+    #[test]
+    fn embedded_texture_container_keeps_exact_blobs_provenance_and_offline_bindings() {
+        use solidcraft_doc::{
+            render_settings::{GpuJob, RenderJob, RenderSetup},
+            render_surface::{EmbeddedSurfaceKind, EmbeddedSurfaceSource, RenderBodyTarget, SavedSurface, SurfaceSource},
+            render_texture_resources::{TextureProvenance, TextureResource},
+        };
+        let source = include_bytes!("../../../assets/render/starter/materials/exports/SURF-027/base_color.png").to_vec();
+        let resource = TextureResource::new(
+            source.clone(),
+            TextureProvenance {
+                author: "Original SolidCraft test".into(),
+                source: "original bundled diagnostic".into(),
+                license: "MIT OR Apache-2.0".into(),
+            },
+        )
+        .unwrap();
+        let id = resource.id();
+        let mut doc = document();
+        let render = Arc::make_mut(&mut doc.render);
+        render.texture_resources.insert(resource).unwrap();
+        let mut setup = RenderSetup {
+            job: Some(RenderJob::GpuPath { transparent_background: false, options: Box::new(GpuJob::default()) }),
+            ..Default::default()
+        };
+        setup
+            .surfaces
+            .set(
+                SavedSurface {
+                    target: RenderBodyTarget { definition: "Wood".into(), feature: 7, component: 0, occurrence_path: vec![] },
+                    source: SurfaceSource::Embedded(EmbeddedSurfaceSource {
+                        kind: EmbeddedSurfaceKind::Embedded,
+                        base_color: Some(id),
+                        normal_open_gl: None,
+                        roughness: Some(id),
+                        metallic: None,
+                        flip_v: true,
+                    }),
+                    local_frame: serde_json::from_value(serde_json::json!({"origin":[0.,0.,0.],"u":[240.,0.,0.],"v":[0.,480.,0.]})).unwrap(),
+                    normal_strength: 0.75,
+                },
+                false,
+            )
+            .unwrap();
+        render.setups.insert("Wood".into(), setup);
+        let bytes = write_design_container(&doc).unwrap();
+        assert_eq!(crate::read_design(&bytes).unwrap(), doc);
+        assert_eq!(crate::read_design(&crate::write_design(&doc)).unwrap(), doc);
+        let original = parts(&bytes);
+        let blob = format!("blobs/{id}.texture");
+        assert_eq!(original.keys().filter(|name| name.ends_with(".texture")).count(), 1);
+        assert_eq!(original[&blob], source);
+        let metadata: Value = serde_json::from_slice(&original["document.json"]).unwrap();
+        let entry = &metadata["render"]["texture_resources"][id.to_string()];
+        assert_eq!(entry["data"], "");
+        assert_eq!(entry["texture_blob"], blob);
+        assert_eq!(entry["provenance"]["author"], "Original SolidCraft test");
+        assert!(Document::from_json(&metadata.to_string()).is_err());
+        let mut missing = original.clone();
+        missing.remove(&blob);
+        assert!(crate::read_design(&package(&missing)).unwrap_err().to_string().contains("required part"));
+        let mut corrupt = original.clone();
+        corrupt.get_mut(&blob).unwrap()[0] ^= 1;
+        assert!(crate::read_design(&package(&corrupt)).unwrap_err().to_string().contains("hash mismatch"));
+        for (field, value) in
+            [("kind", json!("png")), ("data", json!("AAAA")), ("path", json!("wood.png")), ("texture_blob", json!(format!("blobs/{id}.hdr")))]
+        {
+            let mut entries = original.clone();
+            let mut changed = metadata.clone();
+            changed["render"]["texture_resources"][id.to_string()][field] = value;
+            entries.insert("document.json".into(), serde_json::to_vec(&changed).unwrap());
+            assert!(crate::read_design(&package(&entries)).is_err(), "{field}");
+        }
+        let duplicate = format!("{{\"render\":{{\"texture_resources\":{{\"{id}\":{entry},\"{id}\":{entry}}}}}}}");
+        assert!(check_texture_manifest(duplicate.as_bytes()).unwrap_err().to_string().contains("duplicate"));
+    }
+
+    #[test]
+    fn texture_manifest_refuses_escaped_inline_payload_before_value_materialization() {
+        let id = "0".repeat(64);
+        let escaped = "\\u0041".repeat(4096);
+        let wire = format!(
+            "{{\"render\":{{\"texture_resources\":{{\"{id}\":{{\"kind\":\"opaque_texture\",\"data\":\"{escaped}\",\"texture_blob\":\"blobs/{id}.texture\",\"provenance\":{{}}}}}}}}}}"
+        );
+        assert!(check_texture_manifest(wire.as_bytes()).unwrap_err().to_string().contains("marker exceeds its budget"));
     }
 
     #[test]

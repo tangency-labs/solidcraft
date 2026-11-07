@@ -21,7 +21,7 @@ macro_rules! planned {
 }
 
 mod bom;
-mod browser;
+pub(crate) mod browser;
 pub(crate) mod clearance;
 mod clipboard;
 mod clipboard_foreign;
@@ -95,6 +95,8 @@ mod parameters;
 mod plastic;
 mod print_face;
 mod render;
+pub(crate) use render::{PreparedCapture, prepare_capture_with_metadata, render_cancel_params};
+pub(crate) use render_ui::batch_request;
 mod render_ui;
 #[cfg(test)]
 mod script_tests;
@@ -108,6 +110,7 @@ mod sketch;
 pub(crate) use sketch::author_path_for_rebind;
 pub(crate) use sketch::collapse_reason;
 pub(crate) use sketch::created as sketch_created;
+pub(crate) use sketch::{PLANE_REF_FORMS, custom_plane_form};
 mod canvas_sketch;
 mod sketch_3d;
 mod sketch_canvas;
@@ -115,6 +118,7 @@ pub mod sketch_clipboard;
 mod sketch_constraints;
 mod sketch_construction;
 mod sketch_create;
+mod sketch_divide;
 mod sketch_ends;
 mod sketch_equation;
 mod sketch_freeform;
@@ -312,6 +316,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(sketch::COMMANDS.iter());
     v.extend(sketch_create::COMMANDS.iter());
     v.extend(sketch_construction::COMMANDS.iter());
+    v.extend(sketch_divide::COMMANDS.iter());
     v.extend(sketch_equation::COMMANDS.iter());
     v.extend(sketch_constraints::COMMANDS.iter());
     v.extend(sketch_import::COMMANDS.iter());

@@ -1621,7 +1621,7 @@
   "help.sketch.insert_svg": "Beolvassa egy SVG-rajz útvonalait egy vázlatba, az Ön által megadott léptékkel, elforgatással és helyen. Használja egy logó vagy vektoros körvonal kihúzható görbékké alakítására.",
   "help.sketch.inspect": "Jelentést nyit a megnyitott vázlatról: hány szabadságfok maradt, és teljesen kényszerezett-e. Használja annak kiderítésére, mi mozdul még, mielőtt befejezi a vázlatot.",
   "help.sketch.intersect": "Hozzáadja azokat a görbéket vagy pontokat, ahol testek, lapok, élek vagy más vázlatok metszik a vázlatsíkot. Kapcsoltak maradnak, és követik a modellt, ha az megváltozik.",
-  "help.sketch.intersection_curve": "3D görbéket hoz létre ott, ahol két test vagy lap találkozik, hozzájuk kapcsolva. Használja őket útvonalként vagy vezérgörbeként, amely követi a modellt.",
+  "help.sketch.intersection_curve": "3D görbéket hoz létre ott, ahol két test, lap vagy más vázlatok görbéi találkozik, hozzájuk kapcsolva. Használja őket útvonalként vagy vezérgörbeként, amely követi a modellt.",
   "help.sketch.isoparametric_curve": "3D görbét hoz létre egy lap U vagy V iránya mentén egy kiválasztott ponton át, a laphoz kapcsolva. Használja útvonalként vagy osztóvonalként, amely követi a felületet.",
   "help.sketch.line": "Összefüggő vonalakat rajzol pontról pontra, nyitott láncként vagy zárt körvonalként. Ez a legtöbb profil alapeszköze.",
   "help.sketch.line.midpoint": "Vonalat rajzol a felezőpontjától az egyik végéig, a másik véget tükrözve. Használja egy pontra középen álló vonalakhoz, például szimmetrikus élhez.",

@@ -21,7 +21,7 @@ use crate::*;
 /// intersect) ran its booleans on, bodies searched for the cylinder a tap marking lies on,
 /// bodies whose faces a tapped hole read for its wall, intersects run to find a pattern's copies
 /// that cut nothing, and the tools a cut of many tools is made with (one when they are cut in one
-/// go).
+/// go), and face surfaces classified for a hole's direction.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Counts {
     pub moved: usize,
@@ -36,6 +36,7 @@ pub(super) struct Counts {
     pub tapped_wall: usize,
     pub miss_intersects: usize,
     pub cut_tools: usize,
+    pub surfaces: usize,
 }
 
 thread_local! {
@@ -53,6 +54,7 @@ thread_local! {
             tapped_wall: 0,
             miss_intersects: 0,
             cut_tools: 0,
+            surfaces: 0,
         })
     };
 }
@@ -1758,4 +1760,79 @@ fn mesh_metadata_and_order_remain_part_of_the_fingerprint() {
         assert_ne!(model.results[0].fingerprint, before, "edit {edit}");
         same_as_fresh(&doc, &model);
     }
+}
+
+#[test]
+fn an_added_and_deleted_sketch_entity_keeps_its_fingerprint() {
+    let mut doc = Document::new("sketch fingerprint");
+    let id = doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(10.0, 0.0)), None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let key = model.state().sketch_keys.get(&id).copied();
+    let json = super::feature_json(doc.feature(id).unwrap(), &super::ImportDigests::default());
+
+    // Make and delete an id: the counters advance, but the geometry is the same.
+    {
+        let sk = doc.sketch_mut(id).unwrap();
+        let a = sk.add_point(Vec2::new(2.0, 2.0), None).unwrap();
+        let b = sk.add_point(Vec2::new(3.0, 2.0), None).unwrap();
+        let line = sk.add_line_pts(a, b, None).unwrap();
+        sk.remove_curves(&[line]);
+        sk.remove_points(&[b]);
+        sk.remove_points(&[a]);
+    }
+
+    let json_after = super::feature_json(doc.feature(id).unwrap(), &super::ImportDigests::default());
+    assert_eq!(json, json_after, "deleted ids are not geometry");
+    model.evaluate(&doc);
+    assert_eq!(model.state().sketch_keys.get(&id).copied(), key);
+    assert_eq!((model.last_recomputed, model.last_restored), (0, 0));
+}
+
+#[test]
+fn a_hole_skips_the_parts_its_line_cannot_reach() {
+    use solidcraft_geom::Aabb3;
+    let unit = Aabb3 { min: Vec3::ZERO, max: Vec3::new(1.0, 1.0, 1.0) };
+    // Down through the box, from above and from below (the line runs both ways).
+    assert!(super::line_meets_box(Vec3::new(0.5, 0.5, 5.0), Vec3::new(0.0, 0.0, -1.0), &unit));
+    assert!(super::line_meets_box(Vec3::new(0.5, 0.5, -5.0), Vec3::new(0.0, 0.0, -1.0), &unit));
+    // Beside it, parallel to a side: a zero direction component keeps the line out of the slab.
+    assert!(!super::line_meets_box(Vec3::new(2.0, 0.5, 5.0), Vec3::new(0.0, 0.0, -1.0), &unit));
+    // Slanted past a corner, and slanted through it.
+    assert!(!super::line_meets_box(Vec3::new(3.0, 0.0, 0.0), Vec3::new(1.0, 1.0, 0.0), &unit));
+    assert!(super::line_meets_box(Vec3::new(-1.0, -1.0, 0.5), Vec3::new(1.0, 1.0, 0.0), &unit));
+    // Touching a face counts; an empty box never meets.
+    assert!(super::line_meets_box(Vec3::new(1.0, 0.5, 9.0), Vec3::new(0.0, 0.0, 1.0), &unit));
+    assert!(!super::line_meets_box(Vec3::new(0.5, 0.5, 0.5), Vec3::new(0.0, 0.0, 1.0), &Aabb3::EMPTY));
+}
+
+#[test]
+fn a_hole_classifies_the_faces_it_reads_not_every_face_of_the_design() {
+    // Forty separate cylinders, three faces each. A hole placed on the top of one drills down,
+    // and finding that out reads the nearest face only: it used to classify every face of every
+    // body first, which in an assembly of hundreds of imported parts took seconds per hole.
+    let mut doc = Document::new("hole direction work");
+    for k in 0..40 {
+        let kind = FeatureKind::Cylinder {
+            base: point_expr(Vec3::new(10.0 * f64::from(k), 0.0, 0.0)),
+            axis: Dir(Vec3::Z),
+            radius: "2".into(),
+            height: "10".into(),
+            operation: Operation::NewBody,
+            references: Vec::new(),
+        };
+        doc.add_feature(kind, None).unwrap();
+    }
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 40);
+    let mut dir = None;
+    let work = counted(|| dir = super::hole_direction_at(&st, Vec3::new(250.5, 0.5, 10.0), &[]));
+    let dir = dir.unwrap();
+    assert!((dir - Vec3::new(0.0, 0.0, -1.0)).len() < 1e-9, "drills down into the top: {dir:?}");
+    assert!(work.surfaces <= 2, "classified {} face surfaces for one hole", work.surfaces);
+    // A point on a side wall drills into that wall.
+    let side = super::hole_direction_at(&st, Vec3::new(252.0, 0.0, 5.0), &[]).unwrap();
+    assert!((side - Vec3::new(-1.0, 0.0, 0.0)).len() < 1e-6, "into the side wall: {side:?}");
 }
