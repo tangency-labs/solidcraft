@@ -1,11 +1,11 @@
-//! Simple shapes around a mesh's points, for collision: a convex hull and fitted primitives.
+//! Simple shapes around a mesh's points for robot collision (URDF export): a convex hull and
+//! fitted primitives.
 
 use std::collections::BTreeSet;
 
-use crate::inertia::principal;
 use solidcore_record::Vec3;
-
-use crate::{Mesh, Vec3Geom};
+use solidcraft_geom::inertia::principal;
+use solidcraft_geom::{Mesh, Vec3Geom};
 
 /// The most points [`convex_hull`] takes.
 pub const MAX_HULL_POINTS: usize = 2_000_000;
@@ -259,3 +259,7 @@ pub fn fit_sphere(mesh: &Mesh) -> Option<Fitted> {
     let radius = mesh.positions.iter().map(|p| (*p - c).dot(*p - c).sqrt()).fold(0.0, f64::max);
     Some(Fitted { frame: frame(Vec3::X, Vec3::Y, Vec3::Z, c), size: Vec3::new(radius, radius, radius) })
 }
+
+#[cfg(test)]
+#[path = "hull3_tests.rs"]
+mod tests;
