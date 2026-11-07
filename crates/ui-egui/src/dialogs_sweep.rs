@@ -88,17 +88,50 @@ pub fn direction_input() -> SelInput {
     SelInput::new("Direction", AXES | EDGES, false)
 }
 
+/// The rail inputs' labels, in order: a loft takes up to 16 rails.
+const RAIL_LABELS: [&str; 16] = [
+    "Rail",
+    "Second Rail",
+    "Rail 3",
+    "Rail 4",
+    "Rail 5",
+    "Rail 6",
+    "Rail 7",
+    "Rail 8",
+    "Rail 9",
+    "Rail 10",
+    "Rail 11",
+    "Rail 12",
+    "Rail 13",
+    "Rail 14",
+    "Rail 15",
+    "Rail 16",
+];
+
 /// The inputs that pick a sweep's guide rails: the first rail's curves and the second's, in order
 /// along each rail; both optional.
 pub fn rail_inputs() -> [SelInput; 2] {
-    [SelInput::new("Rail", CURVES, true), SelInput::new("Second Rail", CURVES, true)]
+    [rail_input(0), rail_input(1)]
 }
 
-/// A feature's stored rails as the rail inputs' selections (`active`: the sketch being edited).
-pub fn rail_sels(rails: &[SweepRail], active: Option<u64>) -> [Vec<Sel>; 2] {
+/// The input that picks rail `k`'s curves (from 0), in order along the rail; optional.
+pub fn rail_input(k: usize) -> SelInput {
+    SelInput::new(RAIL_LABELS.get(k).copied().unwrap_or("Rail"), CURVES, true)
+}
+
+/// The rail inputs a loft whose stored rails are `rails` edits with: the two every loft shows,
+/// then one more for each rail past the second (so editing a loft of three or more rails keeps
+/// them all).
+pub fn loft_rail_inputs(rails: &[SweepRail]) -> Vec<SelInput> {
+    (0..rails.len().clamp(2, RAIL_LABELS.len())).map(rail_input).collect()
+}
+
+/// A feature's stored rails as the rail inputs' selections (`active`: the sketch being edited):
+/// at least two, one per stored rail.
+pub fn rail_sels(rails: &[SweepRail], active: Option<u64>) -> Vec<Vec<Sel>> {
     let sels =
         |i: usize| rails.get(i).map(|r| r.curves.iter().map(|id| crate::selection::curve_pick(id, r.sketch.0, active)).collect()).unwrap_or_default();
-    [sels(0), sels(1)]
+    (0..rails.len().max(2)).map(sels).collect()
 }
 
 /// The option rows; true when Enter was pressed in a field.
@@ -132,9 +165,9 @@ pub fn rail_fit_index(fit: RailFit) -> usize {
 
 /// The picked rails (each in the sketch its curves are in) and the fit (`fit`, an index into
 /// [`RAIL_FITS`]), added to `p`; whether any rail was picked.
-pub fn rail_params(app: &SolveApp, fit: usize, rails: [&[Sel]; 2], p: &mut Value) -> Result<bool, String> {
+pub fn rail_params(app: &SolveApp, fit: usize, rails: &[&[Sel]], p: &mut Value) -> Result<bool, String> {
     let mut given = Vec::new();
-    for sels in rails {
+    for sels in rails.iter().copied() {
         let curves: Vec<String> = sels.curve_ids();
         if curves.is_empty() {
             continue;
@@ -158,7 +191,7 @@ pub fn rail_params(app: &SolveApp, fit: usize, rails: [&[Sel]; 2], p: &mut Value
 /// inputs'.
 pub fn params(app: &SolveApp, o: &SweepOpts, picked: Option<&Sel>, rails: [&[Sel]; 2], p: &mut Value) -> Result<(), String> {
     // Rails set the profile's turn and size: the other options don't apply.
-    if rail_params(app, o.rail_fit, rails, p)? {
+    if rail_params(app, o.rail_fit, &rails, p)? {
         return Ok(());
     }
     match o.orientation {

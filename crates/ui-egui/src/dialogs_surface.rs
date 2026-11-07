@@ -588,7 +588,8 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
                 return Err("pick sections in two or more sketches".into());
             }
             let mut p = json!({ "sections": sections });
-            crate::dialogs_sweep::rail_params(app, *rail_fit, [items(inputs, 1), items(inputs, 2)], &mut p)?;
+            let rails: Vec<&[Sel]> = (1..inputs.len()).map(|i| items(inputs, i)).collect();
+            crate::dialogs_sweep::rail_params(app, *rail_fit, &rails, &mut p)?;
             ("surface.loft", p)
         }
         Surf::Blend { continuity, bulge, stitch } => {
@@ -897,7 +898,8 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
         }
         FeatureKind::SurfaceSweep { sketch, profiles, curves, path_sketch, path, orientation, twist, scale, rails, rail_fit, .. } => {
             let (opts, direction) = crate::dialogs_sweep::SweepOpts::of(orientation, twist, scale, *rail_fit, frame);
-            let [rail, rail2] = crate::dialogs_sweep::rail_sels(rails, s.active_sketch);
+            let mut picked_rails = crate::dialogs_sweep::rail_sels(rails, s.active_sketch).into_iter();
+            let (rail, rail2) = (picked_rails.next().unwrap_or_default(), picked_rails.next().unwrap_or_default());
             (
                 Surf::Sweep(opts),
                 vec![
@@ -971,9 +973,10 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             (Surf::Boundary { continuity: g, join: *operation == solidcraft_engine::doc::Operation::Join }, vec![sels(u), sels(v)])
         }
         FeatureKind::SurfaceLoft { sections, rails, rail_fit, .. } => {
-            let [rail, rail2] = crate::dialogs_sweep::rail_sels(rails, s.active_sketch);
             let picked = sections.iter().flat_map(|sec| sheet_sels(app, sec.sketch.0, sec.profiles.as_ref(), &sec.curves)).collect();
-            (Surf::Loft { rail_fit: crate::dialogs_sweep::rail_fit_index(*rail_fit) }, vec![picked, rail, rail2])
+            let mut all = vec![picked];
+            all.extend(crate::dialogs_sweep::rail_sels(rails, s.active_sketch));
+            (Surf::Loft { rail_fit: crate::dialogs_sweep::rail_fit_index(*rail_fit) }, all)
         }
         FeatureKind::SurfaceExtrude { sketch, profiles, curves, extent } => {
             let sels = sheet_sels(app, sketch.0, profiles.as_ref(), curves);
@@ -1157,6 +1160,10 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
         _ => return None,
     };
     let mut ins = inputs(&k);
+    // A loft of three or more rails edits with an input for each.
+    if matches!(k, Surf::Loft { .. }) {
+        ins.extend((ins.len()..fill.len()).map(|i| crate::dialogs_sweep::rail_input(i - 1)));
+    }
     for (inp, items) in ins.iter_mut().zip(fill) {
         inp.items = items;
     }

@@ -1625,15 +1625,15 @@ mod imp {
         with_history(body, &roles, &columns)
     }
 
-    /// A loft through `sections` (as [`loft`] takes them) guided by one or two `rails` (polylines
+    /// A loft through `sections` (as [`loft`] takes them) guided by 1…16 `rails` (polylines
     /// from the first section to the last, through every section's curve), by the law
     /// [`crate::loft_rails::railed`] gives a loft's rails: between each two sections stations are
     /// the plain loft there moved so that the points the rails guide land on the rails. Each
     /// section curve has to pair with the others' (the same kind, so their control points pair
     /// up).
     pub(crate) fn loft_rails(sections: &[(Plane, Vec<Piece>)], first: usize, rails: &[Vec<Vec3>], fit: crate::RailFit) -> Result<Body> {
-        if rails.is_empty() || rails.len() > 2 {
-            return Err(KernelError::Invalid("a loft takes one or two guide rails".into()));
+        if rails.is_empty() || rails.len() > crate::loft_rails::MAX_RAILS {
+            return Err(KernelError::Invalid(format!("a loft takes 1…{} guide rails", crate::loft_rails::MAX_RAILS)));
         }
         let matched = sections
             .iter()

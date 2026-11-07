@@ -196,6 +196,7 @@ pub use intersection::{MeetingEdge, meeting_edges};
 pub use iso::{IsoLine, MAX_ISO_COUNT, iso_curves, iso_grid};
 pub use lip::{raise_band, rim_band};
 pub use loft_blend::loft_blend;
+pub use loft_rails::MAX_RAILS as MAX_LOFT_RAILS;
 pub use matchsurf::{match_surface, seam_continuity};
 pub use measure::{BodyMeasure, MassMeasure, measure, measure_mass};
 pub use mesh_convert::convert_prismatic_mesh;
