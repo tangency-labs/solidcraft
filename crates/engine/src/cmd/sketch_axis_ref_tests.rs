@@ -250,6 +250,35 @@ fn dimension_measures_a_line_to_an_origin_axis() {
     }
 }
 
+/// A line dimensioned to a projected model edge keeps its old dimension: a distance from one
+/// end, with no Parallel to the edge, so a later edit can still turn the line.
+#[test]
+fn a_line_dimensioned_to_a_projected_edge_gets_no_parallel() {
+    for entities in [json!(["l", {"edge": [5, 0, 0]}]), json!([{"edge": [5, 0, 0]}, "l"])] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        run(&mut s, "sketch.line", json!({"points": [[-4, 7], [10, 7]], "ids": ["l"]}));
+        run(&mut s, "sketch.dimension", json!({"entities": entities, "value": "12"}));
+        let sk = sketch(&s);
+        assert!(
+            !sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_sketch::ConstraintKind::Parallel { .. })),
+            "{entities}: {:?}",
+            sk.constraints
+        );
+    }
+}
+
+/// A driven dimension to an origin axis reports what it measures on the solved sketch.
+#[test]
+fn a_driven_dimension_to_an_origin_axis_reports_the_solved_value() {
+    let mut s = on(json!("XY"));
+    run(&mut s, "sketch.line", json!({"points": [[-4, 7], [10, 7]], "ids": ["l"]}));
+    let out = run(&mut s, "sketch.dimension", json!({"entities": ["l", {"axis": "X"}], "driven": true}));
+    assert_eq!(out["driven"], json!(true), "{out}");
+    assert!((out["measured"].as_f64().unwrap_or(f64::NAN) - 7.0).abs() < 1e-6, "{out}");
+}
+
 /// An origin axis is `{"axis": "X"|"Y"|"Z"}`; lowercase `x`/`y` name the sketch's own axes, so
 /// `{"axis": "x"}` is refused and changes nothing.
 #[test]

@@ -3424,12 +3424,18 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
                 let (da, db) = (a1 - a0, b1 - b0);
                 if da.cross(db).abs() < 1e-9 * da.len() * db.len() && ty != "angle" {
                     // Parallel lines: distance between them (a diameter about a centerline).
-                    // The reference is a centerline, else the linked line (an origin axis) in
-                    // either pick order, so the free line is the one kept parallel to it.
+                    // The reference is a centerline, else an origin or sketch axis in either pick
+                    // order, so the free line is the one kept parallel to it. Other linked lines
+                    // (a projected edge) keep the pick order and get no Parallel.
                     let linked = |c: usize| sk.curves.get(c).is_some_and(|c| c.link.is_some());
-                    // A centerline comes first, then a linked line, whichever was picked first.
+                    let axis = |c: usize| {
+                        sk.curves.get(c).and_then(|c| c.link.as_deref()).and_then(|l| sk.link(l)).is_some_and(|l| {
+                            matches!(l.source, solidcraft_sketch::LinkSource::Axis { .. } | solidcraft_sketch::LinkSource::SketchAxis { .. })
+                        })
+                    };
+                    // A centerline comes first, then an axis, whichever was picked first.
                     let centerline = |c: usize| sk.curves.get(c).is_some_and(|c| c.centerline);
-                    let a_ref = centerline(a) || (!centerline(b) && linked(a) && !linked(b));
+                    let a_ref = centerline(a) || (!centerline(b) && axis(a) && !linked(b));
                     let (a, b, b0) = if a_ref { (a, b, b0) } else { (b, a, a0) };
                     let (bq, _) = line_ends(sk, b);
                     let (a0, a1) = line_pts(sk, a).unwrap_or_default();
@@ -3437,7 +3443,7 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
                     if diameter_about(sk, a, &ty) {
                         (ConstraintKind::LinearDiameter { p: bq, l: a, value: 2.0 * d }, 2.0 * d)
                     } else {
-                        if linked(a) && !linked(b) {
+                        if axis(a) && !linked(b) {
                             keep_parallel = Some((b, a));
                         }
                         (ConstraintKind::PointLineDistance { p: bq, l: a, value: d }, d)
@@ -3525,6 +3531,7 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
             // A reference dimension: measures, no parameter.
             let name = k.name();
             let id = sk.add_constraint(k, None)?;
+            new_id = id.clone();
             place_text(sk, &id, text_at);
             if let Some(c) = sk.constraints.iter_mut().find(|c| c.id == id) {
                 c.driven = true;

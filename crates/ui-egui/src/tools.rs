@@ -877,21 +877,28 @@ fn symmetry_args(picks: &[Value], sketch: Option<&solidcraft_engine::sketch::Ske
 /// reference, which the command projects.
 fn axis_pick(app: &SolveApp, tool: &Tool, name: &str) -> Option<String> {
     match tool.cmd {
-        "sketch.constraint.symmetry" if tool.picks.len() == 2 => sketch_axis_of(app, name).map(str::to_string),
+        // Symmetry takes no axis reference, so the axis isn't taken when a curve or point of the
+        // sketch has its `x` / `y` as id: the command would read that entity instead.
+        "sketch.constraint.symmetry" if tool.picks.len() == 2 => own_axis(app, name).map(str::to_string),
         // The sketch's own `x` / `y`, unless a curve or point of the sketch is called that; then
         // the axis reference, which can't be mistaken for it.
         "sketch.constraint.coincident" => {
-            let own = sketch_axis_of(app, name).filter(|id| {
-                let Ok(st) = app.session.world_state() else { return true };
-                !app.session
-                    .active_sketch
-                    .and_then(|s| st.sketch(s))
-                    .is_some_and(|ss| ss.sketch.curve_index(id).is_some() || ss.sketch.point_index(id).is_some())
-            });
-            own.map(str::to_string).or_else(|| matches!(name, "X" | "Y" | "Z").then(|| json!({"axis": name}).to_string()))
+            own_axis(app, name).map(str::to_string).or_else(|| matches!(name, "X" | "Y" | "Z").then(|| json!({"axis": name}).to_string()))
         }
         _ => None,
     }
+}
+
+/// The sketch's own `x` / `y` that origin axis `name` lies along, unless a curve or point of the
+/// active sketch has that id.
+fn own_axis(app: &SolveApp, name: &str) -> Option<&'static str> {
+    sketch_axis_of(app, name).filter(|id| {
+        let Ok(st) = app.session.world_state() else { return true };
+        !app.session
+            .active_sketch
+            .and_then(|s| st.sketch(s))
+            .is_some_and(|ss| ss.sketch.curve_index(id).is_some() || ss.sketch.point_index(id).is_some())
+    })
 }
 
 /// An origin axis picked in the browser while a pick tool that takes it runs: the same as
