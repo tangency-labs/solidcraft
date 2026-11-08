@@ -138,7 +138,11 @@ fn evaluation_scale(curve: &Curve) -> f64 {
         return 0.0;
     };
     points.iter().fold(0.0, |m, p| {
-        let w = if p.w == NOW || p.w == 0.0 { 1.0 } else { p.w.abs() };
+        let w = if p.w == NOW || p.w == 0.0 {
+            1.0
+        } else {
+            p.w.abs()
+        };
         let z = if p.z == NOZ { 0.0 } else { p.z.abs() };
         max2(m, max2(max2(p.x.abs(), p.y.abs()), z) / w)
     })
