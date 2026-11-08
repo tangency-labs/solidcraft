@@ -69,31 +69,45 @@ fn cut(a: &Body, b: &Body) -> Body {
 
 const PI: f64 = std::f64::consts::PI;
 
-/// Smallest corner angle (degrees) over the mesh.
-fn min_angle(m: &Mesh) -> f64 {
-    let mut least = 180.0f64;
-    for t in &m.triangles {
-        let [a, b, c] = t.map(|i| m.positions[i as usize]);
-        for (p, q, r) in [(a, b, c), (b, c, a), (c, a, b)] {
-            let (u, v) = (q - p, r - p);
-            if let (Some(u), Some(v)) = (u.normalized(), v.normalized()) {
-                least = least.min(u.dot(v).clamp(-1.0, 1.0).acos().to_degrees());
-            }
-        }
+/// A flat face is exact for any triangulation of its boundary, so a box is two triangles a
+/// face whatever its size (it was a grid capped at a fifth of the body's diagonal: 124
+/// triangles for 20 x 10 x 5).
+#[test]
+fn a_box_is_two_triangles_a_face() {
+    for (name, size) in [("20 x 10 x 5", Vec3::new(20.0, 10.0, 5.0)), ("40 x 30 x 20", Vec3::new(40.0, 30.0, 20.0))] {
+        let b = ok(crate::box_solid(Vec3::ZERO, size));
+        let (m, s) = plan_body(&b, 0.05);
+        assert_eq!(s.planar, 6);
+        assert_watertight(&m, name);
+        assert_eq!(m.triangles.len(), 12, "{name}: {:?}", (0..6).map(|i| m.tri_face.iter().filter(|t| **t == i).count()).collect::<Vec<_>>());
+        assert!(max_chord(&b, &m) <= 1e-9, "{name}: flat faces are exact");
     }
-    least
 }
 
+/// Flat faces beside curved ones stay joined: the straight edge between a plane and a fillet
+/// takes the fillet's spacing, and the plane's boundary uses those nodes.
 #[test]
-fn a_box_is_a_regular_grid_on_every_face() {
-    // 40 × 30 × 20: sides at most 1/5 of the diagonal (10.77 mm), so 4 × 3 × 2 cells.
-    let b = ok(crate::box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)));
-    let (m, s) = plan_body(&b, 0.05);
-    assert_eq!(s.planar, 6);
-    assert_watertight(&m, "box");
-    let cells = 2 * (4 * 3 + 4 * 2 + 3 * 2);
-    assert_eq!(m.triangles.len(), 2 * cells, "two triangles per grid cell");
-    assert!(min_angle(&m) > 40.0, "{}", min_angle(&m));
+fn flat_faces_beside_curved_ones_stay_watertight_and_within_the_chord() {
+    let tol = 0.01;
+    let bx = ok(crate::box_solid(Vec3::ZERO, Vec3::new(20.0, 10.0, 5.0)));
+    let rounded = ok(crate::fillet(&bx, &[Vec3::new(10.0, 0.0, 5.0), Vec3::new(20.0, 5.0, 5.0), Vec3::new(10.0, 10.0, 5.0), Vec3::new(0.0, 5.0, 5.0)], 1.5));
+    let pin = ok(crate::cylinder(Vec3::new(10.0, 5.0, -1.0), Vec3::Z, 2.0, 7.0));
+    let holed = cut(&bx, &pin);
+    for (name, body) in [("filleted box", &rounded), ("box with a hole", &holed)] {
+        let m = closed_display_mesh(name, body, tol);
+        let chord = max_chord(body, &m);
+        assert!(chord <= tol * 1.05, "{name}: chord {chord}");
+        // The flat faces carry no interior nodes: far fewer triangles than a grid at the
+        // curved neighbours' spacing would give.
+        let (flat, curved) = (0..body.face_count()).fold((0, 0), |(f, c), i| {
+            let n = m.tri_face.iter().filter(|t| **t as usize == i).count();
+            match crate::face_surface(body, i) {
+                Some(crate::FaceSurface::Plane { .. }) => (f + n, c),
+                _ => (f, c + n),
+            }
+        });
+        assert!(flat < curved, "{name}: {flat} flat vs {curved} curved triangles");
+    }
 }
 
 #[test]
