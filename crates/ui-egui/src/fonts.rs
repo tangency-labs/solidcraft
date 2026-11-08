@@ -12,8 +12,8 @@ use crate::ui_kit::type_face::{
     BOLD_FAMILY, CHINESE_FALLBACK, CJK_FALLBACK, HANGUL_FALLBACK, MEDIUM_FAMILY, SEMIBOLD_FAMILY, SYMBOL_FALLBACK, UI_FONT, fallback_order,
     needs_cjk_font, sans_families, semibold,
 };
-// The Thai, Hebrew and Arabic faces come only from the desktop's system font search.
-#[cfg(not(target_arch = "wasm32"))]
+// The Thai, Hebrew and Arabic faces come only from the desktop's system font search (and the tests).
+#[cfg(any(test, not(target_arch = "wasm32")))]
 use crate::ui_kit::type_face::{ARABIC_FALLBACK, HEBREW_FALLBACK, THAI_FALLBACK};
 
 const PLEX_SANS: &[u8] = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/fonts/ibm-plex-sans/IBMPlexSans-Variable.ttf"));
