@@ -182,8 +182,9 @@ pub enum Error {
         /// The least setback.
         least: f64,
     },
-    /// A corner's setback that does not fit on its edges (the kernel's
-    /// `BlendRefusal::SetbackTooLong`): one below `largest` fits.
+    /// A corner's setback that does not fit on its edges, or on its rounds where a far
+    /// corner cuts one (the kernel's `BlendRefusal::SetbackTooLong`): one below `largest`
+    /// fits.
     SetbackTooLong {
         /// The corner's vertex index.
         vertex: usize,

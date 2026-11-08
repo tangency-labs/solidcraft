@@ -73,7 +73,9 @@ pub enum BlendRefusal {
         least: f64,
     },
     /// A setback asked at `vertex` that, with its ease, does not fit on the corner's edges
-    /// (each edge's length less the far end's claim on it): one below `largest` fits.
+    /// (each edge's length less the far end's claim on it), or on its rounds (each round's
+    /// rails reach along its edge only as far as a far corner cuts them): one below
+    /// `largest` fits.
     SetbackTooLong {
         /// The corner's vertex.
         vertex: VertexId,

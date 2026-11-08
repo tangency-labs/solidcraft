@@ -395,3 +395,50 @@ fn a_setback_asked_that_does_not_fit_or_stops_short_is_refused() {
     );
     run(8.0).0.unwrap();
 }
+
+/// A setback asked with an ease past where a far corner cuts a round (#2835). The box's top
+/// corner (60, 40, 50) is rounded 5 on its three edges and set back with an ease of 1, and the
+/// top front edge is rounded too: at (60, 0, 50) the right edge's round turns at the unrounded
+/// upright, a Mitre, whose rails cross at (55, 5, 50). The right edge's round is cut there,
+/// 35 along it from the corner, short of its 40 of room. Asked 37: `SetbackTooLong` naming 35
+/// less the ease and the fit margin (a thousand of the edge's tolerances); asked that, with
+/// the same ease, the corner builds.
+#[test]
+fn a_setback_asked_past_a_far_cut_names_the_largest_with_its_ease() {
+    let at = [
+        [30.0, 40.0, 50.0],
+        [60.0, 20.0, 50.0],
+        [60.0, 40.0, 25.0],
+        [30.0, 0.0, 50.0],
+    ];
+    let corner = Point3::new(60.0, 40.0, 50.0);
+    let run = |setback: f64| -> (Result<(), SolidError>, VertexId, f64) {
+        let mut k = kernel(|_| {});
+        let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 50.0).unwrap();
+        let edges: Vec<EdgeId> = at.iter().map(|&p| pick(&k, &b, p)).collect();
+        let tol = edge::tolerance(&b, edges[1]).unwrap();
+        let v = b
+            .vertices()
+            .ids()
+            .find(|&v| b.vertex(v).unwrap().point.distance(corner) < 1e-9)
+            .unwrap();
+        let xs = vec![FilletSurfaceGeneratorType::Circular; 4];
+        let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+        s.prepare_per_edge_constant_radius(&mut k, &edges, &[5.0; 4], &xs, 1, 1.0)
+            .unwrap();
+        s.set_set_back_fill(v, setback, 1.0, false);
+        s.create_corners(&k, None).unwrap();
+        (s.do_filleting(&mut k, None), v, tol)
+    };
+    let (r, v, tol) = run(37.0);
+    let want = 35.0 - 1.0 - 1000.0 * tol;
+    let largest = match r {
+        Err(SolidError::BlendRefused {
+            refusal: BlendRefusal::SetbackTooLong { vertex, largest },
+            ..
+        }) if vertex == v => largest,
+        other => panic!("{other:?}"),
+    };
+    assert!((largest - want).abs() <= 1e-9, "{largest} against {want}");
+    run(largest).0.unwrap();
+}
