@@ -318,6 +318,7 @@ sketch.solve                      2D sketch only (the sketch solver and engine t
 sketch.spline.insert_point        2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.spline.remove_point        2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.spline.reverse             2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.svg_diagnostics            read-only SVG report: crates/engine/src/cmd/sketch_import.rs::tests::svg_diagnostics_are_read_only_and_use_the_insert_placement
 sketch.toggle_diameter            2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.toggle_driven              2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.transform                  2D sketch only (the sketch solver and engine tests); no kernel operation

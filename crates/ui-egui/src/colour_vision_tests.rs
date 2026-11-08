@@ -573,6 +573,7 @@ const NO_MEANING: &[(&str, &str)] = &[
     ("form_icon_size", "layout dimension"),
     ("form_close_size", "layout dimension"),
     ("form_inset", "layout dimension"),
+    ("form_content_inset", "layout dimension"),
     ("form_icon_inset", "layout dimension"),
     ("form_section_icon_size", "layout dimension"),
     ("form_checkbox_height", "layout dimension"),

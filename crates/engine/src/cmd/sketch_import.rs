@@ -12,7 +12,10 @@ use super::CommandSpec;
 use super::sketch::{Left, edit_solved, ids_of};
 use super::sketch_store;
 use crate::params::{bad, num, str_, vec2};
-use crate::schema::sketch_import::{DrawingInserted, DxfExported, ExportDxfParams, ExportDxfResult, InsertDxfParams, InsertSvgParams, InsertSvgResult, SketchSolve, SvgDiagnostic, SvgDiagnosticsParams, SvgDiagnosticsResult};
+use crate::schema::sketch_import::{
+    DrawingInserted, DxfExported, ExportDxfParams, ExportDxfResult, InsertDxfParams, InsertSvgParams, InsertSvgResult, SketchSolve, SvgDiagnostic,
+    SvgDiagnosticsParams, SvgDiagnosticsResult,
+};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 

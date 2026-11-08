@@ -19,6 +19,12 @@ pub(super) fn paint_check_glyph(painter: &egui::Painter, square: Rect, mixed: bo
     painter.add(egui::Shape::line(points, egui::Stroke::new(t.space_2, ink)));
 }
 
+/// Shared success indicator for status cards and readiness steps.
+/// Tokens: space_3/2; the caller supplies the indicator bounds and semantic ink.
+pub(crate) fn check_indicator(painter: &egui::Painter, rect: Rect, ink: egui::Color32) {
+    paint_check_glyph(painter, rect, false, ink);
+}
+
 /// All states use the same geometry. Disabled opacity is inherited from egui's disabled UI.
 pub(super) fn paint_box(ui: &Ui, square: Rect, response: &Response, on: bool, mixed: bool) {
     let t = Tokens::get();

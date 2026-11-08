@@ -1,7 +1,9 @@
 use serde_json::{Value, json};
 use solidcraft_io::MAX_DRAWING_BYTES;
 
-use super::{DrawingInserted, ExportDxfParams, ExportDxfResult, InsertDxfParams, InsertSvgParams, InsertSvgResult, SvgDiagnosticsParams, SvgDiagnosticsResult};
+use super::{
+    DrawingInserted, ExportDxfParams, ExportDxfResult, InsertDxfParams, InsertSvgParams, InsertSvgResult, SvgDiagnosticsParams, SvgDiagnosticsResult,
+};
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
 use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
@@ -422,4 +424,3 @@ fn svg_commands_replies_match_the_output_schemas() {
         }
     }
 }
-

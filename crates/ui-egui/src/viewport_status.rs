@@ -198,14 +198,19 @@ fn svg_card(ui: &mut egui::Ui, integrity: &crate::dialogs_insert_drawing::Integr
     ui.label(egui::RichText::new(solidcraft_ui_text::tr("ui.svg_integrity")).font(crate::ui_kit::type_face::semibold(t.font_label)));
     for (label, value, tone) in &integrity.rows {
         let (glyph, ink) = match tone {
-            Tone::Success => ("✓", t.form_success),
+            Tone::Success => ("", t.form_success),
             Tone::Warning => ("!", t.warning),
             Tone::Error => ("×", t.form_error),
             Tone::Working => ("…", t.selected_ink),
             Tone::Neutral => ("—", t.form_dim),
         };
         ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(glyph).color(ink));
+            if glyph.is_empty() {
+                let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(t.form_icon_size), egui::Sense::hover());
+                ui_kit::check_indicator(ui.painter(), rect, ink);
+            } else {
+                ui.label(egui::RichText::new(glyph).color(ink));
+            }
             ui.label(label);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(egui::RichText::new(value).monospace().size(t.font_small));

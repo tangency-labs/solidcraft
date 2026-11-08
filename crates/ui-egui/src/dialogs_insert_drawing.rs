@@ -490,6 +490,18 @@ fn small_button(ui: &mut egui::Ui, label: &str, handle: &str) -> bool {
     small_button_tip(ui, label, None, handle)
 }
 
+fn segment_button(ui: &mut egui::Ui, label: &str, handle: &str, previous: bool) -> bool {
+    let t = crate::theme::Tokens::get();
+    let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(t.space_24), egui::Sense::hover());
+    let response = if previous {
+        crate::ui_kit::mirrored_icon_button_at(ui, rect, "chevron_right", label)
+    } else {
+        crate::ui_kit::quiet_icon_button_at(ui, rect, "chevron_right", label)
+    };
+    publish_control(ui, handle, &response);
+    response.clicked()
+}
+
 fn small_button_tip(ui: &mut egui::Ui, label: &str, tip: Option<&str>, handle: &str) -> bool {
     let t = solidcraft_theme::Tokens::get();
     let before = ui.style().clone();
@@ -551,7 +563,7 @@ fn svg_file_card(app: &mut SolveApp, ui: &mut egui::Ui, p: &Place) {
             let side = t.space_24 + t.space_8;
             let (icon, _) = ui.allocate_exact_size(egui::vec2(side, side), egui::Sense::hover());
             ui.painter().rect_filled(icon, t.radius_md, t.dialog_footer);
-            crate::icons::paint_icon(ui.painter(), egui::Rect::from_center_size(icon.center(), egui::Vec2::splat(t.space_16)), "sketch_svg", 1.0);
+            crate::icons::paint_icon(ui.painter(), egui::Rect::from_center_size(icon.center(), egui::Vec2::splat(t.space_16)), "svg", 1.0);
             let text_width = (ui.available_width() - t.space_24 * 3.0 - t.space_8).max(t.space_24);
             ui.allocate_ui_with_layout(egui::vec2(text_width, side), egui::Layout::top_down(egui::Align::Min), |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
@@ -567,7 +579,7 @@ fn svg_file_card(app: &mut SolveApp, ui: &mut egui::Ui, p: &Place) {
             ui.label(egui::RichText::new(app.tr("ui.svg_destination")).size(t.font_small).color(t.form_dim));
             let (info, response) = ui.allocate_exact_size(egui::Vec2::splat(t.space_14), egui::Sense::hover());
             ui.painter().circle_stroke(info.center(), info.width() * 0.5 - 1.0, egui::Stroke::new(1.0, t.form_dim));
-            ui.painter().text(info.center(), egui::Align2::CENTER_CENTER, "i", egui::FontId::proportional(t.font_small - 2.0), t.form_dim);
+            ui.painter().text(info.center(), egui::Align2::CENTER_CENTER, "i", egui::FontId::proportional(t.font_small), t.form_dim);
             response.backing_on_hover_text(&tip);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add(egui::Label::new(egui::RichText::new(&value).size(t.font_small).color(t.form_ink)).truncate());
@@ -669,7 +681,11 @@ fn ladder_row(
         let (badge, _) = ui.allocate_exact_size(egui::Vec2::splat(t.space_24), egui::Sense::hover());
         solidcraft_ui_registry::publish_rect(&format!("svg:metrics:badge:{part}"), badge);
         ui.painter().circle_filled(badge.center(), badge.width() * 0.5, fill);
-        ui.painter().text(badge.center(), egui::Align2::CENTER_CENTER, glyph, crate::ui_kit::type_face::semibold(t.font_label), ink);
+        if glyph.is_empty() {
+            crate::ui_kit::check_indicator(ui.painter(), badge.shrink(t.space_3), ink);
+        } else {
+            ui.painter().text(badge.center(), egui::Align2::CENTER_CENTER, glyph, crate::ui_kit::type_face::semibold(t.font_label), ink);
+        }
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = t.space_2;
             ui.horizontal(|ui| {
@@ -724,7 +740,7 @@ fn readiness_ladder(app: &SolveApp, ui: &mut egui::Ui, p: &mut Place) {
     } else if p.svg.error.is_some() {
         ("ui.svg_failed_title", Tone::Error, "×")
     } else if p.svg.repair && adjusted > 0 {
-        ("ui.svg_adjusted", if remaining > 0 { Tone::Warning } else { Tone::Success }, "✓")
+        ("ui.svg_adjusted", if remaining > 0 { Tone::Warning } else { Tone::Success }, "")
     } else {
         ("ui.svg_checked", if remaining > 0 { Tone::Warning } else { Tone::Neutral }, if remaining > 0 { "!" } else { "—" })
     };
@@ -977,7 +993,7 @@ fn svg_rows(app: &mut SolveApp, ui: &mut egui::Ui, p: &mut Place) {
         if p.svg.repair && preview_ready(p) && region_count(app, p).is_some() {
             let text = solidcraft_ui_text::format("ui.svg_preview_up_to_date", &[("tolerance", &p.svg.tolerance.to_string())]);
             ui.add_space(t.space_6);
-            ui.label(egui::RichText::new(format!("✓ {text}")).size(t.font_small).color(t.form_success));
+            crate::ui_kit::check_status_line(ui, "svg:preview_up_to_date", &text, crate::ui_kit::CheckStatus::Ok);
         }
         crate::ui_kit::section(ui, "svg_repair_details", app.tr("ui.svg_technical_details"), false, |ui| {
             crate::ui_kit::text(ui, app.tr("ui.svg_repair_explanation"), crate::ui_kit::Text::Hint("svg_repair"));
@@ -1078,12 +1094,12 @@ fn review_rows(app: &mut SolveApp, ui: &mut egui::Ui, p: &mut Place) {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = t.space_4;
             ui.add_enabled_ui(position + 1 < group.segments.len(), |ui| {
-                if small_button_tip(ui, "›", Some(app.tr("ui.svg_next")), "dialog:insert:svg:next") {
+                if segment_button(ui, app.tr("ui.svg_next"), "dialog:insert:svg:next", false) {
                     next = group.segments.get(position + 1).copied().unwrap_or(index);
                 }
             });
             ui.add_enabled_ui(position > 0, |ui| {
-                if small_button_tip(ui, "‹", Some(app.tr("ui.svg_previous")), "dialog:insert:svg:previous") {
+                if segment_button(ui, app.tr("ui.svg_previous"), "dialog:insert:svg:previous", true) {
                     next = group.segments.get(position.saturating_sub(1)).copied().unwrap_or(index);
                 }
             });
@@ -1194,6 +1210,21 @@ mod tests {
         crate::test_support::click(h, handle);
     }
 
+    fn wait_for_import_preview(h: &mut Harness) {
+        for _ in 0..600 {
+            h.frames(2);
+            if let Some(dialog) = h.app.dialog.as_ref()
+                && let Kind::InsertDrawing(p) = &dialog.kind
+                && preview_ready(p)
+                && crate::preview::matches_dialog(&h.app, dialog)
+            {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        panic!("the current SVG diagnostics and geometry preview did not finish");
+    }
+
     fn svg_file(name: &str) -> String {
         let dir = std::env::temp_dir().join(format!("solidcraft-insert-place-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
@@ -1238,7 +1269,7 @@ mod tests {
         if let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
             (p.x, p.y, p.scale) = (5.0, -3.0, 2.0);
         }
-        h.frames(3);
+        wait_for_import_preview(&mut h);
         h.step(&json!({"key": "Enter"})).unwrap();
         h.settle();
         assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
@@ -1272,7 +1303,7 @@ mod tests {
             p.scale = 40.0 / nw;
             (p.x, p.y, p.angle) = (5.0, -3.0, 90.0);
         }
-        h.frames(3);
+        wait_for_import_preview(&mut h);
         h.step(&json!({"key": "Enter"})).unwrap();
         h.settle();
         assert!(h.app.dialog.is_none());
