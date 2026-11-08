@@ -1,0 +1,45 @@
+{
+  "cases": [
+    {
+      "name": "temporary_shift_far_positive_wire",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:2347-2384 (SmTemporaryBrepTransform); solidcore#483",
+      "inputs": {
+        "op": 7,
+        "args": [0, 0, 0],
+        "brep": {
+          "kind": "wire",
+          "curve": {"dim": 3, "cpts": [[8000, 4000, 2000, 1], [8010, 4002, 2004, 1]], "p": 1, "u": [0, 0, 1, 1]},
+          "t0": 0,
+          "t1": 1
+        }
+      }
+    },
+    {
+      "name": "temporary_shift_far_negative_wire",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:2347-2384 (SmTemporaryBrepTransform); solidcore#483",
+      "inputs": {
+        "op": 7,
+        "args": [0, 0, 0],
+        "brep": {
+          "kind": "wire",
+          "curve": {"dim": 3, "cpts": [[-8000, -4000, -2000, 1], [-7990, -3998, -1996, 1]], "p": 1, "u": [0, 0, 1, 1]},
+          "t0": 0,
+          "t1": 1
+        }
+      }
+    },
+    {
+      "name": "temporary_shift_far_planar_face",
+      "upstream_ref": "source/SMLib/src/SmMerge.cpp:2347-2384 (SmTemporaryBrepTransform); solidcore#483",
+      "inputs": {
+        "op": 7,
+        "args": [0, 0, 0],
+        "brep": {
+          "kind": "face",
+          "surface": {"plane": {"o": [6000, -3000, 2000], "n": [0, 0, 1]}},
+          "dom": [-5, -3, 5, 3]
+        }
+      }
+    }
+  ]
+}

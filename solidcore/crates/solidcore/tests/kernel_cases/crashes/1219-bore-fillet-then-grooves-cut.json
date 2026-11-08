@@ -1,0 +1,186 @@
+{
+  "area": "crashes",
+  "bodies": {
+    "b41": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b42": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b42"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b43"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b43"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b44"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b41"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b45"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b45"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b46"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b44"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b47"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b46"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b48"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b47",
+        "b48"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b49"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "1219-bore-fillet-then-grooves-cut",
+  "expected": {
+    "body_count": 1,
+    "method": "block 140x140x25 minus bore r68.2 h25: V0 = 140*140*25 - pi*68.2^2*25 = 124692.46. Fillet R1 on the bore's top edge removes the corner region (square 1x1 minus quarter disc, centroid radii 68.7 and 69.2-4/(3pi)), Pappus: 2pi*(1*68.7 - pi/4*(69.2-4/(3pi))) = 92.26. Each groove is the 0.9x0.6 rectangle (x 67.8..68.7, y +-0.3) cut 4.5 deep (z 19..23.5); only the part outside the bore is material: 0.6*68.7 - 2*F(0.3), F(y)=(y*sqrt(r^2-y^2)+r^2*asin(y/r))/2, = 0.300132 mm2, times 4.5 times 24 = 32.41. The grooves end at z 23.5, below the fillet (z 24-25), so the removals are disjoint: V = 124692.46 - 92.26 - 32.41 = 124567.79",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#1219"
+    ],
+    "volume_mm3": 124567.79,
+    "what": "24 small grooves cut into a bore whose top edge has an unrelated 1 mm fillet: 73 s and 24 boolean retries instead of 0.2 s"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 308,
+      "faces": 128,
+      "vertices": 205
+    }
+  },
+  "records": "1219-bore-fillet-then-grooves-cut.bodies.json.gz",
+  "result": [
+    {
+      "body": "Frame",
+      "made": "b49"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 34627.30213856181,
+      "body_count": 1,
+      "edges": 308,
+      "faces": 128,
+      "vertices": 205,
+      "volume_mm3": 124567.78948814073
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#1219"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "24 small grooves cut into a bore whose top edge has an unrelated 1 mm fillet: 73 s and 24 boolean retries instead of 0.2 s",
+  "why_not": []
+}

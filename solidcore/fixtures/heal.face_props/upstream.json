@@ -1,0 +1,1783 @@
+{
+ "cases": [
+  {
+   "name": "gaps",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1e-05,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     [
+      0,
+      2,
+      26,
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "stage2",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1e-05,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     [
+      0,
+      4,
+      26,
+      3,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "stage3",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1e-05,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     [
+      0,
+      6,
+      26,
+      3,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "stage2_early_op",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1e-05,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     [
+      0,
+      4,
+      2,
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "stage3_early_op",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1e-05,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     [
+      0,
+      6,
+      6,
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "reset_has_problems",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1e-05,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     [
+      0,
+      2,
+      26,
+      0,
+      0
+     ],
+     [
+      1,
+      2,
+      0,
+      0,
+      0
+     ],
+     [
+      2,
+      2,
+      1,
+      0,
+      0
+     ],
+     [
+      3,
+      7,
+      0,
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "pole",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1e-05,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     [
+      5,
+      3,
+      0,
+      2,
+      0
+     ],
+     [
+      5,
+      4,
+      3,
+      0.5,
+      0
+     ],
+     [
+      5,
+      1,
+      0,
+      0.001,
+      0
+     ],
+     [
+      4,
+      0.5,
+      0.25,
+      -0.5,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "tree",
+   "upstream_ref": "source/SMLib/src/SmLoopProps.cpp:FindItem",
+   "inputs": {
+    "kind": "tree",
+    "items": [
+     [
+      0,
+      -2
+     ],
+     [
+      1,
+      -2
+     ],
+     [
+      2,
+      -2
+     ],
+     [
+      3,
+      25
+     ],
+     [
+      4,
+      -1
+     ]
+    ],
+    "links": [
+     [
+      1,
+      0,
+      1
+     ],
+     [
+      0,
+      0,
+      2
+     ],
+     [
+      0,
+      0,
+      3
+     ],
+     [
+      0,
+      3,
+      4
+     ]
+    ],
+    "finds": [
+     [
+      0,
+      0
+     ],
+     [
+      0,
+      1
+     ],
+     [
+      0,
+      2
+     ],
+     [
+      0,
+      3
+     ],
+     [
+      0,
+      25
+     ],
+     [
+      0,
+      4
+     ],
+     [
+      0,
+      9
+     ],
+     [
+      3,
+      -1
+     ]
+    ]
+   }
+  },
+  {
+   "name": "cylinder_open_edge_loop_and_hole",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1e-05,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -1,
+      -1,
+      1,
+      1
+     ],
+     "surf": {
+      "kind": "revolution",
+      "gen": {
+       "kind": "line",
+       "a": [
+        1,
+        0,
+        -1
+       ],
+       "b": [
+        1,
+        0,
+        2
+       ]
+      },
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "swap": false,
+      "sweep": 270
+     },
+     "loops": {
+      "kind": "edges",
+      "loops": [
+       [
+        [
+         2,
+         0,
+         0
+        ],
+        [
+         0,
+         2,
+         0
+        ],
+        [
+         -2,
+         0,
+         0
+        ],
+        [
+         0,
+         -2,
+         0
+        ]
+       ],
+       [
+        [
+         0.5,
+         0,
+         0
+        ],
+        [
+         0,
+         -0.5,
+         0
+        ],
+        [
+         -0.5,
+         0,
+         0
+        ],
+        [
+         0,
+         0.5,
+         0
+        ]
+       ]
+      ]
+     }
+    },
+    "ops": [
+     [
+      0,
+      4,
+      26,
+      3,
+      0
+     ],
+     [
+      8,
+      0,
+      0,
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "cone_apex_vertex_loop_at_pole",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1e-05,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -1,
+      -1,
+      1,
+      1
+     ],
+     "surf": {
+      "kind": "revolution",
+      "gen": {
+       "kind": "line",
+       "a": [
+        2,
+        0,
+        -1
+       ],
+       "b": [
+        0,
+        0,
+        2
+       ]
+      },
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "swap": false,
+      "sweep": 270
+     },
+     "loops": {
+      "kind": "vertex",
+      "at": [
+       0,
+       0,
+       2
+      ]
+     }
+    },
+    "ops": [
+     [
+      0,
+      4,
+      26,
+      3,
+      0
+     ],
+     [
+      8,
+      0,
+      0,
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "cone_apex_vertex_loop_off_pole",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1e-05,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -1,
+      -1,
+      1,
+      1
+     ],
+     "surf": {
+      "kind": "revolution",
+      "gen": {
+       "kind": "line",
+       "a": [
+        2,
+        0,
+        -1
+       ],
+       "b": [
+        0,
+        0,
+        2
+       ]
+      },
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "swap": false,
+      "sweep": 270
+     }
+    },
+    "ops": [
+     [
+      0,
+      4,
+      26,
+      3,
+      0
+     ],
+     [
+      8,
+      0,
+      0,
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "sphere_cap_pole_without_vertex",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1e-05,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -1,
+      -1,
+      1,
+      1
+     ],
+     "surf": {
+      "kind": "revolution",
+      "gen": {
+       "kind": "circle",
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "d": [
+        -90,
+        40
+       ],
+       "r": 1.5
+      },
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "swap": false,
+      "sweep": 270
+     },
+     "loops": {
+      "kind": "edges",
+      "loops": [
+       [
+        [
+         2,
+         0,
+         0
+        ],
+        [
+         0,
+         2,
+         0
+        ],
+        [
+         -2,
+         0,
+         0
+        ],
+        [
+         0,
+         -2,
+         0
+        ]
+       ]
+      ]
+     }
+    },
+    "ops": [
+     [
+      0,
+      4,
+      26,
+      3,
+      0
+     ],
+     [
+      8,
+      0,
+      0,
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "sphere_cap_pole_vertex_in_loop",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1e-05,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -1,
+      -1,
+      1,
+      1
+     ],
+     "surf": {
+      "kind": "revolution",
+      "gen": {
+       "kind": "circle",
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "d": [
+        -90,
+        40
+       ],
+       "r": 1.5
+      },
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "swap": false,
+      "sweep": 270
+     },
+     "loops": {
+      "kind": "edges",
+      "loops": [
+       [
+        [
+         0,
+         0,
+         -1.5
+        ],
+        [
+         0,
+         2,
+         0
+        ],
+        [
+         -2,
+         0,
+         0
+        ]
+       ],
+       [
+        [
+         0.5,
+         0,
+         0
+        ],
+        [
+         0,
+         -0.5,
+         0
+        ],
+        [
+         -0.5,
+         0,
+         0
+        ],
+        [
+         0,
+         0.5,
+         0
+        ]
+       ]
+      ]
+     }
+    },
+    "ops": [
+     [
+      0,
+      4,
+      26,
+      3,
+      0
+     ],
+     [
+      8,
+      0,
+      0,
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "sphere_closed_deferred",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1e-05,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -1,
+      -1,
+      1,
+      1
+     ],
+     "surf": {
+      "kind": "revolution",
+      "gen": {
+       "kind": "circle",
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "d": [
+        -90,
+        90
+       ],
+       "r": 1.5
+      },
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "swap": false,
+      "sweep": 360
+     }
+    },
+    "ops": [
+     [
+      0,
+      4,
+      26,
+      3,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "torus_closed_deferred",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1e-05,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -1,
+      -1,
+      1,
+      1
+     ],
+     "surf": {
+      "kind": "revolution",
+      "gen": {
+       "kind": "circle",
+       "c": [
+        3,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "d": [
+        0,
+        360
+       ],
+       "r": 1
+      },
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "swap": false,
+      "sweep": 360
+     }
+    },
+    "ops": [
+     [
+      0,
+      4,
+      26,
+      3,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "cylinder_closed_deferred",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1e-05,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -1,
+      -1,
+      1,
+      1
+     ],
+     "surf": {
+      "kind": "revolution",
+      "gen": {
+       "kind": "line",
+       "a": [
+        1,
+        0,
+        -1
+       ],
+       "b": [
+        1,
+        0,
+        2
+       ]
+      },
+      "point": [
+       0,
+       0,
+       0
+      ],
+      "axis": [
+       0,
+       0,
+       1
+      ],
+      "swap": false,
+      "sweep": 360
+     }
+    },
+    "ops": [
+     [
+      0,
+      4,
+      26,
+      3,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "face_tolerance_1e9_poles",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1000000000.0,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     [
+      0,
+      4,
+      26,
+      3,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "domain_1e-300_every_side_a_pole",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1e-05,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      0,
+      1e-300,
+      1e-300
+     ]
+    },
+    "ops": [
+     [
+      0,
+      4,
+      26,
+      3,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "plane_edge_loop_and_hole",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1e-05,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -1,
+      -1,
+      1,
+      1
+     ],
+     "loops": {
+      "kind": "edges",
+      "loops": [
+       [
+        [
+         2,
+         0,
+         0
+        ],
+        [
+         0,
+         2,
+         0
+        ],
+        [
+         -2,
+         0,
+         0
+        ],
+        [
+         0,
+         -2,
+         0
+        ]
+       ],
+       [
+        [
+         0.5,
+         0,
+         0
+        ],
+        [
+         0,
+         -0.5,
+         0
+        ],
+        [
+         -0.5,
+         0,
+         0
+        ],
+        [
+         0,
+         0.5,
+         0
+        ]
+       ]
+      ]
+     }
+    },
+    "ops": [
+     [
+      0,
+      4,
+      26,
+      3,
+      0
+     ],
+     [
+      8,
+      0,
+      0,
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "rejected_reset_then_stage2",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1e-05,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     [
+      1,
+      3,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      4,
+      26,
+      0,
+      0
+     ]
+    ],
+    "expect_rejected": true
+   }
+  },
+  {
+   "name": "rejected_seeded_gaps_then_stage2",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1e-05,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     [
+      5,
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      6,
+      2,
+      26,
+      0,
+      0
+     ]
+    ],
+    "expect_rejected": true
+   }
+  },
+  {
+   "name": "rejected_face_tolerance_zero",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 0.0,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     [
+      0,
+      4,
+      26,
+      3,
+      0
+     ]
+    ],
+    "expect_rejected": true
+   }
+  },
+  {
+   "name": "rejected_face_tolerance_negative",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": -1e-05,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     [
+      0,
+      4,
+      26,
+      3,
+      0
+     ]
+    ],
+    "expect_rejected": true
+   }
+  },
+  {
+   "name": "rejected_negative_unsigned_seed",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1e-05,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     [
+      5,
+      3,
+      0,
+      -1,
+      0
+     ]
+    ],
+    "expect_rejected": true
+   }
+  },
+  {
+   "name": "rejected_negative_has_problems_bits",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1e-05,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      -1,
+      -1,
+      1,
+      1
+     ]
+    },
+    "ops": [
+     [
+      3,
+      -1,
+      0,
+      0,
+      0
+     ]
+    ],
+    "expect_rejected": true
+   }
+  },
+  {
+   "name": "rejected_degenerate_plane_stage3_setprops",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps_Stage3",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1e-05,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      0,
+      1e-300,
+      1e-300
+     ],
+     "loops": {
+      "kind": "edges",
+      "loops": [
+       [
+        [
+         0,
+         0,
+         0
+        ],
+        [
+         1,
+         0,
+         0
+        ],
+        [
+         0,
+         1,
+         0
+        ]
+       ]
+      ]
+     }
+    },
+    "ops": [
+     [
+      0,
+      6,
+      26,
+      0,
+      0
+     ]
+    ],
+    "expect_rejected": true
+   }
+  },
+  {
+   "name": "rejected_degenerate_plane_stage3_direct",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps_Stage3",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1e-05,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      0,
+      1e-12,
+      1e-12
+     ],
+     "loops": {
+      "kind": "edges",
+      "loops": [
+       [
+        [
+         0,
+         0,
+         0
+        ],
+        [
+         1,
+         0,
+         0
+        ],
+        [
+         0,
+         1,
+         0
+        ]
+       ]
+      ]
+     }
+    },
+    "ops": [
+     [
+      6,
+      3,
+      26,
+      0,
+      0
+     ]
+    ],
+    "expect_rejected": true
+   }
+  },
+  {
+   "name": "rejected_degenerate_plane_stage3_1e-10",
+   "upstream_ref": "source/SMLib/src/SmFaceProps.cpp:SetProps_Stage3",
+   "inputs": {
+    "kind": "props",
+    "face": {
+     "tol": 1e-05,
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "domain": [
+      0,
+      0,
+      1e-10,
+      1e-10
+     ],
+     "loops": {
+      "kind": "edges",
+      "loops": [
+       [
+        [
+         0,
+         0,
+         0
+        ],
+        [
+         1,
+         0,
+         0
+        ],
+        [
+         0,
+         1,
+         0
+        ]
+       ]
+      ]
+     }
+    },
+    "ops": [
+     [
+      0,
+      6,
+      26,
+      0,
+      0
+     ]
+    ],
+    "expect_rejected": true
+   }
+  }
+ ]
+}

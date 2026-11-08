@@ -1,0 +1,292 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/5353",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+ "test": "none: open on SolidCraft's truck kernel (kernel work paused under tangency-labs/solidcraft#3992); geometry is the issue's",
+ "summary": "A plain through hole was refused because of a blind drilled hole's 118 degree tip elsewhere in the body, on SolidCraft's truck kernel (#5353). A 90 x 60 x 14 base with a 50 x 24 x 40 tower on it; a drilled hole d 4.2 along +y into the tower's front face at (-16, -12, 34), 15.2 deep to its shoulder with a 118 degree tip (built as a revolve; the tool starts 1 mm outside the face); then two d 9 through holes in the plate at (-32, -20) and (-32, 20), far from the tower. The second through hole must remove exactly its cylinder. The holes run flush with the plate's faces as in the issue, and in a control 1 mm past them.",
+ "cases": [
+  {
+   "name": "through_holes_flush",
+   "note": "The through-hole tools span exactly z 0..14, flush with the plate's bottom and top, as SolidCraft's holes do.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "base",
+     "origin": [
+      -45,
+      -30,
+      0
+     ],
+     "size": [
+      90,
+      60,
+      14
+     ]
+    },
+    {
+     "op": "box",
+     "id": "tower",
+     "origin": [
+      -25,
+      -12,
+      14
+     ],
+     "size": [
+      50,
+      24,
+      40
+     ]
+    },
+    {
+     "op": "union",
+     "id": "part",
+     "a": "base",
+     "b": "tower"
+    },
+    {
+     "op": "revolve",
+     "id": "drill",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         -16,
+         -13
+        ],
+        [
+         -13.9,
+         -13
+        ],
+        [
+         -13.9,
+         3.2
+        ],
+        [
+         -16,
+         4.461807299957877
+        ]
+       ]
+      }
+     ],
+     "origin": [
+      0,
+      0,
+      34
+     ],
+     "axis_point": [
+      -16,
+      0,
+      34
+     ],
+     "axis_dir": [
+      0,
+      1,
+      0
+     ],
+     "angle_deg": 360
+    },
+    {
+     "op": "difference",
+     "id": "drilled",
+     "a": "part",
+     "b": "drill"
+    },
+    {
+     "op": "cylinder",
+     "id": "m8a",
+     "origin": [
+      -32,
+      -20,
+      0
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 4.5,
+     "height": 14
+    },
+    {
+     "op": "difference",
+     "id": "one",
+     "a": "drilled",
+     "b": "m8a"
+    },
+    {
+     "op": "cylinder",
+     "id": "m8b",
+     "origin": [
+      -32,
+      20,
+      0
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 4.5,
+     "height": 14
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "one",
+     "b": "m8b"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "removed": {
+     "from": "one",
+     "value": 890.6415172927063,
+     "tol": 0.0001,
+     "formula": "pi*4.5^2*14: the second through hole removes its whole cylinder through the 14 mm plate"
+    }
+   }
+  },
+  {
+   "name": "through_holes_overlapping_control",
+   "note": "Control: the tools span z -1..15.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "base",
+     "origin": [
+      -45,
+      -30,
+      0
+     ],
+     "size": [
+      90,
+      60,
+      14
+     ]
+    },
+    {
+     "op": "box",
+     "id": "tower",
+     "origin": [
+      -25,
+      -12,
+      14
+     ],
+     "size": [
+      50,
+      24,
+      40
+     ]
+    },
+    {
+     "op": "union",
+     "id": "part",
+     "a": "base",
+     "b": "tower"
+    },
+    {
+     "op": "revolve",
+     "id": "drill",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         -16,
+         -13
+        ],
+        [
+         -13.9,
+         -13
+        ],
+        [
+         -13.9,
+         3.2
+        ],
+        [
+         -16,
+         4.461807299957877
+        ]
+       ]
+      }
+     ],
+     "origin": [
+      0,
+      0,
+      34
+     ],
+     "axis_point": [
+      -16,
+      0,
+      34
+     ],
+     "axis_dir": [
+      0,
+      1,
+      0
+     ],
+     "angle_deg": 360
+    },
+    {
+     "op": "difference",
+     "id": "drilled",
+     "a": "part",
+     "b": "drill"
+    },
+    {
+     "op": "cylinder",
+     "id": "m8a",
+     "origin": [
+      -32,
+      -20,
+      -1
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 4.5,
+     "height": 16
+    },
+    {
+     "op": "difference",
+     "id": "one",
+     "a": "drilled",
+     "b": "m8a"
+    },
+    {
+     "op": "cylinder",
+     "id": "m8b",
+     "origin": [
+      -32,
+      20,
+      -1
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 4.5,
+     "height": 16
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "one",
+     "b": "m8b"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "removed": {
+     "from": "one",
+     "value": 890.6415172927063,
+     "tol": 0.0001,
+     "formula": "pi*4.5^2*14: the second through hole removes its whole cylinder through the 14 mm plate"
+    }
+   }
+  }
+ ]
+}

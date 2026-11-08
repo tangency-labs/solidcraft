@@ -1,0 +1,300 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b9"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  25.0,
+                  0.0,
+                  0.0
+                ]
+              ],
+              "index": 9
+            },
+            {
+              "at": [
+                [
+                  25.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  25.0,
+                  25.0,
+                  0.0
+                ]
+              ],
+              "index": 11
+            },
+            {
+              "at": [
+                [
+                  25.0,
+                  25.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  25.0,
+                  0.0
+                ]
+              ],
+              "index": 5
+            },
+            {
+              "at": [
+                [
+                  0.0,
+                  25.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              ],
+              "index": 7
+            },
+            {
+              "at": [
+                [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  10.0
+                ]
+              ],
+              "index": 8
+            },
+            {
+              "at": [
+                [
+                  25.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  25.0,
+                  0.0,
+                  10.0
+                ]
+              ],
+              "index": 10
+            },
+            {
+              "at": [
+                [
+                  25.0,
+                  25.0,
+                  0.0
+                ],
+                [
+                  25.0,
+                  25.0,
+                  10.0
+                ]
+              ],
+              "index": 4
+            },
+            {
+              "at": [
+                [
+                  0.0,
+                  25.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  25.0,
+                  10.0
+                ]
+              ],
+              "index": 6
+            }
+          ],
+          "points": [
+            [
+              12.5,
+              0.0,
+              0.0
+            ],
+            [
+              25.0,
+              12.5,
+              0.0
+            ],
+            [
+              12.5,
+              25.0,
+              0.0
+            ],
+            [
+              0.0,
+              12.5,
+              0.0
+            ],
+            [
+              0.0,
+              0.0,
+              5.0
+            ],
+            [
+              25.0,
+              0.0,
+              5.0
+            ],
+            [
+              25.0,
+              25.0,
+              5.0
+            ],
+            [
+              0.0,
+              25.0,
+              5.0
+            ]
+          ],
+          "tolerance": 1.8381173070873837
+        },
+        "kind": "round",
+        "sizes": [
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "1557-fillet-vertical-corners-after-bottom-rounds",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "faces": 18,
+    "method": "box 25x25x10 with the four bottom edges and the four vertical edges rounded R2, top edges left sharp. That is the body (inner rectangle [r,a-r]x[r,b-r] x [r, c+r] grown by a ball r) cut at z=c. Slices: for z>=r the section is the rounded rectangle, area ab - (4-pi) r^2; for 0<=z<=r it is the inner rectangle grown by a disc of radius rho(z) = sqrt(r^2-(r-z)^2): (a-2r)(b-2r) + 2 rho (a+b-4r) + pi rho^2. With the integrals of rho = pi r^2/4 and rho^2 = 2 r^3/3 over z in 0..r: V = (a-2r)(b-2r) r + (a+b-4r) pi r^2/2 + 2 pi r^3/3 + (c-r)(ab-(4-pi) r^2) = 6135.1799. Faces: top, bottom, 4 sides, 4 vertical R2 cylinders, 4 bottom R2 cylinders, 4 sphere octants = 18.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#1557",
+      "tangency-labs/solidcraft#1581"
+    ],
+    "volume_mm3": 6135.179908635561,
+    "what": "vertical corner fillets R2 on a 25x25x10 box whose four bottom edges are already rounded R2 (the round meets the earlier mitre)"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 36,
+      "faces": 18,
+      "vertices": 20
+    }
+  },
+  "records": "1557-fillet-vertical-corners-after-bottom-rounds.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b10"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 2124.1238596692656,
+      "body_count": 1,
+      "edges": 36,
+      "faces": 18,
+      "vertices": 20,
+      "volume_mm3": 6135.1799086700485
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#1557",
+    "tangency-labs/solidcraft#1581"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "vertical corner fillets R2 on a 25x25x10 box whose four bottom edges are already rounded R2 (the round meets the earlier mitre)",
+  "why_not": []
+}

@@ -1,0 +1,37 @@
+{
+  "area": "inspect",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-center-of-mass-refuses-an-unknown-body",
+  "expected": {
+    "method": "box 40 x 30 x 20 with a corner at the origin; no body `Nope`: refused",
+    "outcome": "refused",
+    "refusal": "no such bodies",
+    "source": "analytic",
+    "sources": [],
+    "what": "the centre of mass of a body that is not there"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 2 (inspect.center_of_mass): invalid parameters for `inspect.center_of_mass`: no such bodies",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 2 (inspect.center_of_mass): invalid parameters for `inspect.center_of_mass`: no such bodies",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude"
+  ],
+  "ungraded": [],
+  "what": "the centre of mass of a body that is not there",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 2 (inspect.center_of_mass): invalid parameters for `inspect.center_of_mass`: no such bodies"
+  ]
+}

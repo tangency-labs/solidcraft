@@ -1,0 +1,22 @@
+[package]
+name = "diagnostics"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+publish = false
+description = "solidcore-diag: a shaded picture and a tolerance report of one .smb body, for diagnosing a kernel case"
+
+[[bin]]
+name = "solidcore-diag"
+path = "src/main.rs"
+
+[dependencies]
+solidcore = { path = "../solidcore" }
+solidcore-convert = { path = "../solidcore-convert" }
+solidcore-tess = { path = "../solidcore-tess" }
+# The PNG's zlib stream.
+miniz_oxide = "0.9"
+serde_json = "1"
+
+[lints]
+workspace = true
