@@ -34,7 +34,9 @@
 # reads `ci` from the newest run of a commit, so a run without it would block a PR that passed.
 # SolidCore checks run SolidCore's own required checks (its fmt, Clippy, panic-site inventory, tests,
 # kernel rig, goldens and wasm compile, as solidcore/.github/workflows/ci.yml defines them) from
-# solidcore/, on a pull request (once approved) or merge group that changes solidcore/**.
+# solidcore/, on a pull request (once approved), merge group or push to main that changes
+# solidcore/** (main saves their caches), with SolidCore's cargo-deny (licences, bans, sources,
+# advisories): solidcore/ is outside the workspace, so the workspace's cargo-deny never sees it.
 # Cross-compilation is opt-in through Run workflow; release builds remain in release.yml.
 # The release gate (release-gate.yml) calls this workflow (workflow_call) as a Run workflow with
 # cross-compilation on.
@@ -146,7 +148,7 @@ jobs:
       deps: ${{ steps.paths.outputs.deps }}
       # A merge group reaches the wasm build: Compile WebAssembly.
       wasm: ${{ steps.paths.outputs.wasm }}
-      # solidcore/** changed (approved pull requests and merge groups): SolidCore checks.
+      # solidcore/** changed (approved pull requests, merge groups, pushes to main): SolidCore checks.
       solidcore: ${{ steps.paths.outputs.solidcore }}
       # The passing run a merge of main carries forward (its URL), when this push is only that.
       carried: ${{ steps.paths.outputs.carried }}
@@ -161,6 +163,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PUSH_SHA: ${{ github.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
           GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
           GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -233,7 +236,7 @@ jobs:
             done < "$1"
           }
           # Whether the NUL-separated paths in $1 change the vendored kernel (solidcore/**): SolidCore
-          # checks run its own required checks. Pull requests and merge groups share it.
+          # checks run its own required checks. Pull requests, merge groups and pushes to main share it.
           solidcore_paths() {
             if grep -qz '^solidcore/' "$1"; then solidcore=true; fi
           }
@@ -249,6 +252,17 @@ jobs:
             return 1
           }
           if [ "$EVENT_NAME" = push ]; then
+            # SolidCore checks for a push to main that changes solidcore/**, whatever the queue
+            # tested: main saves their caches, which every pull request restores. A push that
+            # can't be compared (new branch, force push) runs them.
+            if [ "$GITHUB_REF_NAME" = main ]; then
+              if git diff --no-renames --name-only -z "$BEFORE_SHA" "$PUSH_SHA" > "$RUNNER_TEMP/ci-solidcore-paths" 2>/dev/null; then
+                solidcore_paths "$RUNNER_TEMP/ci-solidcore-paths"
+              else
+                solidcore=true
+              fi
+              echo "solidcore=$solidcore for $BEFORE_SHA..$PUSH_SHA"
+            fi
             # The queue lands the very commit its merge_group run tested. If that run passed,
             # testing the push again proves nothing new; otherwise (a merge that skipped the
             # queue, or the API cannot answer) test everything.
@@ -1123,7 +1137,7 @@ jobs:
           if [ "$WASM_RUN" = true ]; then
             test "$WASM" = success
           fi
-          # solidcore/** changed on an approved pull request or in a merge group.
+          # solidcore/** changed on an approved pull request, in a merge group or on main.
           if [ "$SOLIDCORE_RUN" = true ]; then
             test "$SOLIDCORE" = success
           fi
@@ -1154,11 +1168,11 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
       - run: cargo xtask wasm
 
-  # SolidCore's own required checks (fmt, clippy, test, kernel-rig, goldens and wasm in
-  # solidcore/.github/workflows/ci.yml, which GitHub does not run from a subfolder), with its
+  # SolidCore's own checks (its required fmt, clippy, test, kernel-rig, goldens and wasm, and deny,
+  # in solidcore/.github/workflows/ci.yml, which GitHub does not run from a subfolder), with its
   # commands, its toolchain (solidcore/rust-toolchain.toml) and solidcore/ as the working directory.
-  # For a pull request or merge group that changes solidcore/** (Select checks' `solidcore`), where
-  # `ci` requires it; skipped otherwise. Its build, kernel-rig and goldens jobs are one entry here,
+  # For a pull request, merge group or push to main that changes solidcore/** (Select checks'
+  # `solidcore`), where `ci` requires it; skipped otherwise. Its build, kernel-rig and goldens jobs are one entry here,
   # so the rig and goldens binaries are built once without an artifact between jobs.
   solidcore:
     name: SolidCore checks (${{ matrix.check }})
@@ -1181,6 +1195,9 @@ jobs:
             runner: blacksmith-16vcpu-ubuntu-2404
           - check: wasm
             key: wasm
+            runner: blacksmith-4vcpu-ubuntu-2404
+          - check: deny
+            key: deny
             runner: blacksmith-4vcpu-ubuntu-2404
     defaults:
       run:
@@ -1322,6 +1339,18 @@ jobs:
         run: |
           rustup target add wasm32-unknown-unknown
           cargo check -p solidcore --target wasm32-unknown-unknown
+
+      # SolidCore's deny job (licences, bans, sources) with its deny.toml, plus the advisories, as
+      # the workspace's Dependency advisories check them (unmaintained crates reported, not fatal).
+      - name: Install cargo-deny
+        if: matrix.check == 'deny'
+        run: cargo install cargo-deny --version 0.20.2 --locked
+      - name: Licences, bans and sources (solidcore/deny.toml)
+        if: matrix.check == 'deny'
+        run: cargo deny --locked check licenses bans sources
+      - name: Advisories
+        if: matrix.check == 'deny'
+        run: cargo deny --locked check --warn unmaintained advisories
 
   riscv64-gates:
     name: Compile RISC-V (manual)
