@@ -1147,3 +1147,51 @@ fn a_ball_patch_far_from_the_origin_reads_as_one() {
         assert!(read_ball(&mut k, &off, i).is_none(), "face {i}");
     }
 }
+
+/// A record whose body tolerance is above its edges' and vertices' builds with the body's
+/// lowered to the least of them (the flat import's `own_tolerances`): valid at Level 2, and
+/// every edge and vertex at least the body's (invariant 5 of `docs/validity-and-tolerances.md`
+/// §10), each at its own (the zone, half the record's), none raised.
+#[test]
+fn a_body_tolerance_above_its_entities_comes_down_to_theirs() {
+    let mut k = kernel();
+    let mut r = cube(10.0);
+    r.tolerance = 1e-4;
+    r.edges[3].tolerance = 4e-6;
+    r.vertices[5].tolerance = 2e-6;
+    r.validate().unwrap();
+    let (mut b, _) = to_kernel(&mut k, &r, true).unwrap();
+    valid(&mut k, &mut b);
+    // the least is the other edges' 1e-6, as a zone: half of it
+    assert_eq!(b.tolerance(), 5e-7);
+    for &e in b.edge_list() {
+        assert!(b.edge(e).unwrap().tolerance >= b.tolerance(), "edge {e:?}");
+    }
+    for &v in b.vertex_list() {
+        assert!(
+            b.vertex(v).unwrap().tolerance >= b.tolerance(),
+            "vertex {v:?}"
+        );
+    }
+    let mut own: Vec<f64> = b
+        .edge_list()
+        .iter()
+        .map(|&e| b.edge(e).unwrap().tolerance)
+        .collect();
+    own.sort_by(f64::total_cmp);
+    own.dedup();
+    assert_eq!(own, vec![5e-7, 2e-6], "edges keep their own zones");
+}
+
+/// A tolerance so small that its zone (half of it) underflows to zero passes the record's
+/// validation and is refused by the conversion, not dropped to the body's.
+#[test]
+fn a_tolerance_whose_zone_underflows_is_refused() {
+    let mut k = kernel();
+    let mut r = cube(1.0);
+    r.vertices[0].tolerance = f64::from_bits(1);
+    assert!(matches!(
+        to_kernel(&mut k, &r, true),
+        Err(Unsupported::Invalid(_))
+    ));
+}

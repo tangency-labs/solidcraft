@@ -255,6 +255,39 @@ fn a_line_goes_back_as_the_kernel_holds_it() {
     assert_eq!(record_of(&k, &back.curve, &back.interval).unwrap(), r);
 }
 
+/// A line whose STEP parameter runs against its NURBS parameter (`inside_out`: `s = -t`) goes to
+/// the record with its vector reversed and its interval negated, so the interval increases; the
+/// record's point at each end of it is the kernel's at that end, bit for bit, and the round
+/// trip is the identity.
+#[test]
+fn a_reversed_line_goes_back_with_its_vector_turned() {
+    let k = k();
+    let line = Curve::from(Line::infinite(
+        Point3::new(1.0, 2.0, 3.0),
+        Vec3::new(2.0, 0.0, 0.0),
+        3,
+        true,
+    ));
+    let (lo, hi) = (0.5, 2.0);
+    let r = record_of(&k, &line, &Extent1d::from_raw(lo, hi)).unwrap();
+    let Record::Line { start, end } = r.curve else {
+        panic!("not a line: {:?}", r.curve)
+    };
+    assert!(r.interval[0] < r.interval[1], "{:?}", r.interval);
+    let on = |s: f64| {
+        Point3::new(
+            start[0] + s * (end[0] - start[0]),
+            start[1] + s * (end[1] - start[1]),
+            start[2] + s * (end[2] - start[2]),
+        )
+    };
+    // the record's interval runs the kernel's ends in order
+    assert_eq!(on(r.interval[0]), at(&k, &line, lo));
+    assert_eq!(on(r.interval[1]), at(&k, &line, hi));
+    let back = from_parameters(&k, &r.curve, r.interval).unwrap();
+    assert_eq!(record_of(&k, &back.curve, &back.interval).unwrap(), r);
+}
+
 /// A circle goes to the record as its label on its own frame with its NURBS as its form, proved
 /// on each other (bound 0), and comes back through `conic_on_form` to the same record. A circle
 /// whose NURBS runs against its angle reverses the frame's y; a NURBS moved off its circle is

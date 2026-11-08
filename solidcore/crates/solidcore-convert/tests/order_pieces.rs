@@ -30,6 +30,15 @@ fn an_edge_solids_touch_along_is_two_pieces() {
     for p in &pieces {
         assert_eq!(p.faces.len(), 2, "{p:?}");
         assert_eq!(order.edges[p.edge as usize], p.kernel);
+        // the faces are those of that record edge's own uses
+        let mut uses: Vec<u32> = record.edges[p.edge as usize]
+            .uses
+            .iter()
+            .map(|u| u.face)
+            .collect();
+        uses.sort_unstable();
+        uses.dedup();
+        assert_eq!(p.faces, uses, "{p:?}");
     }
     // the two pieces bound four different faces, two of each box
     let mut all: Vec<u32> = pieces.iter().flat_map(|p| p.faces.clone()).collect();
@@ -54,5 +63,8 @@ fn a_box_has_no_pieces() {
     let mut b = create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0).unwrap();
     let (record, order) = to_record(&mut k, &mut b).unwrap();
     assert!(order.pieces(&record).unwrap().is_empty());
+    // one record edge per kernel edge here; in general there are at most as many kernel edges
+    // as record edges (a touching edge is copied)
+    assert!(order.record_edges().len() <= record.edges.len());
     assert_eq!(order.record_edges().len(), record.edges.len());
 }

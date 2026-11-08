@@ -96,7 +96,10 @@ pub struct Order {
 }
 
 /// A kernel edge solids touch along, as [`to_record`] writes it: one record edge per pair of
-/// faces it separates (SolidCraft's `history::Piece`).
+/// faces it separates (SolidCraft's `history::Piece`). An edge with uses on three or more faces
+/// has one [`Piece`] per record edge [`to_record`] copied it into, each with the faces of that
+/// copy's own uses (two, for the sector pairs the radial order gives); none is merged or split
+/// here.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Piece {
     /// The kernel edge.
@@ -128,7 +131,8 @@ impl Order {
     }
 
     /// Every record edge of each kernel edge that has more than one, in record order, with the
-    /// record faces it bounds (`record` is the record this order came with).
+    /// record faces it bounds (`record` is the record this order came with): the faces of that
+    /// record edge's uses, sorted and without repeats.
     ///
     /// # Errors
     ///
@@ -159,7 +163,8 @@ impl Order {
     }
 }
 
-/// Each entity's first index in `list`.
+/// Each entity's first index in `list`. An index past `u32` is left out: unreachable, since
+/// every list is an [`Order`]'s, indexed by a record's `u32` indices.
 fn inverse<T: Copy + Ord>(list: &[T]) -> BTreeMap<T, u32> {
     let mut out = BTreeMap::new();
     for (i, &x) in list.iter().enumerate() {
@@ -600,6 +605,17 @@ fn data(k: &Kernel, rec: &r::Brep, bare: &[(u32, u32, u32)]) -> R<BrepData> {
 /// entity to the body's, so the body's is the least of the record's and its edges' and
 /// vertices', and a face's the least of its loops' edges' and vertices', at most the record's.
 /// Each entity keeps its own across the crossing, none raised to the body's.
+///
+/// This keeps invariant 5 of `docs/validity-and-tolerances.md` §10 (every local tolerance at
+/// least the body's) by the other route from raising each entity to the body's (8252ae3e93,
+/// "never below the body's"): the body comes down to the least of them instead, so no entity
+/// is below it and none is changed. A face's is at least the body's (both are minima, the
+/// body's over more) and at most its loops' edges' and vertices'.
+///
+/// # Errors
+///
+/// [`Unsupported::Invalid`] when the least zone is not positive and finite: a tolerance so
+/// small that its zone (half of it) underflows to zero passes the record's validation.
 fn own_tolerances(d: &mut BrepData, rec: &r::Brep, zone: f64) -> R<()> {
     let edge_zone = |e: u32| -> R<f64> { Ok(at(&d.edges, e)?.zone_tol_3d) };
     let vertex_zone = |v: u32| -> R<f64> { Ok(at(&d.vertices, v)?.zone_tol_3d) };
@@ -625,7 +641,9 @@ fn own_tolerances(d: &mut BrepData, rec: &r::Brep, zone: f64) -> R<()> {
         .chain(d.vertices.iter().map(|v| v.zone_tol_3d))
         .fold(zone, f64::min);
     if !(least.is_finite() && least > 0.0) {
-        return Ok(());
+        return Err(Unsupported::Invalid(
+            "a tolerance whose zone (half of it) is zero or not finite",
+        ));
     }
     d.zone_tol_3d = least;
     for (fd, t) in d.faces.iter_mut().zip(faces) {

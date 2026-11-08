@@ -4,12 +4,12 @@
 //! `trusted`), what it handed the kernel. Each goes to the kernel ([`to_kernel`]) and back
 //! ([`to_record`]); the record that comes back is compared with the one that went in, field by
 //! field, bit for bit. A difference is classed by where it is (indices dropped) and, for a
-//! kind, by what it became; a number that differs within 10⁻¹² of its size is its own class
-//! (rounding), with its count and the largest.
+//! kind, by what it became; a number within [`ROUNDING`] of its size (relative, no floor) is
+//! counted as rounding, with its count and the largest.
 //!
-//! On the whole corpus (1,332 bodies, at #3137): 1,256 come back bit for bit, 37 within 10⁻¹⁵
-//! of their size, and 39 differ only in the named classes ([`NAMED`]) or on a sheet face used on
-//! its reverse side.
+//! On the whole corpus (1,332 bodies, at #3187): 1,256 come back bit for bit, 36 within
+//! rounding (the largest 4.9e-16 relative), and 40 differ, each in exactly the classes
+//! [`pinned`] lists for it.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -18,7 +18,7 @@
     clippy::print_stderr
 )] // test
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
@@ -69,9 +69,18 @@ struct Tally {
     sheet_side: Vec<String>,
     refused_out: Vec<String>,
     classes: BTreeMap<String, Class>,
+    /// Each differing body's classes (sheet-side bodies' too).
+    per_body: BTreeMap<String, BTreeSet<String>>,
+    /// Bodies whose `.tolerance` moved other than down to the least of the record's.
+    tolerance_wrong: Vec<String>,
+    /// Sheet-side bodies whose geometry differs as multisets (not only renumbered).
+    sheet_geometry: Vec<String>,
     /// (body, face, the record's kind, the kind that came back, trusted)
     relabelled: Vec<(String, usize, String, String, bool)>,
 }
+
+/// The relative size of a difference counted as rounding, not a class: a few ulps.
+const ROUNDING: f64 = 1e-15;
 
 fn normal(path: &str) -> String {
     let mut out = String::new();
@@ -90,8 +99,8 @@ fn normal(path: &str) -> String {
     out
 }
 
-/// Every place `a` and `b` differ: (class, place); numbers within 10⁻¹² of their size counted
-/// apart, with the largest relative difference.
+/// Every place `a` and `b` differ: (class, place); numbers within [`ROUNDING`] of their size
+/// (relative, no floor) counted apart, with the largest relative difference.
 fn walk(
     at: &str,
     a: &Value,
@@ -103,8 +112,8 @@ fn walk(
         return;
     }
     if let (Some(x), Some(y)) = (a.as_f64(), b.as_f64()) {
-        let rel = (x - y).abs() / x.abs().max(y.abs()).max(1.0);
-        if rel <= 1e-12 {
+        let rel = (x - y).abs() / x.abs().max(y.abs());
+        if rel <= ROUNDING {
             rounding.0 += 1;
             rounding.1 = rounding.1.max(rel);
             return;
@@ -149,6 +158,34 @@ fn walk(
             diffs.push((normal(at), format!("{at}: {} -> {}", short(a), short(b))));
         }
     }
+}
+
+/// A record's geometry as multisets, its numbering dropped: the vertex points, each edge's
+/// curve (a line's two ends unordered), each face's surface and NURBS form.
+fn geometry(r: &Value) -> [Vec<String>; 3] {
+    let list = |key: &str, f: &dyn Fn(&Value) -> String| -> Vec<String> {
+        let mut v: Vec<String> = r[key]
+            .as_array()
+            .map(|a| a.iter().map(f).collect())
+            .unwrap_or_default();
+        v.sort();
+        v
+    };
+    let curve = |e: &Value| {
+        let c = &e["curve"];
+        if c["kind"] == "line" {
+            let mut ends = [c["start"].to_string(), c["end"].to_string()];
+            ends.sort();
+            format!("line {ends:?}")
+        } else {
+            c.to_string()
+        }
+    };
+    [
+        list("vertices", &|v| v["point"].to_string()),
+        list("edges", &curve),
+        list("faces", &|f| format!("{} {}", f["surface"], f["nurbs"])),
+    ]
 }
 
 fn kind(face: &Value) -> String {
@@ -229,6 +266,26 @@ fn one(name: &str, record: &Record, trusted: bool, fixes: &UpstreamFixes, t: &mu
         }
         return;
     }
+    let classes: BTreeSet<String> = diffs.iter().map(|(c, _)| c.clone()).collect();
+    if classes.contains(".tolerance") {
+        // lowered, to the least of the record's own (the flat import's `own_tolerances`)
+        let least = record
+            .edges
+            .iter()
+            .map(|e| e.tolerance)
+            .chain(record.vertices.iter().map(|v| v.tolerance))
+            .fold(record.tolerance, f64::min);
+        if !(back.tolerance < record.tolerance && back.tolerance == least) {
+            t.tolerance_wrong.push(format!(
+                "{name}: {} -> {} (least {least})",
+                record.tolerance, back.tolerance
+            ));
+        }
+    }
+    t.per_body.insert(name.to_owned(), classes);
+    if sheet_side && geometry(&a) != geometry(&z) {
+        t.sheet_geometry.push(name.to_owned());
+    }
     if sheet_side {
         t.sheet_side.push(name.to_owned());
         return;
@@ -259,35 +316,178 @@ fn fixes() -> UpstreamFixes {
     fixes
 }
 
-/// The differences that are intended, by class (indices dropped): what the flat hop does too,
-/// or where the kernel's proof is stricter than the hop's sampled check (#3137's tables).
-const NAMED: &[&str] = &[
-    // a record whose body tolerance is above its least entity's: the import lowers it, as the
-    // flat import's `own_tolerances` does
-    ".tolerance",
-    // a plane through three points: the kernel's plane holds no record of which kind it came
-    // from, and the flat export never writes this kind
-    ".faces[*].surface.kind: plane_through -> plane",
-    ".faces[*].surface.origin",
-    ".faces[*].surface.u_axis",
-    ".faces[*].surface.v_axis",
-    ".faces[*].surface.u_point",
-    ".faces[*].surface.v_point",
-    // a label its form is not proved on goes as the form alone (#2540): cylinders 1e-13 to
-    // 1e-12 off their forms; tori within ulps of theirs (a proof gap, filed); and an extruded
-    // circle the flat hop left a spline, proved a cylinder
-    ".faces[*].surface.kind: cylinder -> rational_spline",
-    ".faces[*].surface.kind: torus -> rational_spline",
-    ".faces[*].surface.kind: rational_spline -> cylinder",
+const LABEL: [&str; 6] = [
+    ".faces[*].nurbs",
     ".faces[*].surface.frame",
-    ".faces[*].surface.radius",
-    ".faces[*].surface.major_radius",
-    ".faces[*].surface.minor_radius",
     ".faces[*].surface.homogeneous",
     ".faces[*].surface.u_knots",
     ".faces[*].surface.v_knots",
-    ".faces[*].nurbs",
+    "",
 ];
+
+/// Every body that does not come back bit for bit (or within [`ROUNDING`]), with exactly the
+/// classes it differs in: a body that newly differs, one that no longer does, and one whose
+/// classes change all fail (#3187 review). Each group says why its difference is intended.
+fn pinned() -> BTreeMap<String, BTreeSet<String>> {
+    let set = |classes: &[&str]| -> BTreeSet<String> {
+        classes
+            .iter()
+            .filter(|c| !c.is_empty())
+            .map(|c| (*c).to_owned())
+            .collect()
+    };
+    let label = |kind: &str, radii: &[&str]| {
+        let mut c = set(&LABEL);
+        c.insert(format!(".faces[*].surface.kind: {kind}"));
+        c.extend(radii.iter().map(|r| format!(".faces[*].surface.{r}")));
+        c
+    };
+    let groups: Vec<(BTreeSet<String>, &[&str])> = vec![
+        // a record whose body tolerance is above its least entity's: the import lowers it to
+        // that least, as the flat import's `own_tolerances` does (checked: only lowered, and
+        // only to the least of the record's own)
+        (
+            set(&[".tolerance"]),
+            &[
+                "continuity/cov-patch-g1-caps-an-opened-tube-end.json:b3",
+                "continuity/cov-patch-g2-caps-an-opened-tube-end.json:b3",
+                "continuity/g1-patch-g2-at-a-corner-whose-rounds-clash.json:b13",
+                "continuity/g1-patch-g3-at-a-corner-whose-rounds-clash.json:b13",
+                "continuity/g2-patch-g2-on-a-hole-in-one-sheet.json:b11",
+                "continuity/g3-patch-g3-on-a-hole-in-one-sheet.json:b11",
+                "fillets/9-fillet-corner-r5-curvature-default-setback.json:b8",
+                "fillets/cov-fillet-g2-pocket-corner.json:b18",
+                "fillets/every-box-corner-three-edges-r3-curvature-setback-3-5.json:b8",
+                "fillets/report-fillet-curvature-three-edges-at-bar-corner-solver-residues.json:b18",
+                "fillets/report-fillet-curvature-three-edges-at-bar-corner.json:b18",
+                "fillets/report-fillet-g2-corner-of-bar-running-into-cylinder.json:b18",
+                "ladder/07-fillets/015-corner-g2-patch.json:b8",
+                "ladder/07-fillets/019-concave-corner-g2-patch.json:b18",
+                "surfaces/cov-blend-step-between-offset-sheets-g1.json:b1",
+                "surfaces/cov-blend-step-between-offset-sheets-g2.json:b1",
+                "surfaces/cov-blend-step-between-offset-sheets-g3.json:b1",
+                "surfaces/cov-patch-g0-fills-a-240-deg-window-in-a-cylinder.json:b13",
+                "surfaces/cov-patch-g0-fills-a-saddle-window-in-a-torus.json:b13",
+                "surfaces/cov-patch-g1-fills-a-240-deg-window-in-a-cylinder.json:b13",
+                "surfaces/cov-patch-g1-fills-a-saddle-window-in-a-torus.json:b13",
+                "surfaces/cov-patch-open-box-rim-and-stitch-closes-it.json:b3",
+            ],
+        ),
+        // a plane through three points: the kernel's plane holds no record of which kind it
+        // came from, and the flat export never writes this kind
+        (
+            set(&[
+                ".faces[*].surface.kind: plane_through -> plane",
+                ".faces[*].surface.u_axis",
+                ".faces[*].surface.u_point",
+                ".faces[*].surface.v_axis",
+                ".faces[*].surface.v_point",
+            ]),
+            &[
+                "surfaces/cov-ruled-box-edge-along-the-top-normal.json:b2",
+                "surfaces/cov-ruled-closed-top-chain-tangent-mitred-frame.json:b2",
+                "surfaces/cov-ruled-cylinder-rim-tangent-to-the-top-is-a-flat-ring.json:b2",
+            ],
+        ),
+        // a label its form is not proved on goes as the form alone (#2540): cylinders whose
+        // frames are about 1e-14 rad off their forms (two of them at the rounding of a derived
+        // bound, #3185's thread)
+        (
+            label("cylinder -> rational_spline", &["radius"]),
+            &[
+                "booleans/3456-deep-cut-through-drilled-taper-leaves-base.json:b94",
+                "crashes/2243-step-export-flanged-enclosure.json:b43",
+                "fillets/2903-original-rim-chamfer.json:b0",
+                "fillets/2903-original-rim-round.json:b0",
+            ],
+        ),
+        // tori whose frame and fitted sweep are about 1e-14 rad off their forms, rightly
+        // refused (#3185)
+        (
+            label(
+                "torus -> rational_spline",
+                &["major_radius", "minor_radius"],
+            ),
+            &[
+                "sweeps/3897-sweep-ring-along-a-short-arc-joined-to-a-collar.json:b6",
+                "sweeps/4280-circular-pattern-of-sweep-cut-groove-on-hub.json:b46",
+                "sweeps/4280-circular-pattern-of-sweep-cut-groove-on-hub.json:b85",
+            ],
+        ),
+        // an extruded circle the flat hop left a spline, proved a cylinder
+        (
+            label("rational_spline -> cylinder", &["radius"]),
+            &[
+                "tessellation/1615-crossed-lofted-tubes.json:b3",
+                "tessellation/1615-crossed-lofted-tubes.json:b6",
+            ],
+        ),
+        // a line end the export wrote as 3.1e-16 (a cos 90 deg residue) where the kernel's
+        // line, point plus its vector, holds 0: an absolute 3e-16 on a coordinate of size 0
+        (
+            set(&[".edges[*].curve.end[*]"]),
+            &["assemblies/cov-contact-check-touching-faces-do-not-overlap.json:b725"],
+        ),
+    ];
+    let mut out = BTreeMap::new();
+    for (classes, bodies) in groups {
+        for b in bodies {
+            out.insert((*b).to_owned(), classes.clone());
+        }
+    }
+    // a sheet face used on its reverse side: the kernel keeps both uses of a sheet's face and
+    // the record comes back with the `same` one, as the flat export's rule says; every
+    // difference is the renumbering that follows (checked: the same vertex points, edge curves
+    // and face surfaces, as multisets), and two of them also lower `.tolerance`
+    let renumbered = [
+        ".edges[*].uses[*].position",
+        ".faces[*].loops[*].edges[*].edge",
+        ".shells[*].faces[*].forward",
+        ".vertices[*].point[*]",
+    ];
+    let match_sheet = [
+        ".edges[*].curve.knots: length",
+        ".edges[*].curve.points: length",
+        ".edges[*].uses[*].upper",
+    ];
+    let reverse = [
+        ".edges[*].curve.end[*]",
+        ".edges[*].curve.start[*]",
+        ".edges[*].vertices[*]",
+    ];
+    let with = |extra: &[&[&str]]| {
+        let mut c = set(&renumbered);
+        for e in extra {
+            c.extend(set(e));
+        }
+        c
+    };
+    for (b, classes) in [
+        (
+            "surfaces/cov-match-coplanar-sheet-onto-the-near-edge.json:b1",
+            with(&[&match_sheet]),
+        ),
+        (
+            "surfaces/cov-match-raised-sheet-down-onto-the-edge-g1.json:b1",
+            with(&[&match_sheet, &[".tolerance"]]),
+        ),
+        (
+            "surfaces/cov-match-raised-sheet-down-onto-the-edge-g3.json:b1",
+            with(&[&match_sheet, &[".tolerance"]]),
+        ),
+        (
+            "surfaces/cov-reverse-normal-l-sheet-swaps-the-thicken-side.json:b2",
+            with(&[&reverse, &[".edges[*].uses: length"]]),
+        ),
+        (
+            "surfaces/cov-reverse-normal-then-thicken-goes-down.json:b1",
+            with(&[&reverse]),
+        ),
+    ] {
+        out.insert(b.to_owned(), classes);
+    }
+    out
+}
 
 /// Every `stride`th entry; the report is written to `$PARITY_OUT` when set. No body is refused
 /// either way, and every difference is a named one.
@@ -346,6 +546,13 @@ fn parity(stride: usize) {
     for n in &t.sheet_side {
         let _ = writeln!(report, "SHEET-SIDE {n}");
     }
+    for (n, classes) in &t.per_body {
+        let list: Vec<&str> = classes.iter().map(String::as_str).collect();
+        let _ = writeln!(report, "BODY {n} | {}", list.join(" ; "));
+    }
+    for w in &t.tolerance_wrong {
+        let _ = writeln!(report, "TOLERANCE-WRONG {w}");
+    }
     for (n, f, a, b, trusted) in &t.relabelled {
         let _ = writeln!(report, "RELABEL {n} face {f}: {a} -> {b} trusted {trusted}");
     }
@@ -362,12 +569,27 @@ fn parity(stride: usize) {
     assert!(t.bodies > 0);
     assert!(t.refused_in.is_empty(), "{:#?}", t.refused_in);
     assert!(t.refused_out.is_empty(), "{:#?}", t.refused_out);
-    let unnamed: Vec<&String> = t
-        .classes
-        .keys()
-        .filter(|c| !NAMED.contains(&c.trim_start_matches("(untrusted) ")))
-        .collect();
-    assert!(unnamed.is_empty(), "unnamed differences: {unnamed:#?}");
+    assert!(t.tolerance_wrong.is_empty(), "{:#?}", t.tolerance_wrong);
+    assert!(t.sheet_geometry.is_empty(), "{:#?}", t.sheet_geometry);
+    let pinned = pinned();
+    let seen: BTreeMap<&String, &BTreeSet<String>> = t.per_body.iter().collect();
+    for (b, classes) in &seen {
+        assert_eq!(pinned.get(*b), Some(*classes), "{b}: classes not as pinned");
+    }
+    if stride == 1 {
+        let missing: Vec<&String> = pinned.keys().filter(|b| !seen.contains_key(b)).collect();
+        assert!(
+            missing.is_empty(),
+            "pinned bodies that no longer differ: {missing:#?}"
+        );
+        assert_eq!(
+            (t.bodies, t.identical, t.rounding_only),
+            (1332, 1256, 36),
+            "bodies, identical, within rounding"
+        );
+        // the largest rounding difference, relative (#3137: 4.885e-16)
+        assert!(t.rounding_largest <= 4.9e-16, "{:e}", t.rounding_largest);
+    }
 }
 
 /// The whole corpus (`PARITY_STRIDE` takes every nth entry; the run takes seconds in release).
