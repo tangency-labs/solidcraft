@@ -1363,3 +1363,82 @@ fn d_prism_asked_past_the_rails_names_the_setback_that_fits() {
         }
     }
 }
+
+/// The least distance from the prism's axis of the top face's spring curve at the corner of
+/// [`d_prism_eight_case`] when every setback is `s`, by its closed form: the top is a plane,
+/// so the spring curve is the parabola (P, X, Q) itself, P on the chord's rail x = 7, `s`
+/// along the chord from V, Q on the arc's rail rho = 8, `s` along the arc from V, and X where
+/// the rails' tangents there cross. The least over 20000 even steps of the parabola's
+/// parameter (each a few millionths long).
+fn top_spring_least_rho(s: f64) -> f64 {
+    let p = (7.0, 6.0 - s);
+    let psi = 6.0f64.atan2(8.0) + s / 10.0;
+    let q = (8.0 * psi.cos(), 8.0 * psi.sin());
+    let along = (7.0 - q.0) / psi.sin();
+    let x = (7.0, q.1 - along * psi.cos());
+    (0..=20000)
+        .map(|i| {
+            let t = f64::from(i) / 20000.0;
+            let (a, b, c) = ((1.0 - t) * (1.0 - t), 2.0 * t * (1.0 - t), t * t);
+            (a * p.0 + b * x.0 + c * q.0).hypot(a * p.1 + b * x.1 + c * q.1)
+        })
+        .fold(f64::INFINITY, f64::min)
+}
+
+/// #2343 (d), "a thin flat strip beside a cylinder": the bored D prism (bore R 6.9) asked 8.5
+/// at V. By the closed form above its top face's spring curve dips into the bore from asked
+/// 7.8068; main built asked 7.8 (the spring curve 6e-4 clear of the bore) and refused 8 to
+/// 9.5 late, "a round kept round a feature does not close on the body", naming nothing. The
+/// corner checks what it takes out of the top: refused as `SetbackTooLong` at V, naming the
+/// largest setback on 8.5's grid of thousandths whose spring curve stays on the face, 0.918 x
+/// 8.5 = 7.803 (3.3e-4 clear of the bore; the next, 7.8115, 4.1e-4 into it). Asked that, the
+/// corner builds, graded as the corners above.
+#[test]
+fn bored_d_prism_spring_curve_leaving_the_top_names_the_setback_that_keeps_it() {
+    let (bore, asked, step) = (6.9, 8.5, 8.5 / 1000.0);
+    let (mut k, mut b, edges, case) = d_prism_eight_case(Some(bore), 14);
+    let v = vertex_at(&b, case.v);
+    let r = round_asked(
+        &mut k,
+        &mut b,
+        &edges,
+        &[1.0, 1.5, 2.0],
+        case.v,
+        Some(asked),
+    );
+    assert_eq!(r.event, Some(BlendCornerEvent::Setback), "{}", r.reason);
+    assert!(!r.ok, "asked {asked}: built");
+    let named = match r.refusal {
+        Some(BlendRefusal::SetbackTooLong { vertex, largest }) => {
+            assert_eq!(vertex, v);
+            largest
+        }
+        other => panic!("{other:?}, {}", r.reason),
+    };
+    // on the grid, its spring curve clear of the bore, the next one's not
+    let grid = (named / step).round();
+    assert!((grid * step - named).abs() <= 1e-12, "{named} off the grid");
+    assert!(
+        top_spring_least_rho(named) > bore,
+        "{named}: {}",
+        top_spring_least_rho(named)
+    );
+    assert!(
+        top_spring_least_rho(named + step) < bore,
+        "{}: {}",
+        named + step,
+        top_spring_least_rho(named + step)
+    );
+    let (mut k, mut b, edges, case) = d_prism_eight_case(Some(bore), 14);
+    let r = round_asked(
+        &mut k,
+        &mut b,
+        &edges,
+        &[1.0, 1.5, 2.0],
+        case.v,
+        Some(named),
+    );
+    assert!(r.ok, "asked {named}: {}", r.reason);
+    graded(&mut k, &mut b, &case, 3);
+    kept_definitions(&k, &b, &case, 3);
+}
