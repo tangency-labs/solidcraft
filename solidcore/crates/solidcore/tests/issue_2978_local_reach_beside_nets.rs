@@ -274,6 +274,15 @@ fn sound_or_refused_unchanged(moves: &[(usize, f64, [f64; 3])]) {
             assert!(volume(&mut k, &mut b).unwrap() > 0.0);
         }
         Err(e) => {
+            // a refusal of the local operation, not an internal failure rolled back
+            assert_eq!(e.kind(), solidcore::error::ErrorKind::Unsupported, "{e}");
+            assert!(
+                matches!(
+                    e.failure().map(|f| &f.reason),
+                    Some(solidcore::error::Reason::Offset(_))
+                ),
+                "not an offset refusal: {e}"
+            );
             let after = (
                 volume(&mut k, &mut b).unwrap(),
                 bp1::faces(&b, None).unwrap().len(),

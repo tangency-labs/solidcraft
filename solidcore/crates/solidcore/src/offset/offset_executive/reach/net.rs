@@ -1050,6 +1050,38 @@ mod tests {
         Surface::from(BSplineSurface::from_gw_nurb(&patch))
     }
 
+    /// Newton's start for Krawczyk's box settles wherever the part lies: a quarter cylinder
+    /// of radius 0.002 about (1000, 1000), z 1000 to 1000.003, whose points round at about
+    /// 1e-13, while its parameters move 500 per unit length. The line through its axis at
+    /// z 1000.0015 along (1, 1, 0) / √2 meets it 0.002 along.
+    #[test]
+    fn a_small_part_far_from_the_origin_is_met() {
+        let k = Kernel::default();
+        let (c, r, h) = (1000.0, 0.002, 0.003);
+        let w = core::f64::consts::FRAC_1_SQRT_2;
+        let row = |x: f64, y: f64, w: f64| {
+            vec![
+                CPoint::new((c + x) * w, (c + y) * w, c * w, w),
+                CPoint::new((c + x) * w, (c + y) * w, (c + h) * w, w),
+            ]
+        };
+        let patch = Patch::new(
+            vec![row(r, 0.0, 1.0), row(r, r, w), row(0.0, r, 1.0)],
+            2,
+            1,
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let n = net(&k, &Surface::from(BSplineSurface::from_gw_nurb(&patch)));
+        let guess = Cell::new(None);
+        let (x0, u) = (Vec3::new(c, c, c + h / 2.0), Vec3::new(w, w, 0.0));
+        let tau = line_meets(&n, (point(x0), point(u)), (x0, u), &guess)
+            .unwrap()
+            .unwrap();
+        assert!(tau.lo <= r && r <= tau.hi && tau.hi - tau.lo < 1e-9, "{tau:?}");
+    }
+
     /// The plane x = `x` as a bilinear net over y in [−5, 5], z in [−5, 5].
     fn plane_net_at_x(x: f64) -> Surface {
         let row = |y: f64| vec![CPoint::new(x, y, -5.0, NOW), CPoint::new(x, y, 5.0, NOW)];
