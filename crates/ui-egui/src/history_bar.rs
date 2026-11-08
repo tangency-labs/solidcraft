@@ -21,6 +21,8 @@ pub struct Handles<'a> {
     pub marker: &'a str,
     /// Each step's chip, as this followed by the step's label.
     pub step: &'a str,
+    /// Each History control, as this followed by its id (`first`, `back`, `play`...).
+    pub controls: &'a str,
 }
 
 /// The bar as the app describes it this frame.
@@ -164,12 +166,12 @@ pub fn header(ui: &mut egui::Ui, bar: &Bar, rect: Rect) -> HeaderOut {
         drag_rect = drag_rect.union(title_rect);
         x += heading.width();
     }
-    let grip = ui.interact(drag_rect, egui::Id::unique("sc_history_dock_grip"), Sense::drag());
+    let grip = ui.interact(drag_rect, ui.scope_id().with(("history_bar_grip", bar.handles.grip)), Sense::drag());
     solidcraft_ui_registry::publish_handle(bar.handles.grip, drag_rect.center());
     let mut actions = Vec::new();
     for &control in HistoryTransport::shown(bar.play) {
         let br = Rect::from_center_size(pos2(x + t.space_24 / 2.0, rect.center().y), vec2(t.space_24, t.space_24));
-        let response = control.show(ui, br, bar.playing);
+        let response = control.show_as(ui, br, bar.playing, bar.handles.controls);
         actions.extend(transport_actions(control, &response));
         x += t.space_24 + t.space_2;
     }

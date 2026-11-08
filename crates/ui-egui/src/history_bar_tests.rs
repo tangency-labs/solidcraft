@@ -3,7 +3,7 @@ use super::*;
 use egui::{Event, Modifiers, PointerButton, RawInput};
 use std::cell::Cell;
 
-const HANDLES: Handles<'static> = Handles { grip: "test:grip", marker: "test:marker", step: "test:" };
+const HANDLES: Handles<'static> = Handles { grip: "test:grip", marker: "test:marker", step: "test:", controls: "test:ctl:" };
 
 fn bar(steps: usize, marker: usize, play: bool) -> Bar<'static> {
     let t = Tokens::get();
@@ -225,15 +225,15 @@ fn a_folded_chip_of_the_apps_own_takes_its_slots_and_the_marker_inside_it_goes_a
 fn the_controls_return_seek_and_play_and_their_menu() {
     let rig = Rig::new(&["A", "B"], 1);
     for (control, action) in [
-        ("history:first", Action::Seek(Seek::First)),
-        ("history:back", Action::Seek(Seek::Back)),
-        ("history:play", Action::Play),
-        ("history:forward", Action::Seek(Seek::Forward)),
-        ("history:last", Action::Seek(Seek::Last)),
+        ("test:ctl:first", Action::Seek(Seek::First)),
+        ("test:ctl:back", Action::Seek(Seek::Back)),
+        ("test:ctl:play", Action::Play),
+        ("test:ctl:forward", Action::Seek(Seek::Forward)),
+        ("test:ctl:last", Action::Seek(Seek::Last)),
     ] {
         assert_eq!(rig.click(rig.at(control)), vec![action], "{control}");
     }
-    let back = rig.at("history:back");
+    let back = rig.at("test:ctl:back");
     assert_eq!(rig.click_with(back, PointerButton::Secondary, Modifiers::NONE), vec![Action::ControlsMenu { at: back }]);
 }
 
@@ -242,8 +242,8 @@ fn without_play_the_controls_close_up_and_a_narrow_bar_leaves_the_title_out() {
     let mut rig = Rig::new(&["A"], 1);
     rig.bar.play = false;
     rig.frame(Vec::new());
-    assert!(solidcraft_ui_registry::handle_at("history:play").is_none());
-    assert_eq!(rig.click(rig.at("history:forward")), vec![Action::Seek(Seek::Forward)]);
+    assert!(solidcraft_ui_registry::handle_at("test:ctl:play").is_none());
+    assert_eq!(rig.click(rig.at("test:ctl:forward")), vec![Action::Seek(Seek::Forward)]);
     let grip = rig.at("test:grip");
     rig.rect = Rect::from_min_size(rig.rect.min, vec2(100.0, 40.0));
     rig.frame(Vec::new());
@@ -255,7 +255,7 @@ fn an_empty_bar_has_the_marker_at_its_start_and_returns_only_its_drop() {
     let rig = Rig::new(&[], 0);
     assert_eq!(rig.frame(Vec::new()), Vec::new());
     let marker = rig.marker();
-    let first = rig.at("history:last");
+    let first = rig.at("test:ctl:last");
     assert!(marker.x > first.x, "the marker after the controls");
     assert_eq!(rig.drag(marker, marker + vec2(80.0, 0.0)), vec![Action::Seek(Seek::Slot { slot: 0, before: false })]);
 }

@@ -233,11 +233,18 @@ impl HistoryTransport {
         })
     }
 
-    /// `playing` turns the Play button into Stop; the other controls ignore it.
+    /// `playing` turns the Play button into Stop; the other controls ignore it. Published as
+    /// `history:` and its [`HistoryTransport::id`].
     pub fn show(self, ui: &mut egui::Ui, rect: Rect, playing: bool) -> egui::Response {
+        self.show_as(ui, rect, playing, "history:")
+    }
+
+    /// [`HistoryTransport::show`], published in the widget registry as `prefix` followed by its
+    /// [`HistoryTransport::id`].
+    pub fn show_as(self, ui: &mut egui::Ui, rect: Rect, playing: bool, prefix: &str) -> egui::Response {
         let t = Tokens::get();
         let response = ui.interact(rect, ui.scope_id().with(("history_transport", self.id())), egui::Sense::click());
-        solidcraft_ui_registry::publish_target(&format!("history:{}", self.id()), rect);
+        solidcraft_ui_registry::publish_target(&format!("{prefix}{}", self.id()), rect);
         if response.hovered() {
             ui.painter().rect_filled(rect, t.radius_sm, t.hover);
         }

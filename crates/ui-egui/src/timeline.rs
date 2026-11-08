@@ -907,7 +907,8 @@ pub(crate) fn edit_holes_item(app: &mut SolveApp, ui: &mut egui::Ui, folder: u64
 }
 
 /// Where the bottom History bar publishes its grip, marker and feature chips.
-const BAR_HANDLES: history_bar::Handles<'static> = history_bar::Handles { grip: "history:grip", marker: "history:marker", step: "timeline:" };
+const BAR_HANDLES: history_bar::Handles<'static> =
+    history_bar::Handles { grip: "history:grip", marker: "history:marker", step: "timeline:", controls: "history:" };
 
 /// A feature as the bar draws it: id, name, icon, suppressed, type name, kind.
 type BarFeature = (u64, String, &'static str, bool, &'static str, TimelineKind);
