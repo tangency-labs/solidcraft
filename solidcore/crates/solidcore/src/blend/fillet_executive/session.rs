@@ -5729,6 +5729,23 @@ impl FilletParametersAccess<FilletObject> for SessionObjects<'_> {
         };
         crate::topology::edge::tolerance(self.target, id)
     }
+    fn parameters_edge_gap(&mut self, k: &Kernel, edge: FilletObject) -> Result<f64> {
+        let FilletObject::Topology(FilletBody::Target, EntityRef::Edge(id)) = edge else {
+            return Err(invalid("edge is not in the target"));
+        };
+        let mut gap = None::<f64>;
+        for eu in self.target.edge(id)?.edgeuses.clone() {
+            let measured =
+                crate::topology::edgeuse::p1::max_edge_face_gap(k, self.target, eu, false)?;
+            if let Some(g) = measured.filter(|g| g.gap_3d >= 0.0) {
+                gap = Some(gap.map_or(g.gap_3d, |m| m.max(g.gap_3d)));
+            }
+        }
+        match gap {
+            Some(gap) => Ok(gap),
+            None => crate::topology::edge::tolerance(self.target, id),
+        }
+    }
     fn parameters_new_solver(
         &mut self,
         k: &mut Kernel,
