@@ -1,0 +1,89 @@
+{
+ "coverage": "tangency-labs/solidcore#2611 (SolidCraft #11744): SmApiShellBrepFull thickening (create_offset_solid, extended convex edges, merged results) a half-pipe sheet trimmed along an arc, by -2 (inward) and +2 (outward): the outer face (r 25) of a half annulus r 23..25 extruded z -40..40, cut below y = 1 for z < 0, below an arc of radius R (centre (z, y) = (0, 1 + R)) from (0, 1) through 45 degrees and past the arc's end, for R 20 (the issue's recipe) and R 12. data/issue2611_half_pipe_arc_r*.smb are Rust-written ASCII .smb files (data flows Rust to C++ only; each side reads it with its own reader). At the pin TrimExtendedEdge ends each free edge's offset where its UV trim curve crosses the next edge's and reads that UV-curve parameter on the lifted 3D curve (WR-736; Kernel::fixes.offset_lamina_corner_at_vertex_image is off here).",
+ "cases": [
+  {
+   "name": "issue2611_half_pipe_arc_r20_api_shell_in",
+   "upstream_ref": "tangency-labs/solidcore#2611 (operand: crates/solidcore/tests/issue_2611_thicken_arc_trim.rs, ignored write_issue_2611_operands); plan/upstream-issues WR-736",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$repo_file": "fixtures/offset.offset_executive_p2/data/issue2611_half_pipe_arc_r20.smb"
+     }
+    },
+    "faces": [],
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -2.0,
+     "extend_convex": true,
+     "merge_results": true,
+     "create_offset_solid": true
+    }
+   }
+  },
+  {
+   "name": "issue2611_half_pipe_arc_r20_api_shell_out",
+   "upstream_ref": "tangency-labs/solidcore#2611 (operand: crates/solidcore/tests/issue_2611_thicken_arc_trim.rs, ignored write_issue_2611_operands); plan/upstream-issues WR-736",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$repo_file": "fixtures/offset.offset_executive_p2/data/issue2611_half_pipe_arc_r20.smb"
+     }
+    },
+    "faces": [],
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": 2.0,
+     "extend_convex": true,
+     "merge_results": true,
+     "create_offset_solid": true
+    }
+   }
+  },
+  {
+   "name": "issue2611_half_pipe_arc_r12_api_shell_in",
+   "upstream_ref": "tangency-labs/solidcore#2611 (operand: crates/solidcore/tests/issue_2611_thicken_arc_trim.rs, ignored write_issue_2611_operands); plan/upstream-issues WR-736",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$repo_file": "fixtures/offset.offset_executive_p2/data/issue2611_half_pipe_arc_r12.smb"
+     }
+    },
+    "faces": [],
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": -2.0,
+     "extend_convex": true,
+     "merge_results": true,
+     "create_offset_solid": true
+    }
+   }
+  },
+  {
+   "name": "issue2611_half_pipe_arc_r12_api_shell_out",
+   "upstream_ref": "tangency-labs/solidcore#2611 (operand: crates/solidcore/tests/issue_2611_thicken_arc_trim.rs, ignored write_issue_2611_operands); plan/upstream-issues WR-736",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$repo_file": "fixtures/offset.offset_executive_p2/data/issue2611_half_pipe_arc_r12.smb"
+     }
+    },
+    "faces": [],
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": 2.0,
+     "extend_convex": true,
+     "merge_results": true,
+     "create_offset_solid": true
+    }
+   }
+  }
+ ]
+}

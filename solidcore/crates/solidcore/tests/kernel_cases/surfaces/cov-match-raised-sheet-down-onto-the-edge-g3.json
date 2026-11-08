@@ -1,0 +1,96 @@
+{
+  "area": "surfaces",
+  "bodies": {
+    "b1": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b1"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "stitch",
+      "outputs": [
+        "b3"
+      ],
+      "params": {
+        "tolerance": 0.000023449944320643652
+      }
+    }
+  ],
+  "case": "cov-match-raised-sheet-down-onto-the-edge-g3",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "edges": [
+        [
+          10,
+          10,
+          0
+        ]
+      ],
+      "order": "g3"
+    },
+    "faces": 2,
+    "method": "target x 0..10 at z = 0, skirt x 12..20 at z = 2; the near boundary moves onto x = 10, z = 0 repeating the target's plane to G3, the far boundary stays at x = 20, z = 2. Graded: the seam's order as Continuity Analysis measures it, one body of 2 faces",
+    "source": "invariants",
+    "sources": [],
+    "valid": false,
+    "what": "a sheet 2 above and 2 short of a sheet's edge, matched G3 down onto it and stitched: the seam holds G3"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 7,
+      "faces": 2,
+      "vertices": 6
+    }
+  },
+  "records": "cov-match-raised-sheet-down-onto-the-edge-g3.bodies.json.gz",
+  "result": [
+    {
+      "body": "Target",
+      "made": "b3"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 404.1170756954461,
+      "body_count": 1,
+      "edges": 3,
+      "faces": 2,
+      "vertices": 2,
+      "volume_mm3": 0.0
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "tagged",
+    "stitch"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "a sheet 2 above and 2 short of a sheet's edge, matched G3 down onto it and stitched: the seam holds G3",
+  "why_not": []
+}

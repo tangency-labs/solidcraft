@@ -1,0 +1,3077 @@
+{
+ "cases": [
+  {
+   "name": "numcpts_d2_t0.01_s90.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.01,
+    "ang": 90.0,
+    "deg": 2
+   }
+  },
+  {
+   "name": "numcpts_d2_t0.01_s180.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.01,
+    "ang": 180.0,
+    "deg": 2
+   }
+  },
+  {
+   "name": "numcpts_d2_t0.01_s360.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.01,
+    "ang": 360.0,
+    "deg": 2
+   }
+  },
+  {
+   "name": "numcpts_d2_t0.01_s47.5",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.01,
+    "ang": 47.5,
+    "deg": 2
+   }
+  },
+  {
+   "name": "numcpts_d2_t0.1_s90.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.1,
+    "ang": 90.0,
+    "deg": 2
+   }
+  },
+  {
+   "name": "numcpts_d2_t0.1_s180.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.1,
+    "ang": 180.0,
+    "deg": 2
+   }
+  },
+  {
+   "name": "numcpts_d2_t0.1_s360.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.1,
+    "ang": 360.0,
+    "deg": 2
+   }
+  },
+  {
+   "name": "numcpts_d2_t0.1_s47.5",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.1,
+    "ang": 47.5,
+    "deg": 2
+   }
+  },
+  {
+   "name": "numcpts_d2_t0.001_s90.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.001,
+    "ang": 90.0,
+    "deg": 2
+   }
+  },
+  {
+   "name": "numcpts_d2_t0.001_s180.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.001,
+    "ang": 180.0,
+    "deg": 2
+   }
+  },
+  {
+   "name": "numcpts_d2_t0.001_s360.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.001,
+    "ang": 360.0,
+    "deg": 2
+   }
+  },
+  {
+   "name": "numcpts_d2_t0.001_s47.5",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.001,
+    "ang": 47.5,
+    "deg": 2
+   }
+  },
+  {
+   "name": "numcpts_d2_t1e-06_s90.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 1e-06,
+    "ang": 90.0,
+    "deg": 2
+   }
+  },
+  {
+   "name": "numcpts_d2_t1e-06_s180.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 1e-06,
+    "ang": 180.0,
+    "deg": 2
+   }
+  },
+  {
+   "name": "numcpts_d2_t1e-06_s360.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 1e-06,
+    "ang": 360.0,
+    "deg": 2
+   }
+  },
+  {
+   "name": "numcpts_d2_t1e-06_s47.5",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 1e-06,
+    "ang": 47.5,
+    "deg": 2
+   }
+  },
+  {
+   "name": "numcpts_d3_t0.01_s90.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.01,
+    "ang": 90.0,
+    "deg": 3
+   }
+  },
+  {
+   "name": "numcpts_d3_t0.01_s180.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.01,
+    "ang": 180.0,
+    "deg": 3
+   }
+  },
+  {
+   "name": "numcpts_d3_t0.01_s360.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.01,
+    "ang": 360.0,
+    "deg": 3
+   }
+  },
+  {
+   "name": "numcpts_d3_t0.01_s47.5",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.01,
+    "ang": 47.5,
+    "deg": 3
+   }
+  },
+  {
+   "name": "numcpts_d3_t0.1_s90.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.1,
+    "ang": 90.0,
+    "deg": 3
+   }
+  },
+  {
+   "name": "numcpts_d3_t0.1_s180.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.1,
+    "ang": 180.0,
+    "deg": 3
+   }
+  },
+  {
+   "name": "numcpts_d3_t0.1_s360.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.1,
+    "ang": 360.0,
+    "deg": 3
+   }
+  },
+  {
+   "name": "numcpts_d3_t0.1_s47.5",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.1,
+    "ang": 47.5,
+    "deg": 3
+   }
+  },
+  {
+   "name": "numcpts_d3_t0.001_s90.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.001,
+    "ang": 90.0,
+    "deg": 3
+   }
+  },
+  {
+   "name": "numcpts_d3_t0.001_s180.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.001,
+    "ang": 180.0,
+    "deg": 3
+   }
+  },
+  {
+   "name": "numcpts_d3_t0.001_s360.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.001,
+    "ang": 360.0,
+    "deg": 3
+   }
+  },
+  {
+   "name": "numcpts_d3_t0.001_s47.5",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.001,
+    "ang": 47.5,
+    "deg": 3
+   }
+  },
+  {
+   "name": "numcpts_d3_t1e-06_s90.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 1e-06,
+    "ang": 90.0,
+    "deg": 3
+   }
+  },
+  {
+   "name": "numcpts_d3_t1e-06_s180.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 1e-06,
+    "ang": 180.0,
+    "deg": 3
+   }
+  },
+  {
+   "name": "numcpts_d3_t1e-06_s360.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 1e-06,
+    "ang": 360.0,
+    "deg": 3
+   }
+  },
+  {
+   "name": "numcpts_d3_t1e-06_s47.5",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 1e-06,
+    "ang": 47.5,
+    "deg": 3
+   }
+  },
+  {
+   "name": "numcpts_d4_t0.01_s90.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.01,
+    "ang": 90.0,
+    "deg": 4
+   }
+  },
+  {
+   "name": "numcpts_d4_t0.01_s180.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.01,
+    "ang": 180.0,
+    "deg": 4
+   }
+  },
+  {
+   "name": "numcpts_d4_t0.01_s360.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.01,
+    "ang": 360.0,
+    "deg": 4
+   }
+  },
+  {
+   "name": "numcpts_d4_t0.01_s47.5",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.01,
+    "ang": 47.5,
+    "deg": 4
+   }
+  },
+  {
+   "name": "numcpts_d4_t0.1_s90.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.1,
+    "ang": 90.0,
+    "deg": 4
+   }
+  },
+  {
+   "name": "numcpts_d4_t0.1_s180.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.1,
+    "ang": 180.0,
+    "deg": 4
+   }
+  },
+  {
+   "name": "numcpts_d4_t0.1_s360.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.1,
+    "ang": 360.0,
+    "deg": 4
+   }
+  },
+  {
+   "name": "numcpts_d4_t0.1_s47.5",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.1,
+    "ang": 47.5,
+    "deg": 4
+   }
+  },
+  {
+   "name": "numcpts_d4_t0.001_s90.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.001,
+    "ang": 90.0,
+    "deg": 4
+   }
+  },
+  {
+   "name": "numcpts_d4_t0.001_s180.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.001,
+    "ang": 180.0,
+    "deg": 4
+   }
+  },
+  {
+   "name": "numcpts_d4_t0.001_s360.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.001,
+    "ang": 360.0,
+    "deg": 4
+   }
+  },
+  {
+   "name": "numcpts_d4_t0.001_s47.5",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 0.001,
+    "ang": 47.5,
+    "deg": 4
+   }
+  },
+  {
+   "name": "numcpts_d4_t1e-06_s90.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 1e-06,
+    "ang": 90.0,
+    "deg": 4
+   }
+  },
+  {
+   "name": "numcpts_d4_t1e-06_s180.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 1e-06,
+    "ang": 180.0,
+    "deg": 4
+   }
+  },
+  {
+   "name": "numcpts_d4_t1e-06_s360.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 1e-06,
+    "ang": 360.0,
+    "deg": 4
+   }
+  },
+  {
+   "name": "numcpts_d4_t1e-06_s47.5",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "num_cpts",
+    "tol": 1e-06,
+    "ang": 47.5,
+    "deg": 4
+   }
+  },
+  {
+   "name": "arc_d2_nc2_0.0_90.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 0.0,
+    "ae": 90.0,
+    "deg": 2,
+    "nc": 2
+   }
+  },
+  {
+   "name": "arc_d2_nc2_270.0_45.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 270.0,
+    "ae": 45.0,
+    "deg": 2,
+    "nc": 2
+   }
+  },
+  {
+   "name": "arc_d2_nc5_0.0_90.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 0.0,
+    "ae": 90.0,
+    "deg": 2,
+    "nc": 5
+   }
+  },
+  {
+   "name": "arc_d2_nc5_30.0_210.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 30.0,
+    "ae": 210.0,
+    "deg": 2,
+    "nc": 5
+   }
+  },
+  {
+   "name": "arc_d2_nc5_0.0_360.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "deg": 2,
+    "nc": 5
+   }
+  },
+  {
+   "name": "arc_d2_nc5_270.0_45.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 270.0,
+    "ae": 45.0,
+    "deg": 2,
+    "nc": 5
+   }
+  },
+  {
+   "name": "arc_d2_nc13_0.0_90.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 0.0,
+    "ae": 90.0,
+    "deg": 2,
+    "nc": 13
+   }
+  },
+  {
+   "name": "arc_d2_nc13_30.0_210.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 30.0,
+    "ae": 210.0,
+    "deg": 2,
+    "nc": 13
+   }
+  },
+  {
+   "name": "arc_d2_nc13_0.0_360.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "deg": 2,
+    "nc": 13
+   }
+  },
+  {
+   "name": "arc_d2_nc13_270.0_45.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 270.0,
+    "ae": 45.0,
+    "deg": 2,
+    "nc": 13
+   }
+  },
+  {
+   "name": "arc_d2_nc23_0.0_90.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 0.0,
+    "ae": 90.0,
+    "deg": 2,
+    "nc": 23
+   }
+  },
+  {
+   "name": "arc_d2_nc23_30.0_210.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 30.0,
+    "ae": 210.0,
+    "deg": 2,
+    "nc": 23
+   }
+  },
+  {
+   "name": "arc_d2_nc23_0.0_360.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "deg": 2,
+    "nc": 23
+   }
+  },
+  {
+   "name": "arc_d2_nc23_270.0_45.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 270.0,
+    "ae": 45.0,
+    "deg": 2,
+    "nc": 23
+   }
+  },
+  {
+   "name": "arc_d3_nc3_0.0_90.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 0.0,
+    "ae": 90.0,
+    "deg": 3,
+    "nc": 3
+   }
+  },
+  {
+   "name": "arc_d3_nc3_30.0_210.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 30.0,
+    "ae": 210.0,
+    "deg": 3,
+    "nc": 3
+   }
+  },
+  {
+   "name": "arc_d3_nc3_0.0_360.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "deg": 3,
+    "nc": 3
+   }
+  },
+  {
+   "name": "arc_d3_nc3_270.0_45.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 270.0,
+    "ae": 45.0,
+    "deg": 3,
+    "nc": 3
+   }
+  },
+  {
+   "name": "arc_d3_nc4_0.0_90.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 0.0,
+    "ae": 90.0,
+    "deg": 3,
+    "nc": 4
+   }
+  },
+  {
+   "name": "arc_d3_nc4_30.0_210.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 30.0,
+    "ae": 210.0,
+    "deg": 3,
+    "nc": 4
+   }
+  },
+  {
+   "name": "arc_d3_nc4_0.0_360.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "deg": 3,
+    "nc": 4
+   }
+  },
+  {
+   "name": "arc_d3_nc4_270.0_45.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 270.0,
+    "ae": 45.0,
+    "deg": 3,
+    "nc": 4
+   }
+  },
+  {
+   "name": "arc_d3_nc8_0.0_90.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 0.0,
+    "ae": 90.0,
+    "deg": 3,
+    "nc": 8
+   }
+  },
+  {
+   "name": "arc_d3_nc8_30.0_210.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 30.0,
+    "ae": 210.0,
+    "deg": 3,
+    "nc": 8
+   }
+  },
+  {
+   "name": "arc_d3_nc8_0.0_360.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "deg": 3,
+    "nc": 8
+   }
+  },
+  {
+   "name": "arc_d3_nc8_270.0_45.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 270.0,
+    "ae": 45.0,
+    "deg": 3,
+    "nc": 8
+   }
+  },
+  {
+   "name": "arc_d3_nc14_0.0_90.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 0.0,
+    "ae": 90.0,
+    "deg": 3,
+    "nc": 14
+   }
+  },
+  {
+   "name": "arc_d3_nc14_30.0_210.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 30.0,
+    "ae": 210.0,
+    "deg": 3,
+    "nc": 14
+   }
+  },
+  {
+   "name": "arc_d3_nc14_0.0_360.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "deg": 3,
+    "nc": 14
+   }
+  },
+  {
+   "name": "arc_d3_nc14_270.0_45.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 270.0,
+    "ae": 45.0,
+    "deg": 3,
+    "nc": 14
+   }
+  },
+  {
+   "name": "arc_d4_nc4_0.0_90.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 0.0,
+    "ae": 90.0,
+    "deg": 4,
+    "nc": 4
+   }
+  },
+  {
+   "name": "arc_d4_nc4_30.0_210.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 30.0,
+    "ae": 210.0,
+    "deg": 4,
+    "nc": 4
+   }
+  },
+  {
+   "name": "arc_d4_nc4_0.0_360.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "deg": 4,
+    "nc": 4
+   }
+  },
+  {
+   "name": "arc_d4_nc4_270.0_45.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 270.0,
+    "ae": 45.0,
+    "deg": 4,
+    "nc": 4
+   }
+  },
+  {
+   "name": "arc_d4_nc5_0.0_90.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 0.0,
+    "ae": 90.0,
+    "deg": 4,
+    "nc": 5
+   }
+  },
+  {
+   "name": "arc_d4_nc5_30.0_210.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 30.0,
+    "ae": 210.0,
+    "deg": 4,
+    "nc": 5
+   }
+  },
+  {
+   "name": "arc_d4_nc5_0.0_360.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "deg": 4,
+    "nc": 5
+   }
+  },
+  {
+   "name": "arc_d4_nc5_270.0_45.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 270.0,
+    "ae": 45.0,
+    "deg": 4,
+    "nc": 5
+   }
+  },
+  {
+   "name": "arc_d4_nc9_0.0_90.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 0.0,
+    "ae": 90.0,
+    "deg": 4,
+    "nc": 9
+   }
+  },
+  {
+   "name": "arc_d4_nc9_30.0_210.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 30.0,
+    "ae": 210.0,
+    "deg": 4,
+    "nc": 9
+   }
+  },
+  {
+   "name": "arc_d4_nc9_0.0_360.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "deg": 4,
+    "nc": 9
+   }
+  },
+  {
+   "name": "arc_d4_nc9_270.0_45.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 270.0,
+    "ae": 45.0,
+    "deg": 4,
+    "nc": 9
+   }
+  },
+  {
+   "name": "arc_d4_nc11_0.0_90.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 0.0,
+    "ae": 90.0,
+    "deg": 4,
+    "nc": 11
+   }
+  },
+  {
+   "name": "arc_d4_nc11_30.0_210.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 30.0,
+    "ae": 210.0,
+    "deg": 4,
+    "nc": 11
+   }
+  },
+  {
+   "name": "arc_d4_nc11_0.0_360.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 0.0,
+    "ae": 360.0,
+    "deg": 4,
+    "nc": 11
+   }
+  },
+  {
+   "name": "arc_d4_nc11_270.0_45.0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     1.0,
+     -2.0,
+     3.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 5.0,
+    "as": 270.0,
+    "ae": 45.0,
+    "deg": 4,
+    "nc": 11
+   }
+  },
+  {
+   "name": "arc_bad_deg",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 2.0,
+    "as": 10.0,
+    "ae": 100.0,
+    "deg": 5,
+    "nc": 8
+   }
+  },
+  {
+   "name": "arc_nc_lt_deg",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 2.0,
+    "as": 10.0,
+    "ae": 100.0,
+    "deg": 3,
+    "nc": 2
+   }
+  },
+  {
+   "name": "arc_zero_rad",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 0.0,
+    "as": 10.0,
+    "ae": 100.0,
+    "deg": 3,
+    "nc": 6
+   }
+  },
+  {
+   "name": "arc_zero_x",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 2.0,
+    "as": 10.0,
+    "ae": 100.0,
+    "deg": 3,
+    "nc": 6
+   }
+  },
+  {
+   "name": "arc_zero_y",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "rad": 2.0,
+    "as": 10.0,
+    "ae": 100.0,
+    "deg": 4,
+    "nc": 6
+   }
+  },
+  {
+   "name": "arc_nearly_closed",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x": [
+     1.0,
+     0.0,
+     0.0
+    ],
+    "y": [
+     0.0,
+     1.0,
+     0.0
+    ],
+    "rad": 2.0,
+    "as": 10.0,
+    "ae": 359.99995,
+    "deg": 3,
+    "nc": 10
+   }
+  },
+  {
+   "name": "arc_skew_axes",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "op": "circ_arc",
+    "cen": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "x": [
+     2.0,
+     0.5,
+     0.1
+    ],
+    "y": [
+     0.3,
+     3.0,
+     -0.4
+    ],
+    "rad": 2.0,
+    "as": 10.0,
+    "ae": 100.0,
+    "deg": 2,
+    "nc": 9
+   }
+  },
+  {
+   "name": "numcpts_ang0",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "tol": 0.1,
+    "ang": 0.0,
+    "deg": 3,
+    "op": "num_cpts"
+   }
+  },
+  {
+   "name": "numcpts_ang_over",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "tol": 0.1,
+    "ang": 360.0001,
+    "deg": 3,
+    "op": "num_cpts"
+   }
+  },
+  {
+   "name": "numcpts_deg1",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "tol": 0.1,
+    "ang": 90.0,
+    "deg": 1,
+    "op": "num_cpts"
+   }
+  },
+  {
+   "name": "numcpts_tiny_tol_d2",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "tol": 1e-09,
+    "ang": 200.0,
+    "deg": 2,
+    "mode": "kept",
+    "op": "num_cpts"
+   }
+  },
+  {
+   "name": "numcpts_big_tol",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:174,212 (sm_ApproxCircArc: N_CalcNumCPtsToApproxArc then N_ApproxCircArcWithCrvData; reached by prog_test my_test_bsplinesurface_nlib / my_test_surface_interface)",
+   "inputs": {
+    "tol": 50.0,
+    "ang": 10.0,
+    "deg": 4,
+    "mode": "given",
+    "op": "num_cpts"
+   }
+  },
+  {
+   "name": "nonrat_DropCurveCurve_d3_inherited_tan",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "tol": 0.001,
+    "deg": 3,
+    "par": "inherited",
+    "tan": true
+   }
+  },
+  {
+   "name": "nonrat_DropCurveCurve_d3_inherited_notan",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "tol": 0.01,
+    "deg": 3,
+    "par": "inherited",
+    "tan": false
+   }
+  },
+  {
+   "name": "nonrat_DropCurveCurve_d2_chord_length_tan",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "tol": 0.001,
+    "deg": 2,
+    "par": "chord_length",
+    "tan": true
+   }
+  },
+  {
+   "name": "nonrat_DropCurveCurve_d4_centripetal_notan",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "tol": 0.0001,
+    "deg": 4,
+    "par": "centripetal",
+    "tan": false
+   }
+  },
+  {
+   "name": "nonrat_DropCurveCurve_d3_uniform_tan",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    },
+    "tol": 0.01,
+    "deg": 3,
+    "par": "uniform",
+    "tan": true
+   }
+  },
+  {
+   "name": "nonrat_closedCurve_d3_inherited_tan",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "tol": 0.001,
+    "deg": 3,
+    "par": "inherited",
+    "tan": true
+   }
+  },
+  {
+   "name": "nonrat_closedCurve_d3_inherited_notan",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "tol": 0.01,
+    "deg": 3,
+    "par": "inherited",
+    "tan": false
+   }
+  },
+  {
+   "name": "nonrat_closedCurve_d2_chord_length_tan",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "tol": 0.001,
+    "deg": 2,
+    "par": "chord_length",
+    "tan": true
+   }
+  },
+  {
+   "name": "nonrat_closedCurve_d4_centripetal_notan",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "tol": 0.0001,
+    "deg": 4,
+    "par": "centripetal",
+    "tan": false
+   }
+  },
+  {
+   "name": "nonrat_closedCurve_d3_uniform_tan",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    },
+    "tol": 0.01,
+    "deg": 3,
+    "par": "uniform",
+    "tan": true
+   }
+  },
+  {
+   "name": "nonrat_crvToOffset_d3_inherited_tan",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "tol": 0.001,
+    "deg": 3,
+    "par": "inherited",
+    "tan": true
+   }
+  },
+  {
+   "name": "nonrat_crvToOffset_d3_inherited_notan",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "tol": 0.01,
+    "deg": 3,
+    "par": "inherited",
+    "tan": false
+   }
+  },
+  {
+   "name": "nonrat_crvToOffset_d2_chord_length_tan",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "tol": 0.001,
+    "deg": 2,
+    "par": "chord_length",
+    "tan": true
+   }
+  },
+  {
+   "name": "nonrat_crvToOffset_d4_centripetal_notan",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "tol": 0.0001,
+    "deg": 4,
+    "par": "centripetal",
+    "tan": false
+   }
+  },
+  {
+   "name": "nonrat_crvToOffset_d3_uniform_tan",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    },
+    "tol": 0.01,
+    "deg": 3,
+    "par": "uniform",
+    "tan": true
+   }
+  },
+  {
+   "name": "nonrat_crvTrim1_d3_inherited_tan",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "tol": 0.001,
+    "deg": 3,
+    "par": "inherited",
+    "tan": true
+   }
+  },
+  {
+   "name": "nonrat_crvTrim1_d3_inherited_notan",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "tol": 0.01,
+    "deg": 3,
+    "par": "inherited",
+    "tan": false
+   }
+  },
+  {
+   "name": "nonrat_crvTrim1_d2_chord_length_tan",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "tol": 0.001,
+    "deg": 2,
+    "par": "chord_length",
+    "tan": true
+   }
+  },
+  {
+   "name": "nonrat_crvTrim1_d4_centripetal_notan",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "tol": 0.0001,
+    "deg": 4,
+    "par": "centripetal",
+    "tan": false
+   }
+  },
+  {
+   "name": "nonrat_crvTrim1_d3_uniform_tan",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "tol": 0.01,
+    "deg": 3,
+    "par": "uniform",
+    "tan": true
+   }
+  },
+  {
+   "name": "nonrat_crvTrim2_d3_inherited_tan",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "tol": 0.001,
+    "deg": 3,
+    "par": "inherited",
+    "tan": true
+   }
+  },
+  {
+   "name": "nonrat_crvTrim2_d3_inherited_notan",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "tol": 0.01,
+    "deg": 3,
+    "par": "inherited",
+    "tan": false
+   }
+  },
+  {
+   "name": "nonrat_crvTrim2_d2_chord_length_tan",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "tol": 0.001,
+    "deg": 2,
+    "par": "chord_length",
+    "tan": true
+   }
+  },
+  {
+   "name": "nonrat_crvTrim2_d4_centripetal_notan",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "tol": 0.0001,
+    "deg": 4,
+    "par": "centripetal",
+    "tan": false
+   }
+  },
+  {
+   "name": "nonrat_crvTrim2_d3_uniform_tan",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    },
+    "tol": 0.01,
+    "deg": 3,
+    "par": "uniform",
+    "tan": true
+   }
+  },
+  {
+   "name": "nonrat_curve0_d3_inherited_tan",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "tol": 0.001,
+    "deg": 3,
+    "par": "inherited",
+    "tan": true
+   }
+  },
+  {
+   "name": "nonrat_curve0_d3_inherited_notan",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "tol": 0.01,
+    "deg": 3,
+    "par": "inherited",
+    "tan": false
+   }
+  },
+  {
+   "name": "nonrat_curve0_d2_chord_length_tan",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "tol": 0.001,
+    "deg": 2,
+    "par": "chord_length",
+    "tan": true
+   }
+  },
+  {
+   "name": "nonrat_curve0_d3_uniform_tan",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    },
+    "tol": 0.01,
+    "deg": 3,
+    "par": "uniform",
+    "tan": true
+   }
+  },
+  {
+   "name": "nonrat_circle_quarter_d3_inherited_True",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "cpts": [
+      [
+       1,
+       0,
+       0,
+       1
+      ],
+      [
+       0.7071067811865476,
+       0.7071067811865476,
+       0,
+       0.7071067811865476
+      ],
+      [
+       0,
+       1,
+       0,
+       1
+      ]
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "tol": 0.0001,
+    "deg": 3,
+    "par": "inherited",
+    "tan": true
+   }
+  },
+  {
+   "name": "nonrat_circle_quarter_d2_inherited_True",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "cpts": [
+      [
+       1,
+       0,
+       0,
+       1
+      ],
+      [
+       0.7071067811865476,
+       0.7071067811865476,
+       0,
+       0.7071067811865476
+      ],
+      [
+       0,
+       1,
+       0,
+       1
+      ]
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "tol": 0.0001,
+    "deg": 2,
+    "par": "inherited",
+    "tan": true
+   }
+  },
+  {
+   "name": "nonrat_circle_quarter_d1_chord_length_False",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "cpts": [
+      [
+       1,
+       0,
+       0,
+       1
+      ],
+      [
+       0.7071067811865476,
+       0.7071067811865476,
+       0,
+       0.7071067811865476
+      ],
+      [
+       0,
+       1,
+       0,
+       1
+      ]
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "tol": 0.0001,
+    "deg": 1,
+    "par": "chord_length",
+    "tan": false
+   }
+  },
+  {
+   "name": "nonrat_circle_quarter_d5_uniform_True",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "cpts": [
+      [
+       1,
+       0,
+       0,
+       1
+      ],
+      [
+       0.7071067811865476,
+       0.7071067811865476,
+       0,
+       0.7071067811865476
+      ],
+      [
+       0,
+       1,
+       0,
+       1
+      ]
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "tol": 0.0001,
+    "deg": 5,
+    "par": "uniform",
+    "tan": true
+   }
+  },
+  {
+   "name": "nonrat_circle_quarter_d1_inherited_True",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "cpts": [
+      [
+       1,
+       0,
+       0,
+       1
+      ],
+      [
+       0.7071067811865476,
+       0.7071067811865476,
+       0,
+       0.7071067811865476
+      ],
+      [
+       0,
+       1,
+       0,
+       1
+      ]
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "tol": 0.0001,
+    "deg": 1,
+    "par": "inherited",
+    "tan": true
+   }
+  },
+  {
+   "name": "nonrat_circle_full_d3_inherited_True",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "cpts": [
+      [
+       1,
+       0,
+       0,
+       1
+      ],
+      [
+       0.7071067811865476,
+       0.7071067811865476,
+       0,
+       0.7071067811865476
+      ],
+      [
+       0,
+       1,
+       0,
+       1
+      ],
+      [
+       -0.7071067811865476,
+       0.7071067811865476,
+       0,
+       0.7071067811865476
+      ],
+      [
+       -1,
+       0,
+       0,
+       1
+      ],
+      [
+       -0.7071067811865476,
+       -0.7071067811865476,
+       0,
+       0.7071067811865476
+      ],
+      [
+       0,
+       -1,
+       0,
+       1
+      ],
+      [
+       0.7071067811865476,
+       -0.7071067811865476,
+       0,
+       0.7071067811865476
+      ],
+      [
+       1,
+       0,
+       0,
+       1
+      ]
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      0.25,
+      0.25,
+      0.5,
+      0.5,
+      0.75,
+      0.75,
+      1,
+      1,
+      1
+     ]
+    },
+    "tol": 0.0001,
+    "deg": 3,
+    "par": "inherited",
+    "tan": true
+   }
+  },
+  {
+   "name": "nonrat_circle_full_d2_inherited_True",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "cpts": [
+      [
+       1,
+       0,
+       0,
+       1
+      ],
+      [
+       0.7071067811865476,
+       0.7071067811865476,
+       0,
+       0.7071067811865476
+      ],
+      [
+       0,
+       1,
+       0,
+       1
+      ],
+      [
+       -0.7071067811865476,
+       0.7071067811865476,
+       0,
+       0.7071067811865476
+      ],
+      [
+       -1,
+       0,
+       0,
+       1
+      ],
+      [
+       -0.7071067811865476,
+       -0.7071067811865476,
+       0,
+       0.7071067811865476
+      ],
+      [
+       0,
+       -1,
+       0,
+       1
+      ],
+      [
+       0.7071067811865476,
+       -0.7071067811865476,
+       0,
+       0.7071067811865476
+      ],
+      [
+       1,
+       0,
+       0,
+       1
+      ]
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      0.25,
+      0.25,
+      0.5,
+      0.5,
+      0.75,
+      0.75,
+      1,
+      1,
+      1
+     ]
+    },
+    "tol": 0.0001,
+    "deg": 2,
+    "par": "inherited",
+    "tan": true
+   }
+  },
+  {
+   "name": "nonrat_circle_full_d1_chord_length_False",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "cpts": [
+      [
+       1,
+       0,
+       0,
+       1
+      ],
+      [
+       0.7071067811865476,
+       0.7071067811865476,
+       0,
+       0.7071067811865476
+      ],
+      [
+       0,
+       1,
+       0,
+       1
+      ],
+      [
+       -0.7071067811865476,
+       0.7071067811865476,
+       0,
+       0.7071067811865476
+      ],
+      [
+       -1,
+       0,
+       0,
+       1
+      ],
+      [
+       -0.7071067811865476,
+       -0.7071067811865476,
+       0,
+       0.7071067811865476
+      ],
+      [
+       0,
+       -1,
+       0,
+       1
+      ],
+      [
+       0.7071067811865476,
+       -0.7071067811865476,
+       0,
+       0.7071067811865476
+      ],
+      [
+       1,
+       0,
+       0,
+       1
+      ]
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      0.25,
+      0.25,
+      0.5,
+      0.5,
+      0.75,
+      0.75,
+      1,
+      1,
+      1
+     ]
+    },
+    "tol": 0.0001,
+    "deg": 1,
+    "par": "chord_length",
+    "tan": false
+   }
+  },
+  {
+   "name": "nonrat_circle_full_d5_uniform_True",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "cpts": [
+      [
+       1,
+       0,
+       0,
+       1
+      ],
+      [
+       0.7071067811865476,
+       0.7071067811865476,
+       0,
+       0.7071067811865476
+      ],
+      [
+       0,
+       1,
+       0,
+       1
+      ],
+      [
+       -0.7071067811865476,
+       0.7071067811865476,
+       0,
+       0.7071067811865476
+      ],
+      [
+       -1,
+       0,
+       0,
+       1
+      ],
+      [
+       -0.7071067811865476,
+       -0.7071067811865476,
+       0,
+       0.7071067811865476
+      ],
+      [
+       0,
+       -1,
+       0,
+       1
+      ],
+      [
+       0.7071067811865476,
+       -0.7071067811865476,
+       0,
+       0.7071067811865476
+      ],
+      [
+       1,
+       0,
+       0,
+       1
+      ]
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      0.25,
+      0.25,
+      0.5,
+      0.5,
+      0.75,
+      0.75,
+      1,
+      1,
+      1
+     ]
+    },
+    "tol": 0.0001,
+    "deg": 5,
+    "par": "uniform",
+    "tan": true
+   }
+  },
+  {
+   "name": "nonrat_circle_full_d1_inherited_True",
+   "upstream_ref": "source/SMLib/src/SmBSplineCurveNLib.cpp:524 (SmBSplineCurve::ApproximateRationalCurve: deg 3, NL_INHERITED, NL_YES; reached by prog_test my_test_parallel_projection / my_test_tsurf_projection / my_test_ssi)",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "cpts": [
+      [
+       1,
+       0,
+       0,
+       1
+      ],
+      [
+       0.7071067811865476,
+       0.7071067811865476,
+       0,
+       0.7071067811865476
+      ],
+      [
+       0,
+       1,
+       0,
+       1
+      ],
+      [
+       -0.7071067811865476,
+       0.7071067811865476,
+       0,
+       0.7071067811865476
+      ],
+      [
+       -1,
+       0,
+       0,
+       1
+      ],
+      [
+       -0.7071067811865476,
+       -0.7071067811865476,
+       0,
+       0.7071067811865476
+      ],
+      [
+       0,
+       -1,
+       0,
+       1
+      ],
+      [
+       0.7071067811865476,
+       -0.7071067811865476,
+       0,
+       0.7071067811865476
+      ],
+      [
+       1,
+       0,
+       0,
+       1
+      ]
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      0.25,
+      0.25,
+      0.5,
+      0.5,
+      0.75,
+      0.75,
+      1,
+      1,
+      1
+     ]
+    },
+    "tol": 0.0001,
+    "deg": 1,
+    "par": "inherited",
+    "tan": true
+   }
+  },
+  {
+   "name": "nonrat_tol_zero",
+   "upstream_ref": "edge case: N_FloatOpIsBad(1, tol) -> NL_NUM_ERR",
+   "inputs": {
+    "op": "non_rat",
+    "crv": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    },
+    "tol": 0.0,
+    "deg": 3,
+    "par": "inherited",
+    "tan": true
+   }
+  }
+ ]
+}

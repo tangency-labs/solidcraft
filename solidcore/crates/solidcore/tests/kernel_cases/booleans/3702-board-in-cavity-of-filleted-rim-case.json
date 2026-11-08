@@ -1,0 +1,243 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b18": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b19": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b17"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 0.20000000000000018,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                10.0,
+                -7.5,
+                4.9
+              ],
+              "start": [
+                -10.0,
+                -7.5,
+                4.9
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                10.0,
+                7.5,
+                4.9
+              ],
+              "start": [
+                10.0,
+                -7.5,
+                4.9
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -10.0,
+                7.5,
+                4.9
+              ],
+              "start": [
+                10.0,
+                7.5,
+                4.9
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -10.0,
+                -7.5,
+                4.9
+              ],
+              "start": [
+                -10.0,
+                7.5,
+                4.9
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b19"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b20"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b20"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b21"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b22"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b22"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b23"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b21"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b24"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b23"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b25"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b24",
+        "b25"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b26"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "3702-board-in-cavity-of-filleted-rim-case",
+  "expected": {
+    "body_count": 2,
+    "method": "case = cylinder R25 H10 minus cavity R21.5 x 8 deep (floor 2 mm): pi*25^2*10 - pi*21.5^2*8 = 8017.344; rim fillet r1.5 on the outer top edge removes 2*pi*(2.25*24.25 - (pi*1.5^2/4)*(23.5+4*1.5/(3*pi))) = 74.830 (square 1.5x1.5 at radius 24.25 minus the quarter disc, Pappus); case = 7942.514. The 20x15x0.2 board (60 mm3, centre z=5, clear of the walls and floor) does not touch the case, is kept as a tool, and the cut changes nothing: two bodies, 7942.514 + 60 = 8002.514",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#3702"
+    ],
+    "volume_mm3": 8002.514,
+    "what": "a 0.2 mm board lying in the open cavity of a case with a filleted circular rim: cutting it from the case must leave the case unchanged (it was taken for wholly inside)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 20,
+      "faces": 12,
+      "vertices": 13
+    }
+  },
+  "records": "3702-board-in-cavity-of-filleted-rim-case.bodies.json.gz",
+  "result": [
+    {
+      "body": "Case",
+      "made": "b26"
+    },
+    {
+      "body": "Board",
+      "made": "b17"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 7090.365424188839,
+      "body_count": 2,
+      "edges": 20,
+      "faces": 12,
+      "vertices": 13,
+      "volume_mm3": 8002.514403554358
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#3702"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a 0.2 mm board lying in the open cavity of a case with a filleted circular rim: cutting it from the case must leave the case unchanged (it was taken for wholly inside)",
+  "why_not": []
+}
