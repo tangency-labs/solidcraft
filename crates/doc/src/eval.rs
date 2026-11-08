@@ -9113,9 +9113,13 @@ pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut 
 /// of a component placed differently.
 fn construction_planes_in_frame<'a>(doc: &Document, st: &ModelState, comp: u64, plane: &'a PlaneRef) -> Result<std::borrow::Cow<'a, PlaneRef>> {
     use std::borrow::Cow;
+    // The component of a feature, read from the timeline without `Document::feature`'s search counter.
+    fn owner_of(doc: &Document, id: u64) -> Option<u64> {
+        doc.features.iter().find(|f| f.id == id).map(|f| f.component)
+    }
     fn foreign(doc: &Document, comp: u64, plane: &PlaneRef) -> bool {
         match plane {
-            PlaneRef::Construction { feature } => doc.feature(feature.0).is_some_and(|f| f.component != comp),
+            PlaneRef::Construction { feature } => owner_of(doc, feature.0).is_some_and(|owner| owner != comp),
             PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::ThroughPoint { base, .. } => {
                 foreign(doc, comp, base)
             }
@@ -9125,7 +9129,7 @@ fn construction_planes_in_frame<'a>(doc: &Document, st: &ModelState, comp: u64, 
     fn map(doc: &Document, st: &ModelState, comp: u64, plane: &mut PlaneRef) -> Result<()> {
         match plane {
             PlaneRef::Construction { feature } => {
-                let owner = doc.feature(feature.0).map_or(comp, |f| f.component);
+                let owner = owner_of(doc, feature.0).unwrap_or(comp);
                 if owner == comp {
                     return Ok(());
                 }
