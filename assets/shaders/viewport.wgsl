@@ -716,14 +716,20 @@ fn lit_color(i: TOut, visibility: f32, base: vec4<f32>) -> vec4<f32> {
     if (dot(n, v) < 0.0) { n = -n; }
     if u.product_lights_meta.x>0.0 {
         var radiance=vec3<f32>(0.0);
+        let albedo=srgb_decode(base.rgb);
         for (var k=0u;k<min(u32(u.product_lights_meta.y),21u);k+=1u) {
-            if u.product_lights[k*4u].w == 4.0 {radiance+=to_linear(base.rgb)*u.product_lights[k*4u+1u].xyz/3.141592653589793;continue;}
+            if u.product_lights[k*4u].w == 4.0 {radiance+=albedo*u.product_lights[k*4u+1u].xyz/3.141592653589793;continue;}
             let sample=product_light_sample(k,i.wp);
-            radiance+=to_linear(base.rgb)*sample[1]*(max(dot(n,sample[0]),0.0)/3.141592653589793);
+            radiance+=albedo*sample[1]*(max(dot(n,sample[0]),0.0)/3.141592653589793);
         }
         let mapped=radiance/(vec3<f32>(1.0)+radiance);
+        // A linear attachment takes linear light as it is; any other is encoded once, as the CPU
+        // image is (decoding the encoded value again through `out_color` would flatten the dark end).
+        if (u.back.w > 0.5) {
+            return vec4<f32>(mapped,base.a);
+        }
         let encoded=select(mapped*12.92,1.055*pow(mapped,vec3<f32>(1.0/2.4))-vec3<f32>(0.055),mapped>vec3<f32>(0.0031308));
-        return out_color(vec4<f32>(encoded,base.a));
+        return vec4<f32>(encoded,base.a);
     }
     let key = normalize(v * 0.8 + vec3<f32>(-0.3, 0.2, 0.6));
     let diff = max(dot(n, key), 0.0);

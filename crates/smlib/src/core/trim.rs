@@ -613,7 +613,9 @@ fn same_patch(k: &Kernel, p: &Surface, q: &Surface, tol: f64) -> bool {
 /// [`Error::NotExact`], never a surface that falls short or runs past.
 fn extended_by(k: &Kernel, surf: &Surface, dom: &Extent2d, s: Side, how: Continuity, distance: f64) -> Result<Surface> {
     match surf.extended_by_distance(k, dom, s.which, how, distance) {
-        Ok(e) => Ok(e.surface),
+        Ok(Some(e)) => Ok(e.surface),
+        // Below the side's resolution: the distance is too small to extend by, so the surface stays as it is.
+        Ok(None) => Ok(surf.clone()),
         Err(SolidError::ExtendRefused { .. } | SolidError::NotConverged { .. }) => Err(Error::NotExact),
         Err(e) => Err(status(e)),
     }

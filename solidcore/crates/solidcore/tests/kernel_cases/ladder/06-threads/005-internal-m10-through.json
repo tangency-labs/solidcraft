@@ -1,0 +1,174 @@
+{
+  "area": "ladder/06-threads",
+  "bodies": {
+    "b13": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b22": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b23"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b23"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b24"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b22"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b25"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b25"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b26"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b24"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b27"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b26"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b28"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b27",
+        "b28"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b29"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "005-internal-m10-through",
+  "expected": {
+    "body_count": 1,
+    "method": "ISO 68-1 internal basic profile: groove P/8 wide at the major diameter, growing 2 tan30 per mm inward; the drilled hole r4.25 is above the minor r4.188, so the groove removes 2 pi int_4.25^5 r g(r) dr per mm; screw motion argument as in 001; both ends run out",
+    "source": "analytic",
+    "sources": [],
+    "tolerance": {
+      "rel": 0.005
+    },
+    "volume_mm3": 16688.181199219,
+    "what": "a modelled internal M10 thread in a d8.5 (tap drill) hole through a 30x30x20 block"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 4978.101312125217,
+      "body_count": 1,
+      "edges": 186,
+      "faces": 64,
+      "vertices": 124,
+      "volume_mm3": 16688.181679696947
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 256,
+      "faces": 105,
+      "vertices": 153
+    }
+  },
+  "records": "005-internal-m10-through.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b29"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 4978.101312125217,
+      "body_count": 1,
+      "edges": 186,
+      "faces": 64,
+      "vertices": 124,
+      "volume_mm3": 16688.181679696947
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "screw_sweep",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a modelled internal M10 thread in a d8.5 (tap drill) hole through a 30x30x20 block",
+  "why_not": []
+}

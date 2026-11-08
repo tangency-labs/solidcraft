@@ -1,5 +1,6 @@
-//! Contracts for sheet metal feature and rule commands in `cmd/sheet.rs`. Feature commands
-//! return [`FeatureResult`](super::features::FeatureResult); rule commands have their own replies.
+//! Contracts for sheet metal feature, rule, flat pattern and bend table commands in
+//! `cmd/sheet.rs`. Feature commands return [`FeatureResult`](super::features::FeatureResult); the
+//! others have their own replies.
 //!
 //! A sheet metal rule sets the sheet's thickness, K-factor, bend radius and reliefs: the
 //! commands refuse those keys with a pointer to `sheet.manage_rules`, so they are no keys of
@@ -747,6 +748,301 @@ pub enum ManageRulesResult {
     },
     Deleted {
         deleted: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        param_warnings: Vec<String>,
+    },
+}
+
+/// A point in mm on a sheet edge, `[x, y, z]` or `{x, y, z}`, with a path flange's message for
+/// `edge`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SheetEdgePoint(pub Vec3);
+
+impl<'de> Deserialize<'de> for SheetEdgePoint {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        crate::params::vec3(&Value::deserialize(d)?).map(SheetEdgePoint).ok_or_else(|| D::Error::custom("must be a point [x, y, z] on a sheet edge"))
+    }
+}
+
+impl JsonSchema for SheetEdgePoint {
+    fn schema_name() -> Cow<'static, str> {
+        "SheetEdgePoint".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        Point3::json_schema(generator)
+    }
+}
+
+/// Add a path flange: flanges along an open chain of sketch lines drawn on a plane across a
+/// sheet edge, from the edge out. Each line is one flange as long as the line (to the outer face
+/// from the virtual sharp) and each corner one bend, turning the way the lines turn. One
+/// feature, one body. `participants` changes nothing.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct PathFlangeParams {
+    /// A point on a top or bottom edge of the sheet, where the path starts.
+    pub edge: SheetEdgePoint,
+    /// The sketch holding the path, by id or name.
+    pub sketch: SketchRef,
+    /// The path's lines: 1 to 64 lines of `sketch`, by id, in one open chain, in any order. Arcs
+    /// are refused.
+    pub curves: StringList,
+    /// The inner bend radius. Default: the sheet's rule's.
+    #[serde(default)]
+    pub radius: Option<LengthExpr>,
+    /// The sheet metal body. Default: the sheet with an edge nearest `edge`.
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// Read a sheet's flat pattern: its size, outline, cut-outs, pockets, bends and perforations, in
+/// flat coordinates (mm, on the base panel's bottom face). Refused while a feature that is not
+/// sheet metal (a fillet, a join) has changed the body.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct FlatPatternParams {
+    /// The sheet metal body. Default: the last sheet.
+    #[serde(default)]
+    pub body: Option<String>,
+}
+
+/// Export a sheet's bend table: a row per bend, in mm and degrees, with the rule and the bend's
+/// centre line in flat coordinates. A bend that cut-outs split has a row for each piece.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct BendTableParams {
+    /// The sheet metal body. Default: the last sheet.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// csv (a header and a row per bend, quoted body and rule names, CRLF line ends) or json (the
+    /// flat pattern that `sheet.flat_pattern` returns, as text). Default: csv.
+    #[serde(default)]
+    pub format: Option<BendTableFormatParam>,
+    /// The file to write. Default (or blank): no file; the reply holds the table's text.
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+/// The form of a bend table.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum BendTableFormat {
+    Csv,
+    Json,
+}
+
+/// A bend table's `format`, in any case (read by `sheet::bend_table_format`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BendTableFormatParam(pub BendTableFormat);
+
+impl<'de> Deserialize<'de> for BendTableFormatParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        v.as_str().and_then(crate::cmd::bend_table_format).map(BendTableFormatParam).ok_or_else(|| D::Error::custom("must be csv or json"))
+    }
+}
+
+impl JsonSchema for BendTableFormatParam {
+    fn schema_name() -> Cow<'static, str> {
+        "BendTableFormat".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({"description": "csv or json, in any case.", "type": "string", "pattern": "^([Cc][Ss][Vv]|[Jj][Ss][Oo][Nn])$"})
+    }
+}
+
+/// A point `[x, y]` in flat coordinates, in mm.
+pub type FlatPoint = [f64; 2];
+
+/// One curve of a cut-out's exact shape.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum FlatSegment {
+    /// A straight line from its first point to its second.
+    Line([FlatPoint; 2]),
+    /// A circular arc.
+    Arc {
+        center: FlatPoint,
+        radius: f64,
+        /// Where the arc starts, in degrees counterclockwise from +X.
+        start_deg: f64,
+        /// How far it turns, in degrees: positive counterclockwise.
+        sweep_deg: f64,
+    },
+    /// Any other curve (an ellipse, a spline), as points within 0.001 mm of it.
+    Polyline(Vec<FlatPoint>),
+}
+
+/// A circle's centre and radius, in mm.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct FlatCircle {
+    pub center: FlatPoint,
+    pub radius: f64,
+}
+
+/// A cut-out's exact shape: a whole circle, or its curves in order.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum FlatShape {
+    Circle { circle: FlatCircle },
+    Segments { segments: Vec<FlatSegment> },
+}
+
+/// Which side of the sheet a pocket is machined from.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum PocketSide {
+    /// From the flat's bottom face.
+    Bottom,
+    /// From its top face.
+    Top,
+    /// Inside the sheet, open to neither face.
+    Internal,
+}
+
+/// A pocket: material machined to a depth, not through the sheet.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct FlatPocket {
+    /// Its outer contour, as points within 0.001 mm.
+    pub outline: Vec<FlatPoint>,
+    /// Islands inside it that keep their material, as points within 0.001 mm.
+    pub cutouts: Vec<Vec<FlatPoint>>,
+    /// The same islands exactly, in the same order.
+    pub cutout_shapes: Vec<FlatShape>,
+    pub side: PocketSide,
+    /// `z1_mm` less `z0_mm`.
+    pub depth_mm: f64,
+    /// The pocket's bottom and top, measured from the flat's bottom face, in mm.
+    pub z0_mm: f64,
+    pub z1_mm: f64,
+}
+
+/// Which way a bend folds: up toward the flat's top face (+z), down toward its bottom.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum BendDirection {
+    Up,
+    Down,
+}
+
+/// A bend of the flat pattern.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct FlatBend {
+    /// The bend's number, from 1. The stretches that cut-outs leave of one bend each have a row,
+    /// with the same number.
+    pub bend: usize,
+    /// The bend angle, in degrees.
+    pub angle_deg: f64,
+    /// The angle left between the bend's sides, in degrees: 180 less `angle_deg`.
+    pub included_angle_deg: f64,
+    /// The inner bend radius, in mm.
+    pub radius: f64,
+    pub direction: BendDirection,
+    /// The bend allowance (the bend zone's width in the flat), in mm.
+    pub allowance: f64,
+    /// The length of this stretch of the bend's centre line, in mm.
+    pub length: f64,
+    /// The bend's centre line, from `start` to `end`.
+    pub start: FlatPoint,
+    pub end: FlatPoint,
+}
+
+/// How a perforation field lays out its holes.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum FlatPerforationPattern {
+    /// Rows offset for a 60° pattern.
+    Staggered,
+    Square,
+}
+
+/// A perforation field: round holes in the flat pattern, not cut into the solid.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct FlatPerforation {
+    /// The `sheet.perforate` feature's id.
+    pub feature: u64,
+    /// The holes' diameter, the distance between their centres and how far they stay clear of
+    /// edges, cut-outs and bends, in mm.
+    pub diameter: f64,
+    pub pitch: f64,
+    pub margin: f64,
+    pub pattern: FlatPerforationPattern,
+    /// How many holes the field has.
+    pub count: usize,
+    /// The holes' area together, in mm².
+    pub open_area_mm2: f64,
+}
+
+/// A hole drilled along a panel into its rim, drilled after cutting and not in the outline.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct FlatBore {
+    /// Where it starts, in flat coordinates with z up from the bottom face, in mm.
+    pub start: [f64; 3],
+    /// Its direction, a unit vector.
+    pub axis: [f64; 3],
+    /// Its diameter and length, in mm.
+    pub diameter: f64,
+    pub length: f64,
+}
+
+/// What `sheet.flat_pattern` returns: the sheet's flat pattern in flat coordinates (mm, on the
+/// base panel's bottom face). The `json` form of `sheet.export_bend_table` is this as text.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct FlatPatternResult {
+    /// The sheet metal body.
+    pub body: String,
+    /// Its sheet metal rule, by name.
+    pub rule: String,
+    /// The sheet's thickness, in mm.
+    pub thickness: f64,
+    /// The K-factor its bends unfold with.
+    pub k_factor: f64,
+    /// The flat pattern's width and height (its bounding box) and its thickness, in mm.
+    pub flat_size_mm: [f64; 3],
+    /// The outer contours, one per piece, as points within 0.001 mm.
+    pub outline: Vec<Vec<FlatPoint>>,
+    /// The cut-outs through the sheet, as points within 0.001 mm.
+    pub cutouts: Vec<Vec<FlatPoint>>,
+    /// The same cut-outs exactly, in the same order.
+    pub cutout_shapes: Vec<FlatShape>,
+    pub pockets: Vec<FlatPocket>,
+    pub bends: Vec<FlatBend>,
+    /// Whether the sheet is unfolded now.
+    pub unfolded: bool,
+    pub perforations: Vec<FlatPerforation>,
+    /// Each bend zone's bounding box, `[min x, max x, min y, max y]` in mm.
+    pub bend_zones: Vec<[f64; 4]>,
+    /// Left out when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bores: Vec<FlatBore>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// What `sheet.export_bend_table` returns: the file it wrote, or the table's text.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum BendTableResult {
+    /// The table went to `path`.
+    Written {
+        path: String,
+        format: BendTableFormat,
+        /// How many rows the table has: one per bend, or per stretch of a bend that cut-outs split.
+        bends: usize,
+        /// In the warn parameter-check mode: what the call's parameters got wrong.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        param_warnings: Vec<String>,
+    },
+    /// No `path`: the table's text.
+    Text {
+        format: BendTableFormat,
+        text: String,
+        /// How many rows the table has: one per bend, or per stretch of a bend that cut-outs split.
+        bends: usize,
+        /// In the warn parameter-check mode: what the call's parameters got wrong.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         param_warnings: Vec<String>,
     },

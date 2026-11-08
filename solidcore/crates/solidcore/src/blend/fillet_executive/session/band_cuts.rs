@@ -1,0 +1,1181 @@
+//! Whether a convex blend would take all of the part between its rails somewhere along its
+//! edge, cutting it into pieces, and the largest size that keeps it whole.
+//!
+//! Upstream: not in SMLib at the pinned commit. SolidCraft's fork (tangency-labs/smlib#79,
+//! merged at 5e8c9c1) adds `SmFilletSolver::BandCutsThePart` with `sm_EdgesCrossingPlane`
+//! and `sm_KeepsMaterialBehind` (`SmFilletSolver.cpp`, `SmFilletSolver.h`) in commits
+//! 862971f, e568e45 (the section intersected with every face, not sampled) and aac4288 (a
+//! run of cutting sections reaching an end of the edge is no cut). They run only with the
+//! opt-in `Kernel::fixes.fillet_gn_section_generator`.
+//!
+//! | Rust                          | Upstream (fork)                          |
+//! |-------------------------------|------------------------------------------|
+//! | [`band_cuts_the_part`]        | `SmFilletSolver::BandCutsThePart`        |
+//! | [`BandCut`]                   | its outputs `rbCuts`, `rdRadius`, `rdSetback` |
+//! | `edges_crossing_plane` (private) | `sm_EdgesCrossingPlane`               |
+//! | `keeps_material_behind` (private) | `sm_KeepsMaterialBehind`             |
+//! | `keeps` (private)             | the `Keeps` lambda of `BandCutsThePart`  |
+//!
+//! Not the fork's: [`band_breaks_through_the_part`] (WR-707, #2299), the same sections
+//! judged for breaking through the part into a hollow behind a wall, with
+//! `fixes.fillet_refuse_rounds_breaking_through`.
+//!
+//! Deviations: the fork's out-params are returned (`None` for no cut). The solutions of
+//! `SmSurface::GlobalCurveIntersect` carry no object handles (the fork reads only their
+//! parameters). Every loop is bounded by fixed counts (32 steps, 40 bisections, halvings
+//! down to a millionth of the radius); there is no recursion.
+
+// the fork's NaN-safe tests (`!(a > b)`) are kept as written
+#![allow(clippy::neg_cmp_op_on_partial_ord)]
+use crate::blend::fillet_executive::session::ball_regular::{
+    ball_law, ball_section_at, rolls_a_ball, set_ball_radius,
+};
+use crate::blend::fillet_executive::session::SolverObject;
+use crate::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
+use crate::curve::curve::Curve;
+use crate::curve::ellipse::p2::EllipseOptions;
+use crate::curve::ellipse::Ellipse;
+use crate::curve::line::Line;
+use crate::error::EntityRef;
+use crate::error::{Result, SolidError};
+use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::extent1d::Extent1d;
+use crate::geom::extent2d::Extent2d;
+use crate::geom::extent3d::Extent3d;
+use crate::geom::solution_array::{ObjectKind, SolutionObject, SolutionType};
+use crate::geom::tol::{brep_zone_tol_3d, SmallTopoType};
+use crate::intersect::point_class::{PointClassType, PointClassification};
+use crate::intersect::surface_intersector::p1::{SrfIndex, TsectPnt};
+use crate::kernel::Kernel;
+use crate::math::{rad_to_deg, Point2, Point3, Vec3, EFF_ZERO};
+use crate::nurbs::b_spline_curve::BoundingBoxRequest;
+use crate::query::brep::BrepQuery;
+use crate::surface::plane::p1::Plane;
+use crate::surface::surface::Surface;
+use crate::topology::brep_cache::CacheObject;
+use crate::topology::edge;
+use crate::topology::edgeuse::p1 as eu;
+use crate::topology::{face, vertex, Brep, FaceId};
+use std::collections::BTreeSet;
+
+const OP: &str = "blend::fillet_executive::session::band_cuts";
+
+/// `lSteps`: the sections along the edge.
+const STEPS: usize = 32;
+
+/// `lBisections`: the bisection steps on the ball's radius.
+const BISECTIONS: usize = 40;
+
+/// `smos_Max` of two doubles.
+fn smos_max(a: f64, b: f64) -> f64 {
+    if a > b {
+        a
+    } else {
+        b
+    }
+}
+
+/// Where a convex blend would cut the part ([`band_cuts_the_part`]): the largest ball
+/// radius that keeps it whole, least over the cutting sections (`rdRadius`), and that
+/// radius's setback from the edge to the first rail (`rdSetback`, a chamfer's size).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BandCut {
+    /// `rdRadius`.
+    pub radius: f64,
+    /// `rdSetback`.
+    pub setback: f64,
+}
+
+#[derive(Debug)]
+struct CachedEdge {
+    curve: Curve,
+    natural_interval: Extent1d,
+    interval: Extent1d,
+    bbox: Option<Extent3d>,
+}
+
+#[derive(Debug)]
+struct CachedFace {
+    id: FaceId,
+    surface: Surface,
+    domain: Extent2d,
+    bbox: Option<Extent3d>,
+}
+
+/// Precomputed target-body topology, bounding boxes, and [`BrepQuery`] (with its kept
+/// `BrepCache`, `Extent3d`, and `KeptFaceCaches`) shared across all station and solver
+/// checks in [`band_cuts_the_part_cached`] and [`band_breaks_through_the_part_cached`].
+#[derive(Debug)]
+pub(crate) struct BandCutCache {
+    edges: Vec<CachedEdge>,
+    faces: Vec<CachedFace>,
+    query: BrepQuery<'static>,
+}
+
+impl BandCutCache {
+    fn new(k: &Kernel, body: &mut Brep) -> Result<Self> {
+        let mut edges = Vec::new();
+        for e in crate::topology::brep::p1::edges(body, None)? {
+            let Some(curve) = edge::evaluation_curve(body, e)? else {
+                continue;
+            };
+            let interval = edge::interval(body, e)?;
+            let natural_interval = curve.natural_interval();
+            let bbox = curve
+                .calculate_bounding_box(
+                    k,
+                    &interval,
+                    BoundingBoxRequest {
+                        normal: true,
+                        pseudo: false,
+                        polar: false,
+                    },
+                    false,
+                )
+                .ok()
+                .and_then(|b| b.normal);
+            edges.push(CachedEdge {
+                curve,
+                natural_interval,
+                interval,
+                bbox,
+            });
+        }
+        let mut faces = Vec::new();
+        for f in crate::topology::brep::p1::faces(body, None)? {
+            let Some(surface) = face::p2::surface(body, f)? else {
+                continue;
+            };
+            let surface = surface.clone_for_evaluation()?;
+            let domain = surface.natural_uv_domain_with_nurb(k)?;
+            let bbox = crate::query::face::p1::calculate_bounding_box(k, &mut *body, f, false).ok();
+            faces.push(CachedFace {
+                id: f,
+                surface,
+                domain,
+                bbox,
+            });
+        }
+        let query = BrepQuery::of_brep(body);
+        Ok(Self {
+            edges,
+            faces,
+            query,
+        })
+    }
+}
+
+/// The operands of the plane's intersections: an edge's curve and the plane, named as
+/// upstream's solutions name them (the caches they build own their trees).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Operand {
+    /// The edge's curve, with its natural interval.
+    Curve(Extent1d),
+    /// The plane, with its natural domain.
+    Plane(Extent2d),
+}
+
+impl SolutionObject for Operand {
+    fn kind(&self) -> ObjectKind {
+        match self {
+            Self::Curve(_) => ObjectKind::Curve,
+            Self::Plane(_) => ObjectKind::Surface,
+        }
+    }
+
+    fn natural_interval(&self) -> Option<Extent1d> {
+        match self {
+            Self::Curve(ivl) => Some(*ivl),
+            Self::Plane(_) => None,
+        }
+    }
+
+    fn natural_uv_domain(&self) -> Option<Extent2d> {
+        match self {
+            Self::Plane(domain) => Some(*domain),
+            Self::Curve(_) => None,
+        }
+    }
+}
+
+/// `sm_EdgesCrossingPlane`: the points where `body`'s edges cross the plane through
+/// `origin` square to the unit `normal`, each edge's curve intersected with the plane; an
+/// edge lying in the plane gives its ends there.
+fn edges_crossing_plane(
+    k: &Kernel,
+    body: &Brep,
+    cache: &BandCutCache,
+    origin: Point3,
+    normal: Vec3,
+) -> Result<Vec<Point3>> {
+    let mut crossings = Vec::new();
+    let x = if normal.x.abs() < 0.9 {
+        Vec3::new(1.0, 0.0, 0.0).cross(normal)
+    } else {
+        Vec3::new(0.0, 1.0, 0.0).cross(normal)
+    };
+    let x = x.unitize()?;
+    let y = normal.cross(x);
+    let plane = Surface::from(Plane::create_canonical(&Axis2Placement::new(origin, x, y))?);
+    let domain = plane.natural_uv_domain_with_nurb(k)?;
+    let tol = body.tolerance();
+    let plane_tol = smos_max(tol, 1.0e-4);
+    for edge in &cache.edges {
+        if let Some(bbox) = &edge.bbox {
+            if bbox.distance_to_plane(origin, normal).abs() > plane_tol {
+                continue;
+            }
+        }
+        let solutions = plane.global_curve_intersect(
+            k,
+            [
+                Operand::Curve(edge.natural_interval),
+                Operand::Plane(domain),
+            ],
+            &domain,
+            &edge.curve,
+            &edge.interval,
+            tol,
+        )?;
+        for sol in solutions.as_slice() {
+            let t = sol
+                .start
+                .parameters
+                .first()
+                .copied()
+                .ok_or_else(|| SolidError::null_pointer(OP))?;
+            crossings.push(edge.curve.evaluate_point(k, t)?);
+            if sol.solution_type == SolutionType::RangeOfValues {
+                let t = sol
+                    .end
+                    .parameters
+                    .first()
+                    .copied()
+                    .ok_or_else(|| SolidError::null_pointer(OP))?;
+                crossings.push(edge.curve.evaluate_point(k, t)?);
+            }
+        }
+    }
+    Ok(crossings)
+}
+
+/// `sm_KeepsMaterialBehind`: whether the part keeps material behind the section of a
+/// convex blend at a station, the region between the section and the ball's centre
+/// `centre` (the ball's sector between the rails for a round, the triangle of the centre
+/// and the rails for a chamfer's `chord`).
+///
+/// Kept where a body edge crosses the station's plane inside that region (`crossings`),
+/// or the section (as an exact curve) crosses a face's surface inside the face. With
+/// neither, one point of the section classified against the body says whether it lies
+/// inside the part; outside, the blend takes all of the part between its rails there.
+fn keeps_material_behind(
+    k: &Kernel,
+    body: &mut Brep,
+    cache: &BandCutCache,
+    centre: Point3,
+    rails: [Point3; 2],
+    chord: bool,
+    crossings: &[Point3],
+) -> Result<bool> {
+    let [rail1, rail2] = rails;
+    let a = rail1 - centre;
+    let b = rail2 - centre;
+    let r2 = smos_max(a.length_squared(), b.length_squared());
+    let (aa, ab, bb) = (a.dot(a), a.dot(b), b.dot(b));
+    let det = aa * bb - ab * ab;
+    if !(det > EFF_ZERO * aa * bb) {
+        return Ok(true); // rails opposite or together: no region to judge
+    }
+    let tol = 1.0e-9 * r2.sqrt();
+    for &crossing in crossings {
+        let x = crossing - centre;
+        let (xa, xb) = (x.dot(a), x.dot(b));
+        let alpha = (xa * bb - xb * ab) / det;
+        let beta = (xb * aa - xa * ab) / det;
+        if alpha < -1.0e-12 || beta < -1.0e-12 {
+            continue;
+        }
+        let inside = if chord {
+            alpha + beta <= 1.0 + 1.0e-12
+        } else {
+            x.length() <= r2.sqrt() + tol
+        };
+        if inside {
+            return Ok(true);
+        }
+    }
+
+    // the section as an exact curve: the chord, or the circle's arc from the first rail to the
+    // second the short way
+    let (section, middle) = if chord {
+        let line = Line::create_line_segment(3, rail1, rail2, None)?;
+        (Curve::from(line), (rail1 + rail2) * 0.5)
+    } else {
+        let rho = aa.sqrt();
+        let e1 = a / rho;
+        let e2 = (b - a * (ab / aa)).unitize()?;
+        let phi = b.dot(e2).atan2(b.dot(e1));
+        let circle = Ellipse::new_circle(
+            k,
+            centre,
+            e1,
+            e2,
+            Extent1d::from_min_max(0.0, rad_to_deg(phi)),
+            rho,
+            &EllipseOptions {
+                dim: 3,
+                ..EllipseOptions::default()
+            },
+        )?;
+        let middle = centre + e1 * (rho * (0.5 * phi).cos()) + e2 * (rho * (0.5 * phi).sin());
+        (Curve::from(circle), middle)
+    };
+    let interval = section.natural_interval();
+    let ends = body.tolerance();
+    let zone = brep_zone_tol_3d(k, body, SmallTopoType::default());
+    let sec_box = section
+        .calculate_bounding_box(
+            k,
+            &interval,
+            BoundingBoxRequest {
+                normal: true,
+                pseudo: false,
+                polar: false,
+            },
+            false,
+        )
+        .ok()
+        .and_then(|b| b.normal);
+    for face in &cache.faces {
+        if let (Some(f_box), Some(s_box)) = (&face.bbox, &sec_box) {
+            if f_box.are_disjoint(s_box, ends) {
+                continue;
+            }
+        }
+        let f = face.id;
+        // the crossings inside the face's surface's domain, judged after the borrow ends
+        let mut on_face: Vec<Point2> = Vec::new();
+        {
+            // the face's surface solves through its face (its trimmed cache), as upstream's
+            // `GlobalCurveIntersect` reaches the owner's cache
+            let solutions = cache
+                .query
+                .face_caches()
+                .with_services(k, &mut *body, |services| {
+                    face.surface
+                        .global_curve_intersect_with_context::<CacheObject>(
+                            k,
+                            [None, Some(CacheObject::Surface(f))],
+                            None,
+                            services,
+                            &face.domain,
+                            &section,
+                            &interval,
+                            ends,
+                        )
+                })?;
+            for sol in solutions.as_slice() {
+                if sol.solution_type == SolutionType::RangeOfValues {
+                    return Ok(true); // the section runs along the face's surface
+                }
+                let params = &sol.start.parameters;
+                let (Some(&t), Some(&u), Some(&v)) = (params.first(), params.get(1), params.get(2))
+                else {
+                    return Err(SolidError::null_pointer(OP));
+                };
+                let at = section.evaluate_point(k, t)?;
+                if at.distance(rail1) <= ends || at.distance(rail2) <= ends {
+                    continue; // the section's own ends, on the blended faces
+                }
+                on_face.push(Point2::new(u, v));
+            }
+        }
+        for uv in on_face {
+            let mut class = PointClassification::<EntityRef>::new(zone);
+            cache.query.face_caches().point_classify(
+                k,
+                body,
+                f,
+                uv,
+                &mut class,
+                crate::query::face::p2::PointClassifyOptions {
+                    src_zone_tol_3d: zone,
+                    do_boundary_intersections: true,
+                    use_uv_classification: true,
+                    ..crate::query::face::p2::PointClassifyOptions::default()
+                },
+            )?;
+            if class.point_class() == PointClassType::Face {
+                return Ok(true); // the section crosses the part's boundary inside a face
+            }
+        }
+    }
+    // no crossing: the section between its rails is wholly in the part or wholly outside it
+    let class = cache.query.point_3d_classify(k, body, middle, zone, true)?;
+    if class.point_class() != PointClassType::Region {
+        return Ok(true);
+    }
+    if let Some(EntityRef::Region(region)) = class.object() {
+        if body.region(region)?.is_void() == 0 {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// One section judged by `keeps`.
+#[derive(Debug, Clone, Copy, Default)]
+struct Section {
+    /// `rbJudged`: the section was found.
+    found: bool,
+    /// `rbKeeps`: material is kept behind it.
+    keeps: bool,
+    /// `rdSetbackHere`: the distance from the edge to the first rail.
+    setback: f64,
+}
+
+/// The `Keeps` lambda of `BandCutsThePart`: at the edge's `t` with the ball's radius
+/// `trial` (0: the solver's own, restored to `own` after), whether material is kept behind
+/// the section; `near` is the guess, then this section if found.
+#[allow(clippy::too_many_arguments)]
+fn keeps(
+    k: &Kernel,
+    target: &mut Brep,
+    cache: &BandCutCache,
+    solver: &mut SolverObject,
+    edge_curve: &Curve,
+    chord: bool,
+    own: f64,
+    t: f64,
+    trial: f64,
+    judge: Judge<'_>,
+    near: &mut Option<TsectPnt>,
+) -> Result<Section> {
+    let mut out = Section {
+        found: false,
+        keeps: true,
+        setback: 0.0,
+    };
+    if trial > 0.0 && !set_ball_radius(solver, trial)? {
+        return Ok(out);
+    }
+    let evaluated = (|| -> Result<Option<(TsectPnt, [Point3; 3])>> {
+        let Some(pnt) = ball_section_at(k, target, solver, edge_curve, t, near.as_ref())? else {
+            return Ok(None);
+        };
+        let uvs = [pnt.uv_pos(SrfIndex::First), pnt.uv_pos(SrfIndex::Second)];
+        let base = solver.base_mut();
+        let mut at = [Point3::UNDEF; 3];
+        {
+            let slot = base
+                .surface_mut(0)?
+                .ok_or_else(|| SolidError::null_pointer(OP))?;
+            at[0] = slot.surface.surface.evaluate_point_extending(k, uvs[0])?;
+        }
+        for (rail, uv) in uvs.into_iter().enumerate() {
+            let slot = base
+                .surface(rail)?
+                .ok_or_else(|| SolidError::null_pointer(OP))?;
+            let p = slot.surface.surface.base_surface().evaluate_point(k, uv)?;
+            if let Some(dst) = at.get_mut(rail + 1) {
+                *dst = p;
+            }
+        }
+        // the rails past a base surface's domain lie on its extension, as the offset evaluates it
+        for (rail, uv) in uvs.into_iter().enumerate() {
+            let slot = base
+                .surface(rail)?
+                .ok_or_else(|| SolidError::null_pointer(OP))?;
+            let offset = &slot.surface.surface;
+            if let Some(extended) = offset.extended_base_surface() {
+                if !offset
+                    .base_surface()
+                    .natural_uv_domain_with_nurb(k)?
+                    .contains_point(uv, 0.0)
+                    && extended
+                        .natural_uv_domain_with_nurb(k)?
+                        .contains_point(uv, 0.0)
+                {
+                    let p = extended.evaluate_point(k, uv)?;
+                    if let Some(dst) = at.get_mut(rail + 1) {
+                        *dst = p;
+                    }
+                }
+            }
+        }
+        Ok(Some((pnt, at)))
+    })();
+    if trial > 0.0 {
+        // the solver's own radius back, whatever the solve did
+        let _ = set_ball_radius(solver, own);
+    }
+    let Some((pnt, [centre, rail1, rail2])) = evaluated? else {
+        return Ok(out);
+    };
+    *near = Some(pnt);
+    out.found = true;
+    let p = edge_curve.evaluate_point(k, t)?;
+    out.setback = p.distance(rail1);
+    out.keeps = match judge {
+        Judge::KeepsMaterial(crossings) => {
+            keeps_material_behind(k, target, cache, centre, [rail1, rail2], chord, crossings)?
+        }
+        Judge::StaysInside(faces) => {
+            !section_breaks_through(k, target, cache, centre, [rail1, rail2], chord, faces)?
+        }
+    };
+    Ok(out)
+}
+
+/// What `keeps` judges at a section: material kept behind it (`sm_KeepsMaterialBehind`,
+/// with the body's edges crossing the station's plane), or (WR-707, not the fork's) the
+/// section not breaking through the part (`section_breaks_through`).
+#[derive(Clone, Copy)]
+enum Judge<'a> {
+    /// `sm_KeepsMaterialBehind` with these plane crossings.
+    KeepsMaterial(&'a [Point3]),
+    /// `section_breaks_through` false, with these faces.
+    StaysInside(&'a ThroughFaces),
+}
+
+/// The faces `section_breaks_through` tells apart (WR-707, not the fork's).
+struct ThroughFaces {
+    /// The faces at the blended edge's ends, which the corners trim: not judged.
+    skip: BTreeSet<FaceId>,
+    /// The blended faces and every face sharing an edge with one: the faces the blend
+    /// reaches over the blended faces' boundaries, which it is trimmed to.
+    reached: BTreeSet<FaceId>,
+}
+
+/// Not the fork's (WR-707, #2299): whether the section of a convex blend at a station,
+/// between its rails (the ball's arc, or the chamfer's chord, as an exact curve), breaks
+/// through the part's boundary: it leaves the part through a face and comes back into it
+/// through another (or the same) face, so the part between those crossings is a hollow
+/// behind a wall that the blend opens (a round on a wall thinner than it reaches into the
+/// hollow behind, #2299).
+///
+/// The section is split at every point where it meets the body's boundary (crossings
+/// within the body's tolerance of its own ends are its rails), and each piece between two
+/// such points is classified by its middle. The section breaks through where a piece
+/// lies outside the part's material, one of its ends crosses a face inside the face (not
+/// at an edge), neither end is on a face at the blended edge's ends (which the corners
+/// trim), and one end is on a face that shares no edge with the blended faces: an inner
+/// face of the part, bounding material behind a wall, that the blend does not reach over
+/// the blended faces' boundaries; and the material beside the piece runs to a rail on one
+/// side (WR-707 addendum, 2026-11-03, #2328). That material is the wall, part of what the
+/// blend rounds. A piece between islands of material, with void on either side of each
+/// along the section (a thin rib across a slot), is not behind a wall: the blend runs past
+/// the islands and is trimmed to their faces.
+///
+/// So a piece outside the part that reaches a rail is not a break-through: there the
+/// blend runs off its face (over a cliff, into a hole or an opening) and is trimmed to the
+/// faces it runs onto. Nor is a piece through a hole or an opening in a blended face: its
+/// walls bound that face. The construction builds both to their closed-form volumes
+/// (SolidCraft rig cases the fork builds). It builds a blind pocket or a cavity under a
+/// blended face wrong, and those are refused (WR-707 addendum, 2026-11-02).
+fn section_breaks_through(
+    k: &Kernel,
+    body: &mut Brep,
+    cache: &BandCutCache,
+    centre: Point3,
+    rails: [Point3; 2],
+    chord: bool,
+    faces: &ThroughFaces,
+) -> Result<bool> {
+    let [rail1, rail2] = rails;
+    let a = rail1 - centre;
+    let b = rail2 - centre;
+    let (aa, ab, bb) = (a.dot(a), a.dot(b), b.dot(b));
+    let det = aa * bb - ab * ab;
+    if !(det > EFF_ZERO * aa * bb) {
+        return Ok(false); // rails opposite or together: no section to judge
+    }
+    let section = if chord {
+        Curve::from(Line::create_line_segment(3, rail1, rail2, None)?)
+    } else {
+        let rho = aa.sqrt();
+        let e1 = a / rho;
+        let e2 = (b - a * (ab / aa)).unitize()?;
+        let phi = b.dot(e2).atan2(b.dot(e1));
+        Curve::from(Ellipse::new_circle(
+            k,
+            centre,
+            e1,
+            e2,
+            Extent1d::from_min_max(0.0, rad_to_deg(phi)),
+            rho,
+            &EllipseOptions {
+                dim: 3,
+                ..EllipseOptions::default()
+            },
+        )?)
+    };
+    let interval = section.natural_interval();
+    let ends = body.tolerance();
+    let zone = brep_zone_tol_3d(k, body, SmallTopoType::default());
+    let sec_box = section
+        .calculate_bounding_box(
+            k,
+            &interval,
+            BoundingBoxRequest {
+                normal: true,
+                pseudo: false,
+                polar: false,
+            },
+            false,
+        )
+        .ok()
+        .and_then(|b| b.normal);
+    // where the section meets the boundary of face `f`: its parameter, whether it crosses
+    // `f` inside it (not on its boundary), whether `f` is judged and whether the blend
+    // reaches `f`
+    let mut meets: Vec<Meet> = Vec::new();
+    for face in &cache.faces {
+        if let (Some(f_box), Some(s_box)) = (&face.bbox, &sec_box) {
+            if f_box.are_disjoint(s_box, ends) {
+                continue;
+            }
+        }
+        let f = face.id;
+        let mut on_face: Vec<(f64, Point2)> = Vec::new();
+        {
+            let solutions = cache
+                .query
+                .face_caches()
+                .with_services(k, &mut *body, |services| {
+                    face.surface
+                        .global_curve_intersect_with_context::<CacheObject>(
+                            k,
+                            [None, Some(CacheObject::Surface(f))],
+                            None,
+                            services,
+                            &face.domain,
+                            &section,
+                            &interval,
+                            ends,
+                        )
+                })?;
+            for sol in solutions.as_slice() {
+                let params = &sol.start.parameters;
+                let (Some(&t), Some(&u), Some(&v)) = (params.first(), params.get(1), params.get(2))
+                else {
+                    return Err(SolidError::null_pointer(OP));
+                };
+                let at = section.evaluate_point(k, t)?;
+                if at.distance(rail1) <= ends || at.distance(rail2) <= ends {
+                    continue; // the section's own ends, on the blended faces
+                }
+                on_face.push((t, Point2::new(u, v)));
+            }
+        }
+        for (t, uv) in on_face {
+            let mut class = PointClassification::<EntityRef>::new(zone);
+            cache.query.face_caches().point_classify(
+                k,
+                body,
+                f,
+                uv,
+                &mut class,
+                crate::query::face::p2::PointClassifyOptions {
+                    src_zone_tol_3d: zone,
+                    do_boundary_intersections: true,
+                    use_uv_classification: true,
+                    ..crate::query::face::p2::PointClassifyOptions::default()
+                },
+            )?;
+            let inside = match class.point_class() {
+                PointClassType::Unknown => continue, // outside the face
+                PointClassType::Face => true,
+                _ => false, // on the face's boundary
+            };
+            meets.push(Meet {
+                t,
+                inside,
+                judged: !faces.skip.contains(&f),
+                reached: faces.reached.contains(&f),
+            });
+        }
+    }
+    meets.sort_by(|x, y| x.t.total_cmp(&y.t));
+    // the bounds of the section's pieces: its rails and the meets between them; piece `i`
+    // runs from `at[i]` to `at[i + 1]`, so meet `j` ends piece `j` and starts piece `j + 1`
+    let mut at = Vec::with_capacity(meets.len() + 2);
+    at.push(interval.min());
+    at.extend(meets.iter().map(|m| m.t));
+    at.push(interval.max());
+    let mut pieces = Pieces {
+        section: &section,
+        at: &at,
+        classes: vec![None; at.len() - 1],
+        zone,
+        query: &cache.query,
+    };
+    for (j, pair) in meets.windows(2).enumerate() {
+        let [m0, m1] = pair else {
+            continue;
+        };
+        if !(m0.judged && m1.judged) || !(m0.inside || m1.inside) || (m0.reached && m1.reached) {
+            continue;
+        }
+        let piece = j + 1;
+        if pieces.class(k, body, piece)? != Piece::Void {
+            continue;
+        }
+        // the wall: the material beside the piece runs to a rail
+        if pieces.material_to_rail(k, body, (0..piece).rev())?
+            || pieces.material_to_rail(k, body, piece + 1..at.len() - 1)?
+        {
+            return Ok(true); // a hollow behind a wall: the section breaks through
+        }
+    }
+    Ok(false)
+}
+
+/// The pieces of a section between the points where it meets the part's boundary
+/// (`section_breaks_through`), each classified once, by its middle.
+struct Pieces<'a> {
+    /// The section.
+    section: &'a Curve,
+    /// The pieces' bounds, in the section's parameter.
+    at: &'a [f64],
+    /// Each piece's class, once classified.
+    classes: Vec<Option<Piece>>,
+    /// The body's zone tolerance.
+    zone: f64,
+    /// Shared B-rep query for point classifications.
+    query: &'a BrepQuery<'static>,
+}
+
+impl Pieces<'_> {
+    /// The class of piece `i`.
+    fn class(&mut self, k: &Kernel, body: &mut Brep, i: usize) -> Result<Piece> {
+        if let Some(Some(known)) = self.classes.get(i) {
+            return Ok(*known);
+        }
+        let (Some(&t0), Some(&t1)) = (self.at.get(i), self.at.get(i + 1)) else {
+            return Err(SolidError::null_pointer(OP));
+        };
+        let class = if !(t1 - t0 > 0.0) {
+            Piece::Point
+        } else if point_in_material(
+            k,
+            body,
+            self.query,
+            self.section.evaluate_point(k, 0.5 * (t0 + t1))?,
+            self.zone,
+        )? {
+            Piece::Material
+        } else {
+            Piece::Void
+        };
+        if let Some(slot) = self.classes.get_mut(i) {
+            *slot = Some(class);
+        }
+        Ok(class)
+    }
+
+    /// Whether the pieces `run`, taken from a void piece out to a rail, all lie in the
+    /// material (a piece of no length does not interrupt them): the material beside the
+    /// void piece is the part the blend rounds, reaching the blended face at its rail, not
+    /// an island with void on both sides that the blend runs past and is trimmed to.
+    fn material_to_rail(
+        &mut self,
+        k: &Kernel,
+        body: &mut Brep,
+        run: impl Iterator<Item = usize>,
+    ) -> Result<bool> {
+        for i in run {
+            if self.class(k, body, i)? == Piece::Void {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+}
+
+/// What a piece of a section between two meets is (`section_breaks_through`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Piece {
+    /// In the part's material.
+    Material,
+    /// Outside it.
+    Void,
+    /// Of no length: one point, met on two faces.
+    Point,
+}
+
+/// Where a section meets the boundary of a face (`section_breaks_through`).
+#[derive(Clone, Copy)]
+struct Meet {
+    /// The section's parameter there.
+    t: f64,
+    /// Inside the face, not on its boundary.
+    inside: bool,
+    /// The face is judged: not one at the blended edge's ends.
+    judged: bool,
+    /// The face is one the blend reaches ([`ThroughFaces::reached`]).
+    reached: bool,
+}
+
+/// Whether `point` lies in the part's material, inside a region that is not void (the
+/// final classification of `sm_KeepsMaterialBehind`, with a point on the boundary, within
+/// the zone tolerance of a face, edge or vertex, not counted in: a piece of a section
+/// between two crossings of faces that lies within the tolerance of the boundary is too
+/// shallow to keep material).
+fn point_in_material(
+    k: &Kernel,
+    body: &mut Brep,
+    query: &BrepQuery<'_>,
+    point: Point3,
+    zone: f64,
+) -> Result<bool> {
+    let class = query.point_3d_classify(k, body, point, zone, true)?;
+    if class.point_class() != PointClassType::Region {
+        return Ok(false);
+    }
+    if let Some(EntityRef::Region(region)) = class.object() {
+        return Ok(body.region(region)?.is_void() == 0);
+    }
+    Ok(false)
+}
+
+/// `SmFilletSolver::BandCutsThePart`: whether this convex blend (one that removes
+/// material) would take all of the part between its rails somewhere along its edge,
+/// cutting it into pieces (a round or chamfer through the bridge over a slot); and where it
+/// would, the largest size that keeps the part whole. `None` where it does not cut.
+///
+/// At the middles of 32 equal steps of the edge (as [`super::ball_regular::ball_is_regular`]),
+/// with the body's edges crossing each section's plane found once. A section where no
+/// material lies behind the blend's section is a cut where sections either side of its run
+/// along the edge keep material. The limit is then found at each cutting section by
+/// bisection on the ball's radius, least over the sections. A constant ball only.
+///
+/// `target` is the body blended; it holds the solver's edge use.
+///
+/// # Errors
+///
+/// Those of the section solves, the intersections, the classifications and the
+/// evaluations; `SM_ERR_NULL_POINTER` for an edge without a curve.
+pub fn band_cuts_the_part(
+    k: &Kernel,
+    target: &mut Brep,
+    solver: &mut SolverObject,
+) -> Result<Option<BandCut>> {
+    band_cuts_the_part_cached(k, target, solver, &mut None)
+}
+
+pub(crate) fn band_cuts_the_part_cached(
+    k: &Kernel,
+    target: &mut Brep,
+    solver: &mut SolverObject,
+    cache_slot: &mut Option<BandCutCache>,
+) -> Result<Option<BandCut>> {
+    let base = solver.base();
+    if base.surface(0)?.is_none() || base.surface(1)?.is_none() {
+        return Ok(None);
+    }
+    let Some(edgeuse) = base.edgeuse(0)? else {
+        return Ok(None);
+    };
+    let edge_id = eu::edge(target, edgeuse)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let curve = edge::evaluation_curve(target, edge_id)?
+        .ok_or_else(|| SolidError::null_pointer(OP))?
+        .clone();
+    let ivl = edge::interval(target, edge_id)?;
+    let (rolls, on_edge) = rolls_a_ball(solver);
+    if !rolls || on_edge {
+        return Ok(None); // a constant ball only
+    }
+    let probe = TsectPnt::new();
+    let own = ball_law(k, solver, &probe)?.r[0];
+    let chord = solver.base().fsg.as_ref().is_some_and(|fsg| {
+        fsg.fillet_surface_generator_type() == FilletSurfaceGeneratorType::Linear
+    });
+    let cache = match cache_slot {
+        Some(c) => c,
+        None => cache_slot.insert(BandCutCache::new(k, target)?),
+    };
+
+    // each section: its parameter, plane crossings and section found near, and whether it keeps
+    // material behind it (0), takes all of the part between the rails (1), or is not judged (2)
+    let mut ts: Vec<f64> = Vec::new();
+    let mut all_crossings: Vec<Vec<Point3>> = Vec::new();
+    let mut nears: Vec<Option<TsectPnt>> = Vec::new();
+    let mut states: Vec<u8> = Vec::new();
+    let mut near: Option<TsectPnt> = None;
+    for j in 0..STEPS {
+        let t = ivl.evaluate((j as f64 + 0.5) / STEPS as f64);
+        ts.push(t);
+        let pv = curve.evaluate(k, t, 1, true, false)?;
+        let (Some(&point), Some(&tangent)) = (pv.first(), pv.get(1)) else {
+            return Err(SolidError::null_pointer(OP));
+        };
+        if !(tangent.length() > EFF_ZERO) {
+            all_crossings.push(Vec::new());
+            nears.push(None);
+            states.push(2);
+            continue;
+        }
+        let normal = tangent.unitize()?;
+        let crossings = edges_crossing_plane(k, target, cache, point, normal)?;
+        let judged = keeps(
+            k,
+            target,
+            cache,
+            solver,
+            &curve,
+            chord,
+            own,
+            t,
+            0.0,
+            Judge::KeepsMaterial(&crossings),
+            &mut near,
+        )?;
+        all_crossings.push(crossings);
+        nears.push(near.clone());
+        states.push(if judged.found {
+            u8::from(!judged.keeps)
+        } else {
+            2
+        });
+    }
+
+    // a run of sections that take all of the part cuts it in two only where sections either side
+    // of the run along the edge keep material: a run that reaches an end of the edge (a tip, where
+    // the part runs out thinner than the band) blends that end away and leaves the part whole
+    let state = |i: usize| states.get(i).copied().unwrap_or(2);
+    let mut cut: Option<BandCut> = None;
+    let mut j = 0;
+    while j < STEPS {
+        if state(j) != 1 {
+            j += 1;
+            continue;
+        }
+        let first = j;
+        let mut last = j;
+        while last + 1 < STEPS && state(last + 1) != 0 {
+            last += 1;
+        }
+        j = last + 1;
+        let kept_before = (0..first).any(|i| state(i) == 0);
+        let kept_after = (last + 1..STEPS).any(|i| state(i) == 0);
+        if !kept_before || !kept_after {
+            continue;
+        }
+        for m in first..=last {
+            if state(m) != 1 {
+                continue;
+            }
+            let t = ts.get(m).copied().unwrap_or(0.0);
+            let crossings = all_crossings.get(m).map_or(&[][..], Vec::as_slice);
+            // the largest radius that keeps material behind its section here
+            let mut at = nears.get(m).cloned().flatten();
+            let radius = own;
+            let (mut lo, mut hi, mut lo_setback) = (0.0_f64, radius, 0.0);
+            let mut tr = 0.5 * radius;
+            while tr > 1.0e-6 * radius {
+                let judged = keeps(
+                    k,
+                    target,
+                    cache,
+                    solver,
+                    &curve,
+                    chord,
+                    own,
+                    t,
+                    tr,
+                    Judge::KeepsMaterial(crossings),
+                    &mut at,
+                )?;
+                if judged.found && judged.keeps {
+                    lo = tr;
+                    lo_setback = judged.setback;
+                    break;
+                }
+                hi = tr;
+                tr *= 0.5;
+            }
+            let mut i = 0;
+            while i < BISECTIONS && lo > 0.0 {
+                let mid = 0.5 * (lo + hi);
+                let judged = keeps(
+                    k,
+                    target,
+                    cache,
+                    solver,
+                    &curve,
+                    chord,
+                    own,
+                    t,
+                    mid,
+                    Judge::KeepsMaterial(crossings),
+                    &mut at,
+                )?;
+                if judged.found && judged.keeps {
+                    lo = mid;
+                    lo_setback = judged.setback;
+                } else {
+                    hi = mid;
+                }
+                i += 1;
+            }
+            if cut.is_none_or(|c| lo < c.radius) {
+                cut = Some(BandCut {
+                    radius: lo,
+                    setback: lo_setback,
+                });
+            }
+        }
+    }
+    Ok(cut)
+}
+
+/// Not the fork's (WR-707, #2299; `fixes.fillet_refuse_rounds_breaking_through` with
+/// `fixes.fillet_gn_section_generator`): whether this convex blend's section breaks
+/// through the part somewhere along its edge (it leaves the part and comes back into it
+/// through an inner face, one sharing no edge with the blended faces: a hollow behind a
+/// wall, `section_breaks_through`), and where it would, the largest size that keeps every
+/// section from breaking through. At the same 32 sections as [`band_cuts_the_part`]; faces
+/// at the blended edge's ends (the corners trim the blend there) are not judged. The limit at
+/// each crossing section is found as the cut's is (halving from the ball's radius, then
+/// 40 bisections), least over the sections. A constant ball only. `None` where no
+/// section breaks through.
+///
+/// # Errors
+///
+/// As [`band_cuts_the_part`].
+pub fn band_breaks_through_the_part(
+    k: &Kernel,
+    target: &mut Brep,
+    solver: &mut SolverObject,
+) -> Result<Option<BandCut>> {
+    band_breaks_through_the_part_cached(k, target, solver, &mut None)
+}
+
+pub(crate) fn band_breaks_through_the_part_cached(
+    k: &Kernel,
+    target: &mut Brep,
+    solver: &mut SolverObject,
+    cache_slot: &mut Option<BandCutCache>,
+) -> Result<Option<BandCut>> {
+    let base = solver.base();
+    if base.surface(0)?.is_none() || base.surface(1)?.is_none() {
+        return Ok(None);
+    }
+    let Some(edgeuse) = base.edgeuse(0)? else {
+        return Ok(None);
+    };
+    let edge_id = eu::edge(target, edgeuse)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let curve =
+        edge::evaluation_curve(target, edge_id)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let ivl = edge::interval(target, edge_id)?;
+    let (rolls, on_edge) = rolls_a_ball(solver);
+    if !rolls || on_edge {
+        return Ok(None); // a constant ball only
+    }
+    let probe = TsectPnt::new();
+    let own = ball_law(k, solver, &probe)?.r[0];
+    let chord = solver.base().fsg.as_ref().is_some_and(|fsg| {
+        fsg.fillet_surface_generator_type() == FilletSurfaceGeneratorType::Linear
+    });
+    // the faces at the edge's ends
+    let mut skip = BTreeSet::new();
+    let v0 = edge::vertex(target, edge_id)?;
+    for v in [v0, edge::other_vertex(target, edge_id, v0)?]
+        .into_iter()
+        .flatten()
+    {
+        skip.extend(vertex::faces(target, v)?);
+    }
+    // the blended faces and the faces sharing an edge with them
+    let mut reached = BTreeSet::new();
+    for f in edge::faces(target, edge_id, None)? {
+        reached.insert(f);
+        for e in face::p4::edges(target, f, None, false, None)? {
+            reached.extend(edge::faces(target, e, None)?);
+        }
+    }
+    let faces = ThroughFaces { skip, reached };
+    let cache = match cache_slot {
+        Some(c) => c,
+        None => cache_slot.insert(BandCutCache::new(k, target)?),
+    };
+    let mut out: Option<BandCut> = None;
+    let mut near: Option<TsectPnt> = None;
+    for j in 0..STEPS {
+        let t = ivl.evaluate((j as f64 + 0.5) / STEPS as f64);
+        let judged = keeps(
+            k,
+            target,
+            cache,
+            solver,
+            &curve,
+            chord,
+            own,
+            t,
+            0.0,
+            Judge::StaysInside(&faces),
+            &mut near,
+        )?;
+        if !judged.found || judged.keeps {
+            continue;
+        }
+        // the largest radius whose section here stays inside the part
+        let mut at = near.clone();
+        let (mut lo, mut hi, mut lo_setback) = (0.0_f64, own, 0.0);
+        let mut tr = 0.5 * own;
+        while tr > 1.0e-6 * own {
+            let s = keeps(
+                k,
+                target,
+                cache,
+                solver,
+                &curve,
+                chord,
+                own,
+                t,
+                tr,
+                Judge::StaysInside(&faces),
+                &mut at,
+            )?;
+            if s.found && s.keeps {
+                lo = tr;
+                lo_setback = s.setback;
+                break;
+            }
+            hi = tr;
+            tr *= 0.5;
+        }
+        let mut i = 0;
+        while i < BISECTIONS && lo > 0.0 {
+            let mid = 0.5 * (lo + hi);
+            let s = keeps(
+                k,
+                target,
+                cache,
+                solver,
+                &curve,
+                chord,
+                own,
+                t,
+                mid,
+                Judge::StaysInside(&faces),
+                &mut at,
+            )?;
+            if s.found && s.keeps {
+                lo = mid;
+                lo_setback = s.setback;
+            } else {
+                hi = mid;
+            }
+            i += 1;
+        }
+        if out.is_none_or(|c| lo < c.radius) {
+            out = Some(BandCut {
+                radius: lo,
+                setback: lo_setback,
+            });
+        }
+    }
+    Ok(out)
+}

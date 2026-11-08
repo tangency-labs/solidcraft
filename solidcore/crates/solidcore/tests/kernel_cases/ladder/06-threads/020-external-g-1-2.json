@@ -1,0 +1,166 @@
+{
+  "area": "ladder/06-threads",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b15"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b16"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b17"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b16"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b18"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b17",
+        "b18"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b19"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "020-external-g-1-2",
+  "expected": {
+    "body_count": 1,
+    "method": "groove volume per turn 2 pi int r w(r) dr over the material it cuts (Pappus on the axial section; a screw motion), w(r) = P - flat - depth (tan a + tan b); six whole turns between free ends, so V = stock - 6 x that. Tolerance 0.01%: SMLib's exact screw sweep. the space between the teeth is a groove of straight flanks, its tooth (H - h) tan(half angle) wide at the crest and its groove as wide at the root (the truncations split equally); the standard's crest and root rounds are flats here. ISO 228-1 G 1/2: d = 20.955, 14 threads per inch, H = 0.960491 P, h = 0.640327 P, so the crest flat (H - h) tan27.5 = 0.16667 P and the minor d1 = d - 2h = 18.631",
+    "source": "analytic",
+    "sources": [],
+    "tolerance": {
+      "rel": 0.0001
+    },
+    "volume_mm3": 3355.923237102,
+    "what": "a modelled G 1/2 parallel pipe thread (ISO 228-1, 55 deg) on a d20.955 shaft, six turns"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 1819.8329651487302,
+      "body_count": 1,
+      "edges": 84,
+      "faces": 30,
+      "vertices": 56,
+      "volume_mm3": 3355.9227118042977
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 117,
+      "faces": 49,
+      "vertices": 70
+    }
+  },
+  "records": "020-external-g-1-2.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b19"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 1819.8329651487302,
+      "body_count": 1,
+      "edges": 84,
+      "faces": 30,
+      "vertices": 56,
+      "volume_mm3": 3355.9227118042977
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "screw_sweep",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a modelled G 1/2 parallel pipe thread (ISO 228-1, 55 deg) on a d20.955 shaft, six turns",
+  "why_not": []
+}

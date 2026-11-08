@@ -1,5 +1,5 @@
 //! Reordering chrome shared by the ribbon and editable navigation bar.
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ReorderPayload<T> {

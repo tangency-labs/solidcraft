@@ -1,0 +1,12 @@
+id = "surface.surface_approximate"
+upstream = ["source/SMLib/src/SmSurface.cpp", "source/SMLib/src/SmBSplineSurfaceNLib.cpp", "source/SMLib/inc/SmCubicBezierSurface.h"]
+rust_module = "surface::surface::approximate"
+depends_on = ["surface.surface_p1", "surface.surface_p2", "surface.offset_surface", "nurbs.b_spline_surface_p1", "nurbs.b_spline_surface_p2", "nurbs.b_spline_surface_n_lib_p1", "nurbs.b_spline_surface_n_lib_p2", "nlib.srf_tool_p1", "nlib.srf_tool_p2", "nlib.srf_tool_p3", "nlib.srf_tool_p4"]
+soft_depends_on = []
+est_lines = 640
+layer = 32
+tests = []
+status = "green"
+claimed_by = ""
+claimed_at = ""
+notes = "PR #1533, issue #1441 (offset surfaces cannot be exported; solidcore 1.0.1 parity). NOT IN callgraph/units.json: SmSurface::ApproximateSurface and its own callees are in harness/callgraph/unused_functions.txt (no upstream test or SM_API entry point reaches them). Owns SmSurface::ApproximateSurface (SmSurface.cpp:877), SmSurface::ComputeCubicBezierApprox (SmSurface.cpp:8600), SmCubicBezierSurface (its points only), the GetRootSurface overrides (SmSurface, SmBSplineSurface, SmOffsetSurface, SmCurveBoundedSurface, SmSTEPSurface, SmSrfInVolume), and SmBSplineSurface::DegreeElevate, InsertKnots (SmTArray form, SmBSplineSurfaceNLib.cpp:6490) and RemoveKnots. Rust: Surface::approximate_surface / approximate_surface_ignoring_status / compute_cubic_bezier_approx, BSplineSurface::degree_elevate / insert_knots / remove_knots. Not ported (follow-ups): the callers SmBrepData's bWriteAsBSplines writer (brep_data_write writes native formats only), SmFace::ApproximateWithBSpline, SmFace::ApproximateSurface, SmSurface::ApproximateSurfaceLeastSqs, the graphics output; SmCubicBezierSurface's other members. Status pending the gate run."

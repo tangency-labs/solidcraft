@@ -1,0 +1,6 @@
+{
+  "unit": "nlib.srf_tool_p2",
+  "cases": [
+    {"name": "fuzz01717_ffi_rejected_bad_index_count_2147483648", "origin": "fuzz-out/n2000/nlib.srf_tool_p2/fuzz01717.json (crash: rust: killed by signal 6 (memory allocation of 34359738376 bytes failed))", "cpp": "harness: ffi rejected: bad index/count 2147483648", "rust": "ok", "inputs": {"dir": 1, "op": "elevate", "sur": {"net": [[[-41.7, 5.64e-07, 0.552, 0.642], [4.36, 1.07, -5.9e-07, 1.18], [0.801, -9140.0, -2.73, 1.06], [-7270.0, 14.4, -7200.0, 1.8]], [[0.312, 2.99e-08, -0.421, 0.0499], [-6600.0, 0.0199, 2.82, 0.826], [9.77, 0.0, 3.54, 1.0], [-5830.0, -7.21, 17.8, 1.79]]], "p": 1, "q": 2147483648, "u": [1.22], "v": [2.87]}, "t": 1}}
+  ]
+}

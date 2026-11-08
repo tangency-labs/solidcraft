@@ -88,7 +88,7 @@ fn describe_returns_both_schemas() {
     // Its own output schema lists the warnings warn mode can add.
     let own = s.execute("engine.describe", &json!({"command": "engine.describe"})).unwrap_or_else(|e| panic!("{e}"));
     assert!(own["output"]["properties"].get("param_warnings").is_some(), "{own}");
-    let d = s.execute("engine.describe", &json!({"command": "solid.revolve"})).unwrap_or_else(|e| panic!("{e}"));
+    let d = s.execute("engine.describe", &json!({"command": "solid.emboss"})).unwrap_or_else(|e| panic!("{e}"));
     assert!(d["input"].is_null() && d["output"].is_null(), "unconverted commands have no schemas yet");
     let e = s.execute("engine.describe", &json!({"command": "solid.extrud"})).err().map(|e| e.to_string());
     assert!(e.as_deref().is_some_and(|e| e.contains("did you mean `solid.extrude`")), "{e:?}");

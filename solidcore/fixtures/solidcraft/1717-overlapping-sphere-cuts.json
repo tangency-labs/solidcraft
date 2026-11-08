@@ -1,0 +1,174 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/1717",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/2158",
+ "test": "crates/kernel/src/issue_1717_tests.rs: overlapping_sphere_cuts_on_a_box_edge",
+ "summary": "Robustness seed 2 cut a sphere twice in a rectangular pattern, 5 mm apart, and the second cut failed with `boolean Cut: no result`. The issue cuts it down to a 30 x 20 x 5 box with an r 10 sphere centred on its back bottom edge (y = 20, z = 0) at x = 12, then the same sphere at x = 17. The two intersection curves that end on the edge between the box's top face and the first cut's face were traced apart and ended 1.5e-6 mm from each other, so one shell merged the ends and the other didn't, and a loop on the tool's face never closed. Each cut takes the quarter y <= 20, 0 <= z <= 5 of its ball. Volumes are closed form.",
+ "cases": [
+  {
+   "name": "one_sphere_cut",
+   "note": "Control: the first cut alone, which built before the fix too.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "result",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      30,
+      20,
+      5
+     ]
+    },
+    {
+     "op": "sphere",
+     "id": "ball",
+     "center": [
+      12.0,
+      20,
+      0
+     ],
+     "radius": 10.0
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "result",
+     "b": "ball"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 2280.051683552339,
+     "tol": 0.01,
+     "formula": "30*20*5 - pi*(2*5*10^2 - 2*5^3/3)/4 = 3000 - 1375*pi/6"
+    }
+   }
+  },
+  {
+   "name": "two_overlapping_sphere_cuts",
+   "note": "#1717: the second sphere, 5 mm along the edge, cut after the first.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "result",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      30,
+      20,
+      5
+     ]
+    },
+    {
+     "op": "sphere",
+     "id": "ball_1",
+     "center": [
+      12.0,
+      20,
+      0
+     ],
+     "radius": 10.0
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "result",
+     "b": "ball_1"
+    },
+    {
+     "op": "sphere",
+     "id": "ball_2",
+     "center": [
+      17.0,
+      20,
+      0
+     ],
+     "radius": 10.0
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "result",
+     "b": "ball_2"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 2043.65480604582,
+     "tol": 0.01,
+     "formula": "30*20*5 - (2*S - L)/4, S = pi*(2*5*10^2 - 2*5^3/3) (one ball between z = -5 and 5), L = the two balls' lens between z = -5 and 5 = 2*int_{2.5}^{10} A(t) dt, A(t) = area of the disc of radius sqrt(100 - t^2) inside |z| <= 5; the asin part integrated by parts in closed form (asin and atan terms), L/4 = 483.5514389411417 mm^3"
+    }
+   }
+  },
+  {
+   "name": "patterned_sphere_cut",
+   "note": "As robustness seed 2 has it: one sphere cut as a 2 x 1 pattern with a 5 mm pitch along x.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "result",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      30,
+      20,
+      5
+     ]
+    },
+    {
+     "op": "sphere",
+     "id": "ball",
+     "center": [
+      12.0,
+      20,
+      0
+     ],
+     "radius": 10.0
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "result",
+     "b": "ball",
+     "pattern": {
+      "count": [
+       2,
+       1
+      ],
+      "pitch": [
+       [
+        5.0,
+        0,
+        0
+       ],
+       [
+        0,
+        0,
+        0
+       ]
+      ]
+     }
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 2043.65480604582,
+     "tol": 0.01,
+     "formula": "30*20*5 - (2*S - L)/4, S = pi*(2*5*10^2 - 2*5^3/3) (one ball between z = -5 and 5), L = the two balls' lens between z = -5 and 5 = 2*int_{2.5}^{10} A(t) dt, A(t) = area of the disc of radius sqrt(100 - t^2) inside |z| <= 5; the asin part integrated by parts in closed form (asin and atan terms), L/4 = 483.5514389411417 mm^3"
+    }
+   }
+  }
+ ]
+}
