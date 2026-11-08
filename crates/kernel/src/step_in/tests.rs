@@ -541,6 +541,65 @@ fn offset_surface_cube_import_is_closed_and_editable() {
     assert!(rel(measure(&result).unwrap().volume, 1000.0 - 40.0 * std::f64::consts::PI) < 1e-3);
 }
 
+/// A box whose six faces are flat degree-1 B-spline patches, as some exporters write planes
+/// (solidcraft#8473's BackPlateSpacer: 2 x 2 control points, knots `0, 0, 0.131, 0.131`),
+/// comes in with planar faces, so Create Sketch and a face extrusion take them as they take a
+/// `PLANE`. Each patch is the exact affine map of its plane (a parallelogram), wound so its
+/// natural normal is the face's outward normal.
+#[test]
+fn flat_degree_one_bspline_faces_import_as_planes() {
+    let mut entities = cube_entities();
+    // Each face's patch: its origin corner and the two unit edges a (along u) and b (along v),
+    // with a x b the outward normal.
+    let patches: [((i32, i32, i32), (i32, i32, i32), (i32, i32, i32)); 6] = [
+        ((0, 0, 0), (0, 1, 0), (1, 0, 0)),
+        ((0, 0, 1), (1, 0, 0), (0, 1, 0)),
+        ((0, 0, 0), (1, 0, 0), (0, 0, 1)),
+        ((1, 0, 0), (0, 1, 0), (0, 0, 1)),
+        ((0, 1, 0), (0, 0, 1), (1, 0, 0)),
+        ((0, 0, 0), (0, 0, 1), (0, 1, 0)),
+    ];
+    let at = |o: (i32, i32, i32), a: (i32, i32, i32), b: (i32, i32, i32)| format!("({}.,{}.,{}.)", o.0 + a.0 + b.0, o.1 + a.1 + b.1, o.2 + a.2 + b.2);
+    let zero = (0, 0, 0);
+    for (f, (o, a, b)) in patches.into_iter().enumerate() {
+        let base = 400 + f * 20;
+        let p = 1000 + f * 10;
+        // Rows by u: ((P00, P01), (P10, P11)).
+        entities = entities.replace(
+            &format!("#{}=PLANE('',#{});", base + 10, base + 9),
+            &format!(
+                "#{}=B_SPLINE_SURFACE_WITH_KNOTS('',1,1,((#{p},#{}),(#{},#{})),.UNSPECIFIED.,.F.,.F.,.F.,(2,2),(2,2),(0.,0.131),(0.,0.131),.UNSPECIFIED.);",
+                base + 10,
+                p + 1,
+                p + 2,
+                p + 3
+            ),
+        );
+        entities += &format!(
+            "#{p}=CARTESIAN_POINT('',{});\n#{}=CARTESIAN_POINT('',{});\n#{}=CARTESIAN_POINT('',{});\n#{}=CARTESIAN_POINT('',{});\n",
+            at(o, zero, zero),
+            p + 1,
+            at(o, zero, b),
+            p + 2,
+            at(o, a, zero),
+            p + 3,
+            at(o, a, b)
+        );
+    }
+    entities += &context(10, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.CENTI.,.METRE.))");
+    entities += "#9=ADVANCED_BREP_SHAPE_REPRESENTATION('Patches',(#101),#10);\n";
+    let import = step_import(&format!("{HEAD}{entities}{TAIL}")).unwrap();
+    assert!(import.warnings.is_empty(), "{:?}", import.warnings);
+    assert!(import.bodies[0].closed);
+    let body = &import.bodies[0].body;
+    assert_eq!(body.face_count(), 6);
+    assert!(rel(measure(body).unwrap().volume, 1000.0) < 1e-6);
+    for i in 0..6 {
+        assert!(body.planar_face(i).is_some(), "face {i} is not planar");
+        assert!(body.face_plane(i).is_some(), "face {i} has no plane");
+    }
+}
+
 /// A hand-written unit cube brep (`#100`…) in a representation with the given unit and items.
 fn cube_entities() -> String {
     let mut s = String::new();
