@@ -102,6 +102,9 @@ fn strict_keeps_todays_errors() {
         ("component.unlock", json!({})),
         ("component.unlock", json!({"component": [0]})),
         ("component.unlock", json!({"component": 0})),
+        ("component.mirror", json!({"components": ["Part"], "plane": "YZ", "as": "sideways"})),
+        ("component.mirror", json!({"components": ["Part"], "plane": "YZ", "as": 3})),
+        ("component.mirror", json!({"components": ["Part"], "plane": "YZ", "symmetry": "W"})),
     ]);
 }
 
@@ -423,15 +426,6 @@ fn replies_match_the_output_schema() {
 }
 
 #[test]
-fn strict_keeps_todays_errors() {
-    assert_strict_keeps_todays_errors(&[
-        ("component.mirror", json!({"components": ["Part"], "plane": "YZ", "as": "sideways"})),
-        ("component.mirror", json!({"components": ["Part"], "plane": "YZ", "as": 3})),
-        ("component.mirror", json!({"components": ["Part"], "plane": "YZ", "symmetry": "W"})),
-    ]);
-}
-
-#[test]
 fn mirror_replies_match_the_output_schema() {
     let schema = output_schema_for::<MirrorComponentsResult>();
     let schema = schema.as_value();
@@ -450,6 +444,22 @@ fn mirror_replies_match_the_output_schema() {
         assert_eq!(r.get("param_warnings"), None, "{r}");
     }
     assert!(!conforms(schema, schema, &json!({"occurrences": "1"})));
+}
+
+/// A mirror plane placed by a parameter shows in `parameters.users` as the output schema says.
+#[test]
+fn a_mirror_plane_user_matches_the_parameter_users_schema() {
+    let schema = output_schema_for::<crate::schema::parameters::ParamUsersResult>();
+    let schema = schema.as_value();
+    let mut s = Session::default();
+    s.execute("component.create", &json!({"name": "Part", "grounded": false})).unwrap();
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 4, "corner": [20, 0, 0]})).unwrap();
+    s.execute("component.activate", &json!({"component": "root"})).unwrap();
+    s.execute("parameters.add", &json!({"name": "gap", "expression": "5 mm"})).unwrap();
+    s.execute("component.mirror", &json!({"components": ["Part"], "plane": {"origin": ["gap", 0, 0], "normal": [1, 0, 0]}})).unwrap();
+    let users = s.execute("parameters.users", &json!({"name": "gap"})).unwrap();
+    assert_eq!(users["users"][0]["type"], "mirror", "{users}");
+    assert!(conforms(schema, schema, &users), "{users} doesn't match {schema}");
 }
 
 fn sketch_square(s: &mut Session) {
