@@ -52,6 +52,8 @@ pub mod insertion;
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::geom::extent3d::Extent3d;
+
 use super::p1::{CornerCreation, ExecutiveObjects, SolverLoadingAccess};
 use super::p2::{EdgeMapAccess, FilletParameters, FilletParametersAccess, SolverSpec};
 use super::p3::{
@@ -5328,6 +5330,34 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
             edges.push((edge, ends));
         }
         let apart = 10.0 * tol;
+        // Most pairs of blends are nowhere near each other (every hole of a pegboard chamfered
+        // in one call, solidcraft#6478: the check below cost the square of their number). A
+        // rail's point can lie inside another blend's band only within the band's reach of its
+        // edge: nearer the edge than the band is wide, which is at most the diagonal of the box
+        // round that blend's edge and rails. Each blend's rails over their kept intervals, and
+        // each blend's reach, boxed once; a pair whose boxes are apart is skipped. A curve
+        // without a box keeps every pair it is in.
+        let mut rail_boxes: Vec<Option<Extent3d>> = Vec::with_capacity(edges.len());
+        let mut reaches: Vec<Option<Extent3d>> = Vec::with_capacity(edges.len());
+        for (own, &(edge, _)) in rails.iter().zip(&edges) {
+            let mut rail_box: Option<Extent3d> = Some(Extent3d::new());
+            let mut reach: Option<Extent3d> = Some(Extent3d::new());
+            for (_, curve, kept) in own {
+                rail_box = union_of(rail_box, curve_box(k, curve, kept)?);
+                reach = union_of(reach, curve_box(k, curve, &curve.natural_interval())?);
+            }
+            let rec = self.target.edge(edge)?;
+            let edge_curve = rec
+                .curve
+                .clone()
+                .ok_or_else(|| invalid("filleted edge without curve"))?;
+            reach = union_of(reach, curve_box(k, &edge_curve, &rec.interval)?);
+            if let Some(r) = reach.as_mut() {
+                r.expand_absolute(r.size().length() + apart + tol);
+            }
+            rail_boxes.push(rail_box);
+            reaches.push(reach);
+        }
         for (a, &(edge_a, ends_a)) in edges.iter().enumerate() {
             for (b, &(edge_b, ends_b)) in edges.iter().enumerate() {
                 if a == b || edge_a == edge_b {
@@ -5335,6 +5365,12 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                 }
                 if ends_a.iter().any(|v| ends_b.contains(v)) {
                     continue; // a corner trims them where they meet
+                }
+                if beyond_reach(
+                    rail_boxes.get(a).and_then(Option::as_ref),
+                    reaches.get(b).and_then(Option::as_ref),
+                ) {
+                    continue; // nowhere near each other
                 }
                 let edge_curve_b = self
                     .target
@@ -5441,6 +5477,40 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
             }
         }
         Ok(true)
+    }
+}
+
+/// The axis-aligned box of `curve` over `interval` (its `CalculateBoundingBox`), `None` where
+/// none is made.
+fn curve_box(
+    k: &Kernel,
+    curve: &crate::curve::curve::Curve,
+    interval: &crate::geom::extent1d::Extent1d,
+) -> Result<Option<Extent3d>> {
+    let req = crate::nurbs::b_spline_curve::p2::BoundingBoxRequest {
+        normal: true,
+        pseudo: false,
+        polar: false,
+    };
+    match curve.calculate_bounding_box(k, interval, req, true) {
+        Ok(boxes) => Ok(boxes.normal),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
+        Err(_) => Ok(None),
+    }
+}
+
+/// The union of two boxes, `None` once either is missing.
+fn union_of(a: Option<Extent3d>, b: Option<Extent3d>) -> Option<Extent3d> {
+    Some(a?.union(&b?))
+}
+
+/// Whether a blend's rails (`rail`, their box) lie wholly outside another blend's `reach` (the
+/// box round its edge and rails, expanded by as much as its band can be wide), so that no point
+/// of the rails can be inside that band. A missing box keeps the pair.
+fn beyond_reach(rail: Option<&Extent3d>, reach: Option<&Extent3d>) -> bool {
+    match (rail, reach) {
+        (Some(rail), Some(reach)) => rail.min_distance(reach) > 0.0,
+        _ => false,
     }
 }
 
