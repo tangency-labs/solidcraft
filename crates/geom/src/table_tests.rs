@@ -33,11 +33,19 @@ fn table() -> Table {
         filter: Filter::default(),
         overrides: vec![],
         split: None,
+        sort: Vec::new(),
     }
 }
 
 fn row(key: &str, kind: RowKind, purchased: bool, fields: &[(&str, &str)]) -> Row {
-    Row { key: key.into(), kind, purchased, fields: fields.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect() }
+    Row {
+        key: key.into(),
+        kind,
+        purchased,
+        fields: fields.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+        level: 0,
+        numbers: BTreeMap::new(),
+    }
 }
 
 /// A plate, a bought pin and a frame.
@@ -638,6 +646,234 @@ fn split_tables_of_every_small_shape_keep_their_parts_apart() {
                     assert_eq!(keys, (1..=n).map(|i| format!("r{i}")).collect::<Vec<_>>(), "{case}: in order");
                 }
             }
+        }
+    }
+}
+
+/// A part with these fields, `level` deep, with these numbers.
+fn ranked(key: &str, level: u32, fields: &[(&str, &str)], numbers: &[(&str, f64)]) -> Row {
+    Row { level, numbers: numbers.iter().map(|(k, n)| (k.to_string(), *n)).collect(), ..row(key, RowKind::Part, false, fields) }
+}
+
+/// These columns, sorted by `keys` (column, descending), the first first.
+fn sorted_by(columns: Vec<Column>, keys: &[(&str, bool)]) -> Table {
+    let sort = keys.iter().map(|(column, descending)| SortKey { column: column.to_string(), descending: *descending }).collect();
+    Table { columns, sort, ..table() }
+}
+
+/// The keys of the rows a table shows, in order.
+fn order_of(table: &Table, rows: &[Row]) -> Vec<String> {
+    table.layout(rows, Vec2::new(400.0, 280.0), &fixed).unwrap().rows.iter().filter_map(|r| r.key.clone()).collect()
+}
+
+/// Text sorts without case, a run of digits as a number with its leading zeros left out; equal
+/// cells keep the list's order whichever way; a missing value sorts after letters and digits.
+#[test]
+fn a_sort_orders_text_without_case_and_digit_runs_as_numbers() {
+    let texts = [("k1", "A10"), ("k2", "a2"), ("k3", "007"), ("k4", "B1"), ("k5", "7")];
+    let mut rows: Vec<Row> = texts.iter().map(|(key, text)| ranked(key, 0, &[("part_number", text)], &[])).collect();
+    rows.push(ranked("k6", 0, &[], &[]));
+    let columns = || vec![column("item", "Item", HAlign::Centre), column("part_number", "Part number", HAlign::Left)];
+    assert_eq!(order_of(&sorted_by(columns(), &[("part_number", false)]), &rows), ["k3", "k5", "k2", "k1", "k4", "k6"]);
+    assert_eq!(order_of(&sorted_by(columns(), &[("part_number", true)]), &rows), ["k6", "k4", "k1", "k2", "k3", "k5"]);
+    assert_eq!(order_of(&sorted_by(columns(), &[]), &rows), ["k1", "k2", "k3", "k4", "k5", "k6"], "no sort: the list's order");
+    for (a, b, found) in [("9", "10", Ordering::Less), ("a2", "a10", Ordering::Less), ("1.2", "1.10", Ordering::Less), ("x", "x0", Ordering::Less)] {
+        assert_eq!(natural(a, b), found, "{a} / {b}");
+        assert_eq!(natural(b, a), found.reverse(), "{b} / {a}");
+    }
+    let long = "9".repeat(400);
+    assert_eq!(natural(&long, &format!("1{long}")), Ordering::Less, "a long run is compared by its length, never parsed");
+}
+
+/// A column of numbers sorts by the rows' numbers whatever their text's format: zeros trimmed, a
+/// decimal comma, a minus sign. Text typed over a cell sorts by value when it reads as a number
+/// (`0,3`, `−2`) and after every number when it doesn't (`about 2`); so does a row without one.
+#[test]
+fn a_column_of_numbers_sorts_by_value_whatever_its_format() {
+    let rows = vec![
+        ranked("half", 0, &[("mass", "0.5")], &[("mass", 0.5)]),
+        ranked("quarter", 0, &[("mass", "0.25")], &[("mass", 0.25)]),
+        ranked("eleven", 0, &[("mass", "1.1")], &[("mass", 1.1)]),
+        ranked("comma", 0, &[("mass", "0,75")], &[("mass", 0.75)]),
+        ranked("minus", 0, &[("mass", "-1.5")], &[("mass", -1.5)]),
+        ranked("unknown", 0, &[], &[]),
+    ];
+    let columns = || vec![column("item", "Item", HAlign::Centre), column("mass", "Mass", HAlign::Right)];
+    assert_eq!(order_of(&sorted_by(columns(), &[("mass", false)]), &rows), ["minus", "quarter", "half", "comma", "eleven", "unknown"]);
+    assert_eq!(order_of(&sorted_by(columns(), &[("mass", true)]), &rows), ["eleven", "comma", "half", "quarter", "minus", "unknown"]);
+    let typed = |row: &str, text: &str| Override { row: row.into(), column: "mass".into(), text: text.into() };
+    let overrides = vec![typed("eleven", "0,3"), typed("half", "about 2"), typed("comma", "\u{2212}2")];
+    let overridden = Table { overrides, ..sorted_by(columns(), &[("mass", false)]) };
+    assert_eq!(order_of(&overridden, &rows), ["comma", "minus", "quarter", "eleven", "half", "unknown"]);
+    for (text, read) in [
+        ("0,5", Some(0.5)),
+        (" -1.25 ", Some(-1.25)),
+        ("+3", Some(3.0)),
+        (".5", Some(0.5)),
+        ("12 mm", None),
+        ("1,234.5", None),
+        ("-", None),
+        ("1e3", None),
+        ("", None),
+    ] {
+        assert_eq!(typed_number(text), read, "{text:?}");
+    }
+}
+
+/// The item column reads as a path (1.2 before 1.10) and the mass column as numbers (1.10 before
+/// 1.2): one text, two orders, each by what its column holds.
+#[test]
+fn an_item_sorts_as_a_path_and_a_mass_as_a_number() {
+    let rows = vec![
+        ranked("a", 0, &[("item", "1.10"), ("mass", "1.10")], &[("mass", 1.1)]),
+        ranked("b", 0, &[("item", "1.2"), ("mass", "1.2")], &[("mass", 1.2)]),
+    ];
+    let columns = || vec![column("item", "Item", HAlign::Centre), column("mass", "Mass", HAlign::Right)];
+    assert_eq!(order_of(&sorted_by(columns(), &[("item", false)]), &rows), ["b", "a"]);
+    assert_eq!(order_of(&sorted_by(columns(), &[("mass", false)]), &rows), ["a", "b"]);
+}
+
+/// A second key orders rows the first finds equal, and rows equal on every key keep the list's
+/// order. A column that isn't printed sorts too, and so does an override's text.
+#[test]
+fn a_second_key_breaks_ties_and_equal_rows_keep_their_order() {
+    let rows = vec![
+        ranked("r1", 0, &[("part_number", "B"), ("quantity", "2")], &[("quantity", 2.0)]),
+        ranked("r2", 0, &[("part_number", "A"), ("quantity", "1")], &[("quantity", 1.0)]),
+        ranked("r3", 0, &[("part_number", "B"), ("quantity", "1")], &[("quantity", 1.0)]),
+        ranked("r4", 0, &[("part_number", "A"), ("quantity", "1")], &[("quantity", 1.0)]),
+    ];
+    let columns = || table().columns;
+    assert_eq!(order_of(&sorted_by(columns(), &[("quantity", false), ("part_number", false)]), &rows), ["r2", "r4", "r3", "r1"]);
+    assert_eq!(order_of(&sorted_by(columns(), &[("quantity", true), ("part_number", false)]), &rows), ["r1", "r2", "r4", "r3"]);
+    let hidden = || {
+        let mut columns = columns();
+        columns[1].printed = false;
+        columns
+    };
+    assert_eq!(order_of(&sorted_by(hidden(), &[("part_number", true)]), &rows), ["r1", "r3", "r2", "r4"]);
+    let overrides = vec![Override { row: "r4".into(), column: "part_number".into(), text: "C".into() }];
+    let typed = Table { overrides, ..sorted_by(columns(), &[("part_number", false)]) };
+    assert_eq!(order_of(&typed, &rows), ["r2", "r1", "r3", "r4"]);
+}
+
+/// Each level sorts on its own: the rows under an assembly stay under it, in their own order. A row
+/// listed deeper than the one before by more than one level is still under it. A filter that hides
+/// an assembly leaves its rows where the sort put them.
+#[test]
+fn a_parts_list_sorts_within_each_level() {
+    let named = |key: &str, level, name: &str| ranked(key, level, &[("part_number", name)], &[]);
+    let rows = vec![
+        named("A", 0, "b"),
+        named("A.1", 1, "z"),
+        named("A.2", 1, "y"),
+        named("B", 0, "a"),
+        named("B.1", 1, "x"),
+        named("C", 0, "c"),
+        named("C.1.1", 3, "w"),
+        named("C.2", 1, "v"),
+    ];
+    let by_name = sorted_by(table().columns, &[("part_number", false)]);
+    assert_eq!(order_of(&by_name, &rows), ["B", "B.1", "A", "A.2", "A.1", "C", "C.2", "C.1.1"]);
+    let mut assemblies = rows.clone();
+    for row in assemblies.iter_mut().filter(|r| r.level == 0) {
+        row.kind = RowKind::Assembly;
+    }
+    let parts = Table { filter: Filter { only: Some(Only::Parts), text: vec![] }, ..by_name };
+    assert_eq!(order_of(&parts, &assemblies), ["B.1", "A.2", "A.1", "C.2", "C.1.1"]);
+}
+
+/// The sort's rules at their bounds: 4 keys, not 5; each names one column of the table, once; no
+/// sort and an ascending key are never written, and a saved sort reads back as it was. A row's
+/// number is finite.
+#[test]
+fn a_sorts_rules_hold_at_their_bounds() {
+    let columns: Vec<Column> = (0..5).map(|i| column(&format!("c{i}"), "C", HAlign::Left)).collect();
+    let keys = |n: usize| (0..n).map(|i| SortKey { column: format!("c{i}"), descending: false }).collect::<Vec<_>>();
+    assert!(Table { columns: columns.clone(), sort: keys(4), ..table() }.validate().is_ok());
+    let refused = |t: Table| t.validate().unwrap_err().0;
+    assert_eq!(refused(Table { columns: columns.clone(), sort: keys(5), ..table() }), "a table sorts by at most 4 columns");
+    assert_eq!(refused(sorted_by(table().columns, &[("colour", false)])), "a sort key names a column");
+    assert_eq!(refused(sorted_by(table().columns, &[("item", false), ("item", true)])), "no two sort keys name one column");
+    assert!(serde_json::to_value(table()).unwrap().get("sort").is_none());
+    let saved = sorted_by(table().columns, &[("quantity", true), ("item", false)]);
+    let written = serde_json::to_value(&saved).unwrap();
+    assert_eq!(written["sort"], json!([{"column": "quantity", "descending": true}, {"column": "item"}]));
+    assert_eq!(serde_json::from_value::<Table>(written).unwrap(), saved);
+    assert!(serde_json::from_value::<SortKey>(json!({"column": "item", "reverse": true})).is_err());
+    for bad in [f64::NAN, f64::INFINITY] {
+        let rows = vec![ranked("r", 0, &[], &[("quantity", bad)])];
+        let found = table().layout(&rows, Vec2::new(400.0, 280.0), &fixed).unwrap_err();
+        assert!(found.0.contains("is finite"), "{found}");
+    }
+}
+
+/// Random lists, sorted by random keys: every row once; each row followed at once by every row
+/// under it (by its list's levels, jumps too); rows under one parent in key order, and equal ones
+/// in the list's order.
+#[test]
+fn sorted_tables_of_random_shapes_keep_each_row_with_its_own() {
+    let mut seed = 0x1305_6502_5a17_c3d1u64;
+    let mut next = |n: u64| {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        (seed >> 33) % n.max(1)
+    };
+    let words = ["", "a", "A", "b", "1", "2", "10", "a2", "a10", "007", "7", "\u{2014}"];
+    let names = ["item", "part_number", "quantity"];
+    for round in 0..500 {
+        let n = next(25) as usize;
+        let mut level = 0u32;
+        let mut rows = Vec::with_capacity(n);
+        for i in 0..n {
+            level = next(u64::from(level) + 3) as u32;
+            let (word, number) = (words[next(words.len() as u64) as usize], next(3));
+            let mut row = ranked(&format!("r{i}"), level, &[("part_number", word), ("quantity", &number.to_string())], &[]);
+            if next(4) != 0 {
+                row.numbers.insert("quantity".into(), number as f64);
+            }
+            rows.push(row);
+        }
+        let mut keys: Vec<(&str, bool)> = Vec::new();
+        for _ in 0..1 + next(2) {
+            let key = (names[next(3) as usize], next(2) == 1);
+            if keys.iter().all(|(c, _)| *c != key.0) {
+                keys.push(key);
+            }
+        }
+        let sorted = sorted_by(table().columns, &keys);
+        let at: HashMap<String, usize> = rows.iter().enumerate().map(|(i, r)| (r.key.clone(), i)).collect();
+        let order: Vec<usize> = order_of(&sorted, &rows).iter().map(|k| at[k]).collect();
+        let case = format!("round {round}: levels {:?}, keys {keys:?}", rows.iter().map(|r| r.level).collect::<Vec<_>>());
+        let mut every = order.clone();
+        every.sort_unstable();
+        assert_eq!(every, (0..n).collect::<Vec<_>>(), "{case}: every row once");
+        // Each row's parent: the nearest row before it listed less deep.
+        let parent: Vec<Option<usize>> = (0..n).map(|i| (0..i).rev().find(|&j| rows[j].level < rows[i].level)).collect();
+        let under = |i: usize, j: usize| {
+            let mut p = parent[j];
+            while let Some(q) = p {
+                if q == i {
+                    return true;
+                }
+                p = parent[q];
+            }
+            false
+        };
+        for (place, &i) in order.iter().enumerate() {
+            let size = (0..n).filter(|&j| under(i, j)).count();
+            assert!(order[place + 1..place + 1 + size].iter().all(|&j| under(i, j)), "{case}: the rows under r{i} follow it");
+        }
+        let overrides = Overrides::new();
+        let sort_columns: Vec<(&Column, bool)> = keys.iter().map(|(c, d)| (sorted.columns.iter().find(|x| x.name == *c).unwrap(), *d)).collect();
+        let value = |i: usize| {
+            let mut budget = Budget(0);
+            sort_columns.iter().map(|(c, _)| sort_value(&rows[i], c, &overrides, &mut budget).unwrap()).collect::<Vec<_>>()
+        };
+        for (place, &a) in order.iter().enumerate() {
+            let Some(&b) = order[place + 1..].iter().find(|&&b| parent[b] == parent[a]) else { continue };
+            let (x, y) = (value(a), value(b));
+            let found = x.iter().zip(&y).zip(&sort_columns).fold(Ordering::Equal, |f, ((x, y), (_, d))| f.then_with(|| compare(x, y, *d)));
+            assert!(found == Ordering::Less || (found == Ordering::Equal && a < b), "{case}: r{a} before r{b}");
         }
     }
 }

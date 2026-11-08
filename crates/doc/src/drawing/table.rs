@@ -131,7 +131,8 @@ impl PartsList {
     }
 
     /// Each row of `list` as a table reads it, each followed by the rows listed under it, with its
-    /// values formatted. A length is shown in `units`. A value the row doesn't have is left out, so the
+    /// values formatted and its numbers kept as numbers, so a sort orders them by value. A length is
+    /// shown in `units`. A value the row doesn't have is left out, so the
     /// cell shows [`solidcraft_geom::cell::MISSING`]: a mass not weighed or not known, or a quantity that doesn't add up.
     pub fn rows(&self, list: &Bom, units: &str) -> Vec<table::Row> {
         let row = |(item, row): (Vec<u32>, &bom::Row)| {
@@ -156,8 +157,21 @@ impl PartsList {
             };
             let values = [("quantity", quantity), ("mass", self.mass.text(row.mass))];
             fields.extend(values.into_iter().filter_map(|(key, value)| Some((key.to_string(), value?))));
+            let quantity = match row.quantity {
+                // A count's text is a whole number, which is exact as a float up to 2^53.
+                Quantity::Count => Some(row.each as f64),
+                Quantity::Pieces(n) => Some(n),
+                Quantity::Length(mm) => Some(mm),
+                Quantity::Unknown(_) => None,
+            };
+            // The values the texts above are formatted from, filled here with them (`table::Row::numbers`).
+            let mass = if let Mass::Grams(grams) = row.mass { Some(grams) } else { None };
+            let numbers = [("count", Some(row.count as f64)), ("quantity", quantity), ("mass", mass)];
+            let numbers = numbers.into_iter().filter_map(|(key, n)| Some((key.to_string(), n.filter(|n| n.is_finite())?))).collect();
             let kind = if row.assembly { table::RowKind::Assembly } else { table::RowKind::Part };
-            table::Row { key: row.key.text(), kind, purchased: row.bom_type == BomType::Purchased, fields }
+            // The item's path names the row and those it is listed under: one deeper per member.
+            let level = u32::try_from(item.len().saturating_sub(1)).unwrap_or(u32::MAX);
+            table::Row { key: row.key.text(), kind, purchased: row.bom_type == BomType::Purchased, fields, level, numbers }
         };
         list.rows_deep().into_iter().map(row).collect()
     }
@@ -209,6 +223,7 @@ impl Kind {
             filter: Filter::default(),
             overrides: Vec::new(),
             split: None,
+            sort: Vec::new(),
         }
     }
 

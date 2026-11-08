@@ -101,6 +101,10 @@ pub struct TableSet {
     /// `null` puts every row in one part again.
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     pub split: Option<Value>,
+    /// `[{column, descending?}]`: at most 4 columns the rows are ordered by, the first first. A column
+    /// of numbers sorts by value; the rows under an assembly stay under it. `[]` keeps the list's order.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    pub sort: Option<Value>,
     /// `{anchor: {corner: top_left | top_right | bottom_left | bottom_right, offset_mm?: [x, y]}}`,
     /// or `{at: [x, y]}`, its outline's top left from the sheet's lower-left corner.
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]

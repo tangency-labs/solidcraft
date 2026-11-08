@@ -20,12 +20,18 @@
 //! - A [`Split`] cuts the rows shown into parts that stand side by side, each under its own heading
 //!   and all with the same columns. The first part sits where the whole table would; the others
 //!   follow it to one side, their headings' outer edges in line.
+//! - A [`SortKey`] list orders the rows by up to [`MAX_SORT_KEYS`] columns before the filters run,
+//!   each level of a parts list on its own, so the rows under an assembly stay under it. A column
+//!   that reads one field the row gives as a number ([`Row::numbers`]) sorts by value, typed text
+//!   over it too when it reads as a number; other text sorts without case, a run of digits as a
+//!   number (`A2` before `A10`, item `1.2` before `1.10`). Equal rows keep the list's order.
 //! - A row field the row doesn't have shows [`MISSING`]. An [`Override`] shows its text in one
 //!   cell and keeps the value it replaces; an empty one is a blank cell.
 //! - The outline is drawn `outline_line_mm` wide and the lines between cells `cell_line_mm`, each
 //!   centred on its edge, and a cell's text is padded from the inner edge of its lines, as in a
 //!   title block.
 
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
@@ -42,6 +48,8 @@ pub const MAX_COLUMNS: usize = 64;
 /// The most parts a split table may stand in: so its lines stay well inside the paper scene's
 /// records, whatever its rows and columns.
 pub const MAX_PARTS: usize = 64;
+/// The most columns a table may sort by.
+pub const MAX_SORT_KEYS: usize = 4;
 /// The most bytes of text a table and its rows may hold in all.
 pub const MAX_TEXT_BYTES: usize = 1 << 20;
 use crate::cell::MISSING;
@@ -77,6 +85,9 @@ pub struct Table {
     /// None: one part holds every row.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub split: Option<Split>,
+    /// The columns its rows are ordered by, the first first: none keeps the list's order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sort: Vec<SortKey>,
 }
 
 fn default_row_height() -> f64 {
@@ -158,6 +169,15 @@ pub struct Override {
     pub text: String,
 }
 
+/// One column a table's rows are ordered by.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SortKey {
+    pub column: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub descending: bool,
+}
+
 /// A long table cut into parts that stand side by side, each with its own heading.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -189,6 +209,13 @@ pub struct Row {
     pub kind: RowKind,
     pub purchased: bool,
     pub fields: BTreeMap<String, String>,
+    /// How deep it is listed (0: at the top). Rows come in their list's order, each followed by the
+    /// rows listed under it, one level deeper.
+    pub level: u32,
+    /// The fields that are numbers, by key, as numbers: what a sort orders them by, whatever their
+    /// text's format. Each is the value its field's text is formatted from, and the list that makes
+    /// the rows fills both in one place: never set one without the other.
+    pub numbers: BTreeMap<String, f64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -278,6 +305,15 @@ struct Shown {
     replaced: Option<String>,
 }
 
+/// Each override's text by its row's key and column's name.
+type Overrides<'t> = HashMap<(&'t str, &'t str), &'t str>;
+
+/// What one cell sorts by: a number before any text, whichever way the key runs.
+enum SortValue {
+    Number(f64),
+    Text(String),
+}
+
 impl Table {
     /// Checks a definition on its own, counting its columns and overrides first: call it when one
     /// is read. [`Self::layout`] calls it too.
@@ -301,6 +337,7 @@ impl Table {
             let gap = split.gap_mm;
             require(gap.is_finite() && (0.0..=MAX_SIDE_MM).contains(&gap), "the gap between a table's parts is 0 to 5000 mm")?;
         }
+        require(self.sort.len() <= MAX_SORT_KEYS, "a table sorts by at most 4 columns")?;
         let mut budget = Budget(0);
         for (i, column) in self.columns.iter().enumerate() {
             require(is_snake_case(&column.name), "a column's name is snake case and at most 64 characters")?;
@@ -326,6 +363,10 @@ impl Table {
             }
         }
         let column = |name: &str| self.columns.iter().any(|c| c.name == name);
+        for (i, key) in self.sort.iter().enumerate() {
+            require(column(&key.column), "a sort key names a column")?;
+            require(self.sort.iter().take(i).all(|other| other.column != key.column), "no two sort keys name one column")?;
+        }
         for filter in &self.filter.text {
             require(column(&filter.column), "a text filter names a column")?;
             cell::check_label(&filter.contains).map_err(cell_rule)?;
@@ -360,6 +401,9 @@ impl Table {
             for (key, value) in &row.fields {
                 require(key.len() <= MAX_KEY_BYTES, "a row field's key is at most 256 bytes")?;
                 check_text([value.as_str()]).map_err(cell_rule)?;
+            }
+            for (key, value) in &row.numbers {
+                require(key.len() <= MAX_KEY_BYTES && value.is_finite(), "a row's number has a key of at most 256 bytes and is finite")?;
             }
         }
         let shown = self.shown(rows, &mut budget)?;
@@ -488,10 +532,10 @@ impl Table {
         Ok(TableLayout { outline, outline_line_mm: self.outline_line_mm, cell_line_mm: self.cell_line_mm, heading, rows: placed_rows, parts })
     }
 
-    /// The rows the filter lets through, in order, each with its printed cells' text (the filters
-    /// read every column), counted against the budget before it is built.
+    /// The rows the filter lets through, in the sort's order, each with its printed cells' text (the
+    /// filters read every column), counted against the budget before it is built.
     fn shown<'r>(&self, rows: &'r [Row], budget: &mut Budget) -> Result<Vec<(&'r Row, Vec<Shown>)>> {
-        let overrides: HashMap<(&str, &str), &str> = self.overrides.iter().map(|o| ((o.row.as_str(), o.column.as_str()), o.text.as_str())).collect();
+        let overrides: Overrides = self.overrides.iter().map(|o| ((o.row.as_str(), o.column.as_str()), o.text.as_str())).collect();
         let filters: Vec<(Option<usize>, String)> =
             self.filter.text.iter().map(|f| (self.columns.iter().position(|c| c.name == f.column), f.contains.to_lowercase())).collect();
         let kind = |row: &Row| match self.filter.only {
@@ -501,21 +545,11 @@ impl Table {
             Some(Only::Purchased) => row.purchased,
         };
         let mut shown = Vec::new();
-        for row in rows.iter().filter(|row| kind(row)) {
+        // Sorted before the filters, so a row whose parent is filtered out stays in its parent's place.
+        for row in self.sorted(rows, &overrides, budget)?.into_iter().filter(|row| kind(row)) {
             let mut cells = Vec::with_capacity(self.columns.len());
             for column in &self.columns {
-                let parts = || {
-                    column.content.0.iter().map(|part| match part {
-                        Part::Text(text) => text.as_str(),
-                        Part::Field { key, .. } => row.fields.get(key).map_or(MISSING, String::as_str),
-                    })
-                };
-                budget.count(parts().map(str::len).sum())?;
-                let value: String = parts().collect();
-                cells.push(match overrides.get(&(row.key.as_str(), column.name.as_str())) {
-                    Some(text) => Shown { text: text.to_string(), replaced: Some(value) },
-                    None => Shown { text: value, replaced: None },
-                });
+                cells.push(cell(row, column, &overrides, budget)?);
             }
             let passes =
                 |(i, needle): &(Option<usize>, String)| i.and_then(|i| cells.get(i)).is_some_and(|c| c.text.to_lowercase().contains(needle.as_str()));
@@ -525,6 +559,48 @@ impl Table {
             }
         }
         Ok(shown)
+    }
+
+    /// `rows` in the sort's order: each level on its own, a row's parent being the nearest row before
+    /// it listed less deep, and each row followed by those under it. Without a sort, the list's order.
+    fn sorted<'r>(&self, rows: &'r [Row], overrides: &Overrides, budget: &mut Budget) -> Result<Vec<&'r Row>> {
+        if self.sort.is_empty() {
+            return Ok(rows.iter().collect());
+        }
+        let keys: Vec<(&Column, bool)> =
+            self.sort.iter().filter_map(|key| self.columns.iter().find(|c| c.name == key.column).map(|c| (c, key.descending))).collect();
+        let mut values = Vec::with_capacity(rows.len());
+        for row in rows {
+            values.push(keys.iter().map(|(column, _)| sort_value(row, column, overrides, budget)).collect::<Result<Vec<_>>>()?);
+        }
+        // The rows under each row, at `i + 1`, and the top rows at 0.
+        let mut under: Vec<Vec<usize>> = vec![Vec::new(); rows.len() + 1];
+        let mut open: Vec<usize> = Vec::new();
+        for (i, row) in rows.iter().enumerate() {
+            while open.last().and_then(|&p| rows.get(p)).is_some_and(|parent| parent.level >= row.level) {
+                open.pop();
+            }
+            if let Some(list) = under.get_mut(open.last().map_or(0, |&p| p + 1)) {
+                list.push(i);
+            }
+            open.push(i);
+        }
+        let order = |a: &usize, b: &usize| {
+            let pairs = values.get(*a).into_iter().flatten().zip(values.get(*b).into_iter().flatten()).zip(&keys);
+            pairs.fold(Ordering::Equal, |found, ((a, b), (_, descending))| found.then_with(|| compare(a, b, *descending)))
+        };
+        // A stable sort: equal rows keep the list's order.
+        for list in &mut under {
+            list.sort_by(order);
+        }
+        // Depth first, each row followed by those under it, without recursion.
+        let mut out = Vec::with_capacity(rows.len());
+        let mut stack: Vec<usize> = under.first().map(|top| top.iter().rev().copied().collect()).unwrap_or_default();
+        while let Some(i) = stack.pop() {
+            out.extend(rows.get(i));
+            stack.extend(under.get(i + 1).into_iter().flatten().rev());
+        }
+        Ok(out)
     }
 
     /// Each column's left and right line inset: half the outline on the table's sides, half a cell
@@ -567,6 +643,104 @@ impl TableLayout {
         }
         Group { object, kind, items }
     }
+}
+
+/// `column`'s cell on `row`: its value, or the override's text with the value it replaces, counted
+/// against the budget.
+fn cell(row: &Row, column: &Column, overrides: &Overrides, budget: &mut Budget) -> Result<Shown> {
+    let parts = || {
+        column.content.0.iter().map(|part| match part {
+            Part::Text(text) => text.as_str(),
+            Part::Field { key, .. } => row.fields.get(key).map_or(MISSING, String::as_str),
+        })
+    };
+    budget.count(parts().map(str::len).sum())?;
+    let value: String = parts().collect();
+    Ok(match overrides.get(&(row.key.as_str(), column.name.as_str())) {
+        Some(text) => Shown { text: text.to_string(), replaced: Some(value) },
+        None => Shown { text: value, replaced: None },
+    })
+}
+
+/// What `column`'s cell on `row` sorts by. A column that reads one field the row has as a number
+/// sorts by it, or by the text typed over the cell when that reads as a number; any other cell by
+/// its text, without case.
+fn sort_value(row: &Row, column: &Column, overrides: &Overrides, budget: &mut Budget) -> Result<SortValue> {
+    let shown = cell(row, column, overrides, budget)?;
+    let number = match column.content.0.as_slice() {
+        [Part::Field { key, .. }] => row.numbers.get(key).copied(),
+        _ => None,
+    };
+    let number = number.and_then(|value| if shown.replaced.is_some() { typed_number(&shown.text) } else { Some(value) });
+    Ok(number.map_or_else(|| SortValue::Text(shown.text.to_lowercase()), SortValue::Number))
+}
+
+/// Text typed as a number: a sign (`-`, `−` or `+`), digits and at most one decimal point or comma,
+/// and nothing else, so `12 mm` or `1,234.5` stays text. Tables show numbers without groups.
+fn typed_number(text: &str) -> Option<f64> {
+    let text = text.trim();
+    let (negative, digits) = match text.strip_prefix(['-', '\u{2212}']) {
+        Some(rest) => (true, rest),
+        None => (false, text.strip_prefix('+').unwrap_or(text)),
+    };
+    let markers = digits.chars().filter(|c| matches!(c, '.' | ',')).count();
+    let plain = digits.chars().all(|c| c.is_ascii_digit() || matches!(c, '.' | ','));
+    if markers > 1 || !plain || !digits.chars().any(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    let value: f64 = digits.replace(',', ".").parse().ok()?;
+    Some(if negative { -value } else { value }).filter(|v| v.is_finite())
+}
+
+/// Two cells' sort values in a key's direction: numbers by value, text by [`natural`] with an empty
+/// cell after the rest, and a number before any text either way.
+fn compare(a: &SortValue, b: &SortValue, descending: bool) -> Ordering {
+    let way = |o: Ordering| if descending { o.reverse() } else { o };
+    match (a, b) {
+        (SortValue::Number(a), SortValue::Number(b)) => way(a.partial_cmp(b).unwrap_or(Ordering::Equal)),
+        (SortValue::Text(a), SortValue::Text(b)) => way(a.is_empty().cmp(&b.is_empty()).then_with(|| natural(a, b))),
+        (SortValue::Number(_), SortValue::Text(_)) => Ordering::Less,
+        (SortValue::Text(_), SortValue::Number(_)) => Ordering::Greater,
+    }
+}
+
+/// Text in reading order, a run of digits as one number: `9` before `10`, `A2` before `A10` and item
+/// `1.2` before `1.10`. Leading zeros don't count, and a long run is compared by its length, then
+/// its digits, so no run overflows.
+fn natural(a: &str, b: &str) -> Ordering {
+    let (mut a, mut b) = (a.chars().peekable(), b.chars().peekable());
+    loop {
+        match (a.peek().copied(), b.peek().copied()) {
+            (None, None) => return Ordering::Equal,
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(x), Some(y)) if x.is_ascii_digit() && y.is_ascii_digit() => {
+                let (x, y) = (digit_run(&mut a), digit_run(&mut b));
+                let found = x.len().cmp(&y.len()).then_with(|| x.cmp(&y));
+                if found != Ordering::Equal {
+                    return found;
+                }
+            }
+            (Some(x), Some(y)) => {
+                if x != y {
+                    return x.cmp(&y);
+                }
+                a.next();
+                b.next();
+            }
+        }
+    }
+}
+
+/// The run of digits `chars` starts with, taken from it, without its leading zeros.
+fn digit_run(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> String {
+    let mut run = String::new();
+    while let Some(c) = chars.next_if(char::is_ascii_digit) {
+        if !(run.is_empty() && c == '0') {
+            run.push(c);
+        }
+    }
+    run
 }
 
 /// A text's lines as written: none for an empty text.

@@ -33,6 +33,14 @@ fn assembly() -> Session {
     s
 }
 
+/// `change` made to the model with the drawing closed, as only it can be, and the drawing open again.
+fn with_the_drawing_closed(s: &mut Session, change: impl FnOnce(&mut Session)) {
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    s.execute("drawing.close", &json!({})).unwrap();
+    change(s);
+    s.execute("drawing.open", &drawing).unwrap();
+}
+
 fn sheet_of(s: &Session) -> String {
     ids::encode(s.drawing("test").unwrap().sheets[0].id)
 }
@@ -536,6 +544,44 @@ fn a_split_table_stands_in_parts_and_null_joins_them() {
     assert_eq!(outline(&mut s), whole);
 }
 
+/// A sort saves on the record and orders the rows the sheet shows: by name the Bolt comes before
+/// the Plate, as it does by quantity, most first; descending turns it round; `[]` is the list's order
+/// again, and each edit is one undo step. Two definitions with one part number stay one row however
+/// it is sorted.
+#[test]
+fn a_sorted_table_orders_its_rows_and_an_empty_sort_is_the_lists_order() {
+    let mut s = assembly();
+    let sheet = sheet_of(&s);
+    let id = id_of(&run(&mut s, ADD, json!({"sheet": sheet, "kind": "parts_list"})));
+    let table = ids::encode(id);
+    let keys = |s: &mut Session| -> Vec<String> {
+        inspected(s, id)["rows"].as_array().unwrap().iter().map(|r| r["key"].as_str().unwrap().to_string()).collect()
+    };
+    let listed = keys(&mut s);
+    let sorted = |s: &mut Session, sort: Value| {
+        let steps = s.undo.len();
+        let edited = run(s, EDIT, json!({"table": table, "set": {"sort": sort.clone()}}));
+        assert_eq!(s.undo.len(), steps + 1, "one undo step for {sort}");
+        (edited, keys(s))
+    };
+    let (edited, by_name) = sorted(&mut s, json!([{"column": "name"}]));
+    assert_eq!(edited["record"]["table"]["sort"], json!([{"column": "name"}]), "{edited}");
+    let (_, by_quantity) = sorted(&mut s, json!([{"column": "quantity", "descending": true}]));
+    assert_eq!(by_name, by_quantity, "the Bolt, placed twice, first both ways");
+    let (_, backwards) = sorted(&mut s, json!([{"column": "name", "descending": true}]));
+    assert_eq!(backwards, by_name.iter().rev().cloned().collect::<Vec<_>>());
+    let (cleared, again) = sorted(&mut s, json!([]));
+    assert!(cleared["record"]["table"].get("sort").is_none(), "{cleared}");
+    assert_eq!(again, listed);
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(keys(&mut s), backwards, "undo puts the last sort back");
+    with_the_drawing_closed(&mut s, |s| {
+        s.execute("component.metadata.set", &json!({"component": "Plate", "part_number": "B-200"})).unwrap();
+    });
+    assert_eq!(inspected(&mut s, id)["listed"].as_u64(), Some(1), "one part number, one row");
+    assert_eq!(keys(&mut s).len(), 1);
+}
+
 /// A table's id is drawn from the ids the drawing shares, and a damaged file's table is refused.
 #[test]
 fn hostile_tables_are_refused_with_nothing_changed() {
@@ -575,6 +621,15 @@ fn hostile_tables_are_refused_with_nothing_changed() {
         json!({"split": {"rows": 2, "side": "up"}}),
         json!({"split": {"rows": 2, "gap": 1.0}}),
         json!({"split": "two"}),
+        json!({"sort": [{"column": "item"}, {"column": "quantity"}, {"column": "name"}, {"column": "material"}, {"column": "mass"}]}),
+        json!({"sort": [{"column": "colour"}]}),
+        json!({"sort": [{"column": "item"}, {"column": "item", "descending": true}]}),
+        json!({"sort": [{"column": "item", "descending": "yes"}]}),
+        json!({"sort": [{"column": "item", "reverse": true}]}),
+        json!({"sort": [{"descending": true}]}),
+        json!({"sort": {"column": "item"}}),
+        json!({"sort": "item"}),
+        json!({"sort": null}),
         json!({"place": {"at": [0.0]}}),
         json!({"place": {"anchor": {"corner": "middle"}}}),
         json!({"place": {"anchor": {"corner": "top_left", "offset_mm": [-6000.0, 0.0]}}}),

@@ -21,7 +21,7 @@
 //! This is the drawing's revision only: the model's revision is its component's part property and
 //! the time of an export is the writer's, and neither is kept or stood in for here.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -414,7 +414,14 @@ impl RevisionRecord {
         self.rows
             .iter()
             .filter(|r| r.sheet == sheet && !r.hidden)
-            .map(|r| table::Row { key: crate::ids::encode(r.id), kind: RowKind::Part, purchased: false, fields: fields(r) })
+            .map(|r| table::Row {
+                key: crate::ids::encode(r.id),
+                kind: RowKind::Part,
+                purchased: false,
+                fields: fields(r),
+                level: 0,
+                numbers: BTreeMap::new(),
+            })
             .collect()
     }
 }
@@ -440,6 +447,7 @@ pub fn table() -> Table {
         filter: table::Filter::default(),
         overrides: Vec::new(),
         split: None,
+        sort: Vec::new(),
     }
 }
 

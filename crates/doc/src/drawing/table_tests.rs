@@ -172,6 +172,53 @@ fn a_lists_rows_lay_out_in_a_table() {
     assert!(row.cells[5].lines.is_empty(), "not weighed");
 }
 
+/// Each row says how deep it is listed and gives its numbers as numbers: its count, its quantity (a
+/// length in millimetres whatever the drawing's units) and its mass in grams, none it hasn't got.
+/// Sorted by name, descending, a row listed under another stays under it.
+#[test]
+fn a_lists_rows_carry_their_level_and_numbers_and_sort_within_each_level() {
+    let mut inner = bom_row(5, 1, 6);
+    inner.each = 2;
+    inner.names = vec!["Washer".into()];
+    inner.mass = Mass::Grams(12.5);
+    let mut outer = bom_row(4, 2, 3);
+    outer.assembly = true;
+    outer.names = vec!["Frame".into()];
+    inner.key.parents = vec![outer.key.member];
+    outer.children = vec![inner];
+    let mut other = bom_row(6, 3, 1);
+    other.names = vec!["Peg".into()];
+    other.quantity = Quantity::Length(1250.0);
+    let parts = parts_list(MassFormat::default());
+    let rows = parts.rows(&bom_of(vec![outer, other]), "m");
+    assert_eq!(rows.iter().map(|r| r.level).collect::<Vec<_>>(), [0, 1, 0]);
+    let numbers = |row: usize| rows[row].numbers.iter().map(|(k, n)| (k.as_str(), *n)).collect::<Vec<_>>();
+    assert_eq!(numbers(0), [("count", 3.0), ("quantity", 3.0)]);
+    assert_eq!(numbers(1), [("count", 6.0), ("mass", 12.5), ("quantity", 2.0)]);
+    assert_eq!(numbers(2), [("count", 1.0), ("quantity", 1250.0)], "a length in millimetres, shown in metres");
+    let mut definition = Kind::PartsList(parts).default_table();
+    definition.sort = vec![table::SortKey { column: "name".into(), descending: true }];
+    let laid = definition.layout(&rows, solidcore_record::Vec2::new(400.0, 280.0), &|t, cap| t.len() as f64 * cap / 2.0).unwrap();
+    let items: Vec<&str> = laid.rows.iter().map(|r| r.cells[0].lines[0].text.as_str()).collect();
+    assert_eq!(items, ["3", "2", "2.1"], "Peg, then Frame with its Washer under it");
+}
+
+/// A sorted table saves its sort and reads back as it was; one that isn't saves as before.
+#[test]
+fn a_tables_sort_saves_and_reads_back() {
+    let (mut d, first) = tabled();
+    let at = d.tables.index_of(first).unwrap();
+    Arc::make_mut(&mut d.tables[at]).table.sort =
+        vec![table::SortKey { column: "mass".into(), descending: true }, table::SortKey { column: "item".into(), descending: false }];
+    let saved: Value = serde_json::from_str(&d.to_json().unwrap()).unwrap();
+    let tables = saved["tables"].as_array().unwrap();
+    assert_eq!(tables[0]["table"]["sort"], json!([{"column": "mass", "descending": true}, {"column": "item"}]));
+    assert_eq!(tables[1]["table"].get("sort"), None, "the revision table isn't sorted");
+    assert_eq!(Drawing::from_value(saved).unwrap(), d);
+    let wrong = damaged(&d, |v| v["tables"][0]["table"]["sort"][0]["column"] = json!("colour"));
+    assert!(wrong.contains("a sort key names a column"), "{wrong}");
+}
+
 /// A row's key fits at the deepest a list goes: 64 levels under the top, every member its longest,
 /// each key apart.
 #[test]
