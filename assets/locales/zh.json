@@ -5887,6 +5887,8 @@
   "ui.profiles": "轮廓",
   "ui.project": "投影",
   "ui.project_face_edges_sketch": "将面的边投影到新草图",
+  "ui.project_references_construction": "将参考投影为构造几何",
+  "ui.project_references_construction_note": "投影、相交、包含三维几何以及在面上新建草图时投影的面边，都会生成构造几何：用于绘图参考，不计入轮廓。它们仍与模型保持关联。",
   "ui.properties": "属性",
   "ui.properties.copy_matrix": "复制矩阵",
   "ui.properties.first_moments": "一阶矩",

@@ -5887,6 +5887,8 @@
   "ui.profiles": "プロファイル",
   "ui.project": "投影",
   "ui.project_face_edges_sketch": "新規スケッチに面のエッジを自動投影",
+  "ui.project_references_construction": "参照をコンストラクションジオメトリとして投影",
+  "ui.project_references_construction_note": "投影、交差、3D ジオメトリを含める、および面上の新規スケッチの面のエッジは、コンストラクションジオメトリになります。描画の参照用で、プロファイルには含まれません。モデルとのリンクは保たれます。",
   "ui.properties": "プロパティ",
   "ui.properties.copy_matrix": "行列をコピー",
   "ui.properties.first_moments": "一次モーメント",

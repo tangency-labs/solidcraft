@@ -5887,6 +5887,8 @@
   "ui.profiles": "Các biên dạng",
   "ui.project": "Chiếu hình học",
   "ui.project_face_edges_sketch": "Chiếu các cạnh bề mặt vào phác thảo mới",
+  "ui.project_references_construction": "Chiếu tham chiếu thành đường dựng hình",
+  "ui.project_references_construction_note": "Chiếu, Giao, Đưa vào hình học 3D và các cạnh bề mặt của phác thảo mới trên một bề mặt tạo ra đường dựng hình: tham chiếu để vẽ theo, không thuộc biên dạng. Chúng vẫn liên kết với mô hình.",
   "ui.properties": "Thuộc tính cơ lý",
   "ui.properties.copy_matrix": "Sao chép ma trận",
   "ui.properties.first_moments": "Mômen bậc nhất",

@@ -5054,6 +5054,8 @@
   "ui.profiles": "프로파일",
   "ui.project": "투영",
   "ui.project_face_edges_sketch": "면 모서리를 새 스케치로 투영",
+  "ui.project_references_construction": "참조를 구성선으로 투영",
+  "ui.project_references_construction_note": "투영, 교차, 3D 형상 포함과 면 위 새 스케치의 면 모서리가 구성선으로 만들어집니다. 프로파일에 포함되지 않는 그리기용 참조이며, 모델과의 연결은 유지됩니다.",
   "ui.properties": "속성",
   "ui.properties.copy_matrix": "행렬 복사",
   "ui.properties.first_moments": "1차 모멘트",

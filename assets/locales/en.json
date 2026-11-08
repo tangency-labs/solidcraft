@@ -5887,6 +5887,8 @@
   "ui.profiles": "Profiles",
   "ui.project": "Project",
   "ui.project_face_edges_sketch": "Project face edges into new sketches",
+  "ui.project_references_construction": "Project references as construction geometry",
+  "ui.project_references_construction_note": "Project, Intersect, Include 3D Geometry and the face edges of a new sketch on a face make construction geometry: references to draw against, left out of profiles. They stay linked to the model.",
   "ui.properties": "Properties",
   "ui.properties.copy_matrix": "Copy matrix",
   "ui.properties.first_moments": "First moments",
