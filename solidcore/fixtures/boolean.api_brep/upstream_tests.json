@@ -1,0 +1,1504 @@
+{
+ "cases": [
+  {
+   "name": "boolean_extract_separate_rejected",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:66",
+   "inputs": {
+    "api": "boolean",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      5,
+      10,
+      15
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      3,
+      5,
+      0
+     ],
+     "radius": 10
+    },
+    "operation": 9
+   }
+  },
+  {
+   "name": "boolean_box_minus_sphere",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:88",
+   "inputs": {
+    "api": "boolean",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      5,
+      10,
+      15
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      3,
+      5,
+      0
+     ],
+     "radius": 10
+    },
+    "operation": 3
+   }
+  },
+  {
+   "name": "boolean_box_sphere_op0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:88",
+   "inputs": {
+    "api": "boolean",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      5,
+      10,
+      15
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      3,
+      5,
+      0
+     ],
+     "radius": 10
+    },
+    "operation": 0
+   }
+  },
+  {
+   "name": "boolean_box_sphere_op1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:88",
+   "inputs": {
+    "api": "boolean",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      5,
+      10,
+      15
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      3,
+      5,
+      0
+     ],
+     "radius": 10
+    },
+    "operation": 1
+   }
+  },
+  {
+   "name": "boolean_box_sphere_op2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:88",
+   "inputs": {
+    "api": "boolean",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      5,
+      10,
+      15
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      3,
+      5,
+      0
+     ],
+     "radius": 10
+    },
+    "operation": 2
+   }
+  },
+  {
+   "name": "boolean_box_sphere_op3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:88",
+   "inputs": {
+    "api": "boolean",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      5,
+      10,
+      15
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      3,
+      5,
+      0
+     ],
+     "radius": 10
+    },
+    "operation": 3
+   }
+  },
+  {
+   "name": "boolean_box_sphere_op4",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:88",
+   "inputs": {
+    "api": "boolean",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      5,
+      10,
+      15
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      3,
+      5,
+      0
+     ],
+     "radius": 10
+    },
+    "operation": 4
+   }
+  },
+  {
+   "name": "boolean_box_sphere_op5",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:88",
+   "inputs": {
+    "api": "boolean",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      5,
+      10,
+      15
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      3,
+      5,
+      0
+     ],
+     "radius": 10
+    },
+    "operation": 5
+   }
+  },
+  {
+   "name": "boolean_box_sphere_op6",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:88",
+   "inputs": {
+    "api": "boolean",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      5,
+      10,
+      15
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      3,
+      5,
+      0
+     ],
+     "radius": 10
+    },
+    "operation": 6
+   }
+  },
+  {
+   "name": "boolean_box_sphere_op7",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:88",
+   "inputs": {
+    "api": "boolean",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      5,
+      10,
+      15
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      3,
+      5,
+      0
+     ],
+     "radius": 10
+    },
+    "operation": 7
+   }
+  },
+  {
+   "name": "boolean_box_sphere_op8",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:88",
+   "inputs": {
+    "api": "boolean",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      5,
+      10,
+      15
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      3,
+      5,
+      0
+     ],
+     "radius": 10
+    },
+    "operation": 8
+   }
+  },
+  {
+   "name": "boolean_box_sphere_op10",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:88",
+   "inputs": {
+    "api": "boolean",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      5,
+      10,
+      15
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      3,
+      5,
+      0
+     ],
+     "radius": 10
+    },
+    "operation": 10
+   }
+  },
+  {
+   "name": "with_options_difference",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:2300",
+   "inputs": {
+    "api": "with_options",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      5,
+      5,
+      5
+     ],
+     "radius": 5
+    },
+    "operation": 3,
+    "flags": {
+     "cookie_cutter": false,
+     "imprinting": false,
+     "boolean_post_process": true,
+     "imprint_and_classify_faces": false,
+     "keep_other_brep": false
+    }
+   }
+  },
+  {
+   "name": "with_options_extract_separate_rejected",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:2300",
+   "inputs": {
+    "api": "with_options",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      5,
+      5,
+      5
+     ],
+     "radius": 5
+    },
+    "operation": 9,
+    "flags": {}
+   }
+  },
+  {
+   "name": "with_options_keep_other",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:2300",
+   "inputs": {
+    "api": "with_options",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      5,
+      5,
+      5
+     ],
+     "radius": 5
+    },
+    "operation": 1,
+    "flags": {
+     "keep_other_brep": true
+    }
+   }
+  },
+  {
+   "name": "with_options_cookie_cutter",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:2300",
+   "inputs": {
+    "api": "with_options",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "b": {
+     "kind": "sphere",
+     "center": [
+      5,
+      5,
+      5
+     ],
+     "radius": 5
+    },
+    "operation": 1,
+    "flags": {
+     "cookie_cutter": true
+    }
+   }
+  },
+  {
+   "name": "merge_breps_empty",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:941",
+   "inputs": {
+    "api": "merge_breps",
+    "breps": [],
+    "operation": 1
+   }
+  },
+  {
+   "name": "merge_breps_singleton",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:958",
+   "inputs": {
+    "api": "merge_breps",
+    "breps": [
+     {
+      "kind": "box",
+      "origin": [
+       1,
+       2,
+       3
+      ],
+      "size": [
+       4,
+       5,
+       6
+      ]
+     }
+    ],
+    "operation": 1
+   }
+  },
+  {
+   "name": "merge_breps_bad_operation_unknown",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1033",
+   "inputs": {
+    "api": "merge_breps",
+    "breps": [
+     {
+      "kind": "box",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "size": [
+       2,
+       3,
+       4
+      ]
+     },
+     {
+      "kind": "box",
+      "origin": [
+       10,
+       0,
+       0
+      ],
+      "size": [
+       3,
+       4,
+       5
+      ]
+     }
+    ],
+    "operation": 0
+   }
+  },
+  {
+   "name": "merge_breps_bad_operation_exclusive_or",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1033",
+   "inputs": {
+    "api": "merge_breps",
+    "breps": [
+     {
+      "kind": "box",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "size": [
+       2,
+       3,
+       4
+      ]
+     },
+     {
+      "kind": "box",
+      "origin": [
+       10,
+       0,
+       0
+      ],
+      "size": [
+       3,
+       4,
+       5
+      ]
+     }
+    ],
+    "operation": 4
+   }
+  },
+  {
+   "name": "merge_breps_bad_operation_partial_merge",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1033",
+   "inputs": {
+    "api": "merge_breps",
+    "breps": [
+     {
+      "kind": "box",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "size": [
+       2,
+       3,
+       4
+      ]
+     },
+     {
+      "kind": "box",
+      "origin": [
+       10,
+       0,
+       0
+      ],
+      "size": [
+       3,
+       4,
+       5
+      ]
+     }
+    ],
+    "operation": 6
+   }
+  },
+  {
+   "name": "merge_breps_bad_operation_imprint",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1033",
+   "inputs": {
+    "api": "merge_breps",
+    "breps": [
+     {
+      "kind": "box",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "size": [
+       2,
+       3,
+       4
+      ]
+     },
+     {
+      "kind": "box",
+      "origin": [
+       10,
+       0,
+       0
+      ],
+      "size": [
+       3,
+       4,
+       5
+      ]
+     }
+    ],
+    "operation": 7
+   }
+  },
+  {
+   "name": "merge_breps_bad_operation_imprint_classify",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1033",
+   "inputs": {
+    "api": "merge_breps",
+    "breps": [
+     {
+      "kind": "box",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "size": [
+       2,
+       3,
+       4
+      ]
+     },
+     {
+      "kind": "box",
+      "origin": [
+       10,
+       0,
+       0
+      ],
+      "size": [
+       3,
+       4,
+       5
+      ]
+     }
+    ],
+    "operation": 8
+   }
+  },
+  {
+   "name": "merge_breps_bad_operation_extract_separate",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1033",
+   "inputs": {
+    "api": "merge_breps",
+    "breps": [
+     {
+      "kind": "box",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "size": [
+       2,
+       3,
+       4
+      ]
+     },
+     {
+      "kind": "box",
+      "origin": [
+       10,
+       0,
+       0
+      ],
+      "size": [
+       3,
+       4,
+       5
+      ]
+     }
+    ],
+    "operation": 9
+   }
+  },
+  {
+   "name": "merge_breps_bad_operation_slice",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1033",
+   "inputs": {
+    "api": "merge_breps",
+    "breps": [
+     {
+      "kind": "box",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "size": [
+       2,
+       3,
+       4
+      ]
+     },
+     {
+      "kind": "box",
+      "origin": [
+       10,
+       0,
+       0
+      ],
+      "size": [
+       3,
+       4,
+       5
+      ]
+     }
+    ],
+    "operation": 10
+   }
+  },
+  {
+   "name": "merge_breps_union",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1038",
+   "inputs": {
+    "api": "merge_breps",
+    "breps": [
+     {
+      "kind": "box",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "size": [
+       10,
+       10,
+       10
+      ]
+     },
+     {
+      "kind": "box",
+      "origin": [
+       8,
+       6,
+       3
+      ],
+      "size": [
+       4,
+       8,
+       6
+      ]
+     }
+    ],
+    "operation": 1
+   }
+  },
+  {
+   "name": "merge_breps_intersection",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1038",
+   "inputs": {
+    "api": "merge_breps",
+    "breps": [
+     {
+      "kind": "box",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "size": [
+       10,
+       10,
+       10
+      ]
+     },
+     {
+      "kind": "box",
+      "origin": [
+       8,
+       6,
+       3
+      ],
+      "size": [
+       4,
+       8,
+       6
+      ]
+     }
+    ],
+    "operation": 2
+   }
+  },
+  {
+   "name": "merge_breps_difference",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1038",
+   "inputs": {
+    "api": "merge_breps",
+    "breps": [
+     {
+      "kind": "box",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "size": [
+       10,
+       10,
+       10
+      ]
+     },
+     {
+      "kind": "box",
+      "origin": [
+       8,
+       6,
+       3
+      ],
+      "size": [
+       4,
+       8,
+       6
+      ]
+     }
+    ],
+    "operation": 3
+   }
+  },
+  {
+   "name": "merge_breps_merge",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1038",
+   "inputs": {
+    "api": "merge_breps",
+    "breps": [
+     {
+      "kind": "box",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "size": [
+       10,
+       10,
+       10
+      ]
+     },
+     {
+      "kind": "box",
+      "origin": [
+       8,
+       6,
+       3
+      ],
+      "size": [
+       4,
+       8,
+       6
+      ]
+     }
+    ],
+    "operation": 5
+   }
+  },
+  {
+   "name": "merge_breps_three_union",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1068",
+   "inputs": {
+    "api": "merge_breps",
+    "breps": [
+     {
+      "kind": "box",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "size": [
+       10,
+       10,
+       10
+      ]
+     },
+     {
+      "kind": "box",
+      "origin": [
+       5,
+       5,
+       5
+      ],
+      "size": [
+       10,
+       10,
+       10
+      ]
+     },
+     {
+      "kind": "box",
+      "origin": [
+       8,
+       8,
+       8
+      ],
+      "size": [
+       10,
+       10,
+       10
+      ]
+     }
+    ],
+    "operation": 1
+   }
+  },
+  {
+   "name": "merge_breps_three_difference",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1105",
+   "inputs": {
+    "api": "merge_breps",
+    "breps": [
+     {
+      "kind": "box",
+      "origin": [
+       1,
+       1,
+       1.5
+      ],
+      "size": [
+       2,
+       2,
+       2
+      ]
+     },
+     {
+      "kind": "box",
+      "origin": [
+       8,
+       6,
+       3
+      ],
+      "size": [
+       4,
+       8,
+       6
+      ]
+     },
+     {
+      "kind": "box",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "size": [
+       10,
+       10,
+       10
+      ]
+     }
+    ],
+    "operation": 3
+   }
+  },
+  {
+   "name": "census_difference_cavity",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3309",
+   "inputs": {
+    "api": "difference",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      3,
+      3,
+      3
+     ],
+     "size": [
+      4,
+      4,
+      4
+     ]
+    }
+   }
+  },
+  {
+   "name": "census_union_disjoint",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3315",
+   "inputs": {
+    "api": "union",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      2,
+      2,
+      2
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      20,
+      0,
+      0
+     ],
+     "size": [
+      2,
+      2,
+      2
+     ]
+    }
+   }
+  },
+  {
+   "name": "intersection_overlap",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3309",
+   "inputs": {
+    "api": "intersection",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      5,
+      5,
+      5
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    }
+   }
+  },
+  {
+   "name": "merge_nested",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:3326",
+   "inputs": {
+    "api": "merge",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      10,
+      10,
+      10
+     ]
+    },
+    "b": {
+     "kind": "box",
+     "origin": [
+      4,
+      4,
+      4
+     ],
+     "size": [
+      2,
+      2,
+      2
+     ]
+    }
+   }
+  },
+  {
+   "name": "lists_op0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:2537",
+   "inputs": {
+    "api": "lists",
+    "breps1": [
+     {
+      "kind": "box",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "size": [
+       10,
+       10,
+       10
+      ]
+     }
+    ],
+    "breps2": [
+     {
+      "kind": "box",
+      "origin": [
+       5,
+       0,
+       0
+      ],
+      "size": [
+       10,
+       10,
+       10
+      ]
+     }
+    ],
+    "operation": 0
+   }
+  },
+  {
+   "name": "lists_op1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:2537",
+   "inputs": {
+    "api": "lists",
+    "breps1": [
+     {
+      "kind": "box",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "size": [
+       10,
+       10,
+       10
+      ]
+     }
+    ],
+    "breps2": [
+     {
+      "kind": "box",
+      "origin": [
+       5,
+       0,
+       0
+      ],
+      "size": [
+       10,
+       10,
+       10
+      ]
+     }
+    ],
+    "operation": 1
+   }
+  },
+  {
+   "name": "lists_op2",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:2537",
+   "inputs": {
+    "api": "lists",
+    "breps1": [
+     {
+      "kind": "box",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "size": [
+       10,
+       10,
+       10
+      ]
+     }
+    ],
+    "breps2": [
+     {
+      "kind": "box",
+      "origin": [
+       5,
+       0,
+       0
+      ],
+      "size": [
+       10,
+       10,
+       10
+      ]
+     }
+    ],
+    "operation": 2
+   }
+  },
+  {
+   "name": "lists_op3",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:2537",
+   "inputs": {
+    "api": "lists",
+    "breps1": [
+     {
+      "kind": "box",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "size": [
+       10,
+       10,
+       10
+      ]
+     }
+    ],
+    "breps2": [
+     {
+      "kind": "box",
+      "origin": [
+       5,
+       0,
+       0
+      ],
+      "size": [
+       10,
+       10,
+       10
+      ]
+     }
+    ],
+    "operation": 3
+   }
+  },
+  {
+   "name": "lists_op4",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:2537",
+   "inputs": {
+    "api": "lists",
+    "breps1": [
+     {
+      "kind": "box",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "size": [
+       10,
+       10,
+       10
+      ]
+     }
+    ],
+    "breps2": [
+     {
+      "kind": "box",
+      "origin": [
+       5,
+       0,
+       0
+      ],
+      "size": [
+       10,
+       10,
+       10
+      ]
+     }
+    ],
+    "operation": 4
+   }
+  },
+  {
+   "name": "lists_empty",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:2537",
+   "inputs": {
+    "api": "lists",
+    "breps1": [],
+    "breps2": [],
+    "operation": 1
+   }
+  },
+  {
+   "name": "trees_union",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1068",
+   "inputs": {
+    "api": "trees",
+    "breps": [
+     {
+      "kind": "box",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "size": [
+       10,
+       10,
+       10
+      ]
+     },
+     {
+      "kind": "box",
+      "origin": [
+       5,
+       5,
+       5
+      ],
+      "size": [
+       10,
+       10,
+       10
+      ]
+     }
+    ],
+    "tree": [
+     0,
+     1,
+     -1
+    ]
+   }
+  },
+  {
+   "name": "trees_two_trees",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1068",
+   "inputs": {
+    "api": "trees",
+    "breps": [
+     {
+      "kind": "box",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "size": [
+       10,
+       10,
+       10
+      ]
+     },
+     {
+      "kind": "box",
+      "origin": [
+       5,
+       5,
+       5
+      ],
+      "size": [
+       10,
+       10,
+       10
+      ]
+     },
+     {
+      "kind": "box",
+      "origin": [
+       30,
+       0,
+       0
+      ],
+      "size": [
+       2,
+       2,
+       2
+      ]
+     },
+     {
+      "kind": "box",
+      "origin": [
+       31,
+       1,
+       1
+      ],
+      "size": [
+       2,
+       2,
+       2
+      ]
+     }
+    ],
+    "tree": [
+     0,
+     1,
+     -1,
+     2,
+     3,
+     -3
+    ]
+   }
+  },
+  {
+   "name": "trees_not_binary",
+   "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp:1068",
+   "inputs": {
+    "api": "trees",
+    "breps": [
+     {
+      "kind": "box",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "size": [
+       10,
+       10,
+       10
+      ]
+     },
+     {
+      "kind": "box",
+      "origin": [
+       5,
+       5,
+       5
+      ],
+      "size": [
+       10,
+       10,
+       10
+      ]
+     }
+    ],
+    "tree": [
+     0,
+     -1
+    ]
+   }
+  }
+ ]
+}

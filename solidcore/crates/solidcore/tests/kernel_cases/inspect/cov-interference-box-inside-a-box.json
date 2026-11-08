@@ -1,0 +1,237 @@
+{
+  "area": "inspect",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 20.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                40.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                40.0,
+                30.0,
+                0.0
+              ],
+              "start": [
+                40.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                30.0,
+                0.0
+              ],
+              "start": [
+                40.0,
+                30.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                30.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 10.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                15.0,
+                5.0,
+                5.0
+              ],
+              "start": [
+                5.0,
+                5.0,
+                5.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                15.0,
+                15.0,
+                5.0
+              ],
+              "start": [
+                15.0,
+                5.0,
+                5.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                5.0,
+                15.0,
+                5.0
+              ],
+              "start": [
+                15.0,
+                15.0,
+                5.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                5.0,
+                5.0,
+                5.0
+              ],
+              "start": [
+                5.0,
+                15.0,
+                5.0
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "cov-interference-box-inside-a-box",
+  "expected": {
+    "method": "box 40 x 30 x 20 with a corner at the origin and a box 10 x 10 x 10 from (5,5,5) inside it: the overlap is the small box: V 1000, centre (10,10,10)",
+    "results": [
+      {
+        "json": 1,
+        "pointer": "/count",
+        "step": 3
+      },
+      {
+        "json": 1000.0,
+        "pointer": "/interferences/0/volume_mm3",
+        "step": 3
+      },
+      {
+        "json": [
+          10.0,
+          10.0,
+          10.0
+        ],
+        "pointer": "/interferences/0/center",
+        "step": 3
+      }
+    ],
+    "source": "analytic",
+    "sources": [],
+    "what": "a box wholly inside another"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 24,
+      "faces": 12,
+      "vertices": 16
+    }
+  },
+  "result": [
+    {
+      "body": "A",
+      "made": "b1"
+    },
+    {
+      "body": "B",
+      "made": "b2"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 5800.0,
+      "body_count": 2,
+      "edges": 24,
+      "faces": 12,
+      "vertices": 16,
+      "volume_mm3": 25000.0
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [
+    "results: SolidCraft computes it"
+  ],
+  "what": "a box wholly inside another",
+  "why_not": []
+}

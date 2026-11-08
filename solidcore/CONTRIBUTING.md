@@ -1,0 +1,113 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+
+# Contributing to solidcore
+
+Thank you for helping. solidcore is a B-rep kernel in safe, deterministic Rust. It started as a
+port of SMLib and has detached from it: clean, procedural constructions, each built from the geometry of its
+case, replacing the code they supersede. This page is the short version;
+[AGENTS.md](AGENTS.md) has the full rules, which apply to people and agents alike.
+
+## Before you start
+
+- **Fix what has been reported.** solidcore replaced SMLib as SolidCraft's kernel in 0.40, and
+  the switch came with bugs: not everything works yet. Take an open reported issue: `urgent`
+  first (a red goldens job on main comes before everything), then `help wanted`. A defect you find yourself in code
+  no user reaches, an unrequested improvement or a speed trick: file it as an issue with a real
+  reproduction and leave it for triage. A pull request names, in its first lines, the issue it
+  fixes. [AGENTS.md §0](AGENTS.md) has the details.
+- **Put the work in its layer.** [docs/layers.md](docs/layers.md) says where each job lives. Geometry is computed only in the kernel (`solidcore`). The modelling API (`solidcore-ops`) only chooses and sequences kernel calls. Applications compute no geometry. If a workflow needs maths the kernel lacks, add it to the kernel with tests.
+- **Read the docs for the area.**
+  - For fillets and chamfers, read [docs/generic-blend.md](docs/generic-blend.md): what the blend
+    builds, its events, its exact classes, its open work, and how each step is ported (§9).
+  - For any unit, read its `plan/units/<id>.toml`, plus its `plan/findings/` and
+    `plan/upstream-issues/` entries.
+- **Check what's already open.** Look at open pull requests, the issues for the area, and its
+  hub issue (fillets and chamfers: [#2243](https://github.com/tangency-labs/solidcore/issues/2243)).
+  Claim an issue before you start, and build on others' work rather than next to it.
+- **Ask when the docs and the code can't answer.** Ask the maintainers on the hub issue, or in
+  the [`#solidcore-dev`](https://discord.com/channels/1560611394934673498/1560631619340214394) channel on Discord for design discussion, and wait for
+  an answer rather than guessing. A short question saves a long review.
+
+## How we fix things
+
+- **Root causes, not patches.** Find why the construction is wrong for the case and fix that. Don't
+  add a branch for one input, a fallback, a retry, a loosened tolerance or a skipped check.
+- **Check more than one issue.** Several failing cases usually share one cause. Before fixing, look
+  for the other open issues and cases it explains, and fix the cause for all of them.
+- **Read the papers.** Most kernel failures are known problems with published constructions.
+  Searching the literature is most often the right way to solve a case; code invented to make one
+  case pass is not.
+- **Events, not try/catch trains.** Decide from the geometry which case you are in (a tangent end, a
+  fold, a corner type) and build that one construction. Never attempt one construction, catch its
+  failure and try the next.
+- **Leave no code smells.** No dead code, no unused flags, no commented-out code, no magic numbers
+  without their reason.
+- **Tests first.** Commit the failing test before the fix, in the area's existing test file. Gate on
+  values a wrong result changes (exact volumes, distances to the exact surface, counts), never on
+  time.
+
+## The new construction replaces the old
+
+- **The most correct solution, not SMLib's.** SMLib and the SolidCraft fork are references to
+  consult (inputs, expected values, known constructions), never targets to match. Prove a result
+  with closed forms, geometric checks and invariants. Code ported unchanged keeps their results
+  bit for bit; code written or changed here sets its own baseline.
+- **No compatibility flags.** A fix changes the default result, with a test that fails without
+  it; no old path is kept behind a flag, and a saved design rebuilds with today's correct result.
+  Say in the PR which results change and show the evidence. Retiring the `UpstreamFixes` flags
+  left from the port (turn on, delete the old path) is welcome work.
+- **Don't extend the old paths.** Improve the construction that replaces them.
+- **Keep history linear.** Rebase your branch onto `main`; never merge `main` into it.
+
+## Goldens
+
+Every unit's cases are checked against its golden, `crates/goldens/expected/<unit>.jsonl`: the
+output solidcore produced for each case when the golden was blessed. CI fails on any case whose
+output changed, any case added or missing, and any case that breaks.
+
+- **Check:** `cargo run --profile goldens -p goldens -- --unit <id> --goldens` (`--all --jobs 0`
+  for every unit, as CI runs it).
+- **Bless** a change you made on purpose: `... --unit <id> --bless`, then commit the golden with
+  its reason. The commit message and the pull request list the cases that changed with their
+  old and new values, say why the new ones are right, and show pictures before and after for
+  geometry. A golden change without that justification is not reviewed.
+- **A golden proves a result unchanged, not correct.** Correctness comes from closed forms,
+  geometric checks and invariants. Never loosen a tolerance to keep a golden.
+- **The C++ is a reading reference.** `upstream/` is read for inputs, expected values and known
+  constructions; nothing here builds, links or runs it.
+
+## Cases and known failures
+
+A new case for a kernel operation goes to the corpus in
+[crates/solidcore/tests/kernel_cases/](crates/solidcore/tests/kernel_cases/README.md#adding-a-case)
+(exported from SolidCraft or written by hand), not to SolidCraft's rig.
+
+The fillet and chamfer cases are shown in the site's case gallery
+([docs/generic-blend.md §7](docs/generic-blend.md#7-case-gallery)), each with its render and its
+state: passes, refused as expected, or known failing (with its reason). The gallery is generated
+from the cases, so never edit a doc for it. When your change makes a case pass, or fixes a known
+failure, update the case's entry (its expectation, and its `gallery_note` if needed), its line in
+`known_failing.json` **and its image** in the same pull request: a new render of the result
+(`crates/solidcore/tests/kernel_cases/<area>/<case>.jpg`) whose view shows the case's issue (the
+corner, the seam, the spot refused or fixed), framed close on it, not a fixed angle. Agents: choose
+the view from the case's geometry. A changed status without a new image is not accepted.
+
+## Concurrency and parallelism
+
+- **The concurrency unit is the `Kernel`.** It holds no global state and can move between
+  threads, so independent kernels run side by side: use one per thread or worker. Upstream SMLib
+  needs a process per job instead, because its default context holds unlocked mutable state; see
+  the fork's `.agents/operations/concurrency.md`.
+- **Operations have parallel structure but run serially for now.** Their pieces are pure functions
+  of immutable inputs, so they can be spread over threads later with the same result bit for bit
+  ([docs/generic-blend.md](docs/generic-blend.md) §5, [AGENTS.md](AGENTS.md) §4c).
+- **Never add global, `static` or `thread_local` state,** or a cache that fills lazily without
+  synchronisation.
+
+## Pull requests
+
+- **One topic per pull request,** with a closing keyword (`Fixes #n`) where it fixes an issue.
+- **Every commit builds,** and the tests it touches pass, or are listed known failing with their
+  reason.
+- **Show the evidence:** the commands you ran and their results
+  ([the completion evidence checklist](docs/porting.md#completion-evidence-checklist)).

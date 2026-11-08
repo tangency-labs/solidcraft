@@ -1,0 +1,316 @@
+{
+ "cases": [
+  {
+   "name": "crossing_creases_union_d3e-06",
+   "note": "#1058 / WR-306 probe geometry (crates/solidcore/tests/issue_1058_crossing_creases_probe.rs): box A [0,10]^3 united with a 10 x 10 x 20 box B turned 45 degrees about z then about x, its crease crossing A's edge y = z = 10 at depth d = 3e-06. At d = 3e-6 the Rust union (fix off) returned an edge naming a deleted vertex. Volume ~3000.",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 45.0
+       }
+      },
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         1.0,
+         0.0,
+         0.0
+        ],
+        "angle_deg": 45.0
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         5.0,
+         9.999997878679656,
+         9.999997878679656
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       -10.0
+      ],
+      "size": [
+       10.0,
+       10.0,
+       20.0
+      ]
+     }
+    },
+    "operation": 1
+   }
+  },
+  {
+   "name": "crossing_creases_union_d1e-05",
+   "note": "#1058 / WR-306 probe geometry (crates/solidcore/tests/issue_1058_crossing_creases_probe.rs): box A [0,10]^3 united with a 10 x 10 x 20 box B turned 45 degrees about z then about x, its crease crossing A's edge y = z = 10 at depth d = 1e-05. At d = 3e-6 the Rust union (fix off) returned an edge naming a deleted vertex. Volume ~3000.",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 45.0
+       }
+      },
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         1.0,
+         0.0,
+         0.0
+        ],
+        "angle_deg": 45.0
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         5.0,
+         9.999992928932189,
+         9.999992928932189
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       -10.0
+      ],
+      "size": [
+       10.0,
+       10.0,
+       20.0
+      ]
+     }
+    },
+    "operation": 1
+   }
+  },
+  {
+   "name": "crossing_creases_union_d3e-05",
+   "note": "#1058 / WR-306 probe geometry (crates/solidcore/tests/issue_1058_crossing_creases_probe.rs): box A [0,10]^3 united with a 10 x 10 x 20 box B turned 45 degrees about z then about x, its crease crossing A's edge y = z = 10 at depth d = 3e-05. At d = 3e-6 the Rust union (fix off) returned an edge naming a deleted vertex. Volume ~3000.",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 45.0
+       }
+      },
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         1.0,
+         0.0,
+         0.0
+        ],
+        "angle_deg": 45.0
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         5.0,
+         9.999978786796564,
+         9.999978786796564
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       -10.0
+      ],
+      "size": [
+       10.0,
+       10.0,
+       20.0
+      ]
+     }
+    },
+    "operation": 1
+   }
+  },
+  {
+   "name": "crossing_creases_union_d0.0001",
+   "note": "#1058 / WR-306 probe geometry (crates/solidcore/tests/issue_1058_crossing_creases_probe.rs): box A [0,10]^3 united with a 10 x 10 x 20 box B turned 45 degrees about z then about x, its crease crossing A's edge y = z = 10 at depth d = 0.0001. At d = 3e-6 the Rust union (fix off) returned an edge naming a deleted vertex. Volume ~3000.",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 45.0
+       }
+      },
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         1.0,
+         0.0,
+         0.0
+        ],
+        "angle_deg": 45.0
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         5.0,
+         9.999929289321882,
+         9.999929289321882
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.0,
+       0.0,
+       -10.0
+      ],
+      "size": [
+       10.0,
+       10.0,
+       20.0
+      ]
+     }
+    },
+    "operation": 1
+   }
+  }
+ ]
+}

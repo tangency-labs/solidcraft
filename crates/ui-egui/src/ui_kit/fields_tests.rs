@@ -73,16 +73,16 @@ fn every_text_input_centres_its_galley_for_mono_and_proportional_fonts() {
         let center = galley.pos.y + galley.galley.rect.center().y;
         assert!((center - rect.center().y).abs() < 0.01, "{case}: galley centre {center} differs from field {rect:?}");
         if case == "search" {
-            assert!(galley.pos.x >= rect.left() + crate::theme::Tokens::get().space_24, "search text leaves room for its icon");
+            assert!(galley.pos.x >= rect.left() + solidcraft_theme::Tokens::get().space_24, "search text leaves room for its icon");
         }
         if case == "placement" {
-            let font = egui::FontId::proportional(crate::theme::Tokens::get().font_body);
+            let font = egui::FontId::proportional(solidcraft_theme::Tokens::get().font_body);
             let native = ctx.fonts_mut(|fonts| fonts.row_height(&font))
                 + ctx.style_of(egui::Theme::Light).spacing.extra_text_line_spacing
-                + crate::theme::Tokens::get().space_4;
+                + solidcraft_theme::Tokens::get().space_4;
             assert_eq!(rect.height(), native, "canvas editor retains its native hit target");
         } else if !matches!(case, "multiline" | "area" | "message") {
-            assert_eq!(rect.height(), crate::theme::Tokens::get().control_height, "{case}");
+            assert_eq!(rect.height(), solidcraft_theme::Tokens::get().control_height, "{case}");
         }
     }
 }
@@ -120,7 +120,7 @@ fn multiline_text_retains_focus_id_and_three_line_geometry() {
     };
     frame(&ctx, vec![], &mut draw);
     let row = scenario::rect_of("dialog:row:Text").unwrap();
-    assert_eq!(row.height(), 3.0 * crate::theme::Tokens::get().control_height);
+    assert_eq!(row.height(), 3.0 * solidcraft_theme::Tokens::get().control_height);
     let at = scenario::handle_at("dialog:Text").unwrap();
     frame(&ctx, pointer(at, true), &mut draw);
     frame(&ctx, pointer(at, false), &mut draw);
@@ -563,9 +563,9 @@ fn preference_dropdown_keeps_disabled_choices_inert_and_closes_after_selection()
 #[test]
 fn dropdown_popups_own_escape_and_return_focus_without_canceling_the_window() {
     use std::cell::Cell;
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         for kind in ["plain", "icons", "compact", "editable"] {
             let ctx = crate::fonts::test_context();
             let action = Cell::new(Action::None);
@@ -647,7 +647,7 @@ fn dropdown_popups_own_escape_and_return_focus_without_canceling_the_window() {
             assert_eq!(selected.get(), 0, "dismissal does not select an option");
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
@@ -886,16 +886,24 @@ fn selection_field_has_three_distinct_looks_in_every_theme() {
         });
         (rects, ink)
     };
-    let mut palettes: Vec<(String, Option<crate::theme::Custom>, bool)> = vec![("dark".into(), None, true), ("light".into(), None, false)];
+    let mut palettes: Vec<(String, Option<crate::theme::FilePalette>, bool)> = vec![("dark".into(), None, true), ("light".into(), None, false)];
     for theme in crate::theme_files::builtin() {
         let dark = theme.base.is_dark();
-        palettes.push((theme.id.clone(), Some(crate::theme::Custom { dark, tokens: crate::theme_files::resolve(theme) }), dark));
+        palettes.push((
+            theme.id.clone(),
+            Some(crate::theme::FilePalette {
+                dark,
+                tokens: crate::theme_files::resolve(theme),
+                icons: crate::theme_files::resolve_icon_palette(theme, &Default::default()),
+            }),
+            dark,
+        ));
     }
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for (name, custom, dark) in palettes {
-        crate::theme::set_dark(dark);
-        crate::theme::set_custom(custom);
-        let t = crate::theme::Tokens::get();
+        solidcraft_theme::set_dark(dark);
+        crate::theme::set_file_palette(custom);
+        let t = solidcraft_theme::Tokens::get();
         let [active_filled, active_empty, filled, empty] = [(true, true), (true, false), (false, true), (false, false)].map(|(a, f)| look(a, f));
         let accented = |l: &Look| l.0.iter().any(|&(fill, stroke)| stroke == t.form_primary || fill == t.selected_bg);
         assert!(accented(&active_filled) && accented(&active_empty), "{name}: the active input is accented");
@@ -930,16 +938,16 @@ fn selection_field_has_three_distinct_looks_in_every_theme() {
         assert_eq!(filled.1, Some(t.form_ink), "{name}: a filled input's count is in text colour");
         assert_eq!(empty.1, Some(t.form_dim), "{name}: an empty input's prompt is dim");
     }
-    crate::theme::set_custom(None);
-    crate::theme::set_dark(previous);
+    crate::theme::set_file_palette(None);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
 fn navigation_dropdown_popups_own_escape_and_return_focus_without_canceling_the_window() {
     use std::cell::Cell;
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         for kind in ["plain", "compact", "bounded", "editable"] {
             let ctx = crate::fonts::test_context();
             let action = Cell::new(Action::None);
@@ -1016,7 +1024,7 @@ fn navigation_dropdown_popups_own_escape_and_return_focus_without_canceling_the_
             assert_eq!(selected.get(), 0, "dismissal does not select an option");
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 // The text fields' right-click menu (#8875).
@@ -1359,7 +1367,7 @@ fn bounded_dropdown_focus_announces_full_selected_source_with_a_nonempty_accessi
             let info = event.widget_info();
             assert_eq!(info.role, egui::Role::ComboBox);
             assert!(info.enabled);
-            let expected = if labelled { crate::i18n::tr_label("Retained source") } else { current };
+            let expected = if labelled { solidcraft_ui_text::tr_label("Retained source") } else { current };
             assert_eq!(info.label.as_deref(), Some(expected));
             assert!(!info.label.as_deref().unwrap().trim().is_empty());
             assert_eq!(
@@ -1419,7 +1427,7 @@ fn a_track_number_adds_up_and_a_sign_adds_to_the_value_now() {
 
 #[test]
 fn a_label_drag_reads_only_literal_values_and_moves_them_on_the_step_grid() {
-    let literal = |text: &str| super::literal(text).map(|l| (l.number, l.unit, l.comma));
+    let literal = |text: &str| super::literal(&crate::params_dialog::DocExpressions, text).map(|l| (l.number, l.unit, l.comma));
     assert_eq!(literal("20 mm"), Some((20.0, " mm".into(), false)));
     assert_eq!(literal(" 1,5in "), Some((1.5, "in".into(), true)));
     assert_eq!(literal("-3"), Some((-3.0, String::new(), false)));
@@ -1435,7 +1443,7 @@ fn a_label_drag_reads_only_literal_values_and_moves_them_on_the_step_grid() {
     assert_eq!(super::scrubbed(2.0, -500.0, 0.1), 0.0, "a size stops at zero");
     assert!((super::scrubbed(-2.0, -10.0, 0.1) + 3.0).abs() < 1e-9, "a negative offset keeps moving");
     assert_eq!(super::scrubbed(1.0, f32::MAX, 1e8), 1.0, "an overflowing drag keeps the value");
-    let text = |n, step, typed: &str| super::scrub_text(n, step, &super::literal(typed).unwrap());
+    let text = |n, step, typed: &str| super::scrub_text(n, step, &super::literal(&crate::params_dialog::DocExpressions, typed).unwrap());
     assert_eq!(text(23.0, 0.1, "20 mm"), "23.0 mm");
     assert_eq!(text(1.75, 0.01, "1,5 in"), "1,75 in");
     assert_eq!(text(-0.0001, 0.01, "-1"), "0.00");
@@ -1473,6 +1481,7 @@ fn dragging_a_value_rows_label_changes_its_literal_and_leaves_expressions_alone(
         frame(ctx, vec![], modifiers, values);
     }
     let ctx = crate::fonts::test_context();
+    crate::params_dialog::install_expressions(&ctx);
     let mut values = ["20 mm".to_owned(), "depth + 2 mm".to_owned()];
     frame(&ctx, vec![], Default::default(), &mut values);
     drag(&ctx, "Distance", 40.0, Default::default(), &mut values);

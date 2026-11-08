@@ -114,7 +114,6 @@
 
           cargoLock = {
             lockFile = ./Cargo.lock;
-            allowBuiltinFetchGit = true;
           };
 
           # The CLI draws the same packaging icons as the other Linux distributions.

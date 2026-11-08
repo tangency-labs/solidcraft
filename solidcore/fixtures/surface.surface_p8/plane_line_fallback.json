@@ -1,0 +1,2272 @@
+{
+ "cases": [
+  {
+   "name": "plane_line_fallback_none",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-09,
+      1e-09
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      1000000.0,
+      0
+     ],
+     "ivl": null,
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_ivl_wide",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-09,
+      1e-09
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      1000000.0,
+      0
+     ],
+     "ivl": [
+      -2,
+      3
+     ],
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_ivl_narrow",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-09,
+      1e-09
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      1000000.0,
+      0
+     ],
+     "ivl": [
+      -0.001,
+      0.001
+     ],
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_ray",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-09,
+      1e-09
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      1000000.0,
+      0
+     ],
+     "ivl": null,
+     "ray": true,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_tiny_dom",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-10,
+      1e-10
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      1000000.0,
+      0
+     ],
+     "ivl": null,
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_tiny_dom_ivl",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-10,
+      1e-10
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      1000000.0,
+      0
+     ],
+     "ivl": [
+      -2,
+      3
+     ],
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_diag_dom",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-09,
+      2e-09
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      500000.0,
+      0
+     ],
+     "ivl": null,
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_000_d1e-06_v1e+06_1e+06_none",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-06,
+      1e-06
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      1000000.0,
+      0
+     ],
+     "ivl": null,
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_001_d1e-06_v1e+06_1e+06_ivl",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-06,
+      1e-06
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      1000000.0,
+      0
+     ],
+     "ivl": [
+      -2,
+      3
+     ],
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_002_d1e-06_v1e+06_1e+06_none_ray",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-06,
+      1e-06
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      1000000.0,
+      0
+     ],
+     "ivl": null,
+     "ray": true,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_003_d1e-06_v1e+06_0_none",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-06,
+      1e-06
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      0,
+      0
+     ],
+     "ivl": null,
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_004_d1e-06_v1e+06_0_ivl",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-06,
+      1e-06
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      0,
+      0
+     ],
+     "ivl": [
+      -2,
+      3
+     ],
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_005_d1e-06_v1e+06_0_none_ray",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-06,
+      1e-06
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      0,
+      0
+     ],
+     "ivl": null,
+     "ray": true,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_006_d1e-06_v1e+06_-1e+06_none",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-06,
+      1e-06
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      -1000000.0,
+      0
+     ],
+     "ivl": null,
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_007_d1e-06_v1e+06_-1e+06_ivl",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-06,
+      1e-06
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      -1000000.0,
+      0
+     ],
+     "ivl": [
+      -2,
+      3
+     ],
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_008_d1e-06_v1e+06_-1e+06_none_ray",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-06,
+      1e-06
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      -1000000.0,
+      0
+     ],
+     "ivl": null,
+     "ray": true,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_015_d5e-07_v1e+06_1e+06_none",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      5e-07,
+      5e-07
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      1000000.0,
+      0
+     ],
+     "ivl": null,
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_016_d5e-07_v1e+06_1e+06_ivl",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      5e-07,
+      5e-07
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      1000000.0,
+      0
+     ],
+     "ivl": [
+      -2,
+      3
+     ],
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_017_d5e-07_v1e+06_1e+06_none_ray",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      5e-07,
+      5e-07
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      1000000.0,
+      0
+     ],
+     "ivl": null,
+     "ray": true,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_018_d5e-07_v1e+06_0_none",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      5e-07,
+      5e-07
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      0,
+      0
+     ],
+     "ivl": null,
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_019_d5e-07_v1e+06_0_ivl",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      5e-07,
+      5e-07
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      0,
+      0
+     ],
+     "ivl": [
+      -2,
+      3
+     ],
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_020_d5e-07_v1e+06_0_none_ray",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      5e-07,
+      5e-07
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      0,
+      0
+     ],
+     "ivl": null,
+     "ray": true,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_021_d5e-07_v1e+06_-1e+06_none",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      5e-07,
+      5e-07
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      -1000000.0,
+      0
+     ],
+     "ivl": null,
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_022_d5e-07_v1e+06_-1e+06_ivl",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      5e-07,
+      5e-07
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      -1000000.0,
+      0
+     ],
+     "ivl": [
+      -2,
+      3
+     ],
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_023_d5e-07_v1e+06_-1e+06_none_ray",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      5e-07,
+      5e-07
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      -1000000.0,
+      0
+     ],
+     "ivl": null,
+     "ray": true,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_030_d2e-06_v1e+06_1e+06_none",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      2e-06,
+      2e-06
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      1000000.0,
+      0
+     ],
+     "ivl": null,
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_031_d2e-06_v1e+06_1e+06_ivl",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      2e-06,
+      2e-06
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      1000000.0,
+      0
+     ],
+     "ivl": [
+      -2,
+      3
+     ],
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_032_d2e-06_v1e+06_1e+06_none_ray",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      2e-06,
+      2e-06
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      1000000.0,
+      0
+     ],
+     "ivl": null,
+     "ray": true,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_033_d2e-06_v1e+06_0_none",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      2e-06,
+      2e-06
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      0,
+      0
+     ],
+     "ivl": null,
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_034_d2e-06_v1e+06_0_ivl",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      2e-06,
+      2e-06
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      0,
+      0
+     ],
+     "ivl": [
+      -2,
+      3
+     ],
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_035_d2e-06_v1e+06_0_none_ray",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      2e-06,
+      2e-06
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      0,
+      0
+     ],
+     "ivl": null,
+     "ray": true,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_036_d2e-06_v1e+06_-1e+06_none",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      2e-06,
+      2e-06
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      -1000000.0,
+      0
+     ],
+     "ivl": null,
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_037_d2e-06_v1e+06_-1e+06_ivl",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      2e-06,
+      2e-06
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      -1000000.0,
+      0
+     ],
+     "ivl": [
+      -2,
+      3
+     ],
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_038_d2e-06_v1e+06_-1e+06_none_ray",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      2e-06,
+      2e-06
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      -1000000.0,
+      0
+     ],
+     "ivl": null,
+     "ray": true,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_045_d1e-08_v1e+06_1e+06_none",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-08,
+      1e-08
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      1000000.0,
+      0
+     ],
+     "ivl": null,
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_046_d1e-08_v1e+06_1e+06_ivl",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-08,
+      1e-08
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      1000000.0,
+      0
+     ],
+     "ivl": [
+      -2,
+      3
+     ],
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_047_d1e-08_v1e+06_1e+06_none_ray",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-08,
+      1e-08
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      1000000.0,
+      0
+     ],
+     "ivl": null,
+     "ray": true,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_048_d1e-08_v1e+06_0_none",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-08,
+      1e-08
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      0,
+      0
+     ],
+     "ivl": null,
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_049_d1e-08_v1e+06_0_ivl",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-08,
+      1e-08
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      0,
+      0
+     ],
+     "ivl": [
+      -2,
+      3
+     ],
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_050_d1e-08_v1e+06_0_none_ray",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-08,
+      1e-08
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      0,
+      0
+     ],
+     "ivl": null,
+     "ray": true,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_051_d1e-08_v1e+06_-1e+06_none",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-08,
+      1e-08
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      -1000000.0,
+      0
+     ],
+     "ivl": null,
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_052_d1e-08_v1e+06_-1e+06_ivl",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-08,
+      1e-08
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      -1000000.0,
+      0
+     ],
+     "ivl": [
+      -2,
+      3
+     ],
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_053_d1e-08_v1e+06_-1e+06_none_ray",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-08,
+      1e-08
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      -1000000.0,
+      0
+     ],
+     "ivl": null,
+     "ray": true,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_060_d1e-10_v1e+06_1e+06_none",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-10,
+      1e-10
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      1000000.0,
+      0
+     ],
+     "ivl": null,
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_061_d1e-10_v1e+06_1e+06_ivl",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-10,
+      1e-10
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      1000000.0,
+      0
+     ],
+     "ivl": [
+      -2,
+      3
+     ],
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_062_d1e-10_v1e+06_1e+06_none_ray",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-10,
+      1e-10
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      1000000.0,
+      0
+     ],
+     "ivl": null,
+     "ray": true,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_063_d1e-10_v1e+06_0_none",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-10,
+      1e-10
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      0,
+      0
+     ],
+     "ivl": null,
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_064_d1e-10_v1e+06_0_ivl",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-10,
+      1e-10
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      0,
+      0
+     ],
+     "ivl": [
+      -2,
+      3
+     ],
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_065_d1e-10_v1e+06_0_none_ray",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-10,
+      1e-10
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      0,
+      0
+     ],
+     "ivl": null,
+     "ray": true,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_066_d1e-10_v1e+06_-1e+06_none",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-10,
+      1e-10
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      -1000000.0,
+      0
+     ],
+     "ivl": null,
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_067_d1e-10_v1e+06_-1e+06_ivl",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-10,
+      1e-10
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      -1000000.0,
+      0
+     ],
+     "ivl": [
+      -2,
+      3
+     ],
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_068_d1e-10_v1e+06_-1e+06_none_ray",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "n": [
+       0,
+       0,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-10,
+      1e-10
+     ],
+     "p": [
+      0,
+      0,
+      0
+     ],
+     "v": [
+      1000000.0,
+      -1000000.0,
+      0
+     ],
+     "ivl": null,
+     "ray": true,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_plane2_d1e-06",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       1,
+       2,
+       3
+      ],
+      "n": [
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-06,
+      1e-06
+     ],
+     "p": [
+      1,
+      2,
+      3
+     ],
+     "v": [
+      1000000.0,
+      -1000000.0,
+      0
+     ],
+     "ivl": null,
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "plane_line_fallback_plane2_d1e-09",
+   "inputs": {
+    "surface": {
+     "plane": {
+      "o": [
+       1,
+       2,
+       3
+      ],
+      "n": [
+       1,
+       1,
+       1
+      ]
+     }
+    },
+    "op": {
+     "op": "line",
+     "dom": [
+      0,
+      0,
+      1e-09,
+      1e-09
+     ],
+     "p": [
+      1,
+      2,
+      3
+     ],
+     "v": [
+      1000000.0,
+      -1000000.0,
+      0
+     ],
+     "ivl": null,
+     "ray": false,
+     "tol": 1e-06
+    }
+   }
+  }
+ ]
+}

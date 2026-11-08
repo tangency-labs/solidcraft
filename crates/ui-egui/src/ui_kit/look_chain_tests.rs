@@ -1,4 +1,5 @@
 use super::*;
+use crate::scenario;
 use crate::ui_kit::{
     FinishKind,
     test_support::{frame, pointer},

@@ -2218,6 +2218,7 @@
   "material.editor.preserved_appearance": "保持される外観",
   "material.editor.public_reference": "公開資料",
   "material.editor.reference": "参照",
+  "material.editor.remove": "削除",
   "material.editor.save_or_discard": "材料を割り当てる前に下書きを保存または破棄してください。",
   "material.editor.saved": "材料を保存しました。ボディへの割り当ては変わりません。",
   "material.editor.scope": "保存してもボディには割り当てません。空欄の特性と条件は不明のままです。カードの密度は割り当て密度や質量を変更しません。",

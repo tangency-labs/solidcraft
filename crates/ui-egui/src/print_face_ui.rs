@@ -40,13 +40,13 @@ pub(crate) fn toggle(app: &mut SolveApp) {
         _ => None,
     };
     let Some((face, body, index)) = picked else {
-        app.set_status(crate::i18n::tr("ui.print_face_pick"), true);
+        app.set_status(solidcraft_ui_text::tr("ui.print_face_pick"), true);
         return;
     };
     let clear = is_print_face(app, &body, index);
     if set(app, &body, if clear { None } else { Some(&face) }) {
         let id = if clear { "ui.print_face_cleared" } else { "ui.print_face_set" };
-        app.set_status(crate::i18n::format(id, &[("body", &body)]), false);
+        app.set_status(solidcraft_ui_text::format(id, &[("body", &body)]), false);
     }
 }
 
