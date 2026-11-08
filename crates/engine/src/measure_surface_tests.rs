@@ -218,11 +218,6 @@ fn a_bore_through_the_wall_is_not_measured_as_the_uncut_band() {
     assert!(area < TAU * 5.0 * 20.0 - 1.0, "the bored wall's area {area} is less than the uncut {}: {r}", TAU * 5.0 * 20.0);
 }
 
-/// The flat face across Z at height `z`, as a pick.
-fn flat_face_at(s: &Session, z: f64) -> Value {
-    face_of(s, |f| matches!(f, solidcraft_kernel::FaceSurface::Plane { normal, point } if normal.vec().z.abs() > 0.999 && (point.z - z).abs() < 1e-6))
-}
-
 /// A flat face with no hole: its perimeter is the length of its four edges, with no outer and
 /// inner split (#12048).
 #[test]
