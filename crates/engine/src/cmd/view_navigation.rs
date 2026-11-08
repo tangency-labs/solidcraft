@@ -561,9 +561,17 @@ fn navigate(_s: &mut Session, p: &Value) -> Result<Value> {
                 .ok_or_else(|| bad(cmd, "degrees must be a number above 0 and at most 180"))?,
         };
         let turn = |toward: solidcore_record::Vec3| cam.looking_from(b * cos + toward * sin);
+        // A step to the side (the arrow keys') turns the view about the up axis and keeps the
+        // pitch: turning toward the camera's own right vector tilts it as well when the view is
+        // not level (#12995). The quarter turn (the cube's arrows) still goes square to the side.
+        let side = |sign: f64| {
+            let (level_r, _, level_b) = Camera { pitch: 0.0, ..cam }.basis();
+            Camera { pitch: cam.pitch, ..cam.looking_from(level_b * cos + level_r * (sign * sin)) }
+        };
+        let stepped = sin != 1.0;
         match p.get("action").and_then(Value::as_str) {
-            Some("left") => cam = turn(-r),
-            Some("right") => cam = turn(r),
+            Some("left") => cam = if stepped { side(-1.0) } else { turn(-r) },
+            Some("right") => cam = if stepped { side(1.0) } else { turn(r) },
             Some("up") => cam = turn(u),
             Some("down") => cam = turn(-u),
             Some("clockwise") => cam.roll = (cam.roll + FRAC_PI_2).rem_euclid(std::f64::consts::TAU),
