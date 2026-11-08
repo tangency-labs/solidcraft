@@ -23,6 +23,9 @@ use solidcraft_io::Format;
 use super::CommandSpec;
 use super::print_face;
 use crate::params::{bad, bool_, num, str_, string_list};
+use crate::schema::file::ExportResult;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::schema::save_mesh::{SaveMeshResult, SlicerDelivery};
 use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
@@ -94,10 +97,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&EXPORT_URDF_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::UrdfExportResult>)
         .params("path; mesh_prefix?; effort? (default 1000); velocity? (default 10) → {path, format, files, links, joints, warnings}: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md"),
-    CommandSpec::new("file.save_mesh", "Save As Mesh", save_mesh)
+    CommandSpec::new("file.save_mesh", "Save As Mesh", crate::checked!("file.save_mesh", save_mesh))
         .at("INSERT", "FILES")
         .icon("mesh_export")
         .noundo()
+        .contract(&SAVE_MESH_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::save_mesh::SaveMeshResult>)
         .params("path; format?: stl|3mf|3mf-tagged (default from the extension, else stl; 3mf-tagged: docs/formats/3mf-face-tags.md); bodies?: [names] (default: all); ascii?: bool (STL); slicer?: id or name from file.slicers, the program path it lists, or a program the user added under Custom… (send the saved file there, through the same steps as file.send_to_slicer: a slicer that has to be started first is waited for; may be deprecated later in favour of file.send_to_slicer or a Send to App workflow, kept for scripts); single_instance?: bool (default true; see file.send_to_slicer); quality?: standard|fine|finest (STL, OBJ and 3MF: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts)"),
     CommandSpec::new("file.send_to_slicer", "Send to Slicer", send_to_slicer)
         .enabled(starts_programs)
@@ -127,6 +132,7 @@ const EXPORT_STL_CONTRACT: crate::schema::TypedContract<crate::schema::file::Exp
 const EXPORT_3MF_CONTRACT: crate::schema::TypedContract<crate::schema::file::Export3mfParams> = crate::schema::TypedContract::new();
 const EXPORT_OBJ_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportMeshParams> = crate::schema::TypedContract::new();
 const EXPORT_URDF_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportUrdfParams> = crate::schema::TypedContract::new();
+const SAVE_MESH_CONTRACT: crate::schema::TypedContract<crate::schema::save_mesh::SaveMeshParams> = crate::schema::TypedContract::new();
 
 fn path_arg<'a>(p: &'a Value, cmd: &str) -> Result<&'a str> {
     str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "`path` is required"))
@@ -961,7 +967,9 @@ fn export_to(
         solidcraft_io::export_with_parts(&s.doc.painted(&*s.world_state()?), bodies, parts, format, &name, &s.doc.metadata, quality)?
     };
     solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    Ok(json!({"path": path, "bytes": bytes.len(), "format": format!("{format:?}")}))
+    let reply =
+        ExportResult { path: path.to_string(), bytes: bytes.len(), format: format!("{format:?}"), files: Vec::new(), param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 /// [`export_to`] for a mesh file a slicer is sent (STL or 3MF): each body laid on its print face.
@@ -979,9 +987,16 @@ fn export_laid_to(
     let laid = print_face::lay_on_print_faces(s, &mut state, bodies, parts);
     let bytes = solidcraft_io::export_with_parts(&state, bodies, parts, format, &name, &s.doc.metadata, quality)?;
     solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    let mut out = json!({"path": path, "bytes": bytes.len(), "format": format!("{format:?}")});
-    laid.report(&mut out);
-    Ok(out)
+    let reply = SaveMeshResult {
+        path: path.to_string(),
+        bytes: bytes.len(),
+        format: format!("{format:?}"),
+        print_faces: laid.bodies,
+        warnings: laid.warnings,
+        delivery: SlicerDelivery::default(),
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 fn export(s: &mut Session, p: &Value) -> Result<Value> {

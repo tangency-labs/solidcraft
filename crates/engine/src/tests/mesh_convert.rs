@@ -233,7 +233,7 @@ fn send_to_slicer_needs_a_slicer_and_bodies() {
 
 /// The chosen-programs list is process-wide: tests that set it take turns.
 #[cfg(unix)]
-static CHOSEN_PROGRAMS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub(crate) static CHOSEN_PROGRAMS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// `file.save_mesh` with a `slicer` writes where the caller said and hands that file over, by the
 /// same steps as `file.send_to_slicer`.

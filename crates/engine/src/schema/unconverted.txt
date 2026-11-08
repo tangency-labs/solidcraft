@@ -13,7 +13,6 @@ file.insert_step
 file.new
 file.save
 file.save_as
-file.save_mesh
 file.slicers
 joint.sweep
 mesh.convert
