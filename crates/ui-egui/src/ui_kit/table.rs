@@ -229,7 +229,7 @@ impl Table<'_> {
             return response;
         }
         if selected || (ui.is_enabled() && ui.rect_contains_pointer(rect)) {
-            ui.painter().rect_filled(rect, t.control_radius, if selected { t.selected_bg } else { t.hover });
+            t.paint_highlight(ui.painter(), rect, t.control_radius, if selected { t.selected_bg } else { t.hover });
         }
         response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), selected, key));
         scenario::publish_rect(&format!("dialog:table:{}:{key}", self.id), rect);
@@ -441,7 +441,7 @@ pub(crate) fn plus_header<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> Opt
     let rect = egui::Rect::from_center_size(ui.max_rect().center(), vec2(t.form_close_size - t.space_4, t.form_close_size - t.space_4));
     let response = super::actions::icon_button_colored(ui, rect, "plus", "Add Column", Some(t.form_dim));
     if response.hovered() {
-        ui.painter().rect_filled(rect, t.control_radius, t.selected_bg);
+        t.paint_highlight(ui.painter(), rect, t.control_radius, t.selected_bg);
         crate::icons::paint_ink(ui.painter(), rect.shrink(t.form_icon_inset), "plus", t.form_primary);
         for x in [rect.left() - t.form_gap_y, rect.right() + t.form_gap_y] {
             ui.painter().vline(x, rect.y_range(), egui::Stroke::new(t.space_2, t.form_primary));

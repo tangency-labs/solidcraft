@@ -390,6 +390,9 @@ pub struct Borders {
     pub primary_inset: Option<InsetBorder>,
     /// Optional directional chrome. Absent themes keep their flat strokes.
     pub bevel: Option<Bevel>,
+    /// Optional armour plates for buttons, highlighted rows and panes (`crate::plate`). Absent
+    /// themes keep their own.
+    pub plate: Option<crate::plate::Plate>,
 }
 
 /// Two directional edge bands, shared by raised chrome and recessed editors.
@@ -454,6 +457,7 @@ impl Borders {
         control: None,
         primary_inset: None,
         bevel: None,
+        plate: None,
     };
 
     pub fn stroke(self, role: BorderRole, fallback: Stroke) -> Stroke {

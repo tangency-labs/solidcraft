@@ -34,6 +34,7 @@ This work stacks on the theme radii and border changes (#4923, #4954).
 | High Contrast | Strong outlines and readable saturated workspace colours |
 | SolidCraft 95 | Classic grey icon geometry; navy, brown, olive, purple, teal, burgundy and green workspace accents |
 | Amber/Green Phosphor | Deliberately single-hue palettes, with different intensities for workspace groups |
+| Hangar | Bright-blue Model, green Sketch, orange, yellow, violet, teal and pink workspaces over white and steel chrome with a near-black title bar |
 
 Shared utility tabs (Assemble, Insert, Inspect, Manage, View) retain the Model
 family. The seven workspace groups are Model, Surface, Mesh, Form, Sheet Metal,

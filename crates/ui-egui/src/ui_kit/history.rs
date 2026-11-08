@@ -241,7 +241,7 @@ impl HistoryTransport {
         let response = ui.interact(rect, ui.scope_id().with(("history_transport", self.id())), egui::Sense::click());
         crate::scenario::publish_target(&format!("history:{}", self.id()), rect);
         if response.hovered() {
-            ui.painter().rect_filled(rect, t.radius_sm, t.hover);
+            t.paint_highlight(ui.painter(), rect, t.radius_sm, t.hover);
         }
         let glyph = if self == Self::Play && playing { "pause" } else { self.id() };
         icons::glyphs::transport_glyph(ui.painter(), rect.center(), glyph, t.icon);

@@ -157,9 +157,14 @@ pub(crate) fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
     let dragged_over = egui::DragAndDrop::has_any_payload(ui.ctx()) && ui.input(|i| i.pointer.hover_pos()).is_some_and(|p| r.contains(p));
     let mut out = RowResp { rect: Some(r), hovered: resp.hovered() || dragged_over, ..Default::default() };
     if row.selected {
-        ui.painter().rect_filled(r, if row.compact { 0 } else { t.radius_sm.saturating_sub(1) }, crate::theme::TabAccent::current(ui.ctx()).soft);
+        t.paint_highlight(
+            ui.painter(),
+            r,
+            if row.compact { 0 } else { t.radius_sm.saturating_sub(1) },
+            crate::theme::TabAccent::current(ui.ctx()).soft,
+        );
     } else if resp.hovered() || row.mark == Mark::Here {
-        ui.painter().rect_filled(r, t.radius_sm.saturating_sub(1), t.hover);
+        t.paint_highlight(ui.painter(), r, t.radius_sm.saturating_sub(1), t.hover);
     }
     // A lit item (selected, or under the pointer in the 3D view): a bar down the left of its row,
     // and a fainter, thinner one on each row leading to it, so the bars trace its branch.

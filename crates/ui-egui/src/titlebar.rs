@@ -102,13 +102,17 @@ pub fn caption_buttons(app: &mut SolveApp, ui: &mut Ui, bar: Rect) {
     for (i, c) in CAPTIONS.into_iter().enumerate() {
         let r = Rect::from_min_size(pos2(bar.right() - WIDTH + i as f32 * BUTTON_WIDTH, bar.top()), vec2(BUTTON_WIDTH, bar.height()));
         let resp = ui.interact(r, caption_id(c), Sense::click());
-        let fill = match (resp.is_pointer_button_down_on(), resp.hovered()) {
-            (true, _) => t.app_bar_hover_subtle,
-            (_, true) => t.app_bar_hover_button,
-            _ if resp.has_focus() => t.app_bar_hover_button,
-            _ => Color32::TRANSPARENT,
-        };
-        ui.painter().rect_filled(r, 0.0, fill);
+        // A plated theme's caption buttons are plates, Close in the error colour.
+        let tint = if matches!(c, Caption::Close) { t.error } else { t.app_bar_tint() };
+        if !t.plate_button(ui.painter(), r.shrink(4.0), tint, crate::plate::Lit::of(&resp, true, false)) {
+            let fill = match (resp.is_pointer_button_down_on(), resp.hovered()) {
+                (true, _) => t.app_bar_hover_subtle,
+                (_, true) => t.app_bar_hover_button,
+                _ if resp.has_focus() => t.app_bar_hover_button,
+                _ => Color32::TRANSPARENT,
+            };
+            ui.painter().rect_filled(r, 0.0, fill);
+        }
         let ink = t.app_bar_text;
         paint_glyph(ui, c, max, r.center(), Stroke::new(1.0, ink));
         let tip = match c {

@@ -262,7 +262,9 @@ themes and any themes you have imported. A choice applies at once. Under the the
 Green Phosphor, Amber Phosphor, Blueprint, One Dark, Tokyo Night, Solarized Light, Nord, High
 Contrast, Graphite, Nosferatu, Catppuccin Mocha, Okibi and Akari (dark and light, from the
 [Okibi design system](https://kaievns.github.io/okibi-akiri-design-system-spec/)), Clay and
-Clay Dark (warm ivory paper and warm charcoal, with a terracotta accent and rounded corners), and
+Clay Dark (warm ivory paper and warm charcoal, with a terracotta accent and rounded corners),
+Hangar (white and steel chrome with a bright blue accent, a near-black title bar and
+cut-corner armour plates for buttons and panes), and
 1-bit and 1-bit Dark (pure black and white with square corners: black on white, or white on
 black, with selections drawn inverted).
 
@@ -490,6 +492,13 @@ same six palettes as the former separate cards, including their icon colours.
 Saved selections and settings profiles using the former `-soft` and `-hard` ids
 select the corresponding family and contrast. Selecting a family again restores its
 last contrast; Reset returns it to Standard.
+
+**Hangar** is an original light theme of white and pale steel chrome with a bright blue accent
+and a near-black title bar, styled like a machine's instrument display. Its buttons are armour
+plates with cut corners, in a few shapes so neighbours differ, that light up blue under the
+pointer; highlighted rows and its panes have cut corners too. Its panels start opaque: lower
+**Opacity** (down to 50%, with optional **Blur**) to see the model through them. Its **Tab
+colours** option is on: each ribbon tab tints the panels and the 3D view in its own colour.
 
 **Onyx** is an original dark stone-grey theme with quiet surface layers, fine etched edges
 and a restrained blue-grey accent. Its defaults pair **80% Opacity** (adjustable from 60–100%) with a broad **60 px Blur**:
