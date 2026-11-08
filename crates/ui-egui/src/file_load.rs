@@ -374,6 +374,21 @@ pub fn begin(app: &mut SolveApp, path: &str, insert: bool) {
     let _ = begin_request(app, Request::new(path, if insert { Kind::Insert } else { Kind::Open }));
 }
 
+/// Insert PCB: insert the board the picked `path` belongs to, beside the window. On the `web`
+/// only a zip is taken: some browsers (iPhone, iPad) don't filter the picker, and one uploaded
+/// file would be read with whatever else was uploaded before.
+pub(crate) fn insert_board(app: &mut SolveApp, path: &str, web: bool) {
+    if web && !solidcraft_engine::io::is_zip_path(path) {
+        app.set_status(crate::i18n::tr("ui.insert_pcb.web_zip"), true);
+        return;
+    }
+    let mut request = Request::new(path, Kind::Insert);
+    request.gerber = true;
+    if let Err(e) = begin_request(app, request) {
+        app.set_status(e, true);
+    }
+}
+
 /// A STEP, IGES, FreeCAD or Rhino file the app opens or inserts gets a `Group #N` history folder
 /// while "Fold the History bar into groups" is on, and none while it is off (#8885), unless the
 /// caller chose (`folder`).
@@ -1680,6 +1695,14 @@ M30
         h.app.run("edit.undo", json!({})).unwrap();
         h.settle();
         assert!(!h.app.session.doc.components.iter().any(|c| c.name == "Picked"), "one undo removes the board");
+        // On the web a file that isn't the board's zip is refused, whatever else was uploaded.
+        let picked = dir.join("board.GKO").to_string_lossy().into_owned();
+        let components = h.app.session.doc.components.len();
+        insert_board(&mut h.app, &picked, true);
+        assert!(h.app.file_load.idle(), "no import starts");
+        h.settle();
+        assert_eq!(h.app.session.doc.components.len(), components);
+        assert!(h.app.status.as_ref().is_some_and(|(s, _, error)| *error && s.contains("zip")), "{:?}", h.app.status);
         let _ = std::fs::remove_dir_all(dir.parent().unwrap_or(&dir));
     }
 
