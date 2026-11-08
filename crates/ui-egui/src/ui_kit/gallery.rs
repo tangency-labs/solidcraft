@@ -2492,8 +2492,11 @@ fn gallery_covers_every_inline_element() {
                 && matches!(&item.vis, syn::Visibility::Restricted(v) if v.path.is_ident("crate"))
             {
                 let name = item.sig.ident.to_string();
-                // Inherited labels, state keys and size measurements do not render elements.
-                if !matches!(name.as_str(), "eye_drag_id" | "icon_label_width" | "label" | "placement_field_content_size") {
+                // Inherited labels, state keys and accessors, parsers and size measurements do not render elements.
+                if !matches!(
+                    name.as_str(),
+                    "eye_drag_id" | "expressions" | "icon_label_width" | "label" | "parse_number" | "placement_field_content_size"
+                ) {
                     assert!(names.contains(name.as_str()), "{file}: {name} needs a gallery entry");
                 }
             }

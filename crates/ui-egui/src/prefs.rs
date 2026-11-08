@@ -2534,16 +2534,6 @@ pub(crate) fn pivot_under(app: &SolveApp, proj: &crate::viewport::Proj, at: Pos2
     if b.is_empty() { app.cam.target } else { b.center() }
 }
 
-/// A plain number typed into a field, with a decimal point or a decimal comma (#1347): "2.5"
-/// and "2,5" are both 2.5, as a numeric keypad types either depending on the locale. Spaces are
-/// ignored and "−" is a minus, as in egui's own parser. A comma beside a point ("1.234,5") or a
-/// second comma is not guessed at: the text is not a number.
-pub fn parse_number(text: &str) -> Option<f64> {
-    let t: String = text.chars().filter(|c| !c.is_whitespace()).map(|c| if c == '\u{2212}' { '-' } else { c }).collect();
-    let t = if !t.contains('.') && t.matches(',').count() == 1 { t.replacen(',', ".", 1) } else { t };
-    t.parse::<f64>().ok().filter(|v| v.is_finite())
-}
-
 // Existing callers retain their numeric-editor API; kit owns the widget.
 
 /// A length typed into a field, in millimetres: a bare number is in the design's units (`scale`
@@ -8688,13 +8678,13 @@ mod tests {
     #[test]
     fn number_fields_take_a_decimal_point_or_a_decimal_comma() {
         // #1347
-        assert_eq!(super::parse_number("2.5"), Some(2.5));
-        assert_eq!(super::parse_number("2,5"), Some(2.5));
-        assert_eq!(super::parse_number(" -0,25 "), Some(-0.25));
-        assert_eq!(super::parse_number("\u{2212}1,5"), Some(-1.5));
-        assert_eq!(super::parse_number("12"), Some(12.0));
+        assert_eq!(crate::ui_kit::parse_number("2.5"), Some(2.5));
+        assert_eq!(crate::ui_kit::parse_number("2,5"), Some(2.5));
+        assert_eq!(crate::ui_kit::parse_number(" -0,25 "), Some(-0.25));
+        assert_eq!(crate::ui_kit::parse_number("\u{2212}1,5"), Some(-1.5));
+        assert_eq!(crate::ui_kit::parse_number("12"), Some(12.0));
         for bad in ["1.234,5", "1,2,3", ",", "abc", "", "inf", "NaN"] {
-            assert_eq!(super::parse_number(bad), None, "{bad}");
+            assert_eq!(crate::ui_kit::parse_number(bad), None, "{bad}");
         }
     }
 

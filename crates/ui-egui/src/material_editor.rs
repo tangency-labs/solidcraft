@@ -313,7 +313,7 @@ impl PropertyDraft {
 }
 
 fn number(value: &str, field: &str) -> Result<f64, String> {
-    crate::prefs::parse_number(value).ok_or_else(|| format!("{field}: {}", tr("material.editor.number_required")))
+    crate::ui_kit::parse_number(value).ok_or_else(|| format!("{field}: {}", tr("material.editor.number_required")))
 }
 
 fn field(ui: &mut egui::Ui, label: &str, id: &str, value: &mut String, unit: &str) {

@@ -176,8 +176,7 @@ pub(crate) fn settings_axis_gain(ui: &mut Ui, gain: &mut f32) -> egui::Response 
     if super::settings_search::querying(ui) && (!ui.is_visible() || super::settings_search::suppress_chrome(ui)) {
         return super::settings_search::hidden_response(ui);
     }
-    let response =
-        ui.add(egui::DragValue::new(gain).range(0.0..=3.0).speed(0.05).suffix("×").fixed_decimals(2).custom_parser(crate::prefs::parse_number));
+    let response = ui.add(egui::DragValue::new(gain).range(0.0..=3.0).speed(0.05).suffix("×").fixed_decimals(2).custom_parser(super::parse_number));
     response.widget_info(|| {
         let mut info = egui::WidgetInfo::drag_value(ui.is_enabled(), f64::from(*gain));
         info.label = Some(super::layout::label(ui).to_owned());

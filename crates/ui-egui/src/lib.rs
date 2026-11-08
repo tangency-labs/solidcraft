@@ -7,7 +7,7 @@
 //! right of the viewport, the command palette and a bottom or left-sidebar feature timeline.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
-use crate::ui_kit::{Container, Surface};
+use crate::ui_kit::{Container, Surface, recent_colors};
 
 pub mod access;
 pub mod agent_chat;
@@ -221,7 +221,6 @@ mod print_face_ui;
 pub(crate) mod quick_measure;
 #[cfg(test)]
 mod quick_measure_tests;
-pub(crate) mod recent_colors;
 pub mod recovery_ui;
 pub mod ref_images;
 pub(crate) mod refused_part;
@@ -3239,6 +3238,7 @@ impl SolveApp {
 
     /// Per-frame logic before layout.
     pub fn logic(&mut self, ctx: &egui::Context) {
+        params_dialog::install_expressions(ctx);
         // Shortcuts run here, before `ui` installs the language scope: a tool started by its
         // key must build its translated hint in the user's language, not in English.
         let _language = crate::i18n::scope(&self.preferences.language);
@@ -3415,6 +3415,7 @@ impl SolveApp {
 
     /// Lay out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        params_dialog::install_expressions(ui.ctx());
         prefs::prepare_blur(self, ui.ctx());
         render_workspace::displayed::begin(self);
         let blur_source = !self.home.open && !render_workspace::result_active(self);
