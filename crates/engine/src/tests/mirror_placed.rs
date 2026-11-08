@@ -522,3 +522,26 @@ fn a_revolve_about_a_mirrored_copys_edge_follows_a_joint_drive() {
         assert_ne!(after, before, "the cut turned about the old axis at {angle}°");
     }
 }
+
+/// A suppressed pose-only mirror has no pose to keep: a model adopted with it is current, and
+/// its first evaluation evaluates nothing again (#12139).
+#[test]
+fn an_adopted_model_with_a_suppressed_mirror_is_current() {
+    let mut s = Session::default();
+    moved_arm(&mut s);
+    run(
+        &mut s,
+        "joint.as_built",
+        json!({"type": "revolute", "name": "Pan", "a": 0, "b": "Arm", "at": {"occurrence": 0, "point": [0, 0, 0], "z": [0, 0, 1]}}),
+    );
+    run(&mut s, "solid.mirror", json!({"bodies": ["ArmBody"], "plane": "YZ", "name": "Copy"}));
+    run(&mut s, "solid.box", json!({"corner": [0, -100, 0], "length": 10, "width": 10, "height": 10, "body_name": "Later"}));
+    run(&mut s, "timeline.suppress", json!({"feature": "Copy", "suppressed": true}));
+    let saved = s.model.saved(&s.doc).unwrap();
+    s.model = solidcraft_doc::Model::adopt(&s.doc, &saved).unwrap();
+    assert!(s.model.is_current(&s.doc), "the adopted model is current");
+    let before = s.model.recomputed;
+    s.model.evaluate(&s.doc);
+    assert_eq!(s.model.recomputed, before, "nothing is evaluated again");
+    assert_model_as_evaluated_afresh(&s);
+}

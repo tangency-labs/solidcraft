@@ -1817,7 +1817,7 @@ fn pose_moved(old: Option<&FeatureResult>, f: &Feature, fp: u64, state: &ModelSt
     let same = names(&before) == names(&after)
         && old.state.bodies.len() == state.bodies.len()
         && old.state.threads.len() == state.threads.len()
-        && old.state.sheets.len() == state.sheets.len()
+        && old.state.sheets == state.sheets
         && old.state.construct.len() == state.construct.len();
     same.then_some(after)
 }
@@ -1831,7 +1831,7 @@ fn read_moved(old: Option<&FeatureResult>, f: &Feature, fp: u64, state: &ModelSt
     let same = names(&old.state) == names(state)
         && old.state.bodies.len() == state.bodies.len()
         && old.state.threads.len() == state.threads.len()
-        && old.state.sheets.len() == state.sheets.len()
+        && old.state.sheets == state.sheets
         && old.state.construct.len() == state.construct.len();
     same.then(|| state.bodies.iter().filter(|b| !old.state.body(&b.name).is_some_and(|o| Arc::ptr_eq(&o.mesh, &b.mesh))).cloned().collect())
 }
@@ -2277,7 +2277,8 @@ impl Model {
         let mut state = self.empty.clone();
         doc.features.iter().zip(&self.results).enumerate().all(|(i, (f, r))| {
             prev = chain_fingerprint(doc, &vals, f, prev, i >= marker, &steps, Some(&state));
-            let posed = !pose_only(f) || self.poses.get(&f.id) == Some(&placement_digest(doc, f, Some(&state)));
+            // A skipped pose-only feature (suppressed or rolled back) has no pose to match.
+            let posed = !pose_only(f) || f.suppressed || i >= marker || self.poses.get(&f.id) == Some(&placement_digest(doc, f, Some(&state)));
             if !r.skipped {
                 state = r.state.clone();
             }
@@ -2381,7 +2382,8 @@ impl Model {
             let cancelled = watched.step(i);
             let fp = chain_fingerprint(doc, &vals, f, prev_fp, rolled_back, &self.import_digests, Some(&state));
             prev_fp = fp;
-            let pose = pose_only(f).then(|| placement_digest(doc, f, Some(&state)));
+            // A skipped one (suppressed or rolled back) makes nothing, so it has no pose to keep.
+            let pose = (pose_only(f) && !f.suppressed && !rolled_back).then(|| placement_digest(doc, f, Some(&state)));
             if let Some(pose) = pose {
                 poses.insert(f.id, pose);
             }
