@@ -67,9 +67,6 @@ sketch.dimension_text
 sketch.drag
 sketch.drag_end
 sketch.draw.dimensioned
-sketch.export_dxf
-sketch.insert_dxf
-sketch.insert_svg
 sketch.move_point
 sketch.options
 sketch.polygon.circumscribed

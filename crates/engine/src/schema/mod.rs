@@ -110,6 +110,7 @@ pub mod sketch_constraints;
 pub mod sketch_create;
 pub mod sketch_ends;
 pub mod sketch_equation;
+pub mod sketch_import;
 pub mod sketch_inspect;
 pub mod sketch_modify;
 pub mod sketch_project;
