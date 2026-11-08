@@ -2098,6 +2098,38 @@ fn align_accepts_a_plane_click() {
     assert_eq!(p["to"], json!("origin"));
 }
 
+/// Align face onto face with To Snap "Onto Plane": the To face goes in as the plane it lies in,
+/// so the moved face comes onto it along its normal only, without sliding across to the picked
+/// point (As Picked brings the picked points together).
+#[test]
+fn align_onto_a_faces_plane_moves_along_its_normal_only() {
+    let mut app = boxed();
+    app.run("solid.box", json!({"length": 10, "width": 10, "height": 5, "corner": [100, 50, 0], "body_name": "Pad"})).unwrap();
+    let pad_bottom = {
+        let st = app.session.model.state();
+        let b = st.body("Pad").unwrap();
+        let f = b.body.faces(0.01).unwrap().into_iter().find(|f| f.centroid.dist(Vec3::new(105.0, 55.0, 0.0)) < 1e-6).unwrap();
+        Sel::Face { body: "Pad".into(), index: f.index, point: Vec3::new(105.0, 55.0, 0.0) }
+    };
+    let mut d = start(&mut app, vec![], "solid.align");
+    d.inputs[0].items = vec![Sel::Body { name: "Pad".into() }];
+    d.inputs[1].items = vec![pad_bottom];
+    d.inputs[2].items = vec![face(&app, Vec3::new(20.0, 15.0, 20.0))];
+    d.extra.insert("to_snap".into(), json!("plane"));
+    let p = apply_commands(&app, &d).unwrap().remove(0).1;
+    assert_eq!(p["to_plane"], json!({"origin": [20.0, 15.0, 20.0], "normal": [0.0, 0.0, 1.0]}), "{p}");
+    assert!(p.get("to_face").is_none() && p["from_face"].is_array(), "{p}");
+    let id = apply(&mut app, &d);
+    assert!(app.session.model.result(id).is_some_and(|r| r.error.is_none()));
+    // Lifted onto the top face's plane, where it was in x and y.
+    let b = app.session.model.state().body("Pad").unwrap().mesh().bounds();
+    assert!(b.min.dist(Vec3::new(100.0, 50.0, 20.0)) < 1e-6 && b.max.dist(Vec3::new(110.0, 60.0, 25.0)) < 1e-6, "{b:?}");
+    // Only a planar face or a plane is a plane to move onto: an edge is refused, not moved to.
+    d.inputs[2].items = vec![edge(&app, Vec3::new(20.0, 0.0, 20.0))];
+    let refused = apply_commands(&app, &d).expect_err("an edge is not a plane");
+    assert!(refused.contains("Onto Plane takes a planar face or a plane"), "{refused}");
+}
+
 #[test]
 fn align_components_input_picks_occurrence_from_viewport_body_and_skips_root_body() {
     let mut app = app_with(json!([]));

@@ -949,9 +949,16 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             } else {
                 &[("As Picked", "picked"), ("Center", "center"), ("Circle Center", "circle"), ("Joint Origin", "origin")]
             };
-            for (label, key) in [("From Snap", "from_snap"), ("To Snap", "to_snap")] {
+            // A planar To face as the plane it lies in: the moved face comes onto it along its
+            // normal only, without sliding across to the picked point.
+            let to_snaps: &[(&str, &str)] = if *components {
+                snaps
+            } else {
+                &[("As Picked", "picked"), ("Center", "center"), ("Circle Center", "circle"), ("Joint Origin", "origin"), ("Onto Plane", "plane")]
+            };
+            for (label, key, choices) in [("From Snap", "from_snap", snaps), ("To Snap", "to_snap", to_snaps)] {
                 form_row(ui, label, |ui| {
-                    extra_choice(ui, &mut d.extra, key, key, snaps);
+                    extra_choice(ui, &mut d.extra, key, key, choices);
                 });
             }
             if *components {

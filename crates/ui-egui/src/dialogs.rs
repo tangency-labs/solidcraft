@@ -5662,6 +5662,10 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             for (i, key) in [(1, "from"), (2, "to")] {
                 let snap = d.extra.get(&format!("{key}_snap")).and_then(Value::as_str).unwrap_or("picked");
                 match (sels(d, i).first(), snap) {
+                    // Onto Plane sets the bodies on a plane: a planar face or a plane, nothing else.
+                    (Some(sel), "plane") if key == "to" && !*components && !matches!(sel, Sel::Face { .. } | Sel::Plane { .. }) => {
+                        return Err("Onto Plane takes a planar face or a plane".into());
+                    }
                     // A sketch point or circle is a frame whatever the snap: the bodies follow it
                     // when it moves (#6257).
                     (Some(sel @ (Sel::SketchPoint { .. } | Sel::SketchCurve { .. })), _) if !*components => {
@@ -5676,6 +5680,11 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     (Some(Sel::Face { point, .. }), "center") => p[key] = json!({"snap": "face_center", "at": pt(*point)}),
                     (Some(Sel::Face { point, .. } | Sel::Edge { point, .. }), "circle") => {
                         p[key] = json!({"snap": "circle_center", "at": pt(*point)})
+                    }
+                    // Onto Plane: the To face as the plane it lies in, so the bodies come onto it
+                    // along its normal only.
+                    (Some(sel @ Sel::Face { .. }), "plane") if key == "to" && !*components => {
+                        p["to_plane"] = plane_value(s, Some(sel)).ok_or("Onto Plane takes a planar face or a plane")?
                     }
                     (Some(Sel::Face { point, .. }), _) => p[format!("{key}_face")] = pt(*point),
                     (Some(Sel::Edge { point, .. }), _) => p[key] = json!({"snap": "edge_mid", "at": pt(*point)}),
