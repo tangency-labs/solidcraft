@@ -15,9 +15,9 @@ use crate::params::{bad, bool_, str_, string_list, vec3};
 use crate::schema::component::{
     ActivateParams, ActivateResult, ChildEntry, CompactPlacement, ComponentNode, CreateParams, CreateResult, DeleteParams, DeleteResult,
     EditInPlaceParams, EditInPlaceResult, FinishEditParams, FinishEditResult, FromBodiesParams, FromBodiesResult, ListParams, ListResult,
-    MirrorComponentsParams, MirrorComponentsResult, MoveFeaturesParams, MoveFeaturesResult, MoveSketchesToPartsParams, MoveSketchesToPartsResult, NamesOrCount, OccurrenceAlignParams,
-    OccurrenceAlignResult, PlacementEntry, PlacementInfo, PropertiesParams, PropertiesResult, RenameParams, RenameResult, ReparentItemsParams,
-    ReparentItemsResult, UnlockParams, UnlockResult,
+    MirrorComponentsParams, MirrorComponentsResult, MoveFeaturesParams, MoveFeaturesResult, MoveSketchesToPartsParams, MoveSketchesToPartsResult,
+    NamesOrCount, OccurrenceAlignParams, OccurrenceAlignResult, PlacementEntry, PlacementInfo, PropertiesParams, PropertiesResult, RenameParams,
+    RenameResult, ReparentItemsParams, ReparentItemsResult, UnlockParams, UnlockResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
