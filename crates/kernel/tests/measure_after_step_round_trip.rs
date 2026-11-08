@@ -26,6 +26,7 @@ fn a_tube_measures_the_same_after_a_step_round_trip() {
         assert!((back.area - built.area).abs() < 1e-6 * built.area, "read back at {base:?}: area {} against {}", back.area, built.area);
         let (c, b) = (back.centroid, built.centroid);
         let off = ((c.x - b.x).powi(2) + (c.y - b.y).powi(2) + (c.z - b.z).powi(2)).sqrt();
-        assert!(off < 1e-6, "read back at {base:?}: centre {:?} against {:?}", back.centroid, built.centroid);
+        // At the measure's accuracy (1e-6 of the tube's length); unfixed, thousands of mm off.
+        assert!(off < 1e-6 * len, "read back at {base:?}: centre {:?} against {:?}", back.centroid, built.centroid);
     }
 }
