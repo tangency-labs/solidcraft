@@ -23,7 +23,10 @@ prefix=${PREFIX:-solidcore}
 remote=$(git rev-parse --verify "${1:?solidcore tip}^{commit}")
 main=$(git rev-parse --verify "${2:-HEAD}^{commit}")
 
-trailer() { git log -1 --format="%(trailers:key=$1,valueonly,separator=)" "$2" | tr -d '[:space:]'; }
+# The last value of trailer $1 on commit $2. --if-exists add below: by default git drops a trailer
+# whose value equals its neighbour's (solidcraft: X then solidcraft-main: X, when the last solidcore/
+# commit is main's tip).
+trailer() { git log -1 --format="%(trailers:key=$1,valueonly,separator=%x0a)" "$2" | sed '/^[[:space:]]*$/d' | tail -n 1 | tr -d '[:space:]'; }
 
 # Where the last run stopped.
 last=$(trailer solidcraft-main "$remote")
@@ -52,7 +55,7 @@ mirror() { # <commit> [main]: one mirror commit for <commit> on top of $tip
     echo "::error::$c has no $prefix/: refusing to mirror a deleted kernel." >&2
     exit 1
   fi
-  msg=$(git log -1 --format=%B "$c" | git interpret-trailers --trailer "solidcraft: $c" ${m:+--trailer "solidcraft-main: $m"})
+  msg=$(git log -1 --format=%B "$c" | git interpret-trailers --if-exists add --trailer "solidcraft: $c" ${m:+--trailer "solidcraft-main: $m"})
   tip=$(
     GIT_AUTHOR_NAME=$(git log -1 --format=%an "$c") GIT_AUTHOR_EMAIL=$(git log -1 --format=%ae "$c") \
     GIT_AUTHOR_DATE=$(git log -1 --format=%ad --date=raw "$c") \
