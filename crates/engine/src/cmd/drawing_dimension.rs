@@ -10,11 +10,11 @@ use std::sync::Arc;
 
 use serde_json::Value;
 use solidcore_record::{Vec2, Vec3};
-use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::drawing::dimension::{
-    Candidate, Dimension, DimensionKind, ModelEdge, ModelFace, ModelPoint, Reference, Resolved, Silhouette, Status, TextPlace,
-    check_baseline_targets, check_chain_length, check_ordinate_targets, check_set_targets,
+    Candidate, Dimension, DimensionKind, ModelEdge, ModelFace, ModelPoint, Reference, Resolved, SetKind, Silhouette, Status, TextPlace,
+    check_chain_length, check_set_targets,
 };
+use solidcraft_doc::drawing::{ByNumber, Drawing, kept_by_number};
 use solidcraft_doc::ids;
 use solidcraft_geom::drawing_measure::{LinearDirection, Reading};
 use solidcraft_geom::prelude::*;
@@ -169,12 +169,12 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
         }
         KindParam::Baseline { origin, targets, direction } => {
             // Counted before any target is looked up.
-            check_baseline_targets(targets.len()).map_err(|why| bad(ADD, why.to_string()))?;
+            check_set_targets(SetKind::Baseline, targets.len()).map_err(|why| bad(ADD, why.to_string()))?;
             let targets = targets.iter().map(corner).collect::<Result<_>>()?;
             DimensionKind::Baseline { origin: corner(&origin)?, targets, direction: direction.unwrap_or(LinearDirection::Aligned) }
         }
         KindParam::Ordinate { origin, targets, direction } => {
-            check_ordinate_targets(targets.len()).map_err(|why| bad(ADD, why.to_string()))?;
+            check_set_targets(SetKind::Ordinate, targets.len()).map_err(|why| bad(ADD, why.to_string()))?;
             let targets = targets.iter().map(corner).collect::<Result<_>>()?;
             DimensionKind::Ordinate { origin: corner(&origin)?, targets, direction: direction.unwrap_or(LinearDirection::Aligned) }
         }
@@ -284,7 +284,7 @@ pub(crate) fn placed(
 fn repair(s: &mut Session, p: &Value) -> Result<Value> {
     let request: RepairParams = crate::schema::read(REPAIR, p)?;
     let id = request.dimension.0;
-    let unknown = || bad(REPAIR, format!("the drawing has no dimension {}", ids::encode(id)));
+    let unknown = || no_dimension(REPAIR, id);
     let d = s.drawing(REPAIR)?;
     d.dimension(id).ok_or_else(unknown)?;
     let read = s.doc.resolve_dimensions(&s.model, d, &[id]).map_err(|e| bad(REPAIR, e.to_string()))?;
@@ -416,24 +416,24 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     let request: EditParams = crate::schema::read(EDIT, p)?;
     let id = request.dimension.0;
     let changed = match &request.set.targets {
-        None => s.edit_drawing(EDIT, |d| change(d, id, &request.set, Vec::new()))?,
+        None => s.edit_drawing(EDIT, |d| change(d, id, &request.set, None))?,
         Some(targets) => {
             // A set's targets change what it measures. Their numbers and their count are checked
             // first, so a refused edit looks nothing up; then the added ones are named as add names
             // them, on a copy that is read before it is kept, as add reads a new dimension.
             let record = s.drawing(EDIT)?;
-            let kind = &record.dimension(id).ok_or_else(|| bad(EDIT, format!("the drawing has no dimension {}", ids::encode(id))))?.kind;
-            if !matches!(kind, DimensionKind::Baseline { .. } | DimensionKind::Ordinate { .. }) {
-                return Err(bad(EDIT, "`targets` is a set's"));
-            }
-            let now = targets_of(kind).len();
-            check_removed(now, &targets.remove)?;
-            let count = now.saturating_sub(targets.remove.len()).saturating_add(targets.add.len());
-            check_set_targets(kind, count).map_err(|why| bad(EDIT, why.to_string()))?;
+            let kind = &record.dimension(id).ok_or_else(|| no_dimension(EDIT, id))?.kind;
+            let Some(set) = kind.set() else { return Err(bad(EDIT, "`targets` is a set's")) };
+            let kept =
+                kept_by_number(targets_of(kind), &targets.remove, targets.add.len(), |n| check_set_targets(set, n)).map_err(|why| match why {
+                    ByNumber::Past { last } => bad(EDIT, format!("`targets.remove` numbers this set's targets, 0 to {}", last.unwrap_or_default())),
+                    ByNumber::Twice => bad(EDIT, "`targets.remove` names each target once"),
+                    ByNumber::Count(why) => bad(EDIT, why.to_string()),
+                })?;
             let name = |c: &CornerParam| s.doc.corner_reference(&s.model, &c.pick, &c.path).map_err(|why| bad(EDIT, why.to_string()));
             let added = targets.add.iter().map(name).collect::<Result<Vec<_>>>()?;
             let mut copy = Drawing::clone(s.drawing(EDIT)?);
-            let changed = change(&mut copy, id, &request.set, added)?;
+            let changed = change(&mut copy, id, &request.set, Some(kept.into_iter().chain(added).collect()))?;
             if let Some(dimension) = copy.dimension(id) {
                 check_drawn(&copy, dimension.view, dimension.kind.paths(), EDIT)?;
             }
@@ -492,10 +492,10 @@ fn side_by_default(s: &Session, drawing: &Drawing, view: u64, direction: LinearD
     }
 }
 
-/// `set` made on dimension `id` of `d`, `added` being the targets it adds, named: the fields it
-/// changes, by name.
-fn change(d: &mut Drawing, id: u64, set: &DimensionSet, added: Vec<ModelPoint>) -> Result<Vec<String>> {
-    let at = d.dimension_index(id).ok_or_else(|| bad(EDIT, format!("the drawing has no dimension {}", ids::encode(id))))?;
+/// `set` made on dimension `id` of `d`, `targets` being a set's whole new list of targets when it
+/// changes them (counted and named by `edit`, before this): the fields it changes, by name.
+fn change(d: &mut Drawing, id: u64, set: &DimensionSet, mut targets: Option<Vec<ModelPoint>>) -> Result<Vec<String>> {
+    let at = d.dimension_index(id).ok_or_else(|| no_dimension(EDIT, id))?;
     let Some(dimension) = d.dimensions.get_mut(at).map(Arc::make_mut) else { return Ok(Vec::new()) };
     let before = dimension.clone();
     if let Some(offset) = set.offset_mm {
@@ -512,9 +512,6 @@ fn change(d: &mut Drawing, id: u64, set: &DimensionSet, added: Vec<ModelPoint>) 
     }
     if set.diameter.is_some() && !matches!(dimension.kind, DimensionKind::Radial { .. }) {
         return Err(bad(EDIT, "`diameter` is a radial dimension's"));
-    }
-    if set.targets.is_some() && !matches!(dimension.kind, DimensionKind::Baseline { .. } | DimensionKind::Ordinate { .. }) {
-        return Err(bad(EDIT, "`targets` is a set's"));
     }
     match &mut dimension.kind {
         DimensionKind::Linear { direction, reading, .. } | DimensionKind::Length { direction, reading, .. } => {
@@ -543,13 +540,13 @@ fn change(d: &mut Drawing, id: u64, set: &DimensionSet, added: Vec<ModelPoint>) 
             }
             *direction = set.direction.unwrap_or(*direction);
         }
-        DimensionKind::Baseline { targets, direction, .. } | DimensionKind::Ordinate { targets, direction, .. } => {
+        DimensionKind::Baseline { targets: now, direction, .. } | DimensionKind::Ordinate { targets: now, direction, .. } => {
             if set.reading.is_some() || set.other_side.is_some() {
                 return Err(bad(EDIT, "a set has only `direction` and `targets`: it reads as the view shows it"));
             }
             *direction = set.direction.unwrap_or(*direction);
-            if let Some(edit) = &set.targets {
-                retarget(targets, &edit.remove, added)?;
+            if let Some(new) = targets.take() {
+                *now = new;
             }
         }
         DimensionKind::Silhouettes { direction, .. } => {
@@ -580,33 +577,7 @@ fn change(d: &mut Drawing, id: u64, set: &DimensionSet, added: Vec<ModelPoint>) 
             }
         }
     }
-    // Before the set is read: one with no targets can't be.
-    check_set_targets(&dimension.kind, targets_of(&dimension.kind).len()).map_err(|why| bad(EDIT, why.to_string()))?;
     Ok(changed_fields(&before, dimension))
-}
-
-/// `targets` without the ones numbered in `remove` (each once, as the list is now), then `added`
-/// after the rest.
-fn retarget(targets: &mut Vec<ModelPoint>, remove: &[usize], added: Vec<ModelPoint>) -> Result<()> {
-    check_removed(targets.len(), remove)?;
-    let mut gone = remove.to_vec();
-    gone.sort_unstable();
-    let kept = std::mem::take(targets).into_iter().enumerate().filter(|(at, _)| gone.binary_search(at).is_err());
-    targets.extend(kept.map(|(_, target)| target).chain(added));
-    Ok(())
-}
-
-/// `remove`, numbers of a set's `targets` targets: each once, as the list is now.
-fn check_removed(targets: usize, remove: &[usize]) -> Result<()> {
-    let mut gone = remove.to_vec();
-    gone.sort_unstable();
-    if gone.windows(2).any(|pair| pair.first() == pair.get(1)) {
-        return Err(bad(EDIT, "`targets.remove` names each target once"));
-    }
-    if gone.last().is_some_and(|last| *last >= targets) {
-        return Err(bad(EDIT, format!("`targets.remove` numbers this set's targets, 0 to {}", targets.saturating_sub(1))));
-    }
-    Ok(())
 }
 
 /// The direction, reading, side and diameter of a dimension's kind, where it has them.
@@ -624,6 +595,11 @@ fn kind_settings(kind: &DimensionKind) -> (Option<LinearDirection>, Option<Readi
         | DimensionKind::Faces { direction, .. } => (Some(*direction), None, false, false),
         DimensionKind::Cylinder { .. } | DimensionKind::Sphere { .. } | DimensionKind::Cone { .. } => (None, None, false, false),
     }
+}
+
+/// `cmd`'s error for a dimension `id` the open drawing doesn't have.
+fn no_dimension(cmd: &str, id: u64) -> EngineError {
+    bad(cmd, format!("the drawing has no dimension {}", ids::encode(id)))
 }
 
 /// A set's targets; none for other kinds.
@@ -660,7 +636,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
 /// good one ([`Session::dimension_values`]); with none this session, the file's is its last good one.
 fn answer(s: &mut Session, cmd: &str, id: u64) -> Result<Value> {
     let d = s.drawing(cmd)?.clone();
-    let dimension = d.dimension(id).ok_or_else(|| bad(cmd, format!("the drawing has no dimension {}", ids::encode(id))))?;
+    let dimension = d.dimension(id).ok_or_else(|| no_dimension(cmd, id))?;
     let resolved = s.doc.resolve_dimensions(&s.model, &d, &[id]).map_err(|e| bad(cmd, e.to_string()))?;
     let r = resolved.into_iter().next().ok_or_else(|| bad(cmd, format!("dimension {} wasn't read", ids::encode(id))))?;
     let last_good = match r.measured {

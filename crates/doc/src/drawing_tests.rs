@@ -618,6 +618,33 @@ fn a_sheet_goes_with_everything_on_it() {
     assert!(moved.validate().unwrap_err().to_string().contains("parent"), "{:?}", moved.validate());
 }
 
+/// A list edited by number keeps its other items in order, and refuses a number past its end, one
+/// given twice and a count its rule refuses, each before the count is asked when it comes first.
+#[test]
+fn a_list_is_edited_by_number_before_anything_is_added() {
+    let list = ["a", "b", "c", "d"];
+    let counted = std::cell::Cell::new(None);
+    let count = |n: usize| {
+        counted.set(Some(n));
+        Ok(())
+    };
+    assert_eq!(kept_by_number(&list, &[3, 0], 2, count).unwrap(), ["b", "c"]);
+    assert_eq!(counted.get(), Some(4), "the count is of the kept and the added together");
+    assert_eq!(kept_by_number(&list, &[], 0, |_| Ok(())).unwrap(), list);
+    let empty: [&str; 0] = [];
+    assert!(matches!(kept_by_number(&list, &[4], 0, |_| Ok(())), Err(ByNumber::Past { last: Some(3) })));
+    assert!(matches!(kept_by_number(&empty, &[0], 0, |_| Ok(())), Err(ByNumber::Past { last: None })));
+    assert!(matches!(kept_by_number(&list, &[1, 2, 1], 0, |_| Ok(())), Err(ByNumber::Twice)));
+    assert!(matches!(kept_by_number(&list, &[0, 1, 2, 3, 0], 0, |_| Ok(())), Err(ByNumber::Twice)), "more numbers than items");
+    let refused = kept_by_number(&list, &[0], 9, |n| require(n <= 4, || format!("at most 4, not {n}")));
+    assert!(matches!(&refused, Err(ByNumber::Count(DocError::Invalid(why))) if why == "at most 4, not 12"), "{refused:?}");
+    // A hostile list of numbers, refused in one pass and never sorted.
+    counted.set(None);
+    let many = vec![1; 100_000];
+    assert!(matches!(kept_by_number(&list, &many, 0, count), Err(ByNumber::Twice)));
+    assert_eq!(counted.get(), None, "a refused edit never reaches the count");
+}
+
 #[test]
 fn a_run_never_gives_an_id_twice() {
     let mut id_source = IdSource::seeded(SEED);
