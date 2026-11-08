@@ -69,6 +69,8 @@ pub enum Row<'a> {
 pub struct Menu<'a> {
     pub id: &'a str,
     pub label: &'a str,
+    /// Off: the menu shows greyed and does not open.
+    pub enabled: bool,
     pub rows: Vec<Row<'a>>,
 }
 
@@ -99,7 +101,7 @@ impl MenuTable {
         rows.extend([Row::Separator, Row::System(System::Services), Row::Separator]);
         rows.extend([Row::System(System::Hide), Row::System(System::HideOthers), Row::System(System::ShowAll), Row::Separator]);
         rows.extend(self.rows(std::slice::from_ref(&bar.quit), &app));
-        let mut menus = vec![Menu { id: APP, label: &bar.title, rows }];
+        let mut menus = vec![Menu { id: APP, label: &bar.title, enabled: true, rows }];
         for menu in &bar.menus {
             let within = [menu.id.clone()];
             let mut rows = self.rows(&menu.children, &within);
@@ -107,13 +109,15 @@ impl MenuTable {
                 rows.extend([Row::Separator, Row::System(System::Minimize), Row::System(System::Zoom), Row::System(System::FullScreen)]);
                 rows.extend([Row::Separator, Row::System(System::BringAllToFront)]);
             }
-            menus.push(Menu { id: &menu.id, label: &menu.label, rows });
+            menus.push(Menu { id: &menu.id, label: &menu.label, enabled: menu.enabled, rows });
         }
         menus
     }
 
     /// Replaces what the submenu with id `id` holds (a recent-files list): forgets its old
-    /// entries and submenus and lays out `children` in their place.
+    /// entries and submenus and lays out `children` in their place. For submenus inside the
+    /// bar's menus only: a menu of the bar itself (the app menu, File, Window, ...) keeps the
+    /// system's entries the layout gave it, so it is built once and `replace` refuses it.
     pub fn replace<'a>(&mut self, id: &str, children: &'a [Item]) -> Result<Vec<Row<'a>>, String> {
         let Some((_, outer)) = self.submenus.iter().find(|(sid, _)| sid == id) else {
             return Err(format!("no submenu `{id}` in the menu bar"));
@@ -208,7 +212,7 @@ mod native {
             let mut rows = Rows { table, title: bar.title.clone(), version: bar.version.clone(), items: Vec::new(), submenus: Vec::new() };
             let menu = Menu::new();
             for m in menus {
-                let sub = Submenu::new(m.label, true);
+                let sub = Submenu::new(m.label, m.enabled);
                 rows.append(&sub, m.rows)?;
                 menu.append(&sub).map_err(err)?;
             }
@@ -371,7 +375,7 @@ mod tests {
                     "File",
                     vec![entry("file.new", "New").key("Cmd+N"), submenu("menu.file.recent", "Open Recent", recent), Item::sep()],
                 ),
-                submenu(WINDOW, "Window", vec![entry("ui.agent_chat", "Agent Chat")]),
+                submenu(WINDOW, "Window", vec![entry("ui.agent_chat", "Agent Chat")]).on_if(false),
             ],
         }
     }
@@ -381,8 +385,8 @@ mod tests {
         let bar = bar();
         let mut table = MenuTable::default();
         let menus = table.layout(&bar);
-        let titles: Vec<_> = menus.iter().map(|m| (m.id, m.label)).collect();
-        assert_eq!(titles, [(APP, "Craft"), ("menu.file", "File"), (WINDOW, "Window")]);
+        let titles: Vec<_> = menus.iter().map(|m| (m.id, m.label, m.enabled)).collect();
+        assert_eq!(titles, [(APP, "Craft", true), ("menu.file", "File", true), (WINDOW, "Window", false)], "a menu that is off stays off");
         assert_eq!(shape(&menus[0].rows), ["About", "-", "ui.prefs", "-", "Services", "-", "Hide", "HideOthers", "ShowAll", "-", "app.quit"]);
         assert_eq!(shape(&menus[1].rows), ["file.new", "[menu.file.recent: ui.file.open_recent - ui.file.clear_recent]", "-"]);
         assert_eq!(shape(&menus[2].rows), ["ui.agent_chat", "-", "Minimize", "Zoom", "FullScreen", "-", "BringAllToFront"]);
@@ -415,5 +419,9 @@ mod tests {
         assert_eq!(table.find(&file[0]), Some(("file.new", None)), "the rest of File stays");
         assert_eq!(table.entries().count(), 5);
         assert!(table.replace("menu.nothing", &fresh).is_err());
+        for menu in [APP, "menu.file", WINDOW] {
+            assert!(table.replace(menu, &fresh).is_err(), "{menu} is a menu of the bar, built once");
+        }
+        assert_eq!(table.entries().count(), 5, "a refused replace forgets nothing");
     }
 }
