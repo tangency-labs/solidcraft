@@ -1419,23 +1419,23 @@ mod tests {
     }
 
     /// The check of the kept edges against the faces moved (issue #2976, certified bound
-    /// #2971), on a 2-cube whose top carries the moved mark: a kept edge that goes through
-    /// the top's trimmed region refuses the operation (`KeptEdgeNotClear`), one far beside
-    /// it does not, and the marks are off the body after either. (That the face's trimmed
-    /// region, not its surface's whole net, is what is tested:
-    /// `clearance::tests::only_the_trimmed_region_of_a_surface_is_tested`, on a plane whose
-    /// net is far wider than the face, and the goldens cases whose planes cross other
-    /// solids' edges.)
+    /// #2971), on the result of raising a 2-cube's top to the plane z = 3 given as
+    /// `Plane::from_normal`, whose net is about 1.2e6 wide while the face on it is 2 x 2.
+    /// The moved face carries the mark. A vertical edge through the face's region at
+    /// (1, 1) refuses the operation (`KeptEdgeNotClear`); one through the plane's net far
+    /// outside the face, at (50, 50), is clear of the face (tested against the whole
+    /// surface instead of the face's trimmed box, it would be called crossed). The marks
+    /// are off the body after either.
     #[test]
-    fn a_kept_edge_through_a_moved_face_refuses_and_one_beside_it_does_not() {
+    fn a_kept_edge_through_a_moved_face_refuses_and_one_through_its_plane_beside_it_does_not() {
         use crate::curve::curve::Curve;
         use crate::curve::line::Line;
         use crate::error::offset::Unsoundness;
         use crate::geom::extent1d::Extent1d;
         let kept_through = |x: f64, y: f64| KeptEdge {
             curve: Curve::from(Line::from_points(
-                Point3::new(x, y, 1.0),
-                Point3::new(x, y, 3.0),
+                Point3::new(x, y, 2.5),
+                Point3::new(x, y, 3.5),
                 3,
             )),
             interval: Extent1d::from_min_max(0.0, 1.0),
@@ -1456,8 +1456,22 @@ mod tests {
                     (s.evaluate_point(&k, uv).unwrap().z - 2.0).abs() < 1e-9
                 })
                 .unwrap();
+            let raised = Surface::from(Plane::from_normal(Point3::new(0.0, 0.0, 3.0), Vec3::Z));
+            with_notifications(&mut b, |b, notes| {
+                local_operation(&mut k, b, &[top], vec![raised], notes)
+            })
+            .unwrap();
+            let moved = bp1::faces(&b, None)
+                .unwrap()
+                .into_iter()
+                .find(|&f| {
+                    let s = face_ops::surface(&b, f).unwrap().unwrap();
+                    let uv = b.face(f).unwrap().uv_domain.evaluate(0.5, 0.5);
+                    (s.evaluate_point(&k, uv).unwrap().z - 3.0).abs() < 1e-9
+                })
+                .unwrap();
             b.add_attribute(
-                EntityRef::Face(top),
+                EntityRef::Face(moved),
                 Attribute::long(MOVED_FACE_MARK, 1, Behavior::Copy),
             )
             .unwrap();
@@ -1476,7 +1490,7 @@ mod tests {
             } else {
                 r.unwrap();
             }
-            assert!(b.entity_attributes(EntityRef::Face(top)).is_empty());
+            assert!(b.entity_attributes(EntityRef::Face(moved)).is_empty());
         }
     }
 
