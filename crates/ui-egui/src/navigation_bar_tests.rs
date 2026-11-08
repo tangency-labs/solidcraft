@@ -38,7 +38,7 @@ fn slot_catalogue_uses_registered_commands_and_existing_icons() {
             Some(command) => assert!(solidcraft_engine::find_command(command).is_some(), "{}", slot.id),
             None => assert!(["projection", "display", "separator"].contains(&slot.id)),
         }
-        if slot.kind != Kind::Separator {
+        if slot.kind != NavigationKind::Separator {
             assert!(!crate::icon_svg::resolve(slot.icon).placeholder, "{}: {}", slot.id, slot.icon);
         }
     }
@@ -46,9 +46,10 @@ fn slot_catalogue_uses_registered_commands_and_existing_icons() {
 
 #[test]
 fn catalogue_slot_descriptions_explain_slots_without_settings_jargon() {
+    crate::i18n::install();
     for slot in CATALOGUE {
         for language in ["en", "ja", "zh"] {
-            let description = crate::i18n::Locale::for_language(language).text(slot.description);
+            let description = solidcraft_ui_text::Locale::for_language(language).text(slot.description);
             assert!(!description.trim().is_empty() && description != slot.description, "{language}: {} needs a description", slot.id);
             assert!(description.ends_with(['.', '。']), "{language}: {} must be a sentence", slot.id);
             let lower = description.to_lowercase();
@@ -136,7 +137,7 @@ fn measured_bar_drops_labels_then_overflows_in_order_without_compass_overlap() {
 #[test]
 fn measured_bar_honours_size_position_and_ignores_unknown_slots() {
     let canvas = Rect::from_min_size(pos2(20.0, 30.0), vec2(700.0, 500.0));
-    for size in [Size::Compact, Size::Regular] {
+    for size in [NavigationSize::Compact, NavigationSize::Regular] {
         for position in [Position::Centre, Position::Left, Position::Right] {
             let prefs: NavigationBar = serde_json::from_value(json!({"slots":["future", "pan", "fit"], "size":size, "position":position})).unwrap();
             let bar = measure(canvas, &prefs, NavCaps::MODEL, |_| 0.0);
@@ -156,20 +157,20 @@ fn a_bar_on_the_top_edge_sits_under_the_top_and_keeps_the_corner_controls_below_
     use crate::ui_kit::NAV_BOTTOM;
     // Older settings have no edge and keep the bar at the bottom; a bad value recovers the same way.
     let old: NavigationBar = serde_json::from_value(json!({"position": "right"})).unwrap();
-    assert_eq!(old.edge, Edge::Bottom);
+    assert_eq!(old.edge, NavigationEdge::Bottom);
     let bad: NavigationBar = serde_json::from_value(json!({"edge": "sideways"})).unwrap();
-    assert_eq!(bad.edge, Edge::Bottom);
+    assert_eq!(bad.edge, NavigationEdge::Bottom);
     assert!(validate(&json!({"edge": "sideways"})).is_err());
     assert!(validate(&json!({"edge": "top"})).is_ok());
     let canvas = Rect::from_min_size(pos2(20.0, 30.0), vec2(900.0, 600.0));
     for position in [Position::Centre, Position::Left, Position::Right] {
-        for edge in [Edge::Bottom, Edge::Top] {
+        for edge in [NavigationEdge::Bottom, NavigationEdge::Top] {
             let prefs: NavigationBar = serde_json::from_value(json!({"position": position, "edge": edge})).unwrap();
-            assert_eq!(serde_json::to_value(&prefs).unwrap()["edge"], if edge == Edge::Top { "top" } else { "bottom" });
+            assert_eq!(serde_json::to_value(&prefs).unwrap()["edge"], if edge == NavigationEdge::Top { "top" } else { "bottom" });
             let bar = measure(canvas, &prefs, NavCaps::MODEL, |_| 50.0);
             match edge {
-                Edge::Bottom => assert_eq!(bar.rect.bottom(), canvas.bottom() - NAV_BOTTOM),
-                Edge::Top => assert_eq!(bar.rect.top(), canvas.top() + NAV_BOTTOM),
+                NavigationEdge::Bottom => assert_eq!(bar.rect.bottom(), canvas.bottom() - NAV_BOTTOM),
+                NavigationEdge::Top => assert_eq!(bar.rect.top(), canvas.top() + NAV_BOTTOM),
             }
             for corner in [egui::Vec2::ZERO, vec2(120.0, 32.0)] {
                 let layout =
@@ -187,7 +188,7 @@ fn a_bar_on_the_top_edge_sits_under_the_top_and_keeps_the_corner_controls_below_
 #[test]
 fn navigation_slot_visuals_never_use_focus_as_a_fill() {
     use crate::ui_kit::{NavigationFill, navigation_visual};
-    for kind in [Kind::Action, Kind::Tool, Kind::Toggle, Kind::Menu] {
+    for kind in [NavigationKind::Action, NavigationKind::Tool, NavigationKind::Toggle, NavigationKind::Menu] {
         for keyboard_focus in [false, true] {
             assert_eq!(
                 navigation_visual(kind, false, false, false, keyboard_focus),
@@ -202,8 +203,8 @@ fn navigation_slot_visuals_never_use_focus_as_a_fill() {
                 );
             }
             let active_fill = match kind {
-                Kind::Action => NavigationFill::None,
-                Kind::Menu => NavigationFill::Press,
+                NavigationKind::Action => NavigationFill::None,
+                NavigationKind::Menu => NavigationFill::Press,
                 _ => NavigationFill::Active,
             };
             assert_eq!(
@@ -217,9 +218,9 @@ fn navigation_slot_visuals_never_use_focus_as_a_fill() {
 
 #[test]
 fn navigation_slot_pointer_clicks_release_focus_and_leave_no_fill() {
-    use crate::theme::Tokens;
     use crate::ui_kit::{NavigationButton, navigation_button};
     use egui::{Color32, Event, RawInput, Shape};
+    use solidcraft_theme::Tokens;
 
     fn fill(output: &egui::FullOutput, bounds: Rect) -> Option<Color32> {
         let mut fill = None;
@@ -236,7 +237,7 @@ fn navigation_slot_pointer_clicks_release_focus_and_leave_no_fill() {
         fill
     }
 
-    for kind in [Kind::Action, Kind::Tool, Kind::Toggle] {
+    for kind in [NavigationKind::Action, NavigationKind::Tool, NavigationKind::Toggle] {
         let ctx = crate::fonts::test_context();
         let bounds = Rect::from_min_size(pos2(20.0, 30.0), vec2(26.0, 26.0));
         let draw = |events, selected| {
@@ -271,7 +272,7 @@ fn navigation_slot_pointer_clicks_release_focus_and_leave_no_fill() {
         assert!(!released.1, "{kind:?}: pointer activation must surrender focus");
         let away = draw(vec![Event::PointerMoved(pos2(200.0, 200.0))], false);
         assert_eq!(fill(&away.0, bounds), None, "{kind:?}: no lingering fill");
-        if kind != Kind::Action {
+        if kind != NavigationKind::Action {
             let active = draw(vec![], true);
             assert_eq!(fill(&active.0, bounds), Some(Tokens::get().selected_bg));
             draw(crate::test_support::pointer(bounds.center(), true), true);
@@ -390,8 +391,8 @@ fn navigation_preview_and_viewport_share_the_row_painter() {
         if let (egui::Shape::Rect(live), egui::Shape::Rect(preview)) = (&live.shape, &preview.shape)
             && live.fill != preview.fill
         {
-            assert_eq!(live.fill, crate::theme::Tokens::get().dialog_body.gamma_multiply(0.97));
-            assert_eq!(preview.fill, crate::theme::Tokens::get().dialog_body);
+            assert_eq!(live.fill, solidcraft_theme::Tokens::get().dialog_body.gamma_multiply(0.97));
+            assert_eq!(preview.fill, solidcraft_theme::Tokens::get().dialog_body);
             let mut opaque = live.clone();
             opaque.fill = preview.fill;
             assert_eq!(&opaque, preview, "only the board's opaque editing surface differs");
@@ -399,7 +400,7 @@ fn navigation_preview_and_viewport_share_the_row_painter() {
             && live != preview
         {
             let first = live.vertices.first().unwrap().pos;
-            assert!(bar.slots.iter().any(|(slot, rect)| slot.kind == Kind::Menu && rect.contains(first)));
+            assert!(bar.slots.iter().any(|(slot, rect)| slot.kind == NavigationKind::Menu && rect.contains(first)));
             let delta = preview.vertices.first().unwrap().pos - first;
             assert_eq!(delta.y, 0.0);
             assert_eq!(delta.x.abs(), crate::ui_kit::NAV_BORDER, "editing menus include their CSS transparent border");
@@ -484,8 +485,10 @@ fn navigation_context_menus_customise_hide_reset_and_remove() {
 #[test]
 fn navigation_board_metrics_and_state_colors_are_shared_in_both_themes() {
     use crate::ui_kit::*;
-    assert_eq!(Size::default(), Size::Regular);
-    for (size, button, icon, height, radius, button_radius) in [(Size::Regular, 32.0, 18.0, 40.0, 10, 7), (Size::Compact, 26.0, 16.0, 34.0, 9, 6)] {
+    assert_eq!(NavigationSize::default(), NavigationSize::Regular);
+    for (size, button, icon, height, radius, button_radius) in
+        [(NavigationSize::Regular, 32.0, 18.0, 40.0, 10, 7), (NavigationSize::Compact, 26.0, 16.0, 34.0, 9, 6)]
+    {
         let metrics = NavigationMetrics::for_size(size);
         assert_eq!(
             (metrics.button, metrics.icon, metrics.height(), metrics.radius, metrics.button_radius),
@@ -499,8 +502,8 @@ fn navigation_board_metrics_and_state_colors_are_shared_in_both_themes() {
         (NAV_MARKER_HEIGHT, NAV_GHOST_OPACITY, NAV_TILE_DRAG_OPACITY, NAV_IDLE_OPACITY, NAV_FADE_SECONDS, NAV_TOOLTIP_DELAY),
         (24.0, 0.7, 0.55, 0.45, 0.12, 0.8)
     );
-    for tokens in [crate::theme::Tokens::light(), crate::theme::Tokens::dark()] {
-        let _theme = crate::theme::scoped_tokens(tokens);
+    for tokens in [solidcraft_theme::Tokens::light(), solidcraft_theme::Tokens::dark()] {
+        let _theme = solidcraft_theme::scoped_tokens(tokens);
         assert_eq!(navigation_fill(&tokens, NavigationFill::None), None);
         assert_eq!(navigation_fill(&tokens, NavigationFill::Hover), Some(tokens.nav_hover));
         assert_eq!(navigation_fill(&tokens, NavigationFill::Press), Some(tokens.nav_press));
@@ -513,7 +516,7 @@ fn navigation_board_metrics_and_state_colors_are_shared_in_both_themes() {
         assert_eq!(frame.shadow, Container::menu_frame().shadow, "navigation inherits the shared popup elevation");
     }
     assert_eq!((NAV_POPUP_WIDTH, NAV_CONTEXT_WIDTH, NAV_MORE_WIDTH, NAV_POPUP_GAP), (244.0, 232.0, 200.0, 6.0));
-    for (idle, opacity) in [(Idle::Always, 1.0), (Idle::Fade, 0.45), (Idle::Hide, 0.0)] {
+    for (idle, opacity) in [(NavigationIdle::Always, 1.0), (NavigationIdle::Fade, 0.45), (NavigationIdle::Hide, 0.0)] {
         assert_eq!(navigation_opacity(idle, false), opacity);
         assert_eq!(navigation_opacity(idle, true), 1.0);
     }
@@ -523,8 +526,8 @@ fn navigation_board_metrics_and_state_colors_are_shared_in_both_themes() {
 fn navigation_board_popup_width_includes_its_border_and_padding() {
     use crate::ui_kit::*;
     let ctx = crate::fonts::test_context();
-    for tokens in [crate::theme::Tokens::light(), crate::theme::Tokens::dark()] {
-        let _theme = crate::theme::scoped_tokens(tokens);
+    for tokens in [solidcraft_theme::Tokens::light(), solidcraft_theme::Tokens::dark()] {
+        let _theme = solidcraft_theme::scoped_tokens(tokens);
         for width in [NAV_POPUP_WIDTH, NAV_CONTEXT_WIDTH, NAV_MORE_WIDTH] {
             let mut outer = Rect::NOTHING;
             let mut row = Rect::NOTHING;
@@ -568,7 +571,7 @@ fn a_long_menu_row_label_ends_in_an_ellipsis_inside_its_row() {
         });
         let text = crate::test_support::text_shapes(&output).find(|t| t.galley.text() == label).unwrap_or_else(|| panic!("{label} is drawn"));
         assert_eq!(text.galley.elided, cut, "{label}");
-        let end = row.right() - NAV_MENU_INSET - if selected { crate::theme::Tokens::get().space_14 } else { 0.0 };
+        let end = row.right() - NAV_MENU_INSET - if selected { solidcraft_theme::Tokens::get().space_14 } else { 0.0 };
         let drawn = text.pos.x + text.galley.size().x;
         assert!(drawn <= end, "{label}: ends at {drawn}, past {end}");
     }
@@ -585,12 +588,12 @@ fn navigation_board_position_aliases_migrate_and_editor_alignment_follows_positi
         let bar: NavigationBar = serde_json::from_value(json!({"position":legacy,"slots":["orbit","pan","fit","look_at","visual_style"]})).unwrap();
         assert_eq!(bar.position, position);
         assert_eq!(serde_json::to_value(&bar).unwrap()["position"], current);
-        for size in [Size::Compact, Size::Regular] {
+        for size in [NavigationSize::Compact, NavigationSize::Regular] {
             let bar = NavigationBar { size, ..bar.clone() };
             let preview = editor_layout(stage, &bar, |_| 0.0);
             let live = measure(stage, &bar, NavCaps::MODEL, |_| 0.0);
             assert_eq!(preview.rect.bottom(), stage.bottom() - NAV_BORDER - NAV_STAGE_INSET);
-            let top = editor_layout(stage, &NavigationBar { edge: crate::navigation_bar::Edge::Top, ..bar.clone() }, |_| 0.0);
+            let top = editor_layout(stage, &NavigationBar { edge: NavigationEdge::Top, ..bar.clone() }, |_| 0.0);
             assert_eq!(top.rect.top(), stage.top() + NAV_BORDER + NAV_STAGE_INSET);
             assert_eq!(preview.rect.height(), NavigationMetrics::for_size(size).height());
             match position {
@@ -601,7 +604,7 @@ fn navigation_board_position_aliases_migrate_and_editor_alignment_follows_positi
             assert_eq!(preview.slots.iter().map(|(slot, _)| slot.id).collect::<Vec<_>>(), bar.slots);
             for ((slot, rect), (live_slot, live_rect)) in preview.slots.iter().zip(&live.slots) {
                 assert_eq!(slot.id, live_slot.id);
-                assert_eq!(rect.width(), live_rect.width() + if slot.kind == Kind::Menu { 2.0 * NAV_BORDER } else { 0.0 });
+                assert_eq!(rect.width(), live_rect.width() + if slot.kind == NavigationKind::Menu { 2.0 * NAV_BORDER } else { 0.0 });
             }
         }
     }
@@ -618,4 +621,187 @@ fn navigation_board_drops_menu_value_text_before_folding_slots() {
     let folded = measure(Rect::from_min_size(egui::Pos2::ZERO, vec2(100.0, 200.0)), &bar, NavCaps::MODEL, |_| 120.0);
     assert!(!folded.values && !folded.overflow.is_empty());
     assert_eq!(folded.more.size(), vec2(32.0, 32.0));
+}
+
+/// The bar component driven with plain data, no app: what each click returns.
+mod component {
+    use super::*;
+    use crate::nav_bar::{Bar, ContextItem, Menu, MenuEntry, MenuRow, NavAction, SlotView, show};
+    use egui::{Event, PointerButton, RawInput};
+
+    fn slot(index: usize, id: &'static str, kind: NavigationKind, x: f32) -> SlotView<'static> {
+        SlotView {
+            index,
+            id,
+            kind,
+            icon: id,
+            text: id.to_owned(),
+            name: id.to_owned(),
+            tip: id.to_owned(),
+            key: None,
+            selected: false,
+            enabled: true,
+            hidden: false,
+            show_text: false,
+            rect: Rect::from_min_size(pos2(x, 304.0), vec2(26.0, 26.0)),
+            alias: None,
+        }
+    }
+
+    /// Fit and Styles on the bar; Zoom and View folded into More.
+    fn bar() -> Bar<'static> {
+        Bar {
+            rect: Rect::from_min_size(pos2(90.0, 300.0), vec2(110.0, 34.0)),
+            size: Default::default(),
+            edge: NavigationEdge::Bottom,
+            idle: NavigationIdle::Always,
+            active: false,
+            slots: vec![
+                slot(0, "fit", NavigationKind::Action, 100.0),
+                SlotView { alias: Some("test:styles"), ..slot(1, "styles", NavigationKind::Menu, 134.0) },
+            ],
+            overflow: vec![slot(2, "zoom", NavigationKind::Action, 0.0), slot(3, "view", NavigationKind::Menu, 0.0)],
+            more: Rect::from_min_size(pos2(168.0, 304.0), vec2(26.0, 26.0)),
+            labels: Default::default(),
+        }
+    }
+
+    /// Styles closes on a pick; View stays open and has a submenu.
+    fn menu(id: &str) -> Menu {
+        match id {
+            "styles" => Menu { entries: vec![MenuEntry::Row(MenuRow::new("wire", "Wire", "", "test:wire"))], close_on_pick: true },
+            "view" => {
+                let mut preset = MenuRow::new("preset", "Preset", "", "test:preset");
+                preset.submenu = vec![MenuRow::new("fast", "Fast", "", "test:fast")];
+                Menu {
+                    entries: vec![
+                        MenuEntry::Heading("Show".into()),
+                        MenuEntry::Row(MenuRow::new("grid", "Grid", "", "test:grid")),
+                        MenuEntry::Separator,
+                        MenuEntry::Row(preset),
+                    ],
+                    close_on_pick: false,
+                }
+            }
+            _ => Menu::default(),
+        }
+    }
+
+    struct Rig {
+        ctx: egui::Context,
+        bar: Bar<'static>,
+    }
+
+    impl Rig {
+        fn new() -> Rig {
+            let rig = Rig { ctx: crate::fonts::test_context(), bar: bar() };
+            rig.frame(Vec::new());
+            rig
+        }
+
+        fn frame(&self, events: Vec<Event>) -> Option<NavAction> {
+            solidcraft_ui_registry::clear_handles();
+            let mut action = None;
+            crate::test_support::frame(
+                &self.ctx,
+                RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(400.0, 400.0))),
+                    events,
+                    focused: true,
+                    ..Default::default()
+                },
+                |ui| action = show(ui, &self.bar, menu),
+            );
+            action
+        }
+
+        /// A press and release of `button` at `at`, then two quiet frames so a popup it opened is
+        /// measured and placed: what the release returned.
+        fn click_with(&self, at: egui::Pos2, button: PointerButton) -> Option<NavAction> {
+            let press = |pressed| vec![Event::PointerMoved(at), Event::PointerButton { pos: at, button, pressed, modifiers: Default::default() }];
+            self.frame(vec![Event::PointerMoved(at)]);
+            let action = self.frame(press(true)).or(self.frame(press(false)));
+            self.frame(Vec::new());
+            self.frame(Vec::new());
+            action
+        }
+
+        fn click(&self, at: egui::Pos2) -> Option<NavAction> {
+            self.click_with(at, PointerButton::Primary)
+        }
+
+        fn click_target(&self, name: &str) -> Option<NavAction> {
+            let at = solidcraft_ui_registry::rect_of(name).expect("the target is drawn").center();
+            self.click(at)
+        }
+
+        fn drawn(&self, name: &str) -> bool {
+            solidcraft_ui_registry::rect_of(name).is_some()
+        }
+    }
+
+    #[test]
+    fn a_slot_or_a_row_of_its_menu_is_returned_and_a_closing_menu_closes() {
+        let rig = Rig::new();
+        assert_eq!(rig.click(pos2(113.0, 317.0)), Some(NavAction::Slot("fit".into())), "an action slot is returned, not run");
+        assert_eq!(rig.click(pos2(147.0, 317.0)), None, "a menu slot opens its menu");
+        assert_eq!(solidcraft_ui_registry::handle_at("test:styles"), Some(pos2(147.0, 317.0)), "a slot's alias names it too");
+        assert_eq!(rig.click_target("test:wire"), Some(NavAction::Item { menu: "styles".into(), item: "wire".into() }));
+        assert!(!rig.drawn("test:wire"), "a pick closes a menu that asks for it");
+    }
+
+    #[test]
+    fn more_returns_a_folded_slot_and_opens_a_folded_menu_that_stays_open() {
+        let rig = Rig::new();
+        assert_eq!(rig.click_target("nav:more"), None);
+        assert_eq!(rig.click_target("nav:slot:zoom"), Some(NavAction::Slot("zoom".into())), "a folded slot is returned");
+        assert!(!rig.drawn("nav:slot:zoom"), "and More closes");
+        rig.click_target("nav:more");
+        assert_eq!(rig.click_target("nav:slot:view"), None, "a folded menu slot opens its menu");
+        assert!(rig.drawn("test:grid") && !rig.drawn("nav:slot:zoom"), "in place of More");
+        assert_eq!(rig.click_target("test:grid"), Some(NavAction::Item { menu: "view".into(), item: "grid".into() }));
+        assert!(rig.drawn("test:grid"), "a menu that does not close on a pick stays open");
+        assert_eq!(rig.click_target("test:preset"), None, "a row with a submenu opens it");
+        assert_eq!(rig.click_target("test:fast"), Some(NavAction::Item { menu: "view".into(), item: "fast".into() }), "a submenu row by its own id");
+    }
+
+    #[test]
+    fn the_context_menus_return_customise_hide_reset_and_remove_with_the_slot_index() {
+        let rig = Rig::new();
+        for (id, item) in [("customise", ContextItem::Customise), ("hide", ContextItem::Hide), ("reset", ContextItem::Reset)] {
+            rig.click_with(pos2(94.0, 317.0), PointerButton::Secondary);
+            assert!(!rig.drawn("nav:context:remove"), "the bar's own menu");
+            assert_eq!(rig.click_target(&format!("nav:context:{id}")), Some(NavAction::Context(item)));
+        }
+        rig.click_with(pos2(147.0, 317.0), PointerButton::Secondary);
+        assert!(!rig.drawn("nav:context:hide"), "a slot's menu");
+        assert_eq!(rig.click_target("nav:context:remove"), Some(NavAction::Context(ContextItem::Remove(1))), "removes the slot at its stored index");
+        rig.click_target("nav:more");
+        rig.frame(vec![Event::PointerMoved(pos2(0.0, 0.0))]);
+        let folded = solidcraft_ui_registry::rect_of("nav:slot:view").expect("More is open").center();
+        rig.click_with(folded, PointerButton::Secondary);
+        assert_eq!(rig.click_target("nav:context:remove"), Some(NavAction::Context(ContextItem::Remove(3))), "a folded slot too");
+    }
+}
+
+#[test]
+fn the_view_menu_slot_is_named_nav_view_on_the_bar_and_in_more() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.ui.show_browser = false;
+    h.app.ui.show_timeline = false;
+    h.call("ui.prefs", json!({"navigation_bar":{"slots":["display","fit","home"]}}));
+    h.settle();
+    let on_bar = solidcraft_ui_registry::handle_at("nav:slot:display").expect("the View slot is on the bar");
+    assert_eq!(solidcraft_ui_registry::handle_at("nav:view"), Some(on_bar));
+    // Many slots before it in a narrow view fold the View slot into More.
+    h.call(
+        "ui.prefs",
+        json!({"navigation_bar":{"slots":["pan","fit","home","visual_style","grid","ground_shadow","ambient_occlusion","projection","spin","orbit","zoom","display"]}}),
+    );
+    h.call("ui.resize", json!({"width":300,"height":600}));
+    h.settle();
+    assert!(solidcraft_ui_registry::handle_at("nav:slot:display").is_none() && solidcraft_ui_registry::handle_at("nav:view").is_none(), "folded");
+    h.step(&json!({"click":{"handle":"nav:more"}})).unwrap();
+    let in_more = solidcraft_ui_registry::handle_at("nav:slot:display").expect("More lists the View slot");
+    assert_eq!(solidcraft_ui_registry::handle_at("nav:view"), Some(in_more));
 }

@@ -1893,6 +1893,7 @@
   "material.editor.preserved_appearance": "Behouden uiterlijk",
   "material.editor.public_reference": "Openbare referentie",
   "material.editor.reference": "Referentie",
+  "material.editor.remove": "Verwijderen",
   "material.editor.save_or_discard": "Sla het materiaalconcept op of verwerp het voordat je een materiaal toewijst.",
   "material.editor.saved": "Materiaal opgeslagen. Toewijzingen aan lichamen zijn ongewijzigd.",
   "material.editor.scope": "Opslaan bewaart dit materiaal zonder het aan lichamen toe te wijzen. Lege eigenschappen en voorwaarden blijven onbekend. De dichtheid op de kaart wijzigt de toegewezen dichtheid of massa niet.",

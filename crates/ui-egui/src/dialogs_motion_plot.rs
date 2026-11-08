@@ -15,7 +15,7 @@ use solidcraft_engine::doc::joints::JointKind;
 use crate::SolveApp;
 use crate::dialogs::{combo, form_row};
 use crate::selection::SelInput;
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 /// Most samples the chart takes (each is a solve).
 const SAMPLES: u64 = 201;
@@ -161,7 +161,7 @@ fn chart(ui: &mut egui::Ui, xs: &[f64], ys: &[f64], unit: &str, total: u32, now:
         }
         let pts: Vec<egui::Pos2> = xs.iter().zip(ys).filter(|(_, v)| v.is_finite()).map(|(s, v)| pos2(x(*s), y(*v))).collect();
         p.add(egui::Shape::line(pts, Stroke::new(1.5, t.accent)));
-        let font = FontId::proportional(crate::theme::Tokens::get().font_micro);
+        let font = FontId::proportional(solidcraft_theme::Tokens::get().font_micro);
         p.text(r.left_top() + vec2(4.0, 2.0), Align2::LEFT_TOP, format!("{} {unit}", short(hi)), font.clone(), t.text_dim);
         p.text(r.left_bottom() + vec2(4.0, -2.0), Align2::LEFT_BOTTOM, format!("{} {unit}", short(lo)), font.clone(), t.text_dim);
         if let Some(v) = value_at(xs, ys, now) {
@@ -285,7 +285,7 @@ fn collision_rows(
             ui.vertical(|ui| {
                 ui.vertical(|ui| {
                     if hits.is_empty() {
-                        ui.label(RichText::new(crate::i18n::tr("motion.no_collisions")).color(t.text_dim));
+                        ui.label(RichText::new(solidcraft_ui_text::tr("motion.no_collisions")).color(t.text_dim));
                     }
                     for (i, c) in hits.iter().enumerate() {
                         let steps: Vec<String> = c["steps"]
@@ -298,7 +298,8 @@ fn collision_rows(
                             })
                             .collect();
                         let name = |k: &str| c[k].as_str().unwrap_or_default().to_string();
-                        let text = crate::i18n::format("motion.collision", &[("a", &name("a")), ("b", &name("b")), ("steps", &steps.join(", "))]);
+                        let text =
+                            solidcraft_ui_text::format("motion.collision", &[("a", &name("a")), ("b", &name("b")), ("steps", &steps.join(", "))]);
                         // A click shows where they first collide.
                         let link = ui.link(RichText::new(text).color(t.error));
                         crate::scenario::publish_handle(&format!("motion:collision:{i}"), link.rect.center());
@@ -310,14 +311,14 @@ fn collision_rows(
                     }
                     if v["truncated"] == true {
                         let to = v["checked_to"].as_f64().map(|x| x.round().to_string()).unwrap_or_default();
-                        ui.label(RichText::new(crate::i18n::format("motion.checked_to", &[("step", &to)])).color(t.warning));
+                        ui.label(RichText::new(solidcraft_ui_text::format("motion.checked_to", &[("step", &to)])).color(t.warning));
                     }
                 });
             });
         }
         Some(Err(e)) => {
             ui.vertical(|ui| {
-                ui.add(egui::Label::new(RichText::new(crate::i18n::tr_label(e)).color(t.error)).wrap());
+                ui.add(egui::Label::new(RichText::new(solidcraft_ui_text::tr_label(e)).color(t.error)).wrap());
             });
         }
         None => {}
@@ -385,7 +386,7 @@ fn plot_rows(
                 });
             }
             Some(Err(e)) => {
-                ui.add(egui::Label::new(RichText::new(crate::i18n::tr_label(e)).color(t.text_dim)).wrap());
+                ui.add(egui::Label::new(RichText::new(solidcraft_ui_text::tr_label(e)).color(t.text_dim)).wrap());
             }
             None => {}
         });

@@ -358,7 +358,7 @@ fn a_pick_field_clicked_into_waits_for_its_pick_and_says_what_it_takes() {
         assert_eq!(tips, [Some("dialog.primitive_point_tip")], "{cmd}");
     }
     for id in ["dialog.cylinder_face_tip", "dialog.reference_edge_tip", "dialog.primitive_point_tip"] {
-        assert_ne!(crate::i18n::tr(id), id, "{id} is in the catalog");
+        assert_ne!(solidcraft_ui_text::tr(id), id, "{id} is in the catalog");
     }
 }
 

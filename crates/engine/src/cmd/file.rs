@@ -23,6 +23,8 @@ use solidcraft_io::Format;
 use super::CommandSpec;
 use super::print_face;
 use crate::params::{bad, bool_, num, str_, string_list};
+use crate::schema::save::{SaveAsParams, SaveParams, SaveResult};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
@@ -40,15 +42,19 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "INSERT")
         .icon("import")
         .params("path: .3mf, .stl, .obj, .ply (with faces), .glb or .gltf file (its meshes join the design as mesh bodies in a new component named after the file → component, component_name, occurrence; a glTF file's node tree becomes nested components held as one rigid group until component.unlock, a mesh placed again another occurrence, its materials the bodies' appearances, and its metres millimetres); name?; up?: z|y for a glTF file (default y: glTF has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence; z: the file's axes are kept); units?: mm|cm|m|in|ft for an STL or OBJ file, or a PLY file with faces (default mm): the unit its coordinates are in, scaled to millimetres as the file is read (a 3MF or glTF file states its own). The design keeps the millimetre mesh and not the unit, so insert the file again to try another; origin?: bool (default false: the mesh keeps its file's coordinates; true: once read, scaled and stood up, the import's occurrence is moved so the box around its bodies is centred on X and Y of the active component with its lowest point on Z = 0 → moved_to_origin: [x, y, z], the shift made)"),
-    CommandSpec::new("file.save", "Save", save)
+    CommandSpec::new("file.save", "Save", crate::checked!("file.save", save))
         .icon("save")
         .key("Ctrl+S")
         .noundo()
+        .contract(&SAVE_CONTRACT)
+        .output(output_schema_for::<SaveResult>)
         .params("path? (default: current file; a name that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (replace the design's file even though another program or computer changed it since it was opened or saved; without it that save is refused)"),
-    CommandSpec::new("file.save_as", "Save As", save_as)
+    CommandSpec::new("file.save_as", "Save As", crate::checked!("file.save_as", save_as))
         .icon("save")
         .key("Ctrl+Shift+S")
         .noundo()
+        .contract(&SAVE_AS_CONTRACT)
+        .output(output_schema_for::<SaveResult>)
         .params("path (a design file name, .sc as a rule; one that opens as another kind of file, such as .step, .stl or .dxf, is refused: file.export writes those); format?: container|json (default: json for .json, otherwise container); compression?: fast|compact (default: fast); cache?: bool (the evaluated model, so the design opens without rebuilding; default: true); preview?: bool (saved display meshes, default: false); overwrite?: bool (as file.save, when `path` is the design's own file)"),
     CommandSpec::new("doc.recovery_list", "Recoverable Designs", recovery_list).icon("restore")
         .noundo()
@@ -57,9 +63,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .params("id (from doc.recovery_list); dir?; discard?: bool (delete the entry once open) — opens it with its file path, unsaved"),
     CommandSpec::new("doc.recovery_discard", "Discard Recovered Design", recovery_discard).icon("delete").noundo().params("id, or all: true; dir?"),
-    CommandSpec::new("file.export", "Export", export)
+    CommandSpec::new("file.export", "Export", crate::checked!("file.export", export))
         .icon("export")
         .noundo()
+        .contract(&EXPORT_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::file::FileExportResult>)
         .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|urdf|json (default from extension; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10); quality?: standard|fine|finest (STL, OBJ and 3MF: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts)"),
     // One command per format, so each File › Export item can have a key of its own; started
     // from a key or command search, the app opens the save picker (the mesh dialog for STL and
@@ -122,6 +130,9 @@ fn new_doc(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"name": name}))
 }
 
+const EXPORT_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportParams> = crate::schema::TypedContract::new();
+const SAVE_CONTRACT: TypedContract<SaveParams> = TypedContract::new();
+const SAVE_AS_CONTRACT: TypedContract<SaveAsParams> = TypedContract::new();
 const EXPORT_STEP_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportStepParams> = crate::schema::TypedContract::new();
 const EXPORT_STL_CONTRACT: crate::schema::TypedContract<crate::schema::file::ExportMeshParams> = crate::schema::TypedContract::new();
 const EXPORT_3MF_CONTRACT: crate::schema::TypedContract<crate::schema::file::Export3mfParams> = crate::schema::TypedContract::new();
@@ -682,7 +693,15 @@ fn write_bytes(
     s.disk = solidcraft_io::design_lock::stamp(path);
     s.read_only = false;
     s.mark_saved();
-    let mut out = json!({"path": path, "bytes": bytes.len(), "name": s.doc.name});
+    let mut out = SaveResult {
+        path: path.to_string(),
+        bytes: bytes.len(),
+        name: s.doc.name.clone(),
+        kept_format: None,
+        warnings: None,
+        not_kept: None,
+        param_warnings: Vec::new(),
+    };
     // A newer SolidCraft's file keeps what this version can't read, and its format number. What
     // couldn't go back, because the design was changed around it, is said.
     if s.doc.newer_file.is_some() {
@@ -690,13 +709,13 @@ fn write_bytes(
         if format == "json" && s.doc.newer_file.as_ref().is_some_and(|file| file.needs_container()) {
             lost.push("the parts of the file beside the design, which plain JSON has no room for: save as .sc to keep them".to_string());
         }
-        out["kept_format"] = json!(s.doc.format);
+        out.kept_format = Some(s.doc.format.clone());
         if !lost.is_empty() {
-            out["warnings"] = json!(lost.iter().map(|what| format!("Not kept: {what}. The previous file is `{path}.bak`.")).collect::<Vec<_>>());
-            out["not_kept"] = json!(lost);
+            out.warnings = Some(lost.iter().map(|what| format!("Not kept: {what}. The previous file is `{path}.bak`.")).collect());
+            out.not_kept = Some(lost);
         }
     }
-    Ok(out)
+    serde_json::to_value(out).map_err(|e| bad("file.save", e.to_string()))
 }
 
 impl Session {
@@ -1393,13 +1412,17 @@ mod tests {
             assert_eq!(r["bytes"].as_u64(), Some(bytes.len() as u64), "{cmd}");
             assert!(bytes.starts_with(signature), "{cmd}");
         }
-        // The triangles `file.export` writes (the 80-byte header holds the file's name): a box is
-        // 12 triangles, 84 + 50 bytes each.
+        // The triangles `file.export` writes (the 80-byte header holds the file's name), 84 + 50
+        // bytes each. A planar face is exact for any triangulation of its outline, so the mesher
+        // gives each of the box's six faces two triangles (kernel test `a_box_is_two_triangles_a_face`).
         s.execute("file.export", &json!({"path": at("box.stl")})).unwrap();
         assert_eq!(std::fs::read(at("StlBinary.txt")).unwrap()[80..], std::fs::read(at("box.stl")).unwrap()[80..]);
-        assert_eq!(std::fs::metadata(at("box.stl")).unwrap().len(), 84 + 50 * 12);
+        let triangles = 6 * 2;
+        let stl = std::fs::read(at("box.stl")).unwrap();
+        assert_eq!(u32::from_le_bytes([stl[80], stl[81], stl[82], stl[83]]), u32::try_from(triangles).unwrap());
+        assert_eq!(stl.len(), 84 + 50 * triangles);
         let obj = std::fs::read_to_string(at("Obj.txt")).unwrap();
-        assert_eq!(obj.lines().filter(|l| l.starts_with("f ")).count(), 12, "{obj}");
+        assert_eq!(obj.lines().filter(|l| l.starts_with("f ")).count(), triangles, "{obj}");
         let r = s.execute("file.export_urdf", &json!({"path": at("robot.urdf")})).unwrap();
         assert_eq!(r["format"], "Urdf");
         assert!(std::fs::read_to_string(at("robot.urdf")).unwrap().contains("<robot"));

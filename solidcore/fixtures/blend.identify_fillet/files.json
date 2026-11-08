@@ -1,0 +1,5614 @@
+{
+  "cases": [
+    {
+      "name": "filleted_box_face0_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "filleted_box_face0_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 0,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "filleted_box_face0_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "filleted_box_face1_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "filleted_box_face1_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 1,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "filleted_box_face1_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "filleted_box_face2_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "filleted_box_face2_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 2,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "filleted_box_face2_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "filleted_box_face3_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 3,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "filleted_box_face3_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 3,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "filleted_box_face3_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 3,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "filleted_box_face4_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 4,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "filleted_box_face4_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 4,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "filleted_box_face4_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 4,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "filleted_box_face5_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 5,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "filleted_box_face5_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 5,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "filleted_box_face5_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 5,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "filleted_box_face6_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 6,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "filleted_box_face6_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 6,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "filleted_box_face6_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 6,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "filleted_box_face7_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 7,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "filleted_box_face7_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 7,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "filleted_box_face7_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 7,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "filleted_box_face8_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 8,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "filleted_box_face8_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 8,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "filleted_box_face8_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 8,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "filleted_box_face9_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 9,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "filleted_box_face9_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 9,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "filleted_box_face9_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/filleted_box.smb",
+        "face": 9,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet0114_face0_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet0114.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet0114_face0_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet0114.smb",
+        "face": 0,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet0114_face0_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet0114.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet0114_face1_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet0114.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet0114_face1_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet0114.smb",
+        "face": 1,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet0114_face1_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet0114.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet0114_face2_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet0114.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet0114_face2_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet0114.smb",
+        "face": 2,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet0114_face2_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet0114.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet0227_face0_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet0227.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet0227_face0_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet0227.smb",
+        "face": 0,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet0227_face0_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet0227.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet0227_face1_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet0227.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet0227_face1_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet0227.smb",
+        "face": 1,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet0227_face1_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet0227.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet0227_face2_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet0227.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet0227_face2_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet0227.smb",
+        "face": 2,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet0227_face2_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet0227.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet0227_face3_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet0227.smb",
+        "face": 3,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet0227_face3_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet0227.smb",
+        "face": 3,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet0227_face3_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet0227.smb",
+        "face": 3,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet0227_face4_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet0227.smb",
+        "face": 4,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet0227_face4_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet0227.smb",
+        "face": 4,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet0227_face4_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet0227.smb",
+        "face": 4,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1010_face0_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1010.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1010_face0_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1010.smb",
+        "face": 0,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1010_face0_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1010.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1010_face1_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1010.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1010_face1_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1010.smb",
+        "face": 1,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1010_face1_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1010.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1010_face2_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1010.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1010_face2_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1010.smb",
+        "face": 2,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1010_face2_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1010.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1010_face3_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1010.smb",
+        "face": 3,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1010_face3_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1010.smb",
+        "face": 3,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1010_face3_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1010.smb",
+        "face": 3,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1010_face4_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1010.smb",
+        "face": 4,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1010_face4_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1010.smb",
+        "face": 4,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1010_face4_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1010.smb",
+        "face": 4,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1010_face5_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1010.smb",
+        "face": 5,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1010_face5_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1010.smb",
+        "face": 5,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1010_face5_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1010.smb",
+        "face": 5,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1017_face0_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1017_face0_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 0,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1017_face0_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1017_face1_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1017_face1_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 1,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1017_face1_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1017_face2_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1017_face2_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 2,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1017_face2_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1017_face3_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 3,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1017_face3_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 3,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1017_face3_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 3,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1017_face4_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 4,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1017_face4_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 4,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1017_face4_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 4,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1017_face5_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 5,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1017_face5_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 5,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1017_face5_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 5,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1017_face6_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 6,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1017_face6_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 6,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1017_face6_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 6,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1017_face7_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 7,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1017_face7_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 7,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1017_face7_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 7,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1017_face8_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 8,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1017_face8_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 8,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1017_face8_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 8,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1017_face9_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 9,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1017_face9_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 9,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1017_face9_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 9,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1017_face10_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 10,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1017_face10_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 10,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1017_face10_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1017.smb",
+        "face": 10,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1018_face0_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1018_face0_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 0,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1018_face0_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1018_face1_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1018_face1_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 1,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1018_face1_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1018_face2_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1018_face2_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 2,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1018_face2_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1018_face3_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 3,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1018_face3_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 3,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1018_face3_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 3,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1018_face4_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 4,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1018_face4_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 4,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1018_face4_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 4,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1018_face5_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 5,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1018_face5_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 5,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1018_face5_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 5,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1018_face6_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 6,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1018_face6_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 6,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1018_face6_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 6,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1018_face7_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 7,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1018_face7_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 7,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1018_face7_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 7,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1018_face8_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 8,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1018_face8_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 8,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1018_face8_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 8,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1018_face9_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 9,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1018_face9_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 9,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1018_face9_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 9,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1018_face10_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 10,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1018_face10_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 10,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1018_face10_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1018.smb",
+        "face": 10,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1019_face0_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1019_face0_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 0,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1019_face0_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1019_face1_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1019_face1_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 1,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1019_face1_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1019_face2_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1019_face2_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 2,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1019_face2_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1019_face3_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 3,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1019_face3_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 3,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1019_face3_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 3,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1019_face4_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 4,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1019_face4_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 4,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1019_face4_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 4,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1019_face5_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 5,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1019_face5_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 5,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1019_face5_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 5,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1019_face6_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 6,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1019_face6_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 6,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1019_face6_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 6,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1019_face7_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 7,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1019_face7_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 7,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1019_face7_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 7,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "fillet1019_face8_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 8,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1019_face8_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 8,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "fillet1019_face8_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/fillet1019.smb",
+        "face": 8,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face0_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face0_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 0,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face0_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face1_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face1_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 1,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face1_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face2_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face2_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 2,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face2_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face3_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 3,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face3_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 3,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face3_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 3,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face4_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 4,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face4_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 4,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face4_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 4,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face5_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 5,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face5_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 5,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face5_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 5,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face6_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 6,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face6_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 6,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face6_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 6,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face7_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 7,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face7_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 7,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face7_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 7,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face8_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 8,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face8_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 8,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet_face8_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet.smb",
+        "face": 8,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face0_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face0_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 0,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face0_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face1_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face1_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 1,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face1_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face2_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face2_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 2,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face2_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face3_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 3,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face3_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 3,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face3_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 3,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face4_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 4,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face4_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 4,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face4_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 4,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face5_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 5,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face5_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 5,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face5_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 5,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face6_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 6,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face6_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 6,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face6_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 6,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face7_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 7,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face7_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 7,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face7_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 7,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face8_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 8,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face8_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 8,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "cyl_on_box_w_fillet1_face8_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/cyl_on_box_w_fillet1.smb",
+        "face": 8,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "box_with_large_fillet_face0_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "box_with_large_fillet.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "box_with_large_fillet_face0_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "box_with_large_fillet.smb",
+        "face": 0,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "box_with_large_fillet_face0_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "box_with_large_fillet.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "box_with_large_fillet_face1_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "box_with_large_fillet.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "box_with_large_fillet_face1_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "box_with_large_fillet.smb",
+        "face": 1,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "box_with_large_fillet_face1_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "box_with_large_fillet.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "box_with_large_fillet_face2_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "box_with_large_fillet.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "box_with_large_fillet_face2_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "box_with_large_fillet.smb",
+        "face": 2,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "box_with_large_fillet_face2_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "box_with_large_fillet.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "box_with_large_fillet_face3_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "box_with_large_fillet.smb",
+        "face": 3,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "box_with_large_fillet_face3_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "box_with_large_fillet.smb",
+        "face": 3,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "box_with_large_fillet_face3_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "box_with_large_fillet.smb",
+        "face": 3,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "box_with_large_fillet_face4_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "box_with_large_fillet.smb",
+        "face": 4,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "box_with_large_fillet_face4_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "box_with_large_fillet.smb",
+        "face": 4,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "box_with_large_fillet_face4_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "box_with_large_fillet.smb",
+        "face": 4,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "box_with_large_fillet_face5_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "box_with_large_fillet.smb",
+        "face": 5,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "box_with_large_fillet_face5_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "box_with_large_fillet.smb",
+        "face": 5,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "box_with_large_fillet_face5_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "box_with_large_fillet.smb",
+        "face": 5,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "box_with_large_fillet_face6_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "box_with_large_fillet.smb",
+        "face": 6,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "box_with_large_fillet_face6_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "box_with_large_fillet.smb",
+        "face": 6,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "box_with_large_fillet_face6_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "box_with_large_fillet.smb",
+        "face": 6,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "nurb_fillet_face0_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face0_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 0,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face0_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "nurb_fillet_face1_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face1_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 1,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face1_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "nurb_fillet_face2_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face2_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 2,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face2_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "nurb_fillet_face3_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 3,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face3_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 3,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face3_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 3,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "nurb_fillet_face4_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 4,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face4_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 4,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face4_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 4,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "nurb_fillet_face5_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 5,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face5_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 5,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face5_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 5,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "nurb_fillet_face6_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 6,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face6_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 6,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face6_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 6,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "nurb_fillet_face7_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 7,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face7_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 7,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face7_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 7,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "nurb_fillet_face8_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 8,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face8_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 8,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face8_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 8,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "nurb_fillet_face9_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 9,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face9_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 9,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face9_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 9,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "nurb_fillet_face10_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 10,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face10_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 10,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face10_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 10,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "nurb_fillet_face11_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 11,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face11_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 11,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face11_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 11,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "nurb_fillet_face12_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 12,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face12_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 12,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face12_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 12,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "nurb_fillet_face13_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 13,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face13_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 13,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face13_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 13,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "nurb_fillet_face14_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 14,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face14_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 14,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face14_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 14,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "nurb_fillet_face15_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 15,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face15_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 15,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face15_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 15,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "nurb_fillet_face16_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 16,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face16_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 16,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face16_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 16,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "nurb_fillet_face17_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 17,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face17_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 17,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face17_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 17,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "nurb_fillet_face18_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 18,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face18_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 18,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face18_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 18,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "nurb_fillet_face19_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 19,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face19_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 19,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "nurb_fillet_face19_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Solids/nurb_fillet.smb",
+        "face": 19,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "torii_fillet_face0_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "torii_fillet_face0_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 0,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "torii_fillet_face0_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "torii_fillet_face1_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "torii_fillet_face1_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 1,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "torii_fillet_face1_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "torii_fillet_face2_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "torii_fillet_face2_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 2,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "torii_fillet_face2_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "torii_fillet_face3_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 3,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "torii_fillet_face3_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 3,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "torii_fillet_face3_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 3,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "torii_fillet_face4_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 4,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "torii_fillet_face4_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 4,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "torii_fillet_face4_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 4,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "torii_fillet_face5_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 5,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "torii_fillet_face5_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 5,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "torii_fillet_face5_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 5,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "torii_fillet_face6_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 6,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "torii_fillet_face6_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 6,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "torii_fillet_face6_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 6,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "torii_fillet_face7_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 7,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "torii_fillet_face7_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 7,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "torii_fillet_face7_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 7,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "torii_fillet_face8_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 8,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "torii_fillet_face8_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 8,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "torii_fillet_face8_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 8,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "torii_fillet_face9_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 9,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "torii_fillet_face9_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 9,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "torii_fillet_face9_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 9,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "torii_fillet_face10_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 10,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "torii_fillet_face10_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 10,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "torii_fillet_face10_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 10,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "torii_fillet_face11_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 11,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "torii_fillet_face11_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 11,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "torii_fillet_face11_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 11,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "torii_fillet_face12_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 12,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "torii_fillet_face12_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 12,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "torii_fillet_face12_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/torii_fillet.smb",
+        "face": 12,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "shell_fillet_face0_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/shell_fillet.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "shell_fillet_face0_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/shell_fillet.smb",
+        "face": 0,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "shell_fillet_face0_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/shell_fillet.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "shell_fillet_face1_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/shell_fillet.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "shell_fillet_face1_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/shell_fillet.smb",
+        "face": 1,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "shell_fillet_face1_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/shell_fillet.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "shell_fillet_face2_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/shell_fillet.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "shell_fillet_face2_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/shell_fillet.smb",
+        "face": 2,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "shell_fillet_face2_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Fillet/shell_fillet.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "defillet_face0_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "defillet_face0_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 0,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "defillet_face0_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "defillet_face1_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "defillet_face1_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 1,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "defillet_face1_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "defillet_face2_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "defillet_face2_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 2,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "defillet_face2_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "defillet_face3_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 3,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "defillet_face3_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 3,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "defillet_face3_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 3,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "defillet_face4_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 4,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "defillet_face4_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 4,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "defillet_face4_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 4,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "defillet_face5_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 5,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "defillet_face5_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 5,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "defillet_face5_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 5,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "defillet_face6_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 6,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "defillet_face6_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 6,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "defillet_face6_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 6,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "defillet_face7_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 7,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "defillet_face7_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 7,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "defillet_face7_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 7,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "defillet_face8_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 8,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "defillet_face8_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 8,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "defillet_face8_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/defillet.smb",
+        "face": 8,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face0_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face0_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 0,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face0_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face1_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face1_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 1,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face1_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face2_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face2_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 2,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face2_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face3_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 3,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face3_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 3,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face3_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 3,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face4_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 4,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face4_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 4,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face4_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 4,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face5_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 5,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face5_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 5,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face5_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 5,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face6_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 6,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face6_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 6,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face6_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 6,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face7_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 7,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face7_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 7,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face7_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 7,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face8_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 8,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face8_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 8,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face8_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 8,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face9_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 9,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face9_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 9,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x1fillet_face9_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x1fillet.smb",
+        "face": 9,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face0_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face0_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 0,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face0_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face1_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face1_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 1,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face1_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face2_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face2_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 2,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face2_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face3_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 3,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face3_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 3,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face3_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 3,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face4_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 4,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face4_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 4,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face4_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 4,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face5_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 5,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face5_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 5,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face5_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 5,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face6_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 6,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face6_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 6,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face6_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 6,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face7_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 7,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face7_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 7,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face7_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 7,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face8_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 8,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face8_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 8,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face8_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 8,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face9_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 9,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face9_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 9,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face9_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 9,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face10_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 10,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face10_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 10,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x2fillet_face10_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x2fillet.smb",
+        "face": 10,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face0_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face0_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 0,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face0_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face1_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face1_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 1,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face1_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face2_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face2_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 2,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face2_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face3_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 3,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face3_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 3,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face3_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 3,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face4_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 4,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face4_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 4,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face4_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 4,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face5_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 5,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face5_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 5,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face5_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 5,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face6_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 6,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face6_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 6,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face6_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 6,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face7_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 7,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face7_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 7,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face7_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 7,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face8_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 8,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face8_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 8,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face8_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 8,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face9_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 9,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face9_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 9,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face9_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 9,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face10_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 10,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face10_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 10,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face10_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 10,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face11_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 11,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face11_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 11,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_1x3fillet_face11_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_1x3fillet.smb",
+        "face": 11,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face0_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face0_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 0,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face0_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 0,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face1_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face1_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 1,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face1_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 1,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face2_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face2_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 2,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face2_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 2,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face3_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 3,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face3_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 3,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face3_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 3,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face4_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 4,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face4_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 4,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face4_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 4,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face5_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 5,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face5_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 5,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face5_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 5,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face6_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 6,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face6_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 6,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face6_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 6,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face7_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 7,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face7_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 7,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face7_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 7,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face8_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 8,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face8_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 8,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face8_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 8,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face9_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 9,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face9_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 9,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face9_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 9,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face10_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 10,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face10_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 10,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face10_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 10,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face11_tangent_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 11,
+        "require_tangent": true,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face11_any_radii",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 11,
+        "require_tangent": false,
+        "require_manifold": false,
+        "min_max_radii": true
+      }
+    },
+    {
+      "name": "inset_cube_3x1fillet_face11_tangent_manifold",
+      "upstream_ref": "source/SMLib/src/SmFace.cpp SmFace::IdentifyFillet",
+      "inputs": {
+        "file": "Defeature/inset_cube_3x1fillet.smb",
+        "face": 11,
+        "require_tangent": true,
+        "require_manifold": true,
+        "min_max_radii": false
+      }
+    }
+  ]
+}

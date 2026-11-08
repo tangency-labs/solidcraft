@@ -1,0 +1,165 @@
+{
+  "area": "ladder/07-fillets",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "fillet_variable",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "degree": 1,
+        "edge": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  0.0,
+                  0.0,
+                  20.0
+                ],
+                [
+                  60.0,
+                  0.0,
+                  20.0
+                ]
+              ],
+              "index": 1
+            }
+          ],
+          "points": [
+            [
+              30.0,
+              0.0,
+              20.0
+            ]
+          ],
+          "tolerance": 3.7426573867739417
+        },
+        "knots": [
+          0.0,
+          0.0,
+          1.0,
+          1.0
+        ],
+        "radii": [
+          5.0,
+          0.001
+        ],
+        "start": [
+          0.0,
+          0.0,
+          20.0
+        ]
+      }
+    }
+  ],
+  "case": "007-variable-r5-to-1e-3",
+  "expected": {
+    "body_count": 1,
+    "faces": 7,
+    "method": "as 005 with b = 1e-3: the round's end a 1e-3 mm circle on the end face; 107.077487 removed (great circles: 107.322)",
+    "source": "analytic",
+    "sources": [],
+    "tolerance": {
+      "rel": 1e-6
+    },
+    "volume_mm3": 47892.922513,
+    "what": "a variable round on the top front edge, r5 down to 1e-3 mm"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 8730.398716300346,
+      "body_count": 1,
+      "edges": 15,
+      "faces": 7,
+      "vertices": 10,
+      "volume_mm3": 47892.91679617966
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 15,
+      "faces": 7,
+      "vertices": 10
+    }
+  },
+  "records": "007-variable-r5-to-1e-3.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b6"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 8730.400698551683,
+      "body_count": 1,
+      "edges": 15,
+      "faces": 7,
+      "vertices": 10,
+      "volume_mm3": 47892.922516784056
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "fillet_variable"
+  ],
+  "ungraded": [],
+  "what": "a variable round on the top front edge, r5 down to 1e-3 mm",
+  "why_not": []
+}

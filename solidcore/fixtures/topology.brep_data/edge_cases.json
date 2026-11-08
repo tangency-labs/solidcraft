@@ -1,0 +1,215 @@
+{
+ "cases": [
+  {
+   "name": "empty_brep_v45_attrs",
+   "inputs": {
+    "mode": "db",
+    "version": 45,
+    "persist": true,
+    "text": "//Brep Starts\n0\n - Brep Tolerance\n0 - Manifold\n1 - Allow Composites\n\n//Region Data\n0 Regions\n0 - Start\n//cols\n\n//Shell Data\n0 Shells\n//a\n//b\n//c\n\n//Composite Face Data\n0 C\n\n//Faceuse Data\n0 Fu\n//a\n\n//Face Data\n0 Fa\n//a\n//b\n\n//Loop Data\n0 Lo\n//a\n//b\n\n//Composite Edge Data\n0 C\n\n//Edgeuse Data\n0 Eu\n//a\n//b\n//c\n//d\n\n//Edge Data\n0 Ed\n//a\n\n//Vertex Data\n0 Ve\n//a\n\n// UV-Curve Data\n0 UV\n\n// 3D-Curve Data\n0 3D\n\n// Surface Data\n0 Srf\n"
+   },
+   "upstream_ref": "source/SMLib/src/SmBrepData.cpp:2933 (SmBrepData::ReadFromDB)"
+  },
+  {
+   "name": "region_attribute_line_too_long_v33",
+   "inputs": {
+    "mode": "db",
+    "version": 33,
+    "persist": true,
+    "pre": 2,
+    "text": "//Brep Starts\n0\n1e-5 - Brep Tolerance\n0 - Manifold\n1 - Allow Composites\n\n//Region Data\n2 Regions\n0 - Start\n//cols\n0 1 2 3 1 0 1\n2 4 6                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         \n1 4 5 6 0 0 0\n1 9\n\n//Shell Data\n0 Shells\n//a\n//b\n//c\n\n//Composite Face Data\n0 C\n\n//Faceuse Data\n0 Fu\n//a\n\n//Face Data\n0 Fa\n//a\n//b\n\n//Loop Data\n0 Lo\n//a\n//b\n\n//Composite Edge Data\n0 C\n\n//Edgeuse Data\n0 Eu\n//a\n//b\n//c\n//d\n\n//Edge Data\n0 Ed\n//a\n\n//Vertex Data\n0 Ve\n//a\n\n// UV-Curve Data\n0 UV\n\n// 3D-Curve Data\n0 3D\n\n// Surface Data\n0 Srf\n"
+   },
+   "upstream_ref": "source/SMLib/src/SmBrepData.cpp:2933 (SmBrepData::ReadFromDB)"
+  },
+  {
+   "name": "unknown_types_negative_unsigned_v32",
+   "inputs": {
+    "mode": "db",
+    "version": 32,
+    "persist": true,
+    "text": "//Brep Starts\n0\n1e-5 - Brep Tolerance\n0 - Manifold\n1 - Allow Composites\n\n//Region Data\n1 Regions\n0 - Start\n//cols\n0 -1 -2 18446744073709551615 7 -3 2\n0\n\n//Shell Data\n2 Shells\n//a\n//b\n//c\n0 0 0 0 9\n0\n1 5 5 5 1 4\n0\n\n//Composite Face Data\n0 C\n\n//Faceuse Data\n0 Fu\n//a\n\n//Face Data\n0 Fa\n//a\n//b\n\n//Loop Data\n1 Lo\n//a\n//b\n0 0 0 0 7\n0\n0\n0\n\n//Composite Edge Data\n0 C\n\n//Edgeuse Data\n2 Eu\n//a\n//b\n//c\n//d\n0 1 1 1 2 2 2 9\n0\n0\n1 1 1 1 2 2 2 3 4 5 -1 9999999\n0\n0\n\n//Edge Data\n0 Ed\n//a\n\n//Vertex Data\n0 Ve\n//a\n\n// UV-Curve Data\n0 UV\n\n// 3D-Curve Data\n0 3D\n\n// Surface Data\n0 Srf\n"
+   },
+   "upstream_ref": "source/SMLib/src/SmBrepData.cpp:2933 (SmBrepData::ReadFromDB)"
+  },
+  {
+   "name": "extreme_values_v30",
+   "inputs": {
+    "mode": "db",
+    "version": 30,
+    "persist": false,
+    "text": "//Brep Starts\n0.25 0.5 1 - Color\n1e-5 - Brep Tolerance\n0 - Manifold\n1 - Allow Composites\n\n//Region Data\n1 Regions\n0 - Start\n//cols\n0 1 0 1\n\n//Shell Data\n0 Shells\n//a\n//b\n//c\n\n//Composite Face Data\n0 C\n\n//Faceuse Data\n0 Fu\n//a\n\n//Face Data\n1 Fa\n//a\n//b\n0 4.9e-324 1 2 3 1\n5 -5 1e-300 2e-300\n\n//Loop Data\n0 Lo\n//a\n//b\n\n//Composite Edge Data\n0 C\n\n//Edgeuse Data\n0 Eu\n//a\n//b\n//c\n//d\n\n//Edge Data\n1 Ed\n//a\n0 -0 1 2 3 -9223372036854775808 1.5 1.5\n\n//Vertex Data\n1 Ve\n//a\n0 1e300 -1e300 2.2250738585072014e-308 4.9e-324\n\n// UV-Curve Data\n0 UV\n\n// 3D-Curve Data\n0 3D\n\n// Surface Data\n0 Srf\n"
+   },
+   "upstream_ref": "source/SMLib/src/SmBrepData.cpp:2933 (SmBrepData::ReadFromDB)"
+  },
+  {
+   "name": "composites_and_long_lines_v30",
+   "inputs": {
+    "mode": "db",
+    "version": 30,
+    "persist": false,
+    "text": "//Brep Starts\n0.25 0.5 1 - Color\n1e-5 - Brep Tolerance\n0 - Manifold\n1 - Allow Composites\n\n//Region Data\n2 Regions\n0 - Start\n//cols\n0 1 0 1                                                                                                                                                                                                                                                                                                            \n1 1 1 0\n\n//Shell Data\n0 Shells\n//a\n//b\n//c\n\n//Composite Face Data\n2 Composite Faces\n//Index, Count, Faces\n0 2 3 4\n1 0\n\n//Faceuse Data\n0 Fu\n//a\n\n//Face Data\n0 Fa\n//a\n//b\n\n//Loop Data\n0 Lo\n//a\n//b\n\n//Composite Edge Data\n1 Composite Edges\n//Index, Count, Edges\n0 3 7 8 9\n\n//Edgeuse Data\n0 Eu\n//a\n//b\n//c\n//d\n\n//Edge Data\n0 Ed\n//a\n\n//Vertex Data\n0 Ve\n//a\n\n// UV-Curve Data\n0 UV\n\n// 3D-Curve Data\n0 3D\n\n// Surface Data\n0 Srf\n"
+   },
+   "upstream_ref": "source/SMLib/src/SmBrepData.cpp:2933 (SmBrepData::ReadFromDB)"
+  },
+  {
+   "name": "file_leading_newline_v45",
+   "inputs": {
+    "mode": "file",
+    "text": "\nVersion 45\nHealer Version 12\n//Brep Starts\n0.25 0.5 1 - Color\n - Brep Tolerance\n0 - Manifold\n1 - Allow Composites\n\n//Region Data\n1 Regions\n0 - Start\n//cols\n0 0 0 0 1 0 1\n\n//Shell Data\n0 Shells\n//a\n//b\n//c\n\n//Composite Face Data\n0 C\n\n//Faceuse Data\n0 Fu\n//a\n\n//Face Data\n0 Fa\n//a\n//b\n\n//Loop Data\n0 Lo\n//a\n//b\n\n//Composite Edge Data\n0 C\n\n//Edgeuse Data\n0 Eu\n//a\n//b\n//c\n//d\n\n//Edge Data\n0 Ed\n//a\n\n//Vertex Data\n0 Ve\n//a\n\n// UV-Curve Data\n0 UV\n\n// 3D-Curve Data\n0 3D\n\n// Surface Data\n0 Srf\n"
+   },
+   "upstream_ref": "source/SMLib/src/SmBrepData.cpp:3585 (SmBrepData::ReadFromFile)"
+  },
+  {
+   "name": "file_v41_no_healer",
+   "inputs": {
+    "mode": "file",
+    "text": "Version 41\n//Brep Starts\n0.25 0.5 1 - Color\n1e-5 - Brep Tolerance\n0 - Manifold\n1 - Allow Composites\n\n//Region Data\n1 Regions\n0 - Start\n//cols\n0 0 0 0 1 0 1\n\n//Shell Data\n0 Shells\n//a\n//b\n//c\n\n//Composite Face Data\n0 C\n\n//Faceuse Data\n0 Fu\n//a\n\n//Face Data\n0 Fa\n//a\n//b\n\n//Loop Data\n0 Lo\n//a\n//b\n\n//Composite Edge Data\n0 C\n\n//Edgeuse Data\n0 Eu\n//a\n//b\n//c\n//d\n\n//Edge Data\n0 Ed\n//a\n\n//Vertex Data\n0 Ve\n//a\n\n// UV-Curve Data\n0 UV\n\n// 3D-Curve Data\n0 3D\n\n// Surface Data\n0 Srf\n"
+   },
+   "upstream_ref": "source/SMLib/src/SmBrepData.cpp:3585 (SmBrepData::ReadFromFile)"
+  },
+  {
+   "name": "file_no_header_v30",
+   "inputs": {
+    "mode": "file",
+    "text": "//Brep Starts\n0.25 0.5 1 - Color\n1e-5 - Brep Tolerance\n0 - Manifold\n1 - Allow Composites\n\n//Region Data\n1 Regions\n0 - Start\n//cols\n0 1 0 1\n\n//Shell Data\n0 Shells\n//a\n//b\n//c\n\n//Composite Face Data\n0 C\n\n//Faceuse Data\n0 Fu\n//a\n\n//Face Data\n0 Fa\n//a\n//b\n\n//Loop Data\n0 Lo\n//a\n//b\n\n//Composite Edge Data\n0 C\n\n//Edgeuse Data\n0 Eu\n//a\n//b\n//c\n//d\n\n//Edge Data\n0 Ed\n//a\n\n//Vertex Data\n0 Ve\n//a\n\n// UV-Curve Data\n0 UV\n\n// 3D-Curve Data\n0 3D\n\n// Surface Data\n0 Srf\n"
+   },
+   "upstream_ref": "source/SMLib/src/SmBrepData.cpp:3585 (SmBrepData::ReadFromFile)"
+  },
+  {
+   "name": "old_composite_curve_attrs_v31",
+   "inputs": {
+    "mode": "curve",
+    "version": 31,
+    "dim": 3,
+    "persist": true,
+    "pre": 4,
+    "text": "Curve Type 14032\n2 3 1\n1 0.5 0.25\nCurve Type 14033\n1\n1\n0\n3\n0 0 0\n1 2 3\n0\n0\n1\n1\n1 1\n0 0.125 0\nCurve Type 14033\n1\n1\n0\n3\n0 0 0\n1 2 3\n0\n0\n1\n1\n2 0 3\n2 2 5\n"
+   },
+   "upstream_ref": "source/SMLib/src/SmBrepData.cpp:5389 (composite branch)"
+  },
+  {
+   "name": "old_composite_curve_no_attrs_v30",
+   "inputs": {
+    "mode": "curve",
+    "version": 30,
+    "dim": 3,
+    "persist": true,
+    "text": "Curve Type 14032\n1 3 0\n0 1e-9 2e-9\nCurve Type 14033\n1\n1\n0\n3\n0 0 0\n1 2 3\n0\n0\n1\n1\n"
+   },
+   "upstream_ref": "source/SMLib/src/SmBrepData.cpp:5389 (composite branch)"
+  },
+  {
+   "name": "old_line_type_is_error_v32",
+   "inputs": {
+    "mode": "curve",
+    "version": 32,
+    "dim": 3,
+    "persist": true,
+    "text": "Curve Type 14001\n"
+   },
+   "upstream_ref": "source/SMLib/src/SmBrepData.cpp:5463"
+  },
+  {
+   "name": "non_curve_type_v45",
+   "inputs": {
+    "mode": "curve",
+    "version": 45,
+    "dim": 2,
+    "persist": true,
+    "text": "Object Type 1\nCurve Dim 2\n"
+   },
+   "upstream_ref": "source/SMLib/src/SmBrepData.cpp:5360"
+  },
+  {
+   "name": "uv_curve_written_3d_v30",
+   "inputs": {
+    "mode": "curve",
+    "version": 30,
+    "dim": 2,
+    "text": "Curve Type 14033\n1\n1\n0\n3\n0 0 0\n1 2 3\n0\n0\n1\n1\n"
+   },
+   "upstream_ref": "source/SMLib/src/SmBSplineCurve.cpp (ConvertTo2D after a 3D read)"
+  },
+  {
+   "name": "curve_v45_dim_header",
+   "inputs": {
+    "mode": "curve",
+    "version": 45,
+    "dim": 3,
+    "persist": true,
+    "pre": 1,
+    "text": "Object Type 14033\nCurve Dim 2\n2\n2\n1\n2\n4\n6\n0 0 1\n1 1 0.5\n2 0 1\n0\n0\n0\n1\n1\n1\n1 0\n"
+   },
+   "upstream_ref": "source/SMLib/src/SmBrepData.cpp:5352"
+  },
+  {
+   "name": "offset_surface_v30",
+   "inputs": {
+    "mode": "surface",
+    "version": 30,
+    "text": "Surface Type 15400\n0.5\n1 1\n1 1\n0\n0 0 0\n0 1 0\n1 0 0\n1 1 1\n0\n0\n1\n1\n0\n0\n1\n1\n"
+   },
+   "upstream_ref": "source/SMLib/src/SmBrepData.cpp:5688 (offset branch)"
+  },
+  {
+   "name": "bspline_surface_attrs_v32",
+   "inputs": {
+    "mode": "surface",
+    "version": 32,
+    "persist": true,
+    "pre": 3,
+    "text": "Surface Type 15002\n1 1\n1 1\n0\n0 0 0\n0 1 0\n1 0 0\n1 1 1\n0\n0\n1\n1\n0\n0\n1\n1\n3 0 1 7\n"
+   },
+   "upstream_ref": "source/SMLib/src/SmBrepData.cpp:5724"
+  },
+  {
+   "name": "old_unknown_surface_v30",
+   "inputs": {
+    "mode": "surface",
+    "version": 30,
+    "text": "Surface Type 15011\n"
+   },
+   "upstream_ref": "source/SMLib/src/SmBrepData.cpp:5717"
+  },
+  {
+   "name": "construct_m0_s0",
+   "inputs": {
+    "mode": "construct",
+    "dim": 0,
+    "source": 0,
+    "version": 0
+   },
+   "upstream_ref": "source/SMLib/src/SmBrepData.cpp:2135 (SmBrepData::SmBrepData)"
+  },
+  {
+   "name": "construct_m1_s1",
+   "inputs": {
+    "mode": "construct",
+    "dim": 1,
+    "source": 1,
+    "version": 7
+   },
+   "upstream_ref": "source/SMLib/src/SmBrepData.cpp:2135 (SmBrepData::SmBrepData)"
+  },
+  {
+   "name": "construct_m2_s14",
+   "inputs": {
+    "mode": "construct",
+    "dim": 2,
+    "source": 14,
+    "version": 123456789
+   },
+   "upstream_ref": "source/SMLib/src/SmBrepData.cpp:2135 (SmBrepData::SmBrepData)"
+  },
+  {
+   "name": "construct_m-1_s9",
+   "inputs": {
+    "mode": "construct",
+    "dim": 0,
+    "source": 9,
+    "version": 0
+   },
+   "upstream_ref": "source/SMLib/src/SmBrepData.cpp:2135 (SmBrepData::SmBrepData)"
+  }
+ ]
+}

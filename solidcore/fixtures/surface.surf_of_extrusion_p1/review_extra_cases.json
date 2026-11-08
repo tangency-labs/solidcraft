@@ -1,0 +1,5057 @@
+{
+ "cases": [
+  {
+   "name": "review_hyp_adjust_sw0",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0.5,
+       -0.25,
+       1
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 1.2,
+      "b": 0.7
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       2
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "adjust",
+    "dom": [
+     -0.75,
+     -1.0,
+     0.75,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "review_hyp_ctor_adjust_sw0",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0.5,
+       -0.25,
+       1
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 1.2,
+      "b": 0.7
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0.3,
+       0.2,
+       1.5
+      ],
+      "domain": [
+       -1.0,
+       0,
+       1.5,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "adjust",
+    "dom": [
+     -0.75,
+     -1.0,
+     0.75,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "review_hyp_update_sw0",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0.5,
+       -0.25,
+       1
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 1.2,
+      "b": 0.7
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -1.0,
+       0,
+       1.5,
+       3
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "update",
+    "dom": [
+     0.1,
+     0.2,
+     0.8,
+     0.9
+    ]
+   }
+  },
+  {
+   "name": "review_hyp_reparam_sw0",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0.5,
+       -0.25,
+       1
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 1.2,
+      "b": 0.7
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -1.0,
+       0,
+       1.5,
+       3
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "reparam",
+    "dom": [
+     -3,
+     -2,
+     5,
+     7
+    ]
+   }
+  },
+  {
+   "name": "review_hyp_adjust_sw1",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0.5,
+       -0.25,
+       1
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 1.2,
+      "b": 0.7
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       2
+      ]
+     },
+     "swap": true,
+     "oob": false
+    },
+    "op": "adjust",
+    "dom": [
+     -0.75,
+     -1.0,
+     0.75,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "review_hyp_ctor_adjust_sw1",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0.5,
+       -0.25,
+       1
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 1.2,
+      "b": 0.7
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0.3,
+       0.2,
+       1.5
+      ],
+      "domain": [
+       -1.0,
+       0,
+       1.5,
+       1
+      ]
+     },
+     "swap": true,
+     "oob": false
+    },
+    "op": "adjust",
+    "dom": [
+     -0.75,
+     -1.0,
+     0.75,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "review_hyp_update_sw1",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0.5,
+       -0.25,
+       1
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 1.2,
+      "b": 0.7
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -1.0,
+       0,
+       1.5,
+       3
+      ]
+     },
+     "swap": true,
+     "oob": false
+    },
+    "op": "update",
+    "dom": [
+     0.2,
+     0.1,
+     0.9,
+     0.8
+    ]
+   }
+  },
+  {
+   "name": "review_hyp_reparam_sw1",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0.5,
+       -0.25,
+       1
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 1.2,
+      "b": 0.7
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -1.0,
+       0,
+       1.5,
+       3
+      ]
+     },
+     "swap": true,
+     "oob": false
+    },
+    "op": "reparam",
+    "dom": [
+     -3,
+     -2,
+     5,
+     7
+    ]
+   }
+  },
+  {
+   "name": "review_hyp_eval5",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0.5,
+       -0.25,
+       1
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 1.2,
+      "b": 0.7
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "eval_step",
+    "u": 0.3,
+    "v": 0.7,
+    "k": 5
+   }
+  },
+  {
+   "name": "review_hyp_eval_out",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0.5,
+       -0.25,
+       1
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 1.2,
+      "b": 0.7
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -1.0,
+       0,
+       1.5,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "eval_step",
+    "u": 1.9,
+    "v": -2.0,
+    "k": 2
+   }
+  },
+  {
+   "name": "review_hyp_evalpt_out_oob",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0.5,
+       -0.25,
+       1
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 1.2,
+      "b": 0.7
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -1.0,
+       0,
+       1.5,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": true
+    },
+    "op": "eval_step",
+    "u": -1.4,
+    "v": 3.0,
+    "k": 0,
+    "point": true
+   }
+  },
+  {
+   "name": "review_hyp_to_nurbs",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0.5,
+       -0.25,
+       1
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 1.2,
+      "b": 0.7
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -1.0,
+       -1,
+       1.5,
+       1
+      ]
+     },
+     "swap": true,
+     "oob": false
+    },
+    "op": "to_nurbs",
+    "u": 0.2,
+    "v": 0.4
+   }
+  },
+  {
+   "name": "review_hyp_to_step",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0.5,
+       -0.25,
+       1
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 1.2,
+      "b": 0.7
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -1.0,
+       -1,
+       1.5,
+       1
+      ]
+     },
+     "swap": true,
+     "oob": false
+    },
+    "op": "to_step",
+    "u": 0.4,
+    "v": 0.2
+   }
+  },
+  {
+   "name": "review_hyp_drop_min",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0.5,
+       -0.25,
+       1
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 1.2,
+      "b": 0.7
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "drop_fast",
+    "dom": [
+     -1.0,
+     -5,
+     1.5,
+     5
+    ],
+    "sop": 3,
+    "p": [
+     0.7,
+     0.2,
+     0.4
+    ],
+    "tol": 1e-09,
+    "requested": 1
+   }
+  },
+  {
+   "name": "review_hyp_drop_sub_sw",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0.5,
+       -0.25,
+       1
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 1.2,
+      "b": 0.7
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -1.0,
+       0,
+       1.5,
+       1
+      ]
+     },
+     "swap": true,
+     "oob": false
+    },
+    "op": "drop_fast",
+    "dom": [
+     0,
+     -0.8,
+     1,
+     1.3
+    ],
+    "sop": 3,
+    "p": [
+     0.7,
+     0.2,
+     0.4
+    ],
+    "tol": 1e-09,
+    "requested": 1
+   }
+  },
+  {
+   "name": "review_hyp_directrix_indep",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0.5,
+       -0.25,
+       1
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 1.2,
+      "b": 0.7
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.5,
+       0.1,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "directrix",
+    "p": [
+     0.3,
+     0.1,
+     0.2
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "review_hyp_directrix_coplanar",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0.5,
+       -0.25,
+       1
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 1.2,
+      "b": 0.7
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       1,
+       0,
+       0
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "directrix",
+    "p": [
+     0.3,
+     0.1,
+     0.0
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "review_hyp_transform_scale",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0.5,
+       -0.25,
+       1
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 1.2,
+      "b": 0.7
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "transform",
+    "origin": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     0,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     0,
+     0
+    ],
+    "scale": [
+     2.5,
+     2.5,
+     2.5
+    ]
+   }
+  },
+  {
+   "name": "review_hyp_copy",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       0.5,
+       -0.25,
+       1
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 1.2,
+      "b": 0.7
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -1.0,
+       0,
+       1.5,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "review_par_adjust_sw0",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.5
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       2
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "adjust",
+    "dom": [
+     -1.7,
+     -1.0,
+     0.10000000000000009,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "review_par_ctor_adjust_sw0",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.5
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0.3,
+       0.2,
+       1.5
+      ],
+      "domain": [
+       -2.0,
+       0,
+       1.0,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "adjust",
+    "dom": [
+     -1.7,
+     -1.0,
+     0.10000000000000009,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "review_par_update_sw0",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.5
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -2.0,
+       0,
+       1.0,
+       3
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "update",
+    "dom": [
+     0.1,
+     0.2,
+     0.8,
+     0.9
+    ]
+   }
+  },
+  {
+   "name": "review_par_reparam_sw0",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.5
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -2.0,
+       0,
+       1.0,
+       3
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "reparam",
+    "dom": [
+     -3,
+     -2,
+     5,
+     7
+    ]
+   }
+  },
+  {
+   "name": "review_par_adjust_sw1",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.5
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       2
+      ]
+     },
+     "swap": true,
+     "oob": false
+    },
+    "op": "adjust",
+    "dom": [
+     -1.7,
+     -1.0,
+     0.10000000000000009,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "review_par_ctor_adjust_sw1",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.5
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0.3,
+       0.2,
+       1.5
+      ],
+      "domain": [
+       -2.0,
+       0,
+       1.0,
+       1
+      ]
+     },
+     "swap": true,
+     "oob": false
+    },
+    "op": "adjust",
+    "dom": [
+     -1.7,
+     -1.0,
+     0.10000000000000009,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "review_par_update_sw1",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.5
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -2.0,
+       0,
+       1.0,
+       3
+      ]
+     },
+     "swap": true,
+     "oob": false
+    },
+    "op": "update",
+    "dom": [
+     0.2,
+     0.1,
+     0.9,
+     0.8
+    ]
+   }
+  },
+  {
+   "name": "review_par_reparam_sw1",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.5
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -2.0,
+       0,
+       1.0,
+       3
+      ]
+     },
+     "swap": true,
+     "oob": false
+    },
+    "op": "reparam",
+    "dom": [
+     -3,
+     -2,
+     5,
+     7
+    ]
+   }
+  },
+  {
+   "name": "review_par_eval5",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.5
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "eval_step",
+    "u": 0.3,
+    "v": 0.7,
+    "k": 5
+   }
+  },
+  {
+   "name": "review_par_eval_out",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.5
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -2.0,
+       0,
+       1.0,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "eval_step",
+    "u": 1.4,
+    "v": -2.0,
+    "k": 2
+   }
+  },
+  {
+   "name": "review_par_evalpt_out_oob",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.5
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -2.0,
+       0,
+       1.0,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": true
+    },
+    "op": "eval_step",
+    "u": -2.4,
+    "v": 3.0,
+    "k": 0,
+    "point": true
+   }
+  },
+  {
+   "name": "review_par_to_nurbs",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.5
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -2.0,
+       -1,
+       1.0,
+       1
+      ]
+     },
+     "swap": true,
+     "oob": false
+    },
+    "op": "to_nurbs",
+    "u": 0.2,
+    "v": 0.4
+   }
+  },
+  {
+   "name": "review_par_to_step",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.5
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -2.0,
+       -1,
+       1.0,
+       1
+      ]
+     },
+     "swap": true,
+     "oob": false
+    },
+    "op": "to_step",
+    "u": 0.4,
+    "v": 0.2
+   }
+  },
+  {
+   "name": "review_par_drop_min",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.5
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "drop_fast",
+    "dom": [
+     -2.0,
+     -5,
+     1.0,
+     5
+    ],
+    "sop": 3,
+    "p": [
+     0.7,
+     0.2,
+     0.4
+    ],
+    "tol": 1e-09,
+    "requested": 1
+   }
+  },
+  {
+   "name": "review_par_drop_sub_sw",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.5
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -2.0,
+       0,
+       1.0,
+       1
+      ]
+     },
+     "swap": true,
+     "oob": false
+    },
+    "op": "drop_fast",
+    "dom": [
+     0,
+     -1.8,
+     1,
+     0.8
+    ],
+    "sop": 3,
+    "p": [
+     0.7,
+     0.2,
+     0.4
+    ],
+    "tol": 1e-09,
+    "requested": 1
+   }
+  },
+  {
+   "name": "review_par_directrix_indep",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.5
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.5,
+       0.1,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "directrix",
+    "p": [
+     0.3,
+     0.1,
+     0.2
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "review_par_directrix_coplanar",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.5
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       1,
+       0,
+       0
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "directrix",
+    "p": [
+     0.3,
+     0.1,
+     0.0
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "review_par_transform_scale",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.5
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "transform",
+    "origin": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     0,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     0,
+     0
+    ],
+    "scale": [
+     2.5,
+     2.5,
+     2.5
+    ]
+   }
+  },
+  {
+   "name": "review_par_copy",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.5
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -2.0,
+       0,
+       1.0,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "review_hugeh_adjust_sw0",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       100000.0,
+       200000.0,
+       -300000.0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 12000.0,
+      "b": 7000.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       2
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "adjust",
+    "dom": [
+     -0.75,
+     -1.0,
+     0.75,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "review_hugeh_ctor_adjust_sw0",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       100000.0,
+       200000.0,
+       -300000.0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 12000.0,
+      "b": 7000.0
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0.3,
+       0.2,
+       1.5
+      ],
+      "domain": [
+       -1.0,
+       0,
+       1.5,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "adjust",
+    "dom": [
+     -0.75,
+     -1.0,
+     0.75,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "review_hugeh_update_sw0",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       100000.0,
+       200000.0,
+       -300000.0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 12000.0,
+      "b": 7000.0
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -1.0,
+       0,
+       1.5,
+       3
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "update",
+    "dom": [
+     0.1,
+     0.2,
+     0.8,
+     0.9
+    ]
+   }
+  },
+  {
+   "name": "review_hugeh_reparam_sw0",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       100000.0,
+       200000.0,
+       -300000.0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 12000.0,
+      "b": 7000.0
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -1.0,
+       0,
+       1.5,
+       3
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "reparam",
+    "dom": [
+     -3,
+     -2,
+     5,
+     7
+    ]
+   }
+  },
+  {
+   "name": "review_hugeh_adjust_sw1",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       100000.0,
+       200000.0,
+       -300000.0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 12000.0,
+      "b": 7000.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       2
+      ]
+     },
+     "swap": true,
+     "oob": false
+    },
+    "op": "adjust",
+    "dom": [
+     -0.75,
+     -1.0,
+     0.75,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "review_hugeh_ctor_adjust_sw1",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       100000.0,
+       200000.0,
+       -300000.0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 12000.0,
+      "b": 7000.0
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0.3,
+       0.2,
+       1.5
+      ],
+      "domain": [
+       -1.0,
+       0,
+       1.5,
+       1
+      ]
+     },
+     "swap": true,
+     "oob": false
+    },
+    "op": "adjust",
+    "dom": [
+     -0.75,
+     -1.0,
+     0.75,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "review_hugeh_update_sw1",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       100000.0,
+       200000.0,
+       -300000.0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 12000.0,
+      "b": 7000.0
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -1.0,
+       0,
+       1.5,
+       3
+      ]
+     },
+     "swap": true,
+     "oob": false
+    },
+    "op": "update",
+    "dom": [
+     0.2,
+     0.1,
+     0.9,
+     0.8
+    ]
+   }
+  },
+  {
+   "name": "review_hugeh_reparam_sw1",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       100000.0,
+       200000.0,
+       -300000.0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 12000.0,
+      "b": 7000.0
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -1.0,
+       0,
+       1.5,
+       3
+      ]
+     },
+     "swap": true,
+     "oob": false
+    },
+    "op": "reparam",
+    "dom": [
+     -3,
+     -2,
+     5,
+     7
+    ]
+   }
+  },
+  {
+   "name": "review_hugeh_eval5",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       100000.0,
+       200000.0,
+       -300000.0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 12000.0,
+      "b": 7000.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "eval_step",
+    "u": 0.3,
+    "v": 0.7,
+    "k": 5
+   }
+  },
+  {
+   "name": "review_hugeh_eval_out",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       100000.0,
+       200000.0,
+       -300000.0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 12000.0,
+      "b": 7000.0
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -1.0,
+       0,
+       1.5,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "eval_step",
+    "u": 1.9,
+    "v": -2.0,
+    "k": 2
+   }
+  },
+  {
+   "name": "review_hugeh_evalpt_out_oob",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       100000.0,
+       200000.0,
+       -300000.0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 12000.0,
+      "b": 7000.0
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -1.0,
+       0,
+       1.5,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": true
+    },
+    "op": "eval_step",
+    "u": -1.4,
+    "v": 3.0,
+    "k": 0,
+    "point": true
+   }
+  },
+  {
+   "name": "review_hugeh_to_nurbs",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       100000.0,
+       200000.0,
+       -300000.0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 12000.0,
+      "b": 7000.0
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -1.0,
+       -1,
+       1.5,
+       1
+      ]
+     },
+     "swap": true,
+     "oob": false
+    },
+    "op": "to_nurbs",
+    "u": 0.2,
+    "v": 0.4
+   }
+  },
+  {
+   "name": "review_hugeh_to_step",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       100000.0,
+       200000.0,
+       -300000.0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 12000.0,
+      "b": 7000.0
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -1.0,
+       -1,
+       1.5,
+       1
+      ]
+     },
+     "swap": true,
+     "oob": false
+    },
+    "op": "to_step",
+    "u": 0.4,
+    "v": 0.2
+   }
+  },
+  {
+   "name": "review_hugeh_drop_min",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       100000.0,
+       200000.0,
+       -300000.0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 12000.0,
+      "b": 7000.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "drop_fast",
+    "dom": [
+     -1.0,
+     -5,
+     1.5,
+     5
+    ],
+    "sop": 3,
+    "p": [
+     0.7,
+     0.2,
+     0.4
+    ],
+    "tol": 1e-09,
+    "requested": 1
+   }
+  },
+  {
+   "name": "review_hugeh_drop_sub_sw",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       100000.0,
+       200000.0,
+       -300000.0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 12000.0,
+      "b": 7000.0
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -1.0,
+       0,
+       1.5,
+       1
+      ]
+     },
+     "swap": true,
+     "oob": false
+    },
+    "op": "drop_fast",
+    "dom": [
+     0,
+     -0.8,
+     1,
+     1.3
+    ],
+    "sop": 3,
+    "p": [
+     0.7,
+     0.2,
+     0.4
+    ],
+    "tol": 1e-09,
+    "requested": 1
+   }
+  },
+  {
+   "name": "review_hugeh_directrix_indep",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       100000.0,
+       200000.0,
+       -300000.0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 12000.0,
+      "b": 7000.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.5,
+       0.1,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "directrix",
+    "p": [
+     0.3,
+     0.1,
+     0.2
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "review_hugeh_directrix_coplanar",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       100000.0,
+       200000.0,
+       -300000.0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 12000.0,
+      "b": 7000.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       1,
+       0,
+       0
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "directrix",
+    "p": [
+     0.3,
+     0.1,
+     0.0
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "review_hugeh_transform_scale",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       100000.0,
+       200000.0,
+       -300000.0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 12000.0,
+      "b": 7000.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "transform",
+    "origin": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     0,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     0,
+     0
+    ],
+    "scale": [
+     2.5,
+     2.5,
+     2.5
+    ]
+   }
+  },
+  {
+   "name": "review_hugeh_copy",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "hyperbola",
+      "c": [
+       100000.0,
+       200000.0,
+       -300000.0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -1.0,
+       1.5
+      ],
+      "a": 12000.0,
+      "b": 7000.0
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -1.0,
+       0,
+       1.5,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "review_tinyp_adjust_sw0",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0.0001,
+       0,
+       0.0002
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.0005
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       2
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "adjust",
+    "dom": [
+     -1.7,
+     -1.0,
+     0.10000000000000009,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "review_tinyp_ctor_adjust_sw0",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0.0001,
+       0,
+       0.0002
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.0005
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0.3,
+       0.2,
+       1.5
+      ],
+      "domain": [
+       -2.0,
+       0,
+       1.0,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "adjust",
+    "dom": [
+     -1.7,
+     -1.0,
+     0.10000000000000009,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "review_tinyp_update_sw0",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0.0001,
+       0,
+       0.0002
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.0005
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -2.0,
+       0,
+       1.0,
+       3
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "update",
+    "dom": [
+     0.1,
+     0.2,
+     0.8,
+     0.9
+    ]
+   }
+  },
+  {
+   "name": "review_tinyp_reparam_sw0",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0.0001,
+       0,
+       0.0002
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.0005
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -2.0,
+       0,
+       1.0,
+       3
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "reparam",
+    "dom": [
+     -3,
+     -2,
+     5,
+     7
+    ]
+   }
+  },
+  {
+   "name": "review_tinyp_adjust_sw1",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0.0001,
+       0,
+       0.0002
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.0005
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       2
+      ]
+     },
+     "swap": true,
+     "oob": false
+    },
+    "op": "adjust",
+    "dom": [
+     -1.7,
+     -1.0,
+     0.10000000000000009,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "review_tinyp_ctor_adjust_sw1",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0.0001,
+       0,
+       0.0002
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.0005
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0.3,
+       0.2,
+       1.5
+      ],
+      "domain": [
+       -2.0,
+       0,
+       1.0,
+       1
+      ]
+     },
+     "swap": true,
+     "oob": false
+    },
+    "op": "adjust",
+    "dom": [
+     -1.7,
+     -1.0,
+     0.10000000000000009,
+     2.0
+    ]
+   }
+  },
+  {
+   "name": "review_tinyp_update_sw1",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0.0001,
+       0,
+       0.0002
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.0005
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -2.0,
+       0,
+       1.0,
+       3
+      ]
+     },
+     "swap": true,
+     "oob": false
+    },
+    "op": "update",
+    "dom": [
+     0.2,
+     0.1,
+     0.9,
+     0.8
+    ]
+   }
+  },
+  {
+   "name": "review_tinyp_reparam_sw1",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0.0001,
+       0,
+       0.0002
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.0005
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -2.0,
+       0,
+       1.0,
+       3
+      ]
+     },
+     "swap": true,
+     "oob": false
+    },
+    "op": "reparam",
+    "dom": [
+     -3,
+     -2,
+     5,
+     7
+    ]
+   }
+  },
+  {
+   "name": "review_tinyp_eval5",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0.0001,
+       0,
+       0.0002
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.0005
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "eval_step",
+    "u": 0.3,
+    "v": 0.7,
+    "k": 5
+   }
+  },
+  {
+   "name": "review_tinyp_eval_out",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0.0001,
+       0,
+       0.0002
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.0005
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -2.0,
+       0,
+       1.0,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "eval_step",
+    "u": 1.4,
+    "v": -2.0,
+    "k": 2
+   }
+  },
+  {
+   "name": "review_tinyp_evalpt_out_oob",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0.0001,
+       0,
+       0.0002
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.0005
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -2.0,
+       0,
+       1.0,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": true
+    },
+    "op": "eval_step",
+    "u": -2.4,
+    "v": 3.0,
+    "k": 0,
+    "point": true
+   }
+  },
+  {
+   "name": "review_tinyp_to_nurbs",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0.0001,
+       0,
+       0.0002
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.0005
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -2.0,
+       -1,
+       1.0,
+       1
+      ]
+     },
+     "swap": true,
+     "oob": false
+    },
+    "op": "to_nurbs",
+    "u": 0.2,
+    "v": 0.4
+   }
+  },
+  {
+   "name": "review_tinyp_to_step",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0.0001,
+       0,
+       0.0002
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.0005
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -2.0,
+       -1,
+       1.0,
+       1
+      ]
+     },
+     "swap": true,
+     "oob": false
+    },
+    "op": "to_step",
+    "u": 0.4,
+    "v": 0.2
+   }
+  },
+  {
+   "name": "review_tinyp_drop_min",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0.0001,
+       0,
+       0.0002
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.0005
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "drop_fast",
+    "dom": [
+     -2.0,
+     -5,
+     1.0,
+     5
+    ],
+    "sop": 3,
+    "p": [
+     0.7,
+     0.2,
+     0.4
+    ],
+    "tol": 1e-09,
+    "requested": 1
+   }
+  },
+  {
+   "name": "review_tinyp_drop_sub_sw",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0.0001,
+       0,
+       0.0002
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.0005
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -2.0,
+       0,
+       1.0,
+       1
+      ]
+     },
+     "swap": true,
+     "oob": false
+    },
+    "op": "drop_fast",
+    "dom": [
+     0,
+     -1.8,
+     1,
+     0.8
+    ],
+    "sop": 3,
+    "p": [
+     0.7,
+     0.2,
+     0.4
+    ],
+    "tol": 1e-09,
+    "requested": 1
+   }
+  },
+  {
+   "name": "review_tinyp_directrix_indep",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0.0001,
+       0,
+       0.0002
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.0005
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0.5,
+       0.1,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "directrix",
+    "p": [
+     0.3,
+     0.1,
+     0.2
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "review_tinyp_directrix_coplanar",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0.0001,
+       0,
+       0.0002
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.0005
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       1,
+       0,
+       0
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "directrix",
+    "p": [
+     0.3,
+     0.1,
+     0.0
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "review_tinyp_transform_scale",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0.0001,
+       0,
+       0.0002
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.0005
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "transform",
+    "origin": [
+     1,
+     2,
+     3
+    ],
+    "x": [
+     0,
+     1,
+     0
+    ],
+    "y": [
+     -1,
+     0,
+     0
+    ],
+    "scale": [
+     2.5,
+     2.5,
+     2.5
+    ]
+   }
+  },
+  {
+   "name": "review_tinyp_copy",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "parabola",
+      "c": [
+       0.0001,
+       0,
+       0.0002
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -2.0,
+       1.0
+      ],
+      "f": 0.0005
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -2.0,
+       0,
+       1.0,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "review_circ_ctor_subdom_eval",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       10,
+       250
+      ],
+      "r": 2.0
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       1,
+       2,
+       3
+      ],
+      "vec": [
+       0,
+       0,
+       2
+      ],
+      "domain": [
+       40,
+       0,
+       200,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "eval_step",
+    "u": 120,
+    "v": 0.5,
+    "k": 3
+   }
+  },
+  {
+   "name": "review_circ_ctor_subdom_adjust_sw",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       10,
+       250
+      ],
+      "r": 2.0
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       1,
+       2,
+       3
+      ],
+      "vec": [
+       0,
+       0,
+       2
+      ],
+      "domain": [
+       40,
+       0,
+       200,
+       1
+      ]
+     },
+     "swap": true,
+     "oob": false
+    },
+    "op": "adjust",
+    "dom": [
+     60,
+     -1,
+     180,
+     2
+    ]
+   }
+  },
+  {
+   "name": "review_circ_stepinv_oob",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       10,
+       250
+      ],
+      "r": 2.0
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": true
+    },
+    "op": "step_inv",
+    "dom": [
+     -400,
+     -1000.0,
+     400,
+     1000.0
+    ],
+    "p": [
+     2.879385241571817,
+     1.3159597133486627,
+     4.5
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "review_circ_stepinv_outside",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "circle",
+      "c": [
+       1,
+       2,
+       3
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       10,
+       250
+      ],
+      "r": 2.0
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       1,
+       2,
+       3
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       10,
+       0,
+       250,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "step_inv",
+    "dom": [
+     10,
+     0,
+     250,
+     1
+    ],
+    "p": [
+     3,
+     2,
+     3.5
+    ],
+    "tol": 1e-06,
+    "guess": [
+     300,
+     0.5
+    ]
+   }
+  },
+  {
+   "name": "review_ell_adjust_sw_tostep",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "ellipse",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -60,
+       200
+      ],
+      "rx": 3,
+      "ry": 1
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1.5
+      ]
+     },
+     "swap": true,
+     "oob": false
+    },
+    "op": "adjust",
+    "dom": [
+     0,
+     -1,
+     150,
+     1
+    ]
+   }
+  },
+  {
+   "name": "review_ell_update_sw",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "ellipse",
+      "c": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "d": [
+       -60,
+       200
+      ],
+      "rx": 3,
+      "ry": 1
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       3,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       -60,
+       0,
+       200,
+       1
+      ]
+     },
+     "swap": true,
+     "oob": false
+    },
+    "op": "update",
+    "dom": [
+     0,
+     0.2,
+     1,
+     0.7
+    ]
+   }
+  },
+  {
+   "name": "review_rat_adjust_sw",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        1,
+        2,
+        0
+       ],
+       [
+        3,
+        -1,
+        0
+       ],
+       [
+        4,
+        1,
+        0
+       ]
+      ],
+      "weights": [
+       1,
+       0.6,
+       1.7,
+       1
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       0.4,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": true,
+     "oob": false
+    },
+    "op": "adjust",
+    "dom": [
+     0.2,
+     -2,
+     0.9,
+     3
+    ]
+   }
+  },
+  {
+   "name": "review_rat_update",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        1,
+        2,
+        0
+       ],
+       [
+        3,
+        -1,
+        0
+       ],
+       [
+        4,
+        1,
+        0
+       ]
+      ],
+      "weights": [
+       1,
+       0.6,
+       1.7,
+       1
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       0.4,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       1
+      ],
+      "domain": [
+       0,
+       0,
+       1,
+       2
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "update",
+    "dom": [
+     0.1,
+     0.5,
+     0.6,
+     1.5
+    ]
+   }
+  },
+  {
+   "name": "review_rat_stepinv_guess",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        1,
+        2,
+        0
+       ],
+       [
+        3,
+        -1,
+        0
+       ],
+       [
+        4,
+        1,
+        0
+       ]
+      ],
+      "weights": [
+       1,
+       0.6,
+       1.7,
+       1
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       0.4,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "canonical",
+      "vec": [
+       0,
+       0,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "step_inv",
+    "dom": [
+     0,
+     -5,
+     1,
+     5
+    ],
+    "p": [
+     2,
+     0.5,
+     1.0
+    ],
+    "tol": 0.001,
+    "guess": [
+     0.9,
+     0
+    ]
+   }
+  },
+  {
+   "name": "review_zero_vec_ctor_stepinv",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        1,
+        2,
+        0
+       ],
+       [
+        3,
+        -1,
+        0
+       ],
+       [
+        4,
+        1,
+        0
+       ]
+      ],
+      "weights": [
+       1,
+       0.6,
+       1.7,
+       1
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       0.4,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "step_inv",
+    "dom": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "p": [
+     0,
+     0,
+     0
+    ],
+    "tol": 1e-06
+   }
+  },
+  {
+   "name": "review_zero_vec_ctor_drop",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        1,
+        2,
+        0
+       ],
+       [
+        3,
+        -1,
+        0
+       ],
+       [
+        4,
+        1,
+        0
+       ]
+      ],
+      "weights": [
+       1,
+       0.6,
+       1.7,
+       1
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       0.4,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "drop_fast",
+    "dom": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "sop": 3,
+    "p": [
+     1,
+     1,
+     1
+    ],
+    "tol": 1e-09,
+    "requested": 1
+   }
+  },
+  {
+   "name": "review_zero_vec_ctor_to_step",
+   "upstream_ref": "review: adversarial",
+   "inputs": {
+    "surf": {
+     "gen": {
+      "kind": "b_spline",
+      "cpts": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        1,
+        2,
+        0
+       ],
+       [
+        3,
+        -1,
+        0
+       ],
+       [
+        4,
+        1,
+        0
+       ]
+      ],
+      "weights": [
+       1,
+       0.6,
+       1.7,
+       1
+      ],
+      "p": 2,
+      "u": [
+       0,
+       0,
+       0,
+       0.4,
+       1,
+       1,
+       1
+      ]
+     },
+     "build": {
+      "mode": "ctor",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "vec": [
+       0,
+       0,
+       0
+      ],
+      "domain": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "swap": false,
+     "oob": false
+    },
+    "op": "to_step",
+    "u": 0.5,
+    "v": 0.5
+   }
+  }
+ ]
+}

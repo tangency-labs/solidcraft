@@ -1,0 +1,183 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/4011",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+ "test": "none: open on SolidCraft's truck kernel (kernel work paused under tangency-labs/solidcraft#3992); geometry is the issue's",
+ "summary": "Mirroring a blind-hole cut about x = 10 removed 129.8 mm^3 instead of the hole's 113.1 on SolidCraft's truck kernel: the copy at x = 20 has its top disc half under the wall's foot (#4011). A 100 x 60 x 10 plate (z -5..5) with a 10 mm wall (x 10..20, z 5..15) on top; an r 3 hole 4 deep from z = 5 at (0, 10), then its mirror image (the tool reflected in x = 10, the runner's mirror step) cut, and as a control the same hole cut directly at (20, 10). The second hole lies wholly below z = 5 and only touches the wall, so both holes remove pi*9*4.",
+ "cases": [
+  {
+   "name": "mirrored_tool",
+   "note": "The hole's tool reflected in the plane x = 10 and cut.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "plate",
+     "origin": [
+      -50,
+      -30,
+      -5
+     ],
+     "size": [
+      100,
+      60,
+      10
+     ]
+    },
+    {
+     "op": "box",
+     "id": "wall",
+     "origin": [
+      10,
+      -30,
+      5
+     ],
+     "size": [
+      10,
+      60,
+      10
+     ]
+    },
+    {
+     "op": "union",
+     "id": "part",
+     "a": "plate",
+     "b": "wall"
+    },
+    {
+     "op": "cylinder",
+     "id": "hole",
+     "origin": [
+      0,
+      10,
+      1
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 3,
+     "height": 4
+    },
+    {
+     "op": "difference",
+     "id": "holed",
+     "a": "part",
+     "b": "hole"
+    },
+    {
+     "op": "mirror",
+     "id": "hole2",
+     "body": "hole",
+     "normal": "x",
+     "at": 10
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "holed",
+     "b": "hole2"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 65773.80532894154,
+     "tol": 0.0001,
+     "formula": "100*60*10 + 10*60*10 - 2*pi*3^2*4 (two blind holes r 3, 4 deep; the second's top disc touches the foot of the wall without cutting it)"
+    }
+   }
+  },
+  {
+   "name": "direct_cut_control",
+   "note": "Control: the second hole cut directly at (20, 10).",
+   "steps": [
+    {
+     "op": "box",
+     "id": "plate",
+     "origin": [
+      -50,
+      -30,
+      -5
+     ],
+     "size": [
+      100,
+      60,
+      10
+     ]
+    },
+    {
+     "op": "box",
+     "id": "wall",
+     "origin": [
+      10,
+      -30,
+      5
+     ],
+     "size": [
+      10,
+      60,
+      10
+     ]
+    },
+    {
+     "op": "union",
+     "id": "part",
+     "a": "plate",
+     "b": "wall"
+    },
+    {
+     "op": "cylinder",
+     "id": "hole",
+     "origin": [
+      0,
+      10,
+      1
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 3,
+     "height": 4
+    },
+    {
+     "op": "difference",
+     "id": "holed",
+     "a": "part",
+     "b": "hole"
+    },
+    {
+     "op": "cylinder",
+     "id": "hole2",
+     "origin": [
+      20,
+      10,
+      1
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 3,
+     "height": 4
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "holed",
+     "b": "hole2"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 65773.80532894154,
+     "tol": 0.0001,
+     "formula": "100*60*10 + 10*60*10 - 2*pi*3^2*4 (two blind holes r 3, 4 deep; the second's top disc touches the foot of the wall without cutting it)"
+    }
+   }
+  }
+ ]
+}

@@ -21,22 +21,6 @@ use crate::prefs::{OrbitAround, pivot_under};
 use crate::space_mouse::{BridgeMotion, Motion};
 use crate::viewport::{Hit, NavMode, axis_rect, nearest_quarter_turn, pick, pick_cached, projection};
 
-/// Take a predominantly horizontal wheel gesture for a hovered scroll viewport.
-/// Leave vertical input for its enclosing page, and leave horizontal input
-/// unconsumed when this viewport is already at the requested end.
-pub(crate) fn take_horizontal_wheel(ui: &egui::Ui, offset: f32, max_offset: f32) -> f32 {
-    ui.input_mut(|input| {
-        let delta = input.smooth_scroll_delta;
-        if delta.x == 0.0 || delta.x.abs() <= delta.y.abs() {
-            return 0.0;
-        }
-        if (offset - delta.x).clamp(0.0, max_offset) != offset {
-            input.smooth_scroll_delta.x = 0.0;
-        }
-        delta.x
-    })
-}
-
 /// What a page's camera may do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct NavCaps {
@@ -2063,7 +2047,8 @@ mod tests {
         ];
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let dirs = [root.join("src"), root.join("../../apps/solidcraft/src"), root.join("../../apps/solidcraft-web/src")];
-        let allowed = ["navigation.rs"];
+        // The kit's wheel.rs scrolls strips (a horizontal wheel over a hovered scroll area), not cameras.
+        let allowed = ["navigation.rs", "wheel.rs"];
         let mut offenders = Vec::new();
         let mut scanned = 0;
         let mut stack: Vec<std::path::PathBuf> = dirs.iter().filter(|d| d.is_dir()).cloned().collect();

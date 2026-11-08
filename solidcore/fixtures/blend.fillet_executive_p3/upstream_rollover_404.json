@@ -1,0 +1,25 @@
+{
+  "cases": [
+    {
+      "name": "private-upstream-rollover-404-cyl-on-box1-edge12-r2",
+      "upstream_ref": "tests/prog_test/src/smFilletTest.cpp:2922 (my_test_suite_4 test 404)",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/cyl_on_box1.smb"
+            }
+          },
+          "radius": 2.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1.0,
+          "edges": [
+            12
+          ]
+        }
+      }
+    }
+  ]
+}
