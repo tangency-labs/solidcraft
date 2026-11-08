@@ -714,8 +714,13 @@ fn no_sheet_body(cmd: &str) -> EngineError {
 }
 
 fn sheet_of(s: &Session, p: &Value, cmd: &str) -> Result<SheetBody> {
+    sheet_named(s, str_(p, "body"), cmd)
+}
+
+/// The sheet-metal body `body`, else the last one.
+fn sheet_named(s: &Session, body: Option<&str>, cmd: &str) -> Result<SheetBody> {
     let st = s.model.state();
-    match str_(p, "body") {
+    match body {
         Some(b) => st.sheets.iter().find(|x| x.body == b).cloned().ok_or_else(|| bad(cmd, format!("`{b}` is not a sheet metal body"))),
         None => st.sheets.last().cloned().ok_or_else(|| no_sheet_body(cmd)),
     }
@@ -819,7 +824,13 @@ fn flat_json(sh: &SheetBody) -> Result<Value> {
 }
 
 fn flat_pattern(s: &mut Session, p: &Value) -> Result<Value> {
-    let sh = sheet_of(s, p, "sheet.flat_pattern")?;
+    flat_reply(s, str_(p, "body"), "sheet.flat_pattern")
+}
+
+/// `sheet.flat_pattern`'s reply for the sheet-metal body `body` (else the last one): what the
+/// command reports and a flat pattern view draws, one reader for both.
+pub(crate) fn flat_reply(s: &Session, body: Option<&str>, cmd: &str) -> Result<Value> {
+    let sh = sheet_named(s, body, cmd)?;
     sh.flat_matches_body()?;
     flat_json(&sh)
 }

@@ -9,6 +9,7 @@
 //! - A **projected view** sits on one side of its parent ([`ProjectedSide`]) and looks from that
 //!   side in third angle, from the side away from it in first ([`projected_basis`]); its frame
 //!   lines up with the parent's ([`ViewFrame::aligned`]).
+//! - A **flat pattern view** draws a flat on its own plane, turned a [`QuarterTurn`] at a time.
 //! - A **[`Scale`]** is a ratio of two numbers from 0.000001 to 1000000, written `"1:2"` (paper :
 //!   model), from 1:100000 to 1000:1. [`Scale::fit`] picks the largest of ISO 5455's preset
 //!   scales at which a view fits a space.
@@ -153,6 +154,53 @@ impl ProjectedSide {
             ProjectedSide::Left | ProjectedSide::Right => Vec2::new(along, point.y),
             ProjectedSide::Above | ProjectedSide::Below => Vec2::new(point.x, along),
         }
+    }
+}
+
+/// How far a flat pattern view turns its flat on paper, anticlockwise: a quarter turn at a time, so
+/// its points map exactly. Saved as its degrees, 0, 90, 180 or 270.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "u16", into = "u16")]
+pub enum QuarterTurn {
+    #[default]
+    None,
+    Quarter,
+    Half,
+    ThreeQuarters,
+}
+
+impl QuarterTurn {
+    pub const ALL: [QuarterTurn; 4] = [QuarterTurn::None, QuarterTurn::Quarter, QuarterTurn::Half, QuarterTurn::ThreeQuarters];
+
+    /// The basis that draws a flat lying on its own plane's x and y (z = 0) turned so: its axes are
+    /// signed unit axes, so each point's paper coordinates are its own, swapped or negated.
+    pub fn basis(self) -> Plane {
+        let (x, y) = match self {
+            QuarterTurn::None => (Vec3::X, Vec3::Y),
+            QuarterTurn::Quarter => (Vec3::new(0.0, -1.0, 0.0), Vec3::X),
+            QuarterTurn::Half => (Vec3::new(-1.0, 0.0, 0.0), Vec3::new(0.0, -1.0, 0.0)),
+            QuarterTurn::ThreeQuarters => (Vec3::Y, Vec3::new(-1.0, 0.0, 0.0)),
+        };
+        Plane { origin: Vec3::ZERO, x, y }
+    }
+}
+
+impl From<QuarterTurn> for u16 {
+    fn from(turn: QuarterTurn) -> u16 {
+        match turn {
+            QuarterTurn::None => 0,
+            QuarterTurn::Quarter => 90,
+            QuarterTurn::Half => 180,
+            QuarterTurn::ThreeQuarters => 270,
+        }
+    }
+}
+
+impl TryFrom<u16> for QuarterTurn {
+    type Error = &'static str;
+
+    fn try_from(degrees: u16) -> std::result::Result<QuarterTurn, &'static str> {
+        QuarterTurn::ALL.into_iter().find(|turn| u16::from(*turn) == degrees).ok_or("a turn is 0, 90, 180 or 270 degrees")
     }
 }
 

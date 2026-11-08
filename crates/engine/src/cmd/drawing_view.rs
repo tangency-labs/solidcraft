@@ -16,6 +16,9 @@
 //! boundary unless placed. Each is one undo step, refused whole by the record's rules, and lists
 //! itself when it lies outside the sheet's drawing space.
 //!
+//! `drawing.view.flat` (#13030) makes a flat pattern view: one sheet-metal body's flat pattern as
+//! `sheet.flat_pattern` reports it, on a sheet, turned a quarter at a time ([`crate::drawing_view::flat`]).
+//!
 //! What a saved view shows, its `source` and `hide`, is set when it is made or edited and follows
 //! the parent as any setting does. The occurrences are checked as they are chosen: one deleted later
 //! leaves the view as it is, and it draws what is left ([`crate::drawing_view::measured`]).
@@ -54,7 +57,7 @@ use crate::drawing_view::{CHORD_RANGE, Extents, LeftOut, LineRequest, Lines, NOT
 use crate::params::bad;
 use crate::schema::drawing_view::{
     AccuracyResult, AlongParam, AngleFromParam, BaseParams, BoxResult, ChoicesResult, CopyParams, CreateResult, DPI_RANGE, EditParams, EditResult,
-    ExtentsResult, FromResult, InspectParams, InspectResult, LineResult, LinesStatusResult, MeasureParam, MeasurementResult, MoveParams,
+    ExtentsResult, FlatParams, FromResult, InspectParams, InspectResult, LineResult, LinesStatusResult, MeasureParam, MeasurementResult, MoveParams,
     OutsideResult, PathSegResult, PictureResult, PieceResult, PlaceParam, ProjectedParams, ScaleResult, SceneResult, SettingResult, SettingsResult,
     SnapshotParams, SnapshotResult, SourceResult, ToSheetResult, ViewLineParam, ViewResult, ViewSet,
 };
@@ -75,6 +78,8 @@ const BASE: &str = "drawing.view.base";
 const BASE_CONTRACT: TypedContract<BaseParams> = TypedContract::new();
 const PROJECTED: &str = "drawing.view.projected";
 const PROJECTED_CONTRACT: TypedContract<ProjectedParams> = TypedContract::new();
+const FLAT: &str = "drawing.view.flat";
+const FLAT_CONTRACT: TypedContract<FlatParams> = TypedContract::new();
 
 /// How far a new projected view's boundary is from its parent's, in paper millimetres, until a
 /// drawing style gives it.
@@ -93,7 +98,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
         .doc_only()
         .contract(&INSPECT_CONTRACT)
         .output(output_schema_for::<InspectResult>)
-        .params("view: a saved view's id → {view, sheet, kind: base|projected, source, parent?, side?, direction, place: {at: [x, y]} or {aligned: n}, settings: {scale, visual_style, reference_style, reference_hides_model, tangent_edges, occurrences (null: every body), hide: {value, from: this|parent|default, parent?, set}}, reference_shown_percent, boundary_mm: {min, max} on the sheet (a 20 x 20 mm placeholder round the view's centre when there's nothing to measure), extents: {min, max, error_mm, status: approximate|placeholder, provenance (a placeholder's reason: past_walk_limit, no_bodies or nothing_chosen)} in model mm on the view's plane, linked? (a projected view's display settings: true, false or \"partly\"), dimensions: [its dimensions' ids, in id order], balloons: [its balloons' ids, in id order], choices: {visual_style, scale}}. Read-only; no model is evaluated."),
+        .params("view: a saved view's id → {view, sheet, kind: base|projected|flat, source, parent?, side?, direction, place: {at: [x, y]} or {aligned: n}, settings: {scale, visual_style, reference_style, reference_hides_model, tangent_edges, occurrences (null: every body), hide: {value, from: this|parent|default, parent?, set}}, reference_shown_percent, boundary_mm: {min, max} on the sheet (a 20 x 20 mm placeholder round the view's centre when there's nothing to measure), extents: {min, max, error_mm, status: approximate|exact (a flat pattern view's)|placeholder, provenance (display_mesh, flat_pattern, or a placeholder's reason: past_walk_limit, no_bodies, nothing_chosen or no_flat)} in model mm on the view's plane, linked? (a projected view's display settings: true, false or \"partly\"), dimensions: [its dimensions' ids, in id order], balloons: [its balloons' ids, in id order], choices: {visual_style, scale}}. Read-only; no model is evaluated."),
     CommandSpec::new(EDIT, "Edit Drawing View", crate::checked!("drawing.view.edit", edit))
         .icon("edit")
         .in_drawing()
@@ -129,6 +134,13 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
         .contract(&PROJECTED_CONTRACT)
         .output(output_schema_for::<CreateResult>)
         .params("parent: a saved view's id; side: left, right, above or below, where it sits (the drawing's projection says which side of the model it shows); place?: {at: [x, y]} or {aligned: n} (default: lined up with its parent, its boundary 20 mm past the parent's) → {view, sheet: its parent's, scale: its parent's, boundary_mm, outside?}. Its scale and display settings follow its parent; drawing.view.edit sets its own. One undo step; no model is evaluated."),
+    CommandSpec::new(FLAT, "Flat Pattern View", crate::checked!("drawing.view.flat", flat))
+        .icon("new")
+        .in_drawing()
+        .doc_only()
+        .contract(&FLAT_CONTRACT)
+        .output(output_schema_for::<CreateResult>)
+        .params("sheet: id or name; body?: a sheet-metal body's name (default the last one made); scale?: \"paper:model\" (default: the largest ISO 5455 preset at which it lies inside the sheet's drawing space and off its title block; saved either way); position_mm?: [x, y] for its centre (default the sheet's centre); turn?: 0 (default), 90, 180 or 270 degrees counter-clockwise → {view, sheet, scale: {text, factor, fitted}, boundary_mm, outside?}. The flat pattern as sheet.flat_pattern reports it: its outlines and cut-outs as visible lines, bends up as centre lines and bends down as phantom lines. Refused as sheet.flat_pattern refuses the body. One undo step; no model is evaluated."),
 ];
 
 fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
@@ -217,7 +229,7 @@ fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
         sheet: request.sheet,
         visual_style: snake_name(settings.visual_style),
         reference_style: snake_name(settings.reference_style),
-        extents: extents_result(&extents, None),
+        extents: extents_result(&extents, None, false),
         boundary_mm: BoxResult { min: boundary.min.into(), max: boundary.max.into() },
         lines: line_results(&set, &drawn),
         status: LinesStatusResult {
@@ -427,14 +439,14 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
     let resolved = d.resolve_view(view.id).map_err(|e| bad(INSPECT, e.to_string()))?;
     let placed = crate::drawing_view::on_sheet(s, d, view.id, INSPECT)?;
     let (parent, side) = match view.kind {
-        ViewKind::Base { .. } => (None, None),
         ViewKind::Projected { parent, side } => (Some(ids::encode(parent)), Some(snake_name(side))),
+        ViewKind::Base { .. } | ViewKind::Flat { .. } => (None, None),
     };
     let own = &view.settings;
     let reply = InspectResult {
         view: ids::encode(view.id),
         sheet: ids::encode(view.sheet),
-        kind: if parent.is_some() { "projected" } else { "base" },
+        kind: view.kind.name(),
         source: ids::encode(resolved.source),
         parent,
         side,
@@ -455,7 +467,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
         },
         reference_shown_percent: view.reference_shown_percent,
         boundary_mm: BoxResult { min: placed.boundary.min.into(), max: placed.boundary.max.into() },
-        extents: extents_result(&placed.extents, placed.unmeasured),
+        extents: extents_result(&placed.extents, placed.unmeasured, resolved.flat.is_some()),
         linked: matches!(view.kind, ViewKind::Projected { .. }).then(|| match display_set(own) {
             0 => Value::Bool(true),
             DISPLAY_GROUP => Value::Bool(false),
@@ -543,11 +555,15 @@ fn change(d: &mut Drawing, id: u64, set: &ViewSet) -> Result<Vec<String>> {
     let at = d.view_index(id).ok_or_else(|| bad(EDIT, format!("the drawing has no view {}", ids::encode(id))))?;
     let Some(view) = d.views.get_mut(at).map(std::sync::Arc::make_mut) else { return Ok(Vec::new()) };
     let before = view.clone();
-    let base = matches!(view.kind, ViewKind::Base { .. });
+    let unparented = view.kind.unparented();
+    let own_direction = match view.kind {
+        ViewKind::Flat { .. } => "a flat pattern view looks straight at its flat: only a base view's direction changes",
+        _ => "a projected view looks from its side of its parent: only a base view's direction changes",
+    };
     let own = &mut view.settings;
     if let Some(linked) = set.linked {
-        if base {
-            return Err(bad(EDIT, "a base view has no parent to follow: `linked` is a projected view's"));
+        if let Some(what) = unparented {
+            return Err(bad(EDIT, format!("{what} has no parent to follow: `linked` is a projected view's")));
         }
         // Following: the display settings cleared. Its own: each at the value it has now.
         own.visual_style = (!linked).then_some(resolved.visual_style.value);
@@ -557,8 +573,8 @@ fn change(d: &mut Drawing, id: u64, set: &ViewSet) -> Result<Vec<String>> {
         own.line_group = (!linked).then_some(resolved.line_group.value);
     }
     if let Some(scale) = set.scale {
-        if base && scale.is_none() {
-            return Err(bad(EDIT, "a base view has no parent to follow: it keeps a scale"));
+        if let Some(what) = unparented.filter(|_| scale.is_none()) {
+            return Err(bad(EDIT, format!("{what} has no parent to follow: it keeps a scale")));
         }
         own.scale = scale.map(|s| s.0);
     }
@@ -587,9 +603,7 @@ fn change(d: &mut Drawing, id: u64, set: &ViewSet) -> Result<Vec<String>> {
         view.reference_shown_percent = percent;
     }
     if let Some(direction) = set.view {
-        let ViewKind::Base { view: looking, .. } = &mut view.kind else {
-            return Err(bad(EDIT, "a projected view looks from its side of its parent: only a base view's direction changes"));
-        };
+        let ViewKind::Base { view: looking, .. } = &mut view.kind else { return Err(bad(EDIT, own_direction)) };
         *looking = direction.0;
     }
     if let Some(place) = set.place {
@@ -631,13 +645,15 @@ pub(super) fn outside_results(outside: Vec<(u64, OnSheet)>) -> Vec<OutsideResult
     outside.into_iter().map(result).collect()
 }
 
-fn extents_result(extents: &Extents, unmeasured: Option<Unmeasured>) -> ExtentsResult {
+/// A flat pattern view's extents are its flat's exact box.
+fn extents_result(extents: &Extents, unmeasured: Option<Unmeasured>, flat: bool) -> ExtentsResult {
+    let (status, measured_on) = if flat { ("exact", "flat_pattern") } else { ("approximate", "display_mesh") };
     ExtentsResult {
         min: extents.model.min.into(),
         max: extents.model.max.into(),
         error_mm: extents.error_mm,
-        status: if unmeasured.is_some() { "placeholder" } else { "approximate" },
-        provenance: unmeasured.map_or("display_mesh", Unmeasured::name),
+        status: if unmeasured.is_some() { "placeholder" } else { status },
+        provenance: unmeasured.map_or(measured_on, Unmeasured::name),
     }
 }
 
@@ -661,10 +677,10 @@ fn lined_up(d: &Drawing, id: u64) -> Vec<u64> {
 /// `view`'s place moved by `by`: a point moves, and a place lined up with a parent moves along
 /// its free axis, so the views lined up with a moved view stay where they were beside it.
 fn shifted(view: &View, by: Vec2) -> ViewPlace {
-    match (view.place, view.kind) {
+    match (view.place, &view.kind) {
         (ViewPlace::At([x, y]), _) => ViewPlace::At([x + by.x, y + by.y]),
         (ViewPlace::Aligned(along), ViewKind::Projected { side, .. }) => ViewPlace::Aligned(along + side.along(by)),
-        (ViewPlace::Aligned(along), ViewKind::Base { .. }) => ViewPlace::Aligned(along + by.y),
+        (ViewPlace::Aligned(along), ViewKind::Base { .. } | ViewKind::Flat { .. }) => ViewPlace::Aligned(along + by.y),
     }
 }
 
@@ -764,7 +780,7 @@ fn copy_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
                     view.place = ViewPlace::At([to.x, to.y]);
                 }
                 ViewKind::Projected { parent, side } => view.kind = ViewKind::Projected { parent: copy_of(parent).unwrap_or(parent), side },
-                ViewKind::Base { .. } => {}
+                ViewKind::Base { .. } | ViewKind::Flat { .. } => {}
             }
             made.push(Arc::new(view));
         }
@@ -893,14 +909,54 @@ fn projected(s: &mut Session, p: &Value) -> Result<Value> {
     created(s, PROJECTED, id, false)
 }
 
+fn flat(s: &mut Session, p: &Value) -> Result<Value> {
+    let request: FlatParams = crate::schema::read(FLAT, p)?;
+    let record = s.drawing(FLAT)?.clone();
+    let (sheet, middle) = sheet_named(&record, &request.sheet, FLAT)?;
+    let source = record.sources.first().map(|source| source.id).ok_or_else(|| bad(FLAT, "the drawing draws no design"))?;
+    // The body as sheet.flat_pattern finds it: the view saves its name, so it draws that body after
+    // others are made.
+    let reply = crate::cmd::flat_reply(s, request.body.as_deref(), FLAT)?;
+    let body = reply.get("body").and_then(Value::as_str).ok_or_else(|| bad(FLAT, "the flat pattern names no body"))?.to_string();
+    let turn = request.turn.map(|turn| turn.0).unwrap_or_default();
+    let position = request.position_mm.map_or(middle, |p| p.0);
+    let id = record.allocate_id(&mut s.ids).map_err(|e| bad(FLAT, e.to_string()))?;
+    let kind = ViewKind::Flat { source, body, turn };
+    let one = Scale::new(1.0, 1.0).map_err(|e| bad(FLAT, e.to_string()))?;
+    let settings = ViewOverrides { scale: Some(request.scale.map_or(one, |scale| scale.0)), ..ViewOverrides::default() };
+    let mut view = View { id, sheet, kind, place: ViewPlace::At([position.x, position.y]), settings, reference_shown_percent: 0.0 };
+    // The record's rules first, at 1:1 unless a scale is given; then the fitted scale, which is saved.
+    let mut staged = Drawing::clone(&record);
+    staged.add_views([Arc::new(view.clone())]);
+    staged.validate().map_err(|e| bad(FLAT, e.to_string()))?;
+    // The flat is read once, for the fit and the reply both: a large flat takes seconds to read.
+    let flat = crate::drawing_view::flat_from(&reply, turn, FLAT)?;
+    if request.scale.is_none() {
+        let model = flat.model;
+        let room = Room::on(crate::drawing_view::sheet(&staged, sheet, FLAT)?, FLAT)?;
+        view.settings.scale = Some(fit(&Extents { model, error_mm: 0.0, bodies: 1 }, model, position, room, FLAT)?);
+    }
+    s.edit_drawing(FLAT, |d| {
+        d.add_views([Arc::new(view)]);
+        Ok(())
+    })?;
+    let placed = crate::drawing_view::flat_on_sheet(s.drawing(FLAT)?, id, &Ok(flat), FLAT)?;
+    created_at(s, FLAT, id, request.scale.is_none(), placed)
+}
+
 /// The reply for view `id`, just made by `cmd`: its sheet, its scale (`fitted` when worked out),
 /// its boundary, and itself when it leaves its sheet's drawing space.
 fn created(s: &Session, cmd: &str, id: u64, fitted: bool) -> Result<Value> {
+    let placed = crate::drawing_view::on_sheet(s, s.drawing(cmd)?, id, cmd)?;
+    created_at(s, cmd, id, fitted, placed)
+}
+
+/// [`created`] with the view's place on its sheet already worked out.
+fn created_at(s: &Session, cmd: &str, id: u64, fitted: bool, placed: OnSheet) -> Result<Value> {
     let d = s.drawing(cmd)?;
     let sheet_id = find(d, id, cmd)?.sheet;
     let sheet = crate::drawing_view::sheet(d, sheet_id, cmd)?;
     let scale = d.resolve_view(id).map_err(|e| bad(cmd, e.to_string()))?.scale.value;
-    let placed = crate::drawing_view::on_sheet(s, d, id, cmd)?;
     let outside = if crate::drawing_view::leaves(sheet, &placed, cmd)? { vec![(id, placed)] } else { Vec::new() };
     let reply = CreateResult {
         view: ids::encode(id),

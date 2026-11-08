@@ -208,7 +208,7 @@ pub fn paper_lines(lines: &Lines, object: u64, group: LineGroup) -> (Group, Vec<
         // One straight line never closes on itself, however short.
         let closed = ends_meet && !matches!(path.as_slice(), [Seg2::Line { .. }]);
         let hidden = piece.visibility == Visibility::Hidden;
-        let pattern = hidden.then(|| LineKind::Hidden.dashes_mm(group)).flatten().map(|d| Dashes { lengths_mm: d.to_vec(), phase_mm: 0.0 });
+        let pattern = hidden.then(|| LineKind::Hidden.dashes_mm(group)).flatten().map(|lengths_mm| Dashes { lengths_mm, phase_mm: 0.0 });
         (!path.is_empty()).then_some(Item::Stroke { path, closed, width_mm, pattern })
     };
     let strokes = |reference: bool, visibility: Visibility, width_mm: f64| {
@@ -229,7 +229,7 @@ pub fn paper_lines(lines: &Lines, object: u64, group: LineGroup) -> (Group, Vec<
 
 /// `seg`, or nothing where it has no length to draw: a line whose ends are one point. An arc too
 /// short to sweep is drawn as its chord.
-fn drawable(seg: Seg2) -> Option<Seg2> {
+pub(super) fn drawable(seg: Seg2) -> Option<Seg2> {
     match seg {
         Seg2::Arc { sweep, .. } if sweep.abs() < 1e-9 => drawable(Seg2::Line { a: seg.start(), b: seg.end() }),
         Seg2::Line { a, b } if a == b => None,

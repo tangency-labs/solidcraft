@@ -601,7 +601,7 @@ fn a_sheet_goes_with_everything_on_it() {
     assert_eq!((without.sheets.len(), without.views.len(), without.dimensions.len(), without.balloons.len()), (1, 1, 0, 0));
     // The top view, placed apart, moved to the bolt's sheet: its parent is on the assembly's.
     let mut moved = d.clone();
-    let top = moved.views.iter().position(|v| v.sheet == assembly && matches!((v.kind, v.place), (ViewKind::Projected { .. }, ViewPlace::At(_))));
+    let top = moved.views.iter().position(|v| v.sheet == assembly && matches!((&v.kind, v.place), (ViewKind::Projected { .. }, ViewPlace::At(_))));
     Arc::make_mut(&mut moved.views[top.unwrap()]).sheet = bolt;
     moved.validate().unwrap();
     moved.remove_sheet(assembly);

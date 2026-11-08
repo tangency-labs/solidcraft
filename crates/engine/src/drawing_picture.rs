@@ -117,7 +117,8 @@ impl<'a> ViewPictures<'a> {
     pub fn new(s: &'a Session, d: &Drawing, sheet: u64) -> Result<ViewPictures<'a>> {
         let (mut pictures, mut spent) = (BTreeMap::new(), BTreeMap::new());
         if let Ok(set) = crate::drawing_view::shown(s) {
-            for (id, view, centre) in crate::drawing_scene::views_on(d, sheet)? {
+            // A flat pattern view draws only lines.
+            for (id, view, centre) in crate::drawing_scene::views_on(d, sheet)?.into_iter().filter(|(_, view, _)| view.flat.is_none()) {
                 let parts = view_parts(&set, Styles::from(&view));
                 let Ok(extents) = crate::drawing_view::measure(&set, &view.basis) else { continue };
                 let frame = ortho(&crate::drawing_view::frame(view.basis, view.scale.value, &extents.model, centre, CMD)?);
