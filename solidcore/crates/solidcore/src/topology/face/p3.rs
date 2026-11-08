@@ -2509,6 +2509,11 @@ pub fn face_intersect_breps_cached(
     let mut uv_curves1: Vec<Option<Curve>> = Vec::new();
     let mut uv_curves2: Vec<Option<Curve>> = Vec::new();
     let mut curve_types: Vec<TsectCurveType> = Vec::new();
+    // Each coincident edge copy's zone: the faces' tolerance, or its edge's when that is
+    // looser (not upstream; solidcraft#11997). A tolerant edge lies off the surfaces as far
+    // as its tolerance says, and classified at the faces' tolerance its crossings with the
+    // other face's edges are missed.
+    let mut curve_zone_tols: Vec<f64> = Vec::new();
 
     let (are_coincident, coinc_dist) = if let Some(c) = options.coincidence {
         (c, 0.0)
@@ -2541,6 +2546,7 @@ pub fn face_intersect_breps_cached(
                 uv_curves1.push(None);
                 uv_curves2.push(None);
                 curve_types.push(TsectCurveType::RegionBoundary);
+                curve_zone_tols.push(smos_max(zone_tol, edge::tolerance(fb, e)?));
             }
         }
     }
@@ -2695,8 +2701,12 @@ pub fn face_intersect_breps_cached(
             .and_then(Option::as_ref)
             .map(|_| IntersectObject::UvCurve(ii, true));
         let ivl = curve.natural_interval();
-        let mut cc1 = curve_classification(k, IntersectObject::Curve(ii), &ivl, uv1, zone_tol)?;
-        let mut cc2 = curve_classification(k, IntersectObject::Curve(ii), &ivl, uv2, zone_tol)?;
+        // surface/surface intersection curves (no entry) are classified at the faces' zone
+        let curve_zone_tol = curve_zone_tols.get(ii).copied().unwrap_or(zone_tol);
+        let mut cc1 =
+            curve_classification(k, IntersectObject::Curve(ii), &ivl, uv1, curve_zone_tol)?;
+        let mut cc2 =
+            curve_classification(k, IntersectObject::Curve(ii), &ivl, uv2, curve_zone_tol)?;
 
         // the classifications' lazy face queries (UV trim curves, gap caches, tolerance
         // growth) edit the faces' own B-reps, as upstream's; they are queries, so the
