@@ -439,6 +439,7 @@ pub fn table() -> Table {
         cell_line_mm: 0.35,
         filter: table::Filter::default(),
         overrides: Vec::new(),
+        split: None,
     }
 }
 

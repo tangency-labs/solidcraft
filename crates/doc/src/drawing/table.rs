@@ -208,6 +208,7 @@ impl Kind {
             cell_line_mm: 0.35,
             filter: Filter::default(),
             overrides: Vec::new(),
+            split: None,
         }
     }
 

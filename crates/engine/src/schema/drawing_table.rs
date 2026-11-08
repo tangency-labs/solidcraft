@@ -97,6 +97,10 @@ pub struct TableSet {
     pub filter: Option<Value>,
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     pub overrides: Option<Value>,
+    /// `{rows, gap_mm?, side?: left | right}`: parts of at most `rows` rows side by side, each headed;
+    /// `null` puts every row in one part again.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    pub split: Option<Value>,
     /// `{anchor: {corner: top_left | top_right | bottom_left | bottom_right, offset_mm?: [x, y]}}`,
     /// or `{at: [x, y]}`, its outline's top left from the sheet's lower-left corner.
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]

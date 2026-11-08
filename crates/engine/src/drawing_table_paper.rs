@@ -27,7 +27,7 @@ use solidcraft_geom::Aabb2;
 use solidcraft_geom::cell::{HAlign, Part};
 use solidcraft_geom::paper::text::Font;
 use solidcraft_geom::paper::{Group, Item, ObjectKind};
-use solidcraft_geom::table::{Heading, Row, Table, TableLayout};
+use solidcraft_geom::table::{Row, Table, TableLayout};
 use solidcraft_sketch::{Outcome, PaperFonts, PaperLines, TextStyle};
 
 use crate::Session;
@@ -97,7 +97,7 @@ pub(crate) fn place(s: &Session, d: &Drawing, record: &SheetTable, space: Aabb2,
     let words = Words::default();
     let measure = |text: &str, cap_mm: f64| words.width(lettering, text, cap_mm);
     let sized = table.layout(&rows, Vec2::ZERO, &measure).map_err(|e| Unplaced::Failed(e.to_string()))?;
-    let corner = corner_of(record.place, table.heading, sized.outline.size(), space);
+    let corner = corner_of(record.place, sized.outline, space);
     let layout = table.layout(&rows, corner, &measure).map_err(|e| Unplaced::Failed(e.to_string()))?;
     if words.pending.get() {
         return Err(Unplaced::Pending);
@@ -113,7 +113,7 @@ impl Placed {
     pub(crate) fn paper(&self, object: u64, kind: ObjectKind, cap_mm: f64, lettering: &PaperFonts) -> OnPaper {
         let mut out = OnPaper { group: self.layout.paper(object, kind), fonts: Vec::new(), why: None };
         let mut unset: Vec<String> = Vec::new();
-        for cell in std::iter::once(&self.layout.heading).chain(&self.layout.rows).flat_map(|row| &row.cells) {
+        for cell in self.layout.drawn_rows().flat_map(|row| &row.cells) {
             // The anchor is the line's left, middle or right as its column aligns; a word is measured
             // from its left, with the width the layout used, so it is shaped once for both.
             let along = match cell.align {
@@ -181,9 +181,11 @@ fn widest(lines: &PaperLines) -> f64 {
     lines.lines.iter().map(|(_, width)| *width).fold(0.0, f64::max)
 }
 
-/// The point [`Table::layout`] takes for a table of `size` placed at `place`: the right end of its
-/// heading's outer edge.
-fn corner_of(place: Place, heading: Heading, size: Vec2, space: Aabb2) -> Vec2 {
+/// The point [`Table::layout`] takes for a table placed at `place`, given `sized`, its outline laid
+/// out at the origin: the point that puts that outline's top left where `place` names it. So a
+/// heading on either side and parts on either side of the first all land where they are named.
+fn corner_of(place: Place, sized: Aabb2, space: Aabb2) -> Vec2 {
+    let size = sized.size();
     // The outline's top left, whichever way it is named.
     let top_left = match place {
         Place::At([x, y]) => Vec2::new(x, y),
@@ -197,8 +199,7 @@ fn corner_of(place: Place, heading: Heading, size: Vec2, space: Aabb2) -> Vec2 {
             Vec2::new(x + dx, y + dy)
         }
     };
-    let edge = if heading == Heading::Top { top_left.y } else { top_left.y - size.y };
-    Vec2::new(top_left.x + size.x, edge)
+    top_left - Vec2::new(sized.min.x, sized.max.y)
 }
 
 /// `record`'s rows: a revision table's from the drawing's revisions; a parts list's from the design

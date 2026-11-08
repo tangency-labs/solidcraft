@@ -17,6 +17,9 @@
 //!   word wider than its column is shown whole with [`Warning::Width`], never cut.
 //! - A column that isn't printed is for an editor alone: its cells are worked out, and filters and
 //!   overrides read them, but it has no place on paper. The [`BALLOONED`] field is one such.
+//! - A [`Split`] cuts the rows shown into parts that stand side by side, each under its own heading
+//!   and all with the same columns. The first part sits where the whole table would; the others
+//!   follow it to one side, their headings' outer edges in line.
 //! - A row field the row doesn't have shows [`MISSING`]. An [`Override`] shows its text in one
 //!   cell and keeps the value it replaces; an empty one is a blank cell.
 //! - The outline is drawn `outline_line_mm` wide and the lines between cells `cell_line_mm`, each
@@ -36,6 +39,9 @@ use solidcore_record::{Loop2, Seg2, Vec2};
 pub const MAX_ROWS: usize = 10_000;
 /// The most columns a table may have.
 pub const MAX_COLUMNS: usize = 64;
+/// The most parts a split table may stand in: so its lines stay well inside the paper scene's
+/// records, whatever its rows and columns.
+pub const MAX_PARTS: usize = 64;
 /// The most bytes of text a table and its rows may hold in all.
 pub const MAX_TEXT_BYTES: usize = 1 << 20;
 use crate::cell::MISSING;
@@ -68,6 +74,9 @@ pub struct Table {
     pub filter: Filter,
     #[serde(default)]
     pub overrides: Vec<Override>,
+    /// None: one part holds every row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub split: Option<Split>,
 }
 
 fn default_row_height() -> f64 {
@@ -149,6 +158,29 @@ pub struct Override {
     pub text: String,
 }
 
+/// A long table cut into parts that stand side by side, each with its own heading.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Split {
+    /// The most rows a part shows: 1 to [`MAX_ROWS`].
+    pub rows: u32,
+    /// The space between two parts, at most [`MAX_SIDE_MM`].
+    #[serde(default)]
+    pub gap_mm: f64,
+    /// The side the later parts stand on, from the first.
+    #[serde(default)]
+    pub side: Side,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Side {
+    /// Away from a table anchored on the right, as a parts list is.
+    #[default]
+    Left,
+    Right,
+}
+
 /// One row as a table reads it: its key (opaque here, unique among the rows), its kind and its
 /// values by field key, formatted.
 #[derive(Clone, Debug, PartialEq)]
@@ -171,9 +203,20 @@ pub struct TableLayout {
     pub outline: Aabb2,
     pub outline_line_mm: f64,
     pub cell_line_mm: f64,
+    /// The first part's heading.
     pub heading: RowLayout,
-    /// The rows shown, in their order.
+    /// The rows shown, in their order, each in its part.
     pub rows: Vec<RowLayout>,
+    /// The parts, from the first: one without a split.
+    pub parts: Vec<PartLayout>,
+}
+
+/// One part of a table placed: its outline, its heading, and which of the table's rows it shows.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PartLayout {
+    pub outline: Aabb2,
+    pub heading: RowLayout,
+    pub rows: std::ops::Range<usize>,
 }
 
 /// One row placed: its key (none for the heading), its rectangle and its cells, one per column.
@@ -253,6 +296,11 @@ impl Table {
         require(self.cap_mm > 0.0 && self.cap_mm <= height, "the text's cap height is above 0 and at most a row's height")?;
         let lines = [self.outline_line_mm, self.cell_line_mm];
         require(lines.into_iter().all(|line| line > 0.0 && line <= MAX_LINE_MM), "a table's lines are above 0 and at most 10 mm wide")?;
+        if let Some(split) = self.split {
+            require(split.rows >= 1 && split.rows as usize <= MAX_ROWS, "a split table's parts show 1 to 10,000 rows")?;
+            let gap = split.gap_mm;
+            require(gap.is_finite() && (0.0..=MAX_SIDE_MM).contains(&gap), "the gap between a table's parts is 0 to 5000 mm")?;
+        }
         let mut budget = Budget(0);
         for (i, column) in self.columns.iter().enumerate() {
             require(is_snake_case(&column.name), "a column's name is snake case and at most 64 characters")?;
@@ -295,9 +343,10 @@ impl Table {
         Ok(budget)
     }
 
-    /// The table with the right end of its heading's outer edge at `corner` (its top right with the
-    /// heading at the top, its bottom right with the heading at the bottom), showing the rows the
-    /// filter lets through. `measure(text, cap_mm)` is the width of one line of text.
+    /// The table with the right end of its first part's heading's outer edge at `corner` (its top
+    /// right with the heading at the top, its bottom right with the heading at the bottom), showing
+    /// the rows the filter lets through in the parts its split cuts them into. `measure(text,
+    /// cap_mm)` is the width of one line of text.
     pub fn layout(&self, rows: &[Row], corner: Vec2, measure: &dyn Fn(&str, f64) -> f64) -> Result<TableLayout> {
         let mut budget = self.check()?;
         require(rows.len() <= MAX_ROWS, "a table lists at most 10,000 rows")?;
@@ -355,58 +404,88 @@ impl Table {
             }
             wrapped.push(cells);
         }
-        // Heights top to bottom: the heading first or last.
-        let mut order: Vec<usize> = (0..wrapped.len()).collect();
-        if self.heading == Heading::Bottom {
-            order.reverse();
-        }
-        let last = order.len().saturating_sub(1);
+        // The parts: the shown rows in runs of the split's size, one run without a split. Each part
+        // stands a table's width and the gap from the one before, its heading's outer edge in line.
+        let per = self.split.map_or(usize::MAX, |s| s.rows as usize).max(1);
+        let runs: Vec<std::ops::Range<usize>> = if shown.is_empty() {
+            std::iter::once(0..0).collect()
+        } else {
+            (0..shown.len()).step_by(per).map(|start| start..shown.len().min(start.saturating_add(per))).collect()
+        };
+        require(runs.len() <= MAX_PARTS, "a split table stands in at most 64 parts")?;
+        let step = match self.split {
+            Some(Split { gap_mm, side: Side::Left, .. }) => -(table_width + gap_mm),
+            Some(Split { gap_mm, side: Side::Right, .. }) => table_width + gap_mm,
+            None => 0.0,
+        };
         let half = |outline: bool| if outline { self.outline_line_mm } else { self.cell_line_mm } / 2.0;
-        let mut heights = vec![0.0; wrapped.len()];
-        for (place, &r) in order.iter().enumerate() {
-            let lines = wrapped.get(r).map_or(1, |cells| cells.iter().map(|(l, _)| l.len()).max().unwrap_or(1).max(1));
-            let needed = self.cap_mm + (lines - 1) as f64 * pitch + 2.0 * PADDING_MM + half(place == 0) + half(place == last);
-            if let Some(h) = heights.get_mut(r) {
-                *h = self.row_height_mm.max(needed);
+        let mut parts = Vec::with_capacity(runs.len());
+        let mut placed_rows = Vec::with_capacity(shown.len());
+        let mut outline = Aabb2::EMPTY;
+        for (k, run) in runs.into_iter().enumerate() {
+            // The part's rows top to bottom, as indices into `wrapped` (0, the heading, first or last).
+            let mut order: Vec<usize> = std::iter::once(0).chain(run.clone().map(|s| s + 1)).collect();
+            if self.heading == Heading::Bottom {
+                order.reverse();
             }
+            let last = order.len().saturating_sub(1);
+            let mut heights = Vec::with_capacity(order.len());
+            for (place, &r) in order.iter().enumerate() {
+                let lines = wrapped.get(r).map_or(1, |cells| cells.iter().map(|(l, _)| l.len()).max().unwrap_or(1).max(1));
+                let needed = self.cap_mm + (lines - 1) as f64 * pitch + 2.0 * PADDING_MM + half(place == 0) + half(place == last);
+                heights.push(self.row_height_mm.max(needed));
+            }
+            let total: f64 = heights.iter().sum();
+            let part_right = corner.x + step * k as f64;
+            let top = if self.heading == Heading::Top { corner.y } else { corner.y + total };
+            let part = Aabb2 { min: Vec2::new(part_right - table_width, top - total), max: Vec2::new(part_right, top) };
+            require(on_paper(part.min) && on_paper(part.max), "a table lies within the paper's coordinates")?;
+            outline = outline.union(&part);
+            let mut heading = None;
+            let mut placed: Vec<Option<RowLayout>> = vec![None; run.len()];
+            let mut y = top;
+            for ((place, &r), &h) in order.iter().enumerate().zip(&heights) {
+                let rect = Aabb2 { min: Vec2::new(part.min.x, y - h), max: Vec2::new(part.max.x, y) };
+                let (above, below) = (half(place == 0), half(place == last));
+                let mut cells = Vec::with_capacity(columns.len());
+                for (i, column) in columns.iter().enumerate() {
+                    let ((x0, x1), (left, right)) = (edges.get(i).copied().unwrap_or_default(), insets.get(i).copied().unwrap_or_default());
+                    let cell_rect = Aabb2 { min: Vec2::new(part.min.x + x0, rect.min.y), max: Vec2::new(part.min.x + x1, rect.max.y) };
+                    let inside = Aabb2 { min: cell_rect.min + Vec2::new(left, below), max: cell_rect.max - Vec2::new(right, above) };
+                    // Every part has the heading's words; a row's are taken, as one part shows it.
+                    let slot = wrapped.get_mut(r).and_then(|cells| cells.get_mut(i));
+                    let (texts, too_wide) = if r == 0 { slot.cloned() } else { slot.map(std::mem::take) }.unwrap_or_default();
+                    let (at, height) =
+                        cell::place_lines(cell::value_box(inside, None), texts.len(), self.cap_mm, pitch, column.align, false).map_err(cell_rule)?;
+                    let lines = texts.into_iter().enumerate().map(|(k, text)| Line { at: at - Vec2::new(0.0, k as f64 * pitch), text }).collect();
+                    let replaced = r.checked_sub(1).and_then(|s| shown.get(s)).and_then(|(_, cells)| cells.get(i)).and_then(|c| c.replaced.clone());
+                    cells.push(CellLayout {
+                        rect: cell_rect,
+                        lines,
+                        align: column.align,
+                        replaced,
+                        warning: if too_wide { Some(Warning::Width) } else { height },
+                    });
+                }
+                let key = r.checked_sub(1).and_then(|s| shown.get(s)).map(|(row, _)| row.key.clone());
+                let row = RowLayout { key, rect, cells };
+                match r.checked_sub(1 + run.start) {
+                    None => heading = Some(row),
+                    Some(at) => {
+                        if let Some(slot) = placed.get_mut(at) {
+                            *slot = Some(row);
+                        }
+                    }
+                }
+                y -= h;
+            }
+            let heading = heading.ok_or(Invalid("a table has a heading"))?;
+            let first = placed_rows.len();
+            placed_rows.extend(placed.into_iter().flatten());
+            parts.push(PartLayout { outline: part, heading, rows: first..placed_rows.len() });
         }
-        let total: f64 = heights.iter().sum();
-        let top = if self.heading == Heading::Top { corner.y } else { corner.y + total };
-        let outline = Aabb2 { min: Vec2::new(corner.x - table_width, top - total), max: Vec2::new(corner.x, top) };
-        require(on_paper(outline.min) && on_paper(outline.max), "a table lies within the paper's coordinates")?;
-        let mut placed: Vec<Option<RowLayout>> = vec![None; wrapped.len()];
-        let mut y = top;
-        for (place, &r) in order.iter().enumerate() {
-            let h = heights.get(r).copied().unwrap_or_default();
-            let rect = Aabb2 { min: Vec2::new(outline.min.x, y - h), max: Vec2::new(outline.max.x, y) };
-            let (above, below) = (half(place == 0), half(place == last));
-            let mut cells = Vec::with_capacity(columns.len());
-            for (i, column) in columns.iter().enumerate() {
-                let ((x0, x1), (left, right)) = (edges.get(i).copied().unwrap_or_default(), insets.get(i).copied().unwrap_or_default());
-                let cell_rect = Aabb2 { min: Vec2::new(outline.min.x + x0, rect.min.y), max: Vec2::new(outline.min.x + x1, rect.max.y) };
-                let inside = Aabb2 { min: cell_rect.min + Vec2::new(left, below), max: cell_rect.max - Vec2::new(right, above) };
-                let (texts, too_wide) = wrapped.get_mut(r).and_then(|cells| cells.get_mut(i)).map(std::mem::take).unwrap_or_default();
-                let (at, height) =
-                    cell::place_lines(cell::value_box(inside, None), texts.len(), self.cap_mm, pitch, column.align, false).map_err(cell_rule)?;
-                let lines = texts.into_iter().enumerate().map(|(k, text)| Line { at: at - Vec2::new(0.0, k as f64 * pitch), text }).collect();
-                let replaced = r.checked_sub(1).and_then(|s| shown.get(s)).and_then(|(_, cells)| cells.get(i)).and_then(|c| c.replaced.clone());
-                cells.push(CellLayout {
-                    rect: cell_rect,
-                    lines,
-                    align: column.align,
-                    replaced,
-                    warning: if too_wide { Some(Warning::Width) } else { height },
-                });
-            }
-            let key = r.checked_sub(1).and_then(|s| shown.get(s)).map(|(row, _)| row.key.clone());
-            if let Some(slot) = placed.get_mut(r) {
-                *slot = Some(RowLayout { key, rect, cells });
-            }
-            y -= h;
-        }
-        let mut placed = placed.into_iter().flatten();
-        let heading = placed.next().ok_or(Invalid("a table has a heading"))?;
-        Ok(TableLayout { outline, outline_line_mm: self.outline_line_mm, cell_line_mm: self.cell_line_mm, heading, rows: placed.collect() })
+        let heading = parts.first().map(|part| part.heading.clone()).ok_or(Invalid("a table has a heading"))?;
+        Ok(TableLayout { outline, outline_line_mm: self.outline_line_mm, cell_line_mm: self.cell_line_mm, heading, rows: placed_rows, parts })
     }
 
     /// The rows the filter lets through, in order, each with its printed cells' text (the filters
@@ -457,25 +536,34 @@ impl Table {
 }
 
 impl TableLayout {
-    /// The table's lines as one paper group, the `kind` of object `object` is: the outline as a
-    /// closed stroke `outline_line_mm` wide, and a stroke `cell_line_mm` wide across the whole table
-    /// at each row boundary inside it and down the whole table at each column boundary. Each line is
-    /// drawn once, centred on its edge, on the layout's own corners. The cells' text isn't here yet.
+    /// Every row on paper: each part's heading, then the rows that part shows.
+    pub fn drawn_rows(&self) -> impl Iterator<Item = &RowLayout> {
+        self.parts.iter().flat_map(|part| std::iter::once(&part.heading).chain(self.rows.get(part.rows.clone()).unwrap_or_default()))
+    }
+
+    /// The table's lines as one paper group, the `kind` of object `object` is. For each part: its
+    /// outline as a closed stroke `outline_line_mm` wide, and a stroke `cell_line_mm` wide across the
+    /// part at each row boundary inside it and down the part at each column boundary. Each line is
+    /// drawn once, centred on its edge, on the layout's own corners. The cells' text isn't here.
     pub fn paper(&self, object: u64, kind: ObjectKind) -> Group {
-        let Aabb2 { min, max } = self.outline;
         let stroke = |path, closed, width_mm| Item::Stroke { path, closed, width_mm, pattern: None };
         let line = |a, b| stroke(vec![Seg2::Line { a, b }], false, self.cell_line_mm);
-        let corners = [min, Vec2::new(max.x, min.y), max, Vec2::new(min.x, max.y)];
-        let mut items = vec![stroke(Loop2::polygon(&corners).segs, true, self.outline_line_mm)];
-        // Rows from the top: each one's lower edge is a boundary but the lowest's, the outline's.
-        let mut rows: Vec<&RowLayout> = std::iter::once(&self.heading).chain(&self.rows).collect();
-        rows.sort_by(|a, b| b.rect.max.y.total_cmp(&a.rect.max.y));
-        for row in rows.iter().take(rows.len().saturating_sub(1)) {
-            items.push(line(Vec2::new(min.x, row.rect.min.y), Vec2::new(max.x, row.rect.min.y)));
-        }
-        // Each column's right edge but the last's, the same in every row.
-        for cell in self.heading.cells.iter().take(self.heading.cells.len().saturating_sub(1)) {
-            items.push(line(Vec2::new(cell.rect.max.x, min.y), Vec2::new(cell.rect.max.x, max.y)));
+        let mut items = Vec::new();
+        for part in &self.parts {
+            let Aabb2 { min, max } = part.outline;
+            let corners = [min, Vec2::new(max.x, min.y), max, Vec2::new(min.x, max.y)];
+            items.push(stroke(Loop2::polygon(&corners).segs, true, self.outline_line_mm));
+            // Rows from the top: each one's lower edge is a boundary but the lowest's, the outline's.
+            let shown = self.rows.get(part.rows.clone()).unwrap_or_default();
+            let mut rows: Vec<&RowLayout> = std::iter::once(&part.heading).chain(shown).collect();
+            rows.sort_by(|a, b| b.rect.max.y.total_cmp(&a.rect.max.y));
+            for row in rows.iter().take(rows.len().saturating_sub(1)) {
+                items.push(line(Vec2::new(min.x, row.rect.min.y), Vec2::new(max.x, row.rect.min.y)));
+            }
+            // Each column's right edge but the last's, the same in every row of the part.
+            for cell in part.heading.cells.iter().take(part.heading.cells.len().saturating_sub(1)) {
+                items.push(line(Vec2::new(cell.rect.max.x, min.y), Vec2::new(cell.rect.max.x, max.y)));
+            }
         }
         Group { object, kind, items }
     }

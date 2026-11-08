@@ -511,6 +511,31 @@ fn a_table_edits_moves_and_goes_with_its_sheet() {
     assert_eq!(s.drawing("test").unwrap().tables.len(), 1);
 }
 
+/// A split saves on the record and stands the parts side by side, the first where the whole table
+/// stood: the assembly's two rows, one to a part, 4 mm apart, make an outline two tables and the gap
+/// wide and a row less tall, its top right where it was. `null` puts every row in one part again.
+#[test]
+fn a_split_table_stands_in_parts_and_null_joins_them() {
+    let mut s = assembly();
+    let sheet = sheet_of(&s);
+    let id = id_of(&run(&mut s, ADD, json!({"sheet": sheet, "kind": "parts_list"})));
+    let table = ids::encode(id);
+    let outline = |s: &mut Session| -> Vec<f64> { inspected(s, id)["outline_mm"].as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect() };
+    let whole = outline(&mut s);
+    let steps = s.undo.len();
+    let edited = run(&mut s, EDIT, json!({"table": table, "set": {"split": {"rows": 1, "gap_mm": 4.0}}}));
+    assert_eq!(edited["record"]["table"]["split"], json!({"rows": 1, "gap_mm": 4.0, "side": "left"}), "{edited}");
+    assert_eq!(s.undo.len(), steps + 1, "one undo step");
+    let [x0, y0, x1, y1] = [whole[0], whole[1], whole[2], whole[3]];
+    let parts = outline(&mut s);
+    let expected = [x1 - 2.0 * (x1 - x0) - 4.0, y0 + 7.0, x1, y1];
+    assert!(parts.iter().zip(expected).all(|(a, b)| (a - b).abs() < 1e-9), "{parts:?} for {expected:?}");
+    assert!(on_sheet(&s, id).1.is_some(), "it draws");
+    let joined = run(&mut s, EDIT, json!({"table": table, "set": {"split": null}}));
+    assert!(joined["record"]["table"].get("split").is_none(), "{joined}");
+    assert_eq!(outline(&mut s), whole);
+}
+
 /// A table's id is drawn from the ids the drawing shares, and a damaged file's table is refused.
 #[test]
 fn hostile_tables_are_refused_with_nothing_changed() {
@@ -543,6 +568,13 @@ fn hostile_tables_are_refused_with_nothing_changed() {
         json!({"filter": {"text": [{"column": "nope", "contains": "x"}]}}),
         json!({"overrides": [{"row": "a", "column": "nope", "text": "x"}]}),
         json!({"place": {"at": [1e300, 0.0]}}),
+        json!({"split": {"rows": 0}}),
+        json!({"split": {"rows": 1e300}}),
+        json!({"split": {"rows": 2, "gap_mm": -1.0}}),
+        json!({"split": {"rows": 2, "gap_mm": 1e300}}),
+        json!({"split": {"rows": 2, "side": "up"}}),
+        json!({"split": {"rows": 2, "gap": 1.0}}),
+        json!({"split": "two"}),
         json!({"place": {"at": [0.0]}}),
         json!({"place": {"anchor": {"corner": "middle"}}}),
         json!({"place": {"anchor": {"corner": "top_left", "offset_mm": [-6000.0, 0.0]}}}),

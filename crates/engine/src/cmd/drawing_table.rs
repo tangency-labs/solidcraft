@@ -61,7 +61,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<TableResult>)
         .params(
             "table: its id; set: {sheet?, list?: {component?, levels?, group_by?, group_children?, show_purchased_contents?, mass?: \
-             {unit: g|kg|lb, decimals}}, columns?, heading?: top|bottom, row_height_mm?, cap_mm?, filter?, overrides?, place?: \
+             {unit: g|kg|lb, decimals}}, columns?, heading?: top|bottom, row_height_mm?, cap_mm?, filter?, overrides?, split?: {rows, gap_mm?, side?: left|right} or null, place?: \
              {anchor: {corner, offset_mm?}} or {at: [x, y]}}, columns, filter and overrides as a drawing saves them → as \
              drawing.table.add. One undo step, none when nothing changes.",
         ),
@@ -230,6 +230,7 @@ fn apply(s: &Session, d: &Drawing, table: &mut SheetTable, set: TableSet, cmd: &
             ("cap_mm", set.cap_mm),
             ("filter", set.filter),
             ("overrides", set.overrides),
+            ("split", set.split),
         ],
         cmd,
     )?;

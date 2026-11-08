@@ -32,6 +32,7 @@ fn table() -> Table {
         cell_line_mm: 0.35,
         filter: Filter::default(),
         overrides: vec![],
+        split: None,
     }
 }
 
@@ -509,6 +510,136 @@ fn a_table_at_its_limits_is_a_valid_paper_group() {
     let group = table.layout(&rows, Vec2::new(400.0, 280.0), &fixed).unwrap().paper(1, ObjectKind::PartsList);
     assert_eq!(group.items.len(), 1 + MAX_ROWS + MAX_COLUMNS - 1);
     sheet(vec![group]).validate().unwrap();
+}
+
+/// `n` parts, each with its item number, one part number and a quantity.
+fn numbered(n: usize) -> Vec<Row> {
+    (1..=n).map(|i| row(&format!("r{i}"), RowKind::Part, false, &[("item", &i.to_string()), ("part_number", "PL"), ("quantity", "1")])).collect()
+}
+
+fn split(rows: u32, gap_mm: f64, side: Side) -> Table {
+    Table { split: Some(Split { rows, gap_mm, side }), ..table() }
+}
+
+/// The issue's case: 40 rows split at 20 stand in two parts of 20, each under its own heading, the
+/// second a part's width and the gap left of the first, their headings in line. Each part draws its
+/// own outline and lines, and its words are the heading's again.
+#[test]
+fn a_split_table_stands_in_parts_each_with_its_heading() {
+    let layout = split(20, 5.0, Side::Left).layout(&numbered(40), Vec2::new(400.0, 280.0), &fixed).unwrap();
+    assert_eq!(layout.parts.iter().map(|p| p.rows.clone()).collect::<Vec<_>>(), [0..20, 20..40]);
+    let [first, second] = [&layout.parts[0], &layout.parts[1]];
+    let moved = Vec2::new(first.outline.size().x + 5.0, 0.0);
+    assert!(near(second.outline, Aabb2 { min: first.outline.min - moved, max: first.outline.max - moved }), "{:?}", second.outline);
+    for part in [first, second] {
+        assert!(at(part.heading.rect.max, part.outline.max.x, 280.0));
+        assert_eq!(part.heading.cells.iter().map(texts).collect::<Vec<_>>(), [["Item"], ["Part number"], ["Qty"]]);
+    }
+    // Its first row just under its heading, and the first part's heading is the table's.
+    assert_eq!(layout.rows[20].key.as_deref(), Some("r21"));
+    assert!((layout.rows[20].rect.max.y - second.heading.rect.min.y).abs() < 1e-9);
+    assert_eq!(layout.heading, first.heading);
+    assert!(near(layout.outline, first.outline.union(&second.outline)));
+    assert_eq!(layout.drawn_rows().count(), 42, "two headings and 40 rows");
+    let group = layout.paper(1, ObjectKind::PartsList);
+    let outlines = group.items.iter().filter(|item| matches!(item, Item::Stroke { closed: true, .. })).count();
+    // Each part: its outline, 20 lines across and 2 down.
+    assert_eq!((outlines, group.items.len()), (2, 2 * (1 + 20 + 2)));
+    sheet(vec![group]).validate().unwrap();
+}
+
+/// With the heading at the bottom the parts grow up from their headings, in line; a part on the right
+/// starts a part's width right of the one before; the last part holds what is left; a split longer
+/// than the rows the filter lets through is one part, the same as no split; no row is one part.
+#[test]
+fn a_split_table_at_the_bottom_on_the_right_and_short() {
+    let bottom = Table { heading: Heading::Bottom, ..split(2, 0.0, Side::Right) };
+    let layout = bottom.layout(&numbered(5), Vec2::new(100.0, 20.0), &fixed).unwrap();
+    assert_eq!(layout.parts.iter().map(|p| p.rows.len()).collect::<Vec<_>>(), [2, 2, 1]);
+    let width = layout.parts[0].outline.size().x;
+    for (k, part) in layout.parts.iter().enumerate() {
+        assert!((part.heading.rect.min.y - 20.0).abs() < 1e-9, "part {k}: its heading in line");
+        assert!((part.outline.max.x - (100.0 + k as f64 * width)).abs() < 1e-9, "part {k}: a part's width right of the one before");
+        let first = &layout.rows[part.rows.start];
+        assert!((first.rect.min.y - part.heading.rect.max.y).abs() < 1e-9, "part {k}: its first row just above its heading");
+    }
+    let long = split(20, 3.0, Side::Left).layout(&rows(), Vec2::new(400.0, 280.0), &fixed).unwrap();
+    let plain = table().layout(&rows(), Vec2::new(400.0, 280.0), &fixed).unwrap();
+    assert_eq!((long.parts.len(), long.outline, &long.rows), (1, plain.outline, &plain.rows));
+    let none = Table { filter: Filter { only: Some(Only::Assemblies), text: vec![] }, ..split(1, 0.0, Side::Left) };
+    let alone = none.layout(&rows()[..2], Vec2::new(400.0, 280.0), &fixed).unwrap();
+    assert_eq!((alone.parts.len(), alone.parts[0].rows.clone(), alone.rows.len()), (1, 0..0, 0));
+}
+
+/// The split's rules at their bounds; parts that would pass the paper's coordinates, or more than 64
+/// of them, are refused with a reason, never drawn; no split is never written, and one reads back as
+/// it was saved.
+#[test]
+fn a_splits_rules_hold_at_their_bounds() {
+    for (rows, gap, ok) in [
+        (0, 0.0, false),
+        (1, 0.0, true),
+        (MAX_ROWS as u32, MAX_SIDE_MM, true),
+        (MAX_ROWS as u32 + 1, 0.0, false),
+        (1, -0.1, false),
+        (1, MAX_SIDE_MM + 0.1, false),
+        (1, f64::NAN, false),
+        (1, f64::INFINITY, false),
+    ] {
+        assert_eq!(split(rows, gap, Side::Left).validate().is_ok(), ok, "rows {rows}, gap {gap}");
+    }
+    let far = split(1, MAX_SIDE_MM, Side::Left).layout(&numbered(40), Vec2::new(400.0, 280.0), &fixed).unwrap_err();
+    assert!(far.0.contains("paper's coordinates"), "{far}");
+    let many = split(1, 0.0, Side::Right).layout(&numbered(65), Vec2::new(0.0, 280.0), &fixed).unwrap_err();
+    assert!(many.0.contains("at most 64 parts"), "{many}");
+    assert_eq!(split(1, 0.0, Side::Right).layout(&numbered(64), Vec2::new(0.0, 280.0), &fixed).map(|l| l.parts.len()), Ok(64));
+    assert!(serde_json::to_value(table()).unwrap().get("split").is_none());
+    let saved = split(3, 2.5, Side::Right);
+    assert_eq!(serde_json::from_value::<Table>(serde_json::to_value(&saved).unwrap()).unwrap(), saved);
+    let read: Split = serde_json::from_value(json!({"rows": 3})).unwrap();
+    assert_eq!(read, Split { rows: 3, gap_mm: 0.0, side: Side::Left });
+    assert!(serde_json::from_value::<Split>(json!({"rows": 3, "gap": 1})).is_err());
+}
+
+/// Every small shape, both headings and both sides: parts hold at most the split's rows, in order,
+/// every row once; each row lies in its part's outline; the parts are one width, the gap apart, and
+/// their headings' outer edges in line.
+#[test]
+fn split_tables_of_every_small_shape_keep_their_parts_apart() {
+    for n in 0..=7 {
+        for per in 1..=4u32 {
+            for heading in [Heading::Top, Heading::Bottom] {
+                for side in [Side::Left, Side::Right] {
+                    let table = Table { heading, ..split(per, 1.5, side) };
+                    let layout = table.layout(&numbered(n), Vec2::new(200.0, 150.0), &fixed).unwrap();
+                    let case = format!("{n} rows, {per} a part, {heading:?}, {side:?}");
+                    assert_eq!(layout.parts.len(), n.div_ceil(per as usize).max(1), "{case}");
+                    let mut next = 0;
+                    for (k, part) in layout.parts.iter().enumerate() {
+                        assert!(part.rows.start == next && part.rows.len() <= per as usize, "{case}: part {k}");
+                        next = part.rows.end;
+                        let edge = if heading == Heading::Top { part.outline.max.y } else { part.outline.min.y };
+                        assert!((edge - 150.0).abs() < 1e-9, "{case}: part {k}'s heading in line");
+                        assert!((part.outline.size().x - layout.parts[0].outline.size().x).abs() < 1e-9, "{case}");
+                        for row in &layout.rows[part.rows.clone()] {
+                            assert!(row.rect.min.y >= part.outline.min.y - 1e-9 && row.rect.max.y <= part.outline.max.y + 1e-9, "{case}");
+                            assert!((row.rect.min.x - part.outline.min.x).abs() < 1e-9, "{case}");
+                        }
+                        if let Some(before) = k.checked_sub(1).and_then(|b| layout.parts.get(b)) {
+                            let apart = match side {
+                                Side::Left => before.outline.min.x - part.outline.max.x,
+                                Side::Right => part.outline.min.x - before.outline.max.x,
+                            };
+                            assert!((apart - 1.5).abs() < 1e-9, "{case}: the gap");
+                        }
+                    }
+                    assert_eq!(next, n, "{case}: every row once");
+                    let keys: Vec<_> = layout.rows.iter().filter_map(|r| r.key.clone()).collect();
+                    assert_eq!(keys, (1..=n).map(|i| format!("r{i}")).collect::<Vec<_>>(), "{case}: in order");
+                }
+            }
+        }
+    }
 }
 
 /// An A3 landscape sheet with these groups.
