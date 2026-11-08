@@ -351,7 +351,10 @@ fn move3d(s: &mut Session, p: &Value) -> Result<Value> {
         };
         let (wires, grabbed, info) = lift(s, p, cmd, &[], &[], Vec3::ZERO, Some((point.to_string(), to)))?;
         let (wire, index) = grabbed.ok_or_else(|| bad(cmd, "the point did not lift"))?;
-        return reply(cmd, Move3dResult { moved: 1, lifted: Some(wires), wire: Some(wire), index: Some(index), sketch: info, param_warnings: Vec::new() });
+        return reply(
+            cmd,
+            Move3dResult { moved: 1, lifted: Some(wires), wire: Some(wire), index: Some(index), sketch: info, param_warnings: Vec::new() },
+        );
     }
     let wire = p.get("wire").and_then(Value::as_str).ok_or_else(|| bad(cmd, "`wire` must be a 3D curve or point id"))?.to_string();
     let index = match p.get("index") {
