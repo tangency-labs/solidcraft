@@ -344,10 +344,15 @@ pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::I
         Some(s) => s,
         None => {
             if !r.drag_started() {
-                let pressed = ui.input(|i| {
-                    i.events.iter().any(|e| matches!(e, egui::Event::PointerButton { button: egui::PointerButton::Primary, pressed: true, .. }))
+                // The handle under the press itself: a press and release in one frame can end
+                // with the pointer somewhere else.
+                let pressed_at = ui.input(|i| {
+                    i.events.iter().find_map(|e| match e {
+                        egui::Event::PointerButton { button: egui::PointerButton::Primary, pressed: true, pos, .. } => Some(*pos),
+                        _ => None,
+                    })
                 });
-                if let (Some(h), true) = (hovered, pressed) {
+                if let Some(h) = pressed_at.filter(|p| proj.rect.contains(*p)).and_then(|p| hit(&sh, p)) {
                     ui.data_mut(|d| d.insert_temp(id.with("click"), h));
                 }
                 return None;
