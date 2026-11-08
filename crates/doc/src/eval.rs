@@ -7498,7 +7498,17 @@ fn eval_feature(
             // A Join extrude to an object joins that object too (#6424): the tool and the body
             // it runs to are one body, not only the body the profile was sketched on.
             let extra: Vec<String> = if *operation == Operation::Join { to_body.into_iter().collect() } else { Vec::new() };
-            apply_traced_with(doc, st, f, tools, *operation, &crate::plain(targets), &extra)
+            // A cut that takes nothing from its targets (a profile off the part, a body moved
+            // away) says so, as a hole or a pattern copy does (#10757).
+            let all_tools = 0..tools.len();
+            let misses = *operation == Operation::Cut
+                && !tools.is_empty()
+                && count_copy_misses(st, f, &crate::plain(targets), &tools, std::slice::from_ref(&all_tools), &[]).0 > 0;
+            apply_traced_with(doc, st, f, tools, *operation, &crate::plain(targets), &extra)?;
+            if misses {
+                append_warning(warning, "the cut removes no material".into());
+            }
+            Ok(())
         }
         FeatureKind::Hole { thread, thread_depth, diameter, hand, modeled, ease_out, .. } => {
             let thread_depth = thread_depth.as_ref().map(|d| val(vals, d, Kind::Length)).transpose()?;

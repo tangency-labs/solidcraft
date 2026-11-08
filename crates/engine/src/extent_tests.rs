@@ -234,3 +234,25 @@ fn cut_to_the_far_side_of_a_curved_wall() {
     assert!((removed - want).abs() < want * 2e-2, "removed {removed}, want {want}");
     assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
 }
+
+/// #10757: an Extrude cut that removes nothing from its target says so, as a hole or a pattern
+/// copy does; one that removes material is silent.
+#[test]
+fn a_cut_that_removes_nothing_says_so() {
+    for (x0, hits) in [(100.0, false), (10.0, true)] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 50, "width": 50, "height": 20, "body_name": "Part"}));
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 20], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [x0, 10], "p1": [x0 + 20.0, 30]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let r = run(&mut s, "solid.extrude", json!({"distance": 5, "direction": "negative", "operation": "cut", "targets": ["Part"]}));
+        let volume = body(&mut s, "Part")["volume_mm3"].as_f64().unwrap();
+        if hits {
+            assert!(r["warning"].is_null(), "{r}");
+            assert!((volume - (50000.0 - 20.0 * 20.0 * 5.0)).abs() < 1e-6, "{volume}");
+        } else {
+            assert!(r["warning"].as_str().is_some_and(|w| w.contains("removes no material")), "{r}");
+            assert!((volume - 50000.0).abs() < 1e-6, "{volume}");
+        }
+    }
+}
