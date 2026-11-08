@@ -93,7 +93,8 @@ fn column_of(s: &Session, p: &Value, cmd: &str) -> Result<Column> {
         }
         let id = s
             .doc
-            .find_component(&key)
+            .resolve_component(&key)
+            .map_err(|error| bad(cmd, error.to_string()))?
             .or_else(|| s.doc.occurrences.iter().find(|occurrence| occurrence.name == key).map(|occurrence| occurrence.component))
             .filter(|id| *id != 0)
             .ok_or_else(|| bad(cmd, "no component definition"))?;

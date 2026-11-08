@@ -464,7 +464,12 @@ pub(crate) fn occurrence_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result
         return Ok(o.id);
     }
     // A component name: its first occurrence.
-    s.doc.find_component(&key).and_then(|c| s.doc.occurrence_of(c)).map(|o| o.id).ok_or_else(|| bad(cmd, format!("no occurrence `{key}`")))
+    s.doc
+        .resolve_component(&key)
+        .map_err(|error| bad(cmd, error.to_string()))?
+        .and_then(|c| s.doc.occurrence_of(c))
+        .map(|o| o.id)
+        .ok_or_else(|| bad(cmd, format!("no occurrence `{key}`")))
 }
 
 /// The occurrence whose bodies are nearest a world point (0 = root bodies).

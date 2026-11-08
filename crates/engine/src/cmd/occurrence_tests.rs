@@ -15,6 +15,76 @@ fn near(value: &Value, expected: f64) {
 }
 
 #[test]
+fn ambiguous_component_names_are_refused_without_changing_the_session() {
+    let mut s = Session::default();
+    let first = run(&mut s, "component.create", json!({"name":"A","activate":false}))["component"].as_u64().unwrap();
+    let second = run(&mut s, "component.create", json!({"name":"A","activate":false}))["component"].as_u64().unwrap();
+    // A placement with that name must not hide an ambiguous component lookup.
+    s.doc_mut().occurrences.first_mut().unwrap().name = "A".into();
+    run(&mut s, "component.create", json!({"name":"Temporary","activate":false}));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(!s.redo.is_empty(), "exercise refusal with an existing redo step");
+    let commands = [
+        ("component.delete", json!({"component":"A"})),
+        ("component.rename", json!({"component":"A","name":"Changed"})),
+        ("component.activate", json!({"component":"A"})),
+        ("component.create", json!({"name":"Child","parent":"A"})),
+        ("component.metadata.set", json!({"component":"A","description":"Changed"})),
+        ("component.break_link", json!({"component":"A"})),
+        ("selection.delete", json!({"components":["A"]})),
+        ("assembly.bom", json!({"component":"A"})),
+        ("config.column", json!({"component_appearance":"A"})),
+        ("appearance.chain", json!({"target":{"component":"A"}})),
+        ("appearance.assign", json!({"components":["A"],"appearance":"ABS - Red"})),
+        ("appearance.replace", json!({"from":"ABS - Red","to":"ABS - Blue","scope":{"components":["A"]}})),
+        ("parts.resize", json!({"component":"A","size":"M6"})),
+        ("solid.pattern.rectangular", json!({"components":["A"],"dir1":[1,0,0],"count1":2,"spacing1":10})),
+    ];
+    for (command, params) in commands {
+        let doc = s.doc.clone();
+        let undo = s.undo.len();
+        let redo = s.redo.len();
+        let error = s.execute(command, &params).unwrap_err();
+        assert!(matches!(&error, crate::EngineError::BadParams { .. }), "{command}: {error}");
+        let message = error.to_string();
+        for expected in ["ambiguous component `A`", &first.to_string(), &second.to_string(), "numeric component ID"] {
+            assert!(message.contains(expected), "{command}: {message}");
+        }
+        assert_eq!(s.doc, doc, "{command} changed the document");
+        assert_eq!(s.undo.len(), undo, "{command} changed undo");
+        assert_eq!(s.redo.len(), redo, "{command} changed redo");
+        assert_eq!(s.active_component, 0, "{command} changed the active component");
+        assert!(s.active_occurrence_path.is_none(), "{command} changed the active placement");
+    }
+    run(&mut s, "component.delete", json!({"component":second}));
+    assert!(s.doc.components.iter().any(|component| component.id == first));
+    assert!(!s.doc.components.iter().any(|component| component.id == second));
+    run(&mut s, "component.rename", json!({"component":"A","name":"Unique"}));
+    assert_eq!(s.doc.find_component("Unique"), Some(first));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.find_component("A"), Some(first));
+}
+
+#[test]
+fn component_ids_take_priority_over_numeric_names_and_survive_reopen() {
+    let mut s = Session::default();
+    let named = run(&mut s, "component.create", json!({"name":"3","activate":false}))["component"].as_u64().unwrap();
+    let target = run(&mut s, "component.create", json!({"name":"Target","activate":false}))["component"].as_u64().unwrap();
+    assert_eq!(target, 3);
+    let zero_name = run(&mut s, "component.create", json!({"name":"03","activate":false}))["component"].as_u64().unwrap();
+    for key in [json!(target), json!(target.to_string())] {
+        run(&mut s, "component.activate", json!({"component":key}));
+        assert_eq!(s.active_component, target);
+    }
+    run(&mut s, "component.activate", json!({"component":"03"}));
+    assert_eq!(s.active_component, zero_name);
+    let mut reopened = Session::opened(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap(), None);
+    run(&mut reopened, "component.rename", json!({"component":target.to_string(),"name":"Renamed"}));
+    assert_eq!(reopened.doc.components.iter().find(|component| component.id == named).unwrap().name, "3");
+    assert_eq!(reopened.doc.find_component("Renamed"), Some(target));
+}
+
+#[test]
 fn component_create_rejects_bodies_without_changing_design() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Body1"}));

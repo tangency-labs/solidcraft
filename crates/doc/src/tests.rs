@@ -8,6 +8,33 @@ fn rel(a: f64, b: f64) -> f64 {
     (a - b).abs() / b.abs().max(1e-12)
 }
 
+#[test]
+fn component_lookup_refuses_duplicate_names_and_keeps_explicit_ids() {
+    let mut doc = Document::new("A");
+    let first = doc.add_component(Some("A"), 0).unwrap();
+    let second = doc.add_component(Some("A"), 0).unwrap();
+    assert_eq!(doc.find_component("A"), None, "a duplicate name must not choose the first component or the root");
+    let error = doc.resolve_component("A").unwrap_err().to_string();
+    assert!(error.contains(&format!("matching IDs: {first}, {second}")), "{error}");
+    for id in [first, second] {
+        assert_eq!(doc.find_component(&id.to_string()), Some(id));
+    }
+    for key in ["0", "root", "ROOT"] {
+        assert_eq!(doc.find_component(key), Some(0));
+    }
+    let numeric_name = doc.add_component(Some(&first.to_string()), 0).unwrap();
+    assert_ne!(numeric_name, first);
+    assert_eq!(doc.find_component(&first.to_string()), Some(first));
+    let leading_zero = doc.add_component(Some("01"), 0).unwrap();
+    assert_eq!(doc.find_component("01"), Some(leading_zero));
+    let reopened = Document::from_json(&doc.to_json()).unwrap();
+    assert_eq!(reopened.find_component("A"), None);
+    assert_eq!(reopened.find_component(&second.to_string()), Some(second));
+    assert_eq!(reopened.resolve_component("Missing").unwrap(), None);
+    let named = Document::new("Design");
+    assert_eq!(named.resolve_component("Design").unwrap(), Some(0));
+}
+
 /// 40 x 30 rectangle with its width and height driven by `width` / d2.
 fn plate_doc() -> (Document, u64) {
     let mut doc = Document::new("plate");

@@ -306,7 +306,7 @@ fn key(v: Option<&Value>) -> Option<String> {
 
 fn component(s: &Session, p: &Value, k: &str, cmd: &str) -> Result<u64> {
     let kk = key(p.get(k)).ok_or_else(|| bad(cmd, format!("`{k}` must be a component id or name")))?;
-    s.doc.find_component(&kk).ok_or_else(|| bad(cmd, format!("no component `{kk}`")))
+    s.doc.resolve_component(&kk).map_err(|error| bad(cmd, error.to_string()))?.ok_or_else(|| bad(cmd, format!("no component `{kk}`")))
 }
 
 fn occurrence(s: &Session, p: &Value, cmd: &str) -> Result<u64> {
