@@ -903,7 +903,7 @@ fn merging_adjacent_regions() {
 /// outline as a slit, out along the arc and back, which SMLib's extrusion refused (status 1005).
 #[test]
 fn regions_sharing_an_arc_whose_tangent_end_is_split_merge_without_a_slit() {
-    let delta = 5e-6; // radians on r 10: 5e-5 mm
+    let delta: f64 = 5e-6; // radians on r 10: 5e-5 mm
     let q = v(10.0 * delta.cos(), 10.0 * delta.sin());
     let quarter = solidcore_record::Region2 {
         outer: solidcore_record::Loop2 {
