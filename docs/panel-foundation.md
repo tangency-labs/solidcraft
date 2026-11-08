@@ -340,7 +340,8 @@ The renderer resolves surface intent through the shared Container, raising its
 fill alpha when canonical text needs more contrast. Captured `paint_alpha` and
 `contrast` report the effective paint and any readable fallback separately from
 declarative intent. Input and occlusion remain reserved regardless of alpha.
-Production workspace rollout and real content adapters remain their named peers' work.
+Remaining panel migrations, native window services and full workspace rollout
+stay with their named peers.
 
 ### Keyboard, accessibility and motion
 
@@ -431,7 +432,7 @@ controls shield the model. Temporary popup shielding is not a Fit/Centre obstacl
 
 This is shared surface policy and an opt-in review seam, not a production content
 migration or a new appearance preset. Classic and shipping defaults remain.
-Future approved docked adapters are Browser, History, Assistant and their allowed
+The initial approved docked adapters are Browser, History, Assistant and their allowed
 RenderSceneBrowser counterpart; other content conversions require a separate
 scope decision. Persistent legacy forms retain their existing hosts and continue
 to contribute their actual footprints until their own migrations.

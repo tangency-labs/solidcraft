@@ -346,7 +346,15 @@ impl WorkspacePanelHost {
             menu_entry: None,
             menu_reveal: None,
             menu_items: Vec::new(),
-            keyboard_shortcuts: Vec::new(),
+            keyboard_shortcuts: [
+                (ContextualPanelAction::ResizeLeft, egui::Key::ArrowLeft),
+                (ContextualPanelAction::ResizeRight, egui::Key::ArrowRight),
+                (ContextualPanelAction::ResizeUp, egui::Key::ArrowUp),
+                (ContextualPanelAction::ResizeDown, egui::Key::ArrowDown),
+            ]
+            .into_iter()
+            .map(|(action, key)| (action, egui::KeyboardShortcut::new(egui::Modifiers::NONE, key)))
+            .collect(),
             pending: None,
             last_capacity: None,
             last_domain: None,
@@ -1658,10 +1666,15 @@ impl WorkspacePanelHost {
         _locale: crate::i18n::Locale,
     ) {
         for control in &frame.controls {
-            let HostControlTarget::Pointer(target @ HostPointerTarget::Sash { .. }) = &control.target else {
+            let HostControlTarget::Pointer(target @ HostPointerTarget::Sash { first, .. }) = &control.target else {
                 continue;
             };
-            let response = ui_kit::panel_host_sash(ui, control.id, egui_rect(control.bounds), &control.accessible_name);
+            let Some(panel) = frame.layout.sections.iter().find(|panel| panel.section == *first) else {
+                continue;
+            };
+            let horizontal = panel.zone != Zone::Bottom;
+            let extent = if horizontal { panel.outer.size.height } else { panel.outer.size.width };
+            let response = ui_kit::panel_host_sash(ui, control.id, egui_rect(control.bounds), &control.accessible_name, horizontal, extent);
             if allow_actions && response.double_clicked() {
                 pointer_events.push((response.id, HostPointerEvent::DoubleClick { target: target.clone() }));
             }
@@ -2549,9 +2562,12 @@ impl PanelHost for WorkspaceContentHost<'_> {
                 // Resize must be above content on the card's actual UI/layer. Its
                 // published bounds and scoped ID remain the layout authority's.
                 for control in self.controls.iter() {
-                    if matches!(&control.target, HostControlTarget::Pointer(HostPointerTarget::Resize { section: id, .. }) if *id == section.section)
+                    if let HostControlTarget::Pointer(HostPointerTarget::Resize { section: id, edge }) = &control.target
+                        && *id == section.section
                     {
-                        ui_kit::panel_host_sash(ui, control.id, egui_rect(control.bounds), &control.accessible_name);
+                        let horizontal = !matches!(edge, HostResizeEdge::Left | HostResizeEdge::Right);
+                        let extent = if horizontal { section.outer.size.height } else { section.outer.size.width };
+                        ui_kit::panel_host_sash(ui, control.id, egui_rect(control.bounds), &control.accessible_name, horizontal, extent);
                     }
                 }
                 if let Some(focused) = ui.memory(|memory| memory.focused())

@@ -534,7 +534,7 @@ fn universal_kit_chrome_uses_one_container_and_preserves_parent_clipping_and_foc
                         rtl: false,
                     },
                 );
-                let resize = panel_host_sash(ui, egui::Id::unique("synthetic-sash"), sash, "Resize synthetic neighbours");
+                let resize = panel_host_sash(ui, egui::Id::unique("synthetic-sash"), sash, "Resize synthetic neighbours", true, bounds.height());
                 assert!(title.sense.is_focusable());
                 assert!(resize.sense.is_focusable());
                 assert_eq!(title.rect, header);
@@ -550,7 +550,23 @@ fn universal_kit_chrome_uses_one_container_and_preserves_parent_clipping_and_foc
     let separator = &tree.nodes.iter().find(|(_, node)| node.label() == Some("Resize synthetic neighbours")).unwrap().1;
     assert_eq!(separator.role(), egui::accesskit::Role::Splitter);
     assert_eq!(separator.orientation(), Some(egui::accesskit::Orientation::Horizontal));
-    assert!(separator.numeric_value().is_some());
+    assert_eq!(separator.numeric_value(), Some(f64::from(bounds.height())));
+    let translated = sash.translate(egui::vec2(35.0, 27.0));
+    let moved = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+        let response = panel_host_sash(ui, egui::Id::unique("synthetic-sash"), translated, "Resize synthetic neighbours", true, bounds.height());
+        assert_eq!(response.rect, translated);
+    });
+    let moved_separator = &moved
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .unwrap()
+        .nodes
+        .iter()
+        .find(|(_, node)| node.label() == Some("Resize synthetic neighbours"))
+        .unwrap()
+        .1;
+    assert_eq!(moved_separator.numeric_value(), separator.numeric_value(), "moving the same controlled panel cannot announce a resize");
     let (mut bevel_edges, mut inset_borders) = (0, 0);
     for shape in &output.shapes {
         assert!(clip.contains_rect(shape.clip_rect), "chrome paint must not escape its inherited clip");

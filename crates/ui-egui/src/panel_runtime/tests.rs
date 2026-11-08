@@ -2505,18 +2505,7 @@ impl RawPanelHost {
         let ctx = crate::fonts::test_context();
         ctx.enable_accesskit();
         ctx.set_pixels_per_point(scale);
-        let mut host = WorkspacePanelHost::new(HostOptions::default()).unwrap();
-        host.set_keyboard_shortcuts(
-            [
-                (ContextualPanelAction::ResizeLeft, egui::Key::ArrowLeft),
-                (ContextualPanelAction::ResizeRight, egui::Key::ArrowRight),
-                (ContextualPanelAction::ResizeUp, egui::Key::ArrowUp),
-                (ContextualPanelAction::ResizeDown, egui::Key::ArrowDown),
-            ]
-            .into_iter()
-            .map(|(action, key)| (action, egui::KeyboardShortcut::new(egui::Modifiers::NONE, key)))
-            .collect(),
-        );
+        let host = WorkspacePanelHost::new(HostOptions::default()).unwrap();
         Self {
             content,
             host,
@@ -12582,6 +12571,22 @@ fn shared_host_accessibility_exposes_tabs_disclosure_and_oriented_splits() {
     }
 }
 
+fn sash_numeric_value(frame: &HostFrame, output: &egui::FullOutput, target: &HostControlTarget) -> f64 {
+    let control = frame.controls.iter().find(|control| control.target == *target).unwrap();
+    output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .unwrap()
+        .nodes
+        .iter()
+        .find(|(id, _)| *id == control.id.accesskit_id())
+        .unwrap()
+        .1
+        .numeric_value()
+        .unwrap()
+}
+
 #[test]
 fn contextual_keyboard_resize_reuses_candidates_and_rejects_foreign_focus() {
     for scale in [1.0, 2.0] {
@@ -12592,22 +12597,80 @@ fn contextual_keyboard_resize_reuses_candidates_and_rejects_foreign_focus() {
             content.runtime.set_environment(environment, &mut content.local).unwrap();
             let mut raw = RawPanelHost::new(content, scale);
             raw.frame(Vec::new(), false);
-            let frame = raw.frame(Vec::new(), false).0;
+            let (frame, output) = raw.frame(Vec::new(), false);
             let sash =
                 frame.controls.iter().find(|control| matches!(control.target, HostControlTarget::Pointer(HostPointerTarget::Sash { .. }))).unwrap();
+            let target = sash.target.clone();
+            let before_value = sash_numeric_value(&frame, &output, &target);
             raw.ctx.memory_mut(|memory| memory.request_focus(sash.id));
             raw.frame(Vec::new(), false);
             let candidate = raw.host.contextual_action(&raw.content.runtime, ContextualPanelAction::ResizeDown).unwrap();
             let before = raw.content.runtime.layout().inspect();
             raw.frame(vec![host_key(egui::Key::ArrowDown, true)], false);
-            raw.frame(vec![host_key(egui::Key::ArrowDown, false)], false);
+            let (after_frame, output) = raw.frame(vec![host_key(egui::Key::ArrowDown, false)], false);
             assert_ne!(raw.content.runtime.layout().inspect().revision, before.revision);
             assert!(matches!(candidate, LayoutAction::Apply { .. }));
+            let value = sash_numeric_value(&after_frame, &output, &target);
+            assert_eq!(value, f64::from(after_frame.layout.sections[0].outer.size.height));
+            assert!(value > before_value, "the default standalone arrow changes the controlled height and accessible value");
+            raw.host.set_keyboard_shortcuts(Vec::new());
+            let unbound = raw.content.runtime.layout().inspect();
+            raw.frame(vec![host_key(egui::Key::ArrowDown, true)], false);
+            raw.frame(vec![host_key(egui::Key::ArrowDown, false)], false);
+            assert_eq!(raw.content.runtime.layout().inspect(), unbound, "application bindings replace rather than extend standalone defaults");
             raw.foreign_cover = Some(egui_rect(raw.capacity));
             raw.foreign_takes_focus = true;
             raw.frame(Vec::new(), false);
             raw.frame(Vec::new(), false);
             assert!(raw.host.contextual_action(&raw.content.runtime, ContextualPanelAction::ResizeDown).is_err());
+        }
+    }
+}
+
+#[test]
+fn splitter_accessible_extent_keeps_its_axis_and_value_when_the_host_scrolls() {
+    for scale in [1.0, 2.0] {
+        for direction in [Direction::Ltr, Direction::Rtl] {
+            for zone in [Zone::Left, Zone::Bottom] {
+                let mut content = host_logs(2, zone);
+                let mut environment = content.runtime.environment().clone();
+                environment.direction = direction;
+                content.runtime.set_environment(environment, &mut content.local).unwrap();
+                let mut raw = RawPanelHost::new(content, scale);
+                raw.capacity.size = if zone == Zone::Bottom { Size { width: 250.0, height: 400.0 } } else { Size { width: 800.0, height: 200.0 } };
+                raw.frame(Vec::new(), false);
+                let (before_frame, output) = raw.frame(Vec::new(), false);
+                let target = HostControlTarget::Pointer(HostPointerTarget::Sash { first: section("section-0"), second: section("section-1") });
+                let value = sash_numeric_value(&before_frame, &output, &target);
+                let before_control = raw_control(&raw, &target);
+                let horizontal_scroll = zone == Zone::Bottom;
+                let track = raw_control(&raw, &HostControlTarget::Scroll { horizontal: horizontal_scroll });
+                let bounds = egui_rect(track.bounds);
+                let at = if horizontal_scroll { bounds.right_center() - egui::vec2(1.0, 0.0) } else { bounds.center_bottom() - egui::vec2(0.0, 1.0) };
+                let before = raw.content.runtime.layout().inspect();
+                raw.frame(vec![egui::Event::PointerMoved(at)], false);
+                raw.pointer(at, true, false);
+                raw.pointer(at, false, false);
+                let (after_frame, output) = raw.frame(Vec::new(), false);
+                let after_control = raw_control(&raw, &target);
+                assert_ne!(after_control.bounds.origin, before_control.bounds.origin, "the actual sash moved with presentation scrolling");
+                assert_eq!(sash_numeric_value(&after_frame, &output, &target), value, "scrolling cannot announce a panel resize");
+                let node = &output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .unwrap()
+                    .nodes
+                    .iter()
+                    .find(|(id, _)| *id == after_control.id.accesskit_id())
+                    .unwrap()
+                    .1;
+                assert_eq!(
+                    node.orientation(),
+                    Some(if horizontal_scroll { egui::accesskit::Orientation::Vertical } else { egui::accesskit::Orientation::Horizontal })
+                );
+                assert_eq!(raw.content.runtime.layout().inspect(), before);
+            }
         }
     }
 }

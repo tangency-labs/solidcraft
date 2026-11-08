@@ -251,7 +251,9 @@ pub(crate) fn panel_host_disclosure(
     response
 }
 
-pub(crate) fn panel_host_sash(ui: &mut egui::Ui, id: egui::Id, bounds: egui::Rect, name: &str) -> egui::Response {
+/// The owner supplies the controlled extent and axis; clipping or scrolling
+/// the sash must not change its accessible value or orientation.
+pub(crate) fn panel_host_sash(ui: &mut egui::Ui, id: egui::Id, bounds: egui::Rect, name: &str, horizontal: bool, extent: f32) -> egui::Response {
     let t = Tokens::get();
     let response = ui.interact(bounds, id, egui::Sense::click_and_drag());
     if response.has_focus() {
@@ -269,22 +271,14 @@ pub(crate) fn panel_host_sash(ui: &mut egui::Ui, id: egui::Id, bounds: egui::Rec
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Unknown, ui.is_enabled(), name));
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::Splitter);
-        node.set_orientation(if bounds.width() >= bounds.height() {
-            egui::accesskit::Orientation::Horizontal
-        } else {
-            egui::accesskit::Orientation::Vertical
-        });
-        node.set_numeric_value(if bounds.width() >= bounds.height() { f64::from(bounds.center().y) } else { f64::from(bounds.center().x) });
+        node.set_orientation(if horizontal { egui::accesskit::Orientation::Horizontal } else { egui::accesskit::Orientation::Vertical });
+        node.set_numeric_value(f64::from(extent));
     });
     if response.hovered() || response.has_focus() || response.dragged() {
         ui.painter().rect_filled(bounds.intersect(ui.clip_rect()), t.radius_sm, t.form_primary);
     }
     if response.hovered() {
-        ui.ctx().set_cursor_icon(if bounds.width() >= bounds.height() {
-            egui::CursorIcon::ResizeVertical
-        } else {
-            egui::CursorIcon::ResizeHorizontal
-        });
+        ui.ctx().set_cursor_icon(if horizontal { egui::CursorIcon::ResizeVertical } else { egui::CursorIcon::ResizeHorizontal });
     }
     response.on_hover_text(name)
 }
