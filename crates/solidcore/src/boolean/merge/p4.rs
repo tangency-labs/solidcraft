@@ -679,6 +679,11 @@ fn classify_edge_faces(
                     region_pair(other, found)?,
                 )
             };
+            // tangent faces only meet at the edge: coincident when their surfaces are (WR-755)
+            if !sector.zero_sector && !p1::faces_coincide(kernels.primary, primary, pf, other, of)?
+            {
+                continue;
+            }
             let first_equal = void(primary, pf_regions.0)? == void(other, of_regions.0)?;
             let second_equal = void(primary, pf_regions.1)? == void(other, of_regions.1)?;
             let same_side = first_equal && second_equal;

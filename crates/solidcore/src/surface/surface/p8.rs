@@ -531,6 +531,99 @@ impl Surface {
         }
     }
 
+    /// Not upstream (WR-755): whether two quadrics of one kind (cone and cylinder, sphere,
+    /// torus) are the same surface within `tol_3d` inside the box `region`, decided from
+    /// their definitions, not by sampling. `None` for any other pair: two planes (their
+    /// gap is measured by the plane's own check), a kind with no definition to compare,
+    /// and two different kinds. Different kinds are never one surface, but where they
+    /// touch tangentially they can stay within `tol_3d` of each other over a patch (a
+    /// sphere cap thinner than the tolerance on a plane, #2412), which a comparison of
+    /// definitions cannot see.
+    ///
+    /// - Cone (a cylinder is a cone of semi-angle 0): coaxial lines within `tol_3d` at the
+    ///   box's diagonal away (parallel in either sense), and radii that differ by at most
+    ///   `tol_3d` at both ends of the box along the axis (a radius is linear in the height).
+    ///   Both nappes are one surface, so the radius and slope may both flip sign.
+    /// - Sphere: centres and radii within `tol_3d`.
+    /// - Torus: coaxial, centres and both radii within `tol_3d`. A torus whose major
+    ///   radius is within `tol_3d` of 0 is the sphere of its minor radius and is
+    ///   compared with spheres as such.
+    #[must_use]
+    pub fn same_analytic_surface(
+        &self,
+        other: &Self,
+        tol_3d: f64,
+        region: &Extent3d,
+    ) -> Option<bool> {
+        let tol = tol_3d.abs();
+        let reach = region.size().length();
+        // The sphere a surface is, as (centre, radius): a sphere, or a torus with no hole.
+        let ball = |s: &Self| match s.kind() {
+            SurfaceKind::Sphere(p) => Some((p.base.position.origin(), p.radius)),
+            SurfaceKind::Torus(t) if t.major_radius.abs() <= tol => {
+                Some((t.base.position.origin(), t.minor_radius))
+            }
+            _ => None,
+        };
+        let same_ball = |a: (Point3, f64), b: (Point3, f64)| {
+            (a.0 - b.0).length() <= tol && (a.1 - b.1).abs() <= tol
+        };
+        match (self.kind(), other.kind()) {
+            (SurfaceKind::Cone(a), SurfaceKind::Cone(b)) => {
+                let (pa, pb) = (&a.rev.position, &b.rev.position);
+                if !pa.are_coaxial(pb, tol, reach) {
+                    return Some(false);
+                }
+                // The second cone on the first's axis: its radius at the first's origin
+                // and its slope per unit of the first's height.
+                let sense = pa.z_axis().dot(pb.z_axis()).signum();
+                let height = (pa.origin() - pb.origin()).dot(pb.z_axis());
+                let (radius, slope) = (b.radius(height), sense * b.tan_semi_angle());
+                let (r0, s0) = (a.base_radius(), a.tan_semi_angle());
+                // The box's extent along the first's axis; the radii gap is linear in it.
+                let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+                for corner in 0..8 {
+                    let at = |i: usize| {
+                        if (corner >> i) & 1 == 1 {
+                            region.max_at(i)
+                        } else {
+                            region.min_at(i)
+                        }
+                    };
+                    let p = Point3::new(at(0), at(1), at(2));
+                    let h = (p - pa.origin()).dot(pa.z_axis());
+                    lo = lo.min(h);
+                    hi = hi.max(h);
+                }
+                let close = |r: f64, s: f64| {
+                    [lo, hi]
+                        .iter()
+                        .all(|h| ((r0 + s0 * h) - (r + s * h)).abs() <= tol)
+                };
+                Some(close(radius, slope) || close(-radius, -slope))
+            }
+            (SurfaceKind::Torus(a), SurfaceKind::Torus(b)) => {
+                let (pa, pb) = (&a.base.position, &b.base.position);
+                if a.major_radius.abs() <= tol || b.major_radius.abs() <= tol {
+                    return Some(
+                        ball(self)
+                            .zip(ball(other))
+                            .is_some_and(|(x, y)| same_ball(x, y)),
+                    );
+                }
+                Some(
+                    pa.are_coaxial(pb, tol, reach)
+                        && (pa.origin() - pb.origin()).length() <= tol
+                        && (a.major_radius - b.major_radius).abs() <= tol
+                        && (a.minor_radius - b.minor_radius).abs() <= tol,
+                )
+            }
+            // A sphere against a sphere or a hole-less torus; any other pair is left to the
+            // caller.
+            _ => ball(self).zip(ball(other)).map(|(x, y)| same_ball(x, y)),
+        }
+    }
+
     /// `SmSurface::CoincidenceCheck` (the base body): a plane `other` runs its own
     /// check. The same object is coincident. Disjoint boxes are not. For whole
     /// surfaces the four corners must match (in either orientation of the
