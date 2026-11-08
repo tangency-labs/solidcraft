@@ -413,7 +413,8 @@ fn transform(app: &SolveApp, p: &Value) -> Result<Mat, String> {
     Ok(rigid(t, origin, axis, value(angle, ang)?))
 }
 
-/// `p` with its translation and turn replaced by `m`'s.
+/// `p` with its translation and turn replaced by `m`'s. `m` turns about the world origin, so a
+/// turn names that origin: an omitted one would be the moved body's own frame's origin.
 fn with_transform(mut p: Value, m: &Mat) -> Value {
     let rows = [0, 1, 2].map(|r| [m[0][r], m[1][r], m[2][r]]);
     let (axis, th) = gizmo::axis_angle(&rows);
@@ -424,6 +425,7 @@ fn with_transform(mut p: Value, m: &Mat) -> Value {
         o.remove("origin");
     }
     if th.abs() > 1e-12 {
+        p["origin"] = json!([mm(0.0), mm(0.0), mm(0.0)]);
         p["axis"] = json!([axis.x, axis.y, axis.z]);
         p["angle"] = json!(deg(th));
     }

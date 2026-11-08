@@ -617,6 +617,8 @@ fn changing_the_move_type_keeps_the_move_made_so_far() {
     assert!((after.min - want.min).len() < 1e-6 && (after.max - want.max).len() < 1e-6, "{after:?} != {want:?}");
 }
 
+/// A free turn about an off-origin pivot survives a switch to Translate: Translate saves no
+/// `origin` of its own, yet the applied move keeps that turn and adds the later translation.
 #[test]
 fn changing_move_types_keeps_an_off_origin_rotation() {
     let mut h = translated_box();
@@ -1331,6 +1333,7 @@ fn a_click_on_an_arrow_puts_the_box_on_its_axis() {
     }
 }
 
+/// Reopening a Move with a parametric origin keeps the origin's expressions and the angle.
 #[test]
 fn editing_a_move_keeps_its_parametric_origin() {
     for axis in [[0, 0, 1], [1, 1, 0]] {
@@ -1348,6 +1351,7 @@ fn editing_a_move_keeps_its_parametric_origin() {
     }
 }
 
+/// Reopening and applying a Move of a body in a turned placement leaves the body where it was.
 #[test]
 fn editing_a_placed_body_move_preserves_its_world_transform() {
     let mut s = Session::default();

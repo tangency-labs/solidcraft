@@ -2944,6 +2944,8 @@ fn a_sketch_coil_cut_follows_its_profile_and_target() {
     assert!(rel(removed, 2.0 * PI * 3.0 * 17.5) < 1e-3, "the groove kept the old shaft: {removed}");
 }
 
+/// On a body in a placed component, an origin (as a list or as x/y/z keys) and a matrix are read
+/// in world coordinates and land the plate in the same place.
 #[test]
 fn move_origin_and_matrix_use_world_coordinates_for_placed_bodies() {
     use solidcore_record::Vec3;
@@ -2962,6 +2964,8 @@ fn move_origin_and_matrix_use_world_coordinates_for_placed_bodies() {
     }
 }
 
+/// A matrix turn of bodies in two differently placed components turns each about the world
+/// origin, in one undo step.
 #[test]
 fn a_matrix_turn_maps_each_translated_component_about_the_world_origin() {
     use solidcore_record::Vec3;
@@ -2981,28 +2985,49 @@ fn a_matrix_turn_maps_each_translated_component_about_the_world_origin() {
     assert_eq!(s.undo.len(), undo + 1);
 }
 
+/// A turn with no `origin` on a body in a placed component keeps its old default, the
+/// component's own origin, with or without an axis; `origin: [0, 0, 0]` asks for the world
+/// origin instead. The component here is only shifted 100 mm along X.
 #[test]
-fn a_turn_with_no_pivot_goes_about_the_world_origin_in_a_placed_component() {
+fn a_turn_with_no_pivot_keeps_the_components_origin_in_a_placed_component() {
     use solidcore_record::Vec3;
-    for explicit_axis in [false, true] {
+    let about_component = (Vec3::new(90.0, 0.0, 0.0), Vec3::new(100.0, 10.0, 10.0));
+    let about_world = (Vec3::new(-10.0, 100.0, 0.0), Vec3::new(0.0, 110.0, 10.0));
+    for (extra, (min, max)) in [
+        (json!({}), about_component),
+        (json!({"axis": [0, 0, 1]}), about_component),
+        (json!({"origin": [0, 0, 0]}), about_world),
+        (json!({"origin": [0, 0, 0], "axis": [0, 0, 1]}), about_world),
+    ] {
         let mut s = Session::default();
         let component = run(&mut s, "component.create", json!({"name": "Offset", "grounded": false}));
         run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Cube"}));
         run(&mut s, "occurrence.move", json!({"occurrence": component["occurrence"], "translate": [100, 0, 0]}));
         run(&mut s, "component.activate", json!({"component": 0}));
-        let mut turn = json!({"bodies": ["Cube"], "angle": "90 deg"});
-        if explicit_axis {
-            turn["axis"] = json!([0, 0, 1]);
-        }
+        let mut turn = extra.clone();
+        turn["bodies"] = json!(["Cube"]);
+        turn["angle"] = json!("90 deg");
         run(&mut s, "solid.move", turn);
         let bounds = world_bounds(&s, "Cube");
-        assert!(
-            bounds.min.dist(Vec3::new(-10.0, 100.0, 0.0)) < 1e-6 && bounds.max.dist(Vec3::new(0.0, 110.0, 10.0)) < 1e-6,
-            "explicit axis {explicit_axis}: {bounds:?}"
-        );
+        assert!(bounds.min.dist(min) < 1e-6 && bounds.max.dist(max) < 1e-6, "{extra}: {bounds:?}");
     }
 }
 
+/// A turn with no `axis` on a body in a turned component keeps its old default, the
+/// component's own Z: the plate stood up by +90° about X has its Z along world −Y.
+#[test]
+fn a_turn_with_no_axis_keeps_the_components_z_in_a_turned_component() {
+    use solidcore_record::Vec3;
+    let mut s = Session::default();
+    placed_plate(&mut s, "Plate", 0.0, 90.0);
+    run(&mut s, "solid.move", json!({"bodies": ["Plate"], "angle": "90 deg"}));
+    // A quarter turn about −Y through the origin: (x, z) → (−z, x). About world Z it would
+    // lie at x −30..0, y 0..20 instead.
+    let b = world_bounds(&s, "Plate");
+    assert!(b.min.dist(Vec3::new(-8.0, 0.0, 0.0)) < 1e-6 && b.max.dist(Vec3::new(0.0, 30.0, 20.0)) < 1e-6, "{b:?}");
+}
+
+/// An origin or a matrix moves each repeated placement of one part alike, in one undo step.
 #[test]
 fn move_origin_and_matrix_apply_to_each_repeated_placement() {
     use solidcore_record::Vec3;

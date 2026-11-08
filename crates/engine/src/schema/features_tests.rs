@@ -1254,6 +1254,8 @@ fn press_pull_checks_its_keys() {
     assert!(error.contains("`flp`"), "{error}");
 }
 
+/// The Move contract accepts an origin turn and a matrix, replies to its output schema, refuses an
+/// unknown key when strict and warns about it otherwise.
 #[test]
 fn move_contract_accepts_transforms_and_reports_unknown_keys() {
     let mut s = Session { param_check: ParamCheck::Strict, ..Default::default() };
@@ -1270,8 +1272,13 @@ fn move_contract_accepts_transforms_and_reports_unknown_keys() {
     s.param_check = ParamCheck::Warn;
     let output = s.execute("solid.move", &json!({"bodies": ["B"], "orgin": [5,5,0]})).unwrap();
     assert!(output["param_warnings"].as_array().is_some_and(|v| !v.is_empty()));
+    // The schema states the tolerance's bounds, as `occurrence.move`'s does.
+    let schema = input_schema_for::<MoveParams>().as_value().to_string();
+    assert!(schema.contains(r#""exclusiveMinimum":0"#) && schema.contains(r#""maximum":0.001"#), "{schema}");
 }
 
+/// Component copies, alone or with bodies split across frames, pass the strict contract and reply
+/// to the output schema.
 #[test]
 fn move_contract_accepts_component_copies_with_and_without_split_body_features() {
     let mut s = Session { param_check: ParamCheck::Strict, ..Default::default() };

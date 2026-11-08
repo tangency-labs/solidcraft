@@ -1038,11 +1038,13 @@ pub struct MoveParams {
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "PointExpr3")]
     pub translate: Option<PointExpr3>,
-    /// Rotation pivot; default world origin. Coordinates are lengths.
+    /// Rotation pivot in world coordinates. Default: the moved body's component's origin, which
+    /// is the world origin for bodies at the root. Coordinates are lengths.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "PointExpr3")]
     pub origin: Option<PointExpr3>,
-    /// Non-zero rotation direction; default Z.
+    /// Non-zero rotation direction in world coordinates. Default: world Z when `origin` is given,
+    /// else the moved body's component's Z, which is world Z for bodies at the root.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "Point3")]
     pub axis: Option<Point3>,
@@ -1056,6 +1058,7 @@ pub struct MoveParams {
     pub matrix: Option<MoveMatrix>,
     /// With matrix: positive rotation tolerance, at most 1e-3; default 1e-9.
     #[serde(default)]
+    #[schemars(with = "Option<super::component::MatrixTolerance>")]
     pub tolerance: Option<f64>,
     /// Keep the source bodies and transform new copies; default false.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]

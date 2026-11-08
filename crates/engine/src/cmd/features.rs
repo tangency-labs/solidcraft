@@ -210,7 +210,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.move", "Move/Copy", crate::checked!("solid.move", move_bodies))
         .at("SOLID", "MODIFY").icon("move").key("M").enabled(not_in_sketch)
         .contract(&MOVE_CONTRACT).output(output_schema_for::<MoveResult>)
-        .params("bodies: [names]; translate?: [x,y,z] (length exprs or numbers, applied after rotation); axis?: [x,y,z] (default Z); angle?: angle expr; origin?: [x,y,z] (length exprs or numbers, default world origin); matrix?: rigid row-major 3x4 or 4x4, flat or rows (instead of translate/axis/angle/origin); tolerance?: matrix rotation tolerance (default 1e-9, at most 1e-3); copy?: bool (default false; true keeps originals and transforms copies); occurrences?: [occurrence paths, root first] (only with copy: copies each component independently and transforms the copies in world space; reply lists them in occurrences); name?, body_name?, body_names?"),
+        .params("bodies: [names]; translate?: [x,y,z] (length exprs or numbers, applied after rotation); axis?: [x,y,z] (default: world Z with origin, else the body's component's Z, world Z at the root); angle?: angle expr; origin?: [x,y,z] (length exprs or numbers in world coordinates; default: the body's component's origin, the world origin at the root); matrix?: rigid row-major 3x4 or 4x4, flat or rows (instead of translate/axis/angle/origin); tolerance?: matrix rotation tolerance (default 1e-9, at most 1e-3); copy?: bool (default false; true keeps originals and transforms copies); occurrences?: [occurrence paths, root first] (only with copy: copies each component independently and transforms the copies in world space; reply lists them in occurrences); name?, body_name?, body_names?"),
 ];
 
 /// Where an extrude starts and which way is positive: a point inside the (first) profile or
@@ -2299,7 +2299,9 @@ fn combine(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// Convert a rigid matrix to the Move feature's existing translation/axis/angle form before
-/// frame mapping. The original matrix is validated before any information is discarded.
+/// frame mapping. The original matrix is validated before any information is discarded. A matrix
+/// turns about the world origin, so the origin is given explicitly: an omitted one would mean the
+/// moved body's own frame's origin on a placed component.
 pub(crate) fn move_matrix_params(p: &Value) -> Result<Option<Value>> {
     let Some(matrix) = p.get("matrix") else { return Ok(None) };
     let cmd = "solid.move";
@@ -2313,6 +2315,7 @@ pub(crate) fn move_matrix_params(p: &Value) -> Result<Option<Value>> {
         obj.remove("matrix");
         obj.remove("tolerance");
         obj.insert("translate".into(), json!([format!("{} mm", m[3][0]), format!("{} mm", m[3][1]), format!("{} mm", m[3][2])]));
+        obj.insert("origin".into(), json!(["0 mm", "0 mm", "0 mm"]));
         obj.insert("axis".into(), json!([axis.x, axis.y, axis.z]));
         obj.insert("angle".into(), json!(format!("{angle} rad")));
     }

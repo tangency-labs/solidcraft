@@ -339,11 +339,13 @@ fn bodies_that_are_not_a_list_are_refused_with_components() {
     assert_eq!(s.doc, before, "a refused move changes nothing");
 }
 
+/// Asserts that `body`'s world bounds are `min`..`max` within 1e-6 mm.
 fn assert_bounds(s: &Session, body: &str, min: Vec3, max: Vec3) {
     let bounds = s.world_state().unwrap().body(body).unwrap().mesh().bounds();
     assert!(bounds.min.dist(min) < 1e-6 && bounds.max.dist(max) < 1e-6, "{body}: {bounds:?}, expected {min:?}..{max:?}");
 }
 
+/// A quarter turn about the box's own centre leaves it where it was, also after a save and reopen.
 #[test]
 fn explicit_origin_rotates_in_place_and_survives_reopen() {
     let mut s = Session::default();
@@ -354,6 +356,7 @@ fn explicit_origin_rotates_in_place_and_survives_reopen() {
     }
 }
 
+/// A rigid matrix, flat 3×4 or as 4×4 rows, transforms a copy and leaves the source; both survive a reopen.
 #[test]
 fn matrix_moves_a_copy_and_survives_reopen() {
     for matrix in [json!([0, -1, 0, 30, 1, 0, 0, 0, 0, 0, 1, 0]), json!([[0, -1, 0, 30], [1, 0, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])] {
@@ -367,6 +370,9 @@ fn matrix_moves_a_copy_and_survives_reopen() {
     }
 }
 
+/// Malformed origins, axes and angles, non-rigid matrices (scale, mirror, shear, projective), a matrix
+/// combined with another transform key, and a tolerance without a matrix are refused before the
+/// design changes.
 #[test]
 fn invalid_move_transforms_are_refused_without_changing_the_design() {
     let mut s = Session::default();
@@ -389,8 +395,9 @@ fn invalid_move_transforms_are_refused_without_changing_the_design() {
         json!({"matrix": rigid, "tolerance": 0.1}),
         json!({"tolerance": 0.001}),
     ];
-    for key in ["translate", "origin", "axis", "angle"] {
+    for (key, value) in [("translate", json!([1, 0, 0])), ("origin", json!([0, 0, 0])), ("axis", json!([0, 0, 1])), ("angle", json!("0 deg"))] {
         cases.push(json!({"matrix": rigid, key: null}));
+        cases.push(json!({"matrix": rigid, key: value}));
     }
     for mut p in cases {
         p["bodies"] = json!(["Cube"]);
@@ -399,6 +406,7 @@ fn invalid_move_transforms_are_refused_without_changing_the_design() {
     }
 }
 
+/// The axis and angle read back from a matrix rebuild the same rotation, near zero and near a half turn.
 #[test]
 fn matrix_axis_angle_preserves_small_and_half_turns() {
     use solidcraft_doc::{apply_point, rigid};
@@ -414,6 +422,7 @@ fn matrix_axis_angle_preserves_small_and_half_turns() {
     }
 }
 
+/// An origin given by a parameter follows that parameter, and the move undoes as one step.
 #[test]
 fn origin_remains_parametric_and_undoable() {
     let mut s = Session::default();
@@ -427,6 +436,7 @@ fn origin_remains_parametric_and_undoable() {
     assert_bounds(&s, "Cube", Vec3::ZERO, Vec3::new(20.0, 20.0, 20.0));
 }
 
+/// A matrix's translation column is millimetres whatever the design's units.
 #[test]
 fn matrix_translation_is_in_mm_even_in_an_inch_design() {
     let mut s = Session::default();
@@ -436,6 +446,8 @@ fn matrix_translation_is_in_mm_even_in_an_inch_design() {
     assert_bounds(&s, "Cube", Vec3::new(30.0, 0.0, 0.0), Vec3::new(50.0, 20.0, 20.0));
 }
 
+/// An origin or a matrix applies alike to component copies and to bodies split across placed frames,
+/// each as one undo step.
 #[test]
 fn origins_and_matrices_preserve_component_copies_and_split_body_moves() {
     for transform in [json!({"origin": [110, 10, 0], "angle": "90 deg"}), json!({"matrix": [0,-1,0,120, 1,0,0,-100, 0,0,1,0]})] {
