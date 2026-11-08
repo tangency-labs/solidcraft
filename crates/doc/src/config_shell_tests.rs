@@ -185,7 +185,7 @@ fn shell_planar_format13_keeps_v12_documents_and_refuses_future() {
     }
     assert_eq!(legacy, current, "the migration preserves every prior field");
     legacy["format"] = json!(crate::format::format_string(crate::format::FORMAT + 1));
-    assert!(crate::format::read(&legacy.to_string()).is_err());
+    assert!(crate::format::read(&legacy.to_string()).unwrap().newer_file.is_some());
 }
 
 #[test]

@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 
 use crate::*;
 
-mod mesh_convert;
+pub(crate) mod mesh_convert;
 
 /// Counts the copies `Session::doc_mut` makes of a shared document.
 pub(crate) mod doc_copies {
@@ -96,6 +96,74 @@ fn edge_picks_at_a_corner_are_refused() {
     }
 }
 
+/// Edge picks on bodies apart: one pick keeps its body on the feature (the model has two), and
+/// picks on both keep none, each found where it lies.
+#[test]
+fn edge_picks_on_bodies_apart_keep_the_body_they_lie_on() {
+    let boxes = || {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Low"}));
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "corner": [0, 0, 50], "operation": "new", "body_name": "High"}));
+        s
+    };
+    let kept = |s: &Session| match &s.doc.features.last().unwrap().kind {
+        solidcraft_doc::FeatureKind::Chamfer { body, .. } => body.as_ref().map(|b| b.0.clone()),
+        k => panic!("{k:?}"),
+    };
+    let each = |s: &Session| ["Low", "High"].map(|b| s.model.state().body(b).unwrap().measure().unwrap().volume);
+    let mut s = boxes();
+    run(&mut s, "solid.chamfer", json!({"edges": [[20, 0, 0]], "distance": 1}));
+    assert_eq!(kept(&s).as_deref(), Some("Low"));
+    let [low, high] = each(&s);
+    assert!((low - 11980.0).abs() < 0.02 && high == 12000.0, "{low} {high}");
+    let mut s = boxes();
+    run(&mut s, "solid.chamfer", json!({"edges": [[20, 0, 0], [20, 0, 60]], "distance": 1}));
+    assert_eq!(kept(&s), None);
+    let [low, high] = each(&s);
+    assert!((low - 11980.0).abs() < 0.02 && (high - 11980.0).abs() < 0.02, "{low} {high}");
+}
+
+/// The halves of a split box share the edges along the cut: a pick on one is refused naming both
+/// halves, and `body` cuts the half named.
+#[test]
+fn edge_picks_on_the_cut_of_a_split_body_name_both_halves() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Box"}));
+    run(&mut s, "solid.split_body", json!({"body": "Box", "plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}}));
+    let features = s.doc.features.len();
+    let err = s.execute("solid.chamfer", &json!({"edges": [[20, 15, 10]], "distance": 1})).unwrap_err().to_string();
+    assert!(err.contains("[20, 15, 10] lies on edges of 2 bodies, Box and Box (1)") && err.contains("with `body`"), "{err}");
+    assert_eq!(s.doc.features.len(), features);
+    run(&mut s, "solid.chamfer", json!({"edges": [[20, 15, 10]], "distance": 1, "body": "Box (1)"}));
+    let half = |s: &Session, b: &str| s.model.state().body(b).unwrap().measure().unwrap().volume;
+    assert!((half(&s, "Box (1)") - 5985.0).abs() < 0.02 && (half(&s, "Box") - 6000.0).abs() < 1e-6, "{} {}", half(&s, "Box"), half(&s, "Box (1)"));
+}
+
+/// A box touching a cylinder along the cylinder's seam: the seam is not an edge to blend, so the
+/// box's edge there is cut.
+#[test]
+fn an_edge_along_another_bodys_seam_is_picked() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 10, "body_name": "Rod"}));
+    let rod = s.model.state().body("Rod").unwrap().body.clone();
+    let mesh = rod.mesh(&solidcraft_kernel::MeshTolerance::chord(0.06)).unwrap();
+    let seam = mesh.edges.iter().zip(&mesh.seams).find(|(_, seam)| **seam).unwrap().0[0];
+    // The box's quarter past the seam's line is outside the cylinder: they touch along it.
+    run(
+        &mut s,
+        "solid.box",
+        json!({"length": 20, "width": 20, "height": 10, "corner": [seam.x, seam.y, 0], "operation": "new", "body_name": "Block"}),
+    );
+    run(&mut s, "solid.chamfer", json!({"edges": [[seam.x, seam.y, 5]], "distance": 1}));
+    let kept = match &s.doc.features.last().unwrap().kind {
+        solidcraft_doc::FeatureKind::Chamfer { body, .. } => body.as_ref().map(|b| b.0.clone()),
+        k => panic!("{k:?}"),
+    };
+    assert_eq!(kept.as_deref(), Some("Block"));
+    let v = |b: &str| s.model.state().body(b).unwrap().measure().unwrap().volume;
+    assert!((v("Block") - 3995.0).abs() < 0.02 && (v("Rod") - PI * 1000.0).abs() < 1.0, "{} {}", v("Block"), v("Rod"));
+}
+
 #[test]
 fn fillet_as_wide_as_a_face_rounds_it_off() {
     // #199: 14 x 6 x 10 box, the four vertical edges at r = 3 (half the 6 mm end faces).
@@ -109,11 +177,10 @@ fn fillet_as_wide_as_a_face_rounds_it_off() {
 
 /// The owner's ruling of 2026-10-30: two edges of a 20 mm box rounded r2 in one fillet (they
 /// meet in a mitre at the corner (20, 0, 20), the upright edge there sharp), then the upright edge
-/// r3 in a second fillet, whose tangent chain takes the mitre's seam with it. The corner is the
-/// one solidcore 8ddce9016 builds for three rounds of different radii there: one patch, 10
-/// faces, 7928.743041456134 mm³ (the fork's setback corner, 15 faces and 7928.142563938, waits
-/// for solidcore#2310). The r2 rounds keep their names, and the r3 round and the corner's patch
-/// are the second fillet's.
+/// r3 in a second fillet, whose tangent chain takes the mitre's seam with it. The corner is
+/// solidcore's setback corner for three rounds of different radii there (solidcore#2382): 15
+/// faces, 7927.724282512234 mm³. The r2 rounds keep their names, and the r3 round and the
+/// corner's six patches are the second fillet's.
 #[test]
 fn a_later_round_at_a_mitred_corner_is_blended_with_the_rounds_there() {
     let mut s = Session::default();
@@ -135,17 +202,17 @@ fn a_later_round_at_a_mitred_corner_is_blended_with_the_rounds_there() {
     let second = run(&mut s, "solid.fillet", json!({"edges": [[20, 0, 10]], "radius": 3}))["feature"].as_u64().unwrap();
     assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
     let v = volume(&mut s);
-    assert!((v - 7928.743041456134).abs() < 1e-6, "{v}");
+    assert!((v - 7927.724282512234).abs() < 1e-6, "{v}");
     let faces = run(&mut s, "model.faces", json!({"body": "Box"}))["faces"].as_array().cloned().unwrap_or_default();
-    assert_eq!(faces.len(), 10);
+    assert_eq!(faces.len(), 15);
     let after: Vec<String> = rounds.iter().map(|p| named(&mut s, *p)).collect();
     assert_eq!(after, before);
     // The r3 round (halfway up, at 45°) and the corner's patches: the faces the second fillet made.
     let k3 = 3.0 - 4.5_f64.sqrt();
     assert!(named(&mut s, solidcore_record::Vec3::new(20.0 - k3, k3, 10.0)).starts_with(&format!("F{second}:blend:")));
     let made = faces.iter().filter(|f| f["name"].as_str().is_some_and(|n| n.starts_with(&format!("F{second}:")))).count();
-    // the r3 round and the corner's patch
-    assert_eq!(made, 2, "{faces:?}");
+    // the r3 round and the corner's six patches
+    assert_eq!(made, 7, "{faces:?}");
 }
 
 #[test]
@@ -1919,9 +1986,17 @@ fn measure_items() {
     let r = run(&mut s, "inspect.measure", json!({"items": [face(ft, [20.0, 15.0, 20.0]), face(fb, [20.0, 15.0, 0.0])]}));
     assert!((r["distance_mm"].as_f64().unwrap() - 20.0).abs() < 1e-9, "{r}");
     assert!((r["angle_deg"].as_f64().unwrap() - 180.0).abs() < 1e-6, "{r}");
+    // The ends of a distance are real points (#11833: NaN ends hid the Distance row): one on
+    // each face, straight across.
+    let end = |k: &str| -> Vec3 { serde_json::from_value(r[k].clone()).unwrap_or_else(|e| panic!("{k}: {e} in {r}")) };
+    let (from, to) = (end("from"), end("to"));
+    assert!((from.z - 20.0).abs() < 1e-9 && to.z.abs() < 1e-9 && (to - from).cross(Vec3::Z).len() < 1e-9, "{r}");
     let r = run(&mut s, "inspect.measure", json!({"items": [face(ft, [20.0, 15.0, 20.0]), face(ff, [20.0, 0.0, 10.0])]}));
     assert!(r["distance_mm"].as_f64().unwrap() < 1e-9);
     assert!((r["angle_deg"].as_f64().unwrap() - 90.0).abs() < 1e-6);
+    for k in ["from", "to"] {
+        assert!(serde_json::from_value::<Vec3>(r[k].clone()).is_ok_and(|p| p.is_finite()), "{k} in {r}");
+    }
     let r = run(&mut s, "inspect.measure", json!({"items": [face(ft, [20.0, 15.0, 20.0])]}));
     assert!((r["items"][0]["area_mm2"].as_f64().unwrap() - 1200.0).abs() < 1e-6, "{r}");
     let v = json!({"type": "vertex", "body": "Body1", "point": [0, 0, 0]});
@@ -2087,12 +2162,105 @@ fn threemf_export_open_insert() {
     assert_eq!(s.model.state().bodies.len(), 3);
     assert!(rel(volume(&mut s), 2.0 * want) < 2e-3);
     assert!(s.execute("file.insert_mesh", &json!({"path": dir.join("x.step").to_string_lossy()})).is_err());
+    // An STL's unit scales it to millimetres as it is read: inches are 25.4 mm each. 3MF states its own.
+    let mut inch = Session::default();
+    let r = run(&mut inch, "file.insert_mesh", json!({"path": stl.to_string_lossy(), "units": "in"}));
+    assert_eq!(r["units"], "in", "{r}");
+    assert!(rel(volume(&mut inch), want * 25.4f64.powi(3)) < 2e-3);
+    for bad_units in [json!("furlong"), json!(7), json!("")] {
+        assert!(inch.execute("file.insert_mesh", &json!({"path": stl.to_string_lossy(), "units": bad_units})).is_err());
+    }
+    assert!(inch.execute("file.insert_mesh", &json!({"path": p.to_string_lossy(), "units": "in"})).is_err());
     let junk = dir.join("junk.3mf");
     std::fs::write(&junk, b"PK\x03\x04 not really").unwrap();
     let before = s.doc.clone();
     assert!(s.execute("file.insert_mesh", &json!({"path": junk.to_string_lossy()})).is_err());
     assert!(s.execute("doc.open", &json!({"path": junk.to_string_lossy()})).is_err());
     assert_eq!(*s.doc, *before);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A cube one unit across comes in as that unit in millimetres, for every unit: the sizes are
+/// written out here, not read from the table that scales the file.
+#[test]
+fn stl_cube_of_one_unit_comes_in_as_that_many_millimetres() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-stl-units-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("one.stl");
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1}));
+    run(&mut s, "file.save_mesh", json!({"path": stl.to_string_lossy()}));
+    for (units, edge) in [("mm", 1.0_f64), ("cm", 10.0), ("m", 1000.0), ("in", 25.4), ("ft", 304.8)] {
+        let mut t = Session::default();
+        let r = run(&mut t, "file.insert_mesh", json!({"path": stl.to_string_lossy(), "units": units}));
+        assert_eq!(r["units"], units, "{r}");
+        let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = &t.doc.features[0].kind else { panic!("{units}: not a mesh import") };
+        for axis in 0..3 {
+            let along: Vec<f64> = meshes[0].positions.chunks(3).map(|p| p[axis]).collect();
+            let (lo, hi) = (along.iter().cloned().fold(f64::MAX, f64::min), along.iter().cloned().fold(f64::MIN, f64::max));
+            assert!(((hi - lo) - edge).abs() <= edge * 1e-12, "{units}: edge {} along axis {axis}, want {edge}", hi - lo);
+        }
+        assert!(rel(volume(&mut t), edge.powi(3)) < 1e-9, "{units}: volume {}", volume(&mut t));
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A unit given on import and a Scale feature after an import in millimetres make the same body,
+/// within floating-point precision, for each unitless mesh format: STL, OBJ and PLY (with faces).
+#[test]
+fn a_unit_on_import_matches_importing_in_millimetres_then_scaling() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-unit-vs-scale-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    // A cube one unit across, as the three formats write it.
+    let corners = [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]];
+    let triangles =
+        [[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [3, 7, 6], [3, 6, 2], [0, 4, 7], [0, 7, 3], [1, 2, 6], [1, 6, 5]];
+    let vertex = |i: usize| format!("{} {} {}", corners[i][0], corners[i][1], corners[i][2]);
+    let mut stl = String::from("solid cube\n");
+    for t in triangles {
+        stl += "facet normal 0 0 0\nouter loop\n";
+        for i in t {
+            stl += &format!("vertex {}\n", vertex(i));
+        }
+        stl += "endloop\nendfacet\n";
+    }
+    stl += "endsolid cube\n";
+    let mut obj = String::from("o Cube\n");
+    for i in 0..8 {
+        obj += &format!("v {}\n", vertex(i));
+    }
+    for t in triangles {
+        obj += &format!("f {} {} {}\n", t[0] + 1, t[1] + 1, t[2] + 1);
+    }
+    let mut ply = String::from("ply\nformat ascii 1.0\nelement vertex 8\nproperty float x\nproperty float y\nproperty float z\n");
+    ply += "element face 12\nproperty list uchar int vertex_indices\nend_header\n";
+    for i in 0..8 {
+        ply += &format!("{}\n", vertex(i));
+    }
+    for t in triangles {
+        ply += &format!("3 {} {} {}\n", t[0], t[1], t[2]);
+    }
+    let close = |a: f64, b: f64| (a - b).abs() <= 1e-9 * b.abs().max(1.0);
+    for (extension, text) in [("stl", stl), ("obj", obj), ("ply", ply)] {
+        let path = dir.join(format!("cube.{extension}"));
+        std::fs::write(&path, text).unwrap();
+        for (units, mm) in [("mm", 1.0_f64), ("cm", 10.0), ("m", 1000.0), ("in", 25.4), ("ft", 304.8)] {
+            let mut with_unit = Session::default();
+            run(&mut with_unit, "file.insert_mesh", json!({"path": path.to_string_lossy(), "units": units}));
+            let mut scaled = Session::default();
+            let inserted = run(&mut scaled, "file.insert_mesh", json!({"path": path.to_string_lossy()}));
+            let body = inserted["bodies"][0].as_str().unwrap().to_string();
+            run(&mut scaled, "solid.scale", json!({"bodies": [body], "factor": mm.to_string()}));
+            let (a, b) = (with_unit.model.state().bodies[0].mesh().bounds(), scaled.model.state().bodies[0].mesh().bounds());
+            let (a, b) = ([a.min.x, a.min.y, a.min.z, a.max.x, a.max.y, a.max.z], [b.min.x, b.min.y, b.min.z, b.max.x, b.max.y, b.max.z]);
+            for (x, y) in a.into_iter().zip(b) {
+                assert!(close(x, y), "{extension} {units}: bounds {a:?} against {b:?}");
+            }
+            let (va, vb) = (volume(&mut with_unit), volume(&mut scaled));
+            assert!(rel(va, vb) < 1e-9, "{extension} {units}: volume {va} against {vb}");
+            assert!(rel(va, mm.powi(3)) < 1e-9, "{extension} {units}: volume {va}, want {}", mm.powi(3));
+        }
+    }
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -2555,6 +2723,34 @@ fn split_body_by_a_face() {
     assert!(s.execute("solid.split_body", &json!({"body": "Block", "tool": {"body": "Tool", "point": [100, 0, 0]}})).is_err());
 }
 
+/// Split Body by a face follows the face when a parameter moves it (#11674): the tool face is
+/// named when it is picked, as other face picks are, and found again where it went.
+#[test]
+fn split_body_by_a_face_follows_the_face() {
+    let build = |h: &str, z: f64| {
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name": "h", "expression": h}));
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 200, "center": [0, 0, 100], "body_name": "Post"}));
+        run(&mut s, "solid.cylinder", json!({"diameter": 42, "height": 300, "base": [-150, 0, "h"], "axis": "X", "body_name": "Rail"}));
+        run(&mut s, "solid.split_body", json!({"body": "Post", "tool": {"body": "Rail", "point": [0, 0, z]}}));
+        s
+    };
+    let volumes = |s: &Session| {
+        let st = s.world_state().unwrap();
+        let mut v: Vec<f64> =
+            st.bodies.iter().filter(|b| b.name.starts_with("Post")).map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).collect();
+        v.sort_by(f64::total_cmp);
+        v
+    };
+    let mut s = build("100 mm", 79.0);
+    run(&mut s, "parameters.change", json!({"name": "h", "expression": "150 mm"}));
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.as_ref().map(|e| format!("{}: {e}", r.name))).collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    // As if the rail had been at 150 mm when the face was picked.
+    let (got, want) = (volumes(&s), volumes(&build("150 mm", 129.0)));
+    assert!(got.len() >= 2 && got.len() == want.len() && got.iter().zip(&want).all(|(a, b)| rel(*a, *b) < 1e-9), "{got:?} against {want:?}");
+}
+
 /// Split Body by a sketch line (#1552): the plane through the line along the sketch's normal
 /// splits a box; the split follows the line when the sketch changes, the design saves the line,
 /// and anything but a straight line of a sketch is refused.
@@ -2594,6 +2790,34 @@ fn split_body_by_a_sketch_line() {
     let saved: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
     let split = saved["features"].as_array().and_then(|f| f.iter().find(|f| f["type"] == "split")).cloned().unwrap();
     assert_eq!((split["sketch"].as_u64(), split["line"].as_str()), (Some(sk), Some("cut")), "{split}");
+}
+
+/// Split Body of a body of two separate pieces joined into one (#6738): a plane through both
+/// pieces splits it, and each half keeps the half of both pieces. The reporter's flow: one
+/// sketch with two squares 20 mm across and 30 mm apart, both extruded 10 mm as New Body, then
+/// Combine (join). The split used to stop with "the tool does not split the body".
+#[test]
+fn split_body_of_a_body_of_two_pieces_splits_both() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Sketch1"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 20]}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [50, 0], "p1": [70, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Sketch1", "distance": 10, "operation": "new"}));
+    run(&mut s, "solid.combine", json!({"target": "Body1", "tools": ["Body2"], "operation": "join"}));
+    // One body of two pieces before the split.
+    let st = s.world_state().unwrap();
+    assert_eq!(st.bodies.len(), 1, "{:?}", st.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    assert_eq!(st.bodies[0].body.lumps().unwrap().len(), 2);
+    // A plane through the middle of both squares (the extrusion is 10 mm tall).
+    run(&mut s, "solid.split_body", json!({"body": "Body1", "plane": {"origin": [0, 0, 5], "normal": [0, 0, 1]}}));
+    let st = s.world_state().unwrap();
+    assert_eq!(st.bodies.len(), 2, "{:?}", st.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    for b in &st.bodies {
+        // Each half holds the half of both squares: two pieces, half the body each.
+        assert!(rel(solidcraft_kernel::measure(&b.body).unwrap().volume, 4000.0) < 1e-6, "{}", b.name);
+        assert_eq!(b.body.lumps().unwrap().len(), 2, "{}", b.name);
+    }
 }
 
 /// Fillet types: chord length (radius from the face angle) and a radius varying along the

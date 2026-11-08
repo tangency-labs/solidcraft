@@ -196,6 +196,45 @@ fn edge_pick<'a>(st: &'a ModelState, at: Vec3, name: &Option<String>) -> Result<
     }
 }
 
+/// The closest point on a polyline to `target`, projecting onto each segment rather than
+/// choosing only its vertices. This keeps an edge pick on the edge between tessellation points.
+fn closest_point_on_polyline(pts: &[Vec3], target: Vec3) -> Option<Vec3> {
+    let mut best: Option<(f64, Vec3)> = None;
+    for w in pts.windows(2) {
+        let (a, b) = (w[0], w[1]);
+        let ab = b - a;
+        let len_sq = ab.dot(ab);
+        let q = if len_sq < 1e-18 {
+            a
+        } else {
+            let t = ((target - a).dot(ab) / len_sq).clamp(0.0, 1.0);
+            a + ab * t
+        };
+        let d = target.dist(q);
+        if best.as_ref().is_none_or(|(bd, _)| d < *bd) {
+            best = Some((d, q));
+        }
+    }
+    best.map(|(_, q)| q)
+}
+
+/// The point on an edge nearest a pick location, projecting onto exact edge geometry
+/// (such as `kernel::edge_circle`) when available, else onto its drawn polyline segments.
+fn edge_point_at_pick(st: &ModelState, pick: Vec3, name: &Option<String>) -> Option<Vec3> {
+    let (b, i, pts) = edge_pick(st, pick, name).ok()?;
+    if let Some(c) = kernel::edge_circle(&b.body, i) {
+        let v = pick - c.center;
+        let v_perp = v - *c.axis * v.dot(*c.axis);
+        if let Some(dir) = v_perp.normalized() {
+            return Some(c.center + dir * c.radius);
+        }
+    }
+    // Until the kernel can project onto any edge geometry (circles are exact above via
+    // kernel::edge_circle), the fallback projects onto the drawn polyline. This is exact for
+    // straight edges and approximates splines within mesh display tolerance.
+    closest_point_on_polyline(&pts, pick)
+}
+
 /// The circle a picked edge lies on, from its exact curve (`kernel::edge_circle`) when the drawn
 /// edge lies on it, else fitted to the drawn points: (centre, unit normal).
 fn edge_circle(b: &ModelBody, index: usize, pts: &[Vec3]) -> Option<(Vec3, Vec3)> {
@@ -743,7 +782,29 @@ pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
         PlaneRef::AxisPoint { axis, point: at } => {
             let (origin, dir) = line(ctx, axis)?;
             let dir = dir.normalized().ok_or_else(|| bad("the axis has no direction"))?;
-            let delta = point(ctx, at)? - origin;
+            let p = match point(ctx, at) {
+                Ok(p) => {
+                    let delta = p - origin;
+                    let across = delta - dir * delta.dot(dir);
+                    if across.len().is_finite() && across.len() >= 1e-9 {
+                        p
+                    } else if let GeoRef::Edge { at: pick, name } = at.as_ref() {
+                        // When the centre of a circular edge lies on the axis, resolve to the picked point on the edge.
+                        edge_point_at_pick(ctx.st, *pick, name).unwrap_or(p)
+                    } else {
+                        p
+                    }
+                }
+                Err(e) => {
+                    // Non-circular edges are not converted to centres by `point`; resolve to the picked edge point.
+                    if let GeoRef::Edge { at: pick, name } = at.as_ref() {
+                        edge_point_at_pick(ctx.st, *pick, name).ok_or(e)?
+                    } else {
+                        return Err(e);
+                    }
+                }
+            };
+            let delta = p - origin;
             let across = delta - dir * delta.dot(dir);
             if !across.len().is_finite() || across.len() < 1e-9 {
                 return Err(bad("the point is on the axis: pick a point off the axis to define a unique plane"));
@@ -923,9 +984,10 @@ impl PlaneRef {
                 refs.push(point.as_mut());
                 refs
             }
-            PlaneRef::AtAngle { base, line, .. } => {
+            PlaneRef::AtAngle { base, line, pivot, .. } => {
                 let mut v = base.refs_mut();
                 v.extend(line.as_deref_mut());
+                v.extend(pivot.as_deref_mut());
                 v
             }
             PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } => base.refs_mut(),

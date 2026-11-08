@@ -33,14 +33,14 @@ impl Side {
 
 /// How far a docked panel with this key was dragged.
 pub fn dock_offset(ctx: &egui::Context, key: &str) -> egui::Vec2 {
-    ctx.data(|d| d.get_temp::<egui::Vec2>(egui::Id::new(("sc_dock_offset", key)))).unwrap_or(egui::Vec2::ZERO)
+    ctx.data(|d| d.get_temp::<egui::Vec2>(egui::Id::unique(("sc_dock_offset", key)))).unwrap_or(egui::Vec2::ZERO)
 }
 
 /// A title drag owns the pointer even when it outruns the dialog's previous position.
 pub(crate) fn dock_dragging(ctx: &egui::Context) -> bool {
     let frame = ctx.cumulative_frame_nr();
     // The viewport can draw before the dialog, so retain the preceding frame's marker.
-    ctx.data(|d| d.get_temp::<u64>(egui::Id::new("sc_dock_drag_frame"))).is_some_and(|at| at >= frame.saturating_sub(1))
+    ctx.data(|d| d.get_temp::<u64>(egui::Id::unique("sc_dock_drag_frame"))).is_some_and(|at| at >= frame.saturating_sub(1))
         && ctx.input(|i| i.pointer.any_down())
 }
 
@@ -61,15 +61,21 @@ pub fn offset_anchor(docked: Pos2, offset: egui::Vec2, vp: egui::Rect, side: Sid
 /// `moved` (as last frame left it; `applied` of it is where the dialog is now, after keeping
 /// it on screen). Called before the band's buttons are added, so they keep their clicks.
 pub fn drag_dock(ui: &Ui, band: egui::Rect, key: &str, moved: egui::Vec2, applied: egui::Vec2) {
-    crate::scenario::publish_handle("dialog:title", band.center());
-    let response = ui.interact(band, ui.id().with("sc_dock_drag"), egui::Sense::drag());
+    drag_dock_named(ui, "dialog:title", band, key, moved, applied);
+}
+
+/// [`drag_dock`] for a panel that stays on screen beside a command dialog (the Sketch palette),
+/// so its band is published under its own scenario `handle` instead of the dialog's.
+pub fn drag_dock_named(ui: &Ui, handle: &str, band: egui::Rect, key: &str, moved: egui::Vec2, applied: egui::Vec2) {
+    crate::scenario::publish_handle(handle, band.center());
+    let response = ui.interact(band, ui.scope_id().with("sc_dock_drag"), egui::Sense::drag());
     if response.dragged() {
         let frame = ui.ctx().cumulative_frame_nr();
-        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("sc_dock_drag_frame"), frame));
+        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique("sc_dock_drag_frame"), frame));
     }
     // The drag runs from where the press started, so no movement is lost while egui decides
     // it is a drag, nor on the frame it ends.
-    let base = egui::Id::new("sc_dock_drag_base");
+    let base = egui::Id::unique("sc_dock_drag_base");
     if response.drag_started()
         && let Some(origin) = ui.input(|i| i.pointer.press_origin())
     {
@@ -82,12 +88,12 @@ pub fn drag_dock(ui: &Ui, band: egui::Rect, key: &str, moved: egui::Vec2, applie
             (Some((start, from)), Some(now)) => start + (now - from),
             _ => applied + response.drag_delta(),
         };
-        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(("sc_dock_offset", key)), to));
+        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique(("sc_dock_offset", key)), to));
     } else if response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     } else if moved != applied {
         // Kept on screen: remember where it is, not where it was dragged off to.
-        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(("sc_dock_offset", key)), applied));
+        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::unique(("sc_dock_offset", key)), applied));
     }
 }
 
@@ -95,7 +101,7 @@ pub fn drag_dock(ui: &Ui, band: egui::Rect, key: &str, moved: egui::Vec2, applie
 mod tests {
     #[test]
     fn feature_forms_use_available_height_and_keep_actions_visible() {
-        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             use crate::scenario::Harness;
             use serde_json::json;
             for (width, height, scale) in [(1400.0, 900.0, 1.0), (1400.0, 950.0, 2.0)] {
@@ -130,7 +136,7 @@ mod tests {
                     "short forms have less content even when both need scrolling: {short_content}, {dialog_content}"
                 );
                 assert!(short.height() <= dialog.height(), "short forms cannot grow taller: {short:?}, {dialog:?}");
-                let t = crate::theme::Tokens::get();
+                let t = solidcraft_theme::Tokens::get();
                 let chrome = f64::from(t.form_header_height + t.form_footer_height + t.form_gap_y * 2.0 + t.space_2);
                 if short_content + chrome < f64::from(dialog.height()) {
                     assert!(short.height() < dialog.height(), "unconstrained short forms must shrink: {short:?}, {dialog:?}");
@@ -161,7 +167,7 @@ mod tests {
         use crate::scenario::Harness;
         use serde_json::json;
 
-        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             let mut h = Harness::new();
             h.call("ui.set", json!({"layout": mode}));
             h.call("ui.resize", json!({"width": 2400, "height": 900}));
@@ -174,7 +180,7 @@ mod tests {
             h.step(&json!({"start": "parameters.change"})).unwrap();
             h.frames(6);
             let title = crate::scenario::handle_at("dialog:title").unwrap();
-            assert!(!h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_params_dialog"))).unwrap().contains(p));
+            assert!(!h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_params_dialog"))).unwrap().contains(p));
             h.call("ui.move", json!({"x": title.x, "y": title.y}));
             h.app.synthetic.push(egui::Event::PointerButton {
                 pos: title,
@@ -186,7 +192,7 @@ mod tests {
             h.app.synthetic.push(egui::Event::PointerMoved(p));
             h.frame();
             assert!(h.ctx.dragged_id().is_some(), "the title must own the drag");
-            assert!(!h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_params_dialog"))).unwrap().contains(p), "the pointer must outrun the dialog");
+            assert!(!h.ctx.memory(|m| m.area_rect(egui::Id::unique("sc_params_dialog"))).unwrap().contains(p), "the pointer must outrun the dialog");
             assert!(h.app.viewport.hover.is_none(), "dragging a dialog must block model highlights");
             assert!(h.app.viewport.mouse.is_none(), "the viewport must not receive the drag pointer");
             h.frames(2);
@@ -208,7 +214,7 @@ mod tests {
     /// drags it; reopening keeps its position.
     #[test]
     fn a_docked_dialog_keeps_its_size_under_the_pointer_and_moves_by_its_title() {
-        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             use crate::scenario::Harness;
             use serde_json::json;
             let mut h = Harness::new();
@@ -248,7 +254,7 @@ mod tests {
     fn command_dialogs_keep_the_dragged_position_after_closing() {
         use crate::scenario::Harness;
         use serde_json::json;
-        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             let mut h = Harness::new();
             h.call("ui.set", json!({"layout":mode}));
             h.call("ui.resize", json!({"width":1400.0,"height":900.0}));

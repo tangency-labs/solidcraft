@@ -79,7 +79,7 @@ fn mark(step: &str) {
     static START: std::sync::OnceLock<(std::time::Instant, bool)> = std::sync::OnceLock::new();
     let (start, on) = START.get_or_init(|| (std::time::Instant::now(), solidcraft_engine::geom::env::var_os("PROFILE_STARTUP").is_some()));
     if *on {
-        eprintln!("startup {:>6.0} ms  {step}", start.elapsed().as_secs_f64() * 1000.0);
+        solidcraft_engine::note!("startup {:>6.0} ms  {step}", start.elapsed().as_secs_f64() * 1000.0);
     }
 }
 
@@ -282,13 +282,20 @@ impl eframe::App for App {
         let now = std::time::Instant::now();
         if self.prefs_writer.due(ui.input(|i| i.events.iter().any(changes_settings)), now)
             && let Some(storage) = frame.storage_mut()
-            && let Some(wait) = self.prefs_writer.store(storage, self.solve.prefs(), now)
+            && let Ok(prefs) = self.prefs_for_storage(storage)
+            && let Some(wait) = self.prefs_writer.store(storage, prefs, now)
         {
             ui.ctx().request_repaint_after(wait);
         }
     }
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        let prefs = self.solve.prefs();
+        let prefs = match self.prefs_for_storage(storage) {
+            Ok(prefs) => prefs,
+            Err(reason) => {
+                log::warn!("Settings were not written: {reason}");
+                return;
+            }
+        };
         storage.set_string(solidcraft_ui_egui::prefs::STORAGE_KEY, prefs.clone());
         self.prefs_writer.written = Some(prefs);
     }
@@ -303,6 +310,8 @@ impl eframe::App for App {
             log::warn!("a picture was still being drawn as the app closed");
         }
         solidcraft_ui_egui::recovery_ui::close(&mut self.solve);
+        // A GPU path tracer setup still running did not stop the app (#9236).
+        solidcraft_ui_egui::render_workspace::close(&mut self.solve);
         solidcraft_ui_egui::open_elsewhere::close(&mut self.solve);
         // Before a restart (`Drop for App`) starts the next instance, which would otherwise get
         // nothing from the 3D mouse driver (`solidcraft_3dx_client::stop`).
@@ -359,6 +368,14 @@ struct LostWatch {
 }
 
 impl App {
+    fn prefs_for_storage(&self, storage: &dyn eframe::Storage) -> Result<String, String> {
+        self.solve.try_prefs().or_else(|reason| {
+            log::warn!("Panel layout changes were not saved: {reason}");
+            let previous = solidcraft_ui_egui::prefs::stored(|key| storage.get_string(key));
+            self.solve.prefs_with_stored_panel_layout(previous.as_deref())
+        })
+    }
+
     /// The graphics device was lost (#4172): the window can't draw again, so close, keeping
     /// unsaved changes for recovery as a forced quit does (the window can't ask about them), and
     /// start again once closed ([`device_lost::restart`]).
@@ -366,7 +383,7 @@ impl App {
         let Some(gpu) = self.gpu.as_mut().filter(|g| g.lost_at.is_none() && g.lost.is_lost()) else { return };
         let reason = gpu.lost.reason().unwrap_or_default();
         log::error!("graphics: the device was lost ({reason}); closing to start again");
-        eprintln!("SolidCraft graphics: the device was lost ({reason}); starting again");
+        solidcraft_engine::note!("SolidCraft graphics: the device was lost ({reason}); starting again");
         solidcraft_engine::crash::phase(&format!("graphics device lost: {reason}"));
         gpu.lost_at = Some(device_lost::now_secs());
         gpu.reason = reason;
@@ -451,7 +468,7 @@ fn case_variants(exts: &[&str]) -> Vec<String> {
 fn content_ui(app: &mut SolveApp, ui: &mut egui::Ui) {
     let content = ui.ctx().content_rect();
     let above = egui::Rect::from_min_max(ui.max_rect().min, egui::pos2(ui.max_rect().right(), content.top()));
-    ui.painter().rect_filled(above, 0.0, solidcraft_ui_egui::theme::Tokens::get().app_bar);
+    ui.painter().rect_filled(above, 0.0, solidcraft_theme::Tokens::get().app_bar);
     ui.scope_builder(egui::UiBuilder::new().max_rect(content), |ui| app.ui(ui));
 }
 
@@ -501,7 +518,7 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
             // The groups come from the format registry, so a new format joins this dialog by itself.
             let mut everything = io::formats::open_extensions(true);
             everything.extend(["dxf", "svg"]);
-            dialog = dialog.add_filter(solidcraft_ui_egui::i18n::tr("file.open.drawing_filter"), &case_variants(&everything));
+            dialog = dialog.add_filter(solidcraft_ui_text::tr("file.open.drawing_filter"), &case_variants(&everything));
             for (label, exts) in io::formats::import_filters(true) {
                 dialog = dialog.add_filter(label, &case_variants(&exts));
             }
@@ -928,6 +945,7 @@ fn main() -> eframe::Result {
     #[cfg(target_os = "macos")]
     objc2_foundation::NSProcessInfo::processInfo().setProcessName(objc2_foundation::ns_string!("SolidCraft"));
     mark("main");
+    solidcraft_ui_egui::i18n::install();
     // On OCLP-patched Macs, wgpu picks a Metal Shading Language standard that the system's
     // compiler refuses (`invalid value 'metal3.2'`), because the patched OS reports a newer
     // macOS version than the GPU's Metal compiler supports. Re-launching with
@@ -991,7 +1009,7 @@ fn main() -> eframe::Result {
     if let Some(value) = max_file_size {
         let applied = startup::max_file_size(value.as_deref()).and_then(|bytes| solidcraft_engine::io::limits::set_override(Some(bytes)));
         if let Err(error) = applied {
-            eprintln!("SolidCraft: {error}");
+            solidcraft_engine::note!("SolidCraft: {error}");
             return Err(eframe::Error::AppCreation(std::io::Error::other(error).into()));
         }
     }
@@ -1023,7 +1041,7 @@ fn main() -> eframe::Result {
     let fallback_note = std::env::var(startup::FALLBACK_NOTE_ENV).ok().map(|s| s.chars().take(4096).collect::<String>());
     if let Some(note) = &fallback_note {
         log::warn!("{note}");
-        eprintln!("SolidCraft: {note}");
+        solidcraft_engine::note!("SolidCraft: {note}");
         notes.push(note.clone());
     }
     let saved_samples = if safe_mode { None } else { msaa() };
@@ -1136,13 +1154,13 @@ fn main() -> eframe::Result {
                 // Windows: the taskbar button shows the mark even when slow first frames keep the
                 // taskbar waiting for the window's icon.
                 if !native_frame::set_class_icon(cc) {
-                    eprintln!("SolidCraft window: no class icon; the taskbar may show a generic one");
+                    solidcraft_engine::note!("SolidCraft window: no class icon; the taskbar may show a generic one");
                 }
                 // The OS hit test offers the resize border, at the window's DPI, from the first
                 // message (#1381).
                 app.native_resize_border = custom_titlebar && native_frame::install(cc);
                 if custom_titlebar && !app.native_resize_border {
-                    eprintln!("SolidCraft window: no native resize border; egui edge zones instead");
+                    solidcraft_engine::note!("SolidCraft window: no native resize border; egui edge zones instead");
                 }
             }
             app.integrated_titlebar = cfg!(target_os = "macos");
@@ -1173,9 +1191,10 @@ fn main() -> eframe::Result {
                     .collect();
                 let info = rs.adapter.get_info();
                 if !app.preferences.graphics_adapter.is_empty() && !info.name.eq_ignore_ascii_case(app.preferences.graphics_adapter.as_str()) {
-                    eprintln!(
+                    solidcraft_engine::note!(
                         "SolidCraft graphics: preferred adapter {:?} was not used; using {:?} instead",
-                        app.preferences.graphics_adapter, info.name
+                        app.preferences.graphics_adapter,
+                        info.name
                     );
                 }
                 let samples = scene_msaa_request(saved_samples);
@@ -1183,7 +1202,7 @@ fn main() -> eframe::Result {
                     eframe::egui_wgpu::supported_msaa_samples(&rs.adapter, &rs.device, rs.target_format, depth)
                 });
                 let scene_samples = scene_samples(info.backend, u32::from(samples), &supported);
-                eprintln!("SolidCraft graphics: {:?}, MSAA {scene_samples}x (requested {}x)", rs.adapter.get_info().backend, samples);
+                solidcraft_engine::note!("SolidCraft graphics: {:?}, MSAA {scene_samples}x (requested {}x)", rs.adapter.get_info().backend, samples);
                 solidcraft_engine::crash::phase("viewport pipelines (shader compile)");
                 let scene_samples = app.set_wgpu_split(rs, depth_bits, STENCIL_BITS, scene_samples);
                 app.msaa_supported = supported;
@@ -1344,7 +1363,7 @@ fn wgpu_options(cpu: bool, preference: Option<&str>) -> eframe::egui_wgpu::WgpuC
         let retry = std::env::var(startup::RETRY_BACKEND_ENV).ok();
         let preference = if cpu { preference } else { retry.as_deref().or(preference) };
         if let Some(backends) = startup::choose_backends(cfg!(target_os = "windows"), env_set, cpu, preference, startup::has_hardware_adapter) {
-            eprintln!("SolidCraft graphics: starting {backends:?}");
+            solidcraft_engine::note!("SolidCraft graphics: starting {backends:?}");
             setup.instance_descriptor.backends = backends;
         }
         let intel_mac = cfg!(all(target_os = "macos", target_arch = "x86_64"));
@@ -1370,7 +1389,7 @@ fn wgpu_options(cpu: bool, preference: Option<&str>) -> eframe::egui_wgpu::WgpuC
 /// event loop or a failed device; each retry advances through the APIs, then software once.
 fn no_window(error: eframe::Error, tried_cpu: bool, failed: eframe::wgpu::Backends, settings: Option<&std::path::Path>) -> eframe::Result {
     log::error!("the window could not open: {error}");
-    eprintln!("SolidCraft: the window could not open: {error}");
+    solidcraft_engine::note!("SolidCraft: the window could not open: {error}");
     // This failure was handled, so neither the marker nor the journal should call it a crash.
     if let Some(dir) = settings {
         startup::started(dir);
@@ -1383,7 +1402,7 @@ fn no_window(error: eframe::Error, tried_cpu: bool, failed: eframe::wgpu::Backen
         let previous = std::env::var(startup::FALLBACK_NOTE_ENV).unwrap_or_default();
         let note = startup::fallback_note(&previous, failed, next, &error.to_string());
         log::warn!("{note}");
-        eprintln!("SolidCraft: {note}");
+        solidcraft_engine::note!("SolidCraft: {note}");
         let mut command = std::process::Command::new(exe);
         command.args(std::env::args_os().skip(1)).env(startup::FALLBACK_NOTE_ENV, note);
         if next == "cpu" {
@@ -1789,7 +1808,7 @@ mod viewport_tests {
                 viewport.fullscreen = Some(fullscreen);
                 viewport.native_pixels_per_point = Some(retina);
                 super::fullscreen_content_insets(&mut raw, 32.0, zoom);
-                let _ = ctx.run_ui(raw, |ui| super::content_ui(app, ui));
+                ctx.run_ui(raw, |ui| super::content_ui(app, ui)).textures_delta.clear();
             };
             // Enter, leave, and enter again: no stale inset when returning to a normal window.
             for fullscreen in [false, true, false, true] {

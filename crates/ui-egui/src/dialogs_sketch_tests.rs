@@ -174,7 +174,7 @@ fn equation_curve_window_gives_the_variable_its_ranges_unit() {
     *start = "a".into();
     *end = "3 * a".into();
     h.settle();
-    let handle = format!("dialog:{}", crate::i18n::tr("ui.equation_variable_unit"));
+    let handle = format!("dialog:{}", solidcraft_ui_text::tr("ui.equation_variable_unit"));
     h.step(&json!({"click": {"handle": handle}})).unwrap();
     h.settle();
     let Some(Kind::SketchModify(Mod::Equation { range_unit, .. })) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("no equation window") };
@@ -680,4 +680,52 @@ fn transform_applies_the_dimensioned_rectangle_shown_in_its_preview() {
         assert!((edge.len() - 60.0).abs() < 1e-6, "the applied width matches Scale 2: {edge:?}");
         assert!((edge.angle().to_degrees() - 30.0).abs() < 1e-6, "the applied rotation matches Angle 30: {edge:?}");
     }
+}
+
+/// #11718: a point picked as Transform's Center is what Scale works about: the rectangle's corner
+/// at (10, 10) stays while the rectangle doubles, and the handles' box is drawn about it too.
+#[test]
+fn transform_scales_about_a_picked_center() {
+    let mut h = fixture();
+    h.step(&json!({"call": "ui.view", "params": {"view": "top"}})).unwrap();
+    h.settle();
+    let (ids, corner) = {
+        let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+        let corner = sk.points.iter().find(|p| p.id != "origin" && p.pos.dist(solidcore_record::Vec2::new(10.0, 10.0)) < 1e-9).unwrap().id.clone();
+        (sk.curves.iter().map(|c| c.id.clone()).collect::<Vec<_>>(), corner)
+    };
+    let mut d = Dialog::for_command(&h.app, "sketch.transform").unwrap();
+    assert_eq!(d.inputs.get(1).map(|i| i.label), Some("Center"), "the window takes a Center point");
+    d.inputs[0].items = ids.iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
+    h.app.dialog = Some(d);
+    h.frames(4);
+    // The corner is under the box's corner handle: with Center waiting for a pick, a click there
+    // picks the point instead of starting a scale.
+    h.step(&json!({"call": "ui.dialogInput", "params": {"index": 1}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"click": {"sketch": [10, 10]}})).unwrap();
+    h.frames(3);
+    let picked = h.app.dialog.as_ref().unwrap().inputs[1].items.clone();
+    assert_eq!(picked, vec![Sel::SketchPoint { id: corner.clone() }], "the corner is the Center");
+    assert!(crate::scenario::handle_at("transform:handle:5").is_some(), "with Center picked, the handles work again");
+    if let Some(Kind::SketchModify(Mod::Transform { factor, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *factor = "2".into();
+    }
+    h.frames(2);
+    let d = h.app.dialog.as_ref().unwrap();
+    let Kind::SketchModify(k) = &d.kind else { panic!("no transform window") };
+    let (cmd, p) = crate::sketch_modify_ui::commands(&h.app, k, &d.inputs, &d.extra).unwrap().remove(0);
+    assert_eq!((cmd.as_str(), &p["center"]), ("sketch.transform", &json!(corner)), "{p}");
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    let state = h.app.session.world_state().unwrap();
+    let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    let (mut lo, mut hi) = ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN));
+    for p in (0..sk.curves.len()).flat_map(|i| sk.polyline(i)) {
+        lo = (lo.0.min(p.x), lo.1.min(p.y));
+        hi = (hi.0.max(p.x), hi.1.max(p.y));
+    }
+    assert!((lo.0 - 10.0).abs() < 1e-6 && (lo.1 - 10.0).abs() < 1e-6, "the picked corner stayed: {lo:?}");
+    assert!((hi.0 - 70.0).abs() < 1e-6 && (hi.1 - 50.0).abs() < 1e-6, "twice the size away from it: {hi:?}");
 }

@@ -36,13 +36,21 @@ pub struct DesignProperties {
     pub fields: Vec<String>,
     /// The last refusal from `document.metadata.set`.
     pub error: Option<String>,
+    /// What the fields were when OK was refused: `error` stays only while they still are.
+    refused: Option<Vec<String>>,
 }
 
 impl DesignProperties {
     pub fn new(app: &SolveApp) -> Self {
         let m = &app.session.doc.metadata;
         let opened: Vec<String> = keys(Owner::Design).map(|k| m.text(k.name).unwrap_or_default().to_string()).collect();
-        DesignProperties { fields: opened.clone(), opened, error: None }
+        DesignProperties { fields: opened.clone(), opened, error: None, refused: None }
+    }
+
+    /// Show why OK was refused, for as long as the fields stay as they are.
+    fn refuse(&mut self, error: String) {
+        self.refused = Some(self.fields.clone());
+        self.error = Some(error);
     }
 
     /// The fields that differ from what the window opened with, as `document.metadata.set`
@@ -70,7 +78,7 @@ fn apply(app: &mut SolveApp, d: &mut DesignProperties) -> bool {
     match app.run("document.metadata.set", serde_json::json!({ "values": values })) {
         Ok(_) => true,
         Err(e) => {
-            d.error = Some(e);
+            d.refuse(e);
             false
         }
     }
@@ -85,28 +93,33 @@ fn preview(v: &Value) -> String {
 /// Draw the window when it is open. Called once per frame.
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut d) = app.design_properties.take() else { return };
+    // A refused OK's message is about the fields it ran with (#641): once they change, it goes.
+    if d.refused.as_ref().is_some_and(|was| *was != d.fields) {
+        d.error = None;
+        d.refused = None;
+    }
     let metadata = app.session.doc.metadata.clone();
-    let title = crate::i18n::tr_label("Design Properties");
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_design_properties"), "settings", title).fields().show(ctx, true, |ui| {
+    let title = solidcraft_ui_text::tr_label("Design Properties");
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_design_properties"), "settings", title).fields().show(ctx, true, |ui| {
         for (i, k) in keys(Owner::Design).enumerate() {
-            let (key, label) = (k.name, crate::i18n::tr(k.label));
+            let (key, label) = (k.name, solidcraft_ui_text::tr(k.label));
             let Some(field) = d.fields.get_mut(i) else { continue };
             if key == DESCRIPTION {
-                ui_kit::multiline_text_field(ui, label, egui::Id::new(("sc_design_properties", key)), field);
+                ui_kit::multiline_text_field(ui, label, egui::Id::unique(("sc_design_properties", key)), field);
             } else {
                 ui_kit::row(ui, label, |ui| ui_kit::text_field(ui, field, ""));
             }
             // Saved by another tool as something other than text: kept unless typed over.
             if metadata.get(key).is_some() && metadata.text(key).is_none() && d.opened.get(i).is_some_and(String::is_empty) {
-                ui_kit::caption(ui, label, crate::i18n::tr("ui.design_properties.not_text"));
+                ui_kit::caption(ui, label, solidcraft_ui_text::tr("ui.design_properties.not_text"));
             }
         }
-        ui_kit::text(ui, crate::i18n::tr("ui.design_properties.exports"), ui_kit::Text::Note("exports"));
+        ui_kit::text(ui, solidcraft_ui_text::tr("ui.design_properties.exports"), ui_kit::Text::Note("exports"));
         let others: Vec<(&String, &Value)> = metadata.others().collect();
         if !others.is_empty() {
-            let heading = format!("{} ({})", crate::i18n::tr("ui.design_properties.others"), others.len());
+            let heading = format!("{} ({})", solidcraft_ui_text::tr("ui.design_properties.others"), others.len());
             ui_kit::section(ui, "sc_design_properties_others", &heading, false, |ui| {
-                ui_kit::text(ui, crate::i18n::tr("ui.design_properties.others_note"), ui_kit::Text::Note("others"));
+                ui_kit::text(ui, solidcraft_ui_text::tr("ui.design_properties.others_note"), ui_kit::Text::Note("others"));
                 egui::ScrollArea::vertical().max_height(ui_kit::row_height() * OTHERS_ROWS).show(ui, |ui| {
                     for (key, value) in others {
                         ui_kit::row(ui, key, |ui| ui_kit::text(ui, &preview(value), ui_kit::Text::Cell));
@@ -250,10 +263,12 @@ fn show_measuring(app: &mut SolveApp, ctx: &egui::Context) {
     let bodies = m.bodies();
     let heading = app.tr("ui.properties").to_string();
     let text = match bodies {
-        Some((done, total)) => crate::i18n::format("ui.properties.measuring_bodies", &[("done", &done.to_string()), ("total", &total.to_string())]),
+        Some((done, total)) => {
+            solidcraft_ui_text::format("ui.properties.measuring_bodies", &[("done", &done.to_string()), ("total", &total.to_string())])
+        }
         None => app.tr("ui.properties.measuring").to_string(),
     };
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_props"), "settings", &heading).actions("", "Close", None).show(ctx, true, |ui| {
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_props"), "settings", &heading).actions("", "Close", None).show(ctx, true, |ui| {
         ui.horizontal(|ui| {
             ui.spinner();
             ui_kit::text(ui, &text, ui_kit::Text::Note("measuring"));
@@ -331,7 +346,7 @@ fn inertia_rows(app: &SolveApp, total: &Value) -> Vec<(String, Vec<String>)> {
     }
     for (n, axis) in total["principal_axes"].as_array().into_iter().flatten().enumerate() {
         let Some(e) = point(axis) else { continue };
-        let label = crate::i18n::format("ui.properties.principal_axis", &[("number", &(n + 1).to_string())]);
+        let label = solidcraft_ui_text::format("ui.properties.principal_axis", &[("number", &(n + 1).to_string())]);
         rows.push((label, [e.x, e.y, e.z].map(|x| format!("{:.4}", if x.abs() < 5e-5 { 0.0 } else { x })).to_vec()));
     }
     rows
@@ -341,9 +356,9 @@ fn inertia_rows(app: &SolveApp, total: &Value) -> Vec<(String, Vec<String>)> {
 /// file's), else with the name of the component, placement or bodies it measured.
 fn window_title(title: &str, v: &Value) -> String {
     if v["component"].as_u64() == Some(0) {
-        crate::i18n::tr("ui.properties").to_string()
+        solidcraft_ui_text::tr("ui.properties").to_string()
     } else {
-        crate::i18n::format("properties.title", &[("name", title)])
+        solidcraft_ui_text::format("properties.title", &[("name", title)])
     }
 }
 
@@ -364,7 +379,7 @@ fn centre_and_axes(v: &Value) -> Option<(Vec3, Vec<Vec3>, f64)> {
 pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let Some((centre, axes, reach)) = app.menu.props.as_ref().and_then(|(_, v)| centre_and_axes(v)) else { return };
     let Some(at) = proj.to_screen(centre) else { return };
-    let tk = crate::theme::Tokens::view();
+    let tk = solidcraft_theme::Tokens::view();
     for (n, (axis, colour)) in axes.iter().zip(tk.axes()).enumerate() {
         let Some(tip) = proj.to_screen(centre + *axis * reach) else { continue };
         painter.line_segment([at, tip], Stroke::new(2.0, colour));
@@ -393,7 +408,7 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
         rows.push(("Density", format!("{:.3} g/cm³", number(b, "density_g_cm3"))));
     }
     if !bodies.is_empty() && skipped == bodies.len() as u64 {
-        rows.push(("", crate::i18n::tr_label("Open surface — no volume").to_string()));
+        rows.push(("", solidcraft_ui_text::tr_label("Open surface — no volume").to_string()));
     } else {
         rows.push(("Mass", format!("{:.3} g", number(total, "mass_g"))));
         rows.push(("Volume", crate::prefs::show_mm(app, number(total, "volume_mm3"), 3)));
@@ -423,7 +438,7 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
         format!("({}) g·{unit}", m.join(", "))
     });
     let inertia = inertia_rows(app, total);
-    let note = crate::i18n::format("ui.properties.inertia_note", &[("unit", unit)]);
+    let note = solidcraft_ui_text::format("ui.properties.inertia_note", &[("unit", unit)]);
     // A component's closed bodies have mass, but a mesh that would not close gave no tensor.
     let unavailable =
         inertia.is_empty() && total["inertia_g_mm2"].is_null() && number(total, "mass_g") > 0.0 && total.get("first_moment_g_mm").is_some();
@@ -435,9 +450,9 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
     let copy = shown_tensor(app, total).map(|t| tensor_text(&t));
     let copy_label = app.tr("ui.properties.copy_matrix").to_string();
     let heading = window_title(&title, &v);
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_props"), "settings", &heading).actions("", "Close", None).show(ctx, true, |ui| {
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_props"), "settings", &heading).actions("", "Close", None).show(ctx, true, |ui| {
         for (label, value) in &rows {
-            ui_kit::row(ui, crate::i18n::tr_label(label), |ui| ui_kit::text(ui, value, ui_kit::Text::Cell));
+            ui_kit::row(ui, solidcraft_ui_text::tr_label(label), |ui| ui_kit::text(ui, value, ui_kit::Text::Cell));
         }
         if let Some(first) = &first {
             ui_kit::row(ui, &first_label, |ui| ui_kit::text(ui, first, ui_kit::Text::Cell));
@@ -553,12 +568,33 @@ mod tests {
         let d = h.app.design_properties.as_ref().expect("still open");
         assert!(d.error.as_deref().is_some_and(|e| e.contains("control character")), "{:?}", d.error);
         assert_eq!(h.app.session.undo.len(), undo + 1);
+        // Correcting the field takes the refusal away before OK is clicked again.
+        h.app.design_properties.as_mut().unwrap().fields[1] = "PN-1".into();
+        h.frames(2);
+        let d = h.app.design_properties.as_ref().expect("still open");
+        assert_eq!(d.error, None, "the message was about the control character, which is gone");
+        // The message is about the fields OK ran with, as a dialog's is about its inputs (#641):
+        // a change to another field takes it away too, and the next OK refuses again.
+        h.app.design_properties.as_mut().unwrap().fields[1] = "bad\u{7}".into();
+        h.frames(2);
+        h.step(&json!({"widget": "OK"})).unwrap();
+        let refused = h.app.design_properties.as_ref().expect("still open").error.clone();
+        assert!(refused.as_deref().is_some_and(|e| e.contains("control character")), "{refused:?}");
+        h.app.design_properties.as_mut().unwrap().fields[0] = "ACME".into();
+        h.frames(2);
+        let d = h.app.design_properties.as_ref().expect("still open");
+        assert_eq!(d.error, None, "the fields differ from the refused ones");
+        h.step(&json!({"widget": "OK"})).unwrap();
+        let d = h.app.design_properties.as_ref().expect("still open: the part number is still refused");
+        assert_eq!(d.error, refused, "the same reason again");
+        assert_eq!(h.app.session.undo.len(), undo + 1, "nothing applied");
     }
 
     #[test]
     fn each_field_is_labelled_from_the_table_of_keys() {
+        crate::i18n::install();
         use solidcraft_engine::doc::metadata::{KEYS, Owner, keys};
-        let english = crate::i18n::Locale::for_language("en");
+        let english = solidcraft_ui_text::Locale::for_language("en");
         for k in KEYS {
             assert_ne!(english.text(k.label), k.label, "`{}`'s label is in the English catalog", k.name);
         }
@@ -697,7 +733,7 @@ mod tests {
         // Held until checked: under load the worker could otherwise finish before the menu returns.
         let (finish, gate) = std::sync::mpsc::channel();
         h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
-        let items = crate::context_menu::items(&h.app, &crate::context_menu::Target::Component { id: 0 });
+        let items = crate::context_menu::entries(&h.app, &crate::context_menu::Target::Component { id: 0 });
         let item = items.iter().find(|i| i.label == "Properties").expect("Properties item");
         crate::context_menu::run_item(&mut h.app, item, egui::pos2(0.0, 0.0));
         assert!(h.app.menu.props_measuring.is_some(), "the menu returns at once, the card measuring");
@@ -732,13 +768,13 @@ mod tests {
     #[test]
     fn the_file_menu_browser_and_root_component_open_the_window() {
         let mut h = Harness::new();
-        let items = crate::context_menu::items(&h.app, &crate::context_menu::Target::Component { id: 0 });
+        let items = crate::context_menu::entries(&h.app, &crate::context_menu::Target::Component { id: 0 });
         let item = items.iter().find(|i| i.id == "ui.designProperties").expect("root component menu item");
         assert_eq!(item.label, "Design Properties");
         crate::context_menu::run_item(&mut h.app, item, egui::pos2(0.0, 0.0));
         assert!(h.app.design_properties.is_some());
         h.app.design_properties = None;
-        h.ctx.data_mut(|d| d.insert_temp(egui::Id::new("sc_file_menu"), true));
+        h.ctx.data_mut(|d| d.insert_temp(egui::Id::unique("sc_file_menu"), true));
         h.frames(2);
         h.step(&json!({"widget": "Design Properties…"})).unwrap();
         assert!(h.app.design_properties.is_some());

@@ -1,5 +1,6 @@
 //! Dense ports of the common feature forms. Commands and parameter construction stay in dialogs.
 use super::*;
+use crate::dialogs_surface::continuity_row_explained;
 use crate::ui_kit;
 use crate::ui_kit::{choice_row, expr_row, hint_row};
 use solidcraft_engine::kernel::Continuity;
@@ -127,7 +128,7 @@ fn setback_factor() -> String {
 /// The Corners row's hover text: a line for each choice.
 fn fillet_corner_tip() -> String {
     let factor = setback_factor();
-    FILLET_CORNERS.map(|(_, tip)| crate::i18n::format(tip, &[("factor", &factor)])).join("\n")
+    FILLET_CORNERS.map(|(_, tip)| solidcraft_ui_text::format(tip, &[("factor", &factor)])).join("\n")
 }
 
 /// What `solid.fillet` does with a radius too large for the faces beside an edge (`fit`): stop
@@ -213,7 +214,7 @@ fn fillet_corner_rows(
     }
     let mut enter = false;
     let mut corner = if patch { Continuity::G2 } else { Continuity::G1 };
-    ui_kit::continuity_row_explained(ui, "ui.corners", "fi_corner", &mut corner, &FILLET_CORNERS.map(|(g, _)| g), &fillet_corner_tip());
+    continuity_row_explained(ui, "ui.corners", "fi_corner", &mut corner, &FILLET_CORNERS.map(|(g, _)| g), &fillet_corner_tip());
     if (corner == Continuity::G2) != patch {
         if corner == Continuity::G2 {
             extra.insert("corner".into(), json!(Continuity::G2.as_str()));
@@ -233,13 +234,13 @@ fn fillet_corner_rows(
         let least = r.and_then(|r| crate::dialogs::fillet_least_setback(ui.ctx(), s, items, &corners, r));
         let warning = least
             .filter(|least| length(&shown).is_some_and(|v| v <= least * (1.0 + 1e-9)))
-            .map(|least| crate::i18n::format("ui.fillet_setback_least", &[("least", &crate::length_input::shown(&s.doc, least))]));
+            .map(|least| solidcraft_ui_text::format("ui.fillet_setback_least", &[("least", &crate::length_input::shown(&s.doc, least))]));
         let mut text = shown.clone();
         let row = ui.scope(|ui| {
-            let hint = crate::i18n::format("ui.fillet_setback_hint", &[("factor", &factor)]);
+            let hint = solidcraft_ui_text::format("ui.fillet_setback_hint", &[("factor", &factor)]);
             ui_kit::checked_row(ui, "ui.fillet_setback", &mut text, &hint, warning.as_deref())
         });
-        row.response.backing_on_hover_text(crate::i18n::format("ui.fillet_setback_tip", &[("factor", &factor)]));
+        row.response.backing_on_hover_text(solidcraft_ui_text::format("ui.fillet_setback_tip", &[("factor", &factor)]));
         let (accepted, field) = row.inner;
         enter |= accepted;
         if text != shown {
@@ -358,7 +359,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         ui_kit::text(ui, &prompt, ui_kit::Text::Hint("tool")).backing_on_hover_text(&prompt);
         if matches!(&d.kind, Kind::SketchModify(k) if k.previews()) {
             let label = d.active_input().map(|input| tr(input.label)).unwrap_or_else(|| tr("Objects"));
-            let step = crate::i18n::format(
+            let step = solidcraft_ui_text::format(
                 "dialog.selection_step",
                 &[("step", &(d.active + 1).to_string()), ("total", &d.inputs.len().to_string()), ("input", label)],
             );
@@ -898,8 +899,11 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 enter |= expr_row(ui, "Distance", offset);
             }
         }
-        Kind::AnglePlane { angle } => {
+        Kind::AnglePlane { angle, direction_only } => {
             enter |= expr_row(ui, "Angle", angle);
+            ui_kit::options(ui, "plane_angle_options", &mut [("Use axis direction only", direction_only)]);
+            const PIVOT: Accept = selection::VERTICES | selection::POINTS | selection::CONSTRUCTION_POINTS;
+            set_object_accepting(&mut d.inputs, &mut d.active, "Pivot", PIVOT, *direction_only);
         }
         // The angle turns the plane from its reference, so it shows once one is picked.
         Kind::TangentPlane { angle } => {
@@ -934,7 +938,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 ui_kit::segmented(ui, &mut i, &["Emboss", "Deboss"], Default::default());
                 *deboss = i == 1;
             });
-            ui.add(egui::Label::new(crate::i18n::tr("ui.emboss_wrap_note")).wrap());
+            ui.add(egui::Label::new(solidcraft_ui_text::tr("ui.emboss_wrap_note")).wrap());
         }
         Kind::Align { flip, components, axes: [ax, ay, az], angle } => {
             // Where on the picked face or edge to snap: as picked (a face turns to meet
@@ -989,8 +993,26 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Stock { margin } => {
             enter |= expr_row(ui, "Margin", margin);
         }
-        Kind::Scale { factor } => {
-            enter |= expr_row(ui, "Scale factor", factor);
+        Kind::Scale { factor, per_axis, factor_y, factor_z } => {
+            form_row(ui, "Type", |ui| {
+                let mut i = usize::from(*per_axis);
+                ui_kit::segmented(ui, &mut i, &["scale.uniform", "scale.per_axis"], Default::default());
+                if (i == 1) != *per_axis {
+                    *per_axis = i == 1;
+                    // Y and Z start at the factor, so nothing changes until one of them does.
+                    if *per_axis {
+                        factor_y.clone_from(factor);
+                        factor_z.clone_from(factor);
+                    }
+                }
+            });
+            if *per_axis {
+                enter |= expr_row(ui, "X", factor);
+                enter |= expr_row(ui, "Y", factor_y);
+                enter |= expr_row(ui, "Z", factor_z);
+            } else {
+                enter |= expr_row(ui, "Scale factor", factor);
+            }
         }
         Kind::OffsetFaces { distance } => {
             enter |= expr_row(ui, "Distance", distance);
@@ -1117,7 +1139,7 @@ fn measure_rows(app: &SolveApp, ui: &mut egui::Ui, r: Option<&Value>, show: &mut
     for (i, it) in r["items"].as_array().into_iter().flatten().enumerate() {
         let lines = crate::quick_measure::item_lines(app, it);
         for (k, line) in lines.into_iter().enumerate() {
-            let label = if k == 0 { crate::i18n::format("measure.item", &[("number", &(i + 1).to_string())]) } else { String::new() };
+            let label = if k == 0 { solidcraft_ui_text::format("measure.item", &[("number", &(i + 1).to_string())]) } else { String::new() };
             // Coordinates need all three values; a fixed-height form cell elides the end.
             let text = if label.is_empty() { line } else { format!("{label}  {line}") };
             ui_kit::text(ui, &text, ui_kit::Text::Report(&format!("measure_item_{i}_{k}"), false));
@@ -1137,15 +1159,15 @@ fn measure_rows(app: &SolveApp, ui: &mut egui::Ui, r: Option<&Value>, show: &mut
             }
         } else {
             let text = crate::prefs::show_mm(app, d, 1);
-            form_row(ui, crate::i18n::tr_label("Distance"), |ui| {
-                let size = crate::theme::Tokens::get().form_close_size;
+            form_row(ui, solidcraft_ui_text::tr_label("Distance"), |ui| {
+                let size = solidcraft_theme::Tokens::get().form_close_size;
                 // The value keeps the room left of the button, so the button stays inside the row.
                 ui.scope(|ui| {
                     ui.set_max_width((ui.available_width() - size).max(0.0));
                     ui_kit::text(ui, &text, ui_kit::Text::Cell);
                 });
                 let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
-                let copy = ui_kit::icon_button_at(ui, rect, "copy", crate::i18n::tr_label("Copy"));
+                let copy = ui_kit::icon_button_at(ui, rect, "copy", solidcraft_ui_text::tr_label("Copy"));
                 crate::scenario::publish_handle("measure:copy:distance", copy.rect.center());
                 if copy.clicked() {
                     ui.ctx().copy_text(text.clone());
@@ -1160,7 +1182,7 @@ fn measure_rows(app: &SolveApp, ui: &mut egui::Ui, r: Option<&Value>, show: &mut
     if let Some(a) = r["angle_deg"].as_f64()
         && r["items"].as_array().is_some_and(|v| v.len() == 2)
     {
-        value(ui, crate::i18n::tr_label("Angle"), &format!("{a:.3}°"));
+        value(ui, solidcraft_ui_text::tr_label("Angle"), &format!("{a:.3}°"));
     }
 }
 
@@ -1181,7 +1203,7 @@ mod tests {
 
     #[test]
     fn common_forms_fit_both_layouts_and_scales_and_pin_footer_at_small_heights() {
-        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             for scale in [1.0, 2.0] {
                 for height in [950.0, 720.0] {
                     let mut h = Harness::new();
@@ -1223,7 +1245,7 @@ mod tests {
 
     #[test]
     fn tiny_windows_do_not_panic_or_publish_non_finite_cards() {
-        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             for size in [(1.0, 1.0), (40.0, 80.0), (180.0, 240.0)] {
                 let mut h = Harness::new();
                 h.call("ui.set", json!({"layout": mode}));
@@ -1281,6 +1303,57 @@ mod tests {
         h.step(&json!({"click":{"handle":format!("dialog:{row}")}})).unwrap();
         h.step(&json!({"click":{"handle":format!("dialog:{row}:{option}")}})).unwrap();
         h.frames(2);
+    }
+
+    #[test]
+    fn fillet_and_chamfer_name_the_body_of_their_edges() {
+        // Named, the feature looks for its edges on that body alone instead of meshing every
+        // body of the design on each preview and apply.
+        let h = fillet_harness();
+        let body = h.app.session.world_state().unwrap().bodies.first().unwrap().name.clone();
+        let p = parameters(&h);
+        assert_eq!(p["body"], json!(body), "{p}");
+        // Edges of two bodies name none: each point finds its own.
+        let mut h = Harness::new();
+        sample(&mut h);
+        h.app.run("solid.box", json!({"length":4,"width":4,"height":4,"corner":[20,0,0],"operation":"new"})).unwrap();
+        let a = edge_sel(&h.app.session, Vec3::new(5.0, 0.0, 5.0)).unwrap();
+        let b = edge_sel(&h.app.session, Vec3::new(22.0, 0.0, 4.0)).unwrap();
+        h.app.session.selection = vec![a, b];
+        h.step(&json!({"start":"solid.chamfer"})).unwrap();
+        h.frames(4);
+        let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        let (cmd, p) = commands.first().unwrap();
+        assert_eq!(*cmd, "solid.chamfer");
+        assert!(p.get("body").is_none(), "{p}");
+    }
+
+    #[test]
+    fn press_pull_on_a_bore_inside_another_part_moves_that_bore() {
+        // A pin standing inside a hollow housing that comes first: by its point alone the face
+        // was looked for on the housing, whose box holds it, and the command failed with
+        // "no face at …". The dialog now names the pin.
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":100,"width":100,"height":100,"body_name":"Housing"})).unwrap();
+        h.app.run("solid.box", json!({"length":80,"width":80,"height":100,"corner":[10,10,10],"operation":"cut","targets":["Housing"]})).unwrap();
+        h.app.run("solid.cylinder", json!({"base":[50,50,20],"radius":5,"height":20,"operation":"new","body_name":"Pin"})).unwrap();
+        let face = face_sel(&h.app.session, Vec3::new(55.0, 50.0, 30.0)).unwrap();
+        assert!(matches!(&face, Sel::Face { body, .. } if body == "Pin"), "{face:?}");
+        h.app.session.selection = vec![face];
+        h.step(&json!({"start":"solid.press_pull"})).unwrap();
+        h.frames(4);
+        let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+        let (cmd, mut p) = commands.first().cloned().unwrap();
+        assert_eq!(cmd, "solid.offset_face");
+        assert_eq!(p["body"], json!("Pin"), "{p}");
+        p["distance"] = json!(1);
+        h.app.run(&cmd, p).unwrap();
+        let st = h.app.session.world_state().unwrap();
+        let pin = st.body("Pin").unwrap().measure().unwrap();
+        let expected = std::f64::consts::PI * 36.0 * 20.0;
+        assert!((pin.volume - expected).abs() < expected * 1e-3, "pin volume {} (expected {expected})", pin.volume);
+        let housing = st.body("Housing").unwrap().measure().unwrap();
+        assert!((housing.volume - (1e6 - 80.0 * 80.0 * 90.0)).abs() < 1.0, "the housing is unchanged: {}", housing.volume);
     }
 
     #[test]
@@ -1479,7 +1552,7 @@ mod tests {
         };
         let shown = |h: &Harness| {
             let tree = h.output.accesskit_update.as_ref().unwrap();
-            let label = crate::i18n::tr_label("ui.fillet_setback");
+            let label = solidcraft_ui_text::tr_label("ui.fillet_setback");
             tree.nodes.iter().find(|(_, n)| n.label() == Some(label)).and_then(|(_, n)| n.value()).unwrap_or_default().to_string()
         };
         let typed = |h: &Harness| match &h.app.dialog.as_ref().unwrap().kind {
@@ -1538,12 +1611,13 @@ mod tests {
     /// are on the controls, the codes only in hover texts. Every section open, the corner row shown.
     #[test]
     fn fillet_labels_use_words_not_continuity_codes() {
+        crate::i18n::install();
         let coded = |text: &str| ["G0", "G1", "G2", "G3"].iter().any(|code| text.contains(code));
         for label in FILLET_TYPES.map(|(label, _)| label).into_iter().chain(FILLET_CORNERS.map(|(g, _)| g.label_id())) {
-            assert!(!coded(crate::i18n::tr_label(label)), "{label}: {}", crate::i18n::tr_label(label));
+            assert!(!coded(solidcraft_ui_text::tr_label(label)), "{label}: {}", solidcraft_ui_text::tr_label(label));
         }
         for (g, tip) in FILLET_CORNERS {
-            assert!(crate::i18n::tr(tip).contains(g.code()), "the hover text keeps the code for those who know it: {tip}");
+            assert!(solidcraft_ui_text::tr(tip).contains(g.code()), "the hover text keeps the code for those who know it: {tip}");
         }
         let tip = fillet_corner_tip();
         assert!(tip.contains("rolling") && tip.contains("1.5") && tip.contains("Setback"), "what each corner builds: {tip}");
@@ -1566,6 +1640,7 @@ mod tests {
     /// in them.
     #[test]
     fn a_setback_too_short_for_the_corner_says_the_least_that_builds() {
+        crate::i18n::install();
         let refused = format!(
             "invalid parameters for `solid.fillet`: the setback is too short for its corner: {}5.9620 mm (the corner's patch is convex only from there)",
             solidcraft_engine::kernel::SETBACK_AT_LEAST
@@ -1577,7 +1652,7 @@ mod tests {
         // A blend too large for its faces keeps its own words.
         assert_eq!(
             crate::dialogs::fillet_plain_error("the fillet is larger than the faces beside its edges allow", true),
-            Some(crate::dialogs::FilletRefusal::Plain(crate::i18n::tr("ui.fillet_error_too_large").to_string()))
+            Some(crate::dialogs::FilletRefusal::Plain(solidcraft_ui_text::tr("ui.fillet_error_too_large").to_string()))
         );
     }
 

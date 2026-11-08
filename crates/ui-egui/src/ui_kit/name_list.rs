@@ -3,8 +3,8 @@
 use super::metrics::dimension;
 use super::table::{Column, Table, TableRow, table_custom};
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::{scenario, theme::Tokens};
 use egui::{Response, Ui, vec2};
+use solidcraft_theme::Tokens;
 
 /// Columns past this are ignored: a list of named rows has a handful of cells.
 const MAX_COLUMNS: usize = 16;
@@ -21,7 +21,7 @@ const MEASURE_WIDTH: f32 = 4096.0;
 pub fn name_list(ui: &mut Ui, id: &str, columns: &[&str], empty: &str, add: impl FnOnce(&mut NameList<'_, '_>)) {
     let t = Tokens::get();
     let columns = columns.get(..columns.len().min(MAX_COLUMNS)).unwrap_or_default();
-    let key = ui.id().with(("name_list", id));
+    let key = ui.scope_id().with(("name_list", id));
     let measured: Vec<f32> = ui.data(|d| d.get_temp(key)).unwrap_or_default();
     let grid: Vec<Column<'_>> = columns
         .iter()
@@ -109,9 +109,9 @@ fn name_text(ui: &mut Ui, name: &str) -> Response {
     job.wrap.max_rows = 1;
     let cut = ui.fonts_mut(|fonts| fonts.layout_job(job)).elided;
     super::text::paint_text(ui, rect, name, font, t.form_ink, false);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), name));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), name));
     let id = format!("dialog:name:{name}");
-    scenario::publish_rect(&id, rect);
-    scenario::publish_count(&format!("{id}:cut"), f64::from(u8::from(cut)));
+    solidcraft_ui_registry::publish_rect(&id, rect);
+    solidcraft_ui_registry::publish_count(&format!("{id}:cut"), f64::from(u8::from(cut)));
     if cut { response.backing_on_hover_text(name) } else { response }
 }

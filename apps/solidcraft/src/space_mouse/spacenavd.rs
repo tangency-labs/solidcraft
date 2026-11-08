@@ -40,10 +40,10 @@ fn connect_to(path: &Path) -> Option<UnixStream> {
 
 /// The axes of one record, or `None` for a record that is not motion.
 ///
-/// The daemon's frame is right-handed with x to the right, y away from the user and z up; ours is
-/// the device's raw one, x right, y towards the user and z down, so y and z (and the rotations
-/// about them) change sign. With nothing set in `spnavcfg` the two give the same motion; what
-/// the user swaps or inverts there then carries over.
+/// The daemon reports x to the right, y up and z away from the user; our raw HID frame is x
+/// right, y towards the user and z down. Swap and negate y/z and ry/rz to match that frame.
+/// With nothing set in `spnavcfg` the two readers give the same motion; what the user swaps
+/// or inverts there then carries over.
 fn decode(record: &[u8; RECORD_BYTES]) -> Option<Axes> {
     let mut data = [0_i32; 8];
     for (slot, bytes) in data.iter_mut().zip(record.as_chunks::<4>().0) {
@@ -51,8 +51,8 @@ fn decode(record: &[u8; RECORD_BYTES]) -> Option<Axes> {
     }
     let [kind, x, y, z, rx, ry, rz, _period] = data;
     (kind == 0).then(|| Axes {
-        translation: [unit(x), unit(-i64::from(y)), unit(-i64::from(z))],
-        rotation: [unit(rx), unit(-i64::from(ry)), unit(-i64::from(rz))],
+        translation: [unit(x), unit(-i64::from(z)), unit(-i64::from(y))],
+        rotation: [unit(rx), unit(-i64::from(rz)), unit(-i64::from(ry))],
     })
 }
 
@@ -149,22 +149,28 @@ mod tests {
 
     #[test]
     fn motion_records_become_axes_in_the_devices_raw_frame() {
-        // Full deflection of the daemon's x, y and z is the device's full scale, and y and z flip.
-        assert_eq!(decode(&record([0, 500, 500, 500, 0, 0, 0, 8])), Some(Axes { translation: [350, -350, -350], rotation: [0; 3] }));
-        // Rotations follow translations: right-handed in both frames, so ry and rz flip as y and z do.
-        assert_eq!(decode(&record([0, 0, 0, 0, 250, 250, 250, 8])), Some(Axes { translation: [0; 3], rotation: [175, -175, -175] }));
+        // Each daemon axis reaches only its matching raw HID axis, in both directions.
+        for (daemon_axis, raw_axis, sign) in [(0, 0, 1), (1, 2, -1), (2, 1, -1), (3, 3, 1), (4, 5, -1), (5, 4, -1)] {
+            for value in [-500, 500] {
+                let mut data = [0; 8];
+                data[daemon_axis + 1] = value;
+                let mut expected = [0; 6];
+                expected[raw_axis] = sign * (value * 350 / 500) as i16;
+                assert_eq!(decode(&record(data)), Some(Axes::from(expected)), "daemon axis {daemon_axis}, value {value}");
+            }
+        }
         // Rest is a motion record of zeros.
         assert_eq!(decode(&record([0, 0, 0, 0, 0, 0, 0, 1200])), Some(Axes::default()));
     }
 
     #[test]
     fn what_spnavcfg_swaps_reaches_the_view() {
-        // The daemon sends a push away as y. With Y and Z swapped in spnavcfg it sends the same push
-        // as z, and the view gets a lift (raw z) instead of the zoom (raw y).
-        let before = decode(&record([0, 0, 500, 0, 0, 0, 0, 8])).map(|axes| axes.translation);
-        let after = decode(&record([0, 0, 0, 500, 0, 0, 0, 8])).map(|axes| axes.translation);
-        assert_eq!(before, Some([0, -350, 0]));
-        assert_eq!(after, Some([0, 0, -350]));
+        // A push away is daemon z (raw y); swapping Y/Z makes it a lift (raw z).
+        // The same swap changes a sideways tilt (daemon rz, raw ry) into a twist (raw rz).
+        let before = decode(&record([0, 0, 0, 500, 0, 0, 250, 8]));
+        let after = decode(&record([0, 0, 500, 0, 0, 250, 0, 8]));
+        assert_eq!(before, Some(Axes { translation: [0, -350, 0], rotation: [0, -175, 0] }));
+        assert_eq!(after, Some(Axes { translation: [0, 0, -350], rotation: [0, 0, -175] }));
     }
 
     #[test]
@@ -179,7 +185,7 @@ mod tests {
         // Nothing overflows on the extremes of `i32`.
         let extreme = decode(&record([0, i32::MIN, i32::MIN, i32::MAX, i32::MAX, i32::MIN, i32::MIN, -1]));
         assert_eq!(extreme.map(|axes| axes.translation[0]), Some(i16::MIN));
-        assert_eq!(extreme.map(|axes| axes.translation[1]), Some(i16::MAX));
+        assert_eq!(extreme.map(|axes| axes.translation), Some([i16::MIN, i16::MIN, i16::MAX]));
         assert_eq!(extreme.map(|axes| axes.rotation[0]), Some(i16::MAX));
     }
 

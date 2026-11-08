@@ -1,7 +1,37 @@
 //! Numbered stage navigation in a two-row workspace card. The caller owns commands and state.
-use crate::theme::{TabAccent, Tokens};
+use super::{Container, LayoutMode, Surface};
 use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Rect, Sense, Ui, pos2, vec2};
+use solidcraft_theme::{TabAccent, Tokens};
+
+/// The workspace switcher card, the ribbon card beside it and the bottom of the pair, laid out
+/// in the space above the viewport.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Cards {
+    pub workspace: Rect,
+    pub ribbon: Rect,
+    pub bottom: f32,
+}
+
+impl Cards {
+    /// The cards for `mode`, the switcher `workspace_width` wide (or as wide as there is room).
+    pub fn new(available: Rect, mode: LayoutMode, ribbon_height: f32, workspace_width: f32) -> Self {
+        let margin = Container::for_layout(mode, Surface::Chrome).gap();
+        let gap = margin;
+        let left = available.left() + margin;
+        let top = available.top() + margin;
+        let right = (available.right() - margin).max(left);
+        let workspace = Rect::from_min_size(
+            pos2(left, top),
+            vec2(
+                workspace_width.min((right - left).max(0.0)),
+                ribbon_height - if !Container::for_layout(mode, Surface::Chrome).floating() { 1.0 } else { 0.0 },
+            ),
+        );
+        let ribbon = Rect::from_min_max(pos2((workspace.right() + gap).min(right), top), pos2(right, top + ribbon_height));
+        Self { workspace, ribbon, bottom: ribbon.bottom() + margin }
+    }
+}
 
 pub(crate) struct StageAction<'a> {
     pub icon: Option<&'a str>,
@@ -24,14 +54,14 @@ impl StageBar {
     pub(crate) const HEADER_HEIGHT: f32 = 36.0;
 
     /// Shared compact workspace shell; independent of modelling ribbon label preferences.
-    pub(crate) fn cards(available: Rect) -> crate::shell::Cards {
+    pub(crate) fn cards(available: Rect) -> Cards {
         let gap = Tokens::get().space_8;
         let min = pos2(available.left() + gap, (available.top() + gap).min(available.bottom()));
         let right = (available.right() - gap).max(min.x);
         let bottom = (min.y + Self::HEIGHT).min(available.bottom()).max(min.y);
         let workspace = Rect::from_min_max(min, pos2((min.x + 104.0).min(right), bottom));
         let ribbon = Rect::from_min_max(pos2((workspace.right() + gap).min(right), min.y), pos2(right, bottom));
-        crate::shell::Cards { workspace, ribbon, bottom: (bottom + gap).min(available.bottom()) }
+        Cards { workspace, ribbon, bottom: (bottom + gap).min(available.bottom()) }
     }
 
     /// Workspace switcher content uses the same accent as the numbered stage chips.
@@ -89,12 +119,14 @@ impl StageBar {
         super::text::paint_text(ui, rect.shrink2(vec2(t.space_4, 0.0)), &label, font, t.text_dim, true);
     }
 
-    /// Quiet information chip within the tools row, using the shared surface and ink tokens.
-    pub(crate) fn note(ui: &mut Ui, label: &str) -> egui::Response {
+    /// Quiet information chip with a bounded, single-line label and shared surface/ink tokens. The caller supplies
+    /// the full-text tooltip when the surrounding row must keep its actions reachable.
+    pub(crate) fn note_bounded(ui: &mut Ui, label: &str, max_width: f32) -> egui::Response {
         let t = Tokens::get();
         let width = ui.painter().layout_no_wrap(label.into(), egui::FontId::proportional(t.font_label), t.text_dim).size().x;
-        let (rect, response) =
-            ui.allocate_exact_size(vec2(width + t.space_14 + t.space_6 + t.space_8 * 2.0, t.control_height - t.space_2), Sense::hover());
+        let width = width + t.space_14 + t.space_6 + t.space_8 * 2.0;
+        let width = width.min(max_width.max(t.control_height));
+        let (rect, response) = ui.allocate_exact_size(vec2(width, t.control_height - t.space_2), Sense::hover());
         ui.painter().rect_filled(rect, t.control_radius, t.dialog_footer);
         let icon = Rect::from_center_size(pos2(rect.left() + t.space_8 + t.space_14 / 2.0, rect.center().y), vec2(t.space_14, t.space_14));
         crate::icons::paint_ink(ui.painter(), icon, "help", t.text_dim);
@@ -199,7 +231,7 @@ impl StageBar {
                 if on { accent.ink } else { t.text },
                 false,
             );
-            response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, on, *label));
+            response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, on, *label));
             result.chips.push(chip.intersect(ui.clip_rect()));
             if response.clicked() {
                 result.stage = Some(index);
@@ -223,7 +255,7 @@ impl StageBar {
         // CommandSearch owns the actual field, focus, S shortcut and registered command dispatch.
         let search = search.intersect(ui.clip_rect());
         ui.ctx().data_mut(|d| {
-            let id = egui::Id::new("sc_ribbon_search");
+            let id = egui::Id::unique("sc_ribbon_search");
             if search.is_positive() {
                 d.insert_temp(id, search);
             } else {

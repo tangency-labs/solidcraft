@@ -49,6 +49,9 @@ enum K {
 
 use K::*;
 
+/// What `timeline.redefine` maps for a surface revolve, which no command is called.
+const SURFACE_REVOLVE_EDIT: &str = "surface.revolve (edit)";
+
 /// The parameters each command takes in world coordinates.
 fn table(id: &str) -> &'static [(&'static str, K)] {
     match id {
@@ -56,6 +59,10 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
             &[("face", Pick), ("faces", Picks), ("face_body", Body), ("from", Make), ("to", Make), ("targets", Body), ("participants", Body)]
         }
         "solid.revolve" => &[("face", Pick), ("axis", Axis), ("to", Make), ("targets", Body), ("participants", Body)],
+        // Edit Feature of a surface revolve (`map_local`): its `{origin, dir}` axis. A new surface
+        // revolve has no entry, so it is taken into the active frame whole (`to_active_frame`),
+        // picked edge and face axes too.
+        SURFACE_REVOLVE_EDIT => &[("axis", Axis)],
         "solid.box" | "solid.sphere" => &[("corner", Make), ("center", Make)],
         "solid.cylinder" | "solid.coil" | "solid.torus" | "solid.cone" => &[("base", Make), ("center", Make), ("axis", Dir)],
         "solid.fillet" | "solid.chamfer" => &[("edges", Picks), ("body", Body)],
@@ -65,7 +72,7 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "solid.thread" => &[("face", Pick), ("from", Pick), ("up_to", Plane)],
         "solid.emboss" => &[("face", Make)],
         "solid.draft" => &[("faces", Picks), ("neutral", Plane), ("pull", Dir), ("body", Body)],
-        "solid.press_pull" => &[("face", Pick), ("edges", Picks)],
+        "solid.press_pull" => &[("face", Pick), ("edges", Picks), ("body", Body)],
         "solid.replace_face" => &[("faces", Picks), ("target_face", Pick), ("target", Plane), ("body", Body)],
         // Align finds its picks where they are shown and takes both ends into the moved bodies'
         // frame itself: a pick mapped into the frame of the body under it would put the two ends
@@ -220,11 +227,11 @@ impl Mapper<'_> {
         let m = if self.here { self.f.sketch } else { under.as_ref().map(|(m, _)| *m).unwrap_or(self.f.active) };
         self.first.get_or_insert(m);
         let out = self.local_point(&m, p);
-        // The command sees the pick in the frame of the body under it. Remember the bodies
-        // whose faces meet there, so a face of that body is found and a body that only
-        // shares its place in the model does not make the pick ambiguous (#419).
-        if let Some((_, names)) = &under {
-            remember(out.as_ref().and_then(vec3).unwrap_or(p), names.clone());
+        // The command sees the pick in the frame of the body under it. Remember where it was
+        // picked and the bodies whose faces meet there, so a face of that body is found and a
+        // body that only shares its place in the model does not make the pick ambiguous (#419).
+        if !self.here {
+            remember(out.as_ref().and_then(vec3).unwrap_or(p), p, under.map(|(_, names)| names).unwrap_or_default());
         }
         out
     }
@@ -291,7 +298,10 @@ impl Mapper<'_> {
                         m.insert(k.into(), y);
                     }
                 }
+                // A sketch's view of the model holds a further placement by the name the world
+                // gives it (`with_placed_copies`), so that name stays (#9957).
                 if let Some(bn) = &b
+                    && !self.here
                     && let Some(own) = self.own_name(bn)
                 {
                     m.insert("body".into(), Value::String(own));
@@ -351,9 +361,19 @@ thread_local! {
     /// The outermost command is `solid.move`, whose parameters stay in the world when its bodies
     /// lie in differently turned frames (`split_move`).
     static OUTER_MOVE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-    /// The picks of the running command: the point it sees and the bodies whose faces meet
-    /// there (the first is the body under it; more than one means the pick is ambiguous).
-    static PICKS: std::cell::RefCell<Vec<(Vec3, Vec<String>)>> = const { std::cell::RefCell::new(Vec::new()) };
+    /// The picks of the running command.
+    static PICKS: std::cell::RefCell<Vec<Pick>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// A pick of the running command.
+struct Pick {
+    /// The point the command sees.
+    local: Vec3,
+    /// Where it was picked.
+    world: Vec3,
+    /// The bodies whose faces meet there: the first is the body under it, more than one means
+    /// the pick is ambiguous, and none that no face is under it.
+    bodies: Vec<String>,
 }
 
 /// How many picks of one command are remembered (a command takes few).
@@ -361,21 +381,28 @@ const MAX_PICKS: usize = 4096;
 /// How many bodies may meet at one pick (an ambiguous pick names them).
 const MAX_PICK_BODIES: usize = 64;
 
-/// Remember the bodies whose faces meet at a pick, against the point the command sees.
-fn remember(point: Vec3, names: Vec<String>) {
-    let names: Vec<String> = names.into_iter().take(MAX_PICK_BODIES).collect();
+/// Remember where a pick was made and the bodies whose faces meet there, against the point the
+/// command sees.
+fn remember(local: Vec3, world: Vec3, names: Vec<String>) {
+    let bodies: Vec<String> = names.into_iter().take(MAX_PICK_BODIES).collect();
     PICKS.with(|picks| {
         let mut picks = picks.borrow_mut();
         if picks.len() < MAX_PICKS {
-            picks.push((point, names));
+            picks.push(Pick { local, world, bodies });
         }
     });
 }
 
-/// The bodies whose faces meet at `point`, when the running command picked it: the first is
-/// the body under the pick, and more than one means the pick is ambiguous.
+/// The bodies whose faces meet at `point`, when the running command picked it on a face: the
+/// first is the body under the pick, and more than one means the pick is ambiguous.
 pub(crate) fn picked(point: Vec3) -> Option<Vec<String>> {
-    PICKS.with(|picks| picks.borrow().iter().find(|(p, _)| *p == point).map(|(_, names)| names.clone()))
+    PICKS.with(|picks| picks.borrow().iter().find(|p| p.local == point && !p.bodies.is_empty()).map(|p| p.bodies.clone()))
+}
+
+/// Where the running command's `nth` pick seen at `point` was picked (counting from 0: two picks
+/// on parts placed apart can be the same point in their own frames).
+pub(crate) fn picked_world(point: Vec3, nth: usize) -> Option<Vec3> {
+    PICKS.with(|picks| picks.borrow().iter().filter(|p| p.local == point).nth(nth).map(|p| p.world))
 }
 
 /// Forget the picks of the last command: a new one starts with none.
@@ -434,7 +461,11 @@ impl Drop for Nested {
 pub fn to_local(s: &Session, id: &str, params: &Value) -> crate::Result<Option<Value>> {
     // A command with no world picks has nothing to map, and may not need the bodies placed.
     let picks = !table(id).is_empty() || matches!(id, "library.apply" | "timeline.redefine" | "sketch.redefine");
-    if !picks || !placed(s) {
+    // Edit Feature of a revolve restores its saved axis (and the origin's expressions) even
+    // where nothing is placed (`map_local`).
+    let revolve_edit =
+        id == "timeline.redefine" && matches!(params.get("command").and_then(Value::as_str), Some("solid.revolve" | "surface.revolve"));
+    if !picks || (!placed(s) && !revolve_edit) {
         return Ok(None);
     }
     // A move of bodies in differently turned frames keeps its world vectors: `solid.move` splits
@@ -442,7 +473,8 @@ pub fn to_local(s: &Session, id: &str, params: &Value) -> crate::Result<Option<V
     if id == "solid.move" && split_move(s, params)?.is_some() {
         return Ok(None);
     }
-    let world = s.world_state()?;
+    // Nothing placed: the model is its own world, and only the saved axis is restored.
+    let world = if placed(s) { s.world_state()? } else { s.model.state() };
     Ok(map_local(s, &world, id, params))
 }
 
@@ -527,16 +559,42 @@ fn map_local(s: &Session, world: &solidcraft_doc::ModelState, id: &str, params: 
         if let solidcraft_doc::FeatureKind::Emboss { face: Some(face), .. } = &feature.kind {
             context.active_occurrence_path = (!face.author_path.is_empty()).then(|| face.author_path.clone());
         }
-        let mut inner = map_local(&context, world, cmd, params.get("params")?)?;
+        // Nothing to map (a surface revolve has no picks; a design with no placed component needs
+        // none): an untouched explicit axis is still restored below.
+        let edited = if cmd == "surface.revolve" { SURFACE_REVOLVE_EDIT } else { cmd };
+        let mapped = if placed(s) { map_local(&context, world, edited, params.get("params")?) } else { None };
+        let mut inner = match mapped {
+            Some(inner) => inner,
+            None if matches!(cmd, "solid.revolve" | "surface.revolve") => params.get("params")?.clone(),
+            None => return None,
+        };
         // An untouched explicit axis is displayed in world coordinates by Edit
         // Feature. Keep its exact saved values instead of an affine round trip.
-        if cmd == "solid.revolve"
-            && let solidcraft_doc::FeatureKind::Revolve { axis: solidcraft_doc::AxisRef::Line { origin, dir }, .. } = &feature.kind
+        if let (
+            "solid.revolve" | "surface.revolve",
+            solidcraft_doc::FeatureKind::Revolve { axis: solidcraft_doc::AxisRef::Line { origin, dir }, .. }
+            | solidcraft_doc::FeatureKind::SurfaceRevolve { axis: solidcraft_doc::AxisRef::Line { origin, dir }, .. },
+        ) = (cmd, &feature.kind)
+            && let Ok(at) = s.doc.eval_point(origin)
         {
             let frame = context.active_component_frame();
-            let displayed = serde_json::json!({"origin":pt(apply_point(&frame,origin.0)),"dir":pt(apply_vector(&frame,dir.0))});
-            if params.get("params").and_then(|p| p.get("axis")) == Some(&displayed) {
-                inner["axis"] = serde_json::json!({"origin":pt(origin.0),"dir":pt(dir.0)});
+            // Each half is kept when the dialog gives back what it showed (to float dust), so
+            // editing only the direction leaves the origin's expressions alone.
+            let given = params.get("params").and_then(|p| p.get("axis"));
+            let shown = |key: &str, shown: Vec3| {
+                let given = given.and_then(|a| a.get(key)).and_then(Value::as_array)?;
+                let [x, y, z] = given.as_slice() else { return None };
+                let near = |g: &Value, w: f64| g.as_f64().is_some_and(|g| (g - w).abs() <= 1e-9 * (1.0 + w.abs()));
+                (near(x, shown.x) && near(y, shown.y) && near(z, shown.z)).then_some(())
+            };
+            if let Some(axis) = inner.get_mut("axis").and_then(Value::as_object_mut) {
+                if shown("origin", apply_point(&frame, at)).is_some() {
+                    // The origin as saved: its expressions stay expressions.
+                    axis.insert("origin".into(), placement_point(origin));
+                }
+                if shown("dir", apply_vector(&frame, dir.0)).is_some() {
+                    axis.insert("dir".into(), pt(dir.0));
+                }
             }
         }
         let points = match (&feature.kind, cmd) {
@@ -677,16 +735,19 @@ fn map_local(s: &Session, world: &solidcraft_doc::ModelState, id: &str, params: 
     m.changed.then_some(Value::Object(out))
 }
 
+/// A placement point as saved: a plain number stays a number, an expression is its text.
+fn placement_point(p: &solidcraft_doc::PointExpr) -> Value {
+    Value::Array(
+        p.iter()
+            .map(|e| e.as_str().trim().parse::<f64>().ok().filter(|x| x.is_finite()).map_or_else(|| Value::from(e.as_str()), Value::from))
+            .collect(),
+    )
+}
+
 /// A primitive's saved placement inputs, in its component's frame, for redefining it with `cmd`.
 fn primitive_placement(kind: &solidcraft_doc::FeatureKind, cmd: &str) -> Vec<(&'static str, Value)> {
     use solidcraft_doc::FeatureKind as Feature;
-    let point = |p: &solidcraft_doc::PointExpr| {
-        Value::Array(
-            p.iter()
-                .map(|e| e.as_str().trim().parse::<f64>().ok().filter(|x| x.is_finite()).map_or_else(|| Value::from(e.as_str()), Value::from))
-                .collect(),
-        )
-    };
+    let point = placement_point;
     match (kind, cmd) {
         (Feature::Box { corner, .. }, "solid.box") => vec![("corner", point(corner))],
         (Feature::Sphere { center, .. }, "solid.sphere") | (Feature::Torus { center, .. }, "solid.torus") => vec![("center", point(center))],

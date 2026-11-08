@@ -1,7 +1,7 @@
 use super::*;
 use crate::scenario::{Harness, handle_at, rect_of};
 use crate::semantic_content::{self, ContentOwner, ContentRequest};
-use crate::shell::{LayoutMode, SHELL_GAP};
+use crate::ui_kit::{LayoutMode, SHELL_GAP};
 
 #[test]
 fn clicked_browser_folders_toggle_visibility_with_v() {
@@ -309,21 +309,21 @@ fn browser_card_shrinks_and_scrolls_without_covering_history() {
 
 #[test]
 fn selected_row_paints_tab_soft_fill_and_accent_text_in_both_layouts() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         for mode in [LayoutMode::Floating, LayoutMode::Docked] {
             for tab in ["MODEL", "SKETCH", "SURFACE", "MESH", "FORM", "SHEET METAL", "RENDER"] {
                 let ctx = crate::fonts::test_context();
                 let mut app = SolveApp::new(Default::default(), Default::default());
                 app.ui.layout = mode;
                 app.ui.tab = tab.into();
-                crate::theme::TabAccent::publish(&app, &ctx);
-                let accent = crate::theme::TabAccent::for_tab(&Tokens::get(), tab);
+                app.publish_tab_accent(&ctx);
+                let accent = solidcraft_theme::TabAccent::for_tab(&Tokens::get(), tab);
                 let mut row_rect = Rect::NOTHING;
                 let out = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
                     let row = Row { selected: true, label: "Selected body", dim: true, color: Some(Tokens::get().error), ..Default::default() };
-                    row_rect = draw_row(ui, egui::Id::new("selected-row"), &row).rect.unwrap();
+                    row_rect = draw_row(ui, egui::Id::unique("selected-row"), &row).rect.unwrap();
                 });
                 assert_eq!(row_rect.height(), 26.0);
                 assert!(out.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.rect == row_rect && r.fill == accent.soft)));
@@ -335,7 +335,7 @@ fn selected_row_paints_tab_soft_fill_and_accent_text_in_both_layouts() {
             }
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
@@ -595,7 +595,7 @@ fn browser_title_uses_a_single_semibold_run() {
         ui.set_width(250.0);
         browser_header(&mut app, ui, true);
     });
-    let title = crate::i18n::tr("ui.browser_title");
+    let title = solidcraft_ui_text::tr("ui.browser_title");
     let titles: Vec<_> = output
         .shapes
         .iter()
@@ -646,7 +646,7 @@ fn browser_width_rejects_hostile_preferences_and_tiny_windows_still_fit() {
     assert_eq!(browser_width(-100.0), MIN_BROWSER_WIDTH);
     assert_eq!(browser_width(f32::MAX), MAX_BROWSER_WIDTH);
     let available = Rect::from_min_size(Pos2::ZERO, vec2(100.0, 300.0));
-    for top_gap in [0.0, crate::shell::SHELL_GAP] {
+    for top_gap in [0.0, crate::ui_kit::SHELL_GAP] {
         let bounds = panel_bounds(available, None, MAX_BROWSER_WIDTH, top_gap);
         assert!(available.contains_rect(bounds));
     }
@@ -667,9 +667,9 @@ fn a_long_body_name_stays_inside_the_card_and_ends_in_an_ellipsis() {
 
 #[test]
 fn collapsed_rail_shares_header_hover_inset_and_expands_from_its_whole_card() {
-    let previous = crate::theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
-        crate::theme::set_dark(dark);
+        solidcraft_theme::set_dark(dark);
         for collapsed in [false, true] {
             let ctx = crate::fonts::test_context();
             ctx.global_style_mut(|style| style.animation_time = 0.0);
@@ -677,7 +677,7 @@ fn collapsed_rail_shares_header_hover_inset_and_expands_from_its_whole_card() {
             app.ui.tab = "SURFACE".into();
             app.preferences.timeline_left = true;
             app.preferences.timeline_left_browser_collapsed = collapsed;
-            crate::theme::TabAccent::publish(&app, &ctx);
+            app.publish_tab_accent(&ctx);
             let bounds = Rect::from_min_size(Pos2::ZERO, vec2(600.0, 700.0));
             let draw = |app: &mut SolveApp, events| {
                 crate::test_support::frame(&ctx, egui::RawInput { screen_rect: Some(bounds), events, ..Default::default() }, |ui| {
@@ -694,7 +694,7 @@ fn collapsed_rail_shares_header_hover_inset_and_expands_from_its_whole_card() {
             draw(&mut app, vec![egui::Event::PointerMoved(at)]);
             let output = draw(&mut app, vec![egui::Event::PointerMoved(at)]);
             assert_eq!(output.platform_output.cursor_icon, egui::CursorIcon::PointingHand);
-            let accent = crate::theme::TabAccent::current(&ctx);
+            let accent = solidcraft_theme::TabAccent::current(&ctx);
             let mut hover = None;
             for shape in &output.shapes {
                 crate::test_support::each_shape(&shape.shape, &mut |shape| {
@@ -719,7 +719,7 @@ fn collapsed_rail_shares_header_hover_inset_and_expands_from_its_whole_card() {
             }
         }
     }
-    crate::theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 /// #6907: a mesh body's row has its own icon and tooltip, so it can be told from a solid one.
@@ -751,8 +751,8 @@ fn mesh_and_solid_body_rows_have_different_icons_and_tooltips() {
     let row = |name: &str| rows.iter().find(|e| e.key == name).unwrap_or_else(|| panic!("no {name} row in {:?}", body_rows(&h.app)));
     assert_eq!((row("Mesh").icon, row("Mesh").tip), ("mesh_body", Some("ui.body_kind_mesh")));
     assert_eq!((row("Solid").icon, row("Solid").tip), ("body", Some("ui.body_kind_solid")));
-    assert_eq!(crate::i18n::tr("ui.body_kind_mesh"), "Mesh body");
-    assert_eq!(crate::i18n::tr("ui.body_kind_solid"), "Solid body");
+    assert_eq!(solidcraft_ui_text::tr("ui.body_kind_mesh"), "Mesh body");
+    assert_eq!(solidcraft_ui_text::tr("ui.body_kind_solid"), "Solid body");
     // Its own drawing in the mesh colours, not the solid body's grey cube.
     let icon = crate::icon_svg::resolve("mesh_body");
     assert!(!icon.placeholder);
@@ -1104,7 +1104,7 @@ fn semantic_frame_transitions(
             semantic_content::finalize(&mut h.app, ui.ctx());
             // App paths may converge after an early return; finalization must be idempotent.
             semantic_content::finalize(&mut h.app, ui.ctx());
-            if ui.ctx().data_mut(|data| data.remove_temp::<bool>(egui::Id::new("semantic-test-discard"))).unwrap_or(false) {
+            if ui.ctx().data_mut(|data| data.remove_temp::<bool>(egui::Id::unique("semantic-test-discard"))).unwrap_or(false) {
                 ui.ctx().request_discard("repeat semantic layout after input");
             }
         })
@@ -1516,7 +1516,7 @@ fn semantic_row_commands_are_consumed_once_across_layout_repeats() {
     let undo = h.app.session.undo.len();
     semantic_frame(&mut h, &owners, vec![egui::Event::PointerMoved(at)], egui::Modifiers::NONE);
     semantic_frame(&mut h, &owners, vec![semantic_button(at, egui::PointerButton::Primary, true, egui::Modifiers::NONE)], egui::Modifiers::NONE);
-    h.ctx.data_mut(|data| data.insert_temp(egui::Id::new("semantic-test-discard"), true));
+    h.ctx.data_mut(|data| data.insert_temp(egui::Id::unique("semantic-test-discard"), true));
     semantic_frame(&mut h, &owners, vec![semantic_button(at, egui::PointerButton::Primary, false, egui::Modifiers::NONE)], egui::Modifiers::NONE);
     assert!(body_hidden(&h, "One"), "a repeated layout cannot toggle the eye back on");
     assert_eq!(h.app.session.undo.len(), undo + 1);
@@ -1802,7 +1802,7 @@ fn switching_semantic_documents_preserves_unrelated_payload_and_capture() {
     }
     let from = semantic_at(ContentOwner::BROWSER, "One");
     semantic_drag_start(&mut h, &owners, from);
-    let external = egui::Id::new("external capture");
+    let external = egui::Id::unique("external capture");
     egui::DragAndDrop::set_payload(&h.ctx, "external payload".to_string());
     h.ctx.set_dragged_id(external);
     crate::documents::switch(&mut h.app, tab);

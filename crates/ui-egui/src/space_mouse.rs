@@ -493,7 +493,7 @@ pub(crate) fn stories(language: &str, mapping: Option<DriverMapping>, source: [u
         let row = source.iter().position(|&s| s == motion);
         motion_story(mapping, source, motion)
             .zip(row)
-            .map(|(label, row)| crate::i18n::Locale::for_language(language).format(label, &[("n", &(row + 1).to_string())]))
+            .map(|(label, row)| solidcraft_ui_text::Locale::for_language(language).format(label, &[("n", &(row + 1).to_string())]))
             .unwrap_or_default()
     })
 }
@@ -1160,6 +1160,7 @@ mod tests {
 
     fn wheel(dy: f32) -> egui::Event {
         egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
             unit: egui::MouseWheelUnit::Point,
             delta: egui::vec2(0.0, dy),
             modifiers: egui::Modifiers::NONE,

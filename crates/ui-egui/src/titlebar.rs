@@ -19,7 +19,7 @@ use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Color32, CursorIcon, Id, LayerId, Order, PointerButton, Pos2, Rect, ResizeDirection, Sense, Stroke, Ui, ViewportCommand, pos2, vec2};
 
 use crate::SolveApp;
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 /// One caption button: as wide as the native Windows ones.
 pub const BUTTON_WIDTH: f32 = 46.0;
@@ -42,7 +42,7 @@ pub const CAPTIONS: [Caption; 3] = [Caption::Minimize, Caption::Maximize, Captio
 
 /// Caption button ids (stable, so tests and agents can find them).
 pub fn caption_id(c: Caption) -> Id {
-    Id::new(("titlebar-caption", c as u8))
+    Id::unique(("titlebar-caption", c as u8))
 }
 
 fn maximized(ctx: &egui::Context) -> bool {
@@ -78,7 +78,7 @@ pub fn window_action(app: &mut SolveApp, ctx: &egui::Context, action: &str) -> R
 /// their clicks.
 pub fn drag_area(ui: &Ui, rect: Rect) {
     let ctx = ui.ctx();
-    let resp = ui.interact(rect, Id::new("titlebar-drag"), Sense::click_and_drag());
+    let resp = ui.interact(rect, Id::unique("titlebar-drag"), Sense::click_and_drag());
     // egui hands a drag that starts on a click-only widget to the drag-sensing background below
     // it, so remember whether the press itself landed on bare background.
     if ctx.input(|i| i.pointer.any_pressed()) {
@@ -191,10 +191,10 @@ pub fn resize_zones(ui: &mut Ui) {
     let w = ctx.content_rect();
     let ppp = ctx.pixels_per_point();
     let edge = resize_border_px(ctx.input(|i| i.viewport().native_pixels_per_point).unwrap_or(ppp)) / ppp;
-    let layer = LayerId::new(Order::Foreground, Id::new("titlebar-resize"));
+    let layer = LayerId::new(Order::Foreground, Id::unique("titlebar-resize"));
     let zui = ui.new_child(egui::UiBuilder::new().layer_id(layer).max_rect(w));
     for (i, (r, dir, cursor)) in zones(w, edge).into_iter().enumerate() {
-        let resp = zui.interact(r, Id::new(("titlebar-resize", i)), Sense::drag()).on_hover_cursor(cursor);
+        let resp = zui.interact(r, Id::unique(("titlebar-resize", i)), Sense::drag()).on_hover_cursor(cursor);
         if resp.drag_started_by(PointerButton::Primary) {
             ctx.send_viewport_cmd(ViewportCommand::BeginResize(dir));
         }
@@ -287,9 +287,9 @@ mod tests {
 
     #[test]
     fn every_bar_control_uses_translucent_hover_chrome() {
-        let previous = crate::theme::is_dark();
+        let previous = solidcraft_theme::is_dark();
         for dark in [false, true] {
-            crate::theme::set_dark(dark);
+            solidcraft_theme::set_dark(dark);
             let mut w = Win::new(1600.0);
             w.app.home.open = false;
             w.frame(vec![]);
@@ -329,7 +329,7 @@ mod tests {
                 );
             }
         }
-        crate::theme::set_dark(previous);
+        solidcraft_theme::set_dark(previous);
     }
 
     #[test]

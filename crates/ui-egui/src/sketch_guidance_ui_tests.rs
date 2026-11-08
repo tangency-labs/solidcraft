@@ -13,6 +13,7 @@ fn step(h: &mut Harness, value: Value) {
 fn fixture() -> Harness {
     let mut h = Harness::new();
     h.app.preferences.look_at_anim = false;
+    h.app.preferences.sketch_mirror_auto_line = false; // Exercise manual reference picking.
     for (command, params) in [
         ("sketch.create", json!({"plane":"XY"})),
         ("sketch.line", json!({"points":[[-30,10],[-15,10]]})),
@@ -216,7 +217,7 @@ fn sketch_modify_previews_use_the_active_occurrences_world_placement() {
         .run("occurrence.move", json!({"occurrence":part["occurrence"],"translate":[100,30,20],"axis":[0,0,1],"angle":"35 deg","capture":false}))
         .unwrap();
     let original = h.app.session.doc.to_json();
-    let colors = crate::preview::Colors::from_tokens(&crate::theme::Tokens::get());
+    let colors = crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::get());
     for (command, params) in [
         ("sketch.mirror", json!({"entities":["l1"],"line":"l2"})),
         ("sketch.pattern.rectangular", json!({"entities":["l1"],"count":3,"spacing":10})),

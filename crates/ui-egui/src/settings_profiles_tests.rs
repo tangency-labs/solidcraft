@@ -15,15 +15,33 @@ fn error(h: &mut Harness, id: &str, params: Value) -> String {
 }
 
 #[test]
+fn panel_arrow_bindings_and_cleared_defaults_survive_profile_export_import_and_apply() {
+    let mut h = Harness::new();
+    crate::keymap::bind(&mut h.app, "panel.sash.left", "Ctrl+Left", false).unwrap();
+    crate::keymap::bind(&mut h.app, "panel.sash.right", "", false).unwrap();
+    run(&mut h, "settings.profile.save", json!({"name":"Panels"}));
+    let profile = run(&mut h, "settings.profile.export", json!({"name":"Panels"}))["profile"].clone();
+    assert_eq!(profile["shortcuts"]["panel.sash.left"], "Ctrl+Left");
+    assert_eq!(profile["shortcuts"]["panel.sash.right"], "");
+    crate::keymap::reset(&mut h.app, None);
+    run(&mut h, "settings.profile.import", json!({"profile":profile,"name":"Imported panels"}));
+    run(&mut h, "settings.profile.apply", json!({"name":"Imported panels"}));
+    assert_eq!(crate::keymap::keys(&h.app, "panel.sash.left"), ["Ctrl+Left"]);
+    assert!(crate::keymap::keys(&h.app, "panel.sash.right").is_empty());
+}
+
+#[test]
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
-    assert_eq!(keys.len(), 98, "page presentation must not alter profile membership");
+    assert_eq!(keys.len(), 103, "Appearance includes its two system-theme slots");
     for key in [
         "nav",
         "mouse_gestures",
         "radial_context_menu",
         "zoom_reverse",
         "theme",
+        "theme_day",
+        "theme_night",
         "ui_scale",
         "ui_font",
         "navigator_style",
@@ -63,6 +81,38 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
 }
 
 #[test]
+fn profile_panel_layout_is_checked_separately_from_ordinary_preferences() {
+    use solidcraft_engine::panels::{Layout, LayoutEnvelope, PanelRegistry, WorkspaceId, encode};
+
+    let h = Harness::new();
+    let mut doc = capture(&h.app, "Layout");
+    assert!(doc.get("panel_layout").is_none(), "Classic does not acquire an opt-in layout through profile capture");
+    let envelope = LayoutEnvelope::new(Layout::empty(WorkspaceId::new("fixture.workspace").unwrap()));
+    let bytes = encode(&envelope, &PanelRegistry::default()).unwrap();
+    let layout = json!({"version":1,"envelope":String::from_utf8(bytes).unwrap()});
+    doc["panel_layout"] = layout.clone();
+    assert_eq!(sanitize(&doc).unwrap()["panel_layout"], layout, "the current layout travels by value");
+    let workspaces = json!({"version":2,"selected":"fixture.workspace","workspaces":{"fixture.workspace":layout["envelope"]}});
+    doc["panel_layout"] = workspaces.clone();
+    assert_eq!(sanitize(&doc).unwrap()["panel_layout"], workspaces, "workspace arrangements and selection travel together");
+
+    for invalid in [
+        Value::Null,
+        json!([]),
+        json!({"version":99,"envelope":"future"}),
+        json!({"version":1,"envelope":"not a layout"}),
+        json!({"version":1,"envelope":"x".repeat(256 * 1024 + 1)}),
+        json!({"version":1,"catalogue":[1,2,3]}),
+        json!({"version":2,"selected":"fixture.workspace","workspaces":{}}),
+        json!({"version":2,"selected":"missing","workspaces":{"fixture.workspace":layout["envelope"]}}),
+        json!({"version":2,"selected":"different","workspaces":{"different":layout["envelope"]}}),
+    ] {
+        doc["panel_layout"] = invalid;
+        assert!(sanitize(&doc).is_err(), "an explicit invalid layout must not become a profile that silently omits it");
+    }
+}
+
+#[test]
 fn switching_profiles_applies_every_setting_at_once() {
     let mut h = Harness::new();
     h.app.preferences.ui_scale = 1.0;
@@ -94,6 +144,30 @@ fn switching_profiles_applies_every_setting_at_once() {
     assert_eq!(h.app.toolbar_custom.panels.get("DESIGN/SOLID/CREATE"), Some(&vec!["solid.box".to_string()]));
 
     assert!(error(&mut h, "settings.profile.apply", json!({"name": "Desk"})).contains("no settings profile"));
+}
+
+/// The quick-access bar (#10223) travels with the toolbar: a profile captures it, survives its
+/// checks, and switching profiles brings each one's bar back.
+#[test]
+fn a_profile_carries_the_quick_access_bar() {
+    let mut h = Harness::new();
+    run(&mut h, "settings.profile.save", json!({"name": "Plain"}));
+    crate::toolbar_custom::quick_add(&mut h.app, "solid.fillet").unwrap();
+    crate::toolbar_custom::quick_add(&mut h.app, "solid.extrude").unwrap();
+    let doc = capture(&h.app, "Quick");
+    assert_eq!(doc["toolbar"]["quick_access"], json!(["solid.fillet", "solid.extrude"]));
+    assert_eq!(sanitize(&doc).unwrap(), doc);
+    run(&mut h, "settings.profile.save", json!({"name": "Quick"}));
+
+    run(&mut h, "settings.profile.apply", json!({"name": "Plain"}));
+    assert!(h.app.toolbar_custom.quick_access.is_empty());
+    run(&mut h, "settings.profile.apply", json!({"name": "Quick"}));
+    assert_eq!(h.app.toolbar_custom.quick_access, ["solid.fillet", "solid.extrude"]);
+
+    // A hostile list is cut down to what the bar holds.
+    let hostile = json!({"format": FORMAT, "name": "Odd", "toolbar": {"version": 3, "quick_access": (0..500).map(|i| json!(format!("c{i}"))).chain([json!(3)]).collect::<Vec<_>>()}});
+    let doc = sanitize(&hostile).unwrap();
+    assert_eq!(doc["toolbar"]["quick_access"].as_array().map(Vec::len), Some(crate::toolbar_custom::MAX_QUICK_ACCESS));
 }
 
 #[test]
@@ -191,7 +265,7 @@ fn theme_options_profiles_restore_replace_and_preserve_stale_values() {
     assert_eq!(out["skipped"], json!([]));
     assert_eq!(serde_json::to_value(&h.app.preferences.theme_options).unwrap(), options);
     h.frames(2);
-    assert_eq!(crate::theme::Tokens::get().panel, egui::Color32::from_rgb(0xab, 0xcd, 0xef));
+    assert_eq!(solidcraft_theme::Tokens::get().panel, egui::Color32::from_rgb(0xab, 0xcd, 0xef));
     run(&mut h, "settings.profile.apply", json!({"name":"Empty"}));
     assert!(h.app.preferences.theme_options.is_empty());
     run(&mut h, "settings.profile.apply", json!({"name":"Options"}));
@@ -408,7 +482,7 @@ fn general_profile_rows_save_replace_apply_and_show_real_state_in_both_themes() 
                 .unwrap();
             let count = crate::scenario::rect_of("dialog:section:Profiles:count").unwrap();
             assert!((count.left() - title.right() - 12.0).abs() < 1.1, "{theme}: count follows the painted title");
-            let t = crate::theme::Tokens::get();
+            let t = solidcraft_theme::Tokens::get();
             let rule = h
                 .shapes
                 .iter()
@@ -526,7 +600,7 @@ fn general_profile_rows_save_replace_apply_and_show_real_state_in_both_themes() 
         let active = crate::scenario::rect_of("prefs:profile:Desk:active").unwrap();
         assert!(desk.contains_rect(active));
         assert!((active.height() - 18.0).abs() < 0.5);
-        let t = crate::theme::Tokens::get();
+        let t = solidcraft_theme::Tokens::get();
         assert!(h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Rect(rect) if rect.rect == desk && rect.fill == t.selected_bg && rect.stroke.color == t.form_primary)));
         assert!(h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if desk.contains(text.pos) && text.galley.job.text == "Desk" && text.galley.job.sections.iter().all(|section| section.format.color == t.selected_ink && section.format.font_id == crate::fonts::semibold(t.font_label)))));
         let body = crate::scenario::rect_of("prefs:page_body").unwrap();
@@ -715,7 +789,7 @@ fn general_profile_row_rename_keeps_validation_and_unchanged_name_noop() {
 }
 
 #[test]
-fn profile_keys_preserve_the_literal_pre_split_baseline() {
+fn profile_keys_preserve_the_baseline_and_explicit_additions() {
     let expected = [
         "browser_bodies_folders",
         "browser_collapsed",
@@ -729,6 +803,7 @@ fn profile_keys_preserve_the_literal_pre_split_baseline() {
         "dialog_buttons",
         "dialog_place",
         "direct_interaction",
+        "escape_twice_finishes_sketch",
         "free_orbit",
         "free_orbit_upright",
         "hidden_toolbar_tabs",
@@ -768,8 +843,10 @@ fn profile_keys_preserve_the_literal_pre_split_baseline() {
         "ribbon_click_ends_tool",
         "ribbon_icon_grid",
         "ribbon_labels",
+        "ribbon_menus_follow_hover",
         "ribbon_menus_skip_pinned",
         "ribbon_reveal",
+        "ribbon_tabs_only",
         "right_drag_orbits",
         "select_other_hidden",
         "selection_shift_add_only",
@@ -791,7 +868,9 @@ fn profile_keys_preserve_the_literal_pre_split_baseline() {
         "status_bar",
         "suppress_sketch_snap",
         "theme",
+        "theme_day",
         "theme_follow",
+        "theme_night",
         "theme_options",
         "timeline_collapsed",
         "timeline_left",
@@ -818,7 +897,7 @@ fn profile_keys_preserve_the_literal_pre_split_baseline() {
     ];
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
-    assert_eq!(expected.len(), 98);
+    assert_eq!(expected.len(), 103);
     assert_eq!(actual, expected);
 }
 
@@ -826,7 +905,7 @@ fn profile_keys_preserve_the_literal_pre_split_baseline() {
 fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
     let mut h = Harness::new();
     let defaults = crate::prefs::Prefs::default();
-    assert!(!defaults.keep_work_on_tab_switch && !defaults.line_hover_tangent_arc);
+    assert!(!defaults.keep_work_on_tab_switch && !defaults.line_hover_tangent_arc && !defaults.ribbon_menus_follow_hover);
     for (key, page) in [("keep_work_on_tab_switch", crate::prefs::PAGE_LAYOUT), ("line_hover_tangent_arc", crate::prefs::PAGE_SKETCH)] {
         let homes: Vec<_> = crate::prefs::FIELD_PAGES.iter().filter_map(|(field, page)| (*field == key).then_some(*page)).collect();
         assert_eq!(homes, [Some(page)], "{key} keeps its new page home");
@@ -843,6 +922,7 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
     h.app.preferences.invert_navigator_arrows = true;
     h.app.preferences.home_fit_size = 0.5;
     h.app.preferences.ribbon_click_ends_tool = false;
+    h.app.preferences.ribbon_menus_follow_hover = true;
     h.app.preferences.sketch_face_activates_part = true;
     run(&mut h, "settings.profile.save", json!({"name":"Moved"}));
     let saved = h.app.settings_profiles.prefs();
@@ -854,6 +934,7 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
         ("invert_navigator_arrows", json!(true)),
         ("navigator_fit", json!(true)),
         ("ribbon_click_ends_tool", json!(false)),
+        ("ribbon_menus_follow_hover", json!(true)),
         ("sketch_face_activates_part", json!(true)),
     ] {
         assert_eq!(doc["preferences"][key], value, "capture retains {key}");
@@ -882,10 +963,11 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
     h.app.preferences.invert_navigator_arrows = defaults.invert_navigator_arrows;
     h.app.preferences.home_fit_size = defaults.home_fit_size;
     h.app.preferences.ribbon_click_ends_tool = defaults.ribbon_click_ends_tool;
+    h.app.preferences.ribbon_menus_follow_hover = defaults.ribbon_menus_follow_hover;
     h.app.preferences.sketch_face_activates_part = defaults.sketch_face_activates_part;
     let out = run(&mut h, "settings.profile.apply", json!({"name":"Moved"}));
     assert_eq!(out["skipped"], json!([]));
-    assert!(h.app.preferences.keep_work_on_tab_switch && h.app.preferences.line_hover_tangent_arc);
+    assert!(h.app.preferences.keep_work_on_tab_switch && h.app.preferences.line_hover_tangent_arc && h.app.preferences.ribbon_menus_follow_hover);
     assert_eq!(capture(&h.app, "Moved"), doc);
     for value in [0.05, 1.1] {
         let mut invalid = doc.clone();
@@ -894,6 +976,24 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
         let out = run(&mut h, "settings.profile.apply", json!({"name":imported["name"]}));
         assert_eq!(out["skipped"], json!(["home_fit_size"]));
         assert_eq!(h.app.preferences.home_fit_size, 0.5, "an out-of-range profile value is refused");
+    }
+}
+
+#[test]
+fn theme_day_and_night_are_captured_restored_and_saved_in_appearance_profiles() {
+    let mut h = Harness::new();
+    h.call("ui.prefs", json!({"theme":"system", "theme_day":"akari", "theme_night":"onyx"}));
+    run(&mut h, "settings.profile.save", json!({"name":"System pair"}));
+    let saved = h.app.settings_profiles.list[0].clone();
+    assert_eq!(saved["preferences"]["theme_day"], "akari");
+    assert_eq!(saved["preferences"]["theme_night"], "onyx");
+    assert_eq!(sanitize(&saved).unwrap(), saved);
+    h.call("ui.prefs", json!({"theme_day":"light", "theme_night":"dark"}));
+    run(&mut h, "settings.profile.apply", json!({"name":"System pair"}));
+    assert_eq!((&h.app.preferences.theme_day[..], &h.app.preferences.theme_night[..]), ("akari", "onyx"));
+    for key in ["theme_day", "theme_night"] {
+        let pages: Vec<_> = crate::prefs::FIELD_PAGES.iter().filter(|(field, _)| *field == key).map(|(_, page)| *page).collect();
+        assert_eq!(pages, [Some(crate::prefs::PAGE_APPEARANCE)]);
     }
 }
 

@@ -12,7 +12,7 @@
 use egui::{Color32, Pos2, Stroke, Vec2, vec2};
 
 use crate::motion::Transition;
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 /// The handles' core: the icon highlight (white in every theme), so the blue preview they sit on
 /// does not hide them. They carry no meaning, only contrast, so it is the same hot or not.
@@ -55,8 +55,8 @@ pub(super) const DIM: f32 = 0.25;
 pub(super) const DIM_S: f32 = 0.16;
 
 /// The marker answering the pointer arriving or leaving, and switching into and out of a drag.
-pub(super) const MARKER_HOT: Transition = Transition::symmetric(0.22);
-pub(super) const MARKER_ACTIVE: Transition = Transition::symmetric(0.36);
+pub(super) const MARKER_HOT: Transition = Transition::symmetric(0.12);
+pub(super) const MARKER_ACTIVE: Transition = Transition::symmetric(0.22);
 /// The marker's line width (a dash's and the shaft's).
 const LINE: f32 = 2.0;
 /// The dot's radius.

@@ -28,8 +28,8 @@ pub fn word_cased(name: &str) -> String {
 /// A ribbon tab's name as the ribbon shows it, in the current language: "SHEET METAL" reads
 /// "Sheet Metal", or "Blech" in German. A partial catalog may translate only the word-cased name.
 pub fn tab_name(tab: &str) -> String {
-    let cased = word_cased(crate::i18n::tr_label(tab_label(tab)));
-    crate::i18n::tr_label(&cased).to_string()
+    let cased = word_cased(solidcraft_ui_text::tr_label(tab_label(tab)));
+    solidcraft_ui_text::tr_label(&cased).to_string()
 }
 
 pub const TABS: &[&str] = &["MODEL", "SURFACE", "ASSEMBLE", "INSERT", "INSPECT", "MANAGE", "VIEW"];
@@ -247,6 +247,7 @@ pub const SECTIONS: &[Section] = &[
             "view.grid",
             "view.ground_shadow",
             "view.navigation_bar",
+            "view.ribbon_tabs_only",
         ],
     },
     Section { tab: "VIEW", panel: "SELECT", promoted: 0, ids: &[] },

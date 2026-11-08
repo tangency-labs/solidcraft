@@ -318,25 +318,34 @@ pub fn install(dir: PathBuf, build: Build) -> Vec<Summary> {
     let _ = fs::write(&seen_file, all.iter().map(|s| s.id.as_str()).collect::<Vec<_>>().join("\n"));
     let known = all.into_iter().filter_map(|s| sig_of(&s.id).map(|sig| (sig, (0, s.id)))).collect();
     let journal = Journal::open(&dir, &build, started);
-    if STATE
-        .set(State {
-            dir,
-            build,
-            environment: Mutex::new(String::new()),
-            journal: Mutex::new(journal),
-            known: Mutex::new(known),
-            written: AtomicUsize::new(0),
-            started,
-            started_ms,
-        })
-        .is_ok()
-    {
-        let previous = std::panic::take_hook();
-        std::panic::set_hook(Box::new(move |info| {
-            if !hook(info) {
-                previous(info);
+    match STATE.set(State {
+        dir,
+        build,
+        environment: Mutex::new(String::new()),
+        journal: Mutex::new(journal),
+        known: Mutex::new(known),
+        written: AtomicUsize::new(0),
+        started,
+        started_ms,
+    }) {
+        Ok(()) => {
+            let previous = std::panic::take_hook();
+            std::panic::set_hook(Box::new(move |info| {
+                if !hook(info) {
+                    previous(info);
+                }
+            }));
+        }
+        Err(state) => {
+            // The journal was already installed in this process: the one just opened is an
+            // orphan nobody holds, and the next start must not call it an unclean exit.
+            if let Ok(mut j) = state.journal.lock()
+                && let Some(path) = j.path.take()
+            {
+                j.file = None;
+                let _ = fs::remove_file(path);
             }
-        }));
+        }
     }
     fresh
 }
@@ -414,11 +423,16 @@ fn remove_stray_native_files(dir: &Path) {
 /// The app is closing normally: its journal goes, and repeat counts are written.
 pub fn end_session() {
     let Some(s) = STATE.get() else { return };
-    if let Ok(mut j) = s.journal.lock()
-        && let Some(path) = j.path.take()
-    {
-        j.file = None;
-        let _ = fs::remove_file(path);
+    if let Ok(mut j) = s.journal.lock() {
+        // The session ended cleanly: the journal says so before it goes. A journal that stays
+        // (the removal failed, the machine stopped in between) is then not an unclean exit at
+        // the next start: the `reported` flag says there is nothing left to report.
+        j.record(&json!({ "reported": "clean" }));
+        if let Some(path) = j.path.take() {
+            j.file = None;
+            // Best-effort: a journal that cannot go is not an unclean exit (it says so).
+            let _ = fs::remove_file(path);
+        }
     }
     let counts: Vec<(u64, String)> = s.known.lock().map(|k| k.values().filter(|(n, _)| *n > 0).cloned().collect()).unwrap_or_default();
     for (n, id) in counts {
@@ -485,12 +499,12 @@ fn hook(info: &std::panic::PanicHookInfo<'_>) -> bool {
                 q.push(p);
             }
         });
-        eprintln!("SolidCraft: internal error caught in a command; a crash report will be written");
+        solidcraft_geom::note!("SolidCraft: internal error caught in a command; a crash report will be written");
     } else {
         // Outside any command: what the journal knows has to do.
         let kind = if recovered { "kernel_panic_recovered" } else { "panic" };
         if let Some(id) = write_from_journal(state, kind, Some(&p)) {
-            eprintln!("SolidCraft: internal error; crash report {}", state.dir.join(&id).display());
+            solidcraft_geom::note!("SolidCraft: internal error; crash report {}", state.dir.join(&id).display());
             if !recovered && let Ok(mut j) = state.journal.try_lock() {
                 j.record(&json!({ "reported": id }));
             }

@@ -4,6 +4,61 @@ use super::finishing::{Backdrop, Finishing};
 use super::{CancelToken, ErrorCode, JobError, JobId, Result, ToneMap};
 use serde::{Deserialize, Serialize};
 
+/// Portable output intent. Exposure and the background remain owned by the image request.
+/// This contains presentation only; it never enables another transport integrator.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct OutputOptions {
+    pub tone_map: ToneMap,
+    pub finishing: Finishing,
+    pub backdrop: Option<Backdrop>,
+    pub linear_exr: bool,
+}
+impl OutputOptions {
+    /// Identity display keeps the CPU producer's original f64 PNG calculation.
+    pub fn identity_display(&self) -> bool {
+        self.tone_map == ToneMap::Reinhard && self.finishing.is_identity() && self.backdrop.is_none()
+    }
+    pub fn validate(self) -> Result<()> {
+        self.finishing.validate()?;
+        if let Some(backdrop) = self.backdrop {
+            backdrop.validate()?;
+        }
+        Ok(())
+    }
+    pub fn validate_image(self, width: u32, height: u32) -> Result<()> {
+        self.validate()?;
+        if !self.identity_display() || self.linear_exr {
+            super::linear_exr::encoded_limit(width, height)?;
+        }
+        Ok(())
+    }
+    pub fn presentation(self, exposure_ev: f64, background: [u8; 3], transparent_background: bool) -> Presentation {
+        Presentation { exposure_ev, background, transparent_background, tone_map: self.tone_map, finishing: self.finishing, backdrop: self.backdrop }
+    }
+    #[cfg(feature = "raytrace-cpu")]
+    pub(crate) fn required_bytes(self, width: u32, height: u32) -> Result<u64> {
+        self.validate_image(width, height)?;
+        if self.identity_display() && !self.linear_exr {
+            return Ok(0);
+        }
+        let count =
+            u64::from(width).checked_mul(u64::from(height)).ok_or_else(|| JobError::new(ErrorCode::LimitExceeded, "CPU output pixel overflow"))?;
+        // One owned float4 conversion, bloom ping/pong, photographic destination/state,
+        // and a final-only EXR companion. The existing producer covers RGBA and PNG output.
+        let bloom = self.finishing.bloom.map_or(Ok(0), |b| b.scratch_bytes(width, height))?;
+        let photographic = self.finishing.photographic.scratch_bytes(width, height)?;
+        let exr = if self.linear_exr { super::linear_exr::encoded_limit(width, height)? } else { 0 };
+        count
+            .checked_mul(16)
+            .and_then(|n| n.checked_add(std::mem::size_of::<super::output::OutputTask>() as u64))
+            .and_then(|n| n.checked_add(bloom))
+            .and_then(|n| n.checked_add(photographic))
+            .and_then(|n| n.checked_add(exr))
+            .ok_or_else(|| JobError::new(ErrorCode::LimitExceeded, "CPU presentation storage overflow"))
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Presentation {
@@ -136,7 +191,7 @@ impl Display {
                     let strength = self.finishing.bloom.map_or(0.0, |b| b.strength);
                     value += strength * self.tone_map.map(f64::from(glow[channel]) * self.exposure * self.finishing.rgb_gain[channel]);
                 }
-                *out = solidcraft_geom::srgb::encode8(value);
+                *out = solidcraft_color::srgb::encode8(value);
             }
             rgba[3] = if self.transparent { (alpha * 255.0).round() as u8 } else { 255 };
         }

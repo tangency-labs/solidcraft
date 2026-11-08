@@ -1,7 +1,7 @@
 //! Shared labelled settings blocks and compact explanatory specimens.
-use crate::theme::Tokens;
 use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Align, FontId, Layout, Rect, Sense, Stroke, Ui, pos2, vec2};
+use solidcraft_theme::Tokens;
 
 const SETTINGS_PAGE: &str = "sc_settings_page";
 pub(super) const ROW_HELP: &str = "sc_settings_row_help";
@@ -55,7 +55,7 @@ pub(crate) fn settings_change_dot(ui: &mut Ui, label: &str) -> egui::Response {
     let t = Tokens::get();
     let (rect, response) = ui.allocate_exact_size(vec2(t.space_8, t.space_8), Sense::hover());
     ui.painter().circle_filled(rect.center(), (t.space_8 - t.space_2 / 2.0) / 2.0, t.pref_note);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), label));
     response.backing_on_hover_text(label)
 }
 
@@ -75,14 +75,14 @@ pub(crate) fn settings_profile_button(ui: &mut Ui, label: &str, name: &str, edit
         let value = Rect::from_min_max(pos2(text_left, overline.bottom()), pos2(text_right, rect.center().y + t.space_16));
         super::text::paint_text(ui, overline, &label.to_uppercase(), crate::fonts::semibold(t.font_panel), t.form_dim, true);
         super::text::paint_text(ui, value, name, crate::fonts::semibold(t.font_label), t.form_ink, false);
-        crate::scenario::publish_rect("prefs:profile:icon", icon);
-        crate::scenario::publish_rect("prefs:profile:label", overline);
-        crate::scenario::publish_rect("prefs:profile:name", value);
-        crate::scenario::publish_rect("prefs:profile:chevron", chevron);
+        solidcraft_ui_registry::publish_rect("prefs:profile:icon", icon);
+        solidcraft_ui_registry::publish_rect("prefs:profile:label", overline);
+        solidcraft_ui_registry::publish_rect("prefs:profile:name", value);
+        solidcraft_ui_registry::publish_rect("prefs:profile:chevron", chevron);
         if edited {
             let dot = Rect::from_min_size(pos2(text_right + t.space_6, value.center().y - t.space_4), vec2(t.space_8, t.space_8));
             let response = ui.scope_builder(egui::UiBuilder::new().max_rect(dot), |ui| settings_change_dot(ui, changed_hint)).inner;
-            crate::scenario::publish_target("prefs:profile:edited", response.rect);
+            solidcraft_ui_registry::publish_target("prefs:profile:edited", response.rect);
         }
     });
     let response = ui.interact(card.response.rect, ui.make_persistent_id("profile_card"), Sense::click());
@@ -100,8 +100,8 @@ pub(crate) fn settings_profile_button(ui: &mut Ui, label: &str, name: &str, edit
     if response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), name));
-    crate::scenario::publish_rect("prefs:profile:sidebar_card", response.rect);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), name));
+    solidcraft_ui_registry::publish_rect("prefs:profile:sidebar_card", response.rect);
     response.backing_on_hover_text(label)
 }
 
@@ -125,7 +125,7 @@ pub(crate) fn settings_state_badge(ui: &mut Ui, label: &str, tone: SettingsBadge
     } else {
         ui.painter().galley(rect.center() - galley.size() / 2.0, galley, ink);
     }
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), label));
     if clipped { response.backing_on_hover_text(label) } else { response }
 }
 
@@ -141,9 +141,9 @@ pub(crate) struct SettingsChip<'a> {
 
 /// Bounded informational pill; an optional removal target lives inside the same outline.
 pub(crate) fn settings_chip(ui: &mut Ui, label: &str, chip: SettingsChip<'_>) -> egui::Response {
-    crate::prefs_search::note_unlabelled(ui, &[label]);
-    if crate::prefs_search::querying(ui) && !crate::prefs_search::visible(ui, &[label]) {
-        return crate::prefs_search::hidden_response(ui);
+    super::settings_search::note_unlabelled(ui, &[label]);
+    if super::settings_search::querying(ui) && !super::settings_search::visible(ui, &[label]) {
+        return super::settings_search::hidden_response(ui);
     }
     let t = Tokens::get();
     let ink = if chip.accent { t.selected_ink } else { t.form_dim };
@@ -161,8 +161,8 @@ pub(crate) fn settings_chip(ui: &mut Ui, label: &str, chip: SettingsChip<'_>) ->
     let height = if chip.compact { t.space_24 - t.space_2 } else { t.space_24 };
     let (rect, response) = ui.allocate_exact_size(vec2(natural.min(super::metrics::dimension(ui.max_rect().width())), height), Sense::hover());
     if super::layout::label(ui).is_empty() {
-        crate::prefs_search::remember(ui, label, rect);
-        crate::prefs_search::follow(ui, label, rect);
+        super::settings_search::remember(ui, label, rect);
+        super::settings_search::follow(ui, label, rect);
     }
     ui.painter().rect(
         rect,
@@ -182,7 +182,7 @@ pub(crate) fn settings_chip(ui: &mut Ui, label: &str, chip: SettingsChip<'_>) ->
     let text_left = (rect.left() + t.space_8 + icon_width).min(rect.right());
     let text_rect = Rect::from_min_max(pos2(text_left, rect.top()), pos2((rect.right() - t.space_8 - remove_width).max(text_left), rect.bottom()));
     super::text::paint_text(ui, text_rect, label, font, ink, false);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), label));
     if let Some(remove) = chip.remove {
         let target = Rect::from_min_max(pos2((rect.right() - t.space_24).max(rect.left()), rect.top()), rect.max);
         if let Some(key) = chip.key {
@@ -212,15 +212,15 @@ pub(crate) fn settings_block_hint<'a, R>(
 }
 
 fn settings_block_content<R>(ui: &mut Ui, label: &str, hint: Option<&str>, label_width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
-    if let Some(gate) = crate::prefs_search::block_gate(ui, label, hint) {
-        let before = crate::prefs_search::hits(ui);
+    if let Some(gate) = super::settings_search::block_gate(ui, label, hint) {
+        let before = super::settings_search::hits(ui);
         if !gate.show {
-            let result = crate::prefs_search::run_hidden(ui, label, add);
-            crate::prefs_search::block_finish(ui, &gate, false, before);
+            let result = super::settings_search::run_hidden(ui, label, add);
+            super::settings_search::block_finish(ui, &gate, false, before);
             return result;
         }
         let result = settings_block_body(ui, label, hint, label_width, add);
-        crate::prefs_search::block_finish(ui, &gate, true, before);
+        super::settings_search::block_finish(ui, &gate, true, before);
         return result;
     }
     settings_block_body(ui, label, hint, label_width, add)
@@ -255,7 +255,7 @@ fn settings_block_body<R>(ui: &mut Ui, label: &str, hint: Option<&str>, label_wi
         )
         .inner
     });
-    crate::scenario::publish_rect(&format!("dialog:row:{label}"), response.response.rect);
+    solidcraft_ui_registry::publish_rect(&format!("dialog:row:{label}"), response.response.rect);
     response.inner
 }
 
@@ -281,7 +281,7 @@ pub(crate) fn settings_autosave_timeline(ui: &mut Ui, minutes: f64) {
     let (r, _) = ui.allocate_exact_size(vec2(super::metrics::dimension(ui.available_width()), t.space_24 + t.space_12 + t.space_2), Sense::hover());
     let line = r;
     if settings_page_active(ui) {
-        crate::scenario::publish_rect("prefs:autosave_timeline", r);
+        solidcraft_ui_registry::publish_rect("prefs:autosave_timeline", r);
     }
     ui.painter().hline(line.x_range(), r.top() + t.space_10, Stroke::new(2.0, t.dialog_rule));
     if minutes.is_finite() && minutes > 0.0 {
@@ -304,7 +304,7 @@ pub(crate) fn settings_autosave_timeline(ui: &mut Ui, minutes: f64) {
             } else {
                 egui::Align2::CENTER_TOP
             },
-            crate::i18n::tr(key),
+            solidcraft_ui_text::tr(key),
             FontId::proportional(t.font_small),
             t.form_dim,
         );
@@ -324,11 +324,11 @@ pub(crate) fn settings_bindings(ui: &mut Ui, bindings: &[(&[&str], &str)]) {
         })
         .fold(t.space_24 * 8.0 + t.space_8, f32::max);
     for (keys, action) in bindings {
-        if crate::prefs_search::querying(ui) && !crate::prefs_search::shows_all(ui) {
-            if !crate::prefs_search::texts_hit(ui, &[action, &keys.join(" ")]) {
+        if super::settings_search::querying(ui) && !super::settings_search::shows_all(ui) {
+            if !super::settings_search::texts_hit(ui, &[action, &keys.join(" ")]) {
                 continue;
             }
-            crate::prefs_search::reveal(ui);
+            super::settings_search::reveal(ui);
         }
         let width = super::metrics::dimension(ui.available_width());
         let action_width = super::ContentWidth::label(ui, action);
@@ -353,8 +353,7 @@ pub(crate) fn settings_bindings(ui: &mut Ui, bindings: &[(&[&str], &str)]) {
         let action = ui.painter().layout((*action).to_owned(), FontId::proportional(t.font_label), t.form_ink, (width - action_left).max(0.0));
         let height = (action_top + action.size().y + t.space_4).max(keys_bottom).max(t.control_height + t.space_2);
         let (r, response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
-        response
-            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), format!("{}: {}", keys.join(" + "), action.text())));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), format!("{}: {}", keys.join(" + "), action.text())));
         t.secondary_hline(ui.painter(), r.x_range(), r.bottom(), t.dialog_rule);
         for (key, cap) in caps {
             let cap = cap.translate(r.min.to_vec2());
@@ -370,6 +369,6 @@ pub(crate) fn settings_precision_sample(ui: &mut Ui, text: &str) {
     let t = Tokens::get();
     let galley = ui.painter().layout_no_wrap(text.to_owned(), FontId::monospace(t.font_body), t.form_dim);
     let (r, response) = ui.allocate_exact_size(galley.size(), Sense::hover());
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), text));
     ui.painter().galley(r.min, galley, t.form_dim);
 }

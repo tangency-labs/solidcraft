@@ -3,9 +3,9 @@ use super::{
     metrics::dimension,
     text::{paint_text, paint_text_aligned},
 };
-use crate::theme::Tokens;
 use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Align2, FontId, InnerResponse, Rect, Response, Sense, Stroke, TextureId, Ui, Vec2, pos2, vec2};
+use solidcraft_theme::Tokens;
 
 pub(crate) struct RecoveryMessage<'a> {
     pub title: &'a str,
@@ -108,7 +108,7 @@ impl FileView {
             egui::Frame::NONE.fill(t.file_surface).stroke(t.tertiary_border(t.file_border)).corner_radius(t.radius_xl),
             |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
-                let key = ui.id().with("file_recent_index");
+                let key = ui.scope_id().with("file_recent_index");
                 ui.ctx().data_mut(|data| data.insert_temp(key, 0_usize));
                 let result = add(ui);
                 ui.ctx().data_mut(|data| data.remove::<usize>(key));
@@ -262,7 +262,7 @@ impl FileView {
         caption_job.wrap.max_rows = 2;
         let caption = ui.fonts_mut(|fonts| fonts.layout_job(caption_job));
         let group_height = title.size().y + t.space_2 + caption.size().y;
-        let top = text_rect.center().y - group_height / 2.0;
+        let top = text_top(text_rect, group_height);
         let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(text_rect));
         painter.galley(pos2(text_rect.left(), top), title.clone(), ink);
         painter.galley(pos2(text_rect.left(), top + title.size().y + t.space_2), caption, t.file_dim);
@@ -276,7 +276,7 @@ impl FileView {
             ui.painter().rect_filled(rect, t.radius_lg, t.hover);
         }
         let list = ui.stack().iter().find_map(|node| {
-            let key = node.id.with("file_recent_index");
+            let key = node.unique_id.with("file_recent_index");
             ui.ctx().data(|data| data.get_temp::<usize>(key)).map(|index| (key, index))
         });
         if let Some((key, index)) = list {
@@ -405,10 +405,17 @@ impl FileView {
     }
 }
 
+/// Where a tile's title and caption start: centred in `area`, or at its top when they are taller
+/// (a system font with tall lines, a wrapped translation, #7483), so the caption loses its end
+/// rather than the title its top.
+pub(crate) fn text_top(area: Rect, height: f32) -> f32 {
+    (area.center().y - height / 2.0).max(area.top())
+}
+
 fn allocate(ui: &mut Ui, id: &str, width: f32, height: f32, label: &str) -> (Rect, Response) {
     let (rect, _) = ui.allocate_exact_size(vec2(dimension(width).min(dimension(ui.available_width())), height), Sense::hover());
     let response = ui.interact(rect, ui.make_persistent_id(id), Sense::click());
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
     if response.clicked() {
         response.request_focus();
     }

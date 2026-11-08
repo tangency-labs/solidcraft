@@ -7,13 +7,16 @@ use std::sync::Arc;
 
 use crate::geom::{
     Associated, Axis1, BSplineCurve, BSplineSurface, Curve, CurveForm, KnotSpec, Logical, P3, Pcurve, Placement, PreferredRep, Surface,
-    SurfaceCurveKind, SurfaceForm, Trim, TrimPreference, dot, norm, scale, sub,
+    SurfaceCurveKind, SurfaceForm, Transform, Trim, TrimPreference, cross, dot, norm, scale, sub,
 };
 use crate::p21::{Entity, Exchange, Param};
 
 pub type R<T> = Result<T, String>;
 
-/// Geometry nesting we follow (a trimmed curve of a surface curve of …).
+/// Geometry nesting we follow (a trimmed curve of a surface curve of …). Real files nest a few
+/// levels; the cap bounds the stack, and it is what ends a curve or surface whose definition leads
+/// back to itself, so every curve and surface read checks it (`read_curve`,
+/// `read_surface`).
 pub const MAX_GEOM_DEPTH: usize = 12;
 /// Most control points in one B-spline (the whole net for a surface).
 pub const MAX_CTRL: usize = 1_000_000;
@@ -355,6 +358,43 @@ impl<'a> Reader<'a> {
         Ok(Axis1 { origin, direction })
     }
 
+    /// CARTESIAN_TRANSFORMATION_OPERATOR_3D, its axes made orthonormal as STEP derives them:
+    /// `Z` from `axis3` (default +Z), `X` from `axis1` made orthogonal to `Z`, `Y` = `Z` × `X`,
+    /// or its opposite (a mirror) when `axis2` points that way.
+    pub fn transform(&self, id: u64) -> R<Transform> {
+        let e = entity(self.ex, id)?;
+        if e.name() != "CARTESIAN_TRANSFORMATION_OPERATOR_3D" {
+            return Err(format!("not supported yet: transformation {}", e.name()));
+        }
+        // (name, description, axis1, axis2, local_origin, scale, axis3): the entity inherits a name
+        // from representation_item and a name and description from the functionally defined
+        // transformation.
+        let p = e.params();
+        let axis = |i: usize| p.get(i).and_then(Param::as_ref_id).map(|d| self.direction(d)).transpose();
+        let z = axis(6)?.unwrap_or([0.0, 0.0, 1.0]);
+        let x = match axis(2)? {
+            Some(a) => sub(a, scale(z, dot(a, z))),
+            None => {
+                let a = if z == [0.0, 0.0, 1.0] { [1.0, 0.0, 0.0] } else { [0.0, 0.0, 1.0] };
+                sub(a, scale(z, dot(a, z)))
+            }
+        };
+        let x = unit(x, &format!("#{id} axes"))?;
+        let mut y = cross(z, x);
+        if axis(3)?.is_some_and(|a| dot(a, y) < 0.0) {
+            y = scale(y, -1.0);
+        }
+        let origin = self.point(reference(p.get(4), "transformation origin")?)?;
+        let k = match p.get(5) {
+            Some(v) if v.as_f64().is_some() => num(Some(v), "transformation scale")?,
+            _ => 1.0,
+        };
+        if !(k > 0.0 && k.is_finite()) {
+            return Err(format!("#{id}: scale must be positive"));
+        }
+        Ok(Transform { origin, x, y, z, scale: k })
+    }
+
     /// A VECTOR: unit direction and magnitude (scaled as a length by `len`).
     fn vector_scaled(&self, id: u64, s: [f64; 3], dim: usize) -> R<(P3, f64)> {
         let e = entity(self.ex, id)?;
@@ -385,9 +425,6 @@ impl<'a> Reader<'a> {
         if let Some(c) = self.curves.get(&id) {
             return Ok(c.clone());
         }
-        if depth > MAX_GEOM_DEPTH {
-            return Err("curve definitions nested too deeply".into());
-        }
         let l = self.units.len;
         let c = Arc::new(self.read_curve(id, [l, l, l], 3, depth)?);
         self.curves.insert(id, c.clone());
@@ -400,9 +437,6 @@ impl<'a> Reader<'a> {
         let key = (id, [s[0].to_bits(), s[1].to_bits()]);
         if let Some(c) = self.curves_2d.get(&key) {
             return Ok(c.clone());
-        }
-        if depth > MAX_GEOM_DEPTH {
-            return Err("curve definitions nested too deeply".into());
         }
         let c = Arc::new(self.read_curve(id, s, 2, depth)?);
         self.curves_2d.insert(key, c.clone());
@@ -425,7 +459,12 @@ impl<'a> Reader<'a> {
         Ok(s[0])
     }
 
+    /// Every curve is read here, the basis of a 2D trimmed curve too, so the depth check here
+    /// ends every chain of curve references, a cycle included.
     fn read_curve(&mut self, id: u64, s: [f64; 3], dim: usize, depth: usize) -> R<Curve> {
+        if depth > MAX_GEOM_DEPTH {
+            return Err(format!("curve #{id}: definitions nested more than {MAX_GEOM_DEPTH} deep, or referring to themselves"));
+        }
         let e = entity(self.ex, id)?;
         if e.is_complex() {
             return self.bspline_curve(e, s, dim);
@@ -527,6 +566,11 @@ impl<'a> Reader<'a> {
                 let ref_direction = self.direction(reference(p.get(4), "offset curve direction")?)?;
                 Ok(Curve::OffsetCurve3d { basis, distance, self_intersect, ref_direction })
             }
+            "CURVE_REPLICA" if dim == 3 => {
+                let parent = self.curve_in(reference(p.get(1), "curve replica parent")?, depth + 1)?;
+                let transform = self.transform(reference(p.get(2), "curve replica transformation")?)?;
+                Ok(Curve::Replica { parent, transform })
+            }
             n => Err(format!("not supported yet: curve {n}{}", if dim == 2 { " in parameter space" } else { "" })),
         }
     }
@@ -583,6 +627,7 @@ impl<'a> Reader<'a> {
         match c {
             Curve::Circle { .. } | Curve::Ellipse { .. } => ParamKind::Angle,
             Curve::Trimmed { basis, .. } | Curve::OffsetCurve3d { basis, .. } => Self::curve_param_kind(basis),
+            Curve::Replica { parent, .. } => Self::curve_param_kind(parent),
             Curve::SurfaceCurve { curve_3d, .. } => Self::curve_param_kind(curve_3d),
             _ => ParamKind::Plain,
         }
@@ -633,15 +678,15 @@ impl<'a> Reader<'a> {
         if let Some(s) = self.surfaces.get(&id) {
             return Ok(s.clone());
         }
-        if depth > MAX_GEOM_DEPTH {
-            return Err("surface definitions nested too deeply".into());
-        }
         let s = Arc::new(self.read_surface(id, depth)?);
         self.surfaces.insert(id, s.clone());
         Ok(s)
     }
 
     fn read_surface(&mut self, id: u64, depth: usize) -> R<Surface> {
+        if depth > MAX_GEOM_DEPTH {
+            return Err(format!("surface #{id}: definitions nested more than {MAX_GEOM_DEPTH} deep, or referring to themselves"));
+        }
         let e = entity(self.ex, id)?;
         if e.is_complex() {
             return self.bspline_surface(e);

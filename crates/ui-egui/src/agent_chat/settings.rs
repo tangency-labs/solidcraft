@@ -34,15 +34,56 @@ pub struct AddState {
     /// Optional reasoning effort sent as `reasoning_effort`; empty sends nothing.
     pub reasoning_effort: String,
     pub error: Option<String>,
+    /// What the fields said when Add was refused: `error` stays only while they still say it.
+    refused: Option<AddInputs>,
     /// Editing this added agent (its id) instead of adding a new one.
     pub editing: Option<String>,
     /// Editing an endpoint whose key is in the keychain: an empty key field keeps it.
     pub saved_key: bool,
+    /// Consent belongs to the normalized URL, never to a different endpoint typed later.
+    insecure_http_url: Option<String>,
+    confirm_insecure_http: Option<String>,
     test: Option<Test>,
     /// The endpoint the model picker lists: what the fields said when they were last left.
     listing: Option<ListingKey>,
     /// The fields were left, or the picker opened: take what they say now.
     list_again: bool,
+}
+
+/// What the Add dialog's fields say, as far as a refusal can be about them: of the key only
+/// whether one is typed (`add_agent` reads nothing else of it, and no second copy is kept).
+type AddInputs = (AddKind, Protocol, usize, String, String, String, String, bool, u64, String);
+
+impl AddState {
+    fn inputs(&self) -> AddInputs {
+        (
+            self.kind,
+            self.protocol,
+            self.preset,
+            self.name.clone(),
+            self.command.clone(),
+            self.base_url.clone(),
+            self.model.clone(),
+            !self.key.trim().is_empty(),
+            self.request_timeout_s,
+            self.reasoning_effort.clone(),
+        )
+    }
+
+    /// Show why Add was refused, for as long as the fields stay as they are.
+    fn refuse(&mut self, error: String) {
+        self.refused = Some(self.inputs());
+        self.error = Some(error);
+    }
+
+    fn insecure_http_endpoint(&self) -> Option<String> {
+        let url = agents::normalize_url(&self.base_url).ok()?;
+        (self.kind == AddKind::Api && self.protocol == Protocol::OpenAi && !agents::key_safe_for(&url)).then_some(url)
+    }
+
+    fn allow_insecure_http(&self) -> bool {
+        self.insecure_http_url.as_ref().is_some_and(|url| self.insecure_http_endpoint().as_ref() == Some(url))
+    }
 }
 
 /// A connection test running or done.
@@ -94,17 +135,26 @@ pub struct State {
     card_listing: Option<(ListingKey, String)>,
 }
 
-/// What an endpoint's models are listed by: its protocol, its base URL, and whether a key goes along.
-type ListingKey = (Protocol, String, bool);
+/// Forget requests queued with an endpoint's revoked permission, without touching a started listing.
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn forget_card_listing(state: &mut State, id: &str) {
+    if state.card_listing.as_ref().is_some_and(|(_, agent)| agent == id) {
+        state.card_listing = None;
+    }
+}
+
+/// What an endpoint's models are listed by: protocol, base URL, whether a key goes along, and HTTP consent.
+type ListingKey = (Protocol, String, bool, bool);
 
 /// Most endpoints' listings kept.
 const ENDPOINT_LISTINGS_CAP: usize = 128;
 
 /// The listing of `base_url`, if that is an address. A key goes along only where it may be sent.
-fn listing_key(protocol: Protocol, base_url: &str, with_key: bool) -> Option<ListingKey> {
+fn listing_key(protocol: Protocol, base_url: &str, with_key: bool, allow_insecure_http: bool) -> Option<ListingKey> {
     let url = agents::normalize_url(base_url).ok().filter(|url| url.len() <= 4096)?;
-    let with_key = with_key && agents::key_safe_for(&url);
-    Some((protocol, url, with_key))
+    let allow_insecure_http = protocol == Protocol::OpenAi && allow_insecure_http;
+    let with_key = with_key && agents::key_allowed_for(&url, allow_insecure_http);
+    Some((protocol, url, with_key, allow_insecure_http))
 }
 
 /// The models listed for `key`, and the note for under them: still listing, or why it could not.
@@ -157,13 +207,13 @@ fn start_listing(app: &mut SolveApp, ctx: &egui::Context, key: ListingKey, secre
         return;
     };
     let (tx, rx) = std::sync::mpsc::channel();
-    let (protocol, url) = (key.0, key.1.clone());
-    let language = crate::i18n::language();
+    let (protocol, url, allow_insecure_http) = (key.0, key.1.clone(), key.3);
+    let language = solidcraft_ui_text::language();
     let wake = ctx.clone();
     let spawned = std::thread::Builder::new().name("endpoint-models".into()).spawn(move || {
-        let _language = crate::i18n::scope(language);
+        let _language = solidcraft_ui_text::scope(language);
         let list = secret().and_then(|secret| match protocol {
-            Protocol::OpenAi => super::api_client::model_list(&http, &url, secret.as_deref()),
+            Protocol::OpenAi => super::api_client::model_list(&http, &url, secret.as_deref(), allow_insecure_http),
             Protocol::Anthropic => super::api_client::anthropic_model_list(&http, &url, secret.as_deref()),
         });
         let _ = tx.send(list);
@@ -208,7 +258,7 @@ fn list_for_dialog(app: &mut SolveApp, ctx: &egui::Context) {
     // Editing an agent whose key is kept: the listing goes with that key, read on its thread.
     let stored = s.editing.clone().filter(|_| s.saved_key && typed.is_none());
     if std::mem::take(&mut s.list_again) {
-        s.listing = listing_key(s.protocol, &s.base_url, typed.is_some() || stored.is_some());
+        s.listing = listing_key(s.protocol, &s.base_url, typed.is_some() || stored.is_some(), s.allow_insecure_http());
         // Asked again: what failed may work now, with another key or the server back up.
         if let Some(key) = &s.listing
             && listing_wants_retry(state.endpoint_models.get(key))
@@ -350,6 +400,7 @@ pub fn open_edit(app: &mut SolveApp, id: &str) -> bool {
         s.base_url = c.base_url.clone();
         s.model = c.model.clone();
         s.saved_key = c.key;
+        s.insecure_http_url = c.allow_insecure_http.then(|| c.base_url.clone());
     } else {
         s.kind = AddKind::Custom;
         s.command = c.command.clone();
@@ -371,6 +422,8 @@ pub(super) fn choose_preset(s: &mut AddState, protocol: Protocol, index: usize) 
     s.error = None;
     s.test = None;
     s.list_again = true;
+    s.insecure_http_url = None;
+    s.confirm_insecure_http = None;
 }
 
 /// Run a connection test in the background (it starts the agent briefly, or asks the endpoint
@@ -388,8 +441,9 @@ fn start_test(app: &SolveApp, e: &agents::Entry, key: Option<String>) -> Test {
         Kind::Api => {
             let Some(http) = app.services.agent_http.clone() else { return Test::Done(Err(TestError::Other(tr("ui.ai_no_http").to_string()))) };
             let (url, model) = (e.base_url.clone(), e.model.clone());
+            let allow_insecure_http = e.allow_insecure_http;
             std::thread::spawn(move || {
-                let _ = tx.send(super::api_client::test_endpoint(&http, &url, key.as_deref(), &model).map_err(TestError::Other));
+                let _ = tx.send(super::api_client::test_endpoint(&http, &url, key.as_deref(), &model, allow_insecure_http).map_err(TestError::Other));
             });
         }
         Kind::Anthropic => {
@@ -419,7 +473,7 @@ fn timeout_field(ui: &mut egui::Ui, secs: &mut u64, handle: &str) -> bool {
 
 /// The free-text reasoning effort field with its hover hint; true when the text changed.
 fn effort_field(ui: &mut egui::Ui, effort: &mut String, handle: &str) -> bool {
-    let response = ui_kit::cell_editor(ui, ui.id().with("ai_reasoning_effort"), effort, tr("ui.ai_reasoning_effort_field_hint"), false)
+    let response = ui_kit::cell_editor(ui, ui.scope_id().with("ai_reasoning_effort"), effort, tr("ui.ai_reasoning_effort_field_hint"), false)
         .backing_on_hover_text(tr("ui.ai_reasoning_effort_hint"));
     crate::scenario::publish_target(handle, response.rect);
     response.changed()
@@ -465,16 +519,19 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
             permissions_section(app, ui);
             #[cfg(not(target_arch = "wasm32"))]
             {
-                let browsing = !crate::prefs_search::querying(ui) || app.prefs_window.section == crate::prefs::PAGE_ASSISTANT;
+                let browsing = !crate::ui_kit::settings_search::querying(ui) || app.prefs_window.section == crate::prefs::PAGE_ASSISTANT;
                 if app.preferences.ai_features && browsing && app.agent_chat.detection.is_none() && app.agent_chat.detecting.is_none() {
                     refresh(app, &ui.ctx().clone());
                 }
                 agents_section(app, ui);
             }
+            instructions_section(app, ui);
             panel_section(app, ui);
             connecting_section(app, ui);
         });
         ui.add_enabled_ui(app.preferences.ai_features, |ui| pointer_section(app, ui));
+        // Agents through MCP don't use the chat, so this stays on with AI features off.
+        mcp_section(app, ui);
     });
 }
 
@@ -493,6 +550,21 @@ fn connecting_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::help_icon(ui, tr(help));
             });
         }
+    });
+}
+
+/// Custom instructions (#8220): text every new chat's system note carries.
+fn instructions_section(app: &mut SolveApp, ui: &mut egui::Ui) {
+    ui_kit::settings_section(ui, "instructions", tr("ai.prefs.instructions"), |ui| {
+        let id = egui::Id::unique("prefs_agent_instructions");
+        let text = &mut app.preferences.agent_instructions;
+        let response = ui_kit::text_area(ui, tr("ai.prefs.instructions"), id, text, 6, acp::INSTRUCTIONS_LIMIT);
+        if response.has_focus() {
+            // Typed text belongs to the field, not to Preferences search.
+            crate::ui_kit::settings_search::note_key_sink(ui.ctx());
+        }
+        crate::scenario::publish_target("prefs:agent_instructions", response.rect);
+        ui_kit::text(ui, tr("ai.prefs.instructions_note"), ui_kit::Text::Hint("instructions"));
     });
 }
 
@@ -546,7 +618,7 @@ fn permissions_section(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             let names: std::collections::HashMap<_, _> = agents::entries(app).into_iter().map(|entry| (entry.id, entry.name)).collect();
             for (agent, tools) in remembered {
-                let t = crate::theme::Tokens::get();
+                let t = solidcraft_theme::Tokens::get();
                 ui_kit::settings_block(ui, names.get(&agent).unwrap_or(&agent), t.space_24 * 6.0 + t.space_6, |ui| {
                     ui.horizontal(|ui| {
                         let reset = ui_kit::button(ui, tr("ui.ai_reset"), ui_kit::Button::Small);
@@ -563,7 +635,7 @@ fn permissions_section(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 fn panel_section(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     ui_kit::settings_section(ui, "panel", tr("ui.ai_panel"), |ui| {
         let label_width = [tr("ui.agent_chat_side"), tr("ui.agent_chat_turn_limit")]
             .iter()
@@ -586,20 +658,20 @@ fn panel_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let previous = usize::from(p.agent_chat_turn_limit != 0);
                 let mut limit = previous;
                 let options = [tr("ui.agent_chat_turn_unlimited"), tr("prefs.assistant_limited")];
-                crate::prefs_search::note_current(ui, &options.join(" "));
+                crate::ui_kit::settings_search::note_current(ui, &options.join(" "));
                 let dropdown_width = ui_kit::ContentWidth::dropdown(ui, &options);
                 let response =
                     ui_kit::settings_control_width(ui, dropdown_width, |ui| ui_kit::dropdown(ui, "assistant_turn_limit", &mut limit, &options));
-                let query = crate::prefs_search::query(ui);
+                let query = crate::ui_kit::settings_search::query(ui);
                 if let Some(option) = options
                     .iter()
                     .find(|option| option.to_lowercase() == query)
-                    .or_else(|| options.iter().find(|option| crate::prefs_search::texts_hit(ui, &[*option])))
+                    .or_else(|| options.iter().find(|option| crate::ui_kit::settings_search::texts_hit(ui, &[*option])))
                 {
-                    crate::prefs_search::remember(ui, option, response.rect);
+                    crate::ui_kit::settings_search::remember(ui, option, response.rect);
                 }
                 for option in options {
-                    crate::prefs_search::follow(ui, option, response.rect);
+                    crate::ui_kit::settings_search::follow(ui, option, response.rect);
                 }
                 crate::scenario::publish_target("prefs:agent_chat_turn_limit:mode", response.rect);
                 if limit != previous {
@@ -627,14 +699,14 @@ fn pointer_section(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui,
             |ui| {
                 let response = ui_kit::checkbox(ui, tr("ai.prefs.show_pointer"), &mut app.ui.agent_cursor.show)
-                    .backing_on_hover_text(crate::i18n::tr_label("Show the pointer an AI agent moves (#35)"));
+                    .backing_on_hover_text(solidcraft_ui_text::tr_label("Show the pointer an AI agent moves (#35)"));
                 crate::scenario::publish_target("prefs:agent_pointer_show", response.rect);
                 ui.add_enabled_ui(app.ui.agent_cursor.show, |ui| {
-                    let speed_label_width = ui_kit::ContentWidth::label(ui, tr("ai.prefs.pointer_speed")) + crate::theme::Tokens::get().space_4;
+                    let speed_label_width = ui_kit::ContentWidth::label(ui, tr("ai.prefs.pointer_speed")) + solidcraft_theme::Tokens::get().space_4;
                     ui_kit::settings_form(ui, speed_label_width, |ui| {
                         ui_kit::row(ui, tr("ai.prefs.pointer_speed"), |ui| {
                             let name = tr("prefs.assistant_pointer_speed");
-                            crate::prefs_search::note_current(ui, name);
+                            crate::ui_kit::settings_search::note_current(ui, name);
                             let response =
                                 ui_kit::named_control(ui, name, |ui| crate::agent_cursor::speed_slider(ui, &mut app.ui.agent_cursor.speed));
                             crate::scenario::publish_target("prefs:agent_pointer_speed", response.rect);
@@ -645,11 +717,11 @@ fn pointer_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                             response.widget_info(|| egui::WidgetInfo::slider(ui.is_enabled(), value, name));
                             // The visible row owns Speed and its legacy Motion speed alias. The
                             // native editor's name owns queries that only match Pointer speed.
-                            if !crate::prefs_search::texts_hit(ui, &[tr("ai.prefs.pointer_speed")]) {
-                                crate::prefs_search::remember(ui, name, response.rect);
+                            if !crate::ui_kit::settings_search::texts_hit(ui, &[tr("ai.prefs.pointer_speed")]) {
+                                crate::ui_kit::settings_search::remember(ui, name, response.rect);
                             }
                             for label in [tr("ai.prefs.pointer_speed"), name] {
-                                crate::prefs_search::follow(ui, label, response.rect);
+                                crate::ui_kit::settings_search::follow(ui, label, response.rect);
                             }
                         });
                     });
@@ -662,8 +734,24 @@ fn pointer_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
                 (app.ui.agent_cursor.show, app.ui.agent_cursor.speed.label(), app.ui.agent_cursor.follow_camera)
             },
-            |ui, (visible, speed, follow)| ui_kit::settings_pointer_preview(ui, visible, crate::i18n::tr_label(&speed), follow),
+            |ui, (visible, speed, follow)| ui_kit::settings_pointer_preview(ui, visible, solidcraft_ui_text::tr_label(&speed), follow),
         );
+    });
+}
+
+/// The AI page's section for agents outside the app, which reach it through the MCP server
+/// whether or not the chat is on: shown below the chat's settings, with the chat off too.
+fn mcp_section(app: &mut SolveApp, ui: &mut egui::Ui) {
+    if cfg!(target_arch = "wasm32") {
+        return;
+    }
+    ui_kit::settings_section(ui, "mcp_agents", tr("ui.mcp_agents"), |ui| {
+        ui.horizontal(|ui| {
+            let response =
+                ui_kit::checkbox(ui, tr("ui.mcp_compact"), &mut app.preferences.mcp_compact).backing_on_hover_text(tr("ui.mcp_compact_note"));
+            crate::scenario::publish_handle("prefs:mcp_compact", response.rect.center());
+            ui_kit::help_icon(ui, tr("ui.mcp_compact_note"));
+        });
     });
 }
 
@@ -679,7 +767,7 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut retimed: Option<(String, u64)> = None;
     let mut reeffort: Option<(String, String)> = None;
     let mut picked_model: Option<(String, ui_kit::Picked)> = None;
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     ui_kit::settings_section_count(ui, "agents", tr("ui.ai_agents"), Some(&all.len().to_string()), |ui| {
         if app.agent_chat.detecting.is_some() {
             ui_kit::text(ui, tr("ui.agent_chat_detecting"), ui_kit::Text::Hint("detecting"));
@@ -693,12 +781,12 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
         for entry in &all {
             ui.push_id(&entry.id, |ui| {
                 let detail = entry.detail();
-                let gate = crate::prefs_search::block_gate(ui, &entry.name, Some(&format!("{} {detail}", entry.id)));
-                let before = crate::prefs_search::hits(ui);
+                let gate = crate::ui_kit::settings_search::block_gate(ui, &entry.name, Some(&format!("{} {detail}", entry.id)));
+                let before = crate::ui_kit::settings_search::hits(ui);
                 let mut paint = |ui: &mut egui::Ui| {
                     let card = ui_kit::settings_card(ui, |ui| {
                         ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-                            crate::prefs_search::visible(ui, &[&entry.name, &entry.id, &detail]);
+                            crate::ui_kit::settings_search::visible(ui, &[&entry.name, &entry.id, &detail]);
                             ui.label(egui::RichText::new(&entry.name).strong().size(t.font_label).color(t.form_ink));
                             ui.allocate_ui_with_layout(
                                 egui::vec2(ui.available_width(), t.control_height),
@@ -763,7 +851,7 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                                     let shown = current.map_or_else(|| tr("ui.ai_mode_global").to_owned(), |mode| mode.label().to_owned());
                                     let mut pick: Option<Option<Mode>> = None;
                                     let options: Vec<_> = std::iter::once(tr("ui.ai_mode_global")).chain(Mode::ALL.map(Mode::label)).collect();
-                                    crate::prefs_search::note_current(ui, &options.join(" "));
+                                    crate::ui_kit::settings_search::note_current(ui, &options.join(" "));
                                     let response = ui_kit::settings_control_width(ui, t.space_24 * 9.0 + t.space_4, |ui| {
                                         ui_kit::dropdown_menu(ui, ("sc_ai_mode", &entry.id), &shown, |ui| {
                                             if ui_kit::list_picker(ui, "global", tr("ui.ai_mode_global"), current.is_none()).clicked() {
@@ -776,16 +864,16 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                                             }
                                         })
                                     });
-                                    let query = crate::prefs_search::query(ui);
+                                    let query = crate::ui_kit::settings_search::query(ui);
                                     if let Some(option) = options
                                         .iter()
                                         .find(|option| option.to_lowercase() == query)
-                                        .or_else(|| options.iter().find(|option| crate::prefs_search::texts_hit(ui, &[*option])))
+                                        .or_else(|| options.iter().find(|option| crate::ui_kit::settings_search::texts_hit(ui, &[*option])))
                                     {
-                                        crate::prefs_search::remember(ui, option, response.rect);
+                                        crate::ui_kit::settings_search::remember(ui, option, response.rect);
                                     }
                                     for option in options {
-                                        crate::prefs_search::follow(ui, option, response.rect);
+                                        crate::ui_kit::settings_search::follow(ui, option, response.rect);
                                     }
                                     match pick {
                                         Some(Some(mode)) => {
@@ -829,7 +917,7 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                             ui_kit::row(ui, tr("ui.ai_model"), |ui| {
                                 let chat = &mut app.agent_chat;
                                 let running = chat.running_id == entry.id && chat.backend.is_some();
-                                let key = listing_key(protocol, &entry.base_url, entry.key);
+                                let key = listing_key(protocol, &entry.base_url, entry.key, entry.allow_insecure_http);
                                 let (models, note) = if running {
                                     (chat.models.as_slice(), chat.models_note.clone())
                                 } else if let Some(models) = chat.models_cache.get(&entry.base_url).filter(|models| !models.is_empty()) {
@@ -877,23 +965,23 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                     });
                     crate::scenario::publish_rect(&format!("prefs:ai_card:{}", entry.id), card.response.rect);
                     let metadata = [&entry.name, &entry.id, &detail];
-                    if let Some(text) = metadata.iter().find(|text| crate::prefs_search::texts_hit(ui, &[*text])) {
-                        crate::prefs_search::remember(ui, text, card.response.rect);
+                    if let Some(text) = metadata.iter().find(|text| crate::ui_kit::settings_search::texts_hit(ui, &[*text])) {
+                        crate::ui_kit::settings_search::remember(ui, text, card.response.rect);
                     }
                     for text in metadata {
-                        crate::prefs_search::follow(ui, text, card.response.rect);
+                        crate::ui_kit::settings_search::follow(ui, text, card.response.rect);
                     }
                 };
                 let show = gate.as_ref().is_none_or(|gate| gate.show);
                 if show {
                     paint(ui);
                 } else {
-                    crate::prefs_search::run_hidden(ui, &entry.id, |ui| {
+                    crate::ui_kit::settings_search::run_hidden(ui, &entry.id, |ui| {
                         paint(ui);
                     });
                 }
                 if let Some(gate) = gate {
-                    crate::prefs_search::block_finish(ui, &gate, show, before);
+                    crate::ui_kit::settings_search::block_finish(ui, &gate, show, before);
                 }
             });
         }
@@ -976,6 +1064,39 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
     if app.agent_chat.settings.add.is_none() {
         return;
     }
+    // A refused Add's message is about the fields it ran with (#641): once they change, it goes.
+    if let Some(s) = app.agent_chat.settings.add.as_mut()
+        && s.refused.as_ref().is_some_and(|was| *was != s.inputs())
+    {
+        s.error = None;
+        s.refused = None;
+    }
+    if let Some(url) = app.agent_chat.settings.add.as_ref().and_then(|s| s.confirm_insecure_http.clone()) {
+        let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_ai_http_consent"), "status_warning", tr("ai.http.allow"))
+            .tone(ui_kit::Tone::Warning)
+            .actions(tr("ai.http.confirm"), tr("ui.cancel"), None)
+            .selected(ui_kit::Action::Cancel)
+            .detail(&url)
+            .show(ctx, true, |ui| {
+                ui_kit::text(ui, tr("ai.http.warning"), ui_kit::Text::Report("http_warning", false));
+            });
+        for (handle, target) in [("ai_add:http_accept", "dialog:ok"), ("ai_add:http_cancel", "dialog:cancel")] {
+            if let Some(rect) = crate::scenario::rect_of(target) {
+                crate::scenario::publish_handle(handle, rect.center());
+            }
+        }
+        if let Some(s) = app.agent_chat.settings.add.as_mut() {
+            if !closed && action == ui_kit::Action::Ok && s.insecure_http_endpoint().as_ref() == Some(&url) {
+                s.insecure_http_url = Some(url);
+                s.list_again = true;
+                s.error = None;
+            }
+            if closed || action != ui_kit::Action::None {
+                s.confirm_insecure_http = None;
+            }
+        }
+        return;
+    }
     #[cfg(not(target_arch = "wasm32"))]
     let found: Vec<agents::Entry> = agents::entries(app).into_iter().filter(|e| e.found).collect();
     #[cfg(target_arch = "wasm32")]
@@ -987,7 +1108,7 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
     // Editing keeps the agent's kind: the kind switch is for adding only.
     let editing = app.agent_chat.settings.add.as_ref().is_some_and(|s| s.editing.is_some());
     let (title, ok) = if editing { ("ui.ai_edit_agent_title", "ui.ai_save") } else { ("ui.ai_add_agent_title", "ui.ai_add") };
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_ai_add"), "settings", tr(title))
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_ai_add"), "settings", tr(title))
         .cards(2.0)
         .fields()
         .actions(tr(ok), "Cancel", None)
@@ -1089,8 +1210,14 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                         ui_kit::text_field(ui, &mut s.name, "");
                     });
                     ui_kit::row(ui, tr("ui.ai_base_url"), |ui| {
-                        s.list_again |=
-                            ui_kit::cell_editor(ui, egui::Id::new("sc_ai_add_url"), &mut s.base_url, tr("ui.ai_url_hint"), false).lost_focus();
+                        let r = ui_kit::cell_editor(ui, egui::Id::unique("sc_ai_add_url"), &mut s.base_url, tr("ui.ai_url_hint"), false);
+                        s.list_again |= r.lost_focus();
+                        if r.changed() {
+                            s.insecure_http_url = None;
+                            s.confirm_insecure_http = None;
+                            s.listing = None;
+                            s.test = None;
+                        }
                     });
                     ui_kit::row(ui, tr("ui.ai_model"), |ui| {
                         let (models, note) = listed_for(&app.agent_chat.settings.endpoint_models, s.listing.as_ref());
@@ -1127,12 +1254,26 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                     ui_kit::row(ui, tr("ui.ai_key"), |ui| {
                         ui.add_enabled_ui(has_keychain, |ui| {
                             let hint = tr(if s.saved_key { "ui.ai_key_keep_hint" } else { "ui.ai_key_hint" });
-                            let r = ui_kit::password_field(ui, egui::Id::new("sc_ai_add_key"), &mut s.key, hint);
+                            let r = ui_kit::password_field(ui, egui::Id::unique("sc_ai_add_key"), &mut s.key, hint);
                             crate::scenario::publish_target("ai_add:key", r.rect);
                             s.list_again |= r.lost_focus();
                         });
                     });
                     ui_kit::text(ui, tr(if has_keychain { "ui.ai_key_note" } else { "ui.ai_no_keychain" }), ui_kit::Text::Note("keychain"));
+                    if let Some(url) = s.insecure_http_endpoint() {
+                        let mut allow = s.allow_insecure_http();
+                        let r = ui_kit::checkbox(ui, tr("ai.http.allow"), &mut allow).on_hover_text(tr("ai.http.warning"));
+                        crate::scenario::publish_target("ai_add:allow_insecure_http", r.rect);
+                        if r.changed() {
+                            if allow {
+                                s.confirm_insecure_http = Some(url);
+                            } else {
+                                s.insecure_http_url = None;
+                                s.list_again = true;
+                            }
+                            s.test = None;
+                        }
+                    }
                     if ui_kit::button(ui, tr("ui.ai_test"), ui_kit::Button::Normal).clicked() {
                         test = true;
                     }
@@ -1143,6 +1284,9 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                 ui_kit::text(ui, e, ui_kit::Text::Report("add_error", true));
             }
         });
+    if app.agent_chat.settings.add.as_ref().is_some_and(|s| s.confirm_insecure_http.is_some()) {
+        return;
+    }
     if let Some(rect) = crate::scenario::rect_of("dialog:ok") {
         crate::scenario::publish_handle("ai_add:add", rect.center());
     }
@@ -1165,18 +1309,22 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                 base_url: url.clone().unwrap_or_default(),
                 model: s.model.trim().to_string(),
                 key: false,
+                allow_insecure_http: s.allow_insecure_http(),
                 request_timeout_s: s.request_timeout_s,
                 reasoning_effort: agents::reasoning_effort(&s.reasoning_effort),
                 problem: None,
                 install: "",
             };
             // Editing with the key field left empty tests with the stored key, which is only ever
-            // sent where a saved key may go (HTTPS or this computer).
+            // read after the endpoint's key policy has been checked.
             let key = Some(s.key.trim().to_string()).filter(|k| !k.is_empty()).or_else(|| {
-                let id = s.editing.as_deref().filter(|_| s.saved_key && url.as_deref().is_ok_and(agents::key_safe_for))?;
+                let id = s.editing.as_deref().filter(|_| s.saved_key && agents::key_allowed_for(&e.base_url, e.allow_insecure_http))?;
                 app.services.secrets.as_ref().and_then(|store| store.get(id).ok().flatten())
             });
             let result = match url {
+                Ok(_) if (s.saved_key || key.is_some()) && !agents::key_allowed_for(&e.base_url, e.allow_insecure_http) => {
+                    Test::Done(Err(TestError::Other(tr("ui.ai_key_needs_https").to_string())))
+                }
                 Ok(_) => start_test(app, &e, key),
                 Err(err) => Test::Done(Err(TestError::Other(err))),
             };
@@ -1190,7 +1338,7 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
             Ok(()) => open = false,
             Err(e) => {
                 if let Some(s) = app.agent_chat.settings.add.as_mut() {
-                    s.error = Some(e);
+                    s.refuse(e);
                 }
             }
         }
@@ -1228,6 +1376,7 @@ fn add_agent(app: &mut SolveApp) -> Result<(), String> {
             c.kind = s.protocol.kind();
             c.ollama = s.protocol == Protocol::OpenAi && s.preset == 0;
             c.base_url = agents::normalize_url(&s.base_url)?;
+            c.allow_insecure_http = s.allow_insecure_http();
             c.model = s.model.trim().to_string();
             c.request_timeout_s = s.request_timeout_s.clamp(agents::MIN_REQUEST_TIMEOUT_S, agents::MAX_REQUEST_TIMEOUT_S);
             c.reasoning_effort = agents::reasoning_effort(&s.reasoning_effort);
@@ -1237,7 +1386,10 @@ fn add_agent(app: &mut SolveApp) -> Result<(), String> {
             key = Some(s.key.trim().to_string()).filter(|k| !k.is_empty());
             // Editing with the key field left empty keeps the stored key.
             let kept = key.is_none() && editing.is_some() && s.saved_key;
-            if (key.is_some() || kept) && !agents::key_safe_for(&c.base_url) {
+            // Revoking consent keeps the key in the keychain, but disconnects the endpoint.
+            // Subsequent edits to that disabled endpoint must still be possible.
+            let same_endpoint = kept && editing.and_then(|at| app.preferences.agents.get(at)).is_some_and(|old| old.base_url == c.base_url);
+            if (key.is_some() || (kept && !same_endpoint)) && !agents::key_allowed_for(&c.base_url, c.allow_insecure_http) {
                 return Err(tr("ui.ai_key_needs_https").to_string());
             }
             c.key = kept;
@@ -1262,6 +1414,7 @@ fn add_agent(app: &mut SolveApp) -> Result<(), String> {
     match app.preferences.agents.get_mut(at) {
         None => return Err(tr("ui.ai_edit_gone").to_string()),
         Some(old) => {
+            let revoked = old.allow_insecure_http && !c.allow_insecure_http;
             // An endpoint edited into a program (or one whose key was dropped) leaves no key behind.
             if old.key
                 && !c.key
@@ -1278,7 +1431,9 @@ fn add_agent(app: &mut SolveApp) -> Result<(), String> {
             app.agent_chat.login_results.remove(&id);
             // The running conversation takes a new timeout from its next request on; the rest
             // applies the next time the agent connects.
-            if app.agent_chat.running_id == id
+            if revoked {
+                super::disconnect_endpoint(app, &id);
+            } else if app.agent_chat.running_id == id
                 && let Some(b) = app.agent_chat.backend.as_mut()
             {
                 b.set_request_timeout(secs);
@@ -1341,7 +1496,7 @@ mod card_tests {
                                     .job
                                     .sections
                                     .iter()
-                                    .all(|section| section.format.font_id.size == crate::theme::Tokens::get().font_page_heading);
+                                    .all(|section| section.format.font_id.size == solidcraft_theme::Tokens::get().font_page_heading);
                         }
                     });
                 }
@@ -1355,10 +1510,10 @@ mod card_tests {
             assert!(scope_visible, "the full localized permission scope remains visible without hovering, including with AI off");
             assert!(privacy_visible, "the localized privacy note remains visible without hovering, including with AI off");
             let mut previous: Option<f32> = None;
-            for key in ["assistant_availability", "permissions", "agents", "panel", "assistant_connecting", "agent_pointer"] {
+            for key in ["assistant_availability", "permissions", "agents", "instructions", "panel", "assistant_connecting", "agent_pointer"] {
                 let section = scenario::rect_of(&format!("prefs:section:{key}")).unwrap();
                 assert!((section.left() - body.left()).abs() <= 1.0 && (section.right() - body.right()).abs() <= 1.0);
-                assert!((section.height() - (crate::theme::Tokens::get().control_height + crate::theme::Tokens::get().space_2)).abs() <= 1.0);
+                assert!((section.height() - (solidcraft_theme::Tokens::get().control_height + solidcraft_theme::Tokens::get().space_2)).abs() <= 1.0);
                 if let Some(bottom) = previous {
                     assert!((section.top() - bottom - 38.0).abs() <= 1.0, "{theme}: {key} retains the page section rhythm");
                 }
@@ -1369,7 +1524,7 @@ mod card_tests {
 
     #[test]
     fn pointer_speed_search_reveals_one_real_slider_in_all_enablement_states() {
-        use crate::prefs_search::{nav, set_cursor};
+        use crate::ui_kit::settings_search::{nav, set_cursor};
         for theme in ["light", "dark"] {
             for (ai, show) in [(true, true), (true, false), (false, true), (false, false)] {
                 let mut h = Harness::new();
@@ -1414,7 +1569,7 @@ mod card_tests {
 
     #[test]
     fn overlapping_agent_metadata_has_one_card_target_and_keeps_fields_indexed() {
-        use crate::prefs_search::{nav, set_cursor};
+        use crate::ui_kit::settings_search::{nav, set_cursor};
         use std::sync::{
             Arc,
             atomic::{AtomicUsize, Ordering},
@@ -1674,12 +1829,55 @@ mod card_tests {
 
     #[test]
     fn model_warning_only_for_explicitly_missing_tools() {
+        crate::i18n::install();
         assert_eq!(
             capability_warning("local:4b", Some(false)).as_deref(),
             Some("local:4b can't use SolidCraft's tools, so it can only chat. Pick a model with tool support.")
         );
         assert_eq!(capability_warning("local:4b", Some(true)), None);
         assert_eq!(capability_warning("local:4b", None), None);
+    }
+
+    #[test]
+    fn a_refused_add_keeps_its_message_until_the_fields_change() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.ai_features = true;
+        h.app.agent_chat.detection = Some(Default::default());
+        open_add(&mut h.app);
+        h.frames(4);
+        h.step(&json!({"click":{"handle":"ai_add:ui.ai_add_custom"}})).unwrap();
+        h.step(&json!({"click":{"handle":"ai_add:add"}})).unwrap();
+        let refused = h.app.agent_chat.settings.add.as_ref().unwrap().error.clone();
+        assert!(refused.is_some(), "an empty command is refused");
+        h.frames(3);
+        assert_eq!(h.app.agent_chat.settings.add.as_ref().unwrap().error, refused, "the message stays while the fields do");
+        // Typing the command takes the refusal away before Add is clicked again.
+        h.app.agent_chat.settings.add.as_mut().unwrap().command = "solidcraft-fixture-agent --acp".into();
+        h.frames(3);
+        assert_eq!(h.app.agent_chat.settings.add.as_ref().unwrap().error, None, "the message was about the empty command, which is gone");
+        // The message is about the fields Add ran with (#641): the same fields again are refused again.
+        h.app.agent_chat.settings.add.as_mut().unwrap().command.clear();
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"ai_add:add"}})).unwrap();
+        assert_eq!(h.app.agent_chat.settings.add.as_ref().unwrap().error, refused, "the same reason again");
+        assert!(h.app.agent_chat.settings.add.is_some(), "nothing added");
+        // An endpoint without a model: the same for its fields.
+        h.step(&json!({"click":{"handle":"ai_add:ui.ai_add_endpoint"}})).unwrap();
+        h.step(&json!({"click":{"handle":"ai_add:protocol:anthropic"}})).unwrap();
+        h.step(&json!({"click":{"handle":"ai_add:add"}})).unwrap();
+        let refused = h.app.agent_chat.settings.add.as_ref().unwrap().error.clone();
+        assert!(refused.is_some(), "an endpoint without a model is refused");
+        h.frames(3);
+        assert_eq!(h.app.agent_chat.settings.add.as_ref().unwrap().error, refused);
+        h.app.agent_chat.settings.add.as_mut().unwrap().model = "claude-opus-5-5".into();
+        h.frames(3);
+        assert_eq!(h.app.agent_chat.settings.add.as_ref().unwrap().error, None, "the message was about the missing model, which is typed");
+        h.app.agent_chat.settings.add.as_mut().unwrap().model.clear();
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"ai_add:add"}})).unwrap();
+        assert_eq!(h.app.agent_chat.settings.add.as_ref().unwrap().error, refused, "the same reason again");
+        assert!(h.app.agent_chat.settings.add.is_some(), "nothing added");
     }
 
     #[test]
@@ -1739,6 +1937,180 @@ mod card_tests {
             self.0.lock().map_err(|e| e.to_string())?.remove(id);
             Ok(())
         }
+    }
+
+    #[test]
+    fn http_authentication_requires_consent_for_the_current_endpoint() {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width": 1600.0, "height": 1000.0}));
+        h.app.home.open = false;
+        h.app.preferences.ai_features = true;
+        h.app.agent_chat.detection = Some(Default::default());
+        let keys = std::sync::Arc::new(MemoryKeys::default());
+        h.app.services.secrets = Some(keys.clone());
+        open_add(&mut h.app);
+        let s = h.app.agent_chat.settings.add.as_mut().unwrap();
+        s.kind = AddKind::Api;
+        s.name = "Private endpoint".into();
+        s.base_url = "http://192.168.1.100:8000/v1".into();
+        s.model = "example-model".into();
+        s.key = "test-only-key".into();
+        let seen = listing_http(&mut h);
+        let requests = || seen.lock().unwrap().clone();
+        assert!(add_agent(&mut h.app).is_err(), "HTTP authentication is off by default");
+        list_settled(&mut h);
+        assert_eq!(requests(), [("http://192.168.1.100:8000/v1/models".into(), false)]);
+        h.step(&json!({"click":{"handle":"ai_add:allow_insecure_http"}})).unwrap();
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"ai_add:http_cancel"}})).unwrap();
+        assert!(add_agent(&mut h.app).is_err(), "cancel is not consent");
+        assert!(keys.0.lock().unwrap().is_empty());
+        list_settled(&mut h);
+        assert!(requests().iter().all(|(_, with_key)| !with_key), "cancel must not authenticate a listing");
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"ai_add:allow_insecure_http"}})).unwrap();
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"ai_add:http_accept"}})).unwrap();
+        list_settled(&mut h);
+        assert_eq!(requests().last().cloned(), Some(("http://192.168.1.100:8000/v1/models".into(), true)), "consent applies to the model picker");
+        h.step(&json!({"click":{"handle":"ai_add:add"}})).unwrap();
+        assert!(h.app.agent_chat.settings.add.is_none());
+        let saved = h.app.preferences.agents.last().unwrap();
+        let json = serde_json::to_value(saved).unwrap();
+        assert_eq!(json["allow_insecure_http"], true);
+        assert!(!json.to_string().contains("test-only-key"));
+        assert_eq!(keys.get(&saved.id).unwrap().as_deref(), Some("test-only-key"));
+        let id = saved.id.clone();
+
+        // The saved agent's picker uses its consent and keychain key too.
+        h.app.agent_chat.settings.endpoint_models.clear();
+        h.call("ui.prefs", json!({"open": "AI"}));
+        h.frames(3);
+        reveal_card_action(&mut h, &format!("prefs:ai_model:{id}")).unwrap();
+        let before = requests().len();
+        h.step(&json!({"click":{"handle":format!("prefs:ai_model:{id}")}})).unwrap();
+        list_settled(&mut h);
+        assert_eq!(requests().len(), before + 1);
+        assert_eq!(requests().last().cloned(), Some(("http://192.168.1.100:8000/v1/models".into(), true)));
+        h.step(&json!({"key":"Escape"})).unwrap();
+
+        assert!(open_edit(&mut h.app, &id));
+        assert!(h.app.agent_chat.settings.add.as_ref().unwrap().key.is_empty());
+        list_settled(&mut h);
+        h.app.agent_chat.settings.endpoint_models.clear();
+        h.step(&json!({"click":{"handle":"ai_add:allow_insecure_http"}})).unwrap();
+        list_settled(&mut h);
+        assert_eq!(
+            requests().last().cloned(),
+            Some(("http://192.168.1.100:8000/v1/models".into(), false)),
+            "revocation also refreshes the model picker without the key"
+        );
+        assert!(open_edit(&mut h.app, &id));
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"dialog:Base URL"}})).unwrap();
+        h.step(&json!({"key":"A", "ctrl":true})).unwrap();
+        h.step(&json!({"text":"http://192.168.1.101:8000/v1"})).unwrap();
+        assert!(!h.app.agent_chat.settings.add.as_ref().unwrap().allow_insecure_http());
+        assert!(add_agent(&mut h.app).is_err(), "a changed URL needs its own consent");
+        // Even changing back does not silently restore consent.
+        h.app.agent_chat.settings.add.as_mut().unwrap().base_url = "http://192.168.1.100:8000/v1".into();
+        assert!(!h.app.agent_chat.settings.add.as_ref().unwrap().allow_insecure_http());
+        assert!(open_edit(&mut h.app, &id));
+        choose_preset(h.app.agent_chat.settings.add.as_mut().unwrap(), Protocol::OpenAi, 0);
+        assert!(!h.app.agent_chat.settings.add.as_ref().unwrap().allow_insecure_http());
+
+        // Revoking consent retains the key, stops this endpoint in every tab, and leaves an
+        // unrelated endpoint connected. All requests use a mock transport.
+        h.app.services.agent_http = Some(std::sync::Arc::new(|_| Ok((200, br#"{"data":[]}"#.to_vec()))));
+        h.app.agent_chat.agent_id = Some(id.clone());
+        super::super::connect(&mut h.app, &h.ctx);
+        assert!(h.app.agent_chat.backend.is_some());
+        crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
+        h.app.preferences.agents.push(AgentConfig {
+            id: "unrelated".into(),
+            kind: Kind::Api,
+            base_url: "http://localhost:8000/v1".into(),
+            model: "m".into(),
+            ..Default::default()
+        });
+        h.app.agent_chat.agent_id = Some("unrelated".into());
+        super::super::connect(&mut h.app, &h.ctx);
+        assert!(h.app.agent_chat.backend.is_some());
+        crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
+        h.app.agent_chat.agent_id = Some(id.clone());
+        super::super::connect(&mut h.app, &h.ctx);
+        assert!(h.app.agent_chat.backend.is_some());
+        assert!(open_edit(&mut h.app, &id));
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"ai_add:allow_insecure_http"}})).unwrap();
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"ai_add:add"}})).unwrap();
+        assert!(!h.app.preferences.agents[0].allow_insecure_http);
+        assert!(h.app.agent_chat.backend.is_none());
+        assert_eq!(keys.get(&id).unwrap().as_deref(), Some("test-only-key"));
+        super::super::connect(&mut h.app, &h.ctx);
+        assert!(h.app.agent_chat.backend.is_none(), "reconnecting without consent refuses the stored key");
+        crate::documents::switch(&mut h.app, 0);
+        assert!(h.app.agent_chat.backend.is_none(), "the hidden conversation was stopped too");
+        crate::documents::switch(&mut h.app, 1);
+        assert!(h.app.agent_chat.backend.is_some(), "other endpoints keep their permission");
+        super::super::disconnect(&mut h.app);
+    }
+
+    #[test]
+    fn revoking_http_consent_discards_queued_listings_in_every_tab() {
+        let mut h = Harness::new();
+        let keys = std::sync::Arc::new(MemoryKeys::default());
+        h.app.services.secrets = Some(keys.clone());
+        let seen = listing_http(&mut h);
+        keys.set("revoked", "test-only-key").unwrap();
+        h.app.preferences.agents.push(AgentConfig {
+            id: "revoked".into(),
+            kind: Kind::Api,
+            base_url: "http://revoked.example/v1".into(),
+            model: "example-model".into(),
+            key: true,
+            allow_insecure_http: true,
+            ..Default::default()
+        });
+        let queue = |state: &mut State, id: &str| {
+            let key = listing_key(Protocol::OpenAi, &format!("http://{id}.example/v1"), true, true).unwrap();
+            let (tx, rx) = std::sync::mpsc::channel();
+            state.listing =
+                Some(ModelListing { key: listing_key(Protocol::OpenAi, "https://already-started.example/v1", false, false).unwrap(), rx });
+            state.card_listing = Some((key, id.into()));
+            tx
+        };
+        let completion = queue(&mut h.app.agent_chat.settings, "revoked");
+        // Main keeps picker state in the window when a different document becomes active.
+        crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
+        assert!(h.app.agent_chat.running_id.is_empty(), "listing does not require a conversation");
+        assert!(open_edit(&mut h.app, "revoked"));
+        h.app.agent_chat.settings.add.as_mut().unwrap().insecure_http_url = None;
+        add_agent(&mut h.app).unwrap();
+        h.app.agent_chat.settings.add = None;
+        assert!(!h.app.preferences.agents[0].allow_insecure_http);
+        assert_eq!(keys.get("revoked").unwrap().as_deref(), Some("test-only-key"));
+        crate::documents::switch(&mut h.app, 0);
+        assert!(h.app.agent_chat.settings.card_listing.is_none(), "the revoked queue cannot return with an earlier tab");
+        assert!(h.app.agent_chat.settings.listing.is_some(), "an already-started listing stays intact");
+        completion.send(Ok(Vec::new())).unwrap();
+        poll_listing(&mut h.app, &h.ctx);
+        assert!(h.app.agent_chat.settings.listing.is_none(), "no revoked request may dispatch after completion");
+        assert!(seen.lock().unwrap().is_empty(), "revoked queues must not reach the transport");
+
+        // The background endpoint cleanup also forgets a matching queue before checking running_id.
+        for id in ["revoked", "unrelated"] {
+            let mut chat = AgentChat::default();
+            let _completion = queue(&mut chat.settings, id);
+            chat.disconnect_endpoint(&mut solidcraft_engine::Session::default(), "revoked");
+            assert_eq!(chat.settings.card_listing.is_some(), id == "unrelated");
+            assert!(chat.settings.listing.is_some(), "started listings are preserved for {id}");
+        }
+        let _completion = queue(&mut h.app.agent_chat.settings, "unrelated");
+        super::super::disconnect_endpoint(&mut h.app, "revoked");
+        assert_eq!(h.app.agent_chat.settings.card_listing.as_ref().unwrap().1, "unrelated");
+        assert!(h.app.agent_chat.settings.listing.is_some());
     }
 
     /// Edit on an added agent reopens the dialog filled in; Save changes it in place, keeping its
@@ -2136,7 +2508,7 @@ mod card_tests {
         h.frames(3);
         h.step(&json!({"text":"  vendor/own "})).unwrap();
         h.frames(3);
-        assert!(h.ctx.memory(|m| m.has_focus(egui::Id::new("sc_ai_model:api-1").with("search"))), "the box keeps the focus over Preferences");
+        assert!(h.ctx.memory(|m| m.has_focus(egui::Id::unique("sc_ai_model:api-1").with("search"))), "the box keeps the focus over Preferences");
         h.step(&json!({"click":{"handle":"prefs:ai_model:api-1:custom"}})).unwrap();
         h.frames(3);
         assert_eq!(model(&h).as_deref(), Some("vendor/own"));

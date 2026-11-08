@@ -118,15 +118,15 @@ impl Frame {
 }
 
 fn active_id() -> egui::Id {
-    egui::Id::new("sc_semantic_content_owner")
+    egui::Id::unique("sc_semantic_content_owner")
 }
 
 fn output_id(owner: ContentOwner) -> egui::Id {
-    egui::Id::new(("sc_semantic_content_output", owner))
+    egui::Id::unique(("sc_semantic_content_output", owner))
 }
 
 fn capture_id() -> egui::Id {
-    egui::Id::new("sc_semantic_content_eye_owner")
+    egui::Id::unique("sc_semantic_content_eye_owner")
 }
 
 #[derive(Clone, Copy)]
@@ -153,7 +153,7 @@ struct InputClaims {
 pub(crate) fn claim_action(ui: &Ui, widget: egui::Id) -> bool {
     let frame = ui.ctx().cumulative_frame_nr();
     ui.ctx().data_mut(|data| {
-        let claims = data.get_temp_mut_or_default::<InputClaims>(egui::Id::new("sc_semantic_content_input_claims"));
+        let claims = data.get_temp_mut_or_default::<InputClaims>(egui::Id::unique("sc_semantic_content_input_claims"));
         if claims.frame != frame {
             claims.frame = frame;
             claims.actions.clear();
@@ -163,7 +163,7 @@ pub(crate) fn claim_action(ui: &Ui, widget: egui::Id) -> bool {
 }
 
 fn row_capture_id() -> egui::Id {
-    egui::Id::new("sc_semantic_content_row_capture")
+    egui::Id::unique("sc_semantic_content_row_capture")
 }
 
 pub(crate) fn current_source(app: &SolveApp) -> Option<ContentSource> {
@@ -392,7 +392,12 @@ pub(crate) fn release_eye(ctx: &egui::Context) -> Option<ContentSource> {
 /// A reveal is acknowledged only after its row is presented in the scroll viewport. An
 /// offscreen target requests scrolling again on the next frame until that happens.
 pub(crate) fn scroll_acknowledged(ui: &Ui, rect: Rect) -> bool {
-    ui.scroll_to_rect(rect, Some(egui::Align::Center));
+    scroll_acknowledged_at(ui, rect, egui::Align::Center)
+}
+
+/// [`scroll_acknowledged`] placing `rect` at `align` in the viewport.
+pub(crate) fn scroll_acknowledged_at(ui: &Ui, rect: Rect, align: egui::Align) -> bool {
+    ui.scroll_to_rect(rect, Some(align));
     presented(ui) && ui.is_rect_visible(rect) && ui.clip_rect().contains(rect.center())
 }
 

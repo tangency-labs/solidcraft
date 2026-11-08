@@ -118,7 +118,7 @@ fn fresh_frame(h: &mut crate::scenario::Harness) -> (Vec<egui::epaint::ClippedSh
     let mut shapes = Vec::new();
     for _ in 0..2 {
         let app = &mut h.app;
-        let out = h.ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+        let mut out = h.ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
             app.logic(ui.ctx());
             app.ui(ui);
         });
@@ -129,6 +129,7 @@ fn fresh_frame(h: &mut crate::scenario::Harness) -> (Vec<egui::epaint::ClippedSh
             colours.dedup();
             textures.insert(*id, colours);
         }
+        out.textures_delta.clear();
         shapes = out.shapes;
     }
     (shapes, textures)
@@ -167,7 +168,7 @@ fn a_sketchs_icon_takes_its_states_colour_in_both_histories_and_the_browser() {
     assert!(report("Fixed").ok() && report("Fixed").dof == 0);
     assert!(!report("Reach").ok(), "{:?}", report("Reach"));
     let states = crate::sketch_state::SketchStates::of(&h.app);
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let want = [("Guide", t.sketch), ("Fixed", t.sketch_fixed), ("Reach", t.error)];
     for (name, colour) in want {
         let id = h.app.session.doc.find_feature(name).unwrap().id;
