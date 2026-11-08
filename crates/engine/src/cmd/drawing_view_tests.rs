@@ -2007,6 +2007,242 @@ fn a_deleted_occurrence_leaves_the_views_that_named_it() {
     assert!((width(&mut s, on_second) - 10.0).abs() < 1e-6);
 }
 
+/// The two cubes of [`two_cubes`] with an exploded view, Apart, that moves the second 30 mm further
+/// along x, and a drawing of them, open, with an assembled base view at 1:1 centred at (150, 150):
+/// the session, the view, the two occurrences and Apart's id.
+fn exploded_pair() -> (Session, u64, [u64; 2], u64) {
+    let (mut s, [first, second]) = two_cubes();
+    let made = run(&mut s, "explode.create", json!({"name": "Apart", "moves": [{"occurrence": second, "translate": [30, 0, 0]}]}));
+    let apart = made["view"].as_u64().unwrap();
+    run(&mut s, "drawing.create", json!({}));
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let (_, view) = create(&mut s, BASE, json!({"sheet": sheet, "scale": "1:1", "position_mm": [150, 150]}));
+    (s, view, [first, second], apart)
+}
+
+/// The first cube's bottom front edge, through its occurrence, as dimensions, balloons and notes
+/// pick it.
+fn first_cubes_edge(first: u64) -> Value {
+    json!({"point": [5, 0, 0], "path": [first]})
+}
+
+/// Two views of one assembly, one exploded and one not, draw differently: the cubes 10 mm apart
+/// are 40 mm across, and 70 mm with the second moved out. Inspect says which each draws and who set
+/// it, and both come back the same after saving and opening the design (#13048).
+#[test]
+fn two_views_one_exploded_draw_differently_and_both_come_back() {
+    let (mut s, assembled, _, apart) = exploded_pair();
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let (reply, exploded) = create(&mut s, BASE, json!({"sheet": sheet, "scale": "1:1", "position_mm": [150, 250], "exploded": "Apart"}));
+    assert!((width(&mut s, assembled) - 40.0).abs() < 1e-6);
+    assert!((width(&mut s, exploded) - 70.0).abs() < 1e-6, "{reply}");
+    let inspected = inspect_view(&mut s, exploded);
+    assert_eq!(inspected["settings"]["exploded"], json!({"value": {"view": apart}, "from": "this", "set": {"view": apart}}), "{inspected}");
+    let inspected = inspect_view(&mut s, assembled);
+    assert_eq!(inspected["settings"]["exploded"], json!({"value": "assembled", "from": "default", "set": null}), "{inspected}");
+
+    let folder = crate::tests::Folder::new("exploded-views");
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "file.save", json!({"path": folder.path("pair.solidcraft")}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": folder.path("pair.solidcraft")}));
+    assert_eq!(opened.doc.drawings, s.doc.drawings);
+    run(&mut opened, "drawing.open", json!({"drawing": drawing}));
+    assert!((width(&mut opened, assembled) - 40.0).abs() < 1e-6);
+    assert!((width(&mut opened, exploded) - 70.0).abs() < 1e-6);
+}
+
+/// Drawing a view exploded changes nothing in the design: the occurrences keep their placements,
+/// nothing is left moved in the session, and the parts list keeps its rows (#13048).
+#[test]
+fn an_exploded_view_leaves_the_design_and_its_parts_list_rows() {
+    let (mut s, view, _, apart) = exploded_pair();
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    run(&mut s, "drawing.table.add", json!({"sheet": sheet, "kind": "parts_list"}));
+    let (placed, rows) = (s.doc.occurrences.clone(), run(&mut s, "drawing.inspect", json!({}))["parts_lists"].clone());
+    assert!(rows.as_array().is_some_and(|lists| !lists.is_empty()), "{rows}");
+    let steps = s.undo.len();
+    let reply = edit_view(&mut s, view, json!({"exploded": apart}));
+    assert_eq!((reply["changed"].clone(), s.undo.len()), (json!(["exploded"]), steps + 1));
+    assert!((width(&mut s, view) - 70.0).abs() < 1e-6);
+    // The sheet drawn as a command reads it, as well as the view.
+    run(&mut s, "drawing.scene", json!({"sheet": sheet}));
+    assert_eq!(s.doc.occurrences, placed);
+    assert!(s.pending_moves.is_empty() && s.exploded.is_empty());
+    assert_eq!(run(&mut s, "drawing.inspect", json!({}))["parts_lists"], rows);
+    run(&mut s, "edit.undo", json!({}));
+    assert!((width(&mut s, view) - 40.0).abs() < 1e-6);
+}
+
+/// A projected view draws its parent's exploded view, naming it, and is among the edit's followers;
+/// then it sets `assembled`, and draws assembled whatever its parent draws.
+#[test]
+fn a_projected_view_draws_its_parents_exploded_view_until_it_sets_its_own() {
+    let (mut s, view, _, apart) = exploded_pair();
+    let (_, above) = create(&mut s, PROJECTED, json!({"parent": ids::encode(view), "side": "above", "place": {"at": [150, 250]}}));
+    let reply = edit_view(&mut s, view, json!({"exploded": "Apart"}));
+    assert_eq!(reply["followers"], json!([ids::encode(above)]), "{reply}");
+    assert!((width(&mut s, above) - 70.0).abs() < 1e-6);
+    let inspected = inspect_view(&mut s, above);
+    assert_eq!(
+        inspected["settings"]["exploded"],
+        json!({"value": {"view": apart}, "from": "parent", "parent": ids::encode(view), "set": null}),
+        "{inspected}"
+    );
+    edit_view(&mut s, above, json!({"exploded": "assembled"}));
+    assert!((width(&mut s, above) - 40.0).abs() < 1e-6, "assembled is a choice of its own");
+    edit_view(&mut s, above, json!({"exploded": null}));
+    assert!((width(&mut s, above) - 70.0).abs() < 1e-6, "null follows the parent again");
+}
+
+/// Dimensions, balloons and notes on a view's model read the design's placements, so on an exploded
+/// view they would measure the parts assembled: they are refused there until they read what the
+/// view draws. An edit that would explode a view holding one, itself or through a view that follows
+/// it, is refused and changes nothing; one whose follower draws assembled goes ahead. A note on the
+/// view itself, not its model, is no hindrance.
+#[test]
+fn an_exploded_view_refuses_what_would_measure_its_parts_assembled() {
+    let (mut s, view, [first, _], apart) = exploded_pair();
+    let on_view = |view: u64| ids::encode(view);
+    let unchanged = |s: &mut Session, view: u64, set: Value, says: &str| {
+        let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+        let e = edit_refused(s, view, set);
+        assert!(e.contains(says), "{e}");
+        assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
+    };
+    let blocked = "not supported yet: an exploded view with dimensions, balloons or notes on its model";
+
+    run(&mut s, "drawing.dimension.add", json!({"view": on_view(view), "kind": {"length": {"edge": first_cubes_edge(first)}}}));
+    unchanged(&mut s, view, json!({"exploded": apart}), blocked);
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "drawing.balloon.add", json!({"view": on_view(view), "edge": first_cubes_edge(first), "at": [60, 40]}));
+    unchanged(&mut s, view, json!({"exploded": apart}), blocked);
+    run(&mut s, "edit.undo", json!({}));
+    let note = json!({"anchor": {"edge": {"view": on_view(view), "edge": first_cubes_edge(first)}}, "at": [60, 40], "content": "Deburr"});
+    run(&mut s, "drawing.note.add", note);
+    unchanged(&mut s, view, json!({"exploded": apart}), blocked);
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "drawing.note.add", json!({"anchor": {"view": on_view(view)}, "at": [60, 40], "content": "Exploded"}));
+    edit_view(&mut s, view, json!({"exploded": apart}));
+    assert!((width(&mut s, view) - 70.0).abs() < 1e-6, "a note on the view isn't on its model");
+
+    // New ones on an exploded view.
+    let e = s
+        .execute("drawing.dimension.add", &json!({"view": on_view(view), "kind": {"length": {"edge": first_cubes_edge(first)}}}))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("not supported yet: dimensions on an exploded view"), "{e}");
+    let e =
+        s.execute("drawing.balloon.add", &json!({"view": on_view(view), "edge": first_cubes_edge(first), "at": [60, 40]})).unwrap_err().to_string();
+    assert!(e.contains("not supported yet: balloons on an exploded view"), "{e}");
+
+    // Through a follower: its dimension blocks its parent's edit, until it draws assembled itself.
+    edit_view(&mut s, view, json!({"exploded": "assembled"}));
+    let (_, above) = create(&mut s, PROJECTED, json!({"parent": on_view(view), "side": "above", "place": {"at": [150, 250]}}));
+    run(&mut s, "drawing.dimension.add", json!({"view": on_view(above), "kind": {"length": {"edge": first_cubes_edge(first)}}}));
+    unchanged(&mut s, view, json!({"exploded": apart}), blocked);
+    edit_view(&mut s, above, json!({"exploded": "assembled"}));
+    edit_view(&mut s, view, json!({"exploded": apart}));
+    assert!((width(&mut s, view) - 70.0).abs() < 1e-6 && (width(&mut s, above) - 40.0).abs() < 1e-6);
+}
+
+/// A shaded view's pictures are rendered from the design as it places its parts, so an exploded view
+/// can't be shaded yet. Whichever setting would make one, the exploded choice, a style or following a
+/// shaded parent, it is refused and changes nothing, on the view itself or on a view that follows it;
+/// a follower that draws assembled is no hindrance (#13048).
+#[test]
+fn an_exploded_view_is_never_shaded() {
+    let (mut s, view, _, apart) = exploded_pair();
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let unchanged = |s: &mut Session, view: u64, set: Value| {
+        let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+        let e = edit_refused(s, view, set);
+        assert!(e.contains("not supported yet: a shaded view of an exploded view"), "{e}");
+        assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
+    };
+    let e = create_refused(&mut s, BASE, json!({"sheet": sheet, "scale": "1:1", "visual_style": "shaded", "exploded": "Apart"}));
+    assert!(e.contains("not supported yet: a shaded view of an exploded view"), "{e}");
+
+    // Exploding a shaded view, and shading an exploded one.
+    edit_view(&mut s, view, json!({"visual_style": "shaded"}));
+    unchanged(&mut s, view, json!({"exploded": apart}));
+    edit_view(&mut s, view, json!({"visual_style": "visible", "exploded": apart}));
+    unchanged(&mut s, view, json!({"visual_style": "shaded"}));
+    unchanged(&mut s, view, json!({"reference_style": "shaded"}));
+
+    // Through a follower: a shaded one blocks its parent's edit, until it draws assembled itself.
+    edit_view(&mut s, view, json!({"exploded": "assembled"}));
+    let (_, above) = create(&mut s, PROJECTED, json!({"parent": ids::encode(view), "side": "above", "place": {"at": [150, 250]}}));
+    edit_view(&mut s, above, json!({"visual_style": "shaded"}));
+    unchanged(&mut s, view, json!({"exploded": apart}));
+    edit_view(&mut s, above, json!({"exploded": "assembled"}));
+    edit_view(&mut s, view, json!({"exploded": apart}));
+
+    // An exploded follower of a shaded parent can't follow its styles.
+    edit_view(&mut s, view, json!({"exploded": "assembled", "visual_style": "shaded"}));
+    edit_view(&mut s, above, json!({"visual_style": "visible", "exploded": apart}));
+    unchanged(&mut s, above, json!({"linked": true}));
+    assert!((width(&mut s, above) - 70.0).abs() < 1e-6);
+}
+
+/// Deleting an exploded view never refuses the drawing: a view that named it is a placeholder that
+/// says why, its choice stays for an undo, and undoing the delete draws it exploded again.
+#[test]
+fn a_deleted_exploded_view_leaves_the_views_that_named_it() {
+    let (mut s, view, _, apart) = exploded_pair();
+    edit_view(&mut s, view, json!({"exploded": apart}));
+    let drawing = ids::encode(s.open_drawing.unwrap());
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "explode.delete", json!({"view": apart}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    let gone = inspect_view(&mut s, view);
+    assert_eq!(
+        (gone["extents"]["status"].as_str(), gone["extents"]["provenance"].as_str()),
+        (Some("placeholder"), Some("no_exploded_view")),
+        "{gone}"
+    );
+    assert_eq!(gone["settings"]["exploded"]["value"], json!({"view": apart}), "the choice stays, for an undo: {gone}");
+    // The sheet is drawn too, the view as its placeholder.
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let scene = run(&mut s, "drawing.scene", json!({"sheet": sheet}));
+    let drawn = scene["views"].as_array().and_then(|views| views.iter().find(|v| v["view"] == json!(ids::encode(view))));
+    assert_eq!(drawn.map(|v| v["status"].clone()), Some(json!("placeholder")), "{scene}");
+    let d = s.drawing("test").unwrap();
+    assert_eq!(&Drawing::from_json(&d.to_json().unwrap()).unwrap(), &**d);
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    assert!((width(&mut s, view) - 70.0).abs() < 1e-6);
+}
+
+/// Making or editing a view refuses an exploded choice that isn't one, with its reason, and leaves
+/// the drawing and the undo steps as they were.
+#[test]
+fn hostile_exploded_choices_are_refused() {
+    let (mut s, view, _, _) = exploded_pair();
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let cases = [
+        (json!("Nowhere"), "no exploded view"),
+        (json!(999_999), "no exploded view"),
+        (json!(-1), "exploded"),
+        (json!(1e300), "exploded"),
+        (json!(f64::NAN.to_string()), "no exploded view"),
+        (json!([]), "exploded"),
+        (json!({"view": "Apart"}), "exploded"),
+        (json!(""), "exploded"),
+        (json!("x".repeat(100_000)), "exploded"),
+    ];
+    for (choice, says) in cases {
+        let e = create_refused(&mut s, BASE, json!({"sheet": sheet, "scale": "1:1", "exploded": choice}));
+        assert!(e.contains(says), "{choice}: {e}");
+        let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+        let e = edit_refused(&mut s, view, json!({"exploded": choice}));
+        assert!(e.contains(says), "{choice}: {e}");
+        assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps), "{choice}");
+    }
+}
+
 /// Making or editing a view refuses what the snapshot refuses, with its reason, and leaves the
 /// drawing and the undo steps as they were: a path no occurrence makes, too many paths or ids, `[]`
 /// in `hide`, and a choice that leaves nothing. `[]` in `source` with only placed bodies is that.

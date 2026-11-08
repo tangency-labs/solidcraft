@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 use solidcraft_doc::MAX_PLACEMENT_DEPTH;
 use solidcraft_doc::drawing::DEFAULT_DPI;
 use solidcraft_doc::drawing::view::{View, ViewKind, ViewPlace};
-use solidcraft_doc::drawing_view::{ViewDirection, ViewOverrides};
+use solidcraft_doc::drawing_view::{Exploded, ViewDirection, ViewOverrides};
 use solidcraft_geom::cell::Projection;
 use solidcraft_geom::drawing_view::{NamedView, ProjectedSide};
 use solidcraft_geom::paper::line::{LineGroup, LineKind};
@@ -747,6 +747,79 @@ fn a_part_made_reference_draws_again() {
     run(&mut s, "occurrence.bom_type", json!({"occurrence": over, "bom_type": "reference"}));
     run(&mut s, "drawing.open", drawing);
     assert_eq!(extract(&mut s, sheet).unwrap().stale.len(), 2);
+}
+
+/// [`two_cubes`] with an exploded view, Apart, moving the second 30 mm further along x, and a drawing
+/// of them, open, with no title block: two assembled front views and one drawing Apart, each at 1:1.
+/// The session, the sheet, the two assembled views, the exploded one and Apart's id.
+fn two_assembled_one_apart() -> (Session, u64, [u64; 3], u64) {
+    let (mut s, [_, second]) = two_cubes();
+    let apart =
+        run(&mut s, "explode.create", json!({"name": "Apart", "moves": [{"occurrence": second, "translate": [30, 0, 0]}]}))["view"].as_u64().unwrap();
+    run(&mut s, "drawing.create", json!({}));
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    Arc::make_mut(&mut d.sheets[0]).set_title_block(None);
+    let mut id_source = solidcraft_doc::ids::IdSource::seeded(13048);
+    let (sheet, source) = (d.sheets[0].id, d.sources[0].id);
+    let mut add = |d: &mut Drawing, at: [f64; 2], exploded: Option<Exploded>| {
+        let id = d.allocate_id(&mut id_source).unwrap();
+        let settings = ViewOverrides { scale: Some("1:1".parse().unwrap()), exploded, ..ViewOverrides::default() };
+        let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) };
+        d.add_views([Arc::new(View { id, sheet, kind, place: ViewPlace::At(at), settings, reference_shown_percent: 0.0 })]);
+        id
+    };
+    let views = [
+        add(&mut d, [60.0, 150.0], None),
+        add(&mut d, [60.0, 250.0], Some(Exploded::Assembled)),
+        add(&mut d, [250.0, 150.0], Some(Exploded::View(apart))),
+    ];
+    d.validate().unwrap();
+    s.doc_mut().put_drawing(Arc::new(d));
+    (s, sheet, views, apart)
+}
+
+/// An exploded view is up to date by what it draws, not by what the design places: moving its parts
+/// further apart draws it again and leaves the assembled views as they were; moving them back to
+/// where they were drawn draws nothing.
+#[test]
+fn an_exploded_views_moves_draw_it_again_and_only_it() {
+    let (mut s, sheet, [_, _, exploded], _) = two_assembled_one_apart();
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    settled(&mut s, sheet);
+    let moves = |s: &mut Session, x: f64| {
+        run(s, "drawing.close", json!({}));
+        let doc = s.doc_mut();
+        let view = doc.assembly.exploded.first_mut().unwrap();
+        view.moves[0].1 = solidcore_record::Vec3::new(x, 0.0, 0.0);
+    };
+    moves(&mut s, 60.0);
+    run(&mut s, "drawing.open", drawing.clone());
+    assert_eq!(extract(&mut s, sheet).unwrap().stale, vec![exploded]);
+    settled(&mut s, sheet);
+    moves(&mut s, 60.0);
+    run(&mut s, "drawing.open", drawing);
+    assert!(extract(&mut s, sheet).unwrap().stale.is_empty(), "the same moves draw the same");
+}
+
+/// A sheet read makes one copy of the session for each exploded view its views draw, shared by every
+/// view that draws it, and none for the views that draw the design as it is placed.
+#[test]
+fn a_sheet_makes_one_copy_for_each_exploded_view_it_draws() {
+    let (mut s, sheet, [assembled, own_assembled, exploded], _) = two_assembled_one_apart();
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let id = d.allocate_id(&mut solidcraft_doc::ids::IdSource::seeded(13049)).unwrap();
+    let mut second = (*d.views.iter().find(|v| v.id == exploded).unwrap().as_ref()).clone();
+    (second.id, second.place) = (id, ViewPlace::At([250.0, 250.0]));
+    d.add_views([Arc::new(second)]);
+    d.validate().unwrap();
+    s.doc_mut().put_drawing(Arc::new(d.clone()));
+    let mut sessions = crate::drawing_view::ViewSessions::new(&s);
+    for view in [assembled, own_assembled, exploded, id] {
+        let resolved = d.resolve_view(view).unwrap();
+        sessions.of(&resolved).unwrap();
+    }
+    assert_eq!(sessions.copies(), 1);
+    built(&s, sheet);
 }
 
 /// A deferred drawing draws nothing until `drawing.update`: then from the model as it is now, until

@@ -118,6 +118,10 @@ impl<'a> ViewPictures<'a> {
         let (mut pictures, mut spent) = (BTreeMap::new(), BTreeMap::new());
         if let Ok(set) = crate::drawing_view::shown(s) {
             for (id, view, centre) in crate::drawing_scene::views_on(d, sheet)? {
+                // Its lines say why it isn't drawn ([`crate::drawing_view::not_drawable_exploded`]).
+                if crate::drawing_view::not_drawable_exploded(&view).is_some() {
+                    continue;
+                }
                 let parts = view_parts(&set, Styles::from(&view));
                 let Ok(extents) = crate::drawing_view::measure(&set, &view.basis) else { continue };
                 let frame = ortho(&crate::drawing_view::frame(view.basis, view.scale.value, &extents.model, centre, CMD)?);

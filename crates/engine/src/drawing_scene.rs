@@ -54,7 +54,7 @@ use solidcraft_doc::bom::Tree;
 use solidcraft_doc::drawing::dimension::{self, Dimension};
 use solidcraft_doc::drawing::view::{ResolvedView, View};
 use solidcraft_doc::drawing::{Drawing, Sheet, Updates};
-use solidcraft_doc::drawing_view::TangentEdges;
+use solidcraft_doc::drawing_view::{Exploded, TangentEdges};
 use solidcraft_doc::{DocError, Document, ModelState, ids};
 use solidcraft_geom::cell::Projection;
 use solidcraft_geom::drawing_view::ViewFrame;
@@ -67,7 +67,9 @@ use solidcraft_geom::{Aabb2, ArcMap};
 use solidcraft_sketch::PaperFonts;
 
 use crate::drawing_picture::{picture_items, view_parts};
-use crate::drawing_view::{CHORD_MM, LineRequest, MIN_MODEL_CHORD_MM, Shown, ShownSet, Stats, Styles, Unmeasured, paper_lines};
+use crate::drawing_view::{
+    CHORD_MM, LineRequest, MIN_MODEL_CHORD_MM, Shown, ShownSet, Stats, Styles, Unmeasured, ViewSessions, draws_exploded, exploded_copy, paper_lines,
+};
 use crate::params::bad;
 use crate::title_block_text::{self, CellText, Set};
 use crate::{EngineError, Result, Session};
@@ -297,10 +299,19 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     // Where the design places its parts, as the provider draws them.
     let copy = (!s.pending_moves.is_empty()).then(|| designed(s));
     let s = copy.as_ref().unwrap_or(s);
-    // Worked out once for the sheet: every view draws from the same one. Each view's lines are
-    // placed as they are drawn, so at most one view's are held beside the scene.
-    let shown = crate::drawing_view::shown(s);
-    let drawn = on.iter().map(|(id, view, centre)| (*id, *centre, draw(s, &shown, *id, view)));
+    // Worked out once for the sheet for each state of the assembly its views draw (#13048): every
+    // view of that state draws from the same one. Each view's lines are placed as they are drawn, so
+    // at most one view's are held beside the scene.
+    let mut sessions = ViewSessions::new(s);
+    let mut shown: BTreeMap<Exploded, std::result::Result<ShownSet, Unmeasured>> = BTreeMap::new();
+    let drawn = on.iter().map(|(id, view, centre)| {
+        let choice = view.exploded.value;
+        let drawn = match sessions.drawing(choice) {
+            Ok(from) => draw(from, shown.entry(choice).or_insert_with(|| crate::drawing_view::shown(from)), *id, view),
+            Err(why) => draw(s, &Err(why), *id, view),
+        };
+        (*id, *centre, drawn)
+    });
     let (text, _) = block_text(record, &Lettering::of(s, drawing), &cell_texts(s, drawing, sheet), true)?;
     let mut assembly = assemble(record, drawing.projection, &text, &crate::drawing_pictures::groups(drawing, sheet), drawn)?;
     // After the views, as they need the views' frames: one read for the sheet's dimensions.
@@ -310,7 +321,8 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     let dimensions = draw_dimensions(s, drawing, &wanted, |view| Some((*frames.get(&view)?, group(view)?)), true);
     assembly.add_dimensions(dimensions.iter());
     let (scene, views, objects, dimensions) = assembly.finish()?;
-    Ok(SheetScene { scene, views, objects, dimensions, out_of_date: Vec::new() })
+    let out_of_date = held_by_exploded(drawing, on.iter().map(|(id, ..)| *id));
+    Ok(SheetScene { scene, views, objects, dimensions, out_of_date })
 }
 
 /// Sheet `sheet` of `d`, the drawing open, as a command reads it: drawn at once ([`build`]), or for a
@@ -324,7 +336,8 @@ pub fn as_shown(s: &mut Session, d: &Drawing, sheet: u64) -> Result<SheetScene> 
     let shown = extract(s, sheet)?;
     // A held view's dimensions are listed after the views, never read again here against its old lines.
     let dimensions = out_of_date_dimensions(d, &shown.stale, shown.stale_dimensions);
-    let out_of_date = shown.stale.iter().copied().chain(dimensions).collect();
+    let exploded = held_by_exploded(d, views_on(d, sheet)?.iter().map(|(id, ..)| *id));
+    let out_of_date = shown.stale.iter().copied().chain(dimensions).chain(exploded).collect();
     let (scene, objects) = (Arc::unwrap_or_clone(shown.scene), shown.objects.to_vec());
     Ok(SheetScene { scene, views: shown.views, objects, dimensions: shown.dimensions, out_of_date })
 }
@@ -416,7 +429,8 @@ fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64,
     let boundary = crate::drawing_view::placed(view, placing, Vec2::ZERO, CMD).ok().map(|placed| placed.boundary);
     let none = |status| Drawn { group: None, status, stats: None, boundary, frame: None, owners: None };
     let styles = Styles::from(view);
-    if let Some(why) = crate::drawing_view::not_drawable(view.visual_style.value, view.reference_style.value) {
+    let not_drawable = crate::drawing_view::not_drawable(view.visual_style.value, view.reference_style.value);
+    if let Some(why) = not_drawable.or_else(|| crate::drawing_view::not_drawable_exploded(view)) {
         return none(Status::Failed(why.into()));
     }
     // Its reference parts draw too, around what the extents measure.
@@ -506,9 +520,20 @@ fn out_of_date_dimensions(d: &Drawing, stale_views: &[u64], stale_dimensions: Ve
     held.chain(stale_dimensions).collect()
 }
 
-/// The dimensions of `views` of `d`, by view and id.
+/// The dimensions of `views` of `d` that their view, drawing an exploded view, holds back
+/// ([`draws_exploded`]): neither read nor drawn, and listed out of date. By view and id.
+fn held_by_exploded(d: &Drawing, views: impl Iterator<Item = u64>) -> Vec<u64> {
+    let views: BTreeSet<u64> = views.filter(|id| draws_exploded(d, *id)).collect();
+    let mut held: Vec<(u64, u64)> =
+        d.dimensions.iter().filter(|record| views.contains(&record.view)).map(|record| (record.view, record.id)).collect();
+    held.sort_unstable();
+    held.into_iter().map(|(_, id)| id).collect()
+}
+
+/// The dimensions of `views` of `d`, by view and id, less those a view drawing an exploded view
+/// holds back ([`draws_exploded`]).
 fn dimensions_on(d: &Drawing, views: impl Iterator<Item = u64>) -> Vec<Arc<Dimension>> {
-    let views: BTreeSet<u64> = views.collect();
+    let views: BTreeSet<u64> = views.filter(|id| !draws_exploded(d, *id)).collect();
     let mut on: Vec<Arc<Dimension>> = d.dimensions.iter().filter(|record| views.contains(&record.view)).cloned().collect();
     on.sort_by_key(|record| (record.view, record.id));
     on
@@ -1140,8 +1165,10 @@ type ShownFor = (Arc<ModelState>, std::result::Result<ShownSet, Unmeasured>);
 /// One view's lines, worked out beside the window: [`begin`] asks for them, [`Job::run`] works them
 /// out anywhere, and [`finish`] takes them.
 pub struct Job {
-    /// The session as the design places its parts.
+    /// The session as its view draws the design: as it places its parts, or an exploded view of it.
     copy: Session,
+    /// Why the view can't be drawn, when its exploded view can't be made ([`exploded_copy`]).
+    refused: Option<Unmeasured>,
     /// The drawing open when the job was asked for: its records of the view's dimensions.
     drawing: Arc<Drawing>,
     ticket: Ticket,
@@ -1168,17 +1195,19 @@ pub struct Done {
     shows: Option<Arc<SourceKey>>,
     dimensions: Vec<Arc<Dimension>>,
     lines: Vec<DrawnDimension>,
-    shown: ShownFor,
+    /// The shown set of the design as it places its parts, for the cache; none from an exploded view.
+    shown: Option<ShownFor>,
 }
 
 impl Job {
     /// Works the view's lines and dimensions out: the one long piece of work, on any thread.
     pub fn run(self) -> Done {
-        let Job { copy, drawing, ticket, shown } = self;
+        let Job { copy, refused, drawing, ticket, shown } = self;
         // A design whose parts can't be placed draws its views as placeholders (`shown` says why).
         let state = copy.world_state().unwrap_or_else(|_| copy.model.state());
-        let shown = match shown {
-            Some((was, shown)) if Arc::ptr_eq(&was, &state) => shown,
+        let shown = match (refused, shown) {
+            (Some(why), _) => Err(why),
+            (None, Some((was, shown))) if Arc::ptr_eq(&was, &state) => shown,
             _ => crate::drawing_view::shown(&copy),
         };
         let drawn = draw(&copy, &shown, ticket.view, &ticket.resolved);
@@ -1187,7 +1216,8 @@ impl Job {
         let frame = drawn.frame.map(|frame| (frame, ticket.resolved.line_group.value));
         let dimensions = dimensions_on(&drawing, std::iter::once(ticket.view));
         let lines = draw_dimensions(&copy, &drawing, &dimensions, |_| frame, false);
-        Done { ticket, drawn, shows, dimensions, lines, shown: (state, shown) }
+        let shown = (ticket.resolved.exploded.value == Exploded::Assembled).then_some((state, shown));
+        Done { ticket, drawn, shows, dimensions, lines, shown }
     }
 }
 
@@ -1206,8 +1236,15 @@ fn job_for(s: &mut Session, d: &Arc<Drawing>, id: u64, view: ResolvedView, state
     let request = REQUEST.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
     s.drawing_scenes.requested = Some(request);
     let lettering = Lettering::of(s, d);
+    let (copy, refused, shown) = match view.exploded.value {
+        Exploded::Assembled => (designed(s), None, s.drawing_scenes.shown.take()),
+        Exploded::View(exploded) => match exploded_copy(s, exploded) {
+            Ok(copy) => (copy, None, None),
+            Err(why) => (designed(s), Some(why), None),
+        },
+    };
     let ticket = Ticket { request, view: id, resolved: view, state, revision: s.revision, lettering };
-    Job { copy: designed(s), drawing: d.clone(), ticket, shown: s.drawing_scenes.shown.take() }
+    Job { copy, refused, drawing: d.clone(), ticket, shown }
 }
 
 /// Takes a job's work into the cache when it is for its latest request and nothing it was asked from
@@ -1229,7 +1266,9 @@ pub fn finish(s: &mut Session, done: Done) -> bool {
         return false;
     }
     let cache = &mut s.drawing_scenes;
-    cache.shown = Some(shown);
+    if shown.is_some() {
+        cache.shown = shown;
+    }
     cache.serial += 1;
     let serial = cache.serial;
     let entry = Entry { state: ticket.state.clone(), shows, view: ticket.resolved, drawn, serial };
@@ -1303,23 +1342,38 @@ fn set_waiting_dimensions(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView
 }
 
 /// Each view of `on` drawn from another world state that showed what `state` shows takes `state`:
-/// drawn as it draws now, it is then up to date ([`Cache::fresh`]) and draws nothing. `state`'s shown
-/// set is worked out once, only when a view is behind it, and kept for [`step`] to draw from.
+/// drawn as it draws now, it is then up to date ([`Cache::fresh`]) and draws nothing. What a view
+/// shows is what it draws: the design as it places its parts, whose shown set is worked out once and
+/// kept for [`step`] to draw from, or its exploded view's (#13048), one for each exploded view behind.
+/// Each is worked out only when a view drawing it is behind.
 fn keep_what_shows_the_same(s: &mut Session, on: impl Iterator<Item = u64> + Clone, state: &Arc<ModelState>) {
-    let entry = |id: u64| s.drawing_scenes.views.get(&id);
-    if !on.clone().any(|id| entry(id).is_some_and(|e| e.shows.is_some() && !Arc::ptr_eq(&e.state, state))) {
-        return;
+    let behind: Vec<(u64, Exploded)> = on
+        .filter_map(|id| {
+            s.drawing_scenes.views.get(&id).filter(|e| e.shows.is_some() && !Arc::ptr_eq(&e.state, state)).map(|e| (id, e.view.exploded.value))
+        })
+        .collect();
+    let mut now: BTreeMap<Exploded, Option<Arc<SourceKey>>> = BTreeMap::new();
+    if behind.iter().any(|(_, exploded)| *exploded == Exploded::Assembled) {
+        let shown = match s.drawing_scenes.shown.take() {
+            Some((was, shown)) if Arc::ptr_eq(&was, state) => shown,
+            _ => crate::drawing_view::shown(s),
+        };
+        now.insert(Exploded::Assembled, SourceKey::of(&shown));
+        s.drawing_scenes.shown = Some((state.clone(), shown));
     }
-    let shown = match s.drawing_scenes.shown.take() {
-        Some((was, shown)) if Arc::ptr_eq(&was, state) => shown,
-        _ => crate::drawing_view::shown(s),
-    };
-    let now = SourceKey::of(&shown);
+    {
+        let mut sessions = ViewSessions::new(s);
+        for (_, exploded) in &behind {
+            if !now.contains_key(exploded) {
+                let shown = sessions.drawing(*exploded).and_then(crate::drawing_view::shown);
+                now.insert(*exploded, SourceKey::of(&shown));
+            }
+        }
+    }
     let cache = &mut s.drawing_scenes;
-    cache.shown = Some((state.clone(), shown));
-    let Some(now) = now else { return };
-    for id in on {
-        if let Some(entry) = cache.views.get_mut(&id).filter(|e| e.shows_the_same(state, &now)) {
+    for (id, exploded) in behind {
+        let Some(Some(now)) = now.get(&exploded) else { continue };
+        if let Some(entry) = cache.views.get_mut(&id).filter(|e| e.shows_the_same(state, now)) {
             entry.state = state.clone();
         }
     }

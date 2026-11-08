@@ -80,6 +80,9 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
             point: s.doc.corner_reference(&s.model, &corner.pick, &corner.path).map_err(|why| bad(ADD, why.to_string()))?,
         },
     };
+    if let Anchor::Edge { view, .. } | Anchor::Corner { view, .. } = anchor {
+        crate::drawing_view::refuse_on_exploded(&record, view, "notes on its model", ADD)?;
+    }
     if let (Some(view), Some(path)) = (anchor.view(), anchor.path()) {
         check_drawn(&record, view, [path], ADD)?;
     }

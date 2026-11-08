@@ -78,6 +78,17 @@ pub enum TangentEdges {
     Show,
 }
 
+/// Which state of its assembly a view draws (#13048): as the design places its parts (the default),
+/// or one of the design's exploded views, by its id. The design is never changed: the view draws a
+/// copy. An id the design no longer has draws a placeholder, never refuses the file.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Exploded {
+    #[default]
+    Assembled,
+    View(u64),
+}
+
 /// What a view shows and how. Every field has a default: the front view at the scale that fits
 /// its page, visible lines only, tangent edges hidden.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -125,6 +136,9 @@ pub struct ViewOverrides {
     /// of its chain sets one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line_group: Option<LineGroup>,
+    /// The state of its assembly it draws: assembled when no view of its chain sets one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exploded: Option<Exploded>,
 }
 
 impl ViewOverrides {

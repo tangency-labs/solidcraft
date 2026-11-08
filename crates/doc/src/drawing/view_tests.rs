@@ -11,7 +11,7 @@ use solidcraft_geom::paper::line::LineGroup;
 
 use super::*;
 use crate::drawing::{Excluded, Sheet, Source};
-use crate::drawing_view::OccurrencePaths;
+use crate::drawing_view::{Exploded, OccurrencePaths};
 use crate::format::DRAWING;
 use crate::ids::IdSource;
 
@@ -201,6 +201,66 @@ fn what_a_view_shows_keeps_its_limits_on_reading() {
         v["views"][at]["settings"]["hide"] = lists(25, 64);
     });
     assert!(both.contains("4096 ids in all"), "{both}");
+}
+
+/// Which exploded view a view draws saves in its settings by the exploded view's id, follows down its
+/// chain until a view sets its own (`assembled` included), and reads back as the same bytes; a view
+/// that sets none saves none and draws assembled.
+#[test]
+fn an_exploded_choice_follows_its_parent_and_saves_as_it_is() {
+    let (mut d, _, [front, right, top]) = three();
+    let resolved = |d: &Drawing, id: u64| d.resolve_view(id).unwrap().exploded;
+    assert_eq!(resolved(&d, top), Setting { value: Exploded::Assembled, set_by: SetBy::Default });
+    view_mut(&mut d, front).settings.exploded = Some(Exploded::View(77));
+    d.validate().unwrap();
+    assert_eq!(resolved(&d, top), Setting { value: Exploded::View(77), set_by: SetBy::Parent(front) });
+    assert_eq!(resolved(&d, front), Setting { value: Exploded::View(77), set_by: SetBy::This });
+    // Assembled is a setting of its own: the views below it draw assembled whatever the base draws.
+    view_mut(&mut d, right).settings.exploded = Some(Exploded::Assembled);
+    assert_eq!(resolved(&d, top), Setting { value: Exploded::Assembled, set_by: SetBy::Parent(right) });
+    let v = file(&d);
+    let listed = v["views"].as_array().unwrap();
+    let saved = |id: u64| listed.iter().find(|view| view["id"] == json!(ids::encode(id))).unwrap();
+    // The design's ids, as occurrence paths save them: numbers.
+    assert_eq!(saved(front)["settings"], json!({"scale": "1:2", "exploded": {"view": 77}}));
+    assert_eq!(saved(right)["settings"], json!({"visual_style": "visible_hidden", "exploded": "assembled"}));
+    assert_eq!(saved(top).get("settings"), None);
+    let reopened = Drawing::from_json(&d.to_json().unwrap()).unwrap();
+    assert_eq!(reopened, d);
+    assert_eq!(reopened.to_json().unwrap(), d.to_json().unwrap());
+}
+
+/// An exploded choice reads whatever exploded view it names (one the design no longer has draws a
+/// placeholder, never refuses the file), and anything that isn't a choice is refused.
+#[test]
+fn an_exploded_choice_keeps_its_limits_on_reading() {
+    let (d, _, _) = three();
+    let at = d.views.iter().position(|view| matches!(view.kind, ViewKind::Base { .. })).unwrap();
+    let with = |choice: Value| {
+        refused(&d, |v| {
+            v["views"][at]["settings"]["exploded"] = choice;
+        })
+    };
+    // What each reads as: "read", or a part of why it is refused ("" for refused, whatever the words).
+    let cases = [
+        (json!({"view": 999_999}), "read"),
+        (json!({"view": u64::MAX}), "read"),
+        (json!({"view": 0}), "read"),
+        (json!("assembled"), "read"),
+        (json!(null), "read"),
+        (json!("exploded"), "unknown variant"),
+        (json!({"view": "7"}), "invalid type"),
+        (json!({"view": -1}), "invalid value"),
+        (json!({"view": 1.5}), "invalid type"),
+        (json!({"view": 7, "amount": 1}), ""),
+        (json!({"view": null}), ""),
+        (json!([]), ""),
+        (json!(1.5), ""),
+    ];
+    for (choice, says) in cases {
+        let e = with(choice.clone());
+        assert!(if says.is_empty() { e != "read" } else { e.contains(says) }, "{choice}: {e}");
+    }
 }
 
 /// Seeded changes to a view's saved choice: each reads or is refused, never panics, and what reads
