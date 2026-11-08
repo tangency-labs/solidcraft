@@ -68,6 +68,12 @@ pub struct WorkspaceDescriptor {
     pub default_preset: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PresetKind {
+    BuiltIn,
+    User,
+}
+
 /// Fields are private: registrations and prepared updates must obey aggregate
 /// bounds before cloning or publishing. There is no independently stored selection.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -95,16 +101,32 @@ impl CatalogueState {
     pub fn user_presets(&self) -> impl Iterator<Item = (&str, &StoredEnvelope)> {
         self.users.iter().map(|(name, record)| (name.as_str(), record))
     }
+    pub fn builtin_presets(&self) -> impl Iterator<Item = (&str, &StoredEnvelope)> {
+        self.builtins.iter().map(|(name, record)| (name.as_str(), record))
+    }
     pub fn remembered(&self, workspace: &WorkspaceId) -> Option<&StoredEnvelope> {
         self.remembered.get(workspace)
     }
     pub fn preset(&self, name: &str) -> PanelResult<&StoredEnvelope> {
-        self.builtins.get(name).or_else(|| self.users.get(name)).ok_or_else(|| error(Rule::MissingTarget, "layout preset not registered"))
+        let name = preset_name(name)?;
+        let (kind, stored_name) = self.find_preset_name(&name).ok_or_else(|| error(Rule::MissingTarget, "layout preset not registered"))?;
+        match kind {
+            PresetKind::BuiltIn => self.builtins.get(stored_name),
+            PresetKind::User => self.users.get(stored_name),
+        }
+        .ok_or_else(|| error(Rule::MissingTarget, "layout preset not registered"))
+    }
+    pub fn preset_kind(&self, name: &str) -> PanelResult<Option<PresetKind>> {
+        Ok(self.find_preset_name(&preset_name(name)?).map(|(kind, _)| kind))
+    }
+    fn find_preset_name(&self, name: &str) -> Option<(PresetKind, &str)> {
+        self.builtins
+            .keys()
+            .find(|stored| preset_names_equal(stored, name))
+            .map(|stored| (PresetKind::BuiltIn, stored.as_str()))
+            .or_else(|| self.users.keys().find(|stored| preset_names_equal(stored, name)).map(|stored| (PresetKind::User, stored.as_str())))
     }
     fn validate(&self) -> PanelResult<()> {
-        if self.users.keys().any(|name| self.builtins.contains_key(name)) {
-            return Err(error(Rule::DuplicateId, "user preset collides with immutable built-in"));
-        }
         if self.users.len() > MAX_USER_PRESETS
             || self.builtins.len() > MAX_USER_PRESETS
             || self.workspaces.len() > MAX_WORKSPACES
@@ -122,9 +144,13 @@ impl CatalogueState {
             metadata = metadata.saturating_add(id.0.len() + item.title_key.len() + item.default_preset.len());
         }
         let mut bytes = 0_usize;
+        let mut names = std::collections::BTreeSet::new();
         for (name, stored) in self.builtins.iter().chain(&self.users) {
             if preset_name(name)? != *name {
                 return Err(error(Rule::Schema, "preset name must be normalised"));
+            }
+            if !names.insert(folded_preset_name(name).collect::<String>()) {
+                return Err(error(Rule::DuplicateId, "preset names must be distinct regardless of case"));
             }
             metadata = metadata.saturating_add(name.len());
             bytes = bytes.saturating_add(stored.bytes.len() + stored.rejected.as_ref().map_or(0, |r| r.len()));
@@ -192,7 +218,7 @@ impl InMemoryCatalogue {
     /// Explicit fixture/peer registration, never populated with invented products.
     pub fn register_builtin(&mut self, name: &str, envelope: &LayoutEnvelope, registry: &PanelRegistry) -> PanelResult<()> {
         let name = preset_name(name)?;
-        if self.state.builtins.contains_key(&name) || self.state.users.contains_key(&name) {
+        if self.state.find_preset_name(&name).is_some() {
             return Err(error(Rule::DuplicateId, "preset already registered"));
         }
         let stored = StoredEnvelope::new(envelope, None, registry)?;
@@ -202,11 +228,16 @@ impl InMemoryCatalogue {
         self.publish(prepared);
         Ok(())
     }
-    pub fn register_workspace(&mut self, descriptor: WorkspaceDescriptor) -> PanelResult<()> {
+    pub fn register_workspace(&mut self, mut descriptor: WorkspaceDescriptor) -> PanelResult<()> {
         valid_id(&descriptor.id.0)?;
         valid_id(&descriptor.title_key)?;
         if self.state.workspaces.contains_key(&descriptor.id) {
             return Err(error(Rule::DuplicateId, "workspace already registered"));
+        }
+        let requested = preset_name(&descriptor.default_preset)?;
+        match self.state.find_preset_name(&requested) {
+            Some((PresetKind::BuiltIn, name)) => descriptor.default_preset = name.to_string(),
+            _ => return Err(error(Rule::MissingTarget, "workspace requires a registered immutable default")),
         }
         let mut next = self.state.clone();
         next.workspaces.insert(descriptor.id.clone(), descriptor);
@@ -236,6 +267,20 @@ pub fn preset_name(raw: &str) -> PanelResult<String> {
     Ok(name.into())
 }
 
+fn folded_preset_name(name: &str) -> impl Iterator<Item = char> + '_ {
+    name.chars().flat_map(char::to_uppercase)
+}
+
+/// Compare bounded normalized names using Unicode uppercase without allocating.
+/// Display spelling is retained in the catalogue, including after replacement.
+pub fn preset_names_equal(left: &str, right: &str) -> bool {
+    left.len() <= 256
+        && right.len() <= 256
+        && left.chars().count() <= 64
+        && right.chars().count() <= 64
+        && folded_preset_name(left).eq(folded_preset_name(right))
+}
+
 pub fn is_command(id: &str) -> bool {
     crate::find_command(id).is_some_and(|spec| IDS.contains(&spec.id))
 }
@@ -252,8 +297,11 @@ pub const IDS: &[&str] = &[
     "panel.dismiss",
     "panel.float",
     "panel.focus",
+    "panel.focus.next",
+    "panel.focus.previous",
     "panel.list",
     "panel.move",
+    "panel.move.next_zone",
     "panel.native_close",
     "panel.open",
     "panel.peek",
@@ -261,6 +309,12 @@ pub const IDS: &[&str] = &[
     "panel.reset_pair",
     "panel.resize",
     "panel.resize_pair",
+    "panel.sash.down",
+    "panel.sash.left",
+    "panel.sash.reset",
+    "panel.sash.right",
+    "panel.sash.up",
+    "panel.toggle",
 ];
 
 #[derive(Debug)]
@@ -269,6 +323,7 @@ pub enum PanelCommand {
     Get,
     Open(wire::Open),
     HeaderAction(wire::HeaderAction),
+    Contextual { action: ContextualPanelAction, params: wire::Revision },
     Select { operation: &'static str, params: wire::Select },
     Move { operation: &'static str, params: wire::Move },
     Resize(wire::Resize),
@@ -308,6 +363,11 @@ pub fn parse_command(id: &str, params: &Value) -> PanelResult<PanelCommand> {
     }
     serde_json::to_writer(Counter(0), params).map_err(|_| error(Rule::CollectionLimit, "panel command byte cap"))?;
     let id = crate::find_command(id).map(|s| s.id).ok_or_else(|| error(Rule::MissingTarget, "unknown panel command"))?;
+    if let Some(action) = ContextualPanelAction::from_command_id(id) {
+        let command = PanelCommand::Contextual { action, params: read(params)? };
+        validate_command(&command)?;
+        return Ok(command);
+    }
     let command = match id {
         "panel.list" => {
             let _: wire::Empty = read(params)?;
@@ -328,7 +388,12 @@ pub fn parse_command(id: &str, params: &Value) -> PanelResult<PanelCommand> {
         "panel.dismiss" => PanelCommand::Dismiss(read(params)?),
         "panel.resize_pair" => PanelCommand::ResizePair(read(params)?),
         "panel.reset_pair" => PanelCommand::ResetPair(read(params)?),
-        "layout.save" => PanelCommand::Save(read(params)?),
+        "layout.save" => {
+            if params.get("replace").zip(params.get("overwrite")).is_some_and(|(replace, overwrite)| replace != overwrite) {
+                return Err(error(Rule::Schema, "replace and overwrite flags disagree"));
+            }
+            PanelCommand::Save(read(params)?)
+        }
         "layout.apply" => PanelCommand::Apply(read(params)?),
         "layout.reset" => PanelCommand::Reset(read(params)?),
         "layout.workspace.select" => PanelCommand::Workspace(read(params)?),
@@ -674,6 +739,25 @@ fn stage_current_prepared(
     preparation: &LayoutPreparationContext,
 ) -> PanelResult<LayoutReply> {
     let source_catalogue = context.catalogue.state().clone();
+    if *action == LayoutAction::Inspect {
+        // Saving catalogue metadata does not change placement. Existing overflow
+        // must not prevent saving the arrangement that the user can already see.
+        let source_context = preparation_context(&current_envelope_snapshot(&*context.catalogue, state, context.registry)?)?;
+        let envelope = with_live_layout(envelope, state.layout.clone(), context.registry)?;
+        let stored = StoredEnvelope::new(&envelope, recovery.as_deref(), context.registry)?;
+        next.remembered.insert(envelope.layout.workspace.clone(), stored);
+        let prepared = context.catalogue.prepare(next)?;
+        let current = context.sink.inspect();
+        if context.catalogue.state() != &source_catalogue || current != *state {
+            return Err(error(Rule::Revision, "layout or catalogue changed during storage staging"));
+        }
+        let current_context = preparation_context(&current_envelope_snapshot(&*context.catalogue, &current, context.registry)?)?;
+        if current_context != source_context {
+            return Err(error(Rule::Revision, "layout context changed during storage staging"));
+        }
+        context.catalogue.publish(prepared);
+        return Ok(current);
+    }
     let projected = context.sink.project_in_context(action.clone(), preparation)?;
     let workspace = match action {
         LayoutAction::Replace { layout, .. } => &layout.workspace,
@@ -697,13 +781,7 @@ fn stage_current_prepared(
     if context.sink.inspect().revision != state.revision {
         return Err(error(Rule::Revision, "layout changed during storage staging"));
     }
-    let committed = if *action == LayoutAction::Inspect {
-        let current = context.sink.inspect();
-        revision(Some(state.revision), &current)?;
-        current
-    } else {
-        context.sink.dispatch_in_context(action.clone(), preparation)?
-    };
+    let committed = context.sink.dispatch_in_context(action.clone(), preparation)?;
     context.catalogue.publish(prepared);
     Ok(committed)
 }
@@ -747,6 +825,11 @@ pub fn execute_command(command: PanelCommand, context: &mut PanelCommandContext<
     validate_command(&command)?;
     let state = context.sink.inspect();
     match command {
+        PanelCommand::Contextual { action, params } => {
+            revision(params.expected_revision, &state)?;
+            let action = context.sink.resolve_contextual(action)?;
+            return value(execute_layout_action(action, context)?);
+        }
         PanelCommand::List => return value(wire::ListReply { state, kinds: context.registry.specs().cloned().collect() }),
         PanelCommand::Get => return value(wire::GetReply { state, workspaces: context.catalogue.state().summaries() }),
         command @ PanelCommand::HeaderAction(_) => {
@@ -771,13 +854,15 @@ pub fn execute_command(command: PanelCommand, context: &mut PanelCommandContext<
     match command {
         PanelCommand::Save(p) => {
             revision(p.expected_revision, &state)?;
-            let name = preset_name(&p.name)?;
-            if next.builtins.contains_key(&name) {
+            let requested = preset_name(&p.name)?;
+            let existing = next.find_preset_name(&requested);
+            if matches!(existing, Some((PresetKind::BuiltIn, _))) {
                 return Err(error(Rule::Capability, "built-in presets are immutable"));
             }
+            let name = existing.map(|(_, name)| name.to_string()).unwrap_or(requested);
             let overwritten = next.users.contains_key(&name);
-            if overwritten && !p.overwrite {
-                return Err(error(Rule::DuplicateId, "preset exists; overwrite must be explicit"));
+            if overwritten && !p.replace && !p.overwrite {
+                return Err(error(Rule::DuplicateId, "preset exists; replace must be explicit"));
             }
             if !overwritten && next.users.len() >= MAX_USER_PRESETS {
                 return Err(error(Rule::CollectionLimit, "user preset count cap"));
@@ -973,6 +1058,7 @@ pub fn preflight_batch(steps: &[Value], workspace: &WorkspaceId) -> PanelResult<
     let mut replacement = false;
     let mut mutation = false;
     let mut header_action = false;
+    let mut contextual = false;
     for step in steps {
         let id =
             step.get("command").or_else(|| step.get("id")).and_then(Value::as_str).ok_or_else(|| error(Rule::Schema, "batch command required"))?;
@@ -980,6 +1066,7 @@ pub fn preflight_batch(steps: &[Value], workspace: &WorkspaceId) -> PanelResult<
         match parse_command(id, step.get("params").unwrap_or(&empty))? {
             PanelCommand::List | PanelCommand::Get | PanelCommand::Save(_) => {}
             PanelCommand::HeaderAction(_) => header_action = true,
+            PanelCommand::Contextual { .. } => contextual = true,
             PanelCommand::Apply(_) | PanelCommand::Reset(_) => replacement = true,
             PanelCommand::Workspace(params) => {
                 replacement |= params.workspace != selected;
@@ -987,6 +1074,9 @@ pub fn preflight_batch(steps: &[Value], workspace: &WorkspaceId) -> PanelResult<
             }
             _ => mutation = true,
         }
+    }
+    if contextual && steps.len() != 1 {
+        return Err(error(Rule::Capability, "contextual panel actions require a standalone transaction"));
     }
     if header_action && steps.len() != 1 {
         return Err(error(Rule::Capability, "header actions require a standalone transaction"));
@@ -1010,7 +1100,7 @@ pub fn execute_batch(steps: &[Value], context: &mut PanelCommandContext<'_>) -> 
             step.get("command").or_else(|| step.get("id")).and_then(Value::as_str).ok_or_else(|| error(Rule::Schema, "batch command required"))?;
         let empty = json!({});
         let command = parse_command(id, step.get("params").unwrap_or(&empty))?;
-        if matches!(&command, PanelCommand::HeaderAction(_)) {
+        if matches!(&command, PanelCommand::HeaderAction(_) | PanelCommand::Contextual { .. }) {
             let result = execute_command(command, context)?;
             return Ok(json!({"completed":1,"results":[result],"undone":0}));
         }

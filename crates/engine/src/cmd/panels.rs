@@ -42,7 +42,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "Save Layout",
         wire::Save,
         wire::SaveReply,
-        "name, overwrite?: false, expected_revision?: save complete envelope in injected catalogue"
+        "name, replace?: false (overwrite accepted for compatibility), expected_revision?: save complete envelope in injected catalogue"
     ),
     command!(
         "layout.workspace.select",
@@ -109,6 +109,22 @@ pub static COMMANDS: &[CommandSpec] = &[
         "target or legacy id, expected_revision?: reopen retained state, activate and request focus"
     ),
     command!(
+        "panel.focus.next",
+        "fit",
+        "Focus Next Panel",
+        wire::Revision,
+        crate::panels::LayoutReply,
+        "expected_revision?: resolve the focused shared panel control in the live host"
+    ),
+    command!(
+        "panel.focus.previous",
+        "fit",
+        "Focus Previous Panel",
+        wire::Revision,
+        crate::panels::LayoutReply,
+        "expected_revision?: resolve the focused shared panel control in the live host"
+    ),
+    command!(
         "panel.list",
         "list",
         "List Panels",
@@ -123,6 +139,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         wire::Move,
         crate::panels::LayoutReply,
         "target or legacy id, destination: new_section, join_tab or relative, activate?: false, expected_revision?"
+    ),
+    command!(
+        "panel.move.next_zone",
+        "move",
+        "Move Panel to Next Zone",
+        wire::Revision,
+        crate::panels::LayoutReply,
+        "expected_revision?: resolve the focused shared panel control in the live host"
     ),
     command!(
         "panel.native_close",
@@ -179,5 +203,57 @@ pub static COMMANDS: &[CommandSpec] = &[
         wire::ResizePair,
         crate::panels::LayoutReply,
         "first, second, first_size, second_size, expected_revision?: conserve adjacent dock pair extent"
+    ),
+    command!(
+        "panel.sash.down",
+        "scale",
+        "Resize Panel Sash Down",
+        wire::Revision,
+        crate::panels::LayoutReply,
+        "expected_revision?: resolve the focused shared panel control in the live host"
+    )
+    .key("Down"),
+    command!(
+        "panel.sash.left",
+        "scale",
+        "Resize Panel Sash Left",
+        wire::Revision,
+        crate::panels::LayoutReply,
+        "expected_revision?: resolve the focused shared panel control in the live host"
+    )
+    .key("Left"),
+    command!(
+        "panel.sash.reset",
+        "restore",
+        "Reset Focused Panel Sash",
+        wire::Revision,
+        crate::panels::LayoutReply,
+        "expected_revision?: resolve the focused shared panel control in the live host"
+    ),
+    command!(
+        "panel.sash.right",
+        "scale",
+        "Resize Panel Sash Right",
+        wire::Revision,
+        crate::panels::LayoutReply,
+        "expected_revision?: resolve the focused shared panel control in the live host"
+    )
+    .key("Right"),
+    command!(
+        "panel.sash.up",
+        "scale",
+        "Resize Panel Sash Up",
+        wire::Revision,
+        crate::panels::LayoutReply,
+        "expected_revision?: resolve the focused shared panel control in the live host"
+    )
+    .key("Up"),
+    command!(
+        "panel.toggle",
+        "fold",
+        "Toggle Focused Panel",
+        wire::Revision,
+        crate::panels::LayoutReply,
+        "expected_revision?: resolve the focused shared panel control in the live host"
     ),
 ];

@@ -21,22 +21,6 @@ use crate::prefs::{OrbitAround, pivot_under};
 use crate::space_mouse::{BridgeMotion, Motion};
 use crate::viewport::{Hit, NavMode, axis_rect, nearest_quarter_turn, pick, pick_cached, projection};
 
-/// Take a predominantly horizontal wheel gesture for a hovered scroll viewport.
-/// Leave vertical input for its enclosing page, and leave horizontal input
-/// unconsumed when this viewport is already at the requested end.
-pub(crate) fn take_horizontal_wheel(ui: &egui::Ui, offset: f32, max_offset: f32) -> f32 {
-    ui.input_mut(|input| {
-        let delta = input.smooth_scroll_delta;
-        if delta.x == 0.0 || delta.x.abs() <= delta.y.abs() {
-            return 0.0;
-        }
-        if (offset - delta.x).clamp(0.0, max_offset) != offset {
-            input.smooth_scroll_delta.x = 0.0;
-        }
-        delta.x
-    })
-}
-
 /// What a page's camera may do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct NavCaps {
@@ -462,7 +446,8 @@ pub(crate) struct KeyHold {
 
 /// A menu, the command box or a focused widget has the keyboard, so the view keys are not ours.
 fn view_keys_blocked(app: &SolveApp, ctx: &egui::Context, canvas: Option<egui::Id>) -> bool {
-    egui::Popup::is_any_open(ctx)
+    (app.prefs_window.open && app.prefs_window.section == crate::prefs::PAGE_LAYOUT)
+        || egui::Popup::is_any_open(ctx)
         || app.viewport.context_menu.is_some()
         || app.ui.palette_open
         || ctx.memory(|m| m.focused().is_some_and(|focused| Some(focused) != canvas))
@@ -2061,7 +2046,8 @@ mod tests {
         ];
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let dirs = [root.join("src"), root.join("../../apps/solidcraft/src"), root.join("../../apps/solidcraft-web/src")];
-        let allowed = ["navigation.rs"];
+        // The kit's wheel.rs scrolls strips (a horizontal wheel over a hovered scroll area), not cameras.
+        let allowed = ["navigation.rs", "wheel.rs"];
         let mut offenders = Vec::new();
         let mut scanned = 0;
         let mut stack: Vec<std::path::PathBuf> = dirs.iter().filter(|d| d.is_dir()).cloned().collect();
@@ -2957,6 +2943,37 @@ mod view_key_tests {
 
     fn arrow(pressed: bool, repeat: bool) -> egui::Event {
         egui::Event::Key { key: egui::Key::ArrowLeft, physical_key: None, pressed, repeat, modifiers: egui::Modifiers::NONE }
+    }
+
+    #[test]
+    fn unfocused_layout_preferences_owns_view_keys_while_general_preserves_camera_preview() {
+        let mut app = crate::SolveApp::new(Default::default(), Default::default());
+        app.preferences.look_at_anim = false;
+        let ctx = crate::fonts::test_context();
+        let mut output = ctx.run_ui(egui::RawInput { events: vec![arrow(true, false)], focused: true, ..Default::default() }, |ui| {
+            assert!(ui.memory(|memory| memory.focused().is_none()));
+            assert!(!egui::Popup::is_any_open(ui.ctx()));
+            app.prefs_window.open = true;
+            app.prefs_window.section = crate::prefs::PAGE_LAYOUT;
+            let before = app.cam;
+            let log = app.session.log.len();
+            assert!(!super::view_key(&mut app, ui.ctx(), egui::Key::ArrowLeft, egui::Modifiers::NONE, false));
+            assert_eq!(app.cam, before, "Layout keeps the arrow even before a selector has focus");
+            assert_eq!(app.session.log.len(), log);
+            assert!(app.viewport.key_hold.is_none());
+
+            app.prefs_window.section = crate::prefs::PAGE_GENERAL;
+            assert!(super::view_key(&mut app, ui.ctx(), egui::Key::ArrowLeft, egui::Modifiers::NONE, false));
+            assert!(app.viewport.key_hold.is_some(), "General retains unfocused arrow camera preview");
+            app.now += super::TAP_SECONDS + 1.0;
+            app.prefs_window.section = crate::prefs::PAGE_LAYOUT;
+            let before = app.cam;
+            assert!(ui.input(|input| input.key_down(egui::Key::ArrowLeft)));
+            super::step_key_hold(&mut app, ui.ctx());
+            assert!(app.viewport.key_hold.is_none(), "opening Layout releases a previous held view key");
+            assert_eq!(app.cam, before);
+        });
+        output.textures_delta.clear();
     }
 
     /// A press and release in one frame, without the harness settling the view after it.

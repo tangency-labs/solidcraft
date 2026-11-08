@@ -21,9 +21,9 @@ use crate::selection::{
     self, AXES, AXIS_PICKS, Accept, BODIES, CURVES, EDGES, FACES, PLANAR_FACES, PLANES, PROFILES, SelInput, SelectionExt as _, point_value as pt,
     polyline_mid,
 };
-use crate::theme::Tokens;
 use crate::tool_modifiers::{Audit, Scope, ToolModifiers};
 use crate::viewport::Hit;
+use solidcraft_theme::Tokens;
 
 #[path = "dialogs_dense.rs"]
 mod dense;
@@ -615,12 +615,13 @@ impl DialogComputation {
     }
 }
 
-fn adopt_dialog(app: &mut SolveApp, prepared: solidcraft_engine::ComputedCommands) -> Result<(), String> {
+fn adopt_dialog(app: &mut SolveApp, prepared: solidcraft_engine::ComputedCommands, d: &Dialog) -> Result<(), String> {
     if app.file_load.busy() || app.file_picker_busy() {
         return Err("a file operation is in progress".into());
     }
     let replies = app.session.accept_commands(prepared).map_err(|e| e.to_string())?;
     app.big_operation = true;
+    let made = crate::hole_place::holes_made(&replies);
     for (id, reply) in replies {
         let stop = (id == "joint.drive").then(|| crate::dialogs_assembly::drive_stop(&reply)).flatten();
         app.command_completed(&id, Ok(reply))?;
@@ -628,6 +629,7 @@ fn adopt_dialog(app: &mut SolveApp, prepared: solidcraft_engine::ComputedCommand
             app.set_status(why, false);
         }
     }
+    crate::hole_place::group_made(app, d, made);
     Ok(())
 }
 
@@ -1589,7 +1591,7 @@ impl Dialog {
     /// lies on that face (a circle's centre) is taken at the point, as a points input picks it.
     pub(crate) fn candidate_on(&self, s: &Session, h: &Hit, snap: Option<&FaceSnap>) -> Option<Sel> {
         if matches!(self.kind, Kind::SketchModify(_)) {
-            return crate::sketch_modify_ui::candidate(self, s, h);
+            return crate::sketch_modify_ui::pick_candidate(self, s, h);
         }
         if let Some(target) = self.extrude_target(s, h) {
             return Some(target);
@@ -2556,7 +2558,7 @@ pub(crate) fn combo(ui: &mut egui::Ui, id: &str, labels: &[&str], sel: &mut usiz
 }
 
 fn tr(text: &str) -> &str {
-    crate::i18n::tr_label(text)
+    solidcraft_ui_text::tr_label(text)
 }
 
 fn publish_check(ui: &egui::Ui, response: &egui::Response, selected: bool) {
@@ -2627,6 +2629,18 @@ fn title(k: &Kind) -> &'static str {
         Kind::SketchModify(k) => k.title(),
         _ => k.simple_metadata().map_or("", |(_, title)| title),
     }
+}
+
+/// Whether the dialog is an extrude opened by Press Pull (the Q shortcut), which says
+/// PRESS PULL, not EXTRUDE (#11705).
+fn press_pull_extrude(d: &Dialog) -> bool {
+    d.press_pull && matches!(d.kind, Kind::Extrude { .. })
+}
+
+/// The dialog's title: an extrude opened by Press Pull (the Q shortcut) says PRESS PULL, not
+/// EXTRUDE (#11705).
+fn title_of(d: &Dialog) -> &'static str {
+    if press_pull_extrude(d) { "PRESS PULL" } else { title(&d.kind) }
 }
 
 fn hint(inp: &SelInput) -> &'static str {
@@ -2741,7 +2755,8 @@ fn object_type_row(d: &mut Dialog, ui: &mut egui::Ui) {
     let cur = usize::from(inp.accept == selection::FEATURES);
     let mut ty = cur;
     // What the two kinds are, and that a sketch is neither (#10057).
-    choice_row(ui, "Object Type", "pat_obj", &mut ty, &["Bodies", "Features"]).backing_on_hover_text(crate::i18n::tr("ui.pattern_object_type_tip"));
+    choice_row(ui, "Object Type", "pat_obj", &mut ty, &["Bodies", "Features"])
+        .backing_on_hover_text(solidcraft_ui_text::tr("ui.pattern_object_type_tip"));
     if ty != cur {
         inp.accept = if ty == 1 { selection::FEATURES } else { BODIES };
         inp.label = objects_label(inp.accept);
@@ -2834,6 +2849,10 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
         object_type_row(d, ui);
         return;
     }
+    if crate::hole_folder::active(d) {
+        crate::hole_folder::note(app, d, ui);
+        return;
+    }
     let Kind::Hole { opts, .. } = &mut d.kind else { return };
     let mut m = usize::from(opts.multiple);
     choice_row(ui, "Placement", "hole_place", &mut m, &["Single", "Multiple"]);
@@ -2909,25 +2928,27 @@ fn occurrence_paths(s: &Session, items: &[Sel]) -> Vec<Vec<u64>> {
 /// the name the preferences give it.
 pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames, d: &Dialog, inp: &SelInput, item: &Sel) -> String {
     let axis = inp.accept == selection::AXIS_PICKS && round_axis(s, item).is_some();
-    let sketch_name =
-        |id| s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_else(|| crate::i18n::format("browser.sketch_name", &[("number", &id.to_string())]));
+    let sketch_name = |id| {
+        s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_else(|| solidcraft_ui_text::format("browser.sketch_name", &[("number", &id.to_string())]))
+    };
     match item {
         Sel::SketchCurve { id, .. } => id.clone(),
         Sel::SketchPoint { id } => crate::sketch_modify_ui::point_id(s, item).unwrap_or(id).to_string(),
-        Sel::SketchMidpoint { id } => crate::i18n::format("dialog.selection_midpoint", &[("id", id)]),
+        Sel::SketchMidpoint { id } => solidcraft_ui_text::format("dialog.selection_midpoint", &[("id", id)]),
         Sel::ExternalSketchCurve { sketch, id } => {
-            crate::i18n::format("dialog.selection_external_curve", &[("sketch", &sketch_name(*sketch)), ("id", id)])
+            solidcraft_ui_text::format("dialog.selection_external_curve", &[("sketch", &sketch_name(*sketch)), ("id", id)])
         }
         // Another sketch's point (a Sphere's centre, #9403), named as Select Other names it.
         Sel::ExternalSketchPoint { sketch, id } => {
             let state = crate::open_meshing::session_world(s);
             let point = state.sketch(*sketch).map_or_else(|| id.clone(), |ss| crate::select_other::point_label(&ss.sketch, id));
-            crate::i18n::format("dialog.selection_external_point", &[("point", &point), ("sketch", &sketch_name(*sketch))])
+            solidcraft_ui_text::format("dialog.selection_external_point", &[("point", &point), ("sketch", &sketch_name(*sketch))])
         }
-        Sel::SketchConstraint { id } => crate::i18n::format("dialog.selection_constraint", &[("id", id)]),
-        Sel::Profile { sketch, index } => {
-            crate::i18n::format("dialog.selection_profile", &[("sketch", &sketch_name(*sketch)), ("number", &index.saturating_add(1).to_string())])
-        }
+        Sel::SketchConstraint { id } => solidcraft_ui_text::format("dialog.selection_constraint", &[("id", id)]),
+        Sel::Profile { sketch, index } => solidcraft_ui_text::format(
+            "dialog.selection_profile",
+            &[("sketch", &sketch_name(*sketch)), ("number", &index.saturating_add(1).to_string())],
+        ),
         Sel::Plane { name } => names.label(name).to_string(),
         Sel::Axis { name } | Sel::ConstructionPoint { name } | Sel::Body { name } => name.clone(),
         Sel::Face { body, index, .. } if axis => format!("{body} · face {index} axis"),
@@ -3027,18 +3048,18 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                 let filled = !inp.items.is_empty() || custom_axis || stored_reference.is_some();
                 let text = if filled {
                     RichText::new(if stored_reference.is_some() && matches!(d.kind, Kind::Section { .. }) {
-                        crate::i18n::tr("ui.viewport_status_section_plane").into()
+                        solidcraft_ui_text::tr("ui.viewport_status_section_plane").into()
                     } else if custom_axis || stored_reference.is_some() {
-                        crate::i18n::tr("dialog.custom_axis").into()
+                        solidcraft_ui_text::tr("dialog.custom_axis").into()
                     } else if !inp.multi {
                         inp.items.first().map(|item| selection_label(s, names, d, inp, item)).unwrap_or_default()
                     } else {
                         let count = if i == 0 { shell_count.unwrap_or(inp.items.len()) } else { inp.items.len() };
-                        crate::i18n::format("dialog.selected_count", &[("count", &count.to_string())])
+                        solidcraft_ui_text::format("dialog.selected_count", &[("count", &count.to_string())])
                     })
                     .color(t.on_accent)
                 } else {
-                    RichText::new(crate::i18n::tr("dialog.select")).color(t.text)
+                    RichText::new(solidcraft_ui_text::tr("dialog.select")).color(t.text)
                 };
                 let selected_text = text.text().strip_prefix("↖ ").unwrap_or_else(|| text.text());
                 let prompt = if !filled && inp.label == "Edges" { tr("Select edges") } else { selected_text };
@@ -3068,7 +3089,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                         hint(inp).to_string()
                     }
                 } else if let Some(id) = inp.tip {
-                    crate::i18n::tr(id).to_string()
+                    solidcraft_ui_text::tr(id).to_string()
                 } else {
                     format!("{} (click to pick into this input)", hint(inp))
                 };
@@ -3093,7 +3114,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                     if inp.multi {
                         let open = d.listed == Some(i);
                         let at = rect.translate(vec2(-t.space_24, 0.0));
-                        let label = crate::i18n::tr_label(if open { "Hide the picked items" } else { "Show the picked items" });
+                        let label = solidcraft_ui_text::tr_label(if open { "Hide the picked items" } else { "Show the picked items" });
                         let arrow = crate::ui_kit::disclosure_button_at(ui, at, open, label);
                         crate::scenario::publish_handle(&format!("dialog:list_toggle:{}", inp.label), arrow.rect.center());
                         if arrow.clicked() {
@@ -3225,7 +3246,7 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
     // Under the fold in a short window, a new note scrolls into view once, as a refusal does.
     let note_shown_id = egui::Id::unique("sc_dialog_pick_refused_shown");
     if let Some(id) = d.pick_refused.filter(|_| d.error.is_none() && app.preview.error.is_none()) {
-        let note = crate::ui_kit::text(ui, crate::i18n::tr(id), crate::ui_kit::Text::Hint("pick_refused"));
+        let note = crate::ui_kit::text(ui, solidcraft_ui_text::tr(id), crate::ui_kit::Text::Hint("pick_refused"));
         crate::scenario::publish_rect("dialog:pick_refused", note.rect);
         if ui.data(|m| m.get_temp::<&'static str>(note_shown_id)) != Some(id) {
             ui.scroll_to_rect(note.rect, None);
@@ -3257,13 +3278,13 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
                 ui.horizontal(|ui| {
                     let ready = solidcraft_engine::find_command(crate::refused_part::REPAIR).map(|c| c.info(&app.session));
                     let enabled = ready.as_ref().is_some_and(|i| i.enabled);
-                    let repair = crate::ui_kit::button(ui, crate::i18n::tr("refused.repair"), crate::ui_kit::Button::Enabled(enabled));
+                    let repair = crate::ui_kit::button(ui, solidcraft_ui_text::tr("refused.repair"), crate::ui_kit::Button::Enabled(enabled));
                     crate::scenario::publish_handle("dialog:repair_part", repair.rect.center());
                     if repair.clicked() {
                         crate::refused_part::repair(app, &part.body);
                     }
                     if part.face.is_some() {
-                        let show = crate::ui_kit::button(ui, crate::i18n::tr("refused.show_face"), crate::ui_kit::Button::Normal);
+                        let show = crate::ui_kit::button(ui, solidcraft_ui_text::tr("refused.show_face"), crate::ui_kit::Button::Normal);
                         crate::scenario::publish_handle("dialog:show_face", show.rect.center());
                         if show.clicked() {
                             crate::refused_part::show_face(app, &part);
@@ -3353,7 +3374,7 @@ pub(crate) fn fillet_plain_error(error: &str, setback_in_field: bool) -> Option<
     if let Some((_, rest)) = error.split_once(solidcraft_engine::kernel::SETBACK_AT_LEAST)
         && let Some(least) = rest.split_once(" mm").map(|(n, _)| n.trim()).filter(|n| n.parse::<f64>().is_ok())
     {
-        return Some(FilletRefusal::Plain(crate::i18n::format("ui.fillet_error_setback_short", &[("least", &format!("{least} mm"))])));
+        return Some(FilletRefusal::Plain(solidcraft_ui_text::format("ui.fillet_error_setback_short", &[("least", &format!("{least} mm"))])));
     }
     let too_large = error.contains("larger than the faces beside its edges allow");
     let corner = error.contains("setback") || error.contains("G2 corner") || error.contains("corner patch");
@@ -3391,7 +3412,7 @@ fn reveal_refusal(on_ok: bool, typing: bool, shown: Option<&str>, error: &str) -
 /// message is in the catalogs.
 fn shown_error(error: &str) -> String {
     let msg = error.strip_prefix("invalid parameters for `").and_then(|rest| rest.split_once("`: ")).map_or(error, |(_, msg)| msg);
-    crate::i18n::tr_diagnostic(crate::i18n::tr_label(msg))
+    crate::i18n::tr_diagnostic(solidcraft_ui_text::tr_label(msg))
 }
 
 /// Find the Boundary Fill cells again when the tool bodies changed (keeping the choices of
@@ -3758,7 +3779,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     crate::sketch_text::sync_path(&mut d);
-    let _language = crate::i18n::scope(&app.preferences.language);
+    let _language = solidcraft_ui_text::scope(&app.preferences.language);
     if let Kind::TextMove(k) = &d.kind
         && !crate::sketch_text_move::valid(app, k)
     {
@@ -3825,8 +3846,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut value_fields = Vec::new();
     let wide = matches!(&d.kind, Kind::Motion(k) if k.wide());
 
-    let raw_title = title(&d.kind);
-    let heading = if d.editing.is_some() { crate::i18n::format("dialog.edit_title", &[("title", tr(raw_title))]) } else { tr(raw_title).to_string() };
+    let raw_title = title_of(&d);
+    let heading =
+        if d.editing.is_some() { solidcraft_ui_text::format("dialog.edit_title", &[("title", tr(raw_title))]) } else { tr(raw_title).to_string() };
     let frame = crate::ui_kit::Panel::feature_frame(ctx, app.ui.layout, side);
     // OK is offered once the inputs make a feature.
     let has_ok = !matches!(d.kind, Kind::Sketch | Kind::Measure { .. });
@@ -3860,7 +3882,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     );
     let grow_key = egui::Id::unique(("sc_dialog_label_grow", raw_title));
     let label_grow = ctx.data(|data| data.get_temp::<f32>(grow_key)).unwrap_or(0.0).min((vp.width() - t.space_24 - card_width(&d)).max(0.0));
-    let panel = crate::ui_kit::Panel::new(&heading, egui::Id::unique(("sc_dialog", title(&d.kind))), anchor, drag_bounds, side, frame)
+    let panel = crate::ui_kit::Panel::new(&heading, egui::Id::unique(("sc_dialog", title_of(&d))), anchor, drag_bounds, side, frame)
         .actions(ok_label, close_label);
     let panel = if let Some(column) = column {
         panel.width(column.width()).joined(crate::ui_kit::DockEdges { left: true, top: true, ..Default::default() })
@@ -3882,7 +3904,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut painted = false;
     if let Kind::ConfirmDelete { with, fail, .. } = &d.kind {
         let detail = with.join(" · ");
-        let (closed, action) = crate::ui_kit::Confirm::new(egui::Id::unique(("sc_dialog", title(&d.kind))), "delete", &heading)
+        let (closed, action) = crate::ui_kit::Confirm::new(egui::Id::unique(("sc_dialog", title_of(&d))), "delete", &heading)
             .tone(crate::ui_kit::Tone::Danger)
             .actions("Delete", "Cancel", None)
             .detail(&detail)
@@ -3901,7 +3923,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     } else {
         let response = window.open(&mut keep).show(ctx, |ui| {
             painted = ui.is_visible() && !ui.is_sizing_pass();
-            let spec = dense::command(&d.kind).and_then(solidcraft_engine::find_command);
+            // A Press Pull's extrude shows the Press Pull command, not Extrude (#11705).
+            let spec = if press_pull_extrude(&d) {
+                solidcraft_engine::find_command("solid.press_pull")
+            } else {
+                dense::command(&d.kind).and_then(solidcraft_engine::find_command)
+            };
             let icon = spec.as_ref().map_or("", |s| s.icon);
             let label = spec.as_ref().map_or(heading.as_str(), |s| tr(s.label));
             let label = if d.editing.is_some() { heading.as_str() } else { label };
@@ -3926,7 +3953,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 }
                 let text = app.applying.as_ref().map(|job| {
                     let seconds = ((crate::now_ms() - job.started) / 1000.0).floor().max(0.0);
-                    crate::i18n::format("dialog.computing", &[("seconds", &format!("{seconds:.0}"))])
+                    solidcraft_ui_text::format("dialog.computing", &[("seconds", &format!("{seconds:.0}"))])
                 });
                 crate::ui_kit::ComputeStatus { text, busy: app.applying.is_some() || app.preview.busy, applying: app.applying.is_some() }
             };
@@ -4134,7 +4161,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 Err(error) => d.refuse(app, error),
             }
         } else {
-            let run = result.and_then(|prepared| adopt_dialog(app, prepared));
+            let run = result.and_then(|prepared| adopt_dialog(app, prepared, &d));
             match run {
                 Ok(()) => {
                     cancel = !apply_again;
@@ -4884,16 +4911,18 @@ pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
     }
     if d.previews() {
         let prepared = DialogComputation::new(app, d)?.compute()?;
-        return adopt_dialog(app, prepared);
+        return adopt_dialog(app, prepared, d);
     }
     let commands = apply_commands(app, d)?;
     if let Some((_, marker)) = d.editing {
         // Record the actual pre-edit timeline state in the command's undo snapshot.
         roll_marker(app, marker)?;
     }
+    let mut replies = Vec::new();
     for (cmd, params) in commands {
         match app.run(&cmd, params) {
             Ok(reply) => {
+                replies.push((cmd.clone(), reply.clone()));
                 // A drive that stopped short says where, and why.
                 if cmd == "joint.drive"
                     && let Some(why) = crate::dialogs_assembly::drive_stop(&reply)
@@ -4910,6 +4939,8 @@ pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
             }
         }
     }
+    let made = crate::hole_place::holes_made(&replies);
+    crate::hole_place::group_made(app, d, made);
     if let Kind::Section { offset, flip, hatch } = &d.kind
         && let Some(cut) = app.session.section
     {
@@ -4981,7 +5012,7 @@ pub(crate) fn feature_frame(s: &Session, component: u64) -> solidcraft_engine::d
 
 /// The feature dialog's current operation name for a reviewed issue draft.
 pub(crate) fn report_title(d: &Dialog) -> String {
-    title(&d.kind).to_string()
+    title_of(d).to_string()
 }
 
 /// The commands OK runs (an edit rebuilds its feature in place); the live preview runs the same.
@@ -4995,6 +5026,9 @@ pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>
     let mut cmds = dialog_commands(app, &normalized)?;
     exact_regions(d, &mut cmds);
     crate::op_auto::scope_targets(app, d, &mut cmds)?;
+    if crate::hole_folder::active(d) {
+        return crate::hole_folder::commands(app, d, cmds);
+    }
     if let Some((id, _)) = d.editing {
         let (cmd, mut params) = cmds.into_iter().next().ok_or("nothing to apply")?;
         if let Some(feature) = app.session.doc.feature(id) {
@@ -5735,10 +5769,10 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
         Kind::Material { index, editor } => {
             if editor.editing() {
-                return Err(crate::i18n::tr("material.editor.save_or_discard").to_string());
+                return Err(solidcraft_ui_text::tr("material.editor.save_or_discard").to_string());
             }
             need(0, "bodies")?;
-            let name = s.doc.material_names().get(*index).cloned().ok_or_else(|| crate::i18n::tr("material.selection.choose").to_string())?;
+            let name = s.doc.material_names().get(*index).cloned().ok_or_else(|| solidcraft_ui_text::tr("material.selection.choose").to_string())?;
             ("material.assign", json!({"bodies": sels(d, 0).body_names(), "material": name}))
         }
         Kind::Section { offset, flip, hatch } => {
@@ -5769,14 +5803,20 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
         Kind::Move { .. } => return Ok(vec![("solid.move".into(), crate::dialogs_move::params(app, d)?)]),
         Kind::Hole { diameter, depth, kind, cb_diameter, cb_depth, cs_diameter, cs_angle, opts } => {
-            need(0, if opts.multiple { "sketch points" } else { "a face position" })?;
+            let folder = crate::hole_folder::active(d);
+            if !folder {
+                need(0, if opts.multiple { "sketch points" } else { "a face position" })?;
+            }
             let ty = match *kind {
                 0 if opts.angled => "drilled",
                 k => HOLE_TYPES.get(k).copied().unwrap_or("simple"),
             };
             // One hole per picked face position, or one Hole feature per sketch for sketch points.
             let mut places: Vec<Value> = Vec::new();
-            if opts.multiple {
+            if folder {
+                // Every hole of a folder keeps its own place (`hole_folder`).
+                places.push(json!({}));
+            } else if opts.multiple {
                 let mut by_sketch: Vec<(u64, Vec<String>)> = Vec::new();
                 for x in sels(d, 0) {
                     if let Sel::SketchPoint { id } = x
@@ -5804,10 +5844,16 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 );
             } else {
                 // One hole per pick: a curved surface split at its seam is picked whole (both
-                // halves, the clicked one first), but the hole goes where it was clicked only.
+                // halves, the clicked one first), but the hole goes where it was clicked only. A
+                // face takes one hole, or several when Preferences says so.
+                let several = crate::hole_place::several(app, d).then(|| crate::hole_place::several_places(s, sels(d, 0)));
                 let mut taken: Vec<Sel> = Vec::new();
-                for x in sels(d, 0) {
-                    if !matches!(x, Sel::Face { .. }) || taken.iter().any(|t| same_face(t, x)) {
+                for (i, x) in sels(d, 0).iter().enumerate() {
+                    let skip = match &several {
+                        Some(places) => !places.contains(&i),
+                        None => !matches!(x, Sel::Face { .. }) || taken.iter().any(|t| same_face(t, x)),
+                    };
+                    if skip {
                         continue;
                     }
                     taken.extend(crate::viewport::grouped_selection(s, x));
@@ -8181,7 +8227,7 @@ mod awaiting_selection_tests {
             h.step(&serde_json::json!({"key":"Enter"})).unwrap();
             h.frames(2);
             assert_eq!(h.app.dialog.as_ref().and_then(|d| d.error.as_deref()), Some(english), "{command}");
-            let _japanese = crate::i18n::scope("ja");
+            let _japanese = solidcraft_ui_text::scope("ja");
             let shown = super::shown_error(english);
             assert!(shown != english && !shown.is_ascii(), "{command} shows {shown:?}");
         }

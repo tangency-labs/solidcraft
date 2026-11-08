@@ -1,7 +1,7 @@
 //! Constraint, assembly snap, hole placement and dimension marker artwork.
 use crate::dialogs_assembly::SnapKind;
-use crate::theme::Tokens;
 use egui::{Color32, Pos2, Stroke, vec2};
+use solidcraft_theme::Tokens;
 
 pub(crate) fn snap(painter: &egui::Painter, c: Pos2, tip: Option<Pos2>, kind: SnapKind, col: Color32, tag: Option<&str>) {
     // A dark halo under every stroke keeps the glyph readable on light and dark faces alike.
@@ -49,7 +49,7 @@ pub(crate) fn snap(painter: &egui::Painter, c: Pos2, tip: Option<Pos2>, kind: Sn
     // What it snaps to (hovered), or which component it is (picked): a small label.
     if let Some(tag) = tag {
         let t = Tokens::get();
-        let font = egui::FontId::proportional(crate::theme::Tokens::get().font_caption);
+        let font = egui::FontId::proportional(solidcraft_theme::Tokens::get().font_caption);
         let g = painter.layout_no_wrap(tag.to_string(), font, t.text);
         let at = c + vec2(12.0, 10.0);
         let r = egui::Rect::from_min_size(at, g.size()).expand2(vec2(5.0, 2.0));
@@ -89,7 +89,7 @@ pub(crate) fn glyph_icon(name: &str) -> Option<&'static str> {
         "Smooth" => "c_smooth",
         "Equal" => "c_equal",
         "Concentric" => "c_concentric",
-        "MidPoint" => "c_midpoint",
+        "MidPoint" | "PointAlong" => "c_midpoint",
         "Symmetry" => "c_symmetry",
         "Fix" => "c_fix",
         _ => return None,

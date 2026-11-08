@@ -21,7 +21,7 @@ pub(crate) struct ProductHighlightCallback(pub Frame);
 /// The viewport callback composites transparently onto this egui GPU mesh. Both its clear
 /// surface and gradient therefore use the same published/animated tokens as the panels; no
 /// background colour belongs to a cached model scene or GPU upload.
-pub(crate) fn paint_background(painter: &egui::Painter, rect: egui::Rect, tokens: &crate::theme::Tokens) {
+pub(crate) fn paint_background(painter: &egui::Painter, rect: egui::Rect, tokens: &solidcraft_theme::Tokens) {
     let mut mesh = egui::Mesh::default();
     mesh.colored_vertex(rect.left_top(), tokens.viewport_top);
     mesh.colored_vertex(rect.right_top(), tokens.viewport_top);
@@ -84,7 +84,7 @@ pub(crate) fn paint_background_picture(app: &mut crate::SolveApp, painter: &egui
             let options = egui::TextureOptions { mipmap_mode: Some(egui::TextureFilter::Linear), ..egui::TextureOptions::LINEAR };
             picture.texture = Some(ctx.load_texture("background-picture", image, options));
         }
-        Some(Err(error)) => app.set_status(format!("{}: {error}", crate::i18n::tr("prefs.background_unreadable")), true),
+        Some(Err(error)) => app.set_status(format!("{}: {error}", solidcraft_ui_text::tr("prefs.background_unreadable")), true),
         None => {}
     }
     if let Some(texture) = &picture.texture {
@@ -458,7 +458,7 @@ impl egui_wgpu::CallbackTrait for ProductHighlightCallback {
 }
 
 /// The shader's analysis colours and flags for the theme's colours.
-pub fn analysis_colors(c: &crate::theme::AnalysisColors) -> [f32; 36] {
+pub fn analysis_colors(c: &solidcraft_color::AnalysisColors) -> [f32; 36] {
     solidcraft_gpu::view::analysis_colors(c)
 }
 
@@ -570,6 +570,7 @@ pub(crate) fn render_offscreen(
         size,
         Offscreen {
             tess,
+            product_lights: None,
             product: false,
             srgb: false,
             analysis,
@@ -590,6 +591,7 @@ pub(crate) fn render_product_offscreen(
     eye: [f32; 4],
     size: u32,
     srgb: bool,
+    product_lights: Option<Vec<[f32; 16]>>,
 ) -> Option<Vec<u8>> {
     offscreen(
         scene,
@@ -600,6 +602,7 @@ pub(crate) fn render_product_offscreen(
         size,
         Offscreen {
             tess: None,
+            product_lights,
             product: true,
             srgb,
             analysis: [0.0; 8],
@@ -614,6 +617,9 @@ pub(crate) fn render_product_offscreen(
 #[cfg(all(test, not(target_arch = "wasm32")))]
 struct Offscreen<'a> {
     tess: Option<&'a str>,
+    /// The Render workspace's analytic preview lights (`Frame::product_lights`); `None` draws the
+    /// product without them.
+    product_lights: Option<Vec<[f32; 16]>>,
     product: bool,
     srgb: bool,
     analysis: [f32; 8],
@@ -642,6 +648,7 @@ pub(crate) fn render_ao_offscreen(
         size,
         Offscreen {
             tess,
+            product_lights: None,
             product: false,
             srgb: false,
             analysis: [0.0; 8],
@@ -672,6 +679,7 @@ pub(crate) fn render_offscreen_ssaa(
         size,
         Offscreen {
             tess: None,
+            product_lights: None,
             product: false,
             srgb: false,
             analysis: [0.0; 8],
@@ -702,7 +710,17 @@ pub(crate) fn render_offscreen_ao(
         back,
         eye,
         size,
-        Offscreen { tess: None, product: false, srgb: false, analysis: [0.0; 8], analysis_colors: [0.0; 36], ssaa: 1.0, ao_radius, ao_samples },
+        Offscreen {
+            tess: None,
+            product_lights: None,
+            product: false,
+            srgb: false,
+            analysis: [0.0; 8],
+            analysis_colors: [0.0; 36],
+            ssaa: 1.0,
+            ao_radius,
+            ao_samples,
+        },
     )
 }
 
@@ -716,7 +734,7 @@ fn offscreen(
     size: u32,
     options: Offscreen<'_>,
 ) -> Option<Vec<u8>> {
-    let Offscreen { tess, product, srgb, analysis, analysis_colors, ssaa, ao_radius, ao_samples } = options;
+    let Offscreen { tess, product_lights, product, srgb, analysis, analysis_colors, ssaa, ao_radius, ao_samples } = options;
     let (adapter, device, queue) = offscreen_device()?;
     eprintln!("offscreen adapter: {:?}", adapter.get_info().backend);
     let format = if srgb { wgpu::TextureFormat::Rgba8UnormSrgb } else { wgpu::TextureFormat::Rgba8Unorm };
@@ -727,7 +745,7 @@ fn offscreen(
     resources.insert(Renderer::new(&device, target, compute));
     let none = || Arc::new(Mutex::new(None));
     let cb = ViewportCallback(Frame {
-        product_lights: None,
+        product_lights,
         product,
         upload_error: None,
         key: 1,
@@ -1591,7 +1609,7 @@ mod tests {
         let x = (local[2].right() - 4.0).clamp(0.0, (f.size[0] - 1) as f32) as usize;
         let y = local[2].center().y.clamp(0.0, (f.size[1] - 1) as f32) as usize;
         let offset = (y * f.size[0] as usize + x) * 4;
-        let outside = crate::theme::Tokens::get().app_bar.to_array();
+        let outside = solidcraft_theme::Tokens::get().app_bar.to_array();
         assert_ne!(&original[offset..offset + 4], &outside, "probe starts in the viewport background");
         // Same local geometry/camera; applied after app.ui has emitted the callback.
         let transform = egui::emath::TSTransform { translation: egui::vec2(-23.0, 17.0), scaling: 0.75 };

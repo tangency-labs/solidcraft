@@ -21,7 +21,7 @@ pub fn start(app: &mut SolveApp, command: &'static str, params: Value) -> bool {
     // An assembly reading its links for a part edited in place takes them up when the read is
     // done: a save before then would record a design that is about to change as saved.
     if let Some(name) = crate::edit_in_place::refreshing_assembly(app) {
-        app.set_status(crate::i18n::format("ui.edit_in_place_save_waits", &[("name", &name)]), true);
+        app.set_status(solidcraft_ui_text::format("ui.edit_in_place_save_waits", &[("name", &name)]), true);
         return false;
     }
     #[cfg(not(target_arch = "wasm32"))]

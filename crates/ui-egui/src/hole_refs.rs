@@ -21,8 +21,8 @@ use solidcraft_engine::{Sel, Session};
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
 use crate::selection::{EDGES, FACES, PLANAR_FACES, SelInput, VERTICES};
-use crate::theme::Tokens;
 use crate::viewport::Proj;
+use solidcraft_theme::Tokens;
 
 /// The reference edge inputs, after the face input.
 pub(crate) const REFERENCES: [&str; 2] = ["Reference 1", "Reference 2"];

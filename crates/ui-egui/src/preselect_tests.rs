@@ -401,7 +401,7 @@ fn path_plane_click_retains_source_and_previews_then_edits_in_place() {
     let history = h.app.session.undo.len();
     let count = h.app.session.doc.features.len();
     let preview = h.app.session.preview_visible_world(&commands).unwrap();
-    let built = crate::preview::compute(&h.app.session, &commands, crate::preview::Colors::from_tokens(&crate::theme::Tokens::dark())).unwrap();
+    let built = crate::preview::compute(&h.app.session, &commands, crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::dark())).unwrap();
     assert!(!built.scene.xray.is_empty(), "construction preview must contain visible geometry");
     let plane = preview.after.construct.last().unwrap();
     let solidcraft_engine::doc::construct::ConstructGeom::Plane(pl) = plane.geom else { panic!("plane") };
@@ -593,7 +593,7 @@ fn cylinder_emboss_edit_retains_second_source_and_author_paths_and_all_profiles(
     let preview = h.app.session.preview_world(&commands).unwrap();
     let volume = preview.after.body(&target).unwrap().mesh().measure().volume;
     assert!(volume > preview.before.body(&target).unwrap().mesh().measure().volume + 10.0);
-    let colors = crate::preview::Colors::from_tokens(&crate::theme::Tokens::get());
+    let colors = crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::get());
     let built = crate::preview::compute(&h.app.session, &commands, colors).unwrap();
     assert!(built.replaced.contains(&target) && !built.scene.tris.is_empty(), "{:?}", built.replaced);
     let source_first = h.app.session.doc.occurrence_of(source).unwrap().id;
@@ -930,6 +930,58 @@ fn press_pull_then_curved_face_offsets_it() {
     };
     crate::viewport::dialog_pick(&mut app, &hit, top);
     assert!(matches!(app.dialog.as_ref().unwrap().kind, Kind::Extrude { .. }));
+}
+
+/// Whether an accessibility node labeled `text` is drawn inside the published rect
+/// `rect_handle` ("dialog:header" is the dialog's heading band), so a same-named widget
+/// elsewhere on screen cannot satisfy the check.
+fn label_in(h: &crate::scenario::Harness, rect_handle: &str, text: &str) -> bool {
+    let Some(rect) = crate::scenario::rect_of(rect_handle) else { return false };
+    let Some(tree) = h.output.accesskit_update.as_ref() else { return false };
+    tree.nodes.iter().any(|(_, n)| {
+        (n.label() == Some(text) || n.value() == Some(text))
+            && n.bounds().is_some_and(|b| rect.contains(egui::pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32)))
+    })
+}
+
+/// The dialog the Q shortcut opens says Press Pull, not Extrude (#11705), with a planar face
+/// picked first or nothing at all; a plain Extrude still says Extrude.
+#[test]
+fn press_pull_dialog_is_titled_press_pull() {
+    let mut app = boxed();
+    let top = face(&app, Vec3::new(20.0, 15.0, 20.0));
+    let d = start(&mut app, vec![top], "solid.press_pull");
+    assert!(matches!(d.kind, Kind::Extrude { .. }));
+    assert!(d.press_pull);
+    assert_eq!(crate::dialogs::report_title(&d), "PRESS PULL");
+
+    let mut app = boxed();
+    app.start("solid.press_pull");
+    let d = app.dialog.clone().unwrap();
+    assert!(matches!(d.kind, Kind::Extrude { .. }));
+    assert!(d.press_pull);
+    assert_eq!(crate::dialogs::report_title(&d), "PRESS PULL");
+
+    let mut app = boxed();
+    app.start("solid.extrude");
+    let d = app.dialog.clone().unwrap();
+    assert!(matches!(d.kind, Kind::Extrude { .. }));
+    assert!(!d.press_pull);
+    assert_eq!(crate::dialogs::report_title(&d), "EXTRUDE");
+
+    // The heading drawn in the panel says it too, found by role and place in its band.
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.step(&json!({"start": "solid.press_pull"})).unwrap();
+    h.frames(2);
+    assert!(label_in(&h, "dialog:header", "Press Pull"), "the drawn header is Press Pull");
+    assert!(!label_in(&h, "dialog:header", "Extrude"), "the drawn header is not Extrude");
+
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.step(&json!({"start": "solid.extrude"})).unwrap();
+    h.frames(2);
+    assert!(label_in(&h, "dialog:header", "Extrude"), "a plain Extrude header is Extrude");
 }
 
 /// Press Pull on a fillet's round face reopens the fillet to change its radius, as the
@@ -1373,8 +1425,9 @@ fn fillet_radius_fit_reduces_and_shows_the_applied_radius() {
     d.extra.insert("fit".into(), json!("reduce"));
     let (id, p) = apply_commands(&app, &d).unwrap().remove(0);
     assert_eq!(p["fit"], json!("reduce"));
-    let job = crate::preview::compute(&app.session, &[(id.clone(), p.clone())], crate::preview::Colors::from_tokens(&crate::theme::Tokens::dark()))
-        .unwrap();
+    let job =
+        crate::preview::compute(&app.session, &[(id.clone(), p.clone())], crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::dark()))
+            .unwrap();
     assert_eq!(job.applied, Some((3.0, 3.0)));
     // Applied and edited again, the fillet keeps its fit.
     app.session.execute(&id, &p).unwrap();
@@ -1383,7 +1436,7 @@ fn fillet_radius_fit_reduces_and_shows_the_applied_radius() {
     assert_eq!(e.extra.get("fit"), Some(&json!("reduce")));
     // Its edit preview shows the radius it uses too.
     let cmds = apply_commands(&app, &e).unwrap();
-    let job = crate::preview::compute(&app.session, &cmds, crate::preview::Colors::from_tokens(&crate::theme::Tokens::dark())).unwrap();
+    let job = crate::preview::compute(&app.session, &cmds, crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::dark())).unwrap();
     assert_eq!(job.applied, Some((3.0, 3.0)));
 }
 
@@ -3795,4 +3848,67 @@ fn shell_lists_the_faces_its_chip_counts() {
     h.frames(2);
     assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![back]);
     assert!(h.widget("1 selected").is_some());
+}
+
+/// #11663: Fix started with only points selected (no curve to fix them through) gives each of
+/// them its own Fix constraint, so a selection of loose points is not silently dropped.
+#[test]
+fn fix_takes_a_selection_of_only_points() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.point", json!({"point": [10, 10]})).unwrap();
+    h.app.run("sketch.point", json!({"point": [30, 20]})).unwrap();
+    let sid = h.app.session.active_sketch.unwrap();
+    let ids: Vec<String> = h.app.session.doc.sketch(sid).unwrap().points.iter().skip(1).map(|p| p.id.clone()).collect();
+    assert_eq!(ids.len(), 2, "two loose points to select");
+    let fixes = |h: &crate::scenario::Harness| h.app.session.doc.sketch(sid).unwrap().constraints.iter().filter(|c| c.kind.name() == "Fix").count();
+    let before = fixes(&h);
+    h.app.session.selection = ids.iter().map(|id| Sel::SketchPoint { id: id.clone() }).collect();
+    h.app.start("sketch.constraint.fix");
+    assert_eq!(fixes(&h), before + 2, "each selected point got a Fix constraint ({:?})", h.app.status);
+    assert!(h.app.tool.is_none(), "Fix applied at once, no pick tool left running");
+}
+
+/// #11663: a curve of another sketch is named by its sketch, and its bare id could be a curve of
+/// the active one; Fix leaves such a selection to the pick tool and changes nothing.
+#[test]
+fn fix_leaves_a_curve_of_another_sketch_to_the_pick_tool() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[0, 0], [20, 2]], "infer": false, "connect": false})).unwrap();
+    let sid = h.app.session.active_sketch.unwrap();
+    h.app.session.selection = vec![Sel::SketchCurve { id: "l1".into(), sketch: Some(sid + 1000) }];
+    h.app.start("sketch.constraint.fix");
+    assert!(h.app.tool.is_some(), "the pick tool is left to ask ({:?})", h.app.status);
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    assert!(sk.curves.iter().all(|c| !c.fixed), "the active sketch's l1 was not fixed by a bare id");
+}
+
+/// #11663: a box drawn over a sketch takes its dimensions and constraint icons along with its
+/// lines and points. Fix started with that selection fixes the lines and points; it does not fall
+/// back to the pick tool. Hundreds of entities (more than the 200 a constraint pick takes) too.
+#[test]
+fn fix_takes_a_boxed_selection_with_its_dimensions_and_hundreds_of_entities() {
+    for lines in [3, 110] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        for i in 0..lines {
+            let y = 5 * i;
+            h.app.run("sketch.line", json!({"points": [[0, y], [20, y + 2]], "infer": false, "connect": false})).unwrap();
+        }
+        h.app.run("sketch.dimension", json!({"entities": ["l1"], "value": "21 mm"})).unwrap();
+        let sid = h.app.session.active_sketch.unwrap();
+        let sk = h.app.session.doc.sketch(sid).unwrap();
+        let mut selection: Vec<Sel> = sk.curves.iter().map(|c| Sel::SketchCurve { id: c.id.clone(), sketch: None }).collect();
+        selection.extend(sk.points.iter().skip(1).map(|p| Sel::SketchPoint { id: p.id.clone() }));
+        selection.extend(sk.constraints.iter().map(|c| Sel::SketchConstraint { id: c.id.clone() }));
+        assert!(selection.iter().any(|s| matches!(s, Sel::SketchConstraint { .. })), "the box holds the dimension");
+        h.app.session.selection = selection;
+        h.app.start("sketch.constraint.fix");
+        let sk = h.app.session.doc.sketch(sid).unwrap();
+        let loose: Vec<&str> = sk.curves.iter().filter(|c| !c.fixed).map(|c| c.id.as_str()).collect();
+        assert!(loose.is_empty(), "{lines} lines: not fixed {loose:?} ({:?})", h.app.status);
+        assert!(h.app.tool.is_none(), "{lines} lines: Fix applied at once, no pick tool left running");
+        assert!(h.app.session.selection.is_empty(), "{lines} lines: the selection is used up");
+    }
 }
