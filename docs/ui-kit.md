@@ -102,8 +102,16 @@ Captured frame alpha is reported separately from declarative surface intent;
 the opt-in surface renderer reports contrast outcomes and raises opacity to retain
 readable primary and muted text. An invalid authored pair uses an opaque accessible
 fallback and reports its reason rather than claiming the original pair complies.
-Native windows, comprehensive accessibility/keyboard
-bindings, saved workspace rollout and real content migrations remain peer work.
+The shared host publishes expanded disclosure, selected tab/tab-list, toggled
+action, menu-item and oriented splitter semantics. Keyboard panel commands use
+the registered keymap and typed host admission; focused text editors retain their
+automatic key handling. Menus support keyboard navigation and Escape focus return.
+Focus traversal reveals clipped headers without changing camera geometry.
+Owner-scoped focus restoration preserves eligible editor state without rendering
+hidden bodies or taking focus from foreign UI. Native logical direction follows
+the effective locale. Shared paint transitions use theme timing and cubic-out
+easing; reduced motion commits immediately.
+Native windows, saved workspace rollout and real content migrations remain peer work.
 
 The authenticated `ui.panel_fixture` seam is off by default and rejects replacing
 an existing runtime. Presets are `docks`, `tabs`, `collapsed`, `floating`, `overflow`
@@ -117,6 +125,8 @@ including fallback reasons. See [the surface specimen contract](panel-foundation
 An enabled specimen accepts `translucency_percent` alone to update presentation
 in place, retaining its controllers, drafts, layout and model. A missing/disabled
 specimen host or a runtime owned by another provider refuses this update.
+An enabled specimen also accepts the ephemeral `reduced_motion` boolean, which
+changes animation without replacing content or writing preferences.
 Drafts, controller identities and lifecycle/service/action counters are inspectable.
 The native specimen exposes editor Apply/Finish/Cancel actions. Separate
 action-binding fixtures retain their declared test actions.

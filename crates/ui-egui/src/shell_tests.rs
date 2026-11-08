@@ -534,14 +534,11 @@ fn actual_tabs_preset_raw_widget_drag_retains_the_inactive_editor_identity_and_d
             let target = HostControlTarget::Pointer(HostPointerTarget::Tab { instance: editor.clone() });
             let control = h.app.universal_panel_frame().unwrap().controls.iter().find(|control| control.target == target).unwrap();
             assert!(
-                h.output
-                    .accesskit_update
-                    .as_ref()
-                    .unwrap()
-                    .nodes
-                    .iter()
-                    .any(|(_, node)| node.role() == egui::accesskit::Role::Button && node.label() == Some(control.accessible_name.as_str())),
-                "use an actual accessible Tab widget, not a reducer-only target"
+                h.output.accesskit_update.as_ref().unwrap().nodes.iter().any(|(id, node)| *id == control.id.accesskit_id()
+                    && node.role() == egui::accesskit::Role::Tab
+                    && node.label() == Some(control.accessible_name.as_str())
+                    && node.is_selected() == Some(false)),
+                "use the actual inactive accessible Tab widget, not a reducer-only target"
             );
             let bounds = control.bounds;
             let card = h.app.universal_panel_frame().unwrap().layout.sections.iter().find(|card| card.section == source_id).unwrap();

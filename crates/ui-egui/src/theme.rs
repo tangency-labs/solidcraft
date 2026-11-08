@@ -11,6 +11,17 @@ mod palettes;
 use egui::{Color32, Stroke};
 use serde::{Deserialize, Serialize};
 
+/// Shared paint-only panel timing. State, geometry and focus commit immediately.
+pub(crate) fn panel_motion_duration(ctx: &egui::Context, reduced: bool) -> f32 {
+    let requested = ctx.global_style().animation_time;
+    if reduced || !requested.is_finite() || requested <= 0.0 { 0.0 } else { requested.clamp(0.12, 0.16) }
+}
+
+pub(crate) fn panel_motion_ease(progress: f32) -> f32 {
+    let progress = if progress.is_finite() { progress.clamp(0.0, 1.0) } else { 1.0 };
+    1.0 - (1.0 - progress).powi(3)
+}
+
 /// Expanded Wide hosts compose controls and content in one total row below
 /// this logical height. Independent of pixel density and user UI scaling.
 pub const PANEL_INLINE_MAX_HEIGHT: f32 = 88.0;
@@ -140,7 +151,7 @@ impl Surfaces {
         if progress >= 1.0 {
             return to;
         }
-        let eased = 1.0 - (1.0 - progress).powi(3);
+        let eased = panel_motion_ease(progress);
         Self {
             panel: oklab_blend(self.panel, to.panel, eased),
             top: oklab_blend(self.top, to.top, eased),
@@ -1774,6 +1785,22 @@ pub fn apply(ctx: &egui::Context) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn panel_motion_is_bounded_and_reduced_or_invalid_inputs_finish_immediately() {
+        let ctx = egui::Context::default();
+        for (requested, expected) in [(0.01, 0.12), (0.14, 0.14), (0.8, 0.16), (0.0, 0.0), (-1.0, 0.0), (f32::NAN, 0.0), (f32::INFINITY, 0.0)] {
+            ctx.global_style_mut(|style| style.animation_time = requested);
+            assert_eq!(super::panel_motion_duration(&ctx, false), expected);
+            assert_eq!(super::panel_motion_duration(&ctx, true), 0.0);
+        }
+        assert_eq!(super::panel_motion_ease(0.0), 0.0);
+        assert_eq!(super::panel_motion_ease(0.5), 0.875);
+        for progress in [1.0, 2.0, f32::NAN, f32::INFINITY] {
+            assert_eq!(super::panel_motion_ease(progress), 1.0);
+        }
+        assert_eq!(super::panel_motion_ease(-1.0), 0.0);
+    }
+
     use super::*;
 
     fn tabs_state(base: &str, overrides: BTreeMap<String, crate::theme_files::OptionValue>) -> TabThemeState {

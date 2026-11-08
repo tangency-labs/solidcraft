@@ -8,13 +8,17 @@ use solidcraft_doc::{Feature, FeatureKind};
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, name_or_id_values, num, str_};
-use crate::schema::TypedContract;
 use crate::schema::edit::{
-    FailingFeature, FeatureInfo, FeatureInput, Inspected, OmittedField, SuppressChanged, TimelineComputeAllParams, TimelineComputeAllResult,
-    TimelineDeleteParams, TimelineDeleteResult, TimelineDependentsParams, TimelineDependentsResult, TimelineEditParams, TimelineEditResult,
-    TimelineInspectParams, TimelineInspectResult, TimelineMarkerResult, TimelineRenameParams, TimelineRenameResult, TimelineRollToParams,
-    TimelineRollbackParams, TimelineSuppressParams, TimelineSuppressResult,
+    BrokenFeature, FailingFeature, FeatureInfo, FeatureInput, Inspected, OmittedField, SuppressChanged, TimelineComputeAllParams,
+    TimelineComputeAllResult, TimelineDeleteParams, TimelineDeleteResult, TimelineDependentsParams, TimelineDependentsResult, TimelineEditParams,
+    TimelineEditResult, TimelineGroupMade, TimelineGroupParams, TimelineGroupRenamed, TimelineInspectParams, TimelineInspectResult,
+    TimelineMarkerResult, TimelineMoveManyParams, TimelineMoveToGroupParams, TimelineMoved, TimelineMovedToGroup, TimelineRedefineParams,
+    TimelineRedefined, TimelineRenameGroupParams, TimelineRenameParams, TimelineRenameResult, TimelineReorderManyParams, TimelineReorderParams,
+    TimelineReordered, TimelineReorderedMany, TimelineRollToParams, TimelineRollbackParams, TimelineSuppressParams, TimelineSuppressResult,
+    TimelineUngroupParams, TimelineUngrouped,
 };
+use crate::schema::select::{PartialPick, SelectClearParams, SelectClearResult, SelectItem, SelectSetParams, SelectSetResult, read_item};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Sel, Session, Snapshot};
 
 pub static COMMANDS: &[CommandSpec] = &[
@@ -87,18 +91,35 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&RENAME_CONTRACT)
         .output(crate::schema::output_schema_for::<TimelineRenameResult>)
         .params("feature: id|name, name (references to it follow)"),
-    CommandSpec::new("timeline.group", "New Feature Folder", group)
+    CommandSpec::new("timeline.group", "New Feature Folder", crate::checked!("timeline.group", group))
         .icon("folder")
         .doc_only()
+        .contract(&GROUP_CONTRACT)
+        .output(output_schema_for::<TimelineGroupMade>)
         .params("name?; features?: [id|name]; joints?: [id|name]; groups?: [folder ids]; parent?: folder id (features and joints leave any other timeline folder)"),
-    CommandSpec::new("timeline.ungroup", "Remove Feature Folders", ungroup).icon("folder")
+    CommandSpec::new("timeline.ungroup", "Remove Feature Folders", crate::checked!("timeline.ungroup", ungroup))
+        .icon("folder")
         .doc_only()
+        .contract(&UNGROUP_CONTRACT)
+        .output(output_schema_for::<TimelineUngrouped>)
         .params("group: id | groups: [ids] (features and joints remain in the timeline)"),
-    CommandSpec::new("timeline.rename_group", "Rename Feature Folder", rename_group).icon("rename").doc_only().params("group: id, name (renames the folder holding features and joints)"),
-    CommandSpec::new("timeline.move_to_group", "Move Features to Folder", move_to_group).icon("folder")
+    CommandSpec::new("timeline.rename_group", "Rename Feature Folder", crate::checked!("timeline.rename_group", rename_group))
+        .icon("rename")
         .doc_only()
+        .contract(&RENAME_GROUP_CONTRACT)
+        .output(output_schema_for::<TimelineGroupRenamed>)
+        .params("group: id, name (renames the folder holding features and joints)"),
+    CommandSpec::new("timeline.move_to_group", "Move Features to Folder", crate::checked!("timeline.move_to_group", move_to_group))
+        .icon("folder")
+        .doc_only()
+        .contract(&MOVE_TO_GROUP_CONTRACT)
+        .output(output_schema_for::<TimelineMovedToGroup>)
         .params("features?: [id|name], joints?: [id|name], groups?: [ids], group?: id (omit or null to move to the timeline root)"),
-    CommandSpec::new("timeline.move_many", "Move Timeline Items", move_many).icon("reorder").params(
+    CommandSpec::new("timeline.move_many", "Move Timeline Items", crate::checked!("timeline.move_many", move_many))
+        .icon("reorder")
+        .contract(&MOVE_MANY_CONTRACT)
+        .output(output_schema_for::<TimelineMoved>)
+        .params(
         "features?: [id|name], groups?: [folder ids], group?: folder id, position: insertion slot, active?: bool (true = the moved contents end up before the history marker, false = behind it; other features keep their state); atomically changes folder membership and moves all selected contents as one block",
     ),
     CommandSpec::new("timeline.rollback", "Move Timeline Marker", crate::checked!("timeline.rollback", rollback))
@@ -111,12 +132,22 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&ROLL_TO_CONTRACT)
         .output(crate::schema::output_schema_for::<TimelineMarkerResult>)
         .params("position: number of features to keep active, or \"end\" (omit = end) | feature: id|name (the marker goes right after it)"),
-    CommandSpec::new("timeline.reorder", "Reorder Feature", reorder).icon("reorder")
+    CommandSpec::new("timeline.reorder", "Reorder Feature", crate::checked!("timeline.reorder", reorder))
+        .icon("reorder")
+        .contract(&REORDER_CONTRACT)
+        .output(output_schema_for::<TimelineReordered>)
         .params("feature: id|name, position: its new index, active?: bool (true = it ends up before the history marker, false = behind it; other features keep their state); refused when a feature that worked would fail, unless allow_errors?: bool (default false): then made, and broken: [{feature, error}] lists the features it broke → feature, position: its index now, from: its index before, moved: bool, note?: why nothing moved, or that a position past the end meant the last slot"),
-    CommandSpec::new("timeline.reorder_many", "Reorder Features", reorder_many).icon("reorder").params(
+    CommandSpec::new("timeline.reorder_many", "Reorder Features", crate::checked!("timeline.reorder_many", reorder_many))
+        .icon("reorder")
+        .contract(&REORDER_MANY_CONTRACT)
+        .output(output_schema_for::<TimelineReorderedMany>)
+        .params(
         "features: [id|name], position: insertion slot in the current history; selected features keep their relative order; active?: bool (as timeline.reorder's); refused when a feature that worked would fail, unless allow_errors?: bool (default false): then made, and broken: [{feature, error}] lists the features it broke",
     ),
-    CommandSpec::new("timeline.redefine", "Edit Feature", redefine).icon("edit")
+    CommandSpec::new("timeline.redefine", "Edit Feature", crate::checked!("timeline.redefine", redefine))
+        .icon("edit")
+        .contract(&REDEFINE_CONTRACT)
+        .output(output_schema_for::<TimelineRedefined>)
         .params("feature: id|name, command: the feature's command id, params: its parameters (the feature is rebuilt in place) → feature, recomputed, restored, rolled_back: bool (the feature is after the history marker, so the edit is not built yet; `note` then says so), warning?"),
     CommandSpec::new("timeline.dependents", "Feature Dependents", crate::checked!("timeline.dependents", dependents))
         .icon("graph")
@@ -152,16 +183,24 @@ pub static COMMANDS: &[CommandSpec] = &[
         "group: folder id → group, name, parent, features, joints; or feature: id|name → type, definition (the fields timeline.edit's set changes, with their current values), \
          inputs: [{label, param, expression, unit}] (named inputs parameters.change can also set), error, warning",
     ),
-    CommandSpec::new("select.set", "Select", select_set).icon("select")
+    CommandSpec::new("select.set", "Select", crate::checked!("select.set", select_set)).icon("select")
         .noundo()
+        .contract(&SELECT_SET_CONTRACT)
+        .output(output_schema_for::<SelectSetResult>)
         .params("items: [{type: body|edge|face|feature|sketch_curve|sketch_point|profile, …}], add?: bool; face/edge: body plus point [x,y,z] in world mm or index (both also accepted); a point uses Measure's pick tolerance, an index supplies a point on the item; invalid partial picks leave the selection unchanged"),
     CommandSpec::new("select.filter", "Selection filter", select_filter).icon("select").noundo().doc_only()
         .params("mode: body|face|component → validated UI pick granularity; headless echo only, no document edits or undo"),
-    CommandSpec::new("select.clear", "Clear Selection", select_clear).icon("select").noundo(),
+    CommandSpec::new("select.clear", "Clear Selection", crate::checked!("select.clear", select_clear))
+        .icon("select")
+        .noundo()
+        .contract(&SELECT_CLEAR_CONTRACT)
+        .output(output_schema_for::<SelectClearResult>),
     CommandSpec::new("select.same_look", "Select Same Look", select_same_look).icon("select").noundo().doc_only()
         .params("body?: world body name, face?: face index; defaults to the current body/face selection → selects objects using the resolved appearance"),
 ];
 
+const SELECT_SET_CONTRACT: TypedContract<SelectSetParams> = TypedContract::new();
+const SELECT_CLEAR_CONTRACT: TypedContract<SelectClearParams> = TypedContract::new();
 const COMPUTE_ALL_CONTRACT: TypedContract<TimelineComputeAllParams> = TypedContract::new();
 const DELETE_CONTRACT: TypedContract<TimelineDeleteParams> = TypedContract::new();
 const RENAME_CONTRACT: TypedContract<TimelineRenameParams> = TypedContract::new();
@@ -171,6 +210,14 @@ const DEPENDENTS_CONTRACT: TypedContract<TimelineDependentsParams> = TypedContra
 const SUPPRESS_CONTRACT: TypedContract<TimelineSuppressParams> = TypedContract::new();
 const EDIT_CONTRACT: TypedContract<TimelineEditParams> = TypedContract::new();
 const INSPECT_CONTRACT: TypedContract<TimelineInspectParams> = TypedContract::new();
+const GROUP_CONTRACT: TypedContract<TimelineGroupParams> = TypedContract::new();
+const UNGROUP_CONTRACT: TypedContract<TimelineUngroupParams> = TypedContract::new();
+const RENAME_GROUP_CONTRACT: TypedContract<TimelineRenameGroupParams> = TypedContract::new();
+const MOVE_TO_GROUP_CONTRACT: TypedContract<TimelineMoveToGroupParams> = TypedContract::new();
+const MOVE_MANY_CONTRACT: TypedContract<TimelineMoveManyParams> = TypedContract::new();
+const REORDER_CONTRACT: TypedContract<TimelineReorderParams> = TypedContract::new();
+const REORDER_MANY_CONTRACT: TypedContract<TimelineReorderManyParams> = TypedContract::new();
+const REDEFINE_CONTRACT: TypedContract<TimelineRedefineParams> = TypedContract::new();
 const PLAY_CONTRACT: crate::schema::TypedContract<crate::schema::edit::TimelinePlayParams> = crate::schema::TypedContract::new();
 
 fn play(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -608,7 +655,7 @@ fn group(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(not_contiguous(&folders, broken, cmd));
     }
     s.doc_mut().timeline_groups = folders;
-    Ok(json!({"group": id, "name": name, "parent": parent, "groups": groups}))
+    reply(cmd, TimelineGroupMade { group: id, name, parent, groups, param_warnings: Vec::new() })
 }
 
 fn ungroup(s: &mut Session, p: &Value) -> Result<Value> {
@@ -665,7 +712,7 @@ fn ungroup(s: &mut Session, p: &Value) -> Result<Value> {
     sort_group_features(&mut next);
     require_contiguous_groups(&next, cmd)?;
     *s.doc_mut() = next;
-    Ok(json!({"groups": ids}))
+    reply(cmd, TimelineUngrouped { groups: ids, param_warnings: Vec::new() })
 }
 
 fn rename_group(s: &mut Session, p: &Value) -> Result<Value> {
@@ -678,7 +725,7 @@ fn rename_group(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(group) = s.doc_mut().timeline_groups.iter_mut().find(|group| group.id == id) {
         group.name = name.to_string();
     }
-    Ok(json!({"group": id, "name": name}))
+    reply(cmd, TimelineGroupRenamed { group: id, name: name.to_string(), param_warnings: Vec::new() })
 }
 
 fn move_to_group(s: &mut Session, p: &Value) -> Result<Value> {
@@ -715,7 +762,7 @@ fn move_to_group(s: &mut Session, p: &Value) -> Result<Value> {
     sort_group_features(&mut next);
     require_contiguous_groups(&next, cmd)?;
     *s.doc_mut() = next;
-    Ok(json!({"features": features, "joints": joints, "groups": groups, "group": target}))
+    reply(cmd, TimelineMovedToGroup { features, joints, groups, group: target, param_warnings: Vec::new() })
 }
 
 fn move_many(s: &mut Session, p: &Value) -> Result<Value> {
@@ -761,7 +808,7 @@ fn move_many(s: &mut Session, p: &Value) -> Result<Value> {
         }
         *s.doc_mut() = next;
     }
-    Ok(json!({"features": ordered, "groups": groups, "group": target, "position": slot}))
+    reply(cmd, TimelineMoved { features: ordered, groups, group: target, position: slot, param_warnings: Vec::new() })
 }
 
 fn rollback(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1408,20 +1455,10 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
 /// an existing index-and-point pair. Unlike Measure, selection keeps the exact face/edge index:
 /// it must not merge a cylinder's patches or a circular rim's arcs into a different item.
 fn selection_item(s: &Session, value: Value) -> Result<Sel> {
-    use solidcore_record::Vec3;
-
-    let kind = value.get("type").and_then(Value::as_str);
-    if !matches!(kind, Some("face" | "edge")) || (value.get("index").is_some() && value.get("point").is_some()) {
-        return serde_json::from_value(value).map_err(|e| bad("select.set", e.to_string()));
-    }
-    let face = kind == Some("face");
-    #[derive(serde::Deserialize)]
-    struct Pick {
-        body: String,
-        index: Option<usize>,
-        point: Option<Vec3>,
-    }
-    let Pick { body, index, point } = serde_json::from_value(value).map_err(|e| bad("select.set", e.to_string()))?;
+    let (face, PartialPick { body, index, point }) = match read_item(value).map_err(|e| bad("select.set", e))? {
+        SelectItem::Exact(sel) => return Ok(sel),
+        SelectItem::Pick { face, pick } => (face, pick),
+    };
     let state = s.world_state()?;
     let b = state.body(&body).ok_or_else(|| bad("select.set", format!("no body `{body}`")))?;
     let missing = || bad("select.set", format!("no {} of `{body}` at the given index or point", if face { "face" } else { "edge" }));
@@ -1496,7 +1533,7 @@ fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     s.refresh_display();
-    Ok(json!({"selected": s.selection.len()}))
+    reply("select.set", SelectSetResult { selected: s.selection.len(), param_warnings: Vec::new() })
 }
 
 fn select_filter(_s: &mut Session, p: &Value) -> Result<Value> {
@@ -1553,7 +1590,7 @@ fn select_same_look(s: &mut Session, p: &Value) -> Result<Value> {
 fn select_clear(s: &mut Session, _p: &Value) -> Result<Value> {
     s.selection.clear();
     s.refresh_display();
-    Ok(json!({"selected": 0}))
+    reply("select.clear", SelectClearResult { selected: 0, param_warnings: Vec::new() })
 }
 
 /// Features that worked in `before` and fail in `after`: (name, error).
@@ -1660,7 +1697,8 @@ fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
     let active = active_param(p, cmd)?;
     if from == to && active.is_none() {
         let why = capped.map_or_else(|| format!("it is already at position {to}"), |c| format!("{c}, where it already is"));
-        return Ok(json!({"feature": id, "position": to, "from": from, "moved": false, "note": format!("nothing moved: {why}")}));
+        let note = Some(format!("nothing moved: {why}"));
+        return reply(cmd, TimelineReordered { feature: id, position: to, from, moved: false, note, broken: None, param_warnings: Vec::new() });
     }
     let mut next = (*s.doc).clone();
     let f = next.features.remove(from);
@@ -1705,20 +1743,22 @@ fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
         }
         *s.doc_mut() = next;
     }
-    let mut out = json!({"feature": id, "position": now, "from": from, "moved": now != from});
     // With `active`, a feature left in place may still cross the history marker: say which.
     let stayed = (now == from).then(|| {
         let what = if s.doc.marker == marker { "nothing moved" } else { "only the history marker moved" };
         format!("{what}: {name} is already at position {now}")
     });
     let note: Vec<String> = [capped, stayed].into_iter().flatten().collect();
-    if !note.is_empty() {
-        out["note"] = json!(note.join("; "));
-    }
-    if allow {
-        out["broken"] = broken_json(&broken);
-    }
-    Ok(out)
+    let out = TimelineReordered {
+        feature: id,
+        position: now,
+        from,
+        moved: now != from,
+        note: (!note.is_empty()).then(|| note.join("; ")),
+        broken: allow.then(|| broken_features(&broken)),
+        param_warnings: Vec::new(),
+    };
+    reply(cmd, out)
 }
 
 /// The optional `allow_errors` of a move: make it even when it breaks features that worked.
@@ -1731,8 +1771,8 @@ fn allow_errors(p: &Value, cmd: &str) -> Result<bool> {
 }
 
 /// The features a move broke, as `[{feature, error}]`.
-fn broken_json(broken: &[(String, String)]) -> Value {
-    broken.iter().map(|(feature, error)| json!({"feature": feature, "error": error})).collect()
+fn broken_features(broken: &[(String, String)]) -> Vec<BrokenFeature> {
+    broken.iter().map(|(feature, error)| BrokenFeature { feature: feature.clone(), error: error.clone() }).collect()
 }
 
 /// The optional `active` of a move: whether the moved features end up before the history marker.
@@ -1778,11 +1818,8 @@ fn reorder_many(s: &mut Session, p: &Value) -> Result<Value> {
         }
         *s.doc_mut() = next;
     }
-    let mut out = json!({"features": ordered, "position": slot.min(s.doc.features.len())});
-    if allow {
-        out["broken"] = broken_json(&broken);
-    }
-    Ok(out)
+    let position = slot.min(s.doc.features.len());
+    reply(cmd, TimelineReorderedMany { features: ordered, position, broken: allow.then(|| broken_features(&broken)), param_warnings: Vec::new() })
 }
 
 /// The reordered design, the moved features in order, and the model the move was checked on
@@ -2093,15 +2130,20 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         if rolled_back { r.get("warning").and_then(Value::as_str).map(str::to_string) } else { s.model.result(id).and_then(|r| r.warning.clone()) };
     // Report the trial's rebuild, plus anything the session still had to compute itself (a kept
     // result its budget dropped); `s.model`'s own counters would only report the reuse (#5694).
-    let mut reply = json!({"feature": id, "recomputed": rebuilt + s.model.last_recomputed, "restored": reused, "rolled_back": rolled_back});
-    if let Some(warning) = warning {
-        reply["warning"] = json!(warning);
-    }
-    if rolled_back {
+    let note = rolled_back.then(|| {
         let name = s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
-        reply["note"] = json!(format!("{name} is after the history marker, so it is not built: move the marker past it to build it"));
-    }
-    Ok(reply)
+        format!("{name} is after the history marker, so it is not built: move the marker past it to build it")
+    });
+    let out = TimelineRedefined {
+        feature: id,
+        recomputed: rebuilt + s.model.last_recomputed,
+        restored: reused,
+        rolled_back,
+        warning,
+        note,
+        param_warnings: Vec::new(),
+    };
+    reply(cmd, out)
 }
 
 fn dependents(s: &mut Session, p: &Value) -> Result<Value> {

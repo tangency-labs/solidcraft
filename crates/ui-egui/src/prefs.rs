@@ -1298,6 +1298,8 @@ preference_settings! {
     language: String = "system".into(), 0;
     /// Shared workspace composition; system windows and popups retain their purpose.
     layout: crate::shell::LayoutMode = Default::default(), PAGE_LAYOUT;
+    /// Mount existing docked content in the shared layout; Classic stays available.
+    shared_panel_layout: bool = false, PAGE_LAYOUT;
     /// Ordered view controls and their appearance.
     #[serde(default)]
     navigation_bar: crate::navigation_bar::NavigationBar = Default::default(), PAGE_LAYOUT;
@@ -1913,6 +1915,7 @@ struct Snapshot {
     agent: crate::agent_cursor::Settings,
     autosave: f64,
     auto_project: bool,
+    project_construction: bool,
     keys: std::collections::BTreeMap<String, Vec<String>>,
     /// What a settings profile also switches: the toolbar, the S box favourites and which profile is active.
     toolbar: serde_json::Value,
@@ -1941,6 +1944,7 @@ impl Snapshot {
             agent: app.ui.agent_cursor,
             autosave: app.autosave_minutes,
             auto_project: app.session.auto_project,
+            project_construction: app.session.project_construction,
             keys: app.keymap.custom.clone(),
             toolbar: app.toolbar_custom.prefs(),
             favourites: app.sbox.pinned.clone(),
@@ -1972,6 +1976,7 @@ impl Snapshot {
         app.autosave_minutes = self.autosave;
         set_autosave(app);
         app.session.auto_project = self.auto_project;
+        app.session.project_construction = self.project_construction;
         app.keymap.custom = self.keys;
         app.toolbar_custom.load(&self.toolbar);
         app.sbox.pinned = self.favourites;
@@ -2001,6 +2006,7 @@ impl Snapshot {
             agent,
             autosave,
             auto_project,
+            project_construction,
             keys,
             toolbar,
             favourites,
@@ -2021,6 +2027,7 @@ impl Snapshot {
             && *agent == app.ui.agent_cursor
             && *autosave == app.autosave_minutes
             && *auto_project == app.session.auto_project
+            && *project_construction == app.session.project_construction
             && *keys == app.keymap.custom
             && *toolbar == app.toolbar_custom.prefs()
             && *favourites == app.sbox.pinned
@@ -2072,6 +2079,7 @@ pub(crate) fn held_overlay(app: &SolveApp) -> Option<serde_json::Map<String, ser
         ("perspective", serde_json::json!(s.perspective)),
         ("pick_bodies", serde_json::json!(s.pick_bodies)),
         ("auto_project", serde_json::json!(s.auto_project)),
+        ("project_construction", serde_json::json!(s.project_construction)),
         ("visual_style", serde_json::json!(s.style)),
         ("shortcut_box", shortcut_box),
         ("shortcuts", serde_json::Value::Object(shortcuts)),
@@ -2265,6 +2273,7 @@ fn defaults(app: &mut SolveApp, page: usize) {
         }
         PAGE_SKETCH => {
             app.session.auto_project = true;
+            app.session.project_construction = false;
             app.ui.pick_bodies = false;
         }
         _ => {}
@@ -2803,7 +2812,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     match button {
         Some("defaults") => defaults(app, app.prefs_window.section),
-        Some("apply") if app.prefs_window.panel_restore_error.is_none() => app.prefs_window.snapshot = Some(Snapshot::take(app)),
+        Some("apply") if app.prefs_window.panel_restore_error.is_none() => match crate::panel_runtime::sync_production_setting(app) {
+            Ok(()) => app.prefs_window.snapshot = Some(Snapshot::take(app)),
+            Err(reason) => app.prefs_window.panel_restore_error = Some(solidcraft_engine::panels::commands::error_text(reason)),
+        },
         Some("ok") => close(app, false),
         Some("cancel") => close(app, true),
         _ if closed => close(app, true),
@@ -3317,7 +3329,10 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
     match button.as_ref().and_then(|b| b.as_str()) {
         Some("ok") => close(app, false),
         Some("cancel") => close(app, true),
-        Some("apply") if app.prefs_window.panel_restore_error.is_none() => app.prefs_window.snapshot = Some(Snapshot::take(app)),
+        Some("apply") if app.prefs_window.panel_restore_error.is_none() => {
+            crate::panel_runtime::sync_production_setting(app).map_err(solidcraft_engine::panels::commands::error_text)?;
+            app.prefs_window.snapshot = Some(Snapshot::take(app));
+        }
         Some("apply") => {}
         Some("defaults") => defaults(app, app.prefs_window.section),
         Some(b) => return Err(format!("unknown button `{b}` (ok, cancel, apply, defaults)")),
@@ -4290,6 +4305,33 @@ pub(crate) fn reveal_preference(h: &mut crate::scenario::Harness, handle: &str) 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn invalid_legacy_panel_preferences_recover_before_shared_host_setup() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        app.load_prefs(
+            &json!({"preferences":{"browser_width":0.0,"timeline_left_width":-1.0,
+                "agent_chat_width":1e9,"render_browser_width":0.0,"browser_share":2.0}})
+            .to_string(),
+        );
+        let defaults = Prefs::default();
+        assert_eq!(app.preferences.browser_width, 0.0);
+        assert_eq!(crate::browser::browser_width(app.preferences.browser_width), 170.0, "Classic keeps its existing saved-width behavior");
+        app.preferences.shared_panel_layout = true;
+        crate::panel_runtime::sync_production_setting(&mut app).unwrap();
+        assert!(app.panel_runtime().is_some(), "malformed legacy sizes must not leave setup retrying each frame");
+        let imported = crate::panel_runtime::preferences_value(&app).unwrap();
+        for (name, expected) in [
+            ("browser_width", defaults.browser_width),
+            ("history_width", defaults.timeline_left_width),
+            ("assistant_width", defaults.agent_chat_width),
+            ("render_width", defaults.render_browser_width),
+            ("browser_share", defaults.browser_share),
+        ] {
+            assert_eq!(imported["legacy"][name], json!(expected));
+        }
+        assert_eq!((app.preferences.browser_width, app.preferences.browser_share), (0.0, 2.0), "shared import never rewrites Classic preferences");
+    }
+
     #[test]
     fn theme_traits_use_resolved_background_and_maximal_contrast() {
         use theme_picker::{Classification, theme_traits};
@@ -6476,16 +6518,19 @@ mod tests {
         app.ui.agent_cursor.show = false;
         app.ui.pick_bodies = true;
         app.session.auto_project = false;
+        app.session.project_construction = true;
         defaults(&mut app, PAGE_GENERAL);
         assert!(!app.ui.agent_cursor.show);
         assert!(app.ui.pick_bodies);
         assert!(!app.session.auto_project);
+        assert!(app.session.project_construction);
         defaults(&mut app, PAGE_ASSISTANT);
         let expected = SolveApp::new(Default::default(), Default::default()).ui.agent_cursor.show;
         assert_eq!(app.ui.agent_cursor.show, expected);
         defaults(&mut app, PAGE_SKETCH);
         assert!(!app.ui.pick_bodies);
         assert!(app.session.auto_project);
+        assert!(!app.session.project_construction, "off by default (#13142)");
     }
 
     #[test]
