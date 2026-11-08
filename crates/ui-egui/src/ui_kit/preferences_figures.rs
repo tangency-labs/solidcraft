@@ -314,10 +314,11 @@ mod tests {
             crate::theme::set_dark(dark);
             let draw = |state| {
                 let ctx = crate::fonts::test_context();
-                let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
                     ui.set_width(262.0);
                     super::paint_layout(ui, state);
                 });
+                output.textures_delta.clear();
                 format!("{:?}", output.shapes)
             };
             let original = draw(baseline);

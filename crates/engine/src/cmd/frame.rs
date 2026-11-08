@@ -6,7 +6,7 @@
 use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
-use serde_json::{Value, json};
+use serde_json::Value;
 use solidcore_record::{Loop2, Seg2, Vec2};
 use solidcraft_doc::expr::Kind;
 use solidcraft_doc::frame::{self, Anchor, MemberProfile, Profile, ProfileSpec};
@@ -17,11 +17,22 @@ use super::features::{add_feature, check_expr, sketch_id};
 use super::sketch::edit;
 use super::{CommandSpec, in_sketch, not_in_sketch};
 use crate::params::{bad, bool_, expr, num, str_, string_list, vec2};
+use crate::schema::features::FeatureResult;
+use crate::schema::frame::{
+    CreatedIds, FrameMemberParams, ProfileInsertParams, ProfileInsertResult, ProfileKindInfo, ProfileListParams, ProfileListResult, ProfileOut,
+    ProfilePropertiesParams, ProfilePropertiesResult, ProfileSection,
+};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
 #[cfg(test)]
 #[path = "frame_tests.rs"]
 mod tests;
+
+const MEMBER_CONTRACT: TypedContract<FrameMemberParams> = TypedContract::new();
+const LIST_CONTRACT: TypedContract<ProfileListParams> = TypedContract::new();
+const PROPERTIES_CONTRACT: TypedContract<ProfilePropertiesParams> = TypedContract::new();
+const INSERT_CONTRACT: TypedContract<ProfileInsertParams> = TypedContract::new();
 
 /// The profile parameter, as every frame command documents it.
 macro_rules! profile_doc {
@@ -31,20 +42,40 @@ macro_rules! profile_doc {
 }
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("frame.member", "Frame Member", member).at("WELDMENTS", "CREATE").icon("frame_member").enabled(not_in_sketch).params(concat!(
+    CommandSpec::new("frame.member", "Frame Member", crate::checked!("frame.member", member))
+        .at("WELDMENTS", "CREATE")
+        .icon("frame_member")
+        .enabled(not_in_sketch)
+        .contract(&MEMBER_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params(concat!(
         "sketch: the frame sketch (id or name; 2D or 3D); lines?: [curve ids] (one member each; default: every straight line drawn in the sketch: not construction, not projected or otherwise linked, not of no length); ",
         profile_doc!(),
         " | profile_sketch: a sketch whose profile is the section, in its own x and y around its origin, with profiles?: picks as solid.extrude takes them (default: its material, nested loops alternating, so two circles make a tube); anchor?: origin|center|centroid|top_left|top|top_right|left|right|bottom_left|bottom|bottom_right (the profile point that sits on each line, default origin); angle?: angle expr (the profile turned about the line; default 0: its y as near world up as the line allows, a vertical member's x along world X); mirror?: bool (the profile mirrored across its y axis); name?; body_name? (what the members are named after, then numbered: `Rail`, `Rail (2)`…; default the profile's description, `Rect Tube 40x40x3`, or the profile sketch's name); names?: {line id: name} (names to keep, as Edit Feature keeps them). One body per line, from its start to its end; each member keeps its name when other lines are added or deleted. Returns the feature and the bodies it made"
     )),
-    CommandSpec::new("frame.profile.list", "Profile Library", list).icon("library")
+    CommandSpec::new("frame.profile.list", "Profile Library", crate::checked!("frame.profile.list", list))
+        .icon("library")
         .noundo()
         .doc_only()
+        .contract(&LIST_CONTRACT)
+        .output(output_schema_for::<ProfileListResult>)
         .params("Returns kinds: [{kind, label, required, optional, example}]: the built-in profiles, each SolidCraft's own parametric definition"),
-    CommandSpec::new("frame.profile.properties", "Profile Properties", properties).icon("measure").noundo().doc_only().params(concat!(
+    CommandSpec::new("frame.profile.properties", "Profile Properties", crate::checked!("frame.profile.properties", properties))
+        .icon("measure")
+        .noundo()
+        .doc_only()
+        .contract(&PROPERTIES_CONTRACT)
+        .output(output_schema_for::<ProfilePropertiesResult>)
+        .params(concat!(
         profile_doc!(),
         "; density?: kg/m³ (adds mass_per_m, kg/m). Returns profile (every default filled in), area (mm²), centroid [x,y] (mm, from the bounding box centre), ixx, iyy, ixy (mm⁴ about the centroid), width, height"
     )),
-    CommandSpec::new("frame.profile.insert", "Insert Profile", insert).icon("import").enabled(in_sketch).params(concat!(
+    CommandSpec::new("frame.profile.insert", "Insert Profile", crate::checked!("frame.profile.insert", insert))
+        .icon("import")
+        .enabled(in_sketch)
+        .contract(&INSERT_CONTRACT)
+        .output(output_schema_for::<ProfileInsertResult>)
+        .params(concat!(
         profile_doc!(),
         "; at?: [x,y] (sketch mm, default the origin); anchor?: origin|center|centroid|top_left|top|top_right|left|right|bottom_left|bottom|bottom_right (the profile point placed on `at`: its origin, the default and a built-in profile's centre, its bounding box's centre, its centroid, or a corner or edge middle of its bounding box); angle?: radians, counter-clockwise; fixed?: bool (default true: the curves are locked, so solving the sketch keeps the shape); sketch?: id|name (default: the sketch being edited). Returns the section as frame.profile.properties does",
         created_doc!()
@@ -73,29 +104,32 @@ fn profile(s: &Session, cmd: &str, p: &Value) -> Result<Profile> {
     resolve(s, cmd, &profile_spec(cmd, p)?)
 }
 
+/// A frame command's reply, built from its schema's type so the two can't drift apart.
+fn frame_reply(cmd: &str, r: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(r).map_err(|e| bad(cmd, e.to_string()))
+}
+
 fn list(_: &mut Session, _: &Value) -> Result<Value> {
-    Ok(json!({"kinds": frame::profile_kinds()}))
+    let kinds = frame::profile_kinds().iter().map(ProfileKindInfo::from).collect();
+    frame_reply("frame.profile.list", ProfileListResult { kinds, param_warnings: Vec::new() })
 }
 
 /// The profile's section as the commands report it.
-fn section_json(cmd: &str, profile: &Profile, density: Option<f64>) -> Result<Value> {
+fn section(cmd: &str, profile: &Profile, density: Option<f64>) -> Result<ProfileSection> {
     let region = profile.region().map_err(|e| bad(cmd, e.to_string()))?;
     let s = frame::section(&region);
-    let mut out = json!({
-        "profile": profile.filled(),
-        "area": s.area,
-        "centroid": s.centroid,
-        "ixx": s.ixx,
-        "iyy": s.iyy,
-        "ixy": s.ixy,
-        "width": s.width,
-        "height": s.height,
-    });
-    if let (Some(rho), Some(o)) = (density, out.as_object_mut()) {
+    Ok(ProfileSection {
+        profile: ProfileOut(profile.filled()),
+        area: s.area,
+        centroid: s.centroid,
+        ixx: s.ixx,
+        iyy: s.iyy,
+        ixy: s.ixy,
+        width: s.width,
+        height: s.height,
         // mm² × 1e-6 m²/mm² × kg/m³ = kg/m.
-        o.insert("mass_per_m".into(), json!(s.area * 1e-6 * rho));
-    }
-    Ok(out)
+        mass_per_m: density.map(|rho| s.area * 1e-6 * rho),
+    })
 }
 
 fn properties(s: &mut Session, p: &Value) -> Result<Value> {
@@ -109,7 +143,7 @@ fn properties(s: &mut Session, p: &Value) -> Result<Value> {
                 .ok_or_else(|| bad(cmd, "`density` must be a positive number of kg/m³ (at most 1e6)"))?,
         ),
     };
-    section_json(cmd, &profile, density)
+    frame_reply(cmd, ProfilePropertiesResult { section: section(cmd, &profile, density)?, param_warnings: Vec::new() })
 }
 
 fn insert(s: &mut Session, p: &Value) -> Result<Value> {
@@ -135,15 +169,16 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let region = profile.region().map_err(|e| bad(cmd, e.to_string()))?;
     let placed = frame::placed(&region, frame::anchor_point(std::slice::from_ref(&region), anchor), at, angle);
-    let section = section_json(cmd, &profile, None)?;
+    let section = section(cmd, &profile, None)?;
     let (created, info) = edit(s, p, cmd, false, |sk, _| {
         let before = sk.clone();
         for l in std::iter::once(&placed.outer).chain(&placed.holes) {
             add_loop(sk, l, fixed, cmd)?;
         }
-        Ok(super::sketch_created(Some(&before), sk))
+        serde_json::from_value::<CreatedIds>(super::sketch_created(Some(&before), sk)).map_err(|e| bad(cmd, e.to_string()))
     })?;
-    Ok(json!({"created": created, "section": section, "sketch": info}))
+    let sketch = serde_json::from_value(info).map_err(|e| bad(cmd, e.to_string()))?;
+    frame_reply(cmd, ProfileInsertResult { created, section, sketch, param_warnings: Vec::new() })
 }
 
 /// Draw the closed loop `l` (lines and arcs) into the sketch, each segment sharing its end

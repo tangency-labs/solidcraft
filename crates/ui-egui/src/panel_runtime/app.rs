@@ -419,6 +419,9 @@ impl AppPanelRuntime {
         self.host = Some(WorkspacePanelHost::new(options)?);
         Ok(())
     }
+    pub fn set_requested_opacity(&mut self, opacity: Option<f32>) -> PanelResult<()> {
+        self.host.as_mut().ok_or_else(|| error(Rule::Lifecycle, "universal panel host disabled"))?.set_requested_opacity(opacity)
+    }
     pub fn disable_host(&mut self) -> PanelResult<()> {
         if self.host.is_some() {
             self.with_adapters(|runtime, _native, services| runtime.mount_in_app(&ResolvedLayout::default(), &mut EmptyPanelHost, services))?;
@@ -1007,11 +1010,12 @@ impl crate::SolveApp {
             .filter(|bounds| bounds.is_positive() && bounds.is_finite())
             .map(logical_rect)
             .collect();
+        let force_opaque = self.services.reduce_transparency.as_ref().and_then(|read| read(true)) == Some(true);
         let prepared = match &mut self.panel_runtime {
             Some(integration) => {
                 let result = (|| {
                     if let Some(host) = &mut integration.host {
-                        host.note_egui_context(ui.ctx());
+                        host.note_egui_context(ui.ctx(), force_opaque);
                         host.set_gap(gap)?;
                     }
                     integration.prepare_host_in_domain(&self.session, logical_rect(render_domain), logical_rect(placement), &chrome)
