@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 
 use super::{
     BoundingSolidParams, BoxParams, CombineParams, CombineResult, ConeParams, CylinderParams, ExtrudeParams, FeatureResult, FilletParams,
-    FilletResult, OffsetPlaneParams, PipeParams, PlaneAtAngleParams, ScaleParams, SphereParams, TorusParams,
+    FilletResult, MirrorParams, OffsetPlaneParams, PipeParams, PlaneAtAngleParams, ScaleParams, SphereParams, TorusParams,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms, sketch_rectangle};
@@ -89,6 +89,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<ScaleParams>(), &["bodies", "factor", "factors", "name", "origin", "participants"]);
     assert_keys(input_schema_for::<OffsetPlaneParams>(), &["base", "name", "offset", "participants", "through"]);
     assert_keys(input_schema_for::<PlaneAtAngleParams>(), &["angle", "axis", "base", "direction_only", "name", "participants", "pivot"]);
+    assert_keys(input_schema_for::<MirrorParams>(), &["bodies", "body_name", "body_names", "combine", "features", "name", "participants", "plane"]);
     assert_keys(
         input_schema_for::<FilletParams>(),
         &[
@@ -203,6 +204,19 @@ fn strict_keeps_todays_errors() {
         ("construct.plane.at_angle", json!({"base": "XY", "axis": {"face": "x", "point": [0, 0, 0]}, "angle": 30})),
         ("construct.plane.at_angle", json!({"base": "XY", "axis": {"face": "x"}, "angle": 30})),
         ("construct.plane.at_angle", json!({"base": "XY", "axis": "X", "angle": true})),
+        // #12893: Mirror's lists and plane; neither `features` nor `bodies`, and names the design
+        // lacks, stay the handler's to refuse.
+        ("solid.mirror", json!({"plane": "XY"})),
+        ("solid.mirror", json!({"features": 5, "plane": "XY"})),
+        ("solid.mirror", json!({"features": ["Nope"], "plane": "XY"})),
+        ("solid.mirror", json!({"bodies": 5, "plane": "XY"})),
+        ("solid.mirror", json!({"bodies": ["B", 1], "plane": "XY"})),
+        ("solid.mirror", json!({"bodies": ["B"], "plane": true})),
+        ("solid.mirror", json!({"bodies": ["B"], "plane": 7.5})),
+        ("solid.mirror", json!({"bodies": ["B"], "plane": null})),
+        ("solid.mirror", json!({"bodies": ["B"], "plane": "NoSuchPlane"})),
+        ("solid.mirror", json!({"bodies": ["B"], "plane": {"origin": [0, 0, 0]}})),
+        ("solid.mirror", json!({"bodies": ["B"], "plane": {"origin": "here", "normal": [0, 0, 1]}})),
         ("solid.fillet", json!({"edges": [[0, 0, 0]], "radius": 1, "turn": "round"})),
         ("solid.fillet", json!({"edges": [[0, 0, 0]], "radius": 1, "turn": "ROUND"})),
         ("solid.fillet", json!({"edges": [[0, 0, 0]], "radius": 1, "type": "bogus"})),
@@ -386,6 +400,76 @@ fn fillet_replies_match_its_output_schema() {
         assert!(crate::schema::Contract::check(&crate::schema::TypedContract::<FilletParams>::new(), &p).is_empty(), "{p}");
     }
     run(json!({"edges": [[20, 0, 10], [40, 15, 10], [40, 0, 5]], "radius": 2, "corner": "g2", "setbacks": [{"vertex": [40, 0, 10], "distance": 4}]}));
+}
+
+/// #12893: Mirror's contract takes what its input schema allows: each call's check finds no issue
+/// exactly when the call matches the schema. A call with neither `features` nor `bodies` matches
+/// it; the handler refuses it.
+#[test]
+fn mirror_check_takes_what_the_schema_allows() {
+    let schema = input_schema_for::<MirrorParams>();
+    let schema = schema.as_value();
+    for (p, takes) in [
+        (json!({"features": ["Extrude1"], "plane": "XY"}), true),
+        (json!({"features": "Extrude1", "plane": "top"}), true),
+        (json!({"bodies": ["B"], "plane": 7}), true),
+        (json!({"bodies": "B", "plane": {"origin": [0, "w", 0], "normal": [1, 0, 0]}, "combine": true, "name": "M", "body_name": "C"}), true),
+        (json!({"bodies": ["B"], "plane": {"x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "features": null, "combine": null}), true),
+        (json!({"plane": "XY"}), true),
+        (json!({"bodies": ["B"]}), false),
+        (json!({"bodies": ["B"], "plane": null}), false),
+        (json!({"bodies": ["B"], "plane": true}), false),
+        (json!({"bodies": ["B"], "plane": 7.5}), false),
+        (json!({"bodies": ["B"], "plane": {"origin": [0, 0, 0]}}), false),
+        (json!({"bodies": [1], "plane": "XY"}), false),
+        (json!({"features": 5, "plane": "XY"}), false),
+        (json!({"bodies": ["B"], "plane": "XY", "combine": "yes"}), false),
+        (json!({"bodies": ["B"], "plane": "XY", "colour": "red"}), false),
+    ] {
+        let issues = crate::schema::issues("solid.mirror", &p);
+        assert_eq!(issues.is_empty(), takes, "{p}: {issues:?}");
+        assert_eq!(conforms(schema, schema, &p), takes, "{p}");
+    }
+}
+
+/// #12893: Mirror replies with `FeatureResult`, with the keys it gave before, in each of its forms:
+/// bodies and features, across an origin plane by name and alias, a construction plane by name
+/// and by id, and explicit planes, combined or not. In Warn, without warnings, so its contract
+/// takes each call.
+#[test]
+fn mirror_replies_with_feature_result() {
+    let schema = output_schema_for::<FeatureResult>();
+    let schema = schema.as_value();
+    let before = BTreeSet::from(["feature", "name", "bodies", "created_bodies", "changed_bodies", "removed_bodies", "warning", "ms"]);
+    // A 10 mm cube `B` from the origin, made by the feature `box_name`, and a construction plane
+    // 20 mm above XY; built again for each call, so the copies don't meet one another.
+    let design = || {
+        let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+        let made = s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "body_name": "B"})).unwrap_or_else(|e| panic!("{e}"));
+        let plane = s.execute("construct.plane.offset", &json!({"base": "XY", "offset": 20})).unwrap_or_else(|e| panic!("{e}"));
+        (s, made["name"].clone(), plane["name"].clone(), plane["feature"].clone())
+    };
+    let (_, box_name, plane_name, plane_id) = design();
+    assert!(box_name.is_string() && plane_name.is_string() && plane_id.is_u64(), "{box_name} {plane_name} {plane_id}");
+    let calls = [
+        json!({"bodies": ["B"], "plane": "YZ"}),
+        json!({"bodies": "B", "plane": "front", "name": "Flip"}),
+        json!({"features": [box_name], "plane": plane_name}),
+        json!({"bodies": ["B"], "plane": plane_id}),
+        json!({"bodies": ["B"], "plane": {"origin": [10, 0, "0 mm"], "normal": [1, 0, 0]}, "combine": true}),
+        json!({"bodies": ["B"], "plane": {"x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "features": null, "combine": null}),
+    ];
+    for p in calls {
+        let (mut s, ..) = design();
+        let r = s.execute("solid.mirror", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+        assert!(r.get("param_warnings").is_none(), "{p}: {r}");
+        let keys: BTreeSet<&str> = r.as_object().into_iter().flatten().map(|(k, _)| k.as_str()).collect();
+        assert_eq!(keys, before, "{p}: {r}");
+        let made = (r["created_bodies"].as_array().map(Vec::len), r["changed_bodies"].as_array().map(Vec::len));
+        let combined = p.get("combine") == Some(&json!(true));
+        assert_eq!(made, if combined { (Some(0), Some(1)) } else { (Some(1), Some(0)) }, "{p}: {r}");
+    }
 }
 
 /// The feature commands converted after box and extrude answer with `FeatureResult` too, and
