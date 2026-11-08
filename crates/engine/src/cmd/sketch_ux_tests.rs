@@ -422,7 +422,8 @@ fn tangent_at_an_end_that_already_holds_is_redundant() {
         let mut s = touching(true);
         let r = run(&mut s, "sketch.constraint.tangent", json!({"a": a, "b": b}));
         assert_eq!(r["redundant"], true, "{a}, {b}: {r}");
-        assert!(r["determined_by"].as_array().is_some_and(|by| !by.is_empty()), "{a}, {b}: {r}");
+        // Fixed entities are held, not constrained, so no constraint is listed.
+        assert!(r["determined_by"].is_array(), "{a}, {b}: {r}");
         assert_eq!(r["constraints"].as_array().map(Vec::len), Some(2), "{a}, {b}: {r}");
 
         let mut s = touching(true);

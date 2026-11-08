@@ -2797,8 +2797,11 @@ fn tangent_at_end(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
         let id = p.get(key).and_then(Value::as_str).unwrap_or_default();
         bad(cmd, format!("`{id}` is not the end of one curve: pick a curve, or the end point of a line or an arc"))
     };
+    let mut before = None;
+    let mut residual = None;
     let (out, info) = edit(s, p, cmd, true, |sk, _| {
         let rep = solve(&mut sk.clone());
+        before = Some(rep.dof);
         let (pa, pb) = (tangent_end(sk, p, "a"), tangent_end(sk, p, "b"));
         let ca = if pa.is_none() { Some(line_or_axis_ref(sk, p.get("a"), cmd, "a")?) } else { None };
         let cb = if pb.is_none() { Some(line_or_axis_ref(sk, p.get("b"), cmd, "b")?) } else { None };
@@ -2827,6 +2830,12 @@ fn tangent_at_end(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
         }
         let tangent = add_c(sk, ConstraintKind::Tangent { a, b })?;
         ids.push(tangent.clone());
+        // As in `constrain`: what already holds needs nothing moved, and is then redundant when it
+        // removes no degree of freedom (see `redundancy`).
+        residual = ids.iter().try_fold(0.0_f64, |worst, id| residual_of(sk, id).map(|r| worst.max(r)));
+        if residual.is_some_and(|r| r <= solidcraft_sketch::CONSISTENT) {
+            return Ok((tangent, ids));
+        }
         // A line's end and a curve, in either order: only that end moves, so the line turns about
         // its other end and gets longer or shorter to meet the curve (#12092). At a joint that end
         // can't leave the other curve: the curve it ends stays, and the other curve moves. Otherwise,
@@ -2848,7 +2857,12 @@ fn tangent_at_end(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
         Ok((tangent, ids))
     })?;
     let (constraint, constraints) = out;
-    reply(cmd, TangentResult { made: TangentMade::End { constraint, constraints, sketch: info }, param_warnings: Vec::new() })
+    let by = redundancy(s, p, cmd, before, &info, residual, &constraint)?;
+    if let Some(by) = &by {
+        keep_redundant(p, cmd, by)?;
+    }
+    let made = TangentMade::End { constraint, constraints, sketch: info, redundant: by.as_ref().map(|_| true), determined_by: by };
+    reply(cmd, TangentResult { made, param_warnings: Vec::new() })
 }
 fn c_equal(s: &mut Session, p: &Value) -> Result<Value> {
     if p.get("curves").is_some() {
