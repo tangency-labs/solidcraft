@@ -769,3 +769,27 @@ fn pattern_limit_replies_match_the_output_schema() {
     }
     assert!(!conforms(schema, schema, &json!({})));
 }
+
+/// The pattern limit is the user's, so the check leaves a count's range to the handler (#7824):
+/// with the limit raised, counts past the old 500 pass in strict and get no warning in warn, and a
+/// count past the raised limit gets the handler's message in strict, naming that limit.
+#[test]
+fn a_raised_pattern_limit_is_the_handlers_to_check() {
+    let raised = |level: ParamCheck| {
+        let (mut s, sides) = editing(level);
+        run(&mut s, "sketch.pattern_limit", json!({"value": 600}));
+        (s, sides)
+    };
+    let (mut s, sides) = raised(ParamCheck::Strict);
+    run(&mut s, "sketch.pattern.circular", json!({"entities": [sides[0]], "center": [40, 0], "count": 501}));
+    let (mut s, sides) = raised(ParamCheck::Strict);
+    run(&mut s, "sketch.pattern.rectangular", json!({"entities": [sides[0]], "count": 3, "spacing": 25, "count2": 167, "spacing2": 25}));
+    let (mut s, sides) = raised(ParamCheck::Warn);
+    let r = run(&mut s, "sketch.pattern.circular", json!({"entities": [sides[0]], "center": [40, 0], "count": 501}));
+    assert_eq!(r.get("param_warnings"), None, "{r}");
+    let too_many = json!({"entities": ["l1"], "center": [20, 0], "count": 601});
+    let [off, strict] =
+        [ParamCheck::Off, ParamCheck::Strict].map(|level| raised(level).0.execute("sketch.pattern.circular", &too_many).err().map(|e| e.to_string()));
+    assert!(off.as_deref().is_some_and(|e| e.contains("from 1 to 600")), "{off:?}");
+    assert_eq!(strict, off);
+}
