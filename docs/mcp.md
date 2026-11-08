@@ -188,7 +188,8 @@ Script mode (scx) gives the agent three tools instead of the usual ones: `run`, 
 `hole`, `sketch(...).extrude`, `fillet`, `hollow`, `with part(...)`, `cmd(...)` for any other
 command), which the server instructions list. Every `run` reply ends with what changed: bodies
 created, changed (volume before and after, bounding box) and removed, so the agent checks its work
-without extra calls. Its prototype (a Python server with the same tools), measured against the usual tools
+without extra calls. A script stopped at a limit (below) ends instead with a note to call `design`,
+which shows what its earlier steps left. Its prototype (a Python server with the same tools), measured against the usual tools
 on the same tasks, cut the cost of a
 modelling session by 20-59 % at about the same accuracy; the tasks, the harness and the results are in
 [the scx write-up (#12522)](https://github.com/tangency-labs/solidcraft/pull/12522).
@@ -197,13 +198,15 @@ It is off by default and turned on like compact output, with no change to the cl
 configuration:
 
 - **Preferences › AI › Agents through MCP › Script mode (scx)** in the app, for every server
-  bridged to it. It applies to agent sessions started after the change.
+  bridged to it. The server reads it when the agent first lists its tools, and keeps it for that session: turn it
+  on before starting the agent session. If the app was not running then, start the agent session
+  again (or use `--scx`).
 - `solidcraft-cli mcp --scx`.
 - The environment variable `SOLIDCRAFT_MCP_SCX=1` (the same values as `SOLIDCRAFT_MCP_COMPACT`).
 
 | Tool | Arguments | What it does |
 | --- | --- | --- |
-| `run` | `code`, `look?`, `new?` | Runs a script. Steps run as they come, so the ones before an error stay. The reply has what the script printed, its last expression, an error with its line and a hint, and what changed. `look: true` adds a small picture; `new: true` (or a name) starts a new, empty design first. |
+| `run` | `code`, `look?`, `new?` | Runs a script. Steps run as they come, so the ones before an error stay. The reply has what the script printed, its last expression, an error with its line and a hint, and what changed. `look: true` adds a small picture; `new: true` (or a name) starts a new, empty design first, replacing the open one: unsaved changes to it are lost, as with `new_design`. |
 | `design` | | Outline of the design: every body with volume, bounding box and face count, and the parts. |
 | `look` | `view?`, `size?` | A small picture of the model (`iso`, `front`, `top`...). |
 
@@ -212,12 +215,14 @@ written in Rust that has no access to the host: opening files, the network, envi
 starting programs and importing modules other than `json` and `math` all fail with
 `PermissionError` or `NameError`. A script reaches SolidCraft only through `execute`, `measure`,
 `list_commands` and `new_design`, answered exactly as when the agent calls them, under the same
-[path rules](#which-files-the-agent-can-reach). Each script runs in its own `solidcraft-cli
+[path rules](#which-files-the-agent-can-reach). So `cmd(...)` reaches every command `execute` does,
+including the ones that send a design to a slicer or upload it to EasyPrint. Each script runs in its own `solidcraft-cli
 scx-worker` process. On Windows a Job Object caps its memory at 1 GiB and lets it start no other
 process; on Linux and the BSDs `RLIMIT_AS` caps its address space at 1 GiB; macOS does not enforce
 `RLIMIT_AS`, so there the worker has no memory cap and the time limit is the backstop. Monty
 itself refuses to start processes on every platform. Each step may compute for 30 seconds. A script that goes past a limit ends with `MemoryError`, `TimeoutError` or
-`RecursionError`; the server and the design go on.
+`RecursionError`; the server and the design go on. On macOS, with no memory cap, a script that
+allocates without end can exhaust the machine's memory before the time limit stops it.
 
 The language is a subset of Python 3: functions, loops, comprehensions, f-strings, `dict`, `list`,
 `set` and `tuple`, but no classes that inherit and no imports beyond `json` and `math`.
