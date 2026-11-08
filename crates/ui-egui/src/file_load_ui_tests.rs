@@ -289,7 +289,7 @@ fn reloading_a_point_cloud_runs_off_the_window_thread() {
     let design = h.app.session.doc.clone();
     let (started, release) = hold(&mut h);
     // Frame by frame: a scenario step would wait for the file operation it starts.
-    let [x, y] = h.widget(crate::i18n::tr("ui.point_cloud_reload")).expect("the card offers a reload");
+    let [x, y] = h.widget(solidcraft_ui_text::tr("ui.point_cloud_reload")).expect("the card offers a reload");
     let at = pos2(x as f32, y as f32);
     let button = |pressed| Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Default::default() };
     for event in [Event::PointerMoved(at), button(true), button(false)] {

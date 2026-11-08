@@ -1,0 +1,409 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/4055",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+ "test": "none: open on SolidCraft's truck kernel (kernel work paused under tangency-labs/solidcraft#3992); geometry is the issue's",
+ "summary": "A chamfer of a bar's bottom edge that runs past a pin joined under the bar left the part open (or was refused) on SolidCraft's truck kernel (#4055). A 100 x 20 x 15 bar on an r 8 (or r 6) pin 30 tall at the origin; the bottom front edge y = -10, z = 30 is chamfered. Where the chamfer's leg on the bottom face reaches past y = -r it crosses the pin's top circle; the pin stays as it is and the chamfer still removes its triangle along the whole bar. In SolidCraft r 8 with 2.5 and 3 and r 6 with 5 came out open; r 8 with 4 and 5 were refused. Fix flags (bisected over every UpstreamFixes field): at d 2 the chamfer's leg on the bottom face just touches the pin's circle, and it opts in to `fillet_rail_rim_on_face` (WR-301); the pinned SMLib fails it with 1001. Past the circle (d 2.5 to 5) the chamfer runs over the pin's top, and the cases opt in to `fillet_refuse_rails_leaving_faces` and `fillet_cliff_overflow`; without them the Rust engine returns one solid that removes 0.37 (d 2.5) to 31.9 mm^3 (d 5) too little.",
+ "cases": [
+  {
+   "name": "pin_r8_chamfer_2_0",
+   "note": "Pin r 8; chamfer 2 on the bar's bottom front edge (y = -10, z = 30).",
+   "fixes": [
+    "fillet_rail_rim_on_face"
+   ],
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "pin",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 8,
+     "height": 30
+    },
+    {
+     "op": "box",
+     "id": "bar",
+     "origin": [
+      -50,
+      -10,
+      30
+     ],
+     "size": [
+      100,
+      20,
+      15
+     ]
+    },
+    {
+     "op": "union",
+     "id": "part",
+     "a": "pin",
+     "b": "bar"
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "part",
+     "edges": [
+      [
+       -30,
+       -10,
+       30
+      ]
+     ],
+     "distance": 2.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 35831.857894892404,
+     "tol": 0.0001,
+     "formula": "pi*8^2*30 + 100*20*15 - 0.5*2^2*100 (the chamfer runs the bar's whole length; the pin below z = 30 is untouched)"
+    }
+   }
+  },
+  {
+   "name": "pin_r8_chamfer_2_5",
+   "note": "Pin r 8; chamfer 2.5 on the bar's bottom front edge (y = -10, z = 30).",
+   "fixes": [
+    "fillet_refuse_rails_leaving_faces",
+    "fillet_cliff_overflow"
+   ],
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "pin",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 8,
+     "height": 30
+    },
+    {
+     "op": "box",
+     "id": "bar",
+     "origin": [
+      -50,
+      -10,
+      30
+     ],
+     "size": [
+      100,
+      20,
+      15
+     ]
+    },
+    {
+     "op": "union",
+     "id": "part",
+     "a": "pin",
+     "b": "bar"
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "part",
+     "edges": [
+      [
+       -30,
+       -10,
+       30
+      ]
+     ],
+     "distance": 2.5
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 35719.357894892404,
+     "tol": 0.0001,
+     "formula": "pi*8^2*30 + 100*20*15 - 0.5*2.5^2*100 (the chamfer runs the bar's whole length; the pin below z = 30 is untouched)"
+    }
+   }
+  },
+  {
+   "name": "pin_r8_chamfer_3_0",
+   "note": "Pin r 8; chamfer 3 on the bar's bottom front edge (y = -10, z = 30).",
+   "fixes": [
+    "fillet_refuse_rails_leaving_faces",
+    "fillet_cliff_overflow"
+   ],
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "pin",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 8,
+     "height": 30
+    },
+    {
+     "op": "box",
+     "id": "bar",
+     "origin": [
+      -50,
+      -10,
+      30
+     ],
+     "size": [
+      100,
+      20,
+      15
+     ]
+    },
+    {
+     "op": "union",
+     "id": "part",
+     "a": "pin",
+     "b": "bar"
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "part",
+     "edges": [
+      [
+       -30,
+       -10,
+       30
+      ]
+     ],
+     "distance": 3.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 35581.857894892404,
+     "tol": 0.0001,
+     "formula": "pi*8^2*30 + 100*20*15 - 0.5*3^2*100 (the chamfer runs the bar's whole length; the pin below z = 30 is untouched)"
+    }
+   }
+  },
+  {
+   "name": "pin_r8_chamfer_4_0",
+   "note": "Pin r 8; chamfer 4 on the bar's bottom front edge (y = -10, z = 30).",
+   "fixes": [
+    "fillet_refuse_rails_leaving_faces",
+    "fillet_cliff_overflow"
+   ],
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "pin",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 8,
+     "height": 30
+    },
+    {
+     "op": "box",
+     "id": "bar",
+     "origin": [
+      -50,
+      -10,
+      30
+     ],
+     "size": [
+      100,
+      20,
+      15
+     ]
+    },
+    {
+     "op": "union",
+     "id": "part",
+     "a": "pin",
+     "b": "bar"
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "part",
+     "edges": [
+      [
+       -30,
+       -10,
+       30
+      ]
+     ],
+     "distance": 4.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 35231.857894892404,
+     "tol": 0.0001,
+     "formula": "pi*8^2*30 + 100*20*15 - 0.5*4^2*100 (the chamfer runs the bar's whole length; the pin below z = 30 is untouched)"
+    }
+   }
+  },
+  {
+   "name": "pin_r8_chamfer_5_0",
+   "note": "Pin r 8; chamfer 5 on the bar's bottom front edge (y = -10, z = 30).",
+   "fixes": [
+    "fillet_refuse_rails_leaving_faces",
+    "fillet_cliff_overflow"
+   ],
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "pin",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 8,
+     "height": 30
+    },
+    {
+     "op": "box",
+     "id": "bar",
+     "origin": [
+      -50,
+      -10,
+      30
+     ],
+     "size": [
+      100,
+      20,
+      15
+     ]
+    },
+    {
+     "op": "union",
+     "id": "part",
+     "a": "pin",
+     "b": "bar"
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "part",
+     "edges": [
+      [
+       -30,
+       -10,
+       30
+      ]
+     ],
+     "distance": 5.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 34781.857894892404,
+     "tol": 0.0001,
+     "formula": "pi*8^2*30 + 100*20*15 - 0.5*5^2*100 (the chamfer runs the bar's whole length; the pin below z = 30 is untouched)"
+    }
+   }
+  },
+  {
+   "name": "pin_r6_chamfer_5_0",
+   "note": "Pin r 6; chamfer 5 on the bar's bottom front edge (y = -10, z = 30).",
+   "fixes": [
+    "fillet_refuse_rails_leaving_faces",
+    "fillet_cliff_overflow"
+   ],
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "pin",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 6,
+     "height": 30
+    },
+    {
+     "op": "box",
+     "id": "bar",
+     "origin": [
+      -50,
+      -10,
+      30
+     ],
+     "size": [
+      100,
+      20,
+      15
+     ]
+    },
+    {
+     "op": "union",
+     "id": "part",
+     "a": "pin",
+     "b": "bar"
+    },
+    {
+     "op": "chamfer",
+     "id": "result",
+     "body": "part",
+     "edges": [
+      [
+       -30,
+       -10,
+       30
+      ]
+     ],
+     "distance": 5.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 32142.920065876977,
+     "tol": 0.0001,
+     "formula": "pi*6^2*30 + 100*20*15 - 0.5*5^2*100 (the chamfer runs the bar's whole length; the pin below z = 30 is untouched)"
+    }
+   }
+  }
+ ]
+}

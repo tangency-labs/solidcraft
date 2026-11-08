@@ -1,0 +1,395 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/5797",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/6595",
+ "test": "crates/engine/src/tests/flush_join_loft.rs: a_disc_joined_flush_under_a_lofted_tube_follows_its_diameter (draft: not merged, kernel work is paused under tangency-labs/solidcraft#3992)",
+ "summary": "A pen holder: a tube with a 1 mm wall lofted from a ring of outer diameter lowerDia on XY to a ring of outer diameter 67 at z = 90, and a 1 mm disc under it, as wide as the tube's foot (z -1..0), joined to it. The disc's top face and the tube's foot touch back to back in the plane z = 0. On SolidCraft's truck kernel (0.20.0 to 0.22.0) changing lowerDia froze the app: at lowerDia 45 the join spent about 102 s in every fallback of the boolean and then failed with `boolean Union: no result`. Copying the tube's bore circle onto the disc's face both ways round, truck gave the reversed copy (a hole) to the region inside the bore whenever the point it tested, on the loft's NURBS arc, fell inside, which depended on the diameter: 52, 50 and 40 joined in 0.1 s; 48, 46, 45, 44 and 30 gave an invalid face. Geometry is the draft PR's test (lowerDia 52, 45 and 30; upperDia 67; height 90; 1 mm radial wall, the circle offset 1 mm in, on both rings). SolidCraft lofts each ring with its offset as the hole; SmApiCreateSkinPrimitive takes one closed chain per section, so here the tube is the ruled loft of the outer circles less the ruled loft of the bore circles. The bore loft runs 0.9 mm past both ends of the tube along the same cone (radius r0 - 1 - (33.5 - r0)/100 at z = -0.9 and 32.5 + (33.5 - r0)/100 at z = 90.9), so that cut has no coplanar caps and the only flush faces are those of the join. Volumes are closed form: a degree-1 loft between two coaxial circles is a cone frustum, pi*h/3*(a^2 + a*b + b^2); the tube is the outer frustum (r0, 33.5) less the bore frustum (r0 - 1, 32.5), which is exactly pi*h*(r0 + 33.5 - 1); the disc is pi*r0^2*1, and it touches the tube without overlapping. At lowerDia 45 that is 17141.3149 mm^3, against SolidCraft's 17141.3 by hand and 17139.6 measured on its NURBS loft after the fix. Tolerance 1e-3 relative (tol = value * 1e-3), the PR test's. The usual 0.01 mm^3 is finer than this geometry allows: each loft alone measures within 1e-8 relative of its frustum, but the tube, one loft cut from the other, measures 0.1 mm^3 (6e-6 relative) under its closed form at lowerDia 52, where the bore meets the tube's caps along fitted intersection curves. 1e-3 still separates every failure by 40 times or more: no result, the disc left out (-pi*r0^2, -1590 mm^3 at 45) or the floor inside the bore lost (-pi*(r0 - 1)^2, -1452 mm^3 at 45).",
+ "cases": [
+  {
+   "name": "dia_52",
+   "note": "Control: lowerDia 52 (the design's own value), which joined in 0.1 s on truck before the fix.",
+   "steps": [
+    {
+     "op": "extrude",
+     "id": "disc",
+     "profile": [
+      {
+       "kind": "circle",
+       "center": [
+        0,
+        0
+       ],
+       "radius": 26.0
+      }
+     ],
+     "origin": [
+      0,
+      0,
+      -1
+     ],
+     "distance": 1
+    },
+    {
+     "op": "loft",
+     "id": "outside",
+     "sections": [
+      {
+       "profile": [
+        {
+         "kind": "circle",
+         "center": [
+          0,
+          0
+         ],
+         "radius": 26.0
+        }
+       ],
+       "origin": [
+        0,
+        0,
+        0
+       ]
+      },
+      {
+       "profile": [
+        {
+         "kind": "circle",
+         "center": [
+          0,
+          0
+         ],
+         "radius": 33.5
+        }
+       ],
+       "origin": [
+        0,
+        0,
+        90.0
+       ]
+      }
+     ]
+    },
+    {
+     "op": "loft",
+     "id": "bore",
+     "sections": [
+      {
+       "profile": [
+        {
+         "kind": "circle",
+         "center": [
+          0,
+          0
+         ],
+         "radius": 24.925
+        }
+       ],
+       "origin": [
+        0,
+        0,
+        -0.9
+       ]
+      },
+      {
+       "profile": [
+        {
+         "kind": "circle",
+         "center": [
+          0,
+          0
+         ],
+         "radius": 32.575
+        }
+       ],
+       "origin": [
+        0,
+        0,
+        90.9
+       ]
+      }
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "tube",
+     "a": "outside",
+     "b": "bore"
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "tube",
+     "b": "disc"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 18664.20195497696,
+     "tol": 18.66420195497696,
+     "formula": "pi*r0^2*1 + pi*h/3*(r0^2 + r0*r1 + r1^2) - pi*h/3*((r0-1)^2 + (r0-1)*(r1-1) + (r1-1)^2) = pi*(r0^2 + h*(r0 + r1 - 1)), r0 = 26, r1 = 33.5, h = 90: disc 2123.716634 + tube 16540.485321"
+    }
+   },
+   "fixes": [
+    "precise_properties_body_length_scale"
+   ]
+  },
+  {
+   "name": "dia_45",
+   "note": "The reported failure: lowerDia 45, about 102 s and then `boolean Union: no result` on truck.",
+   "steps": [
+    {
+     "op": "extrude",
+     "id": "disc",
+     "profile": [
+      {
+       "kind": "circle",
+       "center": [
+        0,
+        0
+       ],
+       "radius": 22.5
+      }
+     ],
+     "origin": [
+      0,
+      0,
+      -1
+     ],
+     "distance": 1
+    },
+    {
+     "op": "loft",
+     "id": "outside",
+     "sections": [
+      {
+       "profile": [
+        {
+         "kind": "circle",
+         "center": [
+          0,
+          0
+         ],
+         "radius": 22.5
+        }
+       ],
+       "origin": [
+        0,
+        0,
+        0
+       ]
+      },
+      {
+       "profile": [
+        {
+         "kind": "circle",
+         "center": [
+          0,
+          0
+         ],
+         "radius": 33.5
+        }
+       ],
+       "origin": [
+        0,
+        0,
+        90.0
+       ]
+      }
+     ]
+    },
+    {
+     "op": "loft",
+     "id": "bore",
+     "sections": [
+      {
+       "profile": [
+        {
+         "kind": "circle",
+         "center": [
+          0,
+          0
+         ],
+         "radius": 21.39
+        }
+       ],
+       "origin": [
+        0,
+        0,
+        -0.9
+       ]
+      },
+      {
+       "profile": [
+        {
+         "kind": "circle",
+         "center": [
+          0,
+          0
+         ],
+         "radius": 32.61
+        }
+       ],
+       "origin": [
+        0,
+        0,
+        90.9
+       ]
+      }
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "tube",
+     "a": "outside",
+     "b": "bore"
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "tube",
+     "b": "disc"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 17141.31491614931,
+     "tol": 17.14131491614931,
+     "formula": "pi*r0^2*1 + pi*h/3*(r0^2 + r0*r1 + r1^2) - pi*h/3*((r0-1)^2 + (r0-1)*(r1-1) + (r1-1)^2) = pi*(r0^2 + h*(r0 + r1 - 1)), r0 = 22.5, r1 = 33.5, h = 90: disc 1590.431281 + tube 15550.883635"
+    }
+   },
+   "fixes": [
+    "precise_properties_body_length_scale"
+   ]
+  },
+  {
+   "name": "dia_30",
+   "note": "lowerDia 30, which also failed on truck (an invalid face, then every fallback).",
+   "steps": [
+    {
+     "op": "extrude",
+     "id": "disc",
+     "profile": [
+      {
+       "kind": "circle",
+       "center": [
+        0,
+        0
+       ],
+       "radius": 15.0
+      }
+     ],
+     "origin": [
+      0,
+      0,
+      -1
+     ],
+     "distance": 1
+    },
+    {
+     "op": "loft",
+     "id": "outside",
+     "sections": [
+      {
+       "profile": [
+        {
+         "kind": "circle",
+         "center": [
+          0,
+          0
+         ],
+         "radius": 15.0
+        }
+       ],
+       "origin": [
+        0,
+        0,
+        0
+       ]
+      },
+      {
+       "profile": [
+        {
+         "kind": "circle",
+         "center": [
+          0,
+          0
+         ],
+         "radius": 33.5
+        }
+       ],
+       "origin": [
+        0,
+        0,
+        90.0
+       ]
+      }
+     ]
+    },
+    {
+     "op": "loft",
+     "id": "bore",
+     "sections": [
+      {
+       "profile": [
+        {
+         "kind": "circle",
+         "center": [
+          0,
+          0
+         ],
+         "radius": 13.815
+        }
+       ],
+       "origin": [
+        0,
+        0,
+        -0.9
+       ]
+      },
+      {
+       "profile": [
+        {
+         "kind": "circle",
+         "center": [
+          0,
+          0
+         ],
+         "radius": 32.685
+        }
+       ],
+       "origin": [
+        0,
+        0,
+        90.9
+       ]
+      }
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "tube",
+     "a": "outside",
+     "b": "bore"
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "tube",
+     "b": "disc"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 14137.16694115407,
+     "tol": 14.13716694115407,
+     "formula": "pi*r0^2*1 + pi*h/3*(r0^2 + r0*r1 + r1^2) - pi*h/3*((r0-1)^2 + (r0-1)*(r1-1) + (r1-1)^2) = pi*(r0^2 + h*(r0 + r1 - 1)), r0 = 15, r1 = 33.5, h = 90: disc 706.858347 + tube 13430.308594"
+    }
+   },
+   "fixes": [
+    "precise_properties_body_length_scale"
+   ]
+  }
+ ]
+}

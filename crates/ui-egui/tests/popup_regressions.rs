@@ -4,10 +4,8 @@ mod raster;
 
 use egui::{ColorImage, Rect, TextureId, pos2};
 use serde_json::json;
-use solidcraft_ui_egui::{
-    scenario::{self, Harness},
-    theme::Tokens,
-};
+use solidcraft_theme::Tokens;
+use solidcraft_ui_egui::scenario::{self, Harness};
 use std::collections::HashMap;
 
 fn setup(dark: bool, ppp: f32) -> Harness {
@@ -25,7 +23,7 @@ fn capture(h: &mut Harness, name: &str) -> (image::RgbaImage, egui::FullOutput) 
     h.ctx = egui::Context::default();
     h.ctx.set_pixels_per_point(h.app.preferences.ui_scale);
     solidcraft_ui_egui::fonts::setup_fonts(&h.ctx);
-    solidcraft_ui_egui::theme::apply(&h.ctx);
+    solidcraft_theme::apply(&h.ctx);
     let mut textures: HashMap<TextureId, ColorImage> = HashMap::new();
     for _ in 0..8 {
         raster::paint(h, &mut textures, vec![]);

@@ -16,7 +16,7 @@ use crate::SolveApp;
 use crate::dialogs::{combo, field, form_row};
 use crate::dialogs_assembly::Asm;
 use crate::selection::{EDGES, FACES, PROFILES, SelInput, SelectionExt as _, VERTICES};
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 /// The follower types, as `joint.cam` takes them, and their labels.
 const FOLLOWERS: [&str; 3] = ["knife", "roller", "flat"];
@@ -116,25 +116,25 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut CamForm, inputs: &[Se
     joint_row(ui, "Cam", "cam_a", &cams, &mut f.a);
     joint_row(ui, "Follower", "cam_b", &followers, &mut f.b);
     form_row(ui, "Type", |ui| {
-        let labels: Vec<&str> = FOLLOWER_LABELS.iter().map(|l| crate::i18n::tr_label(l)).collect();
+        let labels: Vec<&str> = FOLLOWER_LABELS.iter().map(|l| solidcraft_ui_text::tr_label(l)).collect();
         combo(ui, "cam_follower", &labels, &mut f.follower);
     });
     if FOLLOWERS.get(f.follower) == Some(&"roller") {
         form_row(ui, "Radius", |ui| match (pick(inputs, ROLLER), picked_radius(s, inputs, ROLLER)) {
             (_, Some(r)) => {
-                ui.label(format!("{} mm  ({})", trim(r), crate::i18n::tr_label("picked")));
+                ui.label(format!("{} mm  ({})", trim(r), solidcraft_ui_text::tr_label("picked")));
             }
             (Some(_), None) => {
-                ui.label(RichText::new(crate::i18n::tr_label("not a round face")).color(t.warning));
+                ui.label(RichText::new(solidcraft_ui_text::tr_label("not a round face")).color(t.warning));
             }
             (None, None) => enter |= field(ui, &mut f.radius),
         });
     }
     crate::ui_kit::options(ui, "cam_options", &mut [("Other side", &mut f.flip)]);
     form_row(ui, "Animate", |ui| {
-        let label = crate::i18n::tr(if f.animate { "ui.joint_stop" } else { "ui.joint_play" });
+        let label = solidcraft_ui_text::tr(if f.animate { "ui.joint_stop" } else { "ui.joint_play" });
         let r = crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal)
-            .backing_on_hover_text(crate::i18n::tr_label("Play the joint's motion in the view"));
+            .backing_on_hover_text(solidcraft_ui_text::tr_label("Play the joint's motion in the view"));
         crate::scenario::publish_handle("dialog:Animate", r.rect.center());
         if r.clicked() {
             f.animate = !f.animate;

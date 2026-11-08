@@ -7,3 +7,6 @@
 # SolidCraft designs (.sc): a JSON document or a ZIP container, never Scala source, so they
 # stay out of GitHub's language statistics. Git's own text/binary detection handles both kinds.
 *.sc -linguist-detectable
+# The kernel is vendored with git subtree, keeping its own history and licence: it must not look
+# like SolidCraft source in GitHub's language statistics.
+solidcore/** linguist-vendored

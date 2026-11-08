@@ -612,7 +612,7 @@ pub fn reset(app: &mut SolveApp, id: Option<&str>) {
 /// reset; a key another command uses is reported and taken over only on request.
 pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
-    let filtering = crate::prefs_search::querying(ui);
+    let filtering = crate::ui_kit::settings_search::querying(ui);
     // A Preferences search lists the matching shortcuts too, and one recorded from there takes
     // the key like one on this page (#10043). Only a search field that has the keyboard keeps
     // its keys: going back to it to type stops the recording.
@@ -665,7 +665,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut action: Option<(String, &str)> = None;
     ui_kit::scope(ui, |ui| {
         if !filtering {
-            let t = crate::theme::Tokens::get();
+            let t = solidcraft_theme::Tokens::get();
             let edit_label = if app.keymap.read_only { app.tr_label("Edit shortcuts") } else { app.tr("install.done") };
             let actions_width = ui_kit::ContentWidth::button(ui, edit_label)
                 + ui_kit::icon_label_width(ui, app.tr("prefs.profile_export"), Some("export_tray"), false)
@@ -684,7 +684,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                             ui,
                             egui::Id::unique("sc_keymap_filter"),
                             &mut app.keymap.filter,
-                            crate::i18n::tr_label("Filter commands or keys"),
+                            solidcraft_ui_text::tr_label("Filter commands or keys"),
                         )
                     })
                     .inner;
@@ -742,8 +742,8 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let label = app.tr_label(c.label);
                 let group = shortcut_group(c);
                 let hit = if filtering {
-                    crate::prefs_search::shows_all(ui)
-                        || crate::prefs_search::matches_text(
+                    crate::ui_kit::settings_search::shows_all(ui)
+                        || crate::ui_kit::settings_search::matches_text(
                             &q,
                             &[c.label, c.id, label, &group]
                                 .into_iter()
@@ -795,8 +795,8 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::section_heading(ui, group);
                 let heading = crate::scenario::rect_of(&format!("dialog:heading:{group}"));
                 if let Some(rect) = heading {
-                    crate::prefs_search::remember(ui, group, rect);
-                    crate::prefs_search::follow(ui, group, rect);
+                    crate::ui_kit::settings_search::remember(ui, group, rect);
+                    crate::ui_kit::settings_search::follow(ui, group, rect);
                 }
                 for (command, keys, label) in rows {
                     if let Some(chosen) = shortcut_row(app, ui, command, keys, label, filtering) {
@@ -811,9 +811,9 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                 // Collapsed matches still participate in Up/Down and Enter. Enter lands on
                 // the real group or command, where follow() reveals its complete row.
                 for (group, rows) in &groups {
-                    crate::prefs_search::remember(ui, group, rect);
+                    crate::ui_kit::settings_search::remember(ui, group, rect);
                     for (command, keys, label) in rows {
-                        crate::prefs_search::remember(ui, &shortcut_search_label(command, label, keys), rect);
+                        crate::ui_kit::settings_search::remember(ui, &shortcut_search_label(command, label, keys), rect);
                     }
                 }
             }
@@ -897,7 +897,7 @@ fn shortcut_row(
     label: &str,
     filtering: bool,
 ) -> Option<(String, &'static str)> {
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let editing = !app.keymap.read_only;
     let capturing = app.keymap.capturing.as_deref() == Some(command.id);
     let mut slots: Vec<(usize, String, bool)> = keys.iter().enumerate().map(|(slot, key)| (slot, display(key), true)).collect();
@@ -949,13 +949,13 @@ fn shortcut_row(
     let height = if beside { label_height.max(control_height) } else { label_height + control_height + t.space_4 } + t.space_8;
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
     let search_label = shortcut_search_label(command, label, keys);
-    crate::prefs_search::follow(ui, &search_label, rect);
+    crate::ui_kit::settings_search::follow(ui, &search_label, rect);
     if !filtering && !capturing && !ui.is_rect_visible(rect) {
         return None;
     }
     if filtering {
-        crate::prefs_search::reveal(ui);
-        crate::prefs_search::push_force(ui);
+        crate::ui_kit::settings_search::reveal(ui);
+        crate::ui_kit::settings_search::push_force(ui);
     }
     let mut action = None;
     ui.push_id(command.id, |ui| {
@@ -1033,10 +1033,10 @@ fn shortcut_row(
             });
         }
     });
-    crate::prefs_search::remember(ui, &search_label, rect);
+    crate::ui_kit::settings_search::remember(ui, &search_label, rect);
     t.secondary_hline(ui.painter(), rect.x_range(), rect.bottom(), t.dialog_rule);
     if filtering {
-        crate::prefs_search::pop_force(ui);
+        crate::ui_kit::settings_search::pop_force(ui);
     }
     action
 }
@@ -1050,7 +1050,7 @@ fn outcome(app: &SolveApp, ui: &mut egui::Ui) -> Option<&'static str> {
     }
     if let Some((_, key, _, _)) = app.keymap.conflict.clone() {
         ui.horizontal_wrapped(|ui| {
-            let replace = ui_kit::button(ui, crate::i18n::format("keymap.use_anyway", &[("key", &display(&key))]), ui_kit::Button::Normal);
+            let replace = ui_kit::button(ui, solidcraft_ui_text::format("keymap.use_anyway", &[("key", &display(&key))]), ui_kit::Button::Normal);
             crate::scenario::publish_target("keymap:replace", replace.rect);
             if replace.clicked() {
                 chosen = Some("replace");
@@ -1919,7 +1919,7 @@ mod card_tests {
                                 .job
                                 .sections
                                 .iter()
-                                .all(|section| section.format.font_id.size == crate::theme::Tokens::get().font_page_heading);
+                                .all(|section| section.format.font_id.size == solidcraft_theme::Tokens::get().font_page_heading);
                     }
                 });
             }

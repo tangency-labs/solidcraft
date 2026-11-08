@@ -1,0 +1,179 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b17": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b18"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b19"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b19"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b20"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b21"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  0.0,
+                  218.0,
+                  236.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  236.0
+                ]
+              ],
+              "index": 24
+            },
+            {
+              "at": [
+                [
+                  245.0,
+                  0.0,
+                  236.0
+                ],
+                [
+                  245.0,
+                  218.0,
+                  236.0
+                ]
+              ],
+              "index": 25
+            }
+          ],
+          "points": [
+            [
+              0.0,
+              109.0,
+              236.0
+            ],
+            [
+              245.0,
+              109.0,
+              236.0
+            ]
+          ],
+          "tolerance": 20.202794474749023
+        },
+        "kind": "round",
+        "sizes": [
+          18.0,
+          18.0
+        ]
+      }
+    }
+  ],
+  "case": "2852-fillet-outer-round-concentric-with-inner",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "box 245x218x236 with a 239 wide cut from below up to z=233: walls 3 mm, top 3 mm, V0 = 245*218*236 - 239*218*233. R15 on the two inside top edges (concave, length 218) adds (1-pi/4) 225 x 218 each; R18 on the two outside top edges (convex) removes (1-pi/4) 324 x 218 each. The two rounds have the same centre (18, 218 in x,z), so the wall stays exactly 3 mm thick and nothing overlaps: V = V0 + 2 (1-pi/4) 218 (225 - 324) = 455730.93.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#2852"
+    ],
+    "volume_mm3": 455730.92632488743,
+    "what": "an R18 round on the outside top edges of a 3 mm thick upside-down U, concentric with the R15 round of its inside edges"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 36,
+      "faces": 14,
+      "vertices": 24
+    }
+  },
+  "records": "2852-fillet-outer-round-concentric-with-inner.bodies.json.gz",
+  "result": [
+    {
+      "body": "U",
+      "made": "b21"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 309309.63522285235,
+      "body_count": 1,
+      "edges": 36,
+      "faces": 14,
+      "vertices": 24,
+      "volume_mm3": 455730.92625906935
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#2852"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "an R18 round on the outside top edges of a 3 mm thick upside-down U, concentric with the R15 round of its inside edges",
+  "why_not": []
+}

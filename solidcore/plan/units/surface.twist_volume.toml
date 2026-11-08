@@ -1,0 +1,12 @@
+id = "surface.twist_volume"
+upstream = ["source/SMLib/inc/SmTwistVolume.h", "source/SMLib/src/SmTwistVolume.cpp"]
+rust_module = "surface::twist_volume"
+depends_on = ["geom.extent3d", "geom.object", "geom.pseudo_box", "geom.solution_array", "geom.vector3d", "surface.volume_p1", "topology.database_io"]
+soft_depends_on = ["geom.extent1d", "geom.tol"]
+est_lines = 649
+layer = 16
+tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
+status = "green"
+claimed_by = "swarm-surface.twist_volume-a1"
+claimed_at = "2026-10-13T03:03:30Z"
+notes = "difftest green: 1572 cases (default seeds), 1572 pass, 0 deferred (ReadFromDB wired by surface.volume_p2); max_rel_err 0; wiring dropped surface.volume_p1 deferred 99 -> 39. 25 fns; largest: SmTwistVolume::Evaluate, SmTwistVolume::EvaluateSimple, SmTwistVolume::EvaluateBoundingBoxSimple, SmTwistVolume::ReadFromDB; cycle back-edges (call into later units; stub or co-port): surface.volume_p2(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"

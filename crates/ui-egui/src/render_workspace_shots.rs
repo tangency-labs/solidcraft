@@ -33,20 +33,21 @@ pub(crate) fn contents(app: &mut SolveApp, ui: &mut egui::Ui) {
     let result_label = completed
         .as_ref()
         .map(|frame| {
-            crate::i18n::format(
+            solidcraft_ui_text::format(
                 "render.shots_result",
                 &[("number", &frame.job.serial.to_string()), ("width", &frame.width.to_string()), ("height", &frame.height.to_string())],
             )
         })
         .unwrap_or_else(|| app.tr("render.shots_no_result").to_string());
     let queue = app.session.render_queue_state();
-    let queue_label = crate::i18n::format("render.batch_status", &[("running", &queue.running.to_string()), ("waiting", &queue.waiting.to_string())]);
+    let queue_label =
+        solidcraft_ui_text::format("render.batch_status", &[("running", &queue.running.to_string()), ("waiting", &queue.waiting.to_string())]);
     let (mut hide, mut start, mut save, mut chosen, mut size) = (false, false, false, None, None);
     let mut visible = Vec::new();
     ui_kit::Panel::strip_contents(
         ui,
         |ui| {
-            let response = ui_kit::strip_toggle(ui, true, crate::i18n::tr_label("Hide Shots strip"));
+            let response = ui_kit::strip_toggle(ui, true, solidcraft_ui_text::tr_label("Hide Shots strip"));
             crate::scenario::publish_target("render:shots:hide", response.rect);
             hide = response.clicked();
             let response = ui_kit::completion_text(ui, &queue_label, false);
@@ -75,7 +76,7 @@ pub(crate) fn contents(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::scenario::publish_rect("render:shots:status", response.rect);
         },
         |ui| {
-            let heading = ui_kit::StripHeading::new(ui.painter(), crate::i18n::tr_label("Shots"));
+            let heading = ui_kit::StripHeading::new(ui.painter(), solidcraft_ui_text::tr_label("Shots"));
             let response = heading.show(ui);
             crate::scenario::publish_rect("render:shots:heading", response.rect);
             let response = ui.add_enabled_ui(super::setups::snapshot(app).is_ok(), |ui| ui_kit::add_choice(ui, app.tr("render.shots_save"))).inner;

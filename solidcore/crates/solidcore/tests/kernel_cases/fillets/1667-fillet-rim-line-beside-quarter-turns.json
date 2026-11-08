@@ -1,0 +1,299 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b7": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b9"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b9"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b10"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  5.0,
+                  0.0,
+                  60.0
+                ],
+                [
+                  292.0,
+                  0.0,
+                  60.0
+                ]
+              ],
+              "index": 1
+            },
+            {
+              "at": [
+                [
+                  5.0,
+                  0.0,
+                  60.0
+                ],
+                [
+                  0.0,
+                  5.0,
+                  60.0
+                ]
+              ],
+              "index": 21
+            },
+            {
+              "at": [
+                [
+                  297.0,
+                  5.0,
+                  60.0
+                ],
+                [
+                  292.0,
+                  0.0,
+                  60.0
+                ]
+              ],
+              "index": 22
+            },
+            {
+              "at": [
+                [
+                  0.0,
+                  95.0,
+                  60.0
+                ],
+                [
+                  0.0,
+                  5.0,
+                  60.0
+                ]
+              ],
+              "index": 15
+            },
+            {
+              "at": [
+                [
+                  297.0,
+                  5.0,
+                  60.0
+                ],
+                [
+                  297.0,
+                  95.0,
+                  60.0
+                ]
+              ],
+              "index": 5
+            },
+            {
+              "at": [
+                [
+                  0.0,
+                  95.0,
+                  60.0
+                ],
+                [
+                  5.0,
+                  100.0,
+                  60.0
+                ]
+              ],
+              "index": 20
+            },
+            {
+              "at": [
+                [
+                  292.0,
+                  100.0,
+                  60.0
+                ],
+                [
+                  297.0,
+                  95.0,
+                  60.0
+                ]
+              ],
+              "index": 23
+            },
+            {
+              "at": [
+                [
+                  292.0,
+                  100.0,
+                  60.0
+                ],
+                [
+                  5.0,
+                  100.0,
+                  60.0
+                ]
+              ],
+              "index": 9
+            }
+          ],
+          "points": [
+            [
+              148.5,
+              0.0,
+              60.0
+            ],
+            [
+              1.4644660940672622,
+              1.4644660940672625,
+              60.0
+            ],
+            [
+              295.53553390593277,
+              1.4644660940672554,
+              60.0
+            ],
+            [
+              0.0,
+              50.0,
+              60.0
+            ],
+            [
+              297.0,
+              50.0,
+              60.0
+            ],
+            [
+              1.4644660940672625,
+              98.53553390593274,
+              60.0
+            ],
+            [
+              295.53553390593277,
+              98.53553390593274,
+              60.0
+            ],
+            [
+              148.5,
+              100.0,
+              60.0
+            ]
+          ],
+          "tolerance": 15.954761311991602
+        },
+        "kind": "round",
+        "sizes": [
+          5.0,
+          5.0,
+          5.0,
+          5.0,
+          5.0,
+          5.0,
+          5.0,
+          5.0
+        ]
+      }
+    }
+  ],
+  "case": "1667-fillet-rim-line-beside-quarter-turns",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "box 297x100x60 with the four vertical edges rounded R5: area 297*100 - (4-pi)*25, 60 high. One pick on the long top edge takes the whole tangent loop (2 lines of 287, 2 of 90, 4 quarter arcs R5; perimeter P = 785.416). The R5 round (equal to the corner radius, so each corner becomes a sphere octant) removes (1-pi/4) r^2 (P - 2 pi x r), x r = r (5/6-pi/4)/(1-pi/4) the spandrel centroid offset. V = 1776536.245.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#1667",
+      "tangency-labs/solidcraft#1702"
+    ],
+    "volume_mm3": 1776536.244666527,
+    "what": "an R5 round of the top rim of a 297 mm long box whose corners are R5 (a 287 mm line beside 7.85 mm quarter turns)"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 36,
+      "faces": 18,
+      "vertices": 20
+    }
+  },
+  "records": "1667-fillet-rim-line-beside-quarter-turns.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 104785.39756094824,
+      "body_count": 1,
+      "edges": 36,
+      "faces": 18,
+      "vertices": 20,
+      "volume_mm3": 1776536.2446427883
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#1667",
+    "tangency-labs/solidcraft#1702"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "an R5 round of the top rim of a 297 mm long box whose corners are R5 (a 287 mm line beside 7.85 mm quarter turns)",
+  "why_not": []
+}

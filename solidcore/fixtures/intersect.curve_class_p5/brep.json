@@ -1,0 +1,4603 @@
+{
+ "cases": [
+  {
+   "name": "sss_edit_one_span_knot",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:14643-15249 (IntersectVertices, GWC:CHANGED_SSS block 14826-15095)",
+   "inputs": {
+    "op": 7,
+    "topo": {
+     "topo_op": "vertices",
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.3,
+       -0.2,
+       0.1
+      ],
+      "size": [
+       1.3,
+       0.8,
+       1.7
+      ]
+     },
+     "edits": [
+      {
+       "kind": 2,
+       "sel": 0,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 1,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 2,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 3,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 4,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 5,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 6,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 7,
+       "value": 0.0001
+      }
+     ],
+     "face": 2,
+     "anchor": 1,
+     "tol": 1e-06,
+     "srf": {
+      "n1": [
+       0,
+       1,
+       0
+      ],
+      "n2": [
+       0,
+       0,
+       1
+      ]
+     },
+     "p": 3,
+     "knots": [
+      0,
+      0,
+      0,
+      0,
+      0.4,
+      0.4,
+      0.4,
+      1,
+      1,
+      1,
+      1
+     ],
+     "cpts": [
+      [
+       -1.0,
+       5e-05,
+       -3e-05
+      ],
+      [
+       -0.6666666666666667,
+       5e-05,
+       -3e-05
+      ],
+      [
+       -0.33333333333333337,
+       5e-05,
+       -3e-05
+      ],
+      [
+       0.0,
+       5e-05,
+       -3e-05
+      ],
+      [
+       0.33333333333333326,
+       5e-05,
+       -3e-05
+      ],
+      [
+       0.6666666666666667,
+       5e-05,
+       -3e-05
+      ],
+      [
+       1.0,
+       5e-05,
+       -3e-05
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "sss_edit_two_spans",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:14643-15249 (IntersectVertices, GWC:CHANGED_SSS block 14826-15095)",
+   "inputs": {
+    "op": 7,
+    "topo": {
+     "topo_op": "vertices",
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.3,
+       -0.2,
+       0.1
+      ],
+      "size": [
+       1.3,
+       0.8,
+       1.7
+      ]
+     },
+     "edits": [
+      {
+       "kind": 2,
+       "sel": 0,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 1,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 2,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 3,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 4,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 5,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 6,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 7,
+       "value": 0.0001
+      }
+     ],
+     "face": 2,
+     "anchor": 1,
+     "tol": 1e-06,
+     "srf": {
+      "n1": [
+       0,
+       1,
+       0
+      ],
+      "n2": [
+       0,
+       0,
+       1
+      ]
+     },
+     "p": 3,
+     "knots": [
+      0,
+      0,
+      0,
+      0,
+      0.3,
+      0.3,
+      0.3,
+      0.7,
+      0.7,
+      0.7,
+      1,
+      1,
+      1,
+      1
+     ],
+     "cpts": [
+      [
+       -1.0,
+       2e-05,
+       1e-05
+      ],
+      [
+       -0.7777777777777778,
+       2e-05,
+       1e-05
+      ],
+      [
+       -0.5555555555555556,
+       2e-05,
+       1e-05
+      ],
+      [
+       -0.33333333333333337,
+       2e-05,
+       1e-05
+      ],
+      [
+       -0.11111111111111116,
+       2e-05,
+       1e-05
+      ],
+      [
+       0.11111111111111116,
+       2e-05,
+       1e-05
+      ],
+      [
+       0.33333333333333326,
+       2e-05,
+       1e-05
+      ],
+      [
+       0.5555555555555556,
+       2e-05,
+       1e-05
+      ],
+      [
+       0.7777777777777777,
+       2e-05,
+       1e-05
+      ],
+      [
+       1.0,
+       2e-05,
+       1e-05
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "sss_edit_mates_same",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:14643-15249 (IntersectVertices, GWC:CHANGED_SSS block 14826-15095)",
+   "inputs": {
+    "op": 7,
+    "topo": {
+     "topo_op": "vertices",
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.3,
+       -0.2,
+       0.1
+      ],
+      "size": [
+       1.3,
+       0.8,
+       1.7
+      ]
+     },
+     "edits": [
+      {
+       "kind": 2,
+       "sel": 0,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 1,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 2,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 3,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 4,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 5,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 6,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 7,
+       "value": 0.0001
+      }
+     ],
+     "face": 2,
+     "anchor": 1,
+     "tol": 1e-06,
+     "srf": {
+      "n1": [
+       0,
+       1,
+       0
+      ],
+      "n2": [
+       0,
+       0,
+       1
+      ]
+     },
+     "p": 3,
+     "knots": [
+      0,
+      0,
+      0,
+      0,
+      0.4,
+      0.4,
+      0.4,
+      1,
+      1,
+      1,
+      1
+     ],
+     "cpts": [
+      [
+       -1.0,
+       5e-05,
+       -3e-05
+      ],
+      [
+       -0.6666666666666667,
+       5e-05,
+       -3e-05
+      ],
+      [
+       -0.33333333333333337,
+       5e-05,
+       -3e-05
+      ],
+      [
+       0.0,
+       5e-05,
+       -3e-05
+      ],
+      [
+       0.33333333333333326,
+       5e-05,
+       -3e-05
+      ],
+      [
+       0.6666666666666667,
+       5e-05,
+       -3e-05
+      ],
+      [
+       1.0,
+       5e-05,
+       -3e-05
+      ]
+     ],
+     "mates": [
+      [
+       0,
+       0
+      ],
+      [
+       1,
+       1
+      ],
+      [
+       2,
+       2
+      ],
+      [
+       3,
+       3
+      ],
+      [
+       4,
+       4
+      ],
+      [
+       5,
+       5
+      ],
+      [
+       6,
+       6
+      ],
+      [
+       7,
+       7
+      ],
+      [
+       8,
+       8
+      ],
+      [
+       9,
+       9
+      ],
+      [
+       10,
+       10
+      ],
+      [
+       11,
+       11
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "sss_edit_mates_shifted",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:14643-15249 (IntersectVertices, GWC:CHANGED_SSS block 14826-15095)",
+   "inputs": {
+    "op": 7,
+    "topo": {
+     "topo_op": "vertices",
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.3,
+       -0.2,
+       0.1
+      ],
+      "size": [
+       1.3,
+       0.8,
+       1.7
+      ]
+     },
+     "edits": [
+      {
+       "kind": 2,
+       "sel": 0,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 1,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 2,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 3,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 4,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 5,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 6,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 7,
+       "value": 0.0001
+      }
+     ],
+     "face": 2,
+     "anchor": 1,
+     "tol": 1e-06,
+     "srf": {
+      "n1": [
+       0,
+       1,
+       0
+      ],
+      "n2": [
+       0,
+       0,
+       1
+      ]
+     },
+     "p": 3,
+     "knots": [
+      0,
+      0,
+      0,
+      0,
+      0.4,
+      0.4,
+      0.4,
+      1,
+      1,
+      1,
+      1
+     ],
+     "cpts": [
+      [
+       -1.0,
+       5e-05,
+       -3e-05
+      ],
+      [
+       -0.6666666666666667,
+       5e-05,
+       -3e-05
+      ],
+      [
+       -0.33333333333333337,
+       5e-05,
+       -3e-05
+      ],
+      [
+       0.0,
+       5e-05,
+       -3e-05
+      ],
+      [
+       0.33333333333333326,
+       5e-05,
+       -3e-05
+      ],
+      [
+       0.6666666666666667,
+       5e-05,
+       -3e-05
+      ],
+      [
+       1.0,
+       5e-05,
+       -3e-05
+      ]
+     ],
+     "mates": [
+      [
+       0,
+       5
+      ],
+      [
+       1,
+       6
+      ],
+      [
+       2,
+       7
+      ],
+      [
+       3,
+       8
+      ],
+      [
+       4,
+       9
+      ],
+      [
+       5,
+       10
+      ],
+      [
+       6,
+       11
+      ],
+      [
+       7,
+       0
+      ],
+      [
+       8,
+       1
+      ],
+      [
+       9,
+       2
+      ],
+      [
+       10,
+       3
+      ],
+      [
+       11,
+       4
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "sss_edit_uv_guesses",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:14643-15249 (IntersectVertices, GWC:CHANGED_SSS block 14826-15095)",
+   "inputs": {
+    "op": 7,
+    "topo": {
+     "topo_op": "vertices",
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.3,
+       -0.2,
+       0.1
+      ],
+      "size": [
+       1.3,
+       0.8,
+       1.7
+      ]
+     },
+     "edits": [
+      {
+       "kind": 2,
+       "sel": 0,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 1,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 2,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 3,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 4,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 5,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 6,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 7,
+       "value": 0.0001
+      }
+     ],
+     "face": 2,
+     "anchor": 1,
+     "tol": 1e-06,
+     "srf": {
+      "n1": [
+       0,
+       1,
+       0
+      ],
+      "n2": [
+       0,
+       0,
+       1
+      ]
+     },
+     "p": 3,
+     "knots": [
+      0,
+      0,
+      0,
+      0,
+      0.4,
+      0.4,
+      0.4,
+      1,
+      1,
+      1,
+      1
+     ],
+     "cpts": [
+      [
+       -1.0,
+       5e-05,
+       -3e-05
+      ],
+      [
+       -0.6666666666666667,
+       5e-05,
+       -3e-05
+      ],
+      [
+       -0.33333333333333337,
+       5e-05,
+       -3e-05
+      ],
+      [
+       0.0,
+       5e-05,
+       -3e-05
+      ],
+      [
+       0.33333333333333326,
+       5e-05,
+       -3e-05
+      ],
+      [
+       0.6666666666666667,
+       5e-05,
+       -3e-05
+      ],
+      [
+       1.0,
+       5e-05,
+       -3e-05
+      ]
+     ],
+     "uv1": true,
+     "uv2": true
+    }
+   }
+  },
+  {
+   "name": "sss_edit_bspline_surfaces",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:14643-15249 (IntersectVertices, GWC:CHANGED_SSS block 14826-15095)",
+   "inputs": {
+    "op": 7,
+    "topo": {
+     "topo_op": "vertices",
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.3,
+       -0.2,
+       0.1
+      ],
+      "size": [
+       1.3,
+       0.8,
+       1.7
+      ]
+     },
+     "edits": [
+      {
+       "kind": 2,
+       "sel": 0,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 1,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 2,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 3,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 4,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 5,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 6,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 7,
+       "value": 0.0001
+      }
+     ],
+     "face": 2,
+     "anchor": 1,
+     "tol": 1e-06,
+     "srf": {
+      "n1": [
+       0,
+       1,
+       0
+      ],
+      "n2": [
+       0,
+       0,
+       1
+      ],
+      "bspline": [
+       true,
+       true
+      ]
+     },
+     "p": 3,
+     "knots": [
+      0,
+      0,
+      0,
+      0,
+      0.4,
+      0.4,
+      0.4,
+      1,
+      1,
+      1,
+      1
+     ],
+     "cpts": [
+      [
+       -1.0,
+       5e-05,
+       -3e-05
+      ],
+      [
+       -0.6666666666666667,
+       5e-05,
+       -3e-05
+      ],
+      [
+       -0.33333333333333337,
+       5e-05,
+       -3e-05
+      ],
+      [
+       0.0,
+       5e-05,
+       -3e-05
+      ],
+      [
+       0.33333333333333326,
+       5e-05,
+       -3e-05
+      ],
+      [
+       0.6666666666666667,
+       5e-05,
+       -3e-05
+      ],
+      [
+       1.0,
+       5e-05,
+       -3e-05
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "sss_edit_with_uv_trims",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:14643-15249 (IntersectVertices, GWC:CHANGED_SSS block 14826-15095)",
+   "inputs": {
+    "op": 7,
+    "topo": {
+     "topo_op": "vertices",
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.3,
+       -0.2,
+       0.1
+      ],
+      "size": [
+       1.3,
+       0.8,
+       1.7
+      ]
+     },
+     "edits": [
+      {
+       "kind": 2,
+       "sel": 0,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 1,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 2,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 3,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 4,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 5,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 6,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 7,
+       "value": 0.0001
+      },
+      {
+       "kind": 3,
+       "sel": 0,
+       "value": 0
+      },
+      {
+       "kind": 3,
+       "sel": 1,
+       "value": 0
+      },
+      {
+       "kind": 3,
+       "sel": 2,
+       "value": 0
+      },
+      {
+       "kind": 3,
+       "sel": 3,
+       "value": 0
+      },
+      {
+       "kind": 3,
+       "sel": 4,
+       "value": 0
+      },
+      {
+       "kind": 3,
+       "sel": 5,
+       "value": 0
+      }
+     ],
+     "face": 2,
+     "anchor": 1,
+     "tol": 1e-06,
+     "srf": {
+      "n1": [
+       0,
+       1,
+       0
+      ],
+      "n2": [
+       0,
+       0,
+       1
+      ]
+     },
+     "p": 3,
+     "knots": [
+      0,
+      0,
+      0,
+      0,
+      0.4,
+      0.4,
+      0.4,
+      1,
+      1,
+      1,
+      1
+     ],
+     "cpts": [
+      [
+       -1.0,
+       5e-05,
+       -3e-05
+      ],
+      [
+       -0.6666666666666667,
+       5e-05,
+       -3e-05
+      ],
+      [
+       -0.33333333333333337,
+       5e-05,
+       -3e-05
+      ],
+      [
+       0.0,
+       5e-05,
+       -3e-05
+      ],
+      [
+       0.33333333333333326,
+       5e-05,
+       -3e-05
+      ],
+      [
+       0.6666666666666667,
+       5e-05,
+       -3e-05
+      ],
+      [
+       1.0,
+       5e-05,
+       -3e-05
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "sss_edit_all_face_vertices_cc_face",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:14643-15249 (IntersectVertices, GWC:CHANGED_SSS block 14826-15095)",
+   "inputs": {
+    "op": 7,
+    "topo": {
+     "topo_op": "vertices",
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.3,
+       -0.2,
+       0.1
+      ],
+      "size": [
+       1.3,
+       0.8,
+       1.7
+      ]
+     },
+     "edits": [
+      {
+       "kind": 2,
+       "sel": 0,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 1,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 2,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 3,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 4,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 5,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 6,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 7,
+       "value": 0.0001
+      }
+     ],
+     "face": 2,
+     "anchor": 1,
+     "tol": 1e-06,
+     "srf": {
+      "n1": [
+       0,
+       1,
+       0
+      ],
+      "n2": [
+       0,
+       0,
+       1
+      ]
+     },
+     "p": 3,
+     "knots": [
+      0,
+      0,
+      0,
+      0,
+      0.4,
+      0.4,
+      0.4,
+      1,
+      1,
+      1,
+      1
+     ],
+     "cpts": [
+      [
+       -1.0,
+       5e-05,
+       -3e-05
+      ],
+      [
+       -0.6666666666666667,
+       5e-05,
+       -3e-05
+      ],
+      [
+       -0.33333333333333337,
+       5e-05,
+       -3e-05
+      ],
+      [
+       0.0,
+       5e-05,
+       -3e-05
+      ],
+      [
+       0.33333333333333326,
+       5e-05,
+       -3e-05
+      ],
+      [
+       0.6666666666666667,
+       5e-05,
+       -3e-05
+      ],
+      [
+       1.0,
+       5e-05,
+       -3e-05
+      ]
+     ],
+     "cc_face": true,
+     "verts": []
+    }
+   }
+  },
+  {
+   "name": "sss_below_surface_zone",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:14643-15249 (IntersectVertices, GWC:CHANGED_SSS block 14826-15095)",
+   "inputs": {
+    "op": 7,
+    "topo": {
+     "topo_op": "vertices",
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.3,
+       -0.2,
+       0.1
+      ],
+      "size": [
+       1.3,
+       0.8,
+       1.7
+      ]
+     },
+     "edits": [
+      {
+       "kind": 2,
+       "sel": 0,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 1,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 2,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 3,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 4,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 5,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 6,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 7,
+       "value": 0.0001
+      }
+     ],
+     "face": 2,
+     "anchor": 1,
+     "tol": 1e-06,
+     "srf": {
+      "n1": [
+       0,
+       1,
+       0
+      ],
+      "n2": [
+       0,
+       0,
+       1
+      ]
+     },
+     "p": 3,
+     "knots": [
+      0,
+      0,
+      0,
+      0,
+      0.4,
+      0.4,
+      0.4,
+      1,
+      1,
+      1,
+      1
+     ],
+     "cpts": [
+      [
+       -1.0,
+       4e-06,
+       0
+      ],
+      [
+       -0.6666666666666667,
+       4e-06,
+       0
+      ],
+      [
+       -0.33333333333333337,
+       4e-06,
+       0
+      ],
+      [
+       0.0,
+       4e-06,
+       0
+      ],
+      [
+       0.33333333333333326,
+       4e-06,
+       0
+      ],
+      [
+       0.6666666666666667,
+       4e-06,
+       0
+      ],
+      [
+       1.0,
+       4e-06,
+       0
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "sss_tight_drop",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:14643-15249 (IntersectVertices, GWC:CHANGED_SSS block 14826-15095)",
+   "inputs": {
+    "op": 7,
+    "topo": {
+     "topo_op": "vertices",
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.3,
+       -0.2,
+       0.1
+      ],
+      "size": [
+       1.3,
+       0.8,
+       1.7
+      ]
+     },
+     "edits": [
+      {
+       "kind": 2,
+       "sel": 0,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 1,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 2,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 3,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 4,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 5,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 6,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 7,
+       "value": 0.0001
+      }
+     ],
+     "face": 2,
+     "anchor": 1,
+     "tol": 1e-06,
+     "srf": {
+      "n1": [
+       0,
+       1,
+       0
+      ],
+      "n2": [
+       0,
+       0,
+       1
+      ]
+     },
+     "p": 3,
+     "knots": [
+      0,
+      0,
+      0,
+      0,
+      0.4,
+      0.4,
+      0.4,
+      1,
+      1,
+      1,
+      1
+     ],
+     "cpts": [
+      [
+       -1.0,
+       5e-08,
+       0
+      ],
+      [
+       -0.6666666666666667,
+       5e-08,
+       0
+      ],
+      [
+       -0.33333333333333337,
+       5e-08,
+       0
+      ],
+      [
+       0.0,
+       5e-08,
+       0
+      ],
+      [
+       0.33333333333333326,
+       5e-08,
+       0
+      ],
+      [
+       0.6666666666666667,
+       5e-08,
+       0
+      ],
+      [
+       1.0,
+       5e-08,
+       0
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "sss_beyond_tolerance",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:14643-15249 (IntersectVertices, GWC:CHANGED_SSS block 14826-15095)",
+   "inputs": {
+    "op": 7,
+    "topo": {
+     "topo_op": "vertices",
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.3,
+       -0.2,
+       0.1
+      ],
+      "size": [
+       1.3,
+       0.8,
+       1.7
+      ]
+     },
+     "edits": [
+      {
+       "kind": 2,
+       "sel": 0,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 1,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 2,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 3,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 4,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 5,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 6,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 7,
+       "value": 0.0001
+      }
+     ],
+     "face": 2,
+     "anchor": 1,
+     "tol": 1e-06,
+     "srf": {
+      "n1": [
+       0,
+       1,
+       0
+      ],
+      "n2": [
+       0,
+       0,
+       1
+      ]
+     },
+     "p": 3,
+     "knots": [
+      0,
+      0,
+      0,
+      0,
+      0.4,
+      0.4,
+      0.4,
+      1,
+      1,
+      1,
+      1
+     ],
+     "cpts": [
+      [
+       -1.0,
+       0.0003,
+       0
+      ],
+      [
+       -0.6666666666666667,
+       0.0003,
+       0
+      ],
+      [
+       -0.33333333333333337,
+       0.0003,
+       0
+      ],
+      [
+       0.0,
+       0.0003,
+       0
+      ],
+      [
+       0.33333333333333326,
+       0.0003,
+       0
+      ],
+      [
+       0.6666666666666667,
+       0.0003,
+       0
+      ],
+      [
+       1.0,
+       0.0003,
+       0
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "sss_tilted_planes",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:14643-15249 (IntersectVertices, GWC:CHANGED_SSS block 14826-15095)",
+   "inputs": {
+    "op": 7,
+    "topo": {
+     "topo_op": "vertices",
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.3,
+       -0.2,
+       0.1
+      ],
+      "size": [
+       1.3,
+       0.8,
+       1.7
+      ]
+     },
+     "edits": [
+      {
+       "kind": 2,
+       "sel": 0,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 1,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 2,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 3,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 4,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 5,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 6,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 7,
+       "value": 0.0001
+      }
+     ],
+     "face": 2,
+     "anchor": 1,
+     "tol": 1e-06,
+     "srf": {
+      "n1": [
+       0,
+       1,
+       0.2
+      ],
+      "n2": [
+       0.1,
+       0,
+       1
+      ]
+     },
+     "p": 3,
+     "knots": [
+      0,
+      0,
+      0,
+      0,
+      0.4,
+      0.4,
+      0.4,
+      1,
+      1,
+      1,
+      1
+     ],
+     "cpts": [
+      [
+       -1.0,
+       5e-05,
+       -3e-05
+      ],
+      [
+       -0.6666666666666667,
+       5e-05,
+       -3e-05
+      ],
+      [
+       -0.33333333333333337,
+       5e-05,
+       -3e-05
+      ],
+      [
+       0.0,
+       5e-05,
+       -3e-05
+      ],
+      [
+       0.33333333333333326,
+       5e-05,
+       -3e-05
+      ],
+      [
+       0.6666666666666667,
+       5e-05,
+       -3e-05
+      ],
+      [
+       1.0,
+       5e-05,
+       -3e-05
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "sss_not_c0_cubic",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:14643-15249 (IntersectVertices, GWC:CHANGED_SSS block 14826-15095)",
+   "inputs": {
+    "op": 7,
+    "topo": {
+     "topo_op": "vertices",
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.3,
+       -0.2,
+       0.1
+      ],
+      "size": [
+       1.3,
+       0.8,
+       1.7
+      ]
+     },
+     "edits": [
+      {
+       "kind": 2,
+       "sel": 0,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 1,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 2,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 3,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 4,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 5,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 6,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 7,
+       "value": 0.0001
+      }
+     ],
+     "face": 2,
+     "anchor": 1,
+     "tol": 1e-06,
+     "srf": {
+      "n1": [
+       0,
+       1,
+       0
+      ],
+      "n2": [
+       0,
+       0,
+       1
+      ]
+     },
+     "p": 2,
+     "knots": [
+      0,
+      0,
+      0,
+      0.37,
+      1,
+      1,
+      1
+     ],
+     "cpts": [
+      [
+       -1,
+       5e-05,
+       -3e-05
+      ],
+      [
+       -0.2,
+       5e-05,
+       -3e-05
+      ],
+      [
+       0.4,
+       5e-05,
+       -3e-05
+      ],
+      [
+       1,
+       5e-05,
+       -3e-05
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "edge_start_vertex_raises_tolerance",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions, edge branch 4321-4463); SM_API_test TestSmCreateRectangle (box/rectangle faces)",
+   "inputs": {
+    "op": 7,
+    "topo": {
+     "topo_op": "edge_insert",
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "size": [
+       1,
+       2,
+       3
+      ]
+     },
+     "edge": 3,
+     "at": 0.0,
+     "dir": [
+      1,
+      1,
+      1
+     ],
+     "half": 1.0,
+     "tol": 1e-06,
+     "ok_set": true,
+     "sols": [
+      [
+       1,
+       0.5,
+       0.0,
+       0.5,
+       0.0,
+       0,
+       0
+      ]
+     ],
+     "edits": [
+      {
+       "kind": 1,
+       "sel": 0,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 1,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 2,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 3,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 4,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 5,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 6,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 7,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 8,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 9,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 10,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 11,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 0,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 1,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 2,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 3,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 4,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 5,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 6,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 7,
+       "value": 1e-06
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "edge_end_vertex_raises_tolerance",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions, edge branch 4321-4463); SM_API_test TestSmCreateRectangle (box/rectangle faces)",
+   "inputs": {
+    "op": 7,
+    "topo": {
+     "topo_op": "edge_insert",
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "size": [
+       1,
+       2,
+       3
+      ]
+     },
+     "edge": 3,
+     "at": 1.0,
+     "dir": [
+      1,
+      1,
+      1
+     ],
+     "half": 1.0,
+     "tol": 1e-06,
+     "ok_set": true,
+     "sols": [
+      [
+       1,
+       0.5,
+       1.0,
+       0.5,
+       1.0,
+       0,
+       0
+      ]
+     ],
+     "edits": [
+      {
+       "kind": 1,
+       "sel": 0,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 1,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 2,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 3,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 4,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 5,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 6,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 7,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 8,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 9,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 10,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 11,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 0,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 1,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 2,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 3,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 4,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 5,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 6,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 7,
+       "value": 1e-06
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "edge_end_vertex_no_raise_without_ok",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions, edge branch 4321-4463); SM_API_test TestSmCreateRectangle (box/rectangle faces)",
+   "inputs": {
+    "op": 7,
+    "topo": {
+     "topo_op": "edge_insert",
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "size": [
+       1,
+       2,
+       3
+      ]
+     },
+     "edge": 3,
+     "at": 0.0,
+     "dir": [
+      1,
+      1,
+      1
+     ],
+     "half": 1.0,
+     "tol": 1e-06,
+     "ok_set": false,
+     "sols": [
+      [
+       1,
+       0.5,
+       0.0,
+       0.5,
+       0.0,
+       0,
+       0
+      ]
+     ],
+     "edits": [
+      {
+       "kind": 1,
+       "sel": 0,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 1,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 2,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 3,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 4,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 5,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 6,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 7,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 8,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 9,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 10,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 11,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 0,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 1,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 2,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 3,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 4,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 5,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 6,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 7,
+       "value": 1e-06
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "edge_end_vertex_off_by_gap",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions, edge branch 4321-4463); SM_API_test TestSmCreateRectangle (box/rectangle faces)",
+   "inputs": {
+    "op": 7,
+    "topo": {
+     "topo_op": "edge_insert",
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "size": [
+       1,
+       2,
+       3
+      ]
+     },
+     "edge": 3,
+     "at": 1e-09,
+     "dir": [
+      1,
+      1,
+      1
+     ],
+     "half": 1.0,
+     "tol": 1e-06,
+     "ok_set": true,
+     "sols": [
+      [
+       1,
+       0.5,
+       1e-09,
+       0.5,
+       1e-09,
+       1e-06,
+       1e-06
+      ]
+     ],
+     "edits": [
+      {
+       "kind": 1,
+       "sel": 0,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 1,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 2,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 3,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 4,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 5,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 6,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 7,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 8,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 9,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 10,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 11,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 0,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 1,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 2,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 3,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 4,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 5,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 6,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 7,
+       "value": 1e-06
+      }
+     ],
+     "off": [
+      1e-06,
+      0,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "edge_interior_point",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions, edge branch 4321-4463); SM_API_test TestSmCreateRectangle (box/rectangle faces)",
+   "inputs": {
+    "op": 7,
+    "topo": {
+     "topo_op": "edge_insert",
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "size": [
+       1,
+       2,
+       3
+      ]
+     },
+     "edge": 3,
+     "at": 0.37,
+     "dir": [
+      1,
+      1,
+      1
+     ],
+     "half": 1.0,
+     "tol": 1e-06,
+     "ok_set": true,
+     "sols": [
+      [
+       1,
+       0.5,
+       0.37,
+       0.5,
+       0.37,
+       0,
+       0
+      ]
+     ],
+     "edits": [
+      {
+       "kind": 1,
+       "sel": 0,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 1,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 2,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 3,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 4,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 5,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 6,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 7,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 8,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 9,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 10,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 11,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 0,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 1,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 2,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 3,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 4,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 5,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 6,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 7,
+       "value": 1e-06
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "edge_interior_range",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions, edge branch 4321-4463); SM_API_test TestSmCreateRectangle (box/rectangle faces)",
+   "inputs": {
+    "op": 7,
+    "topo": {
+     "topo_op": "edge_insert",
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "size": [
+       1,
+       2,
+       3
+      ]
+     },
+     "edge": 3,
+     "at": 0.37,
+     "dir": [
+      1,
+      1,
+      1
+     ],
+     "half": 1.0,
+     "tol": 1e-06,
+     "ok_set": true,
+     "sols": [
+      [
+       2,
+       0.4,
+       0.36,
+       0.6,
+       0.38,
+       0,
+       0
+      ]
+     ],
+     "edits": [
+      {
+       "kind": 1,
+       "sel": 0,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 1,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 2,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 3,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 4,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 5,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 6,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 7,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 8,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 9,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 10,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 11,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 0,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 1,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 2,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 3,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 4,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 5,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 6,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 7,
+       "value": 1e-06
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "edge_tangent_filtered",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions, edge branch 4321-4463); SM_API_test TestSmCreateRectangle (box/rectangle faces)",
+   "inputs": {
+    "op": 7,
+    "topo": {
+     "topo_op": "edge_insert",
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "size": [
+       1,
+       2,
+       3
+      ]
+     },
+     "edge": 3,
+     "at": 0.37,
+     "dir": [
+      0,
+      0,
+      1
+     ],
+     "half": 1.0,
+     "tol": 1e-06,
+     "ok_set": true,
+     "sols": [
+      [
+       1,
+       0.5,
+       0.37,
+       0.5,
+       0.37,
+       0,
+       0
+      ]
+     ],
+     "edits": [
+      {
+       "kind": 1,
+       "sel": 0,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 1,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 2,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 3,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 4,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 5,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 6,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 7,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 8,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 9,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 10,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 11,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 0,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 1,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 2,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 3,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 4,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 5,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 6,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 7,
+       "value": 1e-06
+      }
+     ],
+     "ignore": true
+    }
+   }
+  },
+  {
+   "name": "edge_short_range_at_end_ignored",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions, edge branch 4321-4463); SM_API_test TestSmCreateRectangle (box/rectangle faces)",
+   "inputs": {
+    "op": 7,
+    "topo": {
+     "topo_op": "edge_insert",
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "size": [
+       1,
+       2,
+       3
+      ]
+     },
+     "edge": 3,
+     "at": 0.0,
+     "dir": [
+      1,
+      1,
+      1
+     ],
+     "half": 1.0,
+     "tol": 1e-06,
+     "ok_set": true,
+     "sols": [
+      [
+       2,
+       0.0,
+       0.0,
+       0.01,
+       0.001,
+       0,
+       0
+      ]
+     ],
+     "edits": [
+      {
+       "kind": 1,
+       "sel": 0,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 1,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 2,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 3,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 4,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 5,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 6,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 7,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 8,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 9,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 10,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 11,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 0,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 1,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 2,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 3,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 4,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 5,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 6,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 7,
+       "value": 1e-06
+      }
+     ],
+     "ignore": true
+    }
+   }
+  },
+  {
+   "name": "edge_two_vertex_hits",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions, edge branch 4321-4463); SM_API_test TestSmCreateRectangle (box/rectangle faces)",
+   "inputs": {
+    "op": 7,
+    "topo": {
+     "topo_op": "edge_insert",
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "size": [
+       1,
+       2,
+       3
+      ]
+     },
+     "edge": 3,
+     "at": 0.0,
+     "dir": [
+      1,
+      1,
+      1
+     ],
+     "half": 1.0,
+     "tol": 1e-06,
+     "ok_set": true,
+     "sols": [
+      [
+       1,
+       0.5,
+       0.0,
+       0.5,
+       0.0,
+       0,
+       0
+      ],
+      [
+       1,
+       0.5,
+       1e-12,
+       0.5,
+       1e-12,
+       0,
+       0
+      ]
+     ],
+     "edits": [
+      {
+       "kind": 1,
+       "sel": 0,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 1,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 2,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 3,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 4,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 5,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 6,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 7,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 8,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 9,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 10,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 11,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 0,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 1,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 2,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 3,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 4,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 5,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 6,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 7,
+       "value": 1e-06
+      }
+     ]
+    }
+   }
+  },
+  {
+   "name": "edge_coplanar_surfaces",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:4158-4791 (sm_InsertSolutions, edge branch 4321-4463); SM_API_test TestSmCreateRectangle (box/rectangle faces)",
+   "inputs": {
+    "op": 7,
+    "topo": {
+     "topo_op": "edge_insert",
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "size": [
+       1,
+       2,
+       3
+      ]
+     },
+     "edge": 3,
+     "at": 0.37,
+     "dir": [
+      0,
+      1,
+      0
+     ],
+     "half": 1.0,
+     "tol": 1e-06,
+     "ok_set": true,
+     "sols": [
+      [
+       1,
+       0.5,
+       0.37,
+       0.5,
+       0.37,
+       0,
+       0
+      ]
+     ],
+     "edits": [
+      {
+       "kind": 1,
+       "sel": 0,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 1,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 2,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 3,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 4,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 5,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 6,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 7,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 8,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 9,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 10,
+       "value": 1e-05
+      },
+      {
+       "kind": 1,
+       "sel": 11,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 0,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 1,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 2,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 3,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 4,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 5,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 6,
+       "value": 1e-06
+      },
+      {
+       "kind": 2,
+       "sel": 7,
+       "value": 1e-06
+      }
+     ],
+     "srf": [
+      [
+       0,
+       0,
+       1
+      ],
+      [
+       1,
+       0,
+       0
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "sss_loop_two_drops",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:14643-15249 (IntersectVertices, GWC:CHANGED_SSS block 14826-15095)",
+   "inputs": {
+    "op": 7,
+    "topo": {
+     "topo_op": "vertices",
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.3,
+       -0.2,
+       0.1
+      ],
+      "size": [
+       1.3,
+       0.8,
+       1.7
+      ]
+     },
+     "edits": [
+      {
+       "kind": 2,
+       "sel": 0,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 1,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 2,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 3,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 4,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 5,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 6,
+       "value": 0.0001
+      },
+      {
+       "kind": 2,
+       "sel": 7,
+       "value": 0.0001
+      }
+     ],
+     "face": 2,
+     "anchor": 1,
+     "tol": 1e-06,
+     "srf": {
+      "n1": [
+       0,
+       1,
+       0
+      ],
+      "n2": [
+       0,
+       0,
+       1
+      ]
+     },
+     "p": 3,
+     "knots": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ],
+     "cpts": [
+      [
+       -0.5,
+       -0.42854142857142863,
+       2e-05
+      ],
+      [
+       1.0,
+       0.5714585714285714,
+       2e-05
+      ],
+      [
+       -1.0,
+       0.5714585714285714,
+       2e-05
+      ],
+      [
+       0.5,
+       -0.42854142857142863,
+       2e-05
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "name": "large_gap_tolerance_face0",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:14643-15249 (IntersectVertices, GWC:CHANGED_SSS block 14826-15095)",
+   "inputs": {
+    "op": 7,
+    "topo": {
+     "topo_op": "vertices",
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.3,
+       -0.2,
+       0.1
+      ],
+      "size": [
+       1.3,
+       0.8,
+       1.7
+      ]
+     },
+     "edits": [
+      {
+       "kind": 2,
+       "sel": 0,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 1,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 2,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 3,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 4,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 5,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 6,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 7,
+       "value": 1e-05
+      },
+      {
+       "kind": 0,
+       "sel": 0,
+       "value": 0.001
+      },
+      {
+       "kind": 0,
+       "sel": 1,
+       "value": 0.001
+      },
+      {
+       "kind": 0,
+       "sel": 2,
+       "value": 0.001
+      },
+      {
+       "kind": 0,
+       "sel": 3,
+       "value": 0.001
+      },
+      {
+       "kind": 0,
+       "sel": 4,
+       "value": 0.001
+      },
+      {
+       "kind": 0,
+       "sel": 5,
+       "value": 0.001
+      },
+      {
+       "kind": 6,
+       "sel": 0,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 1,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 2,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 3,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 4,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 5,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 6,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 7,
+       "value": 0.0001
+      }
+     ],
+     "face": 0,
+     "anchor": 1,
+     "tol": 1e-06,
+     "srf": null,
+     "big": true,
+     "verts": [],
+     "p": 3,
+     "knots": [
+      0,
+      0,
+      0,
+      0,
+      0.4,
+      0.4,
+      0.4,
+      1,
+      1,
+      1,
+      1
+     ],
+     "cpts": [
+      [
+       -1.0,
+       0,
+       6e-05
+      ],
+      [
+       -0.6666666666666667,
+       0,
+       6e-05
+      ],
+      [
+       -0.33333333333333337,
+       0,
+       6e-05
+      ],
+      [
+       0.0,
+       0,
+       6e-05
+      ],
+      [
+       0.33333333333333326,
+       0,
+       6e-05
+      ],
+      [
+       0.6666666666666667,
+       0,
+       6e-05
+      ],
+      [
+       1.0,
+       0,
+       6e-05
+      ]
+     ],
+     "cc_face": false
+    }
+   }
+  },
+  {
+   "name": "large_gap_tolerance_face1",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:14643-15249 (IntersectVertices, GWC:CHANGED_SSS block 14826-15095)",
+   "inputs": {
+    "op": 7,
+    "topo": {
+     "topo_op": "vertices",
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.3,
+       -0.2,
+       0.1
+      ],
+      "size": [
+       1.3,
+       0.8,
+       1.7
+      ]
+     },
+     "edits": [
+      {
+       "kind": 2,
+       "sel": 0,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 1,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 2,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 3,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 4,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 5,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 6,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 7,
+       "value": 1e-05
+      },
+      {
+       "kind": 0,
+       "sel": 0,
+       "value": 0.001
+      },
+      {
+       "kind": 0,
+       "sel": 1,
+       "value": 0.001
+      },
+      {
+       "kind": 0,
+       "sel": 2,
+       "value": 0.001
+      },
+      {
+       "kind": 0,
+       "sel": 3,
+       "value": 0.001
+      },
+      {
+       "kind": 0,
+       "sel": 4,
+       "value": 0.001
+      },
+      {
+       "kind": 0,
+       "sel": 5,
+       "value": 0.001
+      },
+      {
+       "kind": 6,
+       "sel": 0,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 1,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 2,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 3,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 4,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 5,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 6,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 7,
+       "value": 0.0001
+      }
+     ],
+     "face": 1,
+     "anchor": 1,
+     "tol": 1e-06,
+     "srf": null,
+     "big": true,
+     "verts": [],
+     "p": 3,
+     "knots": [
+      0,
+      0,
+      0,
+      0,
+      0.4,
+      0.4,
+      0.4,
+      1,
+      1,
+      1,
+      1
+     ],
+     "cpts": [
+      [
+       -1.0,
+       0,
+       6e-05
+      ],
+      [
+       -0.6666666666666667,
+       0,
+       6e-05
+      ],
+      [
+       -0.33333333333333337,
+       0,
+       6e-05
+      ],
+      [
+       0.0,
+       0,
+       6e-05
+      ],
+      [
+       0.33333333333333326,
+       0,
+       6e-05
+      ],
+      [
+       0.6666666666666667,
+       0,
+       6e-05
+      ],
+      [
+       1.0,
+       0,
+       6e-05
+      ]
+     ],
+     "cc_face": true
+    }
+   }
+  },
+  {
+   "name": "large_gap_tolerance_face2",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:14643-15249 (IntersectVertices, GWC:CHANGED_SSS block 14826-15095)",
+   "inputs": {
+    "op": 7,
+    "topo": {
+     "topo_op": "vertices",
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.3,
+       -0.2,
+       0.1
+      ],
+      "size": [
+       1.3,
+       0.8,
+       1.7
+      ]
+     },
+     "edits": [
+      {
+       "kind": 2,
+       "sel": 0,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 1,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 2,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 3,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 4,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 5,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 6,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 7,
+       "value": 1e-05
+      },
+      {
+       "kind": 0,
+       "sel": 0,
+       "value": 0.001
+      },
+      {
+       "kind": 0,
+       "sel": 1,
+       "value": 0.001
+      },
+      {
+       "kind": 0,
+       "sel": 2,
+       "value": 0.001
+      },
+      {
+       "kind": 0,
+       "sel": 3,
+       "value": 0.001
+      },
+      {
+       "kind": 0,
+       "sel": 4,
+       "value": 0.001
+      },
+      {
+       "kind": 0,
+       "sel": 5,
+       "value": 0.001
+      },
+      {
+       "kind": 6,
+       "sel": 0,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 1,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 2,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 3,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 4,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 5,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 6,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 7,
+       "value": 0.0001
+      }
+     ],
+     "face": 2,
+     "anchor": 1,
+     "tol": 1e-06,
+     "srf": null,
+     "big": true,
+     "verts": [],
+     "p": 3,
+     "knots": [
+      0,
+      0,
+      0,
+      0,
+      0.4,
+      0.4,
+      0.4,
+      1,
+      1,
+      1,
+      1
+     ],
+     "cpts": [
+      [
+       -1.0,
+       0,
+       6e-05
+      ],
+      [
+       -0.6666666666666667,
+       0,
+       6e-05
+      ],
+      [
+       -0.33333333333333337,
+       0,
+       6e-05
+      ],
+      [
+       0.0,
+       0,
+       6e-05
+      ],
+      [
+       0.33333333333333326,
+       0,
+       6e-05
+      ],
+      [
+       0.6666666666666667,
+       0,
+       6e-05
+      ],
+      [
+       1.0,
+       0,
+       6e-05
+      ]
+     ],
+     "cc_face": false
+    }
+   }
+  },
+  {
+   "name": "large_gap_tolerance_face3",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:14643-15249 (IntersectVertices, GWC:CHANGED_SSS block 14826-15095)",
+   "inputs": {
+    "op": 7,
+    "topo": {
+     "topo_op": "vertices",
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.3,
+       -0.2,
+       0.1
+      ],
+      "size": [
+       1.3,
+       0.8,
+       1.7
+      ]
+     },
+     "edits": [
+      {
+       "kind": 2,
+       "sel": 0,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 1,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 2,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 3,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 4,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 5,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 6,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 7,
+       "value": 1e-05
+      },
+      {
+       "kind": 0,
+       "sel": 0,
+       "value": 0.001
+      },
+      {
+       "kind": 0,
+       "sel": 1,
+       "value": 0.001
+      },
+      {
+       "kind": 0,
+       "sel": 2,
+       "value": 0.001
+      },
+      {
+       "kind": 0,
+       "sel": 3,
+       "value": 0.001
+      },
+      {
+       "kind": 0,
+       "sel": 4,
+       "value": 0.001
+      },
+      {
+       "kind": 0,
+       "sel": 5,
+       "value": 0.001
+      },
+      {
+       "kind": 6,
+       "sel": 0,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 1,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 2,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 3,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 4,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 5,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 6,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 7,
+       "value": 0.0001
+      }
+     ],
+     "face": 3,
+     "anchor": 1,
+     "tol": 1e-06,
+     "srf": null,
+     "big": true,
+     "verts": [],
+     "p": 3,
+     "knots": [
+      0,
+      0,
+      0,
+      0,
+      0.4,
+      0.4,
+      0.4,
+      1,
+      1,
+      1,
+      1
+     ],
+     "cpts": [
+      [
+       -1.0,
+       0,
+       6e-05
+      ],
+      [
+       -0.6666666666666667,
+       0,
+       6e-05
+      ],
+      [
+       -0.33333333333333337,
+       0,
+       6e-05
+      ],
+      [
+       0.0,
+       0,
+       6e-05
+      ],
+      [
+       0.33333333333333326,
+       0,
+       6e-05
+      ],
+      [
+       0.6666666666666667,
+       0,
+       6e-05
+      ],
+      [
+       1.0,
+       0,
+       6e-05
+      ]
+     ],
+     "cc_face": true
+    }
+   }
+  },
+  {
+   "name": "large_gap_tolerance_face4",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:14643-15249 (IntersectVertices, GWC:CHANGED_SSS block 14826-15095)",
+   "inputs": {
+    "op": 7,
+    "topo": {
+     "topo_op": "vertices",
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.3,
+       -0.2,
+       0.1
+      ],
+      "size": [
+       1.3,
+       0.8,
+       1.7
+      ]
+     },
+     "edits": [
+      {
+       "kind": 2,
+       "sel": 0,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 1,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 2,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 3,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 4,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 5,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 6,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 7,
+       "value": 1e-05
+      },
+      {
+       "kind": 0,
+       "sel": 0,
+       "value": 0.001
+      },
+      {
+       "kind": 0,
+       "sel": 1,
+       "value": 0.001
+      },
+      {
+       "kind": 0,
+       "sel": 2,
+       "value": 0.001
+      },
+      {
+       "kind": 0,
+       "sel": 3,
+       "value": 0.001
+      },
+      {
+       "kind": 0,
+       "sel": 4,
+       "value": 0.001
+      },
+      {
+       "kind": 0,
+       "sel": 5,
+       "value": 0.001
+      },
+      {
+       "kind": 6,
+       "sel": 0,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 1,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 2,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 3,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 4,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 5,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 6,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 7,
+       "value": 0.0001
+      }
+     ],
+     "face": 4,
+     "anchor": 1,
+     "tol": 1e-06,
+     "srf": null,
+     "big": true,
+     "verts": [],
+     "p": 3,
+     "knots": [
+      0,
+      0,
+      0,
+      0,
+      0.4,
+      0.4,
+      0.4,
+      1,
+      1,
+      1,
+      1
+     ],
+     "cpts": [
+      [
+       -1.0,
+       0,
+       6e-05
+      ],
+      [
+       -0.6666666666666667,
+       0,
+       6e-05
+      ],
+      [
+       -0.33333333333333337,
+       0,
+       6e-05
+      ],
+      [
+       0.0,
+       0,
+       6e-05
+      ],
+      [
+       0.33333333333333326,
+       0,
+       6e-05
+      ],
+      [
+       0.6666666666666667,
+       0,
+       6e-05
+      ],
+      [
+       1.0,
+       0,
+       6e-05
+      ]
+     ],
+     "cc_face": false
+    }
+   }
+  },
+  {
+   "name": "large_gap_tolerance_face5",
+   "upstream_ref": "source/SMLib/src/SmCurveClass.cpp:14643-15249 (IntersectVertices, GWC:CHANGED_SSS block 14826-15095)",
+   "inputs": {
+    "op": 7,
+    "topo": {
+     "topo_op": "vertices",
+     "brep": {
+      "kind": "box",
+      "origin": [
+       0.3,
+       -0.2,
+       0.1
+      ],
+      "size": [
+       1.3,
+       0.8,
+       1.7
+      ]
+     },
+     "edits": [
+      {
+       "kind": 2,
+       "sel": 0,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 1,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 2,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 3,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 4,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 5,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 6,
+       "value": 1e-05
+      },
+      {
+       "kind": 2,
+       "sel": 7,
+       "value": 1e-05
+      },
+      {
+       "kind": 0,
+       "sel": 0,
+       "value": 0.001
+      },
+      {
+       "kind": 0,
+       "sel": 1,
+       "value": 0.001
+      },
+      {
+       "kind": 0,
+       "sel": 2,
+       "value": 0.001
+      },
+      {
+       "kind": 0,
+       "sel": 3,
+       "value": 0.001
+      },
+      {
+       "kind": 0,
+       "sel": 4,
+       "value": 0.001
+      },
+      {
+       "kind": 0,
+       "sel": 5,
+       "value": 0.001
+      },
+      {
+       "kind": 6,
+       "sel": 0,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 1,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 2,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 3,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 4,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 5,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 6,
+       "value": 0.0001
+      },
+      {
+       "kind": 6,
+       "sel": 7,
+       "value": 0.0001
+      }
+     ],
+     "face": 5,
+     "anchor": 1,
+     "tol": 1e-06,
+     "srf": null,
+     "big": true,
+     "verts": [],
+     "p": 3,
+     "knots": [
+      0,
+      0,
+      0,
+      0,
+      0.4,
+      0.4,
+      0.4,
+      1,
+      1,
+      1,
+      1
+     ],
+     "cpts": [
+      [
+       -1.0,
+       0,
+       6e-05
+      ],
+      [
+       -0.6666666666666667,
+       0,
+       6e-05
+      ],
+      [
+       -0.33333333333333337,
+       0,
+       6e-05
+      ],
+      [
+       0.0,
+       0,
+       6e-05
+      ],
+      [
+       0.33333333333333326,
+       0,
+       6e-05
+      ],
+      [
+       0.6666666666666667,
+       0,
+       6e-05
+      ],
+      [
+       1.0,
+       0,
+       6e-05
+      ]
+     ],
+     "cc_face": true
+    }
+   }
+  }
+ ]
+}
