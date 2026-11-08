@@ -526,7 +526,7 @@ fn group_menu(app: &mut SolveApp, ui: &mut egui::Ui, group: &Group, view: &View)
         let _ = app.run("select.set", json!({ "items": items }));
         ui.close();
     }
-    if crate::context_menu::button(ui, crate::i18n::tr_label("Roll History Marker Here"), "rollback").clicked() {
+    if crate::context_menu::button(ui, solidcraft_ui_text::tr_label("Roll History Marker Here"), "rollback").clicked() {
         let end = view.index(group.end);
         let position = if end >= app.session.doc.features.len() { json!({}) } else { json!({ "position": end }) };
         let _ = app.run_heavy("timeline.roll_to", position);

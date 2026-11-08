@@ -3,11 +3,12 @@
 //! tools for free-form curves and slots, text placement, and constraint glyphs. Like `tools`,
 //! these are UI state only: every action runs a command.
 
-use crate::i18n::{tr, tr_engine_error};
+use crate::i18n::tr_engine_error;
 use crate::icons::markers::glyph_icon;
 use crate::icons::markers::glyph_letter;
 use crate::ui_kit::BackingTooltipExt as _;
 use solidcraft_engine::geom::prelude::*;
+use solidcraft_ui_text::tr;
 use std::cell::{Cell, RefCell};
 
 use egui::{Pos2, Stroke};
@@ -226,7 +227,7 @@ fn next_measure(order: Continuity) -> Option<(&'static str, &'static str, &'stat
 fn continuity_label(app: &SolveApp, seam: &Value) -> String {
     let deg = |key: &str| seam[key]["value"].as_f64().map(|x| format!("{x:.3}\u{b0}")).unwrap_or_default();
     let order = seam["order"].as_str().and_then(Continuity::parse);
-    let class = crate::i18n::tr(order_class(order));
+    let class = solidcraft_ui_text::tr(order_class(order));
     match order {
         None => format!("{class} {}", seam["gap_mm"]["value"].as_f64().map(|g| crate::prefs::show_mm(app, g, 1)).unwrap_or_default()),
         Some(g) => {
@@ -323,12 +324,12 @@ pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
         let Ok(v) = app.run(id, json!({})) else { return false };
         let summary = &v["summary"];
         // Each class in the legend's words, best first.
-        let gaps = summary["gap"].as_u64().filter(|n| *n > 0).map(|n| format!("{n} {}", crate::i18n::tr(order_class(None))));
+        let gaps = summary["gap"].as_u64().filter(|n| *n > 0).map(|n| format!("{n} {}", solidcraft_ui_text::tr(order_class(None))));
         let counts: Vec<String> = Continuity::ALL
             .into_iter()
             .rev()
             .filter_map(|g| {
-                summary["orders"][g.as_str()].as_u64().filter(|n| *n > 0).map(|n| format!("{n} {}", crate::i18n::tr(order_class(Some(g)))))
+                summary["orders"][g.as_str()].as_u64().filter(|n| *n > 0).map(|n| format!("{n} {}", solidcraft_ui_text::tr(order_class(Some(g)))))
             })
             .chain(gaps)
             .collect();
@@ -924,8 +925,8 @@ pub fn hint(id: &str) -> Option<String> {
             "inspect.center_of_mass" => "Center of mass of all bodies; click a body for its own",
             "inspect.isocurve" => "Isocurves: click faces",
             "inspect.continuity" => "Continuity: click an edge for its numbers (the button again turns the colours off)",
-            "canvas.insert" => crate::i18n::tr("canvas.place_hint"),
-            "canvas.decal" => crate::i18n::tr("canvas.decal_place_hint"),
+            "canvas.insert" => solidcraft_ui_text::tr("canvas.place_hint"),
+            "canvas.decal" => solidcraft_ui_text::tr("canvas.decal_place_hint"),
             "sketch.trim" => tr("sketch.hint.trim"),
             "sketch.extend" => tr("sketch.hint.extend"),
             "sketch.break" => tr("sketch.hint.break"),

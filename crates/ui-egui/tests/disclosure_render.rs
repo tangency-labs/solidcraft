@@ -6,8 +6,8 @@ use egui::{ColorImage, Rect, TextureId};
 use serde_json::json;
 use solidcraft_ui_egui::{
     scenario::{self, Harness},
-    shell::LayoutMode,
     theme,
+    ui_kit::LayoutMode,
 };
 use std::collections::HashMap;
 

@@ -1,7 +1,7 @@
 use super::*;
 use crate::scenario::{Harness, handle_at, rect_of};
 use crate::semantic_content::{self, ContentOwner, ContentRequest};
-use crate::shell::{LayoutMode, SHELL_GAP};
+use crate::ui_kit::{LayoutMode, SHELL_GAP};
 
 #[test]
 fn clicked_browser_folders_toggle_visibility_with_v() {
@@ -318,7 +318,7 @@ fn selected_row_paints_tab_soft_fill_and_accent_text_in_both_layouts() {
                 let mut app = SolveApp::new(Default::default(), Default::default());
                 app.ui.layout = mode;
                 app.ui.tab = tab.into();
-                crate::theme::TabAccent::publish(&app, &ctx);
+                app.publish_tab_accent(&ctx);
                 let accent = crate::theme::TabAccent::for_tab(&Tokens::get(), tab);
                 let mut row_rect = Rect::NOTHING;
                 let out = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
@@ -595,7 +595,7 @@ fn browser_title_uses_a_single_semibold_run() {
         ui.set_width(250.0);
         browser_header(&mut app, ui, true);
     });
-    let title = crate::i18n::tr("ui.browser_title");
+    let title = solidcraft_ui_text::tr("ui.browser_title");
     let titles: Vec<_> = output
         .shapes
         .iter()
@@ -646,7 +646,7 @@ fn browser_width_rejects_hostile_preferences_and_tiny_windows_still_fit() {
     assert_eq!(browser_width(-100.0), MIN_BROWSER_WIDTH);
     assert_eq!(browser_width(f32::MAX), MAX_BROWSER_WIDTH);
     let available = Rect::from_min_size(Pos2::ZERO, vec2(100.0, 300.0));
-    for top_gap in [0.0, crate::shell::SHELL_GAP] {
+    for top_gap in [0.0, crate::ui_kit::SHELL_GAP] {
         let bounds = panel_bounds(available, None, MAX_BROWSER_WIDTH, top_gap);
         assert!(available.contains_rect(bounds));
     }
@@ -677,7 +677,7 @@ fn collapsed_rail_shares_header_hover_inset_and_expands_from_its_whole_card() {
             app.ui.tab = "SURFACE".into();
             app.preferences.timeline_left = true;
             app.preferences.timeline_left_browser_collapsed = collapsed;
-            crate::theme::TabAccent::publish(&app, &ctx);
+            app.publish_tab_accent(&ctx);
             let bounds = Rect::from_min_size(Pos2::ZERO, vec2(600.0, 700.0));
             let draw = |app: &mut SolveApp, events| {
                 crate::test_support::frame(&ctx, egui::RawInput { screen_rect: Some(bounds), events, ..Default::default() }, |ui| {
@@ -751,8 +751,8 @@ fn mesh_and_solid_body_rows_have_different_icons_and_tooltips() {
     let row = |name: &str| rows.iter().find(|e| e.key == name).unwrap_or_else(|| panic!("no {name} row in {:?}", body_rows(&h.app)));
     assert_eq!((row("Mesh").icon, row("Mesh").tip), ("mesh_body", Some("ui.body_kind_mesh")));
     assert_eq!((row("Solid").icon, row("Solid").tip), ("body", Some("ui.body_kind_solid")));
-    assert_eq!(crate::i18n::tr("ui.body_kind_mesh"), "Mesh body");
-    assert_eq!(crate::i18n::tr("ui.body_kind_solid"), "Solid body");
+    assert_eq!(solidcraft_ui_text::tr("ui.body_kind_mesh"), "Mesh body");
+    assert_eq!(solidcraft_ui_text::tr("ui.body_kind_solid"), "Solid body");
     // Its own drawing in the mesh colours, not the solid body's grey cube.
     let icon = crate::icon_svg::resolve("mesh_body");
     assert!(!icon.placeholder);

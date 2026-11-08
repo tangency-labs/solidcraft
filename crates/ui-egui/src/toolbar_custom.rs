@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 use serde_json::{Value, json};
 use solidcraft_engine::{CommandSpec, command_specs};
 
-use crate::context_menu::Item;
+use crate::ui_kit::Item;
 use crate::{SolveApp, ui_kit};
 
 /// The only workspace so far.
@@ -331,7 +331,7 @@ pub fn quick_add(app: &mut SolveApp, id: &str) -> Result<(), String> {
         return Ok(());
     }
     if list.len() >= MAX_QUICK_ACCESS {
-        return Err(crate::i18n::format("ui.quick_access_full", &[("count", &MAX_QUICK_ACCESS.to_string())]));
+        return Err(solidcraft_ui_text::format("ui.quick_access_full", &[("count", &MAX_QUICK_ACCESS.to_string())]));
     }
     list.push(spec.id.to_string());
     Ok(())
@@ -487,39 +487,44 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
     // published positions instead of shifting them after egui measures the taller content.
     let origin =
         egui::pos2((ctx.content_rect().center().x - t.form_card_width).max(ctx.content_rect().left()), ctx.content_rect().top() + t.space_24 * 2.0);
-    let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_toolbar_customize"), "settings", crate::i18n::tr_label("Customize Toolbar"))
-        .placed(egui::Align2::LEFT_TOP, origin)
-        .cards(2.0)
-        .actions("", "Close", None)
-        .show(ctx, true, |ui| {
-            ui_kit::text(ui, &crate::i18n::format("toolbar.customize_note", &[("tab", app.tr_label(&tab))]), ui_kit::Text::Note("customize"));
-            egui::ScrollArea::vertical()
-                .max_height(
-                    (ctx.content_rect().height() - crate::theme::Tokens::get().control_height * 8.0)
-                        .min(crate::theme::Tokens::get().control_height * 20.0),
-                )
-                .show(ui, |ui| {
-                    for (panel, cmds, n) in panel_lists(&tab) {
-                        if cmds.is_empty() {
-                            continue;
-                        }
-                        ui_kit::section(ui, panel, app.tr_label(panel), true, |ui| {
-                            let shown = buttons(app, &tab, panel, &cmds, n);
-                            for c in &cmds {
-                                let mut on = shown.iter().any(|b| b.id == c.id) || pinned_on(app, &tab, c.id).is_some();
-                                let r = ui_kit::checkbox(ui, app.tr_label(c.label), &mut on);
-                                crate::scenario::publish_handle(&format!("customize:{}", c.id), r.rect.center());
-                                if r.changed() {
-                                    changes.push((c.id, on));
-                                }
+    let (closed, action) =
+        ui_kit::Window::new(egui::Id::unique("sc_toolbar_customize"), "settings", solidcraft_ui_text::tr_label("Customize Toolbar"))
+            .placed(egui::Align2::LEFT_TOP, origin)
+            .cards(2.0)
+            .actions("", "Close", None)
+            .show(ctx, true, |ui| {
+                ui_kit::text(
+                    ui,
+                    &solidcraft_ui_text::format("toolbar.customize_note", &[("tab", app.tr_label(&tab))]),
+                    ui_kit::Text::Note("customize"),
+                );
+                egui::ScrollArea::vertical()
+                    .max_height(
+                        (ctx.content_rect().height() - crate::theme::Tokens::get().control_height * 8.0)
+                            .min(crate::theme::Tokens::get().control_height * 20.0),
+                    )
+                    .show(ui, |ui| {
+                        for (panel, cmds, n) in panel_lists(&tab) {
+                            if cmds.is_empty() {
+                                continue;
                             }
-                        });
-                    }
-                });
-            let reset = ui_kit::button(ui, crate::i18n::tr_label("Reset Toolbar"), ui_kit::Button::Normal);
-            crate::scenario::publish_target("customize:reset", reset.rect);
-            reset_tab |= reset.clicked();
-        });
+                            ui_kit::section(ui, panel, app.tr_label(panel), true, |ui| {
+                                let shown = buttons(app, &tab, panel, &cmds, n);
+                                for c in &cmds {
+                                    let mut on = shown.iter().any(|b| b.id == c.id) || pinned_on(app, &tab, c.id).is_some();
+                                    let r = ui_kit::checkbox(ui, app.tr_label(c.label), &mut on);
+                                    crate::scenario::publish_handle(&format!("customize:{}", c.id), r.rect.center());
+                                    if r.changed() {
+                                        changes.push((c.id, on));
+                                    }
+                                }
+                            });
+                        }
+                    });
+                let reset = ui_kit::button(ui, solidcraft_ui_text::tr_label("Reset Toolbar"), ui_kit::Button::Normal);
+                crate::scenario::publish_target("customize:reset", reset.rect);
+                reset_tab |= reset.clicked();
+            });
     for (id, on) in changes {
         if on {
             if let Err(e) = pin(app, &tab, id) {

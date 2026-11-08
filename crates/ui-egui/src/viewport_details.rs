@@ -10,7 +10,7 @@ use solidcraft_engine::{
 };
 
 fn tr(id: &str) -> String {
-    crate::i18n::tr(id).to_owned()
+    solidcraft_ui_text::tr(id).to_owned()
 }
 fn field(id: &str, label: &str, value: DetailValue) -> DetailSetting {
     DetailSetting { id: id.into(), label: tr(label), value, enabled: true }
@@ -41,7 +41,7 @@ fn record_id(row: &ContinuityDetail) -> String {
     json!([row.body, row.edge]).to_string()
 }
 fn record_label(row: &ContinuityDetail) -> String {
-    crate::i18n::format("ui.details_seam", &[("body", &row.body), ("edge", &row.edge.to_string())])
+    solidcraft_ui_text::format("ui.details_seam", &[("body", &row.body), ("edge", &row.edge.to_string())])
 }
 fn selected<'a>(app: &SolveApp, rows: &'a [ContinuityDetail]) -> Option<&'a ContinuityDetail> {
     app.viewport_status.selected_record.as_ref().and_then(|id| rows.iter().find(|row| record_id(row) == *id)).or_else(|| rows.first())

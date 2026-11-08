@@ -197,10 +197,31 @@ pub struct PanelSpec {
     pub features: PanelFeatures,
     #[serde(default)]
     pub side_height_policy: SideHeightPolicy,
+    /// A rigid, expanded Bottom row. Other zones retain their ordinary bounds
+    /// and collapse capability. The declared height must satisfy those bounds.
+    #[serde(default)]
+    pub fixed_bottom_height: Option<f32>,
     #[serde(default)]
     pub header_actions: Vec<HeaderActionSpec>,
     #[serde(default)]
     pub text_heavy: bool,
+}
+
+impl PanelSpec {
+    pub fn size_bounds(&self, zone: Zone) -> (Size, Size) {
+        let (mut min, mut max) = (self.min_size, self.max_size);
+        if zone == Zone::Bottom
+            && let Some(height) = self.fixed_bottom_height
+        {
+            min.height = height;
+            max.height = height;
+        }
+        (min, max)
+    }
+
+    pub fn collapsible_in(&self, zone: Zone) -> bool {
+        self.features.collapsible && !(zone == Zone::Bottom && self.fixed_bottom_height.is_some())
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -230,6 +251,11 @@ impl PanelRegistry {
         spec.default_size.validate()?;
         if !spec.default_size.within(spec.min_size, spec.max_size) {
             return Err(error(Rule::Bounds, "min <= default <= max required in both dimensions"));
+        }
+        if spec.fixed_bottom_height.is_some_and(|height| {
+            !height.is_finite() || height < spec.min_size.height || height > spec.max_size.height || !spec.allowed_zones.contains(&Zone::Bottom)
+        }) {
+            return Err(error(Rule::Bounds, "fixed Bottom height must satisfy registered bounds in an allowed Bottom zone"));
         }
         if !spec.allowed_zones.contains(&Zone::Floating) || !spec.allowed_zones.contains(&spec.default_zone) {
             return Err(error(Rule::Placement, "Floating and default_zone must be allowed"));
@@ -875,15 +901,25 @@ pub fn tab_bounds(layout: &Layout, registry: &PanelRegistry, section: &Section) 
     let mut max = Size { width: MAX_LOGICAL, height: MAX_LOGICAL };
     for id in &section.tabs {
         let spec = registry.get(&layout.instance(id)?.kind)?;
-        min.width = min.width.max(spec.min_size.width);
-        min.height = min.height.max(spec.min_size.height);
-        max.width = max.width.min(spec.max_size.width);
-        max.height = max.height.min(spec.max_size.height);
+        let (lower, upper) = spec.size_bounds(section.location.zone());
+        min.width = min.width.max(lower.width);
+        min.height = min.height.max(lower.height);
+        max.width = max.width.min(upper.width);
+        max.height = max.height.min(upper.height);
     }
     if min.width > max.width || min.height > max.height {
         return Err(error(Rule::IncompatibleTabs, "tab size constraints have no intersection"));
     }
     Ok((min, max))
+}
+
+pub fn section_collapsible(layout: &Layout, registry: &PanelRegistry, section: &Section) -> PanelResult<bool> {
+    for id in &section.tabs {
+        if !registry.get(&layout.instance(id)?.kind)?.collapsible_in(section.location.zone()) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 pub fn column_bounds(layout: &Layout, registry: &PanelRegistry, column: &ColumnId) -> PanelResult<(f32, f32)> {
@@ -1024,7 +1060,7 @@ pub fn validate(layout: &Layout, registry: &PanelRegistry) -> PanelResult<()> {
             if s.tabs.len() > 1 && !spec.features.tabbable {
                 return Err(error(Rule::FeatureDisabled, "panel cannot join tabs"));
             }
-            if s.collapsed && !spec.features.collapsible {
+            if s.collapsed && !spec.collapsible_in(zone) {
                 return Err(error(Rule::FeatureDisabled, "panel cannot collapse"));
             }
             if zone == Zone::Window && !spec.features.popout {
@@ -1055,9 +1091,9 @@ pub fn validate(layout: &Layout, registry: &PanelRegistry) -> PanelResult<()> {
             for id in &s.tabs {
                 let spec = registry.get(&layout.instance(id)?.kind)?;
                 if !spec.allowed_zones.contains(&return_to.zone)
-                    || !return_to.size.within(spec.min_size, spec.max_size)
+                    || !return_to.size.within(spec.size_bounds(return_to.zone).0, spec.size_bounds(return_to.zone).1)
                     || return_to.column_width.is_some_and(|width| width < spec.min_size.width || width > spec.max_size.width)
-                    || (return_to.collapsed && !spec.features.collapsible)
+                    || (return_to.collapsed && !spec.collapsible_in(return_to.zone))
                 {
                     return Err(error(Rule::Placement, "native return violates member constraints"));
                 }

@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 solidcore-record = { workspace = true }
 robust = "1.2"
+solidcraft-color = { workspace = true }
 solidcraft-geom = { workspace = true }
 solidcraft-render = { workspace = true }
 wgpu = { workspace = true }

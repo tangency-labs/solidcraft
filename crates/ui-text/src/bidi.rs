@@ -50,7 +50,7 @@ pub fn visual(text: &str) -> Cow<'_, str> {
 }
 
 /// `text` as it appears on screen, read left to right: what [`visual`] makes egui draw.
-pub(crate) fn screen_order(text: &str) -> String {
+pub fn screen_order(text: &str) -> String {
     let mut output = String::with_capacity(text.len());
     for (index, line) in text.split('\n').enumerate() {
         if index > 0 {

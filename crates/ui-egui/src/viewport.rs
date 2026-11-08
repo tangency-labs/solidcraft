@@ -391,84 +391,6 @@ pub(crate) fn projected_polygon(pts: &[Pos2], fill: Color32, stroke: Stroke) -> 
     out
 }
 
-/// [`Shape::dashed_line`] for points projected into the viewport, cut to `clip` (grown by two
-/// dash periods, so the cuts lie off screen). epaint makes one shape per dash and steps along in
-/// f32, so a line reaching far off screen made millions of shapes, or never ended: an Extrude
-/// distance of 1e9 mm filled the memory within a second. A line inside the bounds is dashed as
-/// before; a cut one keeps its dashes in phase along the whole line, so they don't crawl as the
-/// view moves.
-pub(crate) fn dashed_line(pts: &[Pos2], clip: Rect, stroke: Stroke, dash: f32, gap: f32) -> Vec<Shape> {
-    let bounds = clip.expand(2.0 * (dash + gap));
-    if pts.iter().all(|p| bounds.contains(*p)) {
-        return Shape::dashed_line(pts, stroke, dash, gap);
-    }
-    let period = f64::from(dash + gap);
-    let mut out = Vec::new();
-    let mut run: Vec<Pos2> = Vec::new();
-    let mut offset = 0.0;
-    let mut flush = |run: &mut Vec<Pos2>, offset: f32| {
-        if run.len() >= 2 && period > 0.0 {
-            out.extend(Shape::dashed_line_with_offset(run, stroke, &[dash], &[gap], offset));
-        }
-        run.clear();
-    };
-    let mut along = 0.0_f64;
-    for w in pts.windows(2) {
-        let (a, b) = (w[0], w[1]);
-        let len = f64::from(a.distance(b));
-        match clip_segment(a, b, bounds).filter(|_| len.is_finite()) {
-            Some((t0, t1)) => {
-                // In f64: a cut a trillion points from `a` is lost in f32.
-                let at = |t: f64| pos2((f64::from(a.x) + f64::from(b.x - a.x) * t) as f32, (f64::from(a.y) + f64::from(b.y - a.y) * t) as f32);
-                let (from, to) = (at(t0), at(t1));
-                if run.is_empty() || t0 > 0.0 {
-                    flush(&mut run, offset);
-                    // How far into its period the pattern is where the run begins: a cut run
-                    // waits for the next dash (the wait is off screen), the line's start begins one.
-                    let phase = (along + len * t0) % period;
-                    offset = if t0 > 0.0 { ((period - phase) % period) as f32 } else { 0.0 };
-                    run.push(from);
-                }
-                run.push(to);
-                if t1 < 1.0 {
-                    flush(&mut run, offset);
-                }
-            }
-            None => flush(&mut run, offset),
-        }
-        if len.is_finite() {
-            along += len;
-        }
-    }
-    flush(&mut run, offset);
-    out
-}
-
-/// The part of segment `a`–`b` inside `r`, as parameters `0 ≤ t0 ≤ t1 ≤ 1` along it; `None` when
-/// it misses `r` or a coordinate is not finite (Liang–Barsky, in f64).
-fn clip_segment(a: Pos2, b: Pos2, r: Rect) -> Option<(f64, f64)> {
-    let (x0, y0, dx, dy) = (f64::from(a.x), f64::from(a.y), f64::from(b.x - a.x), f64::from(b.y - a.y));
-    if ![x0, y0, dx, dy].iter().all(|v| v.is_finite()) {
-        return None;
-    }
-    let (mut t0, mut t1) = (0.0_f64, 1.0_f64);
-    for (p, q) in [(-dx, x0 - f64::from(r.min.x)), (dx, f64::from(r.max.x) - x0), (-dy, y0 - f64::from(r.min.y)), (dy, f64::from(r.max.y) - y0)] {
-        if p == 0.0 {
-            if q < 0.0 {
-                return None;
-            }
-        } else {
-            let t = q / p;
-            if p < 0.0 {
-                t0 = t0.max(t);
-            } else {
-                t1 = t1.min(t);
-            }
-        }
-    }
-    (t0 <= t1).then_some((t0, t1))
-}
-
 /// View directions all round, a few degrees apart, none exactly along an axis.
 #[cfg(test)]
 pub(crate) fn orbit_directions() -> impl Iterator<Item = Vec3> {
@@ -3487,7 +3409,7 @@ pub(crate) type AnalysisLegend = (&'static str, Option<String>, Vec<(Color32, St
 pub(crate) fn analysis_legend_data(app: &SolveApp) -> Option<AnalysisLegend> {
     use solidcraft_engine::SurfaceAnalysis as A;
     let t = Tokens::get();
-    let tr = crate::i18n::tr_label;
+    let tr = solidcraft_ui_text::tr_label;
     let col = |c: [f32; 3]| {
         let u = |x: f32| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
         Color32::from_rgb(u(c[0]), u(c[1]), u(c[2]))
@@ -5555,13 +5477,13 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // so the model does not stay behind its sketch until the next command. Not while CAD input
     // is held back (an issue report's capture): a release then belongs to the report, and the
     // drag continues afterwards.
-    if app.viewport.point_drag.is_some() && !crate::issue_report::cad_input_blocked() && !ui.input(|i| i.pointer.primary_down()) {
+    if app.viewport.point_drag.is_some() && !crate::ui_kit::input_blocked() && !ui.input(|i| i.pointer.primary_down()) {
         app.viewport.point_drag = None;
         crate::drag_snap::clear();
         let _ = app.session.execute("sketch.drag_end", &json!({}));
         crate::sketch_text_move::end_drag(app);
     }
-    if crate::sketch_text_handles::dragging(app) && !crate::issue_report::cad_input_blocked() && !ui.input(|i| i.pointer.primary_down()) {
+    if crate::sketch_text_handles::dragging(app) && !crate::ui_kit::input_blocked() && !ui.input(|i| i.pointer.primary_down()) {
         crate::sketch_text_handles::drag_end(app);
     }
     // Dragging a part moves its free chain (outside sketches), or reaches within its joints
@@ -5595,7 +5517,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     }
-    if crate::joint_handles::active(app) && !crate::issue_report::cad_input_blocked() {
+    if crate::joint_handles::active(app) && !crate::ui_kit::input_blocked() {
         if let Some(p) = ui.input(|i| i.pointer.interact_pos()).filter(|p| p.is_finite()) {
             crate::joint_handles::to(app, &proj, p);
         }
@@ -5781,9 +5703,9 @@ fn agent_chip(app: &mut SolveApp, ui: &egui::Ui, view: Rect, taken: &[Rect]) -> 
     let painter = ui.painter().clone();
     if let Some((since, label)) = app.agent_computing() {
         let seconds = ((crate::now_ms() - since) / 1000.0).floor().max(0.0);
-        let computing = crate::i18n::format("dialog.computing", &[("seconds", &format!("{seconds:.0}"))]);
+        let computing = solidcraft_ui_text::format("dialog.computing", &[("seconds", &format!("{seconds:.0}"))]);
         let galley = painter.layout_no_wrap(format!("{label} · {computing}"), FontId::proportional(t.font_label), t.text);
-        let stop = painter.layout_no_wrap(crate::i18n::tr("ui.agent_chat_stop").to_string(), FontId::proportional(t.font_label), t.text);
+        let stop = painter.layout_no_wrap(solidcraft_ui_text::tr("ui.agent_chat_stop").to_string(), FontId::proportional(t.font_label), t.text);
         let size = vec2(galley.size().x + stop.size().x + 54.0, galley.size().y.max(stop.size().y) + 8.0);
         // Above the navigation bar while it sits on the bottom edge; a bar on top leaves the bottom free.
         let nav = app
@@ -5791,7 +5713,7 @@ fn agent_chip(app: &mut SolveApp, ui: &egui::Ui, view: Rect, taken: &[Rect]) -> 
             .layout
             .as_ref()
             .map(|l| l.navigation)
-            .filter(|n| n.is_positive() && n.is_finite() && app.preferences.navigation_bar.edge == crate::navigation_bar::Edge::Bottom);
+            .filter(|n| n.is_positive() && n.is_finite() && app.preferences.navigation_bar.edge == crate::ui_kit::NavigationEdge::Bottom);
         let (x, bottom) = nav.map_or((view.center().x, view.bottom() - t.space_8), |n| (n.center().x, n.top() - t.space_8));
         let x = x.clamp(view.left() + size.x * 0.5, (view.right() - size.x * 0.5).max(view.left() + size.x * 0.5));
         let mut r = Rect::from_min_size(pos2(x - size.x * 0.5, bottom - size.y), size);
@@ -5902,16 +5824,18 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
     }
     // The 3D mouse calibration offer: text and actions from its module, drawn by the shared toast.
     if let Some(offer) = crate::space_mouse_offer::due(app, ui.ctx()) {
-        let labels: Vec<String> = offer.actions.iter().map(|action| crate::i18n::tr(action.label()).to_string()).collect();
+        let labels: Vec<String> = offer.actions.iter().map(|action| solidcraft_ui_text::tr(action.label()).to_string()).collect();
         let labels: Vec<(&str, ToastKind)> = labels.iter().map(String::as_str).zip(offer.actions.iter().map(|action| action.kind())).collect();
-        let tips: Vec<&str> = offer.actions.iter().map(|action| action.tip().map_or("", crate::i18n::tr)).collect();
+        let tips: Vec<&str> = offer.actions.iter().map(|action| action.tip().map_or("", solidcraft_ui_text::tr)).collect();
         let extras = ToastExtras {
             close: Some("toast:space_mouse_offer:close"),
             countdown: Some((crate::space_mouse_offer::left(app, ui.ctx()), crate::space_mouse_offer::SHOW_SECONDS)),
             tips: &tips,
             ..Default::default()
         };
-        if let Some(toast) = paint_toast_ext(ui, free, crate::i18n::tr("ui.3d_mouse_offer").to_string(), ToastLead::Dot(false), &labels, extras) {
+        if let Some(toast) =
+            paint_toast_ext(ui, free, solidcraft_ui_text::tr("ui.3d_mouse_offer").to_string(), ToastLead::Dot(false), &labels, extras)
+        {
             let r = toast.rect;
             crate::scenario::publish_rect("toast:space_mouse_offer", r);
             for (index, button) in toast.buttons.iter().enumerate() {
@@ -5941,12 +5865,12 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
         let shown_ms = crate::now_ms() - at;
         if shown_ms < STATUS_TOAST_MS {
             let undo = app.status_undo;
-            let actions = if undo { vec![(crate::i18n::tr_label("Undo"), ToastKind::Secondary)] } else { Vec::new() };
+            let actions = if undo { vec![(solidcraft_ui_text::tr_label("Undo"), ToastKind::Secondary)] } else { Vec::new() };
             let extras = ToastExtras {
                 close: Some("toast:status:close"),
                 countdown: Some((countdown_left(0.0, shown_ms / 1000.0, STATUS_TOAST_MS / 1000.0), STATUS_TOAST_MS / 1000.0)),
                 // Without Undo, a click anywhere else on it opens the run's messages.
-                card_hint: (!undo).then(|| crate::i18n::tr("messages.chip_hint")),
+                card_hint: (!undo).then(|| solidcraft_ui_text::tr("messages.chip_hint")),
                 ..Default::default()
             };
             if let Some(toast) = paint_toast_ext(ui, free, msg, ToastLead::Dot(error), &actions, extras) {
@@ -5980,7 +5904,7 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
     }
     if let Some(since) = app.computing_since() {
         let seconds = ((crate::now_ms() - since) / 1000.0).floor().max(0.0);
-        let text = crate::i18n::format("dialog.computing", &[("seconds", &format!("{seconds:.0}"))]);
+        let text = solidcraft_ui_text::format("dialog.computing", &[("seconds", &format!("{seconds:.0}"))]);
         // A history command or a delete's check can be given up on (#8266); a feature edit
         // applying has the dialog's Cancel instead.
         let cancel = app.tr_label("Cancel").to_string();
@@ -6270,7 +6194,7 @@ fn toast_close(ui: &egui::Ui, rect: Rect, id: egui::Id, left: Option<f32>) -> eg
     }
     let ink = if lit && ui.is_enabled() { t.text } else { t.text_dim };
     crate::icons::paint_ink(painter, Rect::from_center_size(centre, vec2(t.space_10, t.space_10)), "close", ink);
-    let label = crate::i18n::tr("ui.close");
+    let label = solidcraft_ui_text::tr("ui.close");
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
     if response.hovered() && ui.is_enabled() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -6358,7 +6282,7 @@ fn paint_toast_ext(
     painter.galley(text_top, galley.clone(), t.text);
     // The card's own click goes first, so its buttons and × (added after it) take theirs. Behind an
     // issue report it is dead too, so a click on the dead × doesn't fall through to it.
-    let blocked = crate::issue_report::cad_input_blocked();
+    let blocked = crate::ui_kit::input_blocked();
     let card_clicked = extras.card_hint.is_some_and(|hint| {
         let sense = if blocked { Sense::hover() } else { Sense::click() };
         ui.interact(r, egui::Id::unique(("sc_toast_card", extras.close.unwrap_or_default())), sense).backing_on_hover_text(hint).clicked()
@@ -7095,15 +7019,15 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     // Sketch status, unless the status bar shows it (#7243).
     if let Some(r) = app.viewport.layout.as_ref().map(|l| l.content).filter(|_| !crate::status_bar::shown(app)) {
         let status = if !ss.report.ok() {
-            crate::i18n::tr("sketch.status_conflict").to_string()
+            solidcraft_ui_text::tr("sketch.status_conflict").to_string()
         } else if !crate::sketch_palette::has_geometry(sk) {
-            crate::i18n::tr("ui.no_geometry_yet").to_string()
+            solidcraft_ui_text::tr("ui.no_geometry_yet").to_string()
         } else if ss.report.dof == 0 {
-            crate::i18n::tr("sketch.status_fully_constrained").to_string()
+            solidcraft_ui_text::tr("sketch.status_fully_constrained").to_string()
         } else if ss.report.dof == 1 {
-            crate::i18n::tr("ui.1_degree_of_freedom").to_string()
+            solidcraft_ui_text::tr("ui.1_degree_of_freedom").to_string()
         } else {
-            crate::i18n::format("sketch.degrees_of_freedom", &[("count", &ss.report.dof.to_string())])
+            solidcraft_ui_text::format("sketch.degrees_of_freedom", &[("count", &ss.report.dof.to_string())])
         };
         let msg = format!("{} — {status}", crate::i18n::tr_name(&ss.name));
         let c = if ss.report.ok() { v.sketch_accent } else { v.error };
@@ -7251,12 +7175,12 @@ pub(crate) fn refresh_layout(app: &mut SolveApp, ctx: &egui::Context) {
             // Focus releases dock reservations while keeping controls below the stage bar.
             content = rect;
             for card in &app.shell.cards {
-                content.min.y = crate::shell::within(card.bottom() + Tokens::get().space_8, content.top(), content.bottom());
+                content.min.y = crate::ui_kit::within(card.bottom() + Tokens::get().space_8, content.top(), content.bottom());
             }
         }
         // The full-height Assistant reserves control space, while rendering and picking
         // keep the original viewport projection. Ordinary feature dialogs do not move controls.
-        if app.ui.layout == crate::shell::LayoutMode::Floating
+        if app.ui.layout == crate::ui_kit::LayoutMode::Floating
             && crate::agent_chat::shown(app)
             && app.agent_chat.open
             && !app.preferences.agent_chat_popped
@@ -7264,9 +7188,9 @@ pub(crate) fn refresh_layout(app: &mut SolveApp, ctx: &egui::Context) {
             && let Some(chat) = app.agent_chat.panel_rect.filter(|r| r.is_finite() && r.is_positive())
         {
             if app.preferences.agent_chat_side == "left" {
-                content.min.x = crate::shell::within(chat.right() + crate::shell::SHELL_GAP, content.left(), content.right());
+                content.min.x = crate::ui_kit::within(chat.right() + crate::ui_kit::SHELL_GAP, content.left(), content.right());
             } else {
-                content.max.x = crate::shell::within(chat.left() - crate::shell::SHELL_GAP, content.left(), content.right());
+                content.max.x = crate::ui_kit::within(chat.left() - crate::ui_kit::SHELL_GAP, content.left(), content.right());
             }
         }
         // OK and Cancel in the view's corner (#6709) take the top right; the axis view goes below.
@@ -7280,7 +7204,7 @@ pub(crate) fn refresh_layout(app: &mut SolveApp, ctx: &egui::Context) {
                 crate::viewport_layout::Layout::product(rect, content, &docks, ctx.pixels_per_point(), style, corner, navigation)
             }
         } else {
-            let content = if app.ui.layout == crate::shell::LayoutMode::Docked { rect } else { content };
+            let content = if app.ui.layout == crate::ui_kit::LayoutMode::Docked { rect } else { content };
             let navigation = if app.ui.show_navigation_bar { crate::navigation_bar_view::measured(app, ctx, content).rect } else { Rect::NOTHING };
             crate::viewport_layout::Layout::with_content(rect, content, &docks, ctx.pixels_per_point(), style, corner, navigation)
         };
@@ -7342,6 +7266,19 @@ fn axis_tips(cam: &Camera, c: Pos2) -> Vec<(&'static str, Vec3, Pos2, f64)> {
         .collect();
     tips.sort_by(|a, b| a.3.total_cmp(&b.3));
     tips
+}
+
+/// The six signed world axes as `cam` poses them, for the navigator figure in Preferences: each
+/// one's screen direction (right and down) and depth along the camera's back.
+pub(crate) fn navigator_axes(cam: &Camera) -> [crate::ui_kit::NavigatorAxis; 6] {
+    let (right, up, back) = cam.basis();
+    let axis = |name: &'static str, d: Vec3| crate::ui_kit::NavigatorAxis {
+        name,
+        direction: d.into(),
+        screen: vec2(d.dot(right) as f32, -d.dot(up) as f32),
+        depth: d.dot(back),
+    };
+    [axis("x", Vec3::X), axis("-x", -Vec3::X), axis("y", Vec3::Y), axis("-y", -Vec3::Y), axis("z", Vec3::Z), axis("-z", -Vec3::Z)]
 }
 
 fn axis_hit(tips: &[(&str, Vec3, Pos2, f64)], p: Pos2) -> Option<usize> {
@@ -7509,7 +7446,7 @@ fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     } else if in_circle && hovered.is_none() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     }
-    if hr.backing_on_hover_text(crate::i18n::tr_label("Home view")).clicked() {
+    if hr.backing_on_hover_text(solidcraft_ui_text::tr_label("Home view")).clicked() {
         app.animate_view("home");
     }
 }
@@ -12255,10 +12192,10 @@ mod tests {
             h.app.cam != before
         };
         for (layout, smooth) in [
-            (crate::shell::LayoutMode::Floating, true),
-            (crate::shell::LayoutMode::Floating, false),
-            (crate::shell::LayoutMode::Docked, true),
-            (crate::shell::LayoutMode::Docked, false),
+            (crate::ui_kit::LayoutMode::Floating, true),
+            (crate::ui_kit::LayoutMode::Floating, false),
+            (crate::ui_kit::LayoutMode::Docked, true),
+            (crate::ui_kit::LayoutMode::Docked, false),
         ] {
             let mut h = Harness::new();
             h.call("ui.set", json!({"layout":layout}));
@@ -12308,7 +12245,7 @@ mod tests {
             // Floating cards sit inside the full viewport. Probe their actual edges; the
             // content anchor also reserves gaps and space below the short browser card.
             // Docked panels end at the viewport boundary instead.
-            let (browser_edge, mid, history_edge) = if layout == crate::shell::LayoutMode::Floating {
+            let (browser_edge, mid, history_edge) = if layout == crate::ui_kit::LayoutMode::Floating {
                 let browser = h.app.shell.browser.expect("the floating browser card");
                 let history = h.app.shell.history.expect("the floating history card");
                 (browser.right(), browser.center().y, history.top())
@@ -12365,7 +12302,7 @@ mod tests {
 
     #[test]
     fn floating_dialog_blocks_axis_view_highlights_and_clicks() {
-        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             let mut h = crate::scenario::Harness::new();
             h.call("ui.set", json!({"layout":mode}));
             h.call("ui.resize", json!({"width": 800, "height": 700}));
@@ -12443,7 +12380,7 @@ mod tests {
 
     #[test]
     fn view_axis_drag_owns_navigation_and_keeps_the_view_centre() {
-        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             for nav in [None, Some(NavMode::Orbit), Some(NavMode::Pan)] {
                 let mut h = crate::scenario::Harness::new();
                 h.call("ui.set", json!({"layout":mode}));
@@ -13015,7 +12952,7 @@ mod tests {
         let proj = projection(&app, Rect::from_min_size(Pos2::ZERO, vec2(SIZE as f32, SIZE as f32)));
         let e = proj.cam.eye().to_f32();
         let eye = [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }];
-        let render = |c: &crate::theme::AnalysisColors| {
+        let render = |c: &solidcraft_color::AnalysisColors| {
             crate::gpu::render_offscreen(
                 build_scene(&app),
                 None,
@@ -13030,7 +12967,7 @@ mod tests {
         };
         let off = Tokens::themed(false, ColorVision::Off).analysis;
         let protan = Tokens::themed(false, ColorVision::Protan).analysis;
-        let flat = crate::theme::AnalysisColors { hatch: false, ..protan };
+        let flat = solidcraft_color::AnalysisColors { hatch: false, ..protan };
         let (Some(a), Some(b), Some(c)) = (render(&off), render(&protan), render(&flat)) else {
             eprintln!("skipping: no GPU adapter");
             return;
@@ -14007,7 +13944,7 @@ mod grid_plane_tests {
 
     #[test]
     fn perspective_button_is_inert_while_editing_a_sketch() {
-        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             for perspective in [false, true] {
                 let mut h = crate::scenario::Harness::new();
                 h.call("ui.set", json!({"layout":mode,"perspective":perspective}));

@@ -388,7 +388,7 @@ impl CjkFontLoader {
     }
 
     /// Called every frame with the live language (a `system` preference resolves to its catalog
-    /// via [`crate::i18n::effective_language`]). `ready` is true when the shell already has the
+    /// via [`solidcraft_ui_text::effective_language`]). `ready` is true when the shell already has the
     /// on-demand face that language needs. Returns true when a fetch should start now. After a
     /// failed load a CJK language falls back to English for this session; the saved preference is
     /// kept (see [`Self::persisted_language`]). Switching to another CJK language that still needs
@@ -401,7 +401,7 @@ impl CjkFontLoader {
                 self.status = CjkFontStatus::Unloaded;
             }
         }
-        if !needs_cjk_font(crate::i18n::effective_language(language)) {
+        if !needs_cjk_font(solidcraft_ui_text::effective_language(language)) {
             return false;
         }
         if ready {
@@ -444,7 +444,7 @@ impl CjkFontLoader {
             self.status = CjkFontStatus::Installed;
         } else {
             self.status = CjkFontStatus::Failed;
-            if needs_cjk_font(crate::i18n::effective_language(language)) {
+            if needs_cjk_font(solidcraft_ui_text::effective_language(language)) {
                 self.fall_back(language);
             }
         }
@@ -1042,6 +1042,7 @@ pub fn setup_fonts(ctx: &egui::Context) {
 /// A context with the production bundled faces, for isolated widget tests.
 #[cfg(test)]
 pub(crate) fn test_context() -> egui::Context {
+    crate::i18n::install();
     let ctx = egui::Context::default();
     setup_bundled_fonts(&ctx);
     ctx
@@ -1246,7 +1247,7 @@ mod tests {
     fn default_ui_language_follows_the_system() {
         // A first start follows the system (#10138); English, the fallback it lands on when
         // nothing matches, needs no CJK face.
-        assert_eq!(crate::prefs::Prefs::default().language, crate::i18n::SYSTEM);
+        assert_eq!(crate::prefs::Prefs::default().language, solidcraft_ui_text::SYSTEM);
         assert!(!needs_cjk_font("en"));
     }
 
@@ -1332,7 +1333,7 @@ mod tests {
         assert!(hebrew(with_fallback(base_font_definitions(), HEBREW_FALLBACK, bytes).unwrap()), "Hebrew draws with the fallback");
     }
 
-    /// What a Hebrew interface shows depends on egui's own shaping as much as on `bidi::visual`:
+    /// What a Hebrew interface shows depends on egui's own shaping as much as on `solidcraft_ui_text::bidi::visual`:
     /// lay messages out with a real Hebrew font and read the glyphs left to right, as they land on
     /// screen. They must come out in the order the line has on screen (#3457).
     #[test]
@@ -1353,9 +1354,9 @@ mod tests {
         };
         for text in ["עץ התכן", "שמירה בשם", "יחידות: mm", "ייצוא STEP", "פרמטרים (5)", "עומק 20.5 mm", "לשמור את השינויים ב־Bracket?"]
         {
-            assert_eq!(on_screen(&crate::bidi::visual(text)), crate::bidi::screen_order(text), "{text}");
+            assert_eq!(on_screen(&solidcraft_ui_text::bidi::visual(text)), solidcraft_ui_text::bidi::screen_order(text), "{text}");
         }
-        let he = crate::i18n::Locale::for_language("he");
+        let he = solidcraft_ui_text::Locale::for_language("he");
         for id in ["ui.preferences", "ui.new_design", "ui.feature_history", "ui.needs_design"] {
             let logical = he.text(id).to_owned();
             assert_eq!(
@@ -1400,7 +1401,7 @@ mod tests {
         }
         // Read right to left, the screen shows the sentence's words in reading order.
         for text in ["حفظ باسم", "تحليل خطوط المعامِل", "إعادة تعيين الكل", "تصدير STEP"] {
-            let mut read = words_left_to_right(&crate::bidi::visual(text));
+            let mut read = words_left_to_right(&solidcraft_ui_text::bidi::visual(text));
             read.reverse();
             let expected: Vec<Vec<char>> = text.split(' ').map(|word| char_set(word.chars().collect())).collect();
             assert_eq!(read, expected, "{text}");
@@ -1567,6 +1568,7 @@ mod tests {
 
     #[test]
     fn web_font_is_fetched_only_for_a_cjk_language() {
+        crate::i18n::install();
         let mut loader = CjkFontLoader::default();
         for lang in ["en", "de"] {
             let mut language = lang.to_owned();
@@ -1583,6 +1585,7 @@ mod tests {
 
     #[test]
     fn chinese_ui_fetches_again_after_japanese_is_installed() {
+        crate::i18n::install();
         let mut loader = CjkFontLoader::default();
         let mut language = "ja".to_owned();
         assert!(loader.tick(&mut language, false));
@@ -1667,6 +1670,7 @@ mod tests {
 
     #[test]
     fn failed_font_fetch_falls_back_for_the_session_without_changing_the_saved_language() {
+        crate::i18n::install();
         let mut loader = CjkFontLoader::default();
         let mut language = "ja".to_owned();
         assert!(loader.tick(&mut language, false));

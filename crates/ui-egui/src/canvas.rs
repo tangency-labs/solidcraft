@@ -957,7 +957,7 @@ fn value_box_full(
         let frame = Container::popup_frame(ui.style()).inner_margin(egui::Margin::symmetric(6, 3));
         Container::show_backing(ui, frame, |ui| {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(crate::i18n::tr_label(label)).color(t.text_dim).size(crate::theme::Tokens::get().font_caption));
+                ui.label(egui::RichText::new(solidcraft_ui_text::tr_label(label)).color(t.text_dim).size(crate::theme::Tokens::get().font_caption));
                 let r = crate::ui_kit::canvas_value_field(ui, id, value, keep_tab);
                 crate::params_dialog::complete(ui, &r, value);
                 if select_all {
@@ -1051,7 +1051,7 @@ fn box_size(ui: &egui::Ui, area: egui::Id, label: &str, note: Option<&str>) -> e
     let t = Tokens::get();
     let font = egui::FontId::proportional(t.font_caption);
     let width = |text: String| ui.painter().layout_no_wrap(text, font.clone(), t.text_dim).size().x;
-    let mut w = width(crate::i18n::tr_label(label).to_string()) + t.space_24 * 3.0;
+    let mut w = width(solidcraft_ui_text::tr_label(label).to_string()) + t.space_24 * 3.0;
     let mut parts = 1;
     if let Some(note) = note {
         w += width(note.to_string());
@@ -1326,7 +1326,7 @@ fn radius_spline_handles(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Pain
         let at = |u: f64| e.start + (e.other - e.start) * u;
         let g = e.spline.greville();
         let tips: Vec<Option<Pos2>> = g.iter().zip(&e.spline.radii).map(|(u, r)| proj.to_screen(at(*u) + e.n * *r)).collect();
-        painter.extend(crate::viewport::dashed_line(
+        painter.extend(crate::ui_kit::dashed_line(
             &tips.iter().flatten().copied().collect::<Vec<_>>(),
             painter.clip_rect(),
             Stroke::new(1.0, t.manipulator),
@@ -1590,7 +1590,7 @@ fn measure_components(
         let (at, offset) = if let Some((sa, sb)) = screen {
             let leg = sb - sa;
             if leg.length_sq() > 1.0 {
-                painter.extend(crate::viewport::dashed_line(&[sa, sb], painter.clip_rect(), Stroke::new(1.5, color), 5.0, 3.0));
+                painter.extend(crate::ui_kit::dashed_line(&[sa, sb], painter.clip_rect(), Stroke::new(1.5, color), 5.0, 3.0));
                 let normal = vec2(-leg.y, leg.x).normalized();
                 for p in [sa, sb] {
                     painter.line_segment([p - normal * 3.0, p + normal * 3.0], Stroke::new(1.0, color));
@@ -1711,7 +1711,7 @@ fn taper_handle(
     crate::scenario::publish_handle("taper", es);
     let hot = r.hovered() || r.dragged();
     let col = if hot { t.accent } else { t.manipulator };
-    painter.extend(crate::viewport::dashed_line(&[fs, es], painter.clip_rect(), Stroke::new(1.2, col), 5.0, 3.0));
+    painter.extend(crate::ui_kit::dashed_line(&[fs, es], painter.clip_rect(), Stroke::new(1.2, col), 5.0, 3.0));
     painter.circle(es, if hot { 6.5 } else { 5.0 }, t.overlay, Stroke::new(2.0, col));
     if hot {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
@@ -1903,12 +1903,13 @@ fn draw_revolve(
                 } else {
                     "Choose target".into()
                 };
-                ui.label(text).backing_on_hover_text(crate::i18n::tr_label("Determined by To Object. Choose Angle to edit the angular extent."));
+                ui.label(text)
+                    .backing_on_hover_text(solidcraft_ui_text::tr_label("Determined by To Object. Choose Angle to edit the angular extent."));
             });
         });
     } else if let Kind::Revolve { angle, .. } = &mut d.kind {
         let dragging = *angle != angle_before;
-        value_box(ui, crate::i18n::tr_label("Angle"), angle, box_at, focus || dragging, box_place(app, proj));
+        value_box(ui, solidcraft_ui_text::tr_label("Angle"), angle, box_at, focus || dragging, box_place(app, proj));
     }
 }
 

@@ -1,4 +1,5 @@
 use super::*;
+use crate::scenario;
 use crate::ui_kit::test_support::pointer;
 
 fn frame<R>(ctx: &egui::Context, events: Vec<egui::Event>, mut add: impl FnMut(&mut Ui) -> R) {
@@ -473,11 +474,11 @@ fn recent_list_is_capped_unique_and_synced_with_the_saved_one() {
     assert_eq!(recent.iter().filter(|c| **c == [35, 0, 0]).count(), 1);
     // Picks flow to the saved list once…
     let mut saved = Vec::new();
-    crate::recent_colors::share(&ctx, &mut saved);
+    crate::ui_kit::recent_colors::share(&ctx, &mut saved);
     assert_eq!(saved, recent);
     // …and a list loaded from preferences (even an oversized one) is what the pickers show.
     let mut loaded: Vec<[u8; 3]> = (0..100u8).map(|i| [0, i, 0]).collect();
-    crate::recent_colors::share(&ctx, &mut loaded);
+    crate::ui_kit::recent_colors::share(&ctx, &mut loaded);
     assert_eq!(loaded.len(), MAX_RECENT_COLORS);
     assert_eq!(recent_colors(&ctx), loaded);
 }
@@ -492,9 +493,9 @@ fn recent_colours_are_saved_with_the_preferences_and_hostile_entries_dropped() {
     assert_eq!(app.ui.recent_colors.len(), MAX_RECENT_COLORS);
     assert_eq!(app.ui.recent_colors.first(), Some(&[1, 2, 3]));
     let ctx = crate::fonts::test_context();
-    crate::recent_colors::share(&ctx, &mut app.ui.recent_colors);
+    crate::ui_kit::recent_colors::share(&ctx, &mut app.ui.recent_colors);
     remember_color(&ctx, [9, 8, 7], None);
-    crate::recent_colors::share(&ctx, &mut app.ui.recent_colors);
+    crate::ui_kit::recent_colors::share(&ctx, &mut app.ui.recent_colors);
     let mut restored = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
     restored.load_prefs(&app.prefs());
     assert_eq!(restored.ui.recent_colors.first(), Some(&[9, 8, 7]));

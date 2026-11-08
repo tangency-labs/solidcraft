@@ -248,7 +248,7 @@ impl Blocked {
         if self.conflicts.is_empty() {
             app.tr("joint_move.fixed").to_string()
         } else {
-            crate::i18n::format("joint_move.conflict", &[("joint", &self.conflicts.join(", "))])
+            solidcraft_ui_text::format("joint_move.conflict", &[("joint", &self.conflicts.join(", "))])
         }
     }
 }

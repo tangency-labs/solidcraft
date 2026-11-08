@@ -302,7 +302,7 @@ fn navigation_bar_buttons_run_registered_commands() {
         let log = h.app.session.log.len();
         h.call("ui.click", json!({"x":at.x,"y":at.y}));
         let label = solidcraft_engine::find_command(id).unwrap().label;
-        let echo = crate::i18n::Locale::for_language(&h.app.preferences.language).format("ui.command_done", &[("command", label)]);
+        let echo = solidcraft_ui_text::Locale::for_language(&h.app.preferences.language).format("ui.command_done", &[("command", label)]);
         assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo), "{id} was not run");
         if slot == "orbit" {
             orbit_on = !orbit_on;
@@ -316,7 +316,7 @@ fn navigation_bar_buttons_run_registered_commands() {
     h.step(&json!({"click":{"handle":"nav:slot:visual_style"}})).unwrap();
     h.step(&json!({"click":{"handle":"nav:style:shaded"}})).unwrap();
     let label = solidcraft_engine::find_command("view.visual_style").unwrap().label;
-    let echo = crate::i18n::Locale::for_language(&h.app.preferences.language).format("ui.command_done", &[("command", label)]);
+    let echo = solidcraft_ui_text::Locale::for_language(&h.app.preferences.language).format("ui.command_done", &[("command", label)]);
     assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo));
     assert_eq!(h.app.ui.visual_style, 1);
     assert_eq!(h.app.session.undo.len(), undo);
@@ -409,7 +409,7 @@ fn navigation_bar_display_menu_runs_grid_and_shadow_commands() {
         h.step(&json!({"widget":label})).unwrap();
         let after = if id == "view.grid" { h.app.ui.show_grid } else { h.app.ui.ground_shadow };
         assert_eq!(after, !before);
-        let language = crate::i18n::Locale::for_language(&h.app.preferences.language);
+        let language = solidcraft_ui_text::Locale::for_language(&h.app.preferences.language);
         let echo = language.format("ui.command_done", &[("command", language.label(crate::command_label(id)))]);
         assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo), "{id} was not run");
     }
@@ -435,7 +435,7 @@ fn navigation_bar_toggle_slots_apply_commands_and_projection_compatibility() {
         assert_eq!(value(&h.app), !before, "{slot}");
         if slot != "projection" {
             let command = solidcraft_engine::find_command(&format!("view.{slot}")).unwrap();
-            let echo = crate::i18n::Locale::for_language(&h.app.preferences.language).format("ui.command_done", &[("command", command.label)]);
+            let echo = solidcraft_ui_text::Locale::for_language(&h.app.preferences.language).format("ui.command_done", &[("command", command.label)]);
             assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo), "{slot}");
         }
     }
@@ -461,8 +461,8 @@ fn navigation_bar_tool_radio_group_and_overflow_execute_in_list_order() {
     h.settle();
     let bar = crate::scenario::rect_of("nav:outer").unwrap();
     assert_eq!(bar, h.app.viewport.layout.as_ref().unwrap().navigation);
-    let metrics = crate::ui_kit::NavigationMetrics::for_size(crate::navigation_bar::Size::Regular);
-    assert_eq!(h.app.preferences.navigation_bar.size, crate::navigation_bar::Size::Regular);
+    let metrics = crate::ui_kit::NavigationMetrics::for_size(crate::ui_kit::NavigationSize::Regular);
+    assert_eq!(h.app.preferences.navigation_bar.size, crate::ui_kit::NavigationSize::Regular);
     assert_eq!(bar.height(), metrics.height());
     let more = crate::scenario::rect_of("nav:more").unwrap();
     assert_eq!(more.size(), egui::vec2(metrics.button, metrics.button));

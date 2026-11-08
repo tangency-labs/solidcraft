@@ -3,7 +3,8 @@
 use egui::{Id, Ui, vec2};
 
 use super::{Draft, MAX_ANSWER, MAX_BODY, draft_url};
-use crate::{SolveApp, i18n::tr_label, ui_kit};
+use crate::{SolveApp, ui_kit};
+use solidcraft_ui_text::tr_label;
 
 const ALL_GUIDANCE: [&str; 4] = [
     "Report text copied. Paste it into GitHub and submit your report there.",
@@ -22,7 +23,7 @@ fn answer(ui: &mut Ui, label: &str, hint: &str, text: &mut String, id: &str, row
     let left = MAX_ANSWER.saturating_sub(text.chars().count());
     if left < super::ANSWER_ROOM {
         let key = if left == 1 { "ui.report_characters_left_one" } else { "ui.report_characters_left_other" };
-        ui_kit::text(ui, &crate::i18n::format(key, &[("count", &left.to_string())]), ui_kit::Text::Note(id));
+        ui_kit::text(ui, &solidcraft_ui_text::format(key, &[("count", &left.to_string())]), ui_kit::Text::Note(id));
     }
     response
 }
