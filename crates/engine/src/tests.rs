@@ -5197,6 +5197,30 @@ fn an_older_pattern_of_several_bodies_opens_with_the_names_it_was_saved_with() {
     assert_eq!(shape(&mut s, "Base (4)"), ("post", 30.0));
 }
 
+/// A design made in memory whose two-body Pattern stored only some of its copies' names: the
+/// first command changes the bodies it copies, before any command stored the names. The copies
+/// it still makes keep their own names, not the names of the source it no longer copies (#12114).
+#[test]
+fn a_pattern_edited_before_its_names_were_stored_keeps_each_name_with_its_source() {
+    let mut s = Session::default();
+    let names = |s: &Session| -> Vec<String> { s.model.state().bodies.iter().map(|b| b.name.clone()).collect() };
+    let shape = pattern_box_or_post;
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "center": [0, 0, 5], "operation": "new_body", "body_name": "Base"}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 6, "height": 20, "base": [0, 0, 10], "operation": "new_body", "body_name": "Post"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Base", "Post"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 30, "name": "Pat"}));
+    let mut doc = (*s.doc).clone();
+    if let Some(f) = doc.features.iter_mut().find(|f| f.name == "Pat") {
+        f.body_names = ["Base (2)", "Base (3)", "Lens"].map(String::from).to_vec();
+    }
+    let mut s = Session::new(doc);
+    assert_eq!(names(&s), ["Base", "Post", "Base (2)", "Base (3)", "Lens", "Post (2)"]);
+
+    run(&mut s, "timeline.edit", json!({"feature": "Pat", "set": {"bodies": ["Post"]}}));
+    assert_eq!(names(&s), ["Base", "Post", "Lens", "Post (2)"]);
+    assert_eq!(shape(&mut s, "Lens"), ("post", 30.0));
+    assert_eq!(shape(&mut s, "Post (2)"), ("post", 60.0));
+}
+
 /// A sketch side drawn as two collinear lines extrudes into one flat face, not two with an edge
 /// between them (#1788); the face is named from the first line and answers to the second.
 #[test]
