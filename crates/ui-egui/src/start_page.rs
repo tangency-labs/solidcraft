@@ -118,6 +118,7 @@ pub struct Recent<'a, A> {
 
 pub struct MenuEntry<'a, A> {
     pub label: Label<'a>,
+    /// A kit icon name: the menu row is a `ui_kit::MenuItem`, which takes a host `Icon` with #13379.
     pub icon: &'a str,
     pub chosen: A,
 }
