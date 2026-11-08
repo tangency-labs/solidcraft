@@ -199,20 +199,39 @@ impl BrepCheck {
         out
     }
 
-    /// The failure classes `self` has more lines of than `before` has, each with how many
-    /// more, in [`FailureClass`] order: what a body has failing that `before` (the body it
-    /// was made from) did not. A class `before` has as many lines of, or more, is not
-    /// listed.
+    /// Failure lines not present at the same entity site in `before`, grouped and
+    /// counted in [`FailureClass`] order. A report matches by class and the identities
+    /// of its reporter, owner and typed other object, not its measured value or tolerance.
+    /// Synthetic lines without a report match by class only.
+    ///
+    /// Compare checks of one body's edit lineage: arena ids survive copies and in-place
+    /// edits, and removed ids are never reused. Geometry report keys encode their owning
+    /// entity's id (`object_info`, `geometry_key`); rebuilt entities therefore have new
+    /// sites, even when their geometry is unchanged. Unrelated bodies' ids do not establish
+    /// correspondence.
     #[must_use]
     pub fn failures_beyond(&self, before: &BrepCheck) -> Vec<(FailureClass, usize)> {
-        let had = before.failure_classes();
-        self.failure_classes()
-            .into_iter()
-            .filter_map(|(class, n)| {
-                let more = n.saturating_sub(had.get(&class).copied().unwrap_or(0));
-                (more > 0).then_some((class, more))
-            })
-            .collect()
+        let had = before.failure_sites();
+        let mut added = BTreeMap::new();
+        for ((class, site), n) in self.failure_sites() {
+            let more = n.saturating_sub(had.get(&(class, site)).copied().unwrap_or(0));
+            if more > 0 {
+                let count: &mut usize = added.entry(class).or_default();
+                *count = count.saturating_add(more);
+            }
+        }
+        added.into_iter().collect()
+    }
+
+    /// Multiplicities before aggregation by class: clearing one site cannot pay for
+    /// another site's failure, including when the total number of lines decreases.
+    fn failure_sites(&self) -> BTreeMap<(FailureClass, Option<FailureSite>), usize> {
+        let mut out = BTreeMap::new();
+        for (class, report) in self.classified() {
+            let n: &mut usize = out.entry((class, report.map(FailureSite::of))).or_default();
+            *n = n.saturating_add(1);
+        }
+        out
     }
 
     /// The failure lines in [`BrepCheck::lines`] order, each with its class and its report
@@ -248,10 +267,31 @@ impl BrepCheck {
     }
 }
 
+/// The identities a report names. The class supplies the reporting and owner types;
+/// the optional second object needs its own type too. Values, parameters and messages
+/// are measurements at this site, not its identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct FailureSite {
+    reporter: Option<ObjectKey>,
+    owner: Option<ObjectKey>,
+    other: Option<ObjectKey>,
+    other_type: i64,
+}
+
+impl FailureSite {
+    fn of(r: &AssertReport) -> Self {
+        Self {
+            reporter: r.reporter,
+            owner: r.owner,
+            other: r.other,
+            other_type: r.other_type,
+        }
+    }
+}
+
 /// What one failure line of a [`BrepCheck`] is, leaving out where: the test that failed
-/// and the type of the object it is about, not which object (an operation that rebuilds a
-/// body's entities gives them new identities, so a failure is compared with its input's
-/// by class: [`BrepCheck::failures_beyond`]).
+/// and the type of the object it is about, not which object. [`BrepCheck::failures_beyond`]
+/// also compares the report's entity site before aggregating new failures by class.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum FailureClass {
     /// A failed report: its reporting type, label table, test and owner type.
@@ -680,6 +720,109 @@ mod tests {
             assert_valid: Some(assert_valid),
             reports,
         }
+    }
+
+    /// Every named object participates in the site; measurements do not.
+    #[test]
+    fn failures_beyond_matches_reporter_owner_and_typed_other() {
+        let spec = ReportSpec {
+            reporter: Some(ObjectKey(1)),
+            owner: Some(ObjectKey(2)),
+            other: Some(ObjectKey(3)),
+            other_type: 16016,
+            test_class: BREP_TYPE,
+            test_index: 19,
+            ..ReportSpec::default()
+        };
+        let checked = |spec| {
+            let mut c = check(false, 19, None);
+            c.reports = AssertArray::new();
+            c.reports
+                .add_unique_delete_duplicate(AssertReport::new(spec).unwrap());
+            c
+        };
+        let input = checked(spec.clone());
+        for changed in [
+            ReportSpec {
+                reporter: Some(ObjectKey(4)),
+                ..spec.clone()
+            },
+            ReportSpec {
+                owner: Some(ObjectKey(4)),
+                ..spec.clone()
+            },
+            ReportSpec {
+                other: Some(ObjectKey(4)),
+                ..spec.clone()
+            },
+            ReportSpec {
+                other_type: 16021,
+                ..spec.clone()
+            },
+            ReportSpec {
+                other: None,
+                ..spec.clone()
+            },
+        ] {
+            let result = checked(changed);
+            assert_eq!(result.failure_classes(), input.failure_classes());
+            assert_eq!(
+                result.failures_beyond(&input).first().map(|(_, n)| *n),
+                Some(1)
+            );
+        }
+        let measured = checked(ReportSpec {
+            value: 0.25,
+            tol3d: 0.5,
+            ..spec
+        });
+        assert!(measured.failures_beyond(&input).is_empty());
+        assert!(input.failures_beyond(&input).is_empty());
+    }
+
+    /// Pointer reports use the same site rule; the synthetic skipped line still
+    /// matches even when the reported entity changes.
+    #[test]
+    fn failures_beyond_matches_pointer_report_sites() {
+        let mut input = check(false, 19, None);
+        input.pointer_reports = std::mem::take(&mut input.reports);
+        input.assert_valid = None;
+        let mut result = input.clone();
+        result.pointer_reports = AssertArray::new();
+        result.pointer_reports.add_unique_delete_duplicate(
+            AssertReport::new(ReportSpec {
+                test_class: BREP_TYPE,
+                test_index: 19,
+                owner: Some(ObjectKey(4)),
+                ..ReportSpec::default()
+            })
+            .unwrap(),
+        );
+        assert!(matches!(
+            result.failures_beyond(&input).as_slice(),
+            [(FailureClass::Report { test_index: 19, .. }, 1)]
+        ));
+        assert!(result.failures_beyond(&result).is_empty());
+    }
+
+    /// Status-only failures have no entity to compare: they retain class-only matches.
+    #[test]
+    fn failures_beyond_matches_synthetic_lines_by_class() {
+        let mut input = check(false, 19, None);
+        input.reports = AssertArray::new();
+        assert!(input.failures_beyond(&input).is_empty());
+        let mut result = input.clone();
+        result.pointers_status = 1001;
+        assert_eq!(
+            result.failures_beyond(&input),
+            [(FailureClass::PointersStatus(1001), 1)]
+        );
+        assert!(result.failures_beyond(&result).is_empty());
+        result.pointers_status = 1002;
+        assert_eq!(
+            result.failures_beyond(&input),
+            [(FailureClass::PointersStatus(1002), 1)]
+        );
     }
 
     /// A report naming no owner type has no owner tag (#2013).

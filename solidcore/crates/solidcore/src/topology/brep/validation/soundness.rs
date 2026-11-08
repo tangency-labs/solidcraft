@@ -111,7 +111,11 @@ pub fn soundness(k: &mut Kernel, b: &mut Brep) -> Result<Soundness> {
 /// geometry's owner the identity `b`'s naming scheme names the entity by
 /// ([`Brep::owner_identity`], as the operations that bind geometry set it), so a curve or
 /// surface owned under another entity's identity fails the owner tests; then the manifold
-/// test. Its volume is not measured ([`volume`]).
+/// test. Its volume is not measured ([`volume`]). The local-operation gate compares
+/// these reports by class and entity site ([`BrepCheck::failures_beyond`]): a failure
+/// may persist only on the same named objects, not migrate to a rebuilt entity. This
+/// uses the arena ids retained by `clone_standing_for_self`, not the caller's owner
+/// naming; a removed slot is never reused (validity-and-tolerances §3, invariant 1).
 ///
 /// As for [`soundness`], the check edits what it measures: measure a private copy.
 ///

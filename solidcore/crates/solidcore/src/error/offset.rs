@@ -156,8 +156,8 @@ pub enum OffsetFailure {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Unsoundness {
-    /// The check at `SM_LEVEL_2` reports `failures` failure lines more than the input's
-    /// check did, counted per class
+    /// The check at `SM_LEVEL_2` reports `failures` failure lines absent at the same
+    /// entity sites in the input's check, grouped per class
     /// ([`crate::topology::brep::validation::BrepCheck::failures_beyond`]); the first such
     /// class is test `test_index` of the reporting type `reporting_type` (`None` for a line
     /// without a report: a failed status).
