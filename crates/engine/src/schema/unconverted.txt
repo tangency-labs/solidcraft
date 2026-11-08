@@ -24,10 +24,6 @@ render.preflight
 render.scene
 render.start
 sheet.export_dxf
-sketch.dimension
-sketch.slot.center_to_center
-sketch.slot.overall
-sketch.draw.dimensioned
 solid.align
 solid.coil
 solid.draft
