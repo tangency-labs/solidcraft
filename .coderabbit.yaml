@@ -13,22 +13,19 @@ reviews:
         When you flag one, start the comment with "Changes a default:", say what a user sees before and after, whether a setting keeps the old behaviour, and whether the PR description's `Changes a default:` line says so.
 
     # Where code goes, SolidCraft or SolidCore: solidcore/docs/layers.md.
-    - path: "crates/**"
-      instructions: &app_layer |
-        The layer split (solidcore/docs/layers.md): the kernel (solidcore) computes geometry any
-        client could use; ops (solidcore-ops) is a recipe of kernel calls for a workflow, with no
-        geometric quantity of its own; the app (SolidCraft) holds state and maps input to commands,
-        with no geometry math.
-
-        - Flag any geometric computation added to SolidCraft's code: dot or cross products,
-          normalizing, square roots or trigonometry on coordinates, linear solves, derivative
-          formulas, intersections, meshing, STEP parsing. Quote the line and say that, per
-          solidcore/docs/layers.md, it belongs in solidcore: the kernel, or ops if it is a recipe
-          of kernel calls for a workflow.
-        - Flag any new direct use of a solidcore crate other than solidcore-ops, solidcore-tess and
-          solidcore-record (a new dependency, `use` or path).
-    - path: "apps/**"
-      instructions: *app_layer
+    - path: "{apps,crates}/**"
+      instructions: |
+        Layers (solidcore/docs/layers.md): SolidCraft is a consumer of solidcore. It holds state,
+        selection, commands, settings, history and UI, and computes no geometry.
+        - Flag any new geometric computation here: a dot or cross product, normalising, sqrt or trig
+          on coordinates, a solve, a derivative, an intersection, a fit, a distance or area. Say which
+          layer it belongs in: a kernel primitive in solidcore/crates/solidcore if it computes
+          geometry, or a recipe in solidcore/crates/solidcore-ops if it only sequences kernel calls.
+        - Flag a new dependency on any solidcore crate other than solidcore-ops, solidcore-tess and
+          solidcore-record.
+        - Flag a new line in xtask/mesh-decisions.txt; that list only shrinks.
+        - Flag a second implementation of something solidcore already has (STEP, meshing, SSI,
+          tangent chains, frames).
 
     # The vendored SolidCore kernel: its own review rules (from solidcore/.coderabbit.yaml, which
     # CodeRabbit reads only at the repository root), with its paths under solidcore/.
