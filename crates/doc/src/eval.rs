@@ -6959,6 +6959,30 @@ fn replay(
             }
             continue;
         }
+        // A thread is cut again on the copy of its face. A copy keeps the thread's hand: the
+        // mirror of a right-hand M8 hole is a right-hand M8 hole, not a left-hand one.
+        if matches!(src.kind, FeatureKind::Thread { .. }) {
+            for m in mats {
+                let mut copy = (*src).clone();
+                copy.id = f.id;
+                copy.face_names.clear();
+                if let FeatureKind::Thread { face, from, up_to, .. } = &mut copy.kind {
+                    face.0 = crate::apply_point(m, face.0);
+                    if let Some(q) = from {
+                        q.0 = crate::apply_point(m, q.0);
+                    }
+                    match up_to {
+                        Some(crate::ThreadLimit::Face(q)) => q.0 = crate::apply_point(m, q.0),
+                        Some(crate::ThreadLimit::Plane(_)) => {
+                            return Err(DocError::Invalid(format!("{} ends at a plane, so it cannot be patterned or mirrored yet", src.name)));
+                        }
+                        None => {}
+                    }
+                }
+                thread::eval(doc, vals, &copy, st, warning)?;
+            }
+            continue;
+        }
         let (op, targets) = feature_op(src);
         // A primitive's or a hole's targets are its participants (#1108): the copies change
         // those bodies only, like the feature itself (#2755).
