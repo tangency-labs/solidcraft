@@ -4,14 +4,18 @@
 //! The bar follows the system's layout: the app menu (About, the app's entries, Services, Hide,
 //! Hide Others, Show All, Quit), then the app's menus. The menu whose id is [`WINDOW`] also gets
 //! the system's window entries (Minimize, Zoom, Enter Full Screen, Bring All to Front). An entry's
-//! `shortcut` is a menu accelerator (`Cmd+Shift+S`, `Cmd+,`). Windows and Linux keep their default
-//! (no menu bar), so only the entry table builds there.
+//! `shortcut` is a menu accelerator (`Cmd+Shift+S`, `Cmd+,`). A menu's own id (`menu.file`, ...)
+//! names it for [`MenuTable::replace`] and is never dispatched. The layout ([`MenuTable`]) is the
+//! same everywhere; only macOS turns it into native menus ([`NativeMenu`]); Windows and Linux keep
+//! their default (no menu bar).
 
 use crate::ui_kit::Item;
 use serde_json::Value;
 
 /// The id of the app's Window menu: the system's window entries are added to it.
-pub const WINDOW: &str = "ui.window";
+pub const WINDOW: &str = "menu.window";
+/// The id of the app menu (the one titled with the app's name).
+pub const APP: &str = "menu.app";
 
 /// What the app puts in its menu bar.
 #[derive(Clone, Debug)]
@@ -28,10 +32,24 @@ pub struct MenuBar {
     pub menus: Vec<Item>,
 }
 
-/// One menu row, as laid out from an [`Item`] tree. Entries carry the key their native item
-/// is made with; the [`MenuTable`] maps it back to the entry's id and parameters.
+/// An entry the system provides and runs itself.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum System {
+    About,
+    Services,
+    Hide,
+    HideOthers,
+    ShowAll,
+    Minimize,
+    Zoom,
+    FullScreen,
+    BringAllToFront,
+}
+
+/// One menu row. An entry carries the key its native item is made with; the [`MenuTable`] maps
+/// it back to the entry's id and parameters.
 #[derive(Debug)]
-pub(crate) enum Node<'a> {
+pub enum Row<'a> {
     Separator,
     /// A section heading: a row that can't be chosen.
     Heading(&'a str),
@@ -41,34 +59,91 @@ pub(crate) enum Node<'a> {
     },
     Submenu {
         item: &'a Item,
-        children: Vec<Node<'a>>,
+        rows: Vec<Row<'a>>,
     },
+    System(System),
 }
 
-/// The menu's entries by the key of their native item.
+/// One menu of the bar, left to right.
+#[derive(Debug)]
+pub struct Menu<'a> {
+    pub id: &'a str,
+    pub label: &'a str,
+    pub rows: Vec<Row<'a>>,
+}
+
+#[derive(Debug)]
+struct Entry {
+    key: String,
+    id: String,
+    params: Option<Value>,
+    /// The ids of the menus it sits in, outermost first.
+    within: Vec<String>,
+}
+
+/// The bar's entries by the key of their native item, and its submenus.
 #[derive(Debug, Default)]
 pub struct MenuTable {
-    entries: Vec<(String, String, Option<Value>)>,
+    entries: Vec<Entry>,
+    /// Every submenu's id with the ids of the menus it sits in.
+    submenus: Vec<(String, Vec<String>)>,
     next: u64,
 }
 
 impl MenuTable {
-    /// Lays out `items`, registering every entry that can be chosen.
-    pub(crate) fn layout<'a>(&mut self, items: &'a [Item]) -> Vec<Node<'a>> {
+    /// Lays out the bar, registering every entry that can be chosen.
+    pub fn layout<'a>(&mut self, bar: &'a MenuBar) -> Vec<Menu<'a>> {
+        let app = [APP.to_string()];
+        let mut rows = vec![Row::System(System::About), Row::Separator];
+        rows.extend(self.rows(&bar.app, &app));
+        rows.extend([Row::Separator, Row::System(System::Services), Row::Separator]);
+        rows.extend([Row::System(System::Hide), Row::System(System::HideOthers), Row::System(System::ShowAll), Row::Separator]);
+        rows.extend(self.rows(std::slice::from_ref(&bar.quit), &app));
+        let mut menus = vec![Menu { id: APP, label: &bar.title, rows }];
+        for menu in &bar.menus {
+            let within = [menu.id.clone()];
+            let mut rows = self.rows(&menu.children, &within);
+            if menu.id == WINDOW {
+                rows.extend([Row::Separator, Row::System(System::Minimize), Row::System(System::Zoom), Row::System(System::FullScreen)]);
+                rows.extend([Row::Separator, Row::System(System::BringAllToFront)]);
+            }
+            menus.push(Menu { id: &menu.id, label: &menu.label, rows });
+        }
+        menus
+    }
+
+    /// Replaces what the submenu with id `id` holds (a recent-files list): forgets its old
+    /// entries and submenus and lays out `children` in their place.
+    pub fn replace<'a>(&mut self, id: &str, children: &'a [Item]) -> Result<Vec<Row<'a>>, String> {
+        let Some((_, outer)) = self.submenus.iter().find(|(sid, _)| sid == id) else {
+            return Err(format!("no submenu `{id}` in the menu bar"));
+        };
+        let mut within = outer.clone();
+        within.push(id.to_string());
+        let inside = |w: &[String]| w.iter().any(|m| m == id);
+        self.entries.retain(|e| !inside(&e.within));
+        self.submenus.retain(|(_, w)| !inside(w));
+        Ok(self.rows(children, &within))
+    }
+
+    fn rows<'a>(&mut self, items: &'a [Item], within: &[String]) -> Vec<Row<'a>> {
         items
             .iter()
             .map(|item| {
                 if item.is_sep() {
-                    Node::Separator
+                    Row::Separator
                 } else if item.is_heading() {
-                    Node::Heading(&item.label)
+                    Row::Heading(&item.label)
                 } else if !item.children.is_empty() {
-                    Node::Submenu { item, children: self.layout(&item.children) }
+                    self.submenus.push((item.id.clone(), within.to_vec()));
+                    let mut inner = within.to_vec();
+                    inner.push(item.id.clone());
+                    Row::Submenu { item, rows: self.rows(&item.children, &inner) }
                 } else {
                     self.next += 1;
                     let key = format!("menu-{}", self.next);
-                    self.entries.push((key.clone(), item.id.clone(), item.params.clone()));
-                    Node::Entry { key, item }
+                    self.entries.push(Entry { key: key.clone(), id: item.id.clone(), params: item.params.clone(), within: within.to_vec() });
+                    Row::Entry { key, item }
                 }
             })
             .collect()
@@ -76,16 +151,18 @@ impl MenuTable {
 
     /// The id and parameters of the entry whose native item has `key`.
     pub fn find(&self, key: &str) -> Option<(&str, Option<&Value>)> {
-        self.entries.iter().find(|(k, ..)| k == key).map(|(_, id, params)| (id.as_str(), params.as_ref()))
+        self.entries.iter().find(|e| e.key == key).map(|e| (e.id.as_str(), e.params.as_ref()))
     }
 
     /// Every entry: (key, id, parameters).
     pub fn entries(&self) -> impl Iterator<Item = (&str, &str, Option<&Value>)> {
-        self.entries.iter().map(|(k, id, params)| (k.as_str(), id.as_str(), params.as_ref()))
+        self.entries.iter().map(|e| (e.key.as_str(), e.id.as_str(), e.params.as_ref()))
     }
 
-    fn forget(&mut self, keys: &[String]) {
-        self.entries.retain(|(k, ..)| !keys.contains(k));
+    /// The menus the submenu with id `id` sits in, outermost first; `None` for one the bar
+    /// doesn't have.
+    pub fn within(&self, id: &str) -> Option<&[String]> {
+        self.submenus.iter().find(|(sid, _)| sid == id).map(|(_, w)| w.as_slice())
     }
 }
 
@@ -94,7 +171,7 @@ pub use native::NativeMenu;
 
 #[cfg(target_os = "macos")]
 mod native {
-    use super::{MenuBar, MenuTable, Node, WINDOW};
+    use super::{MenuBar, MenuTable, Row, System};
     use crate::ui_kit::Item;
     use muda::{AboutMetadata, IsMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu, accelerator::Accelerator};
     use serde_json::Value;
@@ -107,13 +184,14 @@ mod native {
         events: Receiver<MenuEvent>,
     }
 
-    /// The native rows and what they stand for.
-    #[derive(Default)]
+    /// The native rows of a laid-out bar.
     struct Rows {
         table: MenuTable,
+        title: String,
+        version: String,
         items: Vec<(String, MenuItem)>,
-        /// Every submenu by its id, with the keys and submenu ids laid out under it.
-        submenus: Vec<(String, Submenu, Vec<String>, Vec<String>)>,
+        /// Every submenu by its id.
+        submenus: Vec<(String, Submenu)>,
     }
 
     fn err(e: muda::Error) -> String {
@@ -125,44 +203,13 @@ mod native {
         /// it with [`Self::events`]. On the main thread only, as every AppKit menu.
         pub fn new(bar: &MenuBar, ctx: &egui::Context) -> Result<Self, String> {
             // Rows first: the bar is only installed, and taken down on drop, once it is whole.
-            let (menu, mut rows) = (Menu::new(), Rows::default());
-            let title = bar.title.as_str();
-            let application = Submenu::new(title, true);
-            application
-                .append(&PredefinedMenuItem::about(
-                    Some(&format!("About {title}")),
-                    Some(AboutMetadata { name: Some(title.into()), version: Some(bar.version.clone()), ..Default::default() }),
-                ))
-                .map_err(err)?;
-            application.append(&PredefinedMenuItem::separator()).map_err(err)?;
-            rows.fill(&application, &bar.app)?;
-            application.append(&PredefinedMenuItem::separator()).map_err(err)?;
-            application.append(&PredefinedMenuItem::services(None)).map_err(err)?;
-            application.append(&PredefinedMenuItem::separator()).map_err(err)?;
-            application
-                .append_items(&[
-                    &PredefinedMenuItem::hide(Some(&format!("Hide {title}"))),
-                    &PredefinedMenuItem::hide_others(None),
-                    &PredefinedMenuItem::show_all(None),
-                    &PredefinedMenuItem::separator(),
-                ])
-                .map_err(err)?;
-            rows.fill(&application, std::slice::from_ref(&bar.quit))?;
-            menu.append(&application).map_err(err)?;
-            for item in &bar.menus {
-                let nodes = rows.table.layout(&item.children);
-                let sub = rows.submenu(item, nodes)?;
-                if item.id == WINDOW {
-                    sub.append_items(&[
-                        &PredefinedMenuItem::separator(),
-                        &PredefinedMenuItem::minimize(None),
-                        &PredefinedMenuItem::maximize(None),
-                        &PredefinedMenuItem::fullscreen(None),
-                        &PredefinedMenuItem::separator(),
-                        &PredefinedMenuItem::bring_all_to_front(None),
-                    ])
-                    .map_err(err)?;
-                }
+            let mut table = MenuTable::default();
+            let menus = table.layout(bar);
+            let mut rows = Rows { table, title: bar.title.clone(), version: bar.version.clone(), items: Vec::new(), submenus: Vec::new() };
+            let menu = Menu::new();
+            for m in menus {
+                let sub = Submenu::new(m.label, true);
+                rows.append(&sub, m.rows)?;
                 menu.append(&sub).map_err(err)?;
             }
             let (sender, events) = sync_channel(64);
@@ -195,66 +242,69 @@ mod native {
 
         /// Replaces the entries of the submenu with id `id` (a recent-files list).
         pub fn replace(&mut self, id: &str, children: &[Item]) -> Result<(), String> {
-            let Some((_, sub, keys, subs)) = self.rows.submenus.iter_mut().find(|(sid, ..)| sid == id) else {
-                return Err(format!("no submenu `{id}` in the menu bar"));
-            };
-            let (sub, keys, subs) = (sub.clone(), std::mem::take(keys), std::mem::take(subs));
+            let sub = self
+                .rows
+                .submenus
+                .iter()
+                .find(|(sid, _)| sid == id)
+                .map(|(_, s)| s.clone())
+                .ok_or_else(|| format!("no submenu `{id}` in the menu bar"))?;
+            let mut table = std::mem::take(&mut self.rows.table);
+            let laid = table.replace(id, children);
+            // What the table forgot goes from the native rows too.
+            self.rows.items.retain(|(k, _)| table.find(k).is_some());
+            self.rows.submenus.retain(|(sid, _)| sid == id || table.within(sid).is_some());
+            self.rows.table = table;
+            let laid = laid?;
             while sub.remove_at(0).is_some() {}
-            self.rows.table.forget(&keys);
-            self.rows.items.retain(|(k, _)| !keys.contains(k));
-            self.rows.submenus.retain(|(sid, ..)| !subs.contains(sid));
-            let (keys, subs) = self.rows.fill(&sub, children)?;
-            if let Some((_, _, k, s)) = self.rows.submenus.iter_mut().find(|(sid, ..)| sid == id) {
-                (*k, *s) = (keys, subs);
-            }
-            Ok(())
+            self.rows.append(&sub, laid)
         }
     }
 
     impl Rows {
-        fn submenu(&mut self, item: &Item, children: Vec<Node<'_>>) -> Result<Submenu, String> {
-            let sub = Submenu::new(&item.label, item.enabled);
-            let (keys, subs) = self.append(&sub, children)?;
-            self.submenus.push((item.id.clone(), sub.clone(), keys, subs));
-            Ok(sub)
+        fn system(&self, s: System) -> PredefinedMenuItem {
+            let title = self.title.as_str();
+            match s {
+                System::About => PredefinedMenuItem::about(
+                    Some(&format!("About {title}")),
+                    Some(AboutMetadata { name: Some(title.into()), version: Some(self.version.clone()), ..Default::default() }),
+                ),
+                System::Services => PredefinedMenuItem::services(None),
+                System::Hide => PredefinedMenuItem::hide(Some(&format!("Hide {title}"))),
+                System::HideOthers => PredefinedMenuItem::hide_others(None),
+                System::ShowAll => PredefinedMenuItem::show_all(None),
+                System::Minimize => PredefinedMenuItem::minimize(None),
+                System::Zoom => PredefinedMenuItem::maximize(None),
+                System::FullScreen => PredefinedMenuItem::fullscreen(None),
+                System::BringAllToFront => PredefinedMenuItem::bring_all_to_front(None),
+            }
         }
 
-        /// Appends `items` to `parent`: the keys and submenu ids laid out under it.
-        fn fill(&mut self, parent: &Submenu, items: &[Item]) -> Result<(Vec<String>, Vec<String>), String> {
-            let nodes = self.table.layout(items);
-            self.append(parent, nodes)
-        }
-
-        fn append(&mut self, parent: &Submenu, nodes: Vec<Node<'_>>) -> Result<(Vec<String>, Vec<String>), String> {
-            let (mut keys, mut subs) = (Vec::new(), Vec::new());
-            for node in nodes {
-                let row: Box<dyn IsMenuItem> = match node {
-                    Node::Separator => Box::new(PredefinedMenuItem::separator()),
-                    Node::Heading(label) => Box::new(MenuItem::new(label, false, None)),
-                    Node::Entry { key, item } => {
+        fn append(&mut self, parent: &Submenu, rows: Vec<Row<'_>>) -> Result<(), String> {
+            for row in rows {
+                let native: Box<dyn IsMenuItem> = match row {
+                    Row::Separator => Box::new(PredefinedMenuItem::separator()),
+                    Row::Heading(label) => Box::new(MenuItem::new(label, false, None)),
+                    Row::System(s) => Box::new(self.system(s)),
+                    Row::Entry { key, item } => {
                         let shortcut = match item.shortcut.trim() {
                             "" => None,
                             s => Some(s.parse::<Accelerator>().map_err(|e| format!("menu entry `{}`: shortcut `{s}`: {e}", item.id))?),
                         };
-                        let row = MenuItem::with_id(key.as_str(), &item.label, item.enabled, shortcut);
-                        keys.push(key.clone());
-                        self.items.push((key, row.clone()));
-                        Box::new(row)
+                        let native = MenuItem::with_id(key.as_str(), &item.label, item.enabled, shortcut);
+                        self.items.push((key, native.clone()));
+                        Box::new(native)
                     }
-                    Node::Submenu { item, children } => {
-                        let sub = self.submenu(item, children)?;
-                        // `submenu` registered it last, with what it holds.
-                        if let Some((_, _, k, s)) = self.submenus.last() {
-                            keys.extend(k.iter().cloned());
-                            subs.extend(s.iter().cloned());
-                        }
-                        subs.push(item.id.clone());
+                    Row::Submenu { item, rows } => {
+                        let sub = Submenu::new(&item.label, item.enabled);
+                        self.append(&sub, rows)?;
+                        self.submenus.push((item.id.clone(), sub.clone()));
                         Box::new(sub)
                     }
                 };
-                parent.append(row.as_ref()).map_err(err)?;
+                parent.append(native.as_ref()).map_err(err)?;
             }
-            Ok((keys, subs))
+            Ok(())
         }
     }
 
@@ -275,33 +325,95 @@ mod tests {
         Item::action(id, label, "")
     }
 
-    #[test]
-    fn a_chosen_entry_maps_back_to_its_id_and_params() {
-        let mut recent = entry("ui.file.recent_menu", "Open Recent");
-        recent.children = vec![entry("ui.file.open_recent", "/a.solidcraft").with(json!({"path": "/a.solidcraft"})), Item::sep()];
-        let mut file = entry("ui.file", "File");
-        file.children = vec![entry("ui.file.new", "New").key("Cmd+N"), recent, Item::sep(), entry("file.insert_step", "Insert STEP…")];
-        let items = vec![file];
-        let mut table = MenuTable::default();
-        let nodes = table.layout(&items);
-        let [Node::Submenu { children, .. }] = nodes.as_slice() else { panic!("one submenu: {nodes:?}") };
-        let keys: Vec<&str> = children
-            .iter()
-            .flat_map(|n| match n {
-                Node::Entry { key, .. } => vec![key.as_str()],
-                Node::Submenu { children, .. } => {
-                    children.iter().filter_map(|n| if let Node::Entry { key, .. } = n { Some(key.as_str()) } else { None }).collect()
-                }
-                _ => vec![],
+    fn submenu(id: &str, label: &str, children: Vec<Item>) -> Item {
+        let mut menu = entry(id, label);
+        menu.children = children;
+        menu
+    }
+
+    /// The rows as words: the entry's id, `-`, `#heading`, `[submenu: ...]` or the system entry.
+    fn shape(rows: &[Row<'_>]) -> Vec<String> {
+        rows.iter()
+            .map(|r| match r {
+                Row::Separator => "-".to_string(),
+                Row::Heading(h) => format!("#{h}"),
+                Row::Entry { item, .. } => item.id.clone(),
+                Row::Submenu { item, rows } => format!("[{}: {}]", item.id, shape(rows).join(" ")),
+                Row::System(s) => format!("{s:?}"),
             })
-            .collect();
-        assert_eq!(keys.len(), 3, "separators and submenus are not entries: {nodes:?}");
-        assert_eq!(table.find(keys[0]), Some(("ui.file.new", None)));
-        assert_eq!(table.find(keys[1]), Some(("ui.file.open_recent", Some(&json!({"path": "/a.solidcraft"})))));
-        assert_eq!(table.find(keys[2]), Some(("file.insert_step", None)));
+            .collect()
+    }
+
+    fn keys<'a>(rows: &'a [Row<'a>], out: &mut Vec<&'a str>) {
+        for r in rows {
+            match r {
+                Row::Entry { key, .. } => out.push(key),
+                Row::Submenu { rows, .. } => keys(rows, out),
+                _ => {}
+            }
+        }
+    }
+
+    fn bar() -> MenuBar {
+        let recent = vec![
+            entry("ui.file.open_recent", "/a.solidcraft").with(json!({"path": "/a.solidcraft"})),
+            Item::sep(),
+            entry("ui.file.clear_recent", "Clear"),
+        ];
+        MenuBar {
+            title: "Craft".into(),
+            version: "1.0".into(),
+            app: vec![entry("ui.prefs", "Settings…").with(json!({"open": "General"})).key("Cmd+,")],
+            quit: entry("app.quit", "Quit Craft").key("Cmd+Q"),
+            menus: vec![
+                submenu(
+                    "menu.file",
+                    "File",
+                    vec![entry("file.new", "New").key("Cmd+N"), submenu("menu.file.recent", "Open Recent", recent), Item::sep()],
+                ),
+                submenu(WINDOW, "Window", vec![entry("ui.agent_chat", "Agent Chat")]),
+            ],
+        }
+    }
+
+    #[test]
+    fn the_bar_follows_the_system_layout() {
+        let bar = bar();
+        let mut table = MenuTable::default();
+        let menus = table.layout(&bar);
+        let titles: Vec<_> = menus.iter().map(|m| (m.id, m.label)).collect();
+        assert_eq!(titles, [(APP, "Craft"), ("menu.file", "File"), (WINDOW, "Window")]);
+        assert_eq!(shape(&menus[0].rows), ["About", "-", "ui.prefs", "-", "Services", "-", "Hide", "HideOthers", "ShowAll", "-", "app.quit"]);
+        assert_eq!(shape(&menus[1].rows), ["file.new", "[menu.file.recent: ui.file.open_recent - ui.file.clear_recent]", "-"]);
+        assert_eq!(shape(&menus[2].rows), ["ui.agent_chat", "-", "Minimize", "Zoom", "FullScreen", "-", "BringAllToFront"]);
+        // Menu ids are never entries.
+        assert!(table.entries().all(|(_, id, _)| !id.starts_with("menu.")));
+        assert_eq!(table.entries().count(), 6);
+    }
+
+    #[test]
+    fn a_chosen_entry_maps_back_to_its_id_and_params_and_replace_forgets_the_old_ones() {
+        let bar = bar();
+        let mut table = MenuTable::default();
+        let menus = table.layout(&bar);
+        let mut file = vec![];
+        keys(&menus[1].rows, &mut file);
+        let file: Vec<String> = file.into_iter().map(str::to_string).collect();
+        assert_eq!(table.find(&file[0]), Some(("file.new", None)));
+        assert_eq!(table.find(&file[1]), Some(("ui.file.open_recent", Some(&json!({"path": "/a.solidcraft"})))));
+        assert_eq!(table.find(&file[2]), Some(("ui.file.clear_recent", None)));
         assert_eq!(table.find("menu-999"), None);
-        assert_eq!(table.entries().count(), 3);
-        table.forget(&[keys[1].to_string()]);
-        assert_eq!(table.find(keys[1]), None);
+        assert_eq!(table.within("menu.file.recent"), Some(&["menu.file".to_string()][..]));
+
+        let fresh = vec![entry("ui.file.open_recent", "/b.solidcraft").with(json!({"path": "/b.solidcraft"}))];
+        let rows = table.replace("menu.file.recent", &fresh).unwrap_or_default();
+        let mut new = vec![];
+        keys(&rows, &mut new);
+        assert_eq!(new.len(), 1);
+        assert_eq!(table.find(new[0]), Some(("ui.file.open_recent", Some(&json!({"path": "/b.solidcraft"})))));
+        assert_eq!((table.find(&file[1]), table.find(&file[2])), (None, None), "the old recent entries are gone");
+        assert_eq!(table.find(&file[0]), Some(("file.new", None)), "the rest of File stays");
+        assert_eq!(table.entries().count(), 5);
+        assert!(table.replace("menu.nothing", &fresh).is_err());
     }
 }
