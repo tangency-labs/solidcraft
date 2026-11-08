@@ -1436,6 +1436,18 @@ impl Torus {
             return Err(SolidError::sm_err(OP_REBUILD));
         }
 
+        // not upstream (solidcore#3204, solidcraft#12757): the circle on the NURB's iso
+        // curve measures its own interval, unsnapped; where that is the snapped interval
+        // within SM_EFF_ZERO_DEG at both ends, the torus takes it, so its V interval is its
+        // generator's (`SmSurfOfRevolution` test #2 compares them within 1e-12)
+        let mut anal_uv_domain = anal_uv_domain;
+        let (gen_ivl, v_ivl) = (circle.step_interval(), anal_uv_domain.v_interval());
+        if (gen_ivl.min() - v_ivl.min()).abs() < EFF_ZERO_DEG
+            && (gen_ivl.max() - v_ivl.max()).abs() < EFF_ZERO_DEG
+        {
+            anal_uv_domain.set_v_interval(&gen_ivl);
+        }
+
         // set m_pGenCurve
         self.base.gen_curve = Some(Curve::from(circle));
 
