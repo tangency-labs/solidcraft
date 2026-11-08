@@ -190,19 +190,33 @@ pub fn conic_on_form(k: &Kernel, conic: &Record, form: &Record) -> Result<Curve>
     Ok(Curve::from(e))
 }
 
-/// A pcurve's numbers as the kernel's UV trim of an edge over `interval` (the edge's interval
-/// in the kernel's parameter): the record's pcurve runs along the edge over the edge's own
-/// interval in the record, and the kernel's trim runs along the edge over the edge's kernel
-/// interval, so its knots are mapped affinely from the pcurve's domain onto `interval` (copied
-/// as they are where the two are the same). Its points are scaled by `scale` in u and v: a
-/// plane face's kernel parameters are the record's times its axes' lengths (`[1, 1]`
-/// elsewhere, copied).
+/// Map a pcurve's entire natural support onto `interval` and scale its UV
+/// coordinates. This is for callers that intend to remap the whole support.
+/// A B-rep edge may occupy only part of that support: its importer must use
+/// [`uv_trim_on_edge`] with the record edge's actual interval instead.
 ///
 /// # Errors
 ///
 /// `InvalidInput` for a spline whose knots do not fit its points or a pcurve or interval of no
 /// length; those of the constructors.
 pub fn uv_trim(c: &Record2, interval: &Extent1d, scale: [f64; 2]) -> Result<Curve> {
+    let source = c
+        .interval()
+        .ok_or_else(|| SolidError::invalid_input(OP_TRIM, "invalid pcurve interval"))?;
+    uv_trim_on_edge(c, source, interval, scale)
+}
+
+/// Rebuild a pcurve while mapping the record edge parameter to the kernel edge
+/// parameter. The pcurve's own support may extend beyond either edge endpoint.
+///
+/// # Errors
+/// Refuses invalid edge intervals or malformed UV spline data.
+pub fn uv_trim_on_edge(
+    c: &Record2,
+    source: [f64; 2],
+    interval: &Extent1d,
+    scale: [f64; 2],
+) -> Result<Curve> {
     let bad = |reason: &'static str| SolidError::invalid_input(OP_TRIM, reason);
     let [su, sv] = scale;
     let same = su == 1.0 && sv == 1.0;
@@ -238,14 +252,35 @@ pub fn uv_trim(c: &Record2, interval: &Extent1d, scale: [f64; 2]) -> Result<Curv
         return Err(bad("too few knots"));
     };
     let (lo, hi) = (interval.min(), interval.max());
-    if !(s_hi > s_lo) {
+    let [from_lo, from_hi] = source;
+    if !(s_lo.is_finite()
+        && s_hi.is_finite()
+        && s_hi > s_lo
+        && from_lo.is_finite()
+        && from_hi.is_finite()
+        && from_hi > from_lo
+        && lo.is_finite()
+        && hi.is_finite()
+        && hi > lo)
+    {
         return Err(bad("the pcurve's domain has no length"));
     }
-    let mapped: Vec<f64> = if (s_lo, s_hi) == (lo, hi) {
+    let mapped: Vec<f64> = if (from_lo, from_hi) == (lo, hi) {
         knots.to_vec()
     } else {
-        let by = (hi - lo) / (s_hi - s_lo);
-        knots.iter().map(|s| lo + (s - s_lo) * by).collect()
+        let by = (hi - lo) / (from_hi - from_lo);
+        knots
+            .iter()
+            .map(|s| {
+                if *s == from_lo {
+                    lo
+                } else if *s == from_hi {
+                    hi
+                } else {
+                    lo + (s - from_lo) * by
+                }
+            })
+            .collect()
     };
     Ok(Curve::from(spline(&mapped, &rows, 2, OP_TRIM)?))
 }

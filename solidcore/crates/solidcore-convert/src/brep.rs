@@ -475,9 +475,18 @@ fn data(k: &Kernel, rec: &r::Brep, bare: &[(u32, u32, u32)]) -> R<BrepData> {
                             let interval = intervals
                                 .get(u.edge as usize)
                                 .ok_or(Unsupported::Invalid("edge"))?;
+                            let source_interval = rec
+                                .edges
+                                .get(u.edge as usize)
+                                .ok_or(Unsupported::Invalid("edge"))?
+                                .interval;
                             ud.uv_curve = int(d.uv_curves.len())?;
-                            let trim =
-                                curves::uv_trim(&crate::curve2(&u.pcurve), interval, made.scale)?;
+                            let trim = curves::uv_trim_on_edge(
+                                &crate::curve2(&u.pcurve),
+                                source_interval,
+                                interval,
+                                made.scale,
+                            )?;
                             d.uv_curves.push(Keyed {
                                 key: key(),
                                 object: trim,

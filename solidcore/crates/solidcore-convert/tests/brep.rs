@@ -227,6 +227,29 @@ fn a_cube_record_builds_the_kernels_cube() {
 }
 
 #[test]
+fn a_pcurve_support_may_extend_past_its_edge_interval() {
+    let mut record = cube(1.0);
+    let Curve::Line { start, end } = &record.edges[0].curve else {
+        panic!("cube line")
+    };
+    let (start, end) = (*start, *end);
+    record.edges[0].curve = Curve::Spline {
+        knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: vec![start, end],
+    };
+    record.edges[0].interval = [0.0, f64::from_bits(1.0_f64.to_bits() - 2)];
+    record.validate().unwrap();
+    let original = record.faces.clone();
+    let mut k = kernel();
+    let (mut body, _) = to_kernel(&mut k, &record, true).unwrap();
+    let (saved, _) = to_record(&mut k, &mut body).unwrap();
+    assert_eq!(
+        saved.faces.iter().map(|f| &f.loops).collect::<Vec<_>>(),
+        original.iter().map(|f| &f.loops).collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn records_the_conversion_cannot_carry_are_refused() {
     let mut k = kernel();
     let mut r = cube(1.0);
