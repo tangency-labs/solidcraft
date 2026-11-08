@@ -295,7 +295,8 @@ pub fn tube_quarters(s: &Surface, [_, v]: [[f64; 2]; 2], tolerance: f64) -> Opti
     if !matches!(s, Surface::Torus { .. }) {
         return None;
     }
-    Some(face_quarters(v, reaches(s, v, tolerance).1)?.0.1)
+    // a whole turn of the tube spills off a quarter line as one round the axis does ([`quarters`])
+    Some(quarters(v, reaches(s, v, tolerance).1)?.1)
 }
 
 /// A torus with its tube start moved on by `angle`: the same surface, its tube angle parameter
@@ -742,5 +743,23 @@ mod whole_turn_tests {
             assert_eq!(quarters([start, start + TAU], 1e-5), Some((q0, n)), "start {start:e}");
         }
         assert_eq!(face_quarters([-1.6e-12, TAU - 1.6e-12], 1e-5), Some(((0.0, 4), [0.0, 4.0])));
+    }
+
+    /// The same rule along a torus's tube: a whole turn of the tube off a quarter line spills, so the
+    /// importer turns its tube start onto one; on a line, to within rounding, it fits four quarters.
+    #[test]
+    fn a_whole_turn_of_a_tube_off_a_quarter_line_spills() {
+        let torus = Surface::Torus {
+            frame: Frame { origin: [0.0; 3], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] },
+            major_radius: 10.0,
+            minor_radius: 2.0,
+            tube_start: 0.0,
+        };
+        let u = [0.0, FRAC_PI_2];
+        for (start, n) in [(0.0, 4), (-1.6e-12, 4), (-1e-6, 5), (1e-6, 5)] {
+            assert_eq!(tube_quarters(&torus, [u, [start, start + TAU]], 1e-5), Some(n), "tube start {start:e}");
+        }
+        // a tube of less than a turn is counted as before
+        assert_eq!(tube_quarters(&torus, [u, [0.1, 0.1 + FRAC_PI_2]], 1e-5), quarters([0.1, 0.1 + FRAC_PI_2], 1e-5 / 2.0).map(|q| q.1));
     }
 }
