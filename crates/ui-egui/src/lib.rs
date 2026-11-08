@@ -2117,7 +2117,9 @@ impl SolveApp {
         if id == "file.insert_gerber" {
             // Like Insert STEP: the board's zip, or any file in its folder, is picked and the
             // board goes in beside the window, each file's layer found from what it says.
-            self.pick_open_for(&solidcraft_engine::io::BOARD_EXTENSIONS, |app, path| {
+            // On the web only the chosen file is uploaded, not its folder: there the board's zip.
+            let extensions: &[&str] = if cfg!(target_arch = "wasm32") { &["zip"] } else { &solidcraft_engine::io::BOARD_EXTENSIONS };
+            self.pick_open_for(extensions, |app, path| {
                 if let Some(path) = path {
                     let mut request = file_load::Request::new(&path, file_load::Kind::Insert);
                     request.gerber = true;
