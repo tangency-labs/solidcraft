@@ -101,6 +101,7 @@ pub mod render_stage;
 pub mod render_surface_resources;
 pub mod render_ui;
 pub mod section;
+pub mod select;
 pub mod sheet;
 pub mod silhouette;
 pub mod sketch;
