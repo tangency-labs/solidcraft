@@ -13,7 +13,7 @@ fn param_check_applies_to_the_starting_script() {
     std::fs::write(&script, format!(r#"{{"commands": [{box_}]}}"#)).unwrap();
     let run = |level: &str| {
         Command::new(env!("CARGO_BIN_EXE_solidcraft-cli"))
-            .args(["mcp", "--in", script.to_str().unwrap(), "--param-check", level])
+            .args(["mcp", "--no-scx", "--in", script.to_str().unwrap(), "--param-check", level])
             .stdin(Stdio::null())
             .output()
             .unwrap()
@@ -31,7 +31,7 @@ fn param_check_applies_to_the_starting_script() {
     let failing = dir.join("typo_then_failure.json");
     std::fs::write(&failing, format!(r#"{{"commands": [{box_}, {{"command": "no.such_command"}}]}}"#)).unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_solidcraft-cli"))
-        .args(["mcp", "--in", failing.to_str().unwrap(), "--param-check", "warn"])
+        .args(["mcp", "--no-scx", "--in", failing.to_str().unwrap(), "--param-check", "warn"])
         .stdin(Stdio::null())
         .output()
         .unwrap();

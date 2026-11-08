@@ -23,7 +23,7 @@ fn mcp_connect_serves_before_the_app_runs_and_reaches_it_once_it_does() {
     let control_dir = std::env::temp_dir().join(format!("solidcraft-mcp-connect-{}-{port}", std::process::id()));
     std::fs::create_dir_all(&control_dir).unwrap();
     let mut child = Command::new(env!("CARGO_BIN_EXE_solidcraft-cli"))
-        .args(["mcp", "--connect", &addr, "--allow-any-path"])
+        .args(["mcp", "--connect", &addr, "--allow-any-path", "--no-scx"])
         .env("SOLIDCRAFT_CONTROL_DIR", &control_dir)
         .env_remove("SOLIDCRAFT_CONTROL_TOKEN")
         .stdin(Stdio::piped())
@@ -138,7 +138,7 @@ fn mcp_without_arguments_finds_the_running_app() {
         }
     });
     let mut child = Command::new(env!("CARGO_BIN_EXE_solidcraft-cli"))
-        .args(["mcp", "--allow-any-path"])
+        .args(["mcp", "--allow-any-path", "--no-scx"])
         .env("SOLIDCRAFT_CONTROL_DIR", &control_dir)
         .env_remove("SOLIDCRAFT_CONTROL_TOKEN")
         .stdin(Stdio::piped())
@@ -164,7 +164,7 @@ fn mcp_without_arguments_finds_the_running_app() {
     drop(closed);
     std::fs::write(control_dir.join("current.port"), format!("{dead}\n")).unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_solidcraft-cli"))
-        .args(["mcp", "--allow-any-path"])
+        .args(["mcp", "--allow-any-path", "--no-scx"])
         .env("SOLIDCRAFT_CONTROL_DIR", &control_dir)
         .stdin(Stdio::null())
         .output()
@@ -295,7 +295,7 @@ mod scratch_cleanup {
         std::fs::create_dir(&dir).unwrap();
         let mut command = Command::new(env!("CARGO_BIN_EXE_solidcraft-cli"));
         command
-            .args(["mcp", "--headless"])
+            .args(["mcp", "--headless", "--no-scx"])
             .env("TMPDIR", &dir)
             .env("TMP", &dir)
             .env("TEMP", &dir)

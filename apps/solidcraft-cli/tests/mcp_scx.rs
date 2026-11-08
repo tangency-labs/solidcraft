@@ -51,3 +51,31 @@ fn scripts_run_in_a_capped_worker_and_the_server_outlives_them() {
     let _ = child.kill();
     let _ = child.wait();
 }
+
+/// The tool names `solidcraft-cli mcp --headless` lists with `args` and `SOLIDCRAFT_MCP_SCX` = `env`.
+fn tool_names(args: &[&str], env: Option<&str>) -> Vec<String> {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_solidcraft-cli"));
+    cmd.args(["mcp", "--headless", "--allow-any-path"]).args(args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
+    match env {
+        Some(v) => cmd.env("SOLIDCRAFT_MCP_SCX", v),
+        None => cmd.env_remove("SOLIDCRAFT_MCP_SCX"),
+    };
+    let mut child = cmd.spawn().unwrap();
+    {
+        let mut stdin = child.stdin.take().unwrap();
+        writeln!(stdin, "{}", json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})).unwrap();
+    }
+    let out = child.wait_with_output().unwrap();
+    let reply: Value = serde_json::from_slice(&out.stdout).unwrap();
+    reply["result"]["tools"].as_array().unwrap().iter().filter_map(|t| t["name"].as_str().map(str::to_owned)).collect()
+}
+
+/// Script mode is the default; `--no-scx` or `SOLIDCRAFT_MCP_SCX=0` give the usual tools.
+#[test]
+fn script_mode_is_on_by_default_and_turns_off() {
+    assert_eq!(tool_names(&[], None), ["run", "design", "look"]);
+    assert_eq!(tool_names(&[], Some("")), ["run", "design", "look"], "empty is unset");
+    for off in [tool_names(&["--no-scx"], None), tool_names(&[], Some("0")), tool_names(&["--no-scx"], Some("1"))] {
+        assert!(off.len() > 3 && off.iter().any(|n| n == "inspect_design"), "{off:?}");
+    }
+}

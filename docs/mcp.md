@@ -194,15 +194,16 @@ on the same tasks, cut the cost of a
 modelling session by 20-59 % at about the same accuracy; the tasks, the harness and the results are in
 [the scx write-up (#12522)](https://github.com/tangency-labs/solidcraft/pull/12522).
 
-It is off by default and turned on like compact output, with no change to the client
-configuration:
+It is on by default. Any of these turns it off and gives the agent the usual tools, with no change
+to the client configuration:
 
-- **Preferences › AI › Agents through MCP › Script mode (scx)** in the app, for every server
-  bridged to it. The server reads it when the agent session starts (at `initialize`, or at the first tool list)
-  and keeps it for that session: turn it on before starting the agent session. If the app was not
-  running then, start the agent session again once it is (or use `--scx`).
-- `solidcraft-cli mcp --scx`.
-- The environment variable `SOLIDCRAFT_MCP_SCX=1` (the same values as `SOLIDCRAFT_MCP_COMPACT`).
+- **Preferences › AI › Agents through MCP › Script mode (scx)** unticked in the app, for every server
+  bridged to it (`--connect`). The server reads it when the agent session starts (at `initialize`, or at the first tool list)
+  and keeps it for that session: change it before starting the agent session. If the app was not
+  running then, the server's own setting holds; start the agent session again once the app runs.
+- `solidcraft-cli mcp --no-scx` (it wins over `--scx`).
+- The environment variable `SOLIDCRAFT_MCP_SCX=0` (the same values as `SOLIDCRAFT_MCP_COMPACT`;
+  `--scx` or `SOLIDCRAFT_MCP_SCX=1` keep it on whatever the app's checkbox says).
 
 | Tool | Arguments | What it does |
 | --- | --- | --- |
@@ -229,8 +230,9 @@ The language is a subset of Python 3: functions, loops, comprehensions, f-string
 `set` and `tuple`, but no classes that inherit and no imports beyond `json` and `math`.
 
 ```sh
-solidcraft-cli mcp --connect 127.0.0.1:7878 --scx
-SOLIDCRAFT_MCP_SCX=1 solidcraft-cli mcp --connect 127.0.0.1:7878
+solidcraft-cli mcp --connect 127.0.0.1:7878            # script mode, unless the app's checkbox is unticked
+solidcraft-cli mcp --connect 127.0.0.1:7878 --no-scx   # the usual tools
+SOLIDCRAFT_MCP_SCX=0 solidcraft-cli mcp --connect 127.0.0.1:7878
 ```
 
 ### Tool annotations

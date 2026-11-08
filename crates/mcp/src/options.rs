@@ -1,5 +1,5 @@
-//! How the MCP server shapes what its tools return. Off by default: every option keeps the
-//! behaviour the server had before it. Two places turn an option on: the server's own command
+//! How the MCP server shapes what its tools return. Compact output is off by default; script mode
+//! is on for `solidcraft-cli mcp` ([`NO_SCX_FLAG`]). Two places turn an option on: the server's own command
 //! line and environment ([`Options::resolve`]), and, when the server is bridged to the app, the
 //! app's Preferences (AI › MCP agents), which it reports as `mcp.options` ([`Options::from_app`]).
 //! Either one is enough ([`Options::or`]).
@@ -17,6 +17,12 @@ pub const SCX_ENV: &str = "SOLIDCRAFT_MCP_SCX";
 
 /// The command-line flag that turns on script mode.
 pub const SCX_FLAG: &str = "--scx";
+
+/// The command-line flag that turns script mode off. Script mode is on by default for
+/// `solidcraft-cli mcp`: `--no-scx`, `SOLIDCRAFT_MCP_SCX=0` or (with `--connect`) the
+/// app's Preferences checkbox unticked turn it off. `Options::default()` stays off, so library
+/// callers keep the usual tools.
+pub const NO_SCX_FLAG: &str = "--no-scx";
 
 /// Output options of the MCP server.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -43,8 +49,23 @@ impl Options {
     /// subcommand) and environment, script mode included (`--scx`, [`SCX_ENV`]).
     pub fn from_args_and_env(args: &[String]) -> Result<Self, String> {
         let mut o = Self::resolve(args.iter().any(|a| a == COMPACT_FLAG), std::env::var(COMPACT_ENV).ok().as_deref())?;
-        o.scx = args.iter().any(|a| a == SCX_FLAG) || env_on(SCX_ENV, std::env::var(SCX_ENV).ok().as_deref())?;
+        o.scx = Self::scx_choice(args, std::env::var(SCX_ENV).ok().as_deref())?.unwrap_or(true);
         Ok(o)
+    }
+
+    /// Script mode as the command line (`--no-scx` wins over `--scx`) or [`SCX_ENV`] set it, or
+    /// `None` when neither says (then it is on, or with `--connect` the app's Preferences decide).
+    pub fn scx_choice(args: &[String], env: Option<&str>) -> Result<Option<bool>, String> {
+        if args.iter().any(|a| a == NO_SCX_FLAG) {
+            return Ok(Some(false));
+        }
+        if args.iter().any(|a| a == SCX_FLAG) {
+            return Ok(Some(true));
+        }
+        match env.map(str::trim) {
+            None | Some("") => Ok(None),
+            Some(_) => env_on(SCX_ENV, env).map(Some),
+        }
     }
 
     /// The options the app reports in its `mcp.options` reply (`{"compact": bool, "scx": bool}`);
@@ -108,5 +129,20 @@ mod tests {
         assert_eq!(Options::from_app(&serde_json::json!({"scx": true})), scx);
         assert_eq!(Options::from_app(&serde_json::json!({"scx": 1})), off);
         assert_eq!(on.or(scx), Options { compact: true, scx: true });
+    }
+
+    /// `--no-scx` beats `--scx`, the flags beat the environment, and with neither the
+    /// choice is open (on, or the app's checkbox with `--connect`).
+    #[test]
+    fn script_mode_choice() {
+        let a = |v: &[&str]| v.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        assert_eq!(Options::scx_choice(&a(&[]), None), Ok(None));
+        assert_eq!(Options::scx_choice(&a(&[]), Some(" ")), Ok(None));
+        assert_eq!(Options::scx_choice(&a(&[]), Some("0")), Ok(Some(false)));
+        assert_eq!(Options::scx_choice(&a(&[]), Some("on")), Ok(Some(true)));
+        assert_eq!(Options::scx_choice(&a(&["--scx"]), Some("0")), Ok(Some(true)));
+        assert_eq!(Options::scx_choice(&a(&["--scx", "--no-scx"]), None), Ok(Some(false)));
+        assert!(Options::scx_choice(&a(&[]), Some("maybe")).is_err());
+        assert!(!Options::default().scx, "library callers keep the usual tools");
     }
 }

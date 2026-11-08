@@ -92,7 +92,8 @@ const USAGE_KERNEL_CASES: &str = "  solidcraft-cli kernel-cases <case-dir>... [-
 const USAGE_FUZZ: &str =
     "  solidcraft-cli fuzz [--from N] [--count N] [--jobs J] [--timeout S] [--steps N] [--minimise] [--out DIR] [--report FILE]\n";
 /// `mcp`'s lines in the usage.
-const USAGE_MCP: &str = "  solidcraft-cli mcp [--headless] [--in design.sc|script.json] [--connect 127.0.0.1:PORT [--token T]] [--allow-path DIR]... [--allow-any-path]\n                     [--param-check off|warn|strict] [--render-gpu] [--compact] [--scx]\n      (--compact, SOLIDCRAFT_MCP_COMPACT=1 or the app's Preferences › AI (with --connect): compact tool output for\n       agents: inspect_design summarises sketches and takes `sketches` by name and a `bodies` filter, and tool JSON\n       is not pretty-printed; off by default)\n      (--scx, SOLIDCRAFT_MCP_SCX=1 or the app's Preferences › AI (with --connect): script mode: the tools are run,\n       design and look, and the agent builds with short Python scripts run in a sandbox with no file, network or\n       process access (docs/mcp.md, Script mode); off by default)\n  solidcraft-cli mcp setup [--dry-run] [--client opencode|claude-desktop|claude-code|cursor] [--live]\n      (adds a `solidcraft` server, with this program's path, to each installed AI client; --live adds `solidcraft-live` for the running app; alias: mcp install)\n";
+const USAGE_MCP: &str = "  solidcraft-cli mcp [--headless] [--in design.sc|script.json] [--connect 127.0.0.1:PORT [--token T]] [--allow-path DIR]... [--allow-any-path]\n                     [--param-check off|warn|strict] [--render-gpu] [--compact] [--scx|--no-scx]\n      (--compact, SOLIDCRAFT_MCP_COMPACT=1 or the app's Preferences › AI (with --connect): compact tool output for\n       agents: inspect_design summarises sketches and takes `sketches` by name and a `bodies` filter, and tool JSON\n       is not pretty-printed; off by default)\n      (script mode, on by default: the tools are run,\n       design and look, and the agent builds with short Python scripts run in a sandbox with no file, network or\n       process access (docs/mcp.md, Script mode); --no-scx, SOLIDCRAFT_MCP_SCX=0 or, with --connect, the
+       app's Preferences › AI › Script mode unticked turn it off and give the usual tools)\n  solidcraft-cli mcp setup [--dry-run] [--client opencode|claude-desktop|claude-code|cursor] [--live]\n      (adds a `solidcraft` server, with this program's path, to each installed AI client; --live adds `solidcraft-live` for the running app; alias: mcp install)\n";
 /// `crashes`'s lines in the usage.
 const USAGE_CRASHES: &str = "  solidcraft-cli crashes [list [--json] | show <id> | replay <id> | dir | clear [<id>]]\n";
 /// `licences`'s lines in the usage.
@@ -840,6 +841,8 @@ fn cmd_mcp(args: &[String]) -> Result<(), String> {
     }
     install_renderer();
     let options = solidcraft_mcp::Options::from_args_and_env(args).map_err(|e| format!("mcp: {e}"))?;
+    let scx_choice =
+        solidcraft_mcp::Options::scx_choice(args, std::env::var(solidcraft_mcp::SCX_ENV).ok().as_deref()).map_err(|e| format!("mcp: {e}"))?;
     if options.compact {
         eprintln!("solidcraft mcp: compact output (inspect_design summarises sketches; tool JSON is not pretty-printed)");
     }
@@ -891,7 +894,7 @@ fn cmd_mcp(args: &[String]) -> Result<(), String> {
             if auto && let Some(port) = discover_app() {
                 solidcraft_engine::note!("solidcraft mcp: bridged to the running app at 127.0.0.1:{port} (--headless starts a session of its own)");
                 let remote = solidcraft_mcp::Remote::new(&format!("127.0.0.1:{port}"), flag(args, "--token")).with_param_check(param_check);
-                return serve_mcp(Box::new(remote), scope, options);
+                return serve_mcp(Box::new(remote), scope, options, scx_choice);
             }
             let mut headless = solidcraft_mcp::Headless::default();
             headless.session.param_check = param_check;
@@ -906,13 +909,14 @@ fn cmd_mcp(args: &[String]) -> Result<(), String> {
             }
         }
     };
-    serve_mcp(backend, scope, options)
+    serve_mcp(backend, scope, options, scx_choice)
 }
 
 fn serve_mcp(
     backend: Box<dyn solidcraft_mcp::Backend>,
     scope: Option<solidcraft_engine::io::vfs::PathScope>,
     options: solidcraft_mcp::Options,
+    scx_choice: Option<bool>,
 ) -> Result<(), String> {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
@@ -923,6 +927,7 @@ fn serve_mcp(
     solidcraft_mcp::Server::new(backend)
         .with_path_scope(scope)
         .with_options(options)
+        .with_scx_choice(scx_choice)
         .with_scx_runner(runner)
         .serve(stdin.lock(), stdout.lock())
         .map_err(|e| e.to_string())

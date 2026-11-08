@@ -8,7 +8,7 @@
 //! allow-list in `super::HOST_TOOLS`, answered by the server as if the agent had called the tool
 //! itself (same path scope, same checks).
 //!
-//! `solidcraft-cli mcp --scx` runs the interpreter in a child process (`solidcraft-cli
+//! `solidcraft-cli mcp` in script mode runs the interpreter in a child process (`solidcraft-cli
 //! scx-worker`, [`worker`]), one per script, capped in memory by the operating system and in time
 //! by the server ([`in_worker`]): a script that exhausts memory or crashes the interpreter ends
 //! only that child. [`execute`] runs the same steps in this process, for tests and embedders that
