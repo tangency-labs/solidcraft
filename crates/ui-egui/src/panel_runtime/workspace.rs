@@ -935,7 +935,7 @@ impl WorkspacePanelHost {
         // the intended resolved geometry, but never publish it as actual paint
         // or an input/occlusion shield, even if no further egui pass is allowed.
         let mut unpainted_instances = Vec::new();
-        for (layer, bounds) in &unpainted {
+        for (layer, bounds, sizing) in &unpainted {
             let hidden_sections: Vec<_> = frame
                 .layout
                 .sections
@@ -946,6 +946,19 @@ impl WorkspacePanelHost {
                 .iter()
                 .flat_map(|section| std::iter::once(section.instance.clone()).chain(section.tabs.iter().map(|tab| tab.instance.clone())))
                 .collect();
+            // A new Area measures before it paints. Preserve only the editor
+            // that still owns focus; restore it after a fresh response returns.
+            if *sizing && ui.is_enabled() && ui.is_visible() && ui.input(|input| input.focused) && !ui_kit::Container::modal_input_blocked(ui.ctx()) {
+                self.restore_content_focus |= self.content_focus.as_ref().is_some_and(|bookmark| {
+                    self.owned_focus == Some(bookmark.id)
+                        && ui.memory(|memory| memory.focused()) == Some(bookmark.id)
+                        && bookmark.scope == scope
+                        && runtime.instance_owner(&bookmark.key.instance).is_ok_and(|owner| owner == bookmark.key.owner)
+                        && runtime.layout().availability(&bookmark.key.instance) == Availability::Available
+                        && runtime.layout().layout().instance(&bookmark.key.instance).is_ok_and(|instance| instance.requested_open)
+                        && hidden_sections.iter().any(|section| section.instance == bookmark.key.instance && !section.collapsed)
+                });
+            }
             unpainted_instances.extend(hidden_instances.iter().cloned());
             let clipped = logical_rect(egui_rect(*bounds).intersect(egui_rect(frame.layout.capacity)));
             // Remove one occurrence: a visible card can occupy the same rect.
@@ -1032,6 +1045,18 @@ impl WorkspacePanelHost {
                 }
             }
         }
+        let logical_focus_eligible = self.restore_content_focus
+            && ui.input(|input| input.focused)
+            && self.content_focus.as_ref().is_some_and(|bookmark| {
+                bookmark.scope == scope
+                    && runtime.instance_owner(&bookmark.key.instance).is_ok_and(|owner| owner == bookmark.key.owner)
+                    && runtime.layout().availability(&bookmark.key.instance) == Availability::Available
+                    && runtime.layout().layout().instance(&bookmark.key.instance).is_ok_and(|instance| instance.requested_open)
+                    && frame.layout.sections.iter().any(|section| section.instance == bookmark.key.instance && !section.collapsed)
+            });
+        // A passive return cannot outlive deliberate hiding or owner/focus loss.
+        // A modal may still wait while that logical presentation remains valid.
+        self.restore_content_focus &= logical_focus_eligible;
         if self.restore_content_focus && !ui_kit::Container::modal_input_blocked(ui.ctx()) {
             let current = ui.memory(|memory| memory.focused());
             let deliberate = current.is_some_and(|id| ui.ctx().read_response(id).is_some_and(|response| response.gained_focus()));
@@ -1040,11 +1065,8 @@ impl WorkspacePanelHost {
             } else if current.is_none()
                 && let Some(bookmark) = &self.content_focus
             {
-                let eligible = bookmark.scope == scope
-                    && runtime.instance_owner(&bookmark.key.instance).is_ok_and(|owner| owner == bookmark.key.owner)
-                    && runtime.layout().availability(&bookmark.key.instance) == Availability::Available
-                    && frame.layout.sections.iter().any(|section| section.instance == bookmark.key.instance && !section.collapsed)
-                    && self.content_reports.get(&bookmark.id).is_some_and(|report| report.key == bookmark.key && report.scope == bookmark.scope);
+                let eligible =
+                    self.content_reports.get(&bookmark.id).is_some_and(|report| report.key == bookmark.key && report.scope == bookmark.scope);
                 if eligible {
                     bookmark.restore_selection(ui.ctx());
                     ui.memory_mut(|memory| memory.request_focus(bookmark.id));
@@ -2196,7 +2218,7 @@ struct WorkspaceContentHost<'a> {
     motion: Motion,
     commands: &'a mut Vec<HostCommand>,
     allow_actions: bool,
-    unpainted: &'a mut Vec<(egui::LayerId, LogicalRect)>,
+    unpainted: &'a mut Vec<(egui::LayerId, LogicalRect, bool)>,
 }
 
 impl PanelHost for WorkspaceContentHost<'_> {
@@ -2247,7 +2269,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
             matches!(appearance.contrast, ContrastOutcome::RetainReadableFallback { .. }).then(|| style.palette(appearance)),
             |ui, content_clip| {
                 if (section.peek || section.zone == Zone::Floating) && (!ui.is_visible() || ui.is_sizing_pass()) {
-                    self.unpainted.push((ui.layer_id(), section.outer));
+                    self.unpainted.push((ui.layer_id(), section.outer, ui.is_sizing_pass()));
                     return;
                 }
                 // A surface response provides semantic focus and owns only the actual

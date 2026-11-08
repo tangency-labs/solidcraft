@@ -4828,6 +4828,10 @@ fn shared_assistant_wide_and_compact_present_real_regions_without_losing_the_com
     editor.store(&h.ctx, input);
     h.frame();
     let caret = egui::TextEdit::load_state(&h.ctx, input).unwrap().cursor.char_range();
+    assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(input), "the docked composer starts focused");
+    let response = h.ctx.read_response(input).unwrap();
+    assert!(response.enabled() && response.interact_rect.is_positive(), "the focused composer is live and interactable");
+    assert!(!caret.unwrap().is_empty(), "exercise a real selection before moving the panel");
     let draft = h.app.agent_chat.input.clone();
     let document = h.app.session.doc.clone();
     let model = h.app.session.model.state();
