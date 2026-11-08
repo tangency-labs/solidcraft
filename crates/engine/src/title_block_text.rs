@@ -69,12 +69,19 @@ impl Set {
 }
 
 /// The text cells of sheet `at`'s title block as the sheet shows them, in the block's order: each
-/// the text typed over it, or its content as [`read`] reads it.
+/// the text typed over it, or its content as [`read`] reads it. A cell that shows a logo shows no
+/// text (`TextCell::image`).
 pub fn shown(doc: &Document, tree: &mut Tree<'_>, d: &Drawing, at: usize) -> Vec<CellText> {
     let Some(sheet) = d.sheets.get(at) else { return Vec::new() };
     let Some(block) = &sheet.title_block else { return Vec::new() };
-    let texts: Vec<(&String, &Content)> =
-        block.cells.iter().filter_map(|cell| if let CellKind::Text(text) = &cell.kind { Some((&cell.name, &text.content)) } else { None }).collect();
+    let texts: Vec<(&String, &Content)> = block
+        .cells
+        .iter()
+        .filter_map(|cell| match &cell.kind {
+            CellKind::Text(text) if text.image.is_none() => Some((&cell.name, &text.content)),
+            _ => None,
+        })
+        .collect();
     let values = read(doc, tree, d, at, texts.iter().map(|(_, content)| *content));
     let cell = |((name, _), value): ((&String, &Content), String)| match sheet.title_block_overrides.get(name) {
         Some(typed) => CellText { name: name.clone(), text: typed.clone(), replaced: Some(value) },
