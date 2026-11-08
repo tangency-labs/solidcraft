@@ -44,6 +44,7 @@
 //! | `curved_least` (private)     | `sm_SbCurvedLeast` (37c9e1d)                          |
 //! | `gather_ends` (private)      | `BuildSetBackFill`'s `gather`                         |
 //! | `grow_curved` (private)      | `BuildSetBackFill`'s growth beside curved faces (37c9e1d) |
+//! | `springs_on_faces`, `springs_refusal` (private) | none (solidcore#2343 (d))          |
 //!
 //! Deviations: the Setback's own members are kept in [`SetbackCorner`] on the corner
 //! ([`FilletCorner::setback`]) from its creation (`SetFillOrder`) until its patches are
@@ -60,19 +61,25 @@
 //! the vertex there, from the edge's direction at the setback, not the end of its rails
 //! nearer the vertex as the fork's `gather` takes it: a round on an arc, extended past a far
 //! corner that does not blend, comes back round nearer the vertex than a long setback's end
-//! section (solidcore#2835).
+//! section (solidcore#2835). Beside a curved face each spring curve is checked to stay inside
+//! its trimmed face before the fill is made, and again at setbacks the growth finds; a
+//! setback that takes one off its face is refused, naming the largest that keeps every one
+//! on its face (solidcore#2343 (d); the fork's ruling checked the curve's parameter-plane
+//! control triangle instead, and built no check).
 //!
 //! [`FilletCorner::setback`]: crate::blend::fillet_corner::p3::FilletCorner::setback
 
 use std::sync::Arc;
 
 use crate::blend::blend_corner::ball::{solver_of_edgeuse_or_mate, BallSolvers};
+use crate::blend::blend_corner::on_face::{self, Clearance};
 use crate::blend::blend_corner::swept::fmt_g;
 use crate::blend::blend_corner::{BlendCorner, BlendCornerEvent};
 use crate::blend::blend_refusal::BlendRefusal;
 use crate::blend::blend_setback::{
     bisect_thousandths, certified_scale, containment, distances, fill_hole_counted,
-    fill_hole_probe, Edge, Face, FaceKind, Fill, FillStats, Probe, Round,
+    fill_hole_probe, spring_curve, Edge, Face, FaceKind, Fill, FillStats, Probe, Round,
+    SpringCurve,
 };
 use crate::blend::fillet_corner::p1::{face_by_two_edgeuses, test_g1_continuity};
 use crate::blend::fillet_corner::p3::{CornerPatchEnv, FilletCorner, FilletCornerKind};
@@ -92,6 +99,7 @@ use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::SolverOperation;
+use crate::geom::vector3d::sqrt;
 use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
 use crate::math::{Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
@@ -105,6 +113,7 @@ use crate::surface::surface::Surface;
 use crate::topology::brep::p7::{make_face_with_curves, FaceCurvesInput};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::face::p2 as face2;
+use crate::topology::face::p4 as face4;
 use crate::topology::{edge, vertex, Brep, EdgeId, EdgeuseId, FaceId, VertexId};
 
 const OP_CLASSIFY: &str = "blend::blend_corner::setback::classify_setback";
@@ -129,6 +138,10 @@ pub struct SetbackCorner {
     /// curved face the length is the edge's arc length, as the setbacks are measured along
     /// it; between planes (straight edges) the distance between its ends.
     pub room: Vec<f64>,
+    /// Not the fork (solidcore#2343 (d)): each blended edge's least setback, where the
+    /// rails of the rounds beside it cross (`sm_SbSetBacks`'s `rvLeast`); a setback below it
+    /// is too short.
+    pub least: Vec<f64>,
     /// `m_pFill`: the fill, from the edge geometry until the patches take it.
     pub fill: Option<Fill>,
     /// `m_bSetBackOpen` (the fork's ef57570, smlib#125): an open G1 corner, its spring
@@ -149,6 +162,7 @@ impl Default for SetbackCorner {
             convex: true,
             overflows: false,
             room: Vec::new(),
+            least: Vec::new(),
             fill: None,
             open: false,
             definition: None,
@@ -1234,6 +1248,7 @@ pub fn make_setback_topology(
     }
     sb.overflows = !fits;
     sb.room.clone_from(&room);
+    sb.least.clone_from(&least);
     // a G1 fill is taken only certified convex: the least scale of the setbacks at which it
     // is (CertifiedScale). The rule's grow to it, each held at its room less the rule's
     // quarter radius (the others growing on); refused, naming them, where none within the
@@ -1783,6 +1798,26 @@ fn grow_curved<S: SetbackSolvers>(
     let Some(ends) = growth.place(pseudo, corner, solvers, hi)? else {
         return Err(err());
     };
+    // the setbacks the fill needs keep every spring curve on its face, or none builds: the
+    // fill is certified at none smaller, and a spring curve off its face at these stays off
+    // it at every larger one (#2343 (d))
+    let springs = springs_on_faces(
+        growth.k,
+        growth.target,
+        pseudo,
+        corner,
+        growth.planes,
+        growth.tol,
+    )?;
+    if springs == Springs::Leave {
+        return Ok(Err(SetbackRefusal::no_room(
+            format!(
+                "Fillet Error: the setback corner's fill stays no more concave than its faces only from {} times its setbacks, where a spring curve leaves its face: no setback builds",
+                fmt_g(hi)
+            ),
+            Some(0.0),
+        )));
+    }
     if let Some(a) = asked {
         let room = &corner.setback.as_ref().ok_or_else(err)?.room;
         let fits_room = room.iter().all(|&r| hi * a.setback + a.ease < r);
@@ -1803,6 +1838,285 @@ fn grow_curved<S: SetbackSolvers>(
         return Ok(Err(SetbackRefusal::no_room(why, Some(builds))));
     }
     Ok(Ok(ends))
+}
+
+/// Where a Setback's spring curves stand on its faces ([`springs_on_faces`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Springs {
+    /// Each proved to keep clear of every other edge of its face.
+    Clear,
+    /// One comes within its gap of another edge of its face, or is not shown not to.
+    Leave,
+    /// One is not made: a rail's direction is not found, or [`spring_curve`] refuses the
+    /// rails' ends (the fill, which makes it the same way, says why).
+    Unmade,
+}
+
+/// The derivative along `v` of `face`'s unit normal field ([`Face::distance`]'s normal, out
+/// of the material, at any point) at `x`: zero on a plane; a sphere's `side (v - (v . u) u) /
+/// |x - c|` (u the unit direction from its centre); a cylinder's or cone's `side cos v_t /
+/// rho`, `v_t` the part of `v` along the circle about the axis through `x`, rho that circle's
+/// radius and `cos` that of the cone's half angle (1 on a cylinder). `None` on a quadric's
+/// centre or axis.
+fn normal_turn(face: &Face, x: Point3, v: Vec3) -> Option<Vec3> {
+    let u = x - face.point;
+    match face.kind {
+        FaceKind::Plane => Some(Vec3::ZERO),
+        FaceKind::Sphere => {
+            let len = u.length();
+            let d = u.unitize().ok()?;
+            Some((v - d * v.dot(d)) * (face.side / len))
+        }
+        FaceKind::Cylinder | FaceKind::Cone => {
+            let r = u - face.axis * u.dot(face.axis);
+            let rho = r.length();
+            let d = r.unitize().ok()?;
+            let along = v - d * v.dot(d) - face.axis * v.dot(face.axis);
+            let cos = 1.0 / sqrt(1.0 + face.slope * face.slope);
+            Some(along * (face.side * cos / rho))
+        }
+    }
+}
+
+/// The unit direction of the rail on `face` of the round of radius `r` along `edge_id`, at
+/// its end `p` on `face` whose other end is `q` on `other` (the round's two contact points in
+/// one section), turned toward the corner's vertex (`sign` `+1` at a convex corner, `-1` at a
+/// concave one). In closed form, not from the rail as traced, which runs only from the
+/// setback the corner was made at outward: the ball's centre is `c = p - sign r n(p)` and
+/// runs along `n(p) x m(q)` (n, m the faces' normals, constant along their normal lines), the
+/// rail is `c + sign r n(c)`, so its direction is that of the centre's plus `sign r` times the
+/// normal's turn along it ([`normal_turn`]). Toward the vertex: the side the edge runs on to
+/// the vertex at its setback (as `gather_ends` takes the corner's side of an end section).
+/// `None` where the faces' normals are parallel there, or a normal's turn is not defined.
+#[allow(clippy::too_many_arguments)]
+fn rail_toward_vertex(
+    k: &Kernel,
+    target: &Brep,
+    corner: &FilletCorner,
+    edge_id: EdgeId,
+    face: &Face,
+    p: Point3,
+    other: &Face,
+    q: Point3,
+    r: f64,
+    sign: f64,
+) -> Result<Option<Vec3>> {
+    let nul = || SolidError::null_pointer(OP_FILL);
+    let vtx = corner.vertex.ok_or_else(nul)?;
+    let (_, n) = face.distance(p);
+    let (_, m) = other.distance(q);
+    let centre = p - n * (sign * r);
+    let along = n.cross(m);
+    let Some(turn) = normal_turn(face, centre, along) else {
+        return Ok(None);
+    };
+    let Ok(t) = (along + turn * (sign * r)).unitize() else {
+        return Ok(None);
+    };
+    let setback = corner.set_back_dist_along(target, edge_id)?;
+    let (_, edge_dir) = set_back_frame(k, target, edge_id, Some(vtx), setback, OP_FILL)?;
+    let from_start = edge::start_vertex(target, edge_id)? == Some(vtx);
+    let side = t.dot(if from_start { -edge_dir } else { edge_dir });
+    if !side.is_finite() || side.abs() <= 0.0 {
+        return Ok(None);
+    }
+    Ok(Some(if side > 0.0 { t } else { -t }))
+}
+
+/// The corner's spring curves, one per face, at the setbacks its vertices are placed at, as
+/// the fill makes them ([`spring_curve`]): on face `F_i`, from `S_i`, the end of the blend
+/// after `F_i`, leaving its rail toward the vertex, to `M_i`, the end of the blend before,
+/// tangent to both rails ([`rail_toward_vertex`], each with the blend's other end, on its
+/// other face, the mate of its end on `F_i`). `None` where one is not made: a rail's
+/// direction is not found, or [`spring_curve`] refuses the rails' ends (the fill, which makes
+/// it the same way, says why).
+fn corner_springs(
+    k: &Kernel,
+    target: &Brep,
+    pseudo: &FilletBrep,
+    corner: &FilletCorner,
+    planes: &CornerPlanes,
+) -> Result<Option<Vec<SpringCurve>>> {
+    let nul = || SolidError::null_pointer(OP_FILL);
+    let all = corner.all_eus.as_ref().ok_or_else(nul)?;
+    let sign = if corner.setback.as_ref().ok_or_else(nul)?.convex {
+        1.0
+    } else {
+        -1.0
+    };
+    let n = planes.faces.len();
+    let point = |i: usize| -> Result<Point3> {
+        pseudo.vertex_point(*corner.vertices.get(i).ok_or_else(nul)?)
+    };
+    let mut springs = Vec::new();
+    for (f, plane) in planes.planes.iter().enumerate() {
+        let before = (f + n - 1) % n;
+        let mut ends = [(Point3::ZERO, None); 2];
+        // S_f with its mate M_(f+1) on F_(f+1); M_f with its mate S_(f-1) on F_(f-1)
+        for (slot, (blend, at, mate, other)) in ends.iter_mut().zip([
+            (f, 3 * f + 2, 3 * ((f + 1) % n), (f + 1) % n),
+            (before, 3 * f, 3 * before + 2, before),
+        ]) {
+            let e = eu1::edge(target, *all.get(blend).ok_or_else(nul)?)?.ok_or_else(nul)?;
+            let p = point(at)?;
+            let tangent = rail_toward_vertex(
+                k,
+                target,
+                corner,
+                e,
+                plane,
+                p,
+                planes.planes.get(other).ok_or_else(nul)?,
+                point(mate)?,
+                planes.edges.get(blend).ok_or_else(nul)?.radius,
+                sign,
+            )?;
+            *slot = (p, tangent);
+        }
+        let [(p, Some(tp)), (q, Some(tq))] = ends else {
+            return Ok(None);
+        };
+        let Ok(spring) = spring_curve(plane, p, tp, q, -tq) else {
+            return Ok(None);
+        };
+        springs.push(spring);
+    }
+    Ok(Some(springs))
+}
+
+/// solidcore#2343 (d), the owner's ruling B there: whether the corner's spring curves
+/// ([`corner_springs`]) stay inside their trimmed faces. Each starts inside its face, so it
+/// stays inside where it keeps clear of every edge of the face but the two blended edges at
+/// the vertex ([`on_face::clear_of`]: by more than the corner's tolerance and the edge's). An
+/// edge whose curve is not built on a B-spline gives no hull to bound it by: the spring curve
+/// is not shown clear of it.
+fn springs_on_faces(
+    k: &Kernel,
+    target: &Brep,
+    pseudo: &FilletBrep,
+    corner: &FilletCorner,
+    planes: &CornerPlanes,
+    tol: f64,
+) -> Result<Springs> {
+    let nul = || SolidError::null_pointer(OP_FILL);
+    let vtx = corner.vertex.ok_or_else(nul)?;
+    let Some(springs) = corner_springs(k, target, pseudo, corner, planes)? else {
+        return Ok(Springs::Unmade);
+    };
+    for (&face, spring) in planes.faces.iter().zip(&springs) {
+        let mut seen = Vec::new();
+        for e in face4::edges(target, face, None, false, None)? {
+            if seen.contains(&e) {
+                continue;
+            }
+            seen.push(e);
+            if edge::start_vertex(target, e)? == Some(vtx)
+                || edge::end_vertex(target, e)? == Some(vtx)
+            {
+                continue;
+            }
+            // an edge without a curve is a point, at the ends of edges that are checked
+            let Some(curve) = edge::curve(target, e)? else {
+                continue;
+            };
+            let Some(pieces) = on_face::bezier_pieces(curve)? else {
+                return Ok(Springs::Leave);
+            };
+            let gap = tol + edge::tolerance(target, e)?;
+            for half in [&spring.from_p.curve, &spring.from_q.curve] {
+                if on_face::clear_of(k, half, &pieces, gap)? == Clearance::Near {
+                    return Ok(Springs::Leave);
+                }
+            }
+        }
+    }
+    Ok(Springs::Clear)
+}
+
+/// What a setback that takes a spring curve off its face does, for [`setback_too_long`].
+const SPRING_LEAVES: &str =
+    "takes a setback corner's spring curve off its face (it comes within the edges' tolerance of another edge of the face)";
+
+/// solidcore#2343 (d): where a spring curve leaves its face at the corner's setbacks
+/// ([`springs_on_faces`]), the refusal naming the largest common scale of them on the grid of
+/// thousandths at which every spring curve stays inside its face. It is found by the growth's
+/// bisection ([`bisect_thousandths`], each trial placing the setback vertices again as the
+/// growth does), between 1 and the least scale at which every setback reaches its edge's
+/// least, where the rails cross; the search assumes a spring curve on its face at a scale
+/// stays on it at every smaller one (the curve shrinks toward the vertex with its setbacks),
+/// as the growth assumes certification monotone: checked on the cases, not proved. One asked
+/// for is refused as [`BlendRefusal::SetbackTooLong`] naming that scale times it; the
+/// rule's, naming those setbacks. None at or above the least: no setback builds. `None`
+/// where every spring curve stays on its face, or one is not made (the fill says why).
+#[allow(clippy::too_many_arguments)]
+fn springs_refusal<S: SetbackSolvers>(
+    k: &Kernel,
+    target: &Brep,
+    pseudo: &mut FilletBrep,
+    corner: &mut FilletCorner,
+    solvers: &mut S,
+    planes: &CornerPlanes,
+    fills: &[SetBackFill],
+    tol: f64,
+) -> Result<Option<SetbackRefusal>> {
+    let err = || SolidError::sm_err(OP_FILL);
+    let at_base = springs_on_faces(k, target, pseudo, corner, planes, tol)?;
+    if at_base != Springs::Leave {
+        return Ok(None);
+    }
+    let vtx = corner.vertex.ok_or_else(err)?;
+    let asked = set_back_fill_of(fills, vtx);
+    let sb = corner.setback.as_ref().ok_or_else(err)?;
+    let base = sb.setbacks.clone();
+    if sb.least.len() != base.len() {
+        return Err(err());
+    }
+    let mut least_scale: f64 = 0.0;
+    for (&l, &s) in sb.least.iter().zip(&base) {
+        least_scale = smax(least_scale, l / s);
+    }
+    let growth = Growth {
+        k,
+        target,
+        planes,
+        tol,
+        most: vec![BIG_DOUBLE; base.len()],
+        base,
+    };
+    let mut leaves = |i: i32| -> Result<bool> {
+        Ok(
+            match growth.place(pseudo, corner, solvers, f64::from(i) / 1000.0)? {
+                Some(_) => {
+                    springs_on_faces(k, target, pseudo, corner, planes, tol)? != Springs::Clear
+                }
+                None => true,
+            },
+        )
+    };
+    let lo = (1..1000).find(|&i| f64::from(i) >= 1000.0 * least_scale);
+    let fit = match lo {
+        Some(lo) if !leaves(lo)? => Some(bisect_thousandths(lo, 1000, &mut leaves)? - 1),
+        _ => None,
+    };
+    let Some(fit) = fit.map(|i| f64::from(i) / 1000.0) else {
+        return Ok(Some(SetbackRefusal::no_room(
+            "Fillet Error: no setback at or above where the rails cross keeps the setback corner's spring curves on their faces",
+            Some(0.0),
+        )));
+    };
+    if let Some(a) = asked {
+        return Ok(Some(setback_too_long(
+            a,
+            vtx,
+            fit * a.setback,
+            SPRING_LEAVES,
+        )));
+    }
+    let list: Vec<String> = growth.base.iter().map(|&s| fmt_g(fit * s)).collect();
+    Ok(Some(SetbackRefusal::not_built(format!(
+        "Fillet Error: the rule's setbacks take a setback corner's spring curve off its face (it comes within the edges' tolerance of another edge of the face): setbacks of {} keep every spring curve on its face",
+        list.join(", ")
+    ))))
 }
 
 /// A setback asked at `vtx` that, with its ease, does not fit (`why`): refused, naming
@@ -1906,6 +2220,14 @@ pub fn build_setback_fill<S: SetbackSolvers>(
     let open = set_back_fill_of(fills, vtx).is_some_and(|a| a.open);
     if open && order == 1 {
         return open_setback_springs(pseudo, corner, &planes.planes, &planes.edges);
+    }
+    // beside a curved face, the spring curves stay inside their trimmed faces (#2343 (d))
+    if curved {
+        if let Some(refusal) =
+            springs_refusal(k, target, pseudo, corner, solvers, &planes, fills, tol)?
+        {
+            return Ok(Err(refusal));
+        }
     }
     let mut stats = FillStats::default();
     let first = fill_hole_counted(

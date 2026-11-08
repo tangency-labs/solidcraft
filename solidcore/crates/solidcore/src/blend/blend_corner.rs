@@ -25,6 +25,7 @@
 //! | `FilletBrep::calc_join_section` | `SmFilletVertex::CalcJoinSection` (543d25a) |
 //! | `FilletBrep::calc_rail_int_end_surface` | `SmFilletVertex::CalcRailIntEndSurface` (`SmBlendCornerEnd.cpp`, 3e26f76) |
 //! | [`mixed`]                    | the Mixed corner (`ClassifyMixed`, `MakeMixedTopology`, `CalcMixedVertGeom`, `CalcMixedEdgeGeom`, `CreateMixedPatches`; 6fd0411, 6e79de5, e1a2153) |
+//! | [`on_face`]                  | none: a Setback's spring curve kept inside its trimmed face (solidcore#2343 (d)) |
 //! | [`setback`]                  | the Setback (`ClassifySetBack`, `MakeSetBackTopology`, `BuildSetBackFill`, `CreateSetBackPatches`; 61547af, 1506e2f, f1d81f4) |
 //! | [`swept`]                    | the Swept turn (`Classify`'s Swept part, `BuildSweptSurface`, `CreateSweptPatch`) |
 //! | [`BlendChamferCorner`], [`chamfer`] | not the fork's: chamfers meeting at a vertex, closed by their planes (WR-716, #2345) |
@@ -69,6 +70,7 @@ pub mod ball;
 pub mod chamfer;
 pub mod end;
 pub mod mixed;
+pub mod on_face;
 pub mod setback;
 pub mod swept;
 
