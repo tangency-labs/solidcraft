@@ -44,7 +44,7 @@ fn the_chain_offset_ends_lie_one_millimetre_from_the_source_ends() {
     let (mut s, ids) = chain();
     let r = run(&mut s, "sketch.offset", json!({"curves": ids, "distance": 1.0, "chain": true}));
     let curves = r["curves"].as_array().unwrap();
-    println!("OFFSET_CURVES {}", curves.len());
+    assert_eq!(curves.len(), 1, "the chain offsets to one curve: {curves:?}");
     let sk = s.model.state().sketch(s.active_sketch.unwrap()).unwrap().sketch.clone();
     let ends: Vec<_> = curves
         .iter()
