@@ -23,7 +23,6 @@ render.preflight
 render.scene
 render.start
 sheet.export_dxf
-sketch.draw.dimensioned
 solid.align
 solid.coil
 solid.draft
