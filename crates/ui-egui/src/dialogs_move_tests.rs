@@ -782,20 +782,30 @@ fn box_label(h: &mut crate::scenario::Harness) -> Option<&'static str> {
 #[test]
 fn a_click_on_an_arrow_puts_the_box_on_its_axis() {
     // The press and the release in frames of their own, and both in one frame (input queued while
-    // the window is busy arrives together, #8265).
-    for (handle, label, one_frame) in [("y", "Y", false), ("z", "Z", false), ("x", "X", false), ("y", "Y", true), ("z", "Z", true)] {
+    // the window is busy arrives together, #8265), there with the pointer then moved off the triad.
+    for (handle, label, one_frame, off) in [
+        ("y", "Y", false, false),
+        ("z", "Z", false, false),
+        ("x", "X", false, false),
+        ("y", "Y", true, false),
+        ("z", "Z", true, false),
+        ("y", "Y", true, true),
+    ] {
         let mut h = move_triad_fixture();
         assert_eq!(box_label(&mut h), Some("X"), "the box starts on X");
         let at = h.at(&json!({"gizmo": handle})).unwrap();
         h.frame_with(vec![pointer_at(at)]);
-        if one_frame {
+        if off {
+            let away = h.at(&json!({"gizmo": "ball"})).map(|b| [b[0] - 3.0 * (at[0] - b[0]), b[1] - 3.0 * (at[1] - b[1])]).unwrap();
+            h.frame_with(vec![pointer_button(at, true), pointer_button(at, false), pointer_at(away)]);
+        } else if one_frame {
             h.frame_with(vec![pointer_button(at, true), pointer_button(at, false)]);
         } else {
             h.frame_with(vec![pointer_button(at, true)]);
             h.frame_with(vec![pointer_button(at, false)]);
         }
         h.frames(2);
-        assert_eq!(box_label(&mut h), Some(label), "a click on the {label} arrow (one frame: {one_frame})");
+        assert_eq!(box_label(&mut h), Some(label), "a click on the {label} arrow (one frame: {one_frame}, off: {off})");
         let Kind::Move { x, y, z, .. } = &h.app.dialog.as_ref().unwrap().kind else { panic!("not a move") };
         assert_eq!((x.as_str(), y.as_str(), z.as_str()), ("0 mm", "0 mm", "0 mm"), "a click moves nothing");
     }

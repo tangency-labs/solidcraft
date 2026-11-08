@@ -325,8 +325,29 @@ pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::I
     }
     let bc = if hot(Handle::Ball) { tk.accent } else { Color32::from_gray(235) };
     painter.circle(sh.ball, 6.0, bc, Stroke::new(1.5, Color32::from_gray(60)));
-    let p = pointer?;
-    active?;
+    // The handle under the press itself, owned as `hovered` is (this layer, inside the view): a
+    // press and release in one frame can end with the pointer somewhere else, even off the triad.
+    let pressed = || {
+        let at = ui.input(|i| {
+            i.events.iter().find_map(|e| match e {
+                egui::Event::PointerButton { button: egui::PointerButton::Primary, pressed: true, pos, .. } => Some(*pos),
+                _ => None,
+            })
+        })?;
+        let owned = ui.clip_rect().intersect(proj.rect).contains(at) && ui.ctx().layer_id_at(at) == Some(ui.layer_id());
+        owned.then(|| hit(&sh, at)).flatten()
+    };
+    let click = |h: Option<Handle>| {
+        if let Some(h) = h {
+            ui.data_mut(|d| d.insert_temp(id.with("click"), h));
+        }
+    };
+    let (Some(p), Some(_)) = (pointer, active) else {
+        if state.is_none() {
+            click(pressed());
+        }
+        return None;
+    };
     ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     let r = ui.interact(Rect::from_center_size(p, vec2(24.0, 24.0)), id.with("hit"), Sense::drag());
     // Free drag is driven by the per-frame thread-local set from prefs::manipulator_free_held.
@@ -344,17 +365,7 @@ pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::I
         Some(s) => s,
         None => {
             if !r.drag_started() {
-                // The handle under the press itself: a press and release in one frame can end
-                // with the pointer somewhere else.
-                let pressed_at = ui.input(|i| {
-                    i.events.iter().find_map(|e| match e {
-                        egui::Event::PointerButton { button: egui::PointerButton::Primary, pressed: true, pos, .. } => Some(*pos),
-                        _ => None,
-                    })
-                });
-                if let Some(h) = pressed_at.filter(|p| proj.rect.contains(*p)).and_then(|p| hit(&sh, p)) {
-                    ui.data_mut(|d| d.insert_temp(id.with("click"), h));
-                }
+                click(pressed());
                 return None;
             }
             let h = hovered?;
