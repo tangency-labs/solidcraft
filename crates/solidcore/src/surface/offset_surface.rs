@@ -2371,6 +2371,16 @@ pub(crate) fn extends_as_itself(k: &Kernel, surface: &Surface) -> bool {
     }
 }
 
+/// Whether the offset of `surface` continues as itself: `fixes.offset_extension_from_base` and
+/// `fixes.offset_extension_as_itself` on, and [`extends_as_itself`]. The one place that decides
+/// it: the extension ([`extend_from_base`]), the face a round rolls on and the drop that seeds a
+/// rail end all ask this.
+pub(crate) fn offset_continues_as_itself(k: &Kernel, surface: &Surface) -> bool {
+    k.fixes.offset_extension_from_base
+        && k.fixes.offset_extension_as_itself
+        && extends_as_itself(k, surface)
+}
+
 /// The fork's `sm_GeneratorIsCircle` (tangency-labs/smlib@43fd6b6): whether a surface of
 /// revolution's generator is an arc of one circle, and if so that circle's centre (in the
 /// first column's meridian plane) and the arc's angle. A circle's NURB spans are rational
@@ -2952,7 +2962,7 @@ fn extend_from_base(
     // So does (the fork's tangency-labs/smlib@43fd6b6) a surface of revolution whose
     // generator is a circle (a round's cross section revolved, as SMLib's concave round of an
     // arc is): its generator carried on as its own circle.
-    let as_itself = k.fixes.offset_extension_as_itself && extends_as_itself(k, base);
+    let as_itself = offset_continues_as_itself(k, base);
     // WR-650 (the fork's tangency-labs/smlib@b298cc2): round the axis such a surface is a
     // circle, and its extension reaches no further than closing the turn (half the gap past
     // either end, `sm_RotTurn`); from there on that direction is periodic, its parameters
