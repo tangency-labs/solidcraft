@@ -7174,3 +7174,91 @@ mod attribute_seed_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod band_tests {
+    use super::*;
+    use crate::blend::fillet_executive::NoRoomReason;
+    use crate::geom::extent3d::Extent3d;
+    use crate::geom::global_solver::SolverOperation;
+    use crate::math::Point3;
+    use crate::topology::{brep::p1, edge, Brep};
+
+    fn edge_near(k: &Kernel, b: &Brep, point: [f64; 3]) -> EdgeId {
+        let point = Point3::new(point[0], point[1], point[2]);
+        let mut nearest = (f64::MAX, None);
+        for id in p1::edges(b, None).unwrap() {
+            let Some(curve) = edge::curve(b, id).unwrap() else {
+                continue;
+            };
+            let interval = edge::interval(b, id).unwrap();
+            let d = curve
+                .drop_point(
+                    k,
+                    &interval,
+                    point,
+                    None,
+                    1e-6,
+                    None,
+                    SolverOperation::Minimize,
+                )
+                .unwrap();
+            if d.success && d.distance < nearest.0 {
+                nearest = (d.distance, Some(id));
+            }
+        }
+        assert!(nearest.0 < 2e-3, "no edge near {point:?}");
+        nearest.1.unwrap()
+    }
+
+    /// The two long top edges of a 60 x `width` x 20 box rounded r3 together, with the band
+    /// check on: the reason the executive refused for, if any, and the session's result.
+    fn two_top_rounds(width: f64) -> (Option<NoRoomReason>, Result<()>) {
+        let mut k = Kernel::default();
+        k.fixes.fillet_refuse_overlapping_bands = true;
+        let mut body =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 60.0, width, 20.0)
+                .unwrap();
+        let edges: Vec<_> = [[30.0, 0.0, 20.0], [30.0, width, 20.0]]
+            .into_iter()
+            .map(|p| edge_near(&k, &body, p))
+            .collect();
+        let mut session = FilletSession::new(&mut k, &mut body).unwrap();
+        session
+            .prepare_constant_radius_edges(&mut k, &edges, 3.0, 1, 1, 1.0)
+            .unwrap();
+        let result = session.do_fillet(&mut k);
+        (session.executive.error.no_room, result)
+    }
+
+    /// Two r3 rounds across a 4 mm top: their bands on it overlap, and the blend is refused
+    /// for that; across a 40 mm top they are clear and the rounds build.
+    #[test]
+    fn bands_that_overlap_on_a_face_are_refused_and_bands_apart_are_clear() {
+        let (reason, result) = two_top_rounds(4.0);
+        assert!(result.is_err(), "the 4 mm top: {result:?}");
+        assert_eq!(
+            reason,
+            Some(NoRoomReason::BandsOverlap),
+            "the 4 mm top: {result:?}"
+        );
+        let (reason, result) = two_top_rounds(40.0);
+        result.unwrap();
+        assert_eq!(reason, None);
+    }
+
+    /// A rail's box clear of a band's reach skips the pair; a box without bounds (no box
+    /// could be made) never does.
+    #[test]
+    fn a_rail_beyond_a_bands_reach_is_skipped() {
+        let a = Extent3d::from_points(Point3::new(0.0, 0.0, 0.0), Point3::new(10.0, 1.0, 0.0));
+        let b = Extent3d::from_points(Point3::new(0.0, 30.0, 0.0), Point3::new(10.0, 31.0, 0.0));
+        assert!(beyond_reach(Some(&a), Some(&b)));
+        assert!(!beyond_reach(Some(&a), Some(&a)));
+        let mut near = b;
+        near.expand_absolute(29.5);
+        assert!(!beyond_reach(Some(&a), Some(&near)));
+        assert!(!beyond_reach(None, Some(&b)));
+        assert!(!beyond_reach(Some(&a), None));
+    }
+}
