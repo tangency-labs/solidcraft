@@ -453,6 +453,31 @@ impl OffsetExecutive {
         self.kept_edgeuses.contains(&edgeuse)
     }
 
+    /// Not upstream: the edges [`Self::keep_unmoved_edges`] kept, as their curves over
+    /// their intervals with the tolerance each must stay clear within (its own, at least
+    /// the body's), for the local operation's check that the faces it moved stay clear of
+    /// them ([`super::clearance::all_clear`]). `original` is the B-rep the executive ran on.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::NotFound`] for a dangling id; a null pointer for a kept edge without
+    /// a curve.
+    pub(crate) fn kept_edge_curves(
+        &self,
+        original: &Brep,
+    ) -> Result<Vec<super::clearance::KeptEdge>> {
+        let mut kept = Vec::new();
+        for &e in &self.kept_edges {
+            let curve = edge::curve(original, e)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+            kept.push(super::clearance::KeptEdge {
+                curve: curve.clone(),
+                interval: edge::interval(original, e)?,
+                tolerance: edge::tolerance(original, e)?.max(original.tolerance()),
+            });
+        }
+        Ok(kept)
+    }
+
     /// Sets `m_eOffsetOperation`.
     pub fn set_operation(&mut self, operation: OffsetOperation) {
         self.operation = operation;

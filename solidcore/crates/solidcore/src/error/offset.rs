@@ -174,6 +174,11 @@ pub enum Unsoundness {
     NotManifoldSolid,
     /// The body is a manifold solid whose volume is not positive.
     VolumeNotPositive,
+    /// An edge the operation kept as it was is not proved clear of a face it moved: a
+    /// certified distance bound between the edge's whole curve and the moved face's
+    /// trimmed region does not exceed their tolerances (the edge may cross the face, which
+    /// the body's check cannot see, or the bound is unavailable).
+    KeptEdgeNotClear,
 }
 
 /// How loops of an offset face touch without crossing ([`OffsetFailure::WallsTouch`]).
@@ -448,6 +453,10 @@ impl core::fmt::Display for OffsetFailure {
                 Unsoundness::VolumeNotPositive => f.write_str(
                     "the local operation's body is a manifold solid whose volume is not \
                      positive: refused, the input unchanged",
+                ),
+                Unsoundness::KeptEdgeNotClear => f.write_str(
+                    "an edge the local operation kept as it was is not proved clear of a face \
+                     it moved: refused, the input unchanged",
                 ),
             },
             Self::ExactCurveUncut => f.write_str(
