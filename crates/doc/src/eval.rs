@@ -2599,15 +2599,18 @@ impl Model {
         // with one label), so evaluating the renamed design gives the same names.
         let untouched = self.results.iter().skip(at).all(|r| r.state.body(old).is_some_and(|b| Arc::as_ptr(&b.mesh) == made));
         // Or one body from the feature that made it until it is gone (joined into another), and
-        // no other body's name comes from its name.
+        // no other body's name comes from its name, unless the feature that made that body
+        // stores the name (`body.rename` pins a split's other piece, `X (1)`, #12657): the
+        // renamed design builds it under that name too.
         let held: Vec<bool> = self.results.iter().skip(at).map(|r| r.state.body(old).is_some()).collect();
         let one_run = held.iter().skip_while(|h| **h).all(|h| !*h);
         let derived = format!("{old} (");
+        let stored = |b: &ModelBody| doc.feature(b.feature).is_some_and(|f| f.body_names.contains(&b.name));
         let same_body = || {
             self.results
                 .iter()
                 .skip(at)
-                .all(|r| r.state.bodies.iter().all(|b| if b.name == old { b.feature == feature } else { !b.name.starts_with(&derived) }))
+                .all(|r| r.state.bodies.iter().all(|b| if b.name == old { b.feature == feature } else { !b.name.starts_with(&derived) || stored(b) }))
         };
         let quoted = self.results.iter().skip(at).any(|r| [&r.error, &r.warning].into_iter().flatten().any(|m| m.contains(old)));
         let named_elsewhere = self

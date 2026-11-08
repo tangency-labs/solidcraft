@@ -5281,6 +5281,49 @@ fn renaming_a_body_later_features_change_evaluates_nothing() {
     assert_eq!(s.evaluations, 0, "nor do its undo and redo");
 }
 
+/// #12657: renaming a body that a split cut in two, after many features changed it, evaluates
+/// nothing: the split's other piece (`Caisson (1)`) keeps its name, which the split stores, so
+/// the model is the one evaluating the renamed design gives. Undo and redo do the same.
+#[test]
+fn renaming_a_split_body_evaluates_nothing() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 300, "width": 200, "height": 160, "center": [0, 0, 80], "body_name": "Caisson"}));
+    run(&mut s, "solid.shell", json!({"faces": [[0, 0, 160]], "thickness": 4, "body": "Caisson"}));
+    for i in 0..3 {
+        let base = [-140 + i * 14, -103, 20];
+        run(
+            &mut s,
+            "solid.cylinder",
+            json!({"diameter": 4.5, "height": 10, "base": base, "axis": [0, 1, 0], "operation": "cut", "targets": ["Caisson"]}),
+        );
+    }
+    run(&mut s, "solid.split_body", json!({"body": "Caisson", "plane": {"origin": [0, 0, 80], "normal": [0, 0, 1]}}));
+    let looks = |st: &solidcraft_doc::ModelState| {
+        st.bodies.iter().map(|b| (b.name.clone(), (*solidcraft_doc::naming::face_names(b)).clone())).collect::<Vec<_>>()
+    };
+    let before = looks(&s.model.state());
+    assert!(before.iter().any(|b| b.0 == "Caisson (1)"), "{:?}", before.iter().map(|b| &b.0).collect::<Vec<_>>());
+    let v = body_volume(&s.model.state());
+    s.evaluations = 0;
+    run(&mut s, "body.rename", json!({"body": "Caisson", "name": "Haut"}));
+    assert_eq!(s.evaluations, 0, "a rename evaluates nothing");
+    let after = looks(&s.model.state());
+    assert!(
+        after.iter().any(|b| b.0 == "Haut") && after.iter().any(|b| b.0 == "Caisson (1)"),
+        "{:?}",
+        after.iter().map(|b| &b.0).collect::<Vec<_>>()
+    );
+    let mut fresh = Session::new((*s.doc).clone());
+    fresh.refresh();
+    assert_eq!(looks(&fresh.model.state()), after, "the bodies and face names evaluating the renamed design gives");
+    assert!(rel(body_volume(&fresh.model.state()), v) < 1e-9);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(looks(&s.model.state()), before);
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(looks(&s.model.state()), after);
+    assert_eq!(s.evaluations, 0, "nor do its undo and redo");
+}
+
 /// A body whose name later bodies' names are worked out from (`X` patterned into `X (2)`) keeps
 /// the same copies and face names as opening the renamed design.
 #[test]
