@@ -170,7 +170,7 @@ crates/solidcore/src/blend/fillet_corner/p3.rs	FilletCorner::create_corner_patch
 crates/solidcore/src/blend/fillet_corner/p3.rs	FilletCorner::create_corner_patch_3x2_with	Vec::remove	2	open	remove(idx)	
 crates/solidcore/src/blend/fillet_corner/p3.rs	FilletCorner::create_corner_patch_default_with	int-rem	1	proven	(ii + 1) % 3	constant non-zero divisor
 crates/solidcore/src/blend/fillet_corner/p3.rs	FilletCorner::create_corner_patch_default_with	int-rem	2	open	(ii + 1) % total_edges	
-crates/solidcore/src/blend/fillet_corner/p3.rs	FilletCorner::create_corner_patch_default_with	int-rem	3	open	(init_index + ii) % total_edges	
+crates/solidcore/src/blend/fillet_corner/p3.rs	FilletCorner::create_corner_patch_default_with	int-rem	3	proven	(init_index + ii) % total_edges	inside for ii in 0..total_edges, so total_edges > 0; its only other change adds 1
 crates/solidcore/src/blend/fillet_corner/p3.rs	FilletCorner::create_corner_patch_default_with	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore/src/blend/fillet_corner/p3.rs	FilletCorner::create_corner_patch_default_with	with_capacity	1	open	Vec::with_capacity(ordered_3d.len())	
 crates/solidcore/src/blend/fillet_corner/p3.rs	FilletCorner::create_corner_patch_nx2	Vec::remove	1	open	remove(0)	
@@ -187,9 +187,9 @@ crates/solidcore/src/blend/fillet_corner/topology.rs	FilletCorner::make_nx1_corn
 crates/solidcore/src/blend/fillet_corner/topology.rs	FilletCorner::make_nx1_corner_topology	int-rem	5	open	(idx + total - 1) % total	
 crates/solidcore/src/blend/fillet_corner/topology.rs	FilletCorner::make_nx1_corner_topology	int-rem	6	open	(idx + 1) % total	
 crates/solidcore/src/blend/fillet_corner/topology.rs	FilletCorner::make_nx2_corner_topology	int-rem	1	proven	(found1 + found2) % 2	constant non-zero divisor
-crates/solidcore/src/blend/fillet_corner/topology/ball.rs	FilletCorner::make_ball_topology	int-rem	1	open	(ii + n - 1) % n	
-crates/solidcore/src/blend/fillet_corner/topology/ball.rs	FilletCorner::make_ball_topology	int-rem	2	open	(ii + n - 1) % n	
-crates/solidcore/src/blend/fillet_corner/topology/ball.rs	FilletCorner::make_ball_topology	int-rem	3	open	(ii + 1) % n	
+crates/solidcore/src/blend/fillet_corner/topology/ball.rs	FilletCorner::make_ball_topology	int-rem	1	proven	(ii + n - 1) % n	inside for ii in 0..n, so n > 0 (n = all.len(), not reassigned)
+crates/solidcore/src/blend/fillet_corner/topology/ball.rs	FilletCorner::make_ball_topology	int-rem	2	proven	(ii + n - 1) % n	inside for ii in 0..n, so n > 0 (n = all.len(), not reassigned)
+crates/solidcore/src/blend/fillet_corner/topology/ball.rs	FilletCorner::make_ball_topology	int-rem	3	proven	(ii + 1) % n	inside for ii in 0..n, so n > 0 (n = all.len(), not reassigned)
 crates/solidcore/src/blend/fillet_corner/topology/ball.rs	FilletCorner::make_ball_topology	with_capacity	1	open	Vec::with_capacity(n)	
 crates/solidcore/src/blend/fillet_corner/topology/ball.rs	FilletCorner::make_ball_topology	with_capacity	2	open	Vec::with_capacity(n)	
 crates/solidcore/src/blend/fillet_corner/topology/concave_nxn.rs	FilletCorner::make_concave_nxn_corner_topology	Vec::insert	1	open	insert(jj, extra)	
@@ -272,7 +272,7 @@ crates/solidcore/src/blend/fillet_outline.rs	decide	with_capacity	2	proven	Vec::
 crates/solidcore/src/blend/fillet_outline.rs	decide	with_capacity	3	proven	Vec::with_capacity(2)	constant capacity
 crates/solidcore/src/blend/fillet_outline.rs	outline_supports	with_capacity	1	proven	Vec::with_capacity(2)	constant capacity
 crates/solidcore/src/blend/fillet_overflow.rs	extend	Vec::insert	1	proven	insert(0, (q, rev))	index 0 is never past the end
-crates/solidcore/src/blend/fillet_overflow.rs	twice_area	int-rem	1	open	(p + 1) % uv.len()	
+crates/solidcore/src/blend/fillet_overflow.rs	twice_area	int-rem	1	proven	(p + 1) % uv.len()	inside uv.iter().enumerate(), so uv.len() > 0
 crates/solidcore/src/blend/fillet_removal.rs	relink	Vec::remove	1	proven	remove(at)	at is position() in the same Vec
 crates/solidcore/src/blend/fillet_section/certificate.rs	gn_certify_span	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore/src/blend/fillet_section/definition.rs	bern_taylor	windows	1	proven	windows(2)	constant non-zero size
