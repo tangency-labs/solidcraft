@@ -20,7 +20,7 @@ Put a hole in a solid body: a simple hole, a counterbore, a countersink or a tap
 | Hole Tap Type | Simple is a plain drilled hole with a Diameter you type. Tapped drills the tap drill size and shows the thread settings. | Choose Tapped for any tapped hole. |
 | Profile (Tapped) | The thread standard. | UNC for coarse inch threads, UNF for fine inch threads. |
 | Size (Tapped) | The thread size, from a list. The Designation box shows the callout. | 1/4-20 UNC. |
-| Tap drill diameter (Tapped) | The drill for the tapped hole. It fills in the tap maker's drill for the size, and you can type a different one. The app accepts drills from the smaller of the thread's minor diameter and the tap maker's drill, up to 5% over the tap maker's drill, and says the allowed range if you go outside it. For a custom metric size not in the list, the app fills in major diameter minus pitch, the usual rule of thumb; check your tap maker's chart. | 1/4-20 UNC fills in 5.1054 mm (0.201 in, a #7 drill). Typing 0.203 in (13/64) is accepted; 0.220 in is refused because too little thread would engage. |
+| Tap drill diameter (Tapped) | The drill for the tapped hole. It fills in the standard tap drill for the size, the one on a tap drill chart (the app's messages call it "the tap maker's drill"), and you can type a different one. The app accepts drills from the smaller of the thread's minor diameter and the standard tap drill, up to 5% over the standard tap drill, and says the allowed range if you go outside it. For a custom metric size with no entry in the app's tap drill table, the app fills in major diameter minus pitch, the usual rule of thumb; check a tap drill chart. | 1/4-20 UNC fills in 5.1054 mm (0.201 in, a #7 drill). Typing 0.203 in (13/64) is accepted; 0.220 in is refused because too little thread would engage. |
 | Full thread depth (Tapped) | On: the thread runs the full depth of the hole. Off: a Thread depth box appears. | Turn it off for a blind tapped hole. |
 | Thread depth (Tapped) | How deep the full thread goes, separate from the drill Depth. | Drill 0.625 in deep with 0.50 in of thread, so a standard tap doesn't bottom out. |
 | Hand (Tapped) | Right or Left. | Right unless the print calls for LH. |
@@ -43,7 +43,7 @@ Put a hole in a solid body: a simple hole, a counterbore, a countersink or a tap
 #### Tips and common mistakes
 
 - **Do** locate holes from edges the way the print dimensions them. When the part changes size, the holes keep their distances from those edges.
-- **Do** use Tapped and pick the size from the list instead of typing a drill diameter. The hole then carries the thread callout, and the tap drill comes from the tap maker's table.
+- **Do** use Tapped and pick the size from the list instead of typing a drill diameter. The hole then carries the thread callout, and the tap drill comes from a standard tap drill chart.
 - **Do** check the Tap drill diameter before clicking OK. It is shown in millimetres: 5.1054 mm is 0.201 in. If your shop runs a different drill, such as 0.203 in for 1/4-20 in steel, type it in.
 - **Don't** turn on Modeled just to show the hole is tapped. The callout already says it.
 - **Do** turn off Full thread depth on blind tapped holes and set a Thread depth shorter than the drill Depth, so a standard tap doesn't bottom out.
