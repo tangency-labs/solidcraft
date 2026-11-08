@@ -88,7 +88,7 @@ pub(crate) const STILL_RUNNING: &str = "still running:";
 struct Outstanding {
     what: String,
     /// What it does when it finishes; `None`: not known (a request this bridge did not send).
-    effect: Option<control_pending::Effect>,
+    effect: Option<solidcraft_control::Effect>,
     since: Instant,
 }
 
@@ -332,7 +332,7 @@ impl Remote {
         }
         let mut msg = json!({"id": id, "method": method, "params": params});
         // The token goes with every request (an app restarted mid-session has a new one).
-        let token = solidcraft_engine::control_auth::client_token(self.port, self.explicit_token.as_deref());
+        let token = solidcraft_engine::control_auth::APP.client_token(self.port, self.explicit_token.as_deref());
         if let Some(t) = &token {
             msg["token"] = json!(t.token);
         }
@@ -384,7 +384,7 @@ impl Remote {
     /// The tool error for the outstanding request still running after its wait.
     fn still_running(&self, earlier: bool) -> String {
         let Some(o) = &self.outstanding else { return format!("{STILL_RUNNING} a request is still running in the app") };
-        let effect = o.effect.map_or("it was not cancelled and may still change the design when it finishes", control_pending::Effect::when_done);
+        let effect = o.effect.map_or("it was not cancelled and may still change the design when it finishes", solidcraft_control::Effect::when_done);
         let settle = self.waits.settle.as_secs();
         if earlier {
             format!(
@@ -495,7 +495,8 @@ impl Remote {
         }
         // A refused token: say which token file it came from (and whether it is stale).
         outcome(&v).map_err(|error| {
-            solidcraft_engine::control_auth::client_token(self.port, self.explicit_token.as_deref())
+            solidcraft_engine::control_auth::APP
+                .client_token(self.port, self.explicit_token.as_deref())
                 .map_or_else(|| error.clone(), |t| t.explain_error(&error))
         })
     }
@@ -661,7 +662,8 @@ impl Backend for Remote {
         let reply = reply.map_err(|e| self.explain(&e))?;
         let v: Value = serde_json::from_str(&reply).map_err(|e| format!("bad reply from the app: {e}"))?;
         let r = outcome(&v).map_err(|error| {
-            solidcraft_engine::control_auth::client_token(self.port, self.explicit_token.as_deref())
+            solidcraft_engine::control_auth::APP
+                .client_token(self.port, self.explicit_token.as_deref())
                 .map_or_else(|| error.clone(), |t| t.explain_error(&error))
         });
         match r {

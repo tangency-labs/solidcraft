@@ -76,6 +76,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("theme", Class::Shared),
     // the MCP server machinery: JSON-RPC over stdio, lifecycle, tool schemas and argument checks; apps register their tools (#12947)
     ("mcp-server", Class::Shared),
+    // the control channel: the per-launch token and its files, what a request still running does (#12946)
+    ("control", Class::Shared),
     // apps and tooling
     ("solidcraft", Class::Exempt),
     ("cli", Class::Exempt),

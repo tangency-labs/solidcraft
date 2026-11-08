@@ -1,0 +1,9 @@
+[package]
+name = "solidcraft-control"
+description = "The control channel any app may share: the per-launch token and its files, and what a request still running does"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true

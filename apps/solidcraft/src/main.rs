@@ -1222,7 +1222,7 @@ fn main() -> eframe::Result {
             mark("viewport pipelines");
             // `--control`/the environment name a port; otherwise the preference (on by default)
             // opens the default one (docs/control-protocol.md).
-            if let Some(listen_on) = solidcraft_engine::control_auth::plan(control_port, app.preferences.agent_control) {
+            if let Some(listen_on) = solidcraft_control::auth::plan(control_port, app.preferences.agent_control) {
                 let rx = control_server::start(listen_on, cc.egui_ctx.clone());
                 app = app.with_control(rx);
             }

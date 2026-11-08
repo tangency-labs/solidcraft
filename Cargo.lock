@@ -4093,6 +4093,7 @@ dependencies = [
  "serde",
  "serde_json",
  "solidcraft-3dx-client",
+ "solidcraft-control",
  "solidcraft-engine",
  "solidcraft-gpu",
  "solidcraft-space-mouse",
@@ -4127,6 +4128,10 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-color"
+version = "0.40.0-rc.3"
+
+[[package]]
+name = "solidcraft-control"
 version = "0.40.0-rc.3"
 
 [[package]]
@@ -4181,6 +4186,7 @@ dependencies = [
  "serde_path_to_error",
  "solidcore-record",
  "solidcraft-color",
+ "solidcraft-control",
  "solidcraft-doc",
  "solidcraft-geom",
  "solidcraft-io",
@@ -4278,6 +4284,7 @@ version = "0.40.0-rc.3"
 dependencies = [
  "image",
  "serde_json",
+ "solidcraft-control",
  "solidcraft-engine",
  "solidcraft-gpu",
  "solidcraft-mcp-server",

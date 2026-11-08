@@ -1,32 +1,9 @@
-//! What a client is told about a control request that outlasts its wait (docs/control-protocol.md,
-//! #1618): the app's control server and the bridged MCP server both say what the request still
-//! does when it finishes: nothing (it only reads), write a file (an export or a save), or change
-//! the design.
+//! What SolidCraft's requests do when they outlast their wait (docs/control-protocol.md, #1618), as
+//! a [`solidcraft_control::Effect`]: nothing (it only reads), write a file (an export or a save),
+//! or change the design. The app's control server and the bridged MCP server both say it.
 
 use serde_json::Value;
-
-/// What a request still running does when it finishes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Effect {
-    /// It only reads (the design, the window or the command list): nothing changes.
-    ReadsOnly,
-    /// It writes a file (an export, a save, a render to a path); the design stays as it is.
-    WritesFile,
-    /// It changes the design (or may: anything not known to read or only write a file).
-    Changes,
-}
-
-impl Effect {
-    /// What happens when the request finishes, for a message: "it only reads: nothing changes",
-    /// "it was not cancelled and will still write the file when it finishes", …
-    pub fn when_done(self) -> &'static str {
-        match self {
-            Effect::ReadsOnly => "it only reads: nothing changes",
-            Effect::WritesFile => "it was not cancelled and will still write the file when it finishes; the design does not change",
-            Effect::Changes => "it was not cancelled and will still apply when it finishes",
-        }
-    }
-}
+use solidcraft_control::Effect;
 
 /// Control methods that only read: a timed-out one changes nothing when it finishes.
 /// (`ui.screenshot` with a `path`, and `ui.render`, write a file: see [`effect`].)

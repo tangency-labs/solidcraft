@@ -9,8 +9,9 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
+use solidcraft_control::auth;
 use solidcraft_engine::MAX_LINE;
-use solidcraft_engine::control_auth;
+use solidcraft_engine::control_auth::APP;
 use solidcraft_engine::control_pending;
 use solidcraft_ui_egui::ControlRequest;
 use solidcraft_ui_egui::control::{DESIGN_WATCH, DesignWatch, Subscriber};
@@ -44,36 +45,36 @@ fn new_token() -> Option<String> {
 pub fn remove_token_file() {
     if let Ok(files) = TOKEN_FILES.lock() {
         for (path, token) in files.iter() {
-            control_auth::remove_token_file(path, token);
+            auth::remove_token_file(path, token);
         }
     }
     if let Some((port, token)) = APP_PORT.lock().ok().and_then(|p| p.clone()) {
-        control_auth::remove_current_port(port, &token);
+        APP.remove_current_port(port, &token);
     }
 }
 
 /// The port the app's own channel listens on and its token, for removing the discovery file at exit.
 static APP_PORT: std::sync::Mutex<Option<(u16, String)>> = std::sync::Mutex::new(None);
 
-pub fn start(listen_on: control_auth::Listen, ctx: egui::Context) -> Receiver<ControlRequest> {
+pub fn start(listen_on: auth::Listen, ctx: egui::Context) -> Receiver<ControlRequest> {
     let (tx, rx) = channel::<ControlRequest>();
     // Every connection must show the token before anything runs (docs/control-protocol.md).
-    match control_auth::env_token().or_else(new_token) {
+    match APP.env_token().or_else(new_token) {
         Some(token) => {
             let listener = match listen_on {
-                control_auth::Listen::Exact(port) => TcpListener::bind(("127.0.0.1", port)),
-                control_auth::Listen::Default => control_auth::bind_with_fallback(control_auth::DEFAULT_PORT, control_auth::PORT_TRIES),
+                auth::Listen::Exact(port) => TcpListener::bind(("127.0.0.1", port)),
+                auth::Listen::Default => auth::bind_with_fallback(APP.default_port, auth::PORT_TRIES),
             };
             match listener {
                 Ok(l) => {
                     if let Some(port) = listen_on_listener(l, token.clone(), tx, ctx, false) {
-                        if matches!(listen_on, control_auth::Listen::Default) {
+                        if matches!(listen_on, auth::Listen::Default) {
                             solidcraft_engine::note!(
                                 "solidcraft: control channel on the default port 127.0.0.1:{port} (Preferences > Assistant turns it off)"
                             );
                         }
                         // The discovery file: where `solidcraft-cli mcp` finds this app with no arguments.
-                        match control_auth::write_current_port(port) {
+                        match APP.write_current_port(port) {
                             Ok(_) => {
                                 if let Ok(mut p) = APP_PORT.lock() {
                                     *p = Some((port, token));
@@ -114,8 +115,8 @@ pub fn listen_agent(tx: Sender<ControlRequest>, ctx: egui::Context) -> Option<u1
 /// `patient`: every request may wait as long as a batch (a person decides on it).
 fn listen_on_listener(listener: TcpListener, token: String, tx: Sender<ControlRequest>, ctx: egui::Context, patient: bool) -> Option<u16> {
     let port = listener.local_addr().ok()?.port();
-    match control_auth::token_path(port) {
-        Some(path) => match control_auth::write_token_file(&path, &token) {
+    match APP.token_path(port) {
+        Some(path) => match APP.write_token_file(&path, &token) {
             Ok(()) => {
                 solidcraft_engine::note!("solidcraft: control server listening on 127.0.0.1:{port} (token in {})", path.display());
                 if let Ok(mut files) = TOKEN_FILES.lock() {
@@ -411,16 +412,16 @@ fn watch(reply: Receiver<Value>, ticket: Ticket) -> Receiver<Value> {
 /// The reply text for a request that outlasts its wait. A request that only reads changes
 /// nothing when it finishes; an export or a save still writes its file, and any other request
 /// still applies, as it was not cancelled.
-fn timeout_message(what: &str, effect: control_pending::Effect) -> String {
+fn timeout_message(what: &str, effect: solidcraft_control::Effect) -> String {
     match effect {
-        control_pending::Effect::ReadsOnly => {
+        solidcraft_control::Effect::ReadsOnly => {
             format!("timeout: {what} is still running in the app ({}); ask `control.pending` for its answer", effect.when_done())
         }
-        control_pending::Effect::WritesFile => format!(
+        solidcraft_control::Effect::WritesFile => format!(
             "timeout: {what} is still running in the app and will still write the file when it finishes (it was not cancelled: \
              don't send it again; the design does not change); ask `control.pending` for its result"
         ),
-        control_pending::Effect::Changes => format!(
+        solidcraft_control::Effect::Changes => format!(
             "timeout: {what} is still running in the app and will still apply when it finishes (it was not cancelled: don't send it \
              again); ask `control.pending` for its result"
         ),
@@ -607,7 +608,7 @@ fn serve_with(
         // The first request must carry the token; later ones on the same connection may.
         if !authenticated {
             match token_of(&line) {
-                Some(t) if control_auth::tokens_match(&t, token) => {
+                Some(t) if auth::tokens_match(&t, token) => {
                     if reader.get_mut().admit().is_err() {
                         break;
                     }
