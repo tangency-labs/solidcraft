@@ -87,6 +87,11 @@ const MAX_TOLERANCE: f64 = 1.0;
 const VERTEX_GAP_MARGIN: f64 = 1.5;
 /// Intervals an edge's curve is measured over against each face's surface it bounds.
 const EDGE_GAP_SAMPLES: usize = 16;
+/// The least span of a face's parameter box along a direction of its surface that is not
+/// closed on itself, where its natural range has room ([`face_domain`]): 50 times the 2e-5 mm
+/// within which SMLib takes two of a surface's sides for one (#12757: a planar sliver face
+/// 1e-5 mm wide).
+const OPEN_DOMAIN_SPAN: f64 = 1e-3;
 /// An edge's tolerance over the largest gap measured between its pcurves and its curve, as the
 /// record check measures it: with margin, as a vertex's.
 const EDGE_GAP_MARGIN: f64 = 1.5;
@@ -1629,9 +1634,18 @@ fn face_domain(surface: &BSurface, pcs: &[Vec<Curve2>]) -> R<[[f64; 2]; 2]> {
                     y = a + TAU;
                 }
             }
+            // A direction not closed on itself: the box is the reader's to choose within the
+            // natural range (all of it for a plane, or along a cylinder's axis), and SMLib
+            // refuses a surface whose opposite sides lie within its tolerance of each other
+            // (`SmSurface` test #6, "partially coincident boundaries"), so a sliver face's box
+            // is at least `OPEN_DOMAIN_SPAN` across where its range has room.
             Some(Natural::Range(n0, n1)) => {
                 x = x.max(*n0);
                 y = y.min(*n1);
+                if y - x < OPEN_DOMAIN_SPAN {
+                    let c = 0.5 * (x + y);
+                    (x, y) = ((c - 0.5 * OPEN_DOMAIN_SPAN).max(*n0), (c + 0.5 * OPEN_DOMAIN_SPAN).min(*n1));
+                }
             }
             None => {}
         }

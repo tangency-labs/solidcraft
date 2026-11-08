@@ -596,6 +596,41 @@ fn cube_entities() -> String {
     s
 }
 
+/// A planar lens: the line from (0, 0, 0) to (`len`, 0, 0) and the arc back through
+/// (`len` / 2, `width`, 0), as a sliver a part writes where two of its faces nearly meet,
+/// on the plane z = 0 with its x axis across the lens (along y), in a file stating 1e-6 mm.
+fn planar_lens(len: f64, width: f64) -> String {
+    let r = (len * len / 4.0 + width * width) / (2.0 * width);
+    let f = |x: f64| format!("{x:.17E}");
+    let mut t = String::from(HEAD);
+    t += "#10=CARTESIAN_POINT('',(0.,0.,0.));\n#11=DIRECTION('',(0.,0.,1.));\n#12=DIRECTION('',(0.,1.,0.));\n";
+    t += "#13=AXIS2_PLACEMENT_3D('',#10,#11,#12);\n#14=PLANE('',#13);\n";
+    t += &format!("#20=CARTESIAN_POINT('',({},0.,0.));\n#21=VERTEX_POINT('',#10);\n#22=VERTEX_POINT('',#20);\n", f(len));
+    t += "#30=DIRECTION('',(1.,0.,0.));\n#31=VECTOR('',#30,1.);\n#32=LINE('',#10,#31);\n#33=EDGE_CURVE('',#21,#22,#32,.T.);\n";
+    // The arc from the line's end back to its start, centred below the line.
+    t += &format!("#40=CARTESIAN_POINT('',({},{},0.));\n", f(len / 2.0), f(width - r));
+    t += "#41=AXIS2_PLACEMENT_3D('',#40,#11,#30);\n";
+    t += &format!("#42=CIRCLE('',#41,{});\n#43=EDGE_CURVE('',#22,#21,#42,.T.);\n", f(r));
+    t += "#50=ORIENTED_EDGE('',*,*,#33,.T.);\n#51=ORIENTED_EDGE('',*,*,#43,.T.);\n#52=EDGE_LOOP('',(#50,#51));\n";
+    t += "#53=FACE_OUTER_BOUND('',#52,.T.);\n#54=ADVANCED_FACE('',(#53),#14,.T.);\n";
+    t += "#60=OPEN_SHELL('',(#54));\n#61=SHELL_BASED_SURFACE_MODEL('Lens',(#60));\n#62=MANIFOLD_SURFACE_SHAPE_REPRESENTATION('',(#61),#70);\n";
+    t += &context(70, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += TAIL;
+    t
+}
+
+#[test]
+fn a_sliver_planar_face_passes_smlibs_check() {
+    // A lens 0.77 mm long and 1e-5 mm wide (#12757: such a face on an imported part). A plane
+    // is unbounded, so the face's parameter box is the reader's to choose: kept to its pcurves,
+    // padded 1e-6, its two sides across the lens lay within SMLib's tolerance of each other,
+    // and SMLib refused the body ("Bad Surf Coincidence at Seam: Open surface has partially
+    // coincident boundaries").
+    let imp = step_import(&planar_lens(0.77, 1e-5)).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    crate::validation::check_kept(&imp.bodies[0].body).unwrap_or_else(|e| panic!("{e}"));
+}
+
 fn context(id: u64, unit: &str) -> String {
     format!(
         "#{id}=(GEOMETRIC_REPRESENTATION_CONTEXT(3)GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#{}))GLOBAL_UNIT_ASSIGNED_CONTEXT((#{},#{}))REPRESENTATION_CONTEXT('',''));\n#{}=UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-6),#{},'','');\n#{}={unit};\n#{}=(NAMED_UNIT(*)PLANE_ANGLE_UNIT()SI_UNIT($,.RADIAN.));\n",
