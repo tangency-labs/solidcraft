@@ -1040,6 +1040,18 @@ impl ui_kit::Expressions for DocExpressions {
     fn complete(&self, ui: &mut egui::Ui, response: &egui::Response, text: &mut String) -> bool {
         complete(ui, response, text)
     }
+
+    fn unit_scale(&self, units: &str) -> (f64, &'static str) {
+        crate::prefs::unit_scale(units)
+    }
+
+    fn length_number(&self, mm: f64, unit: &str, decimals: u8) -> String {
+        crate::prefs::length_number(mm, unit, decimals)
+    }
+
+    fn parse_length_mm(&self, text: &str, scale: f64) -> Option<f64> {
+        crate::prefs::parse_length_mm(text, scale)
+    }
 }
 
 /// Give the kit's value fields in `ctx` SolidCraft's expressions, unless they have them already.
