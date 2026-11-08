@@ -107,6 +107,12 @@ The [architecture page](docs/architecture.md) has the layer table. The short ver
 
 `cargo xtask layers` fails the build if a lower layer depends on a higher one.
 
+Whether a change belongs in SolidCraft or in SolidCore is decided by
+[`solidcore/docs/layers.md`](solidcore/docs/layers.md). Its tests: the **kernel** (`solidcore`)
+computes geometry any client could use; **ops** (`solidcore-ops`) is a recipe of kernel calls for a
+workflow, with no geometric quantity of its own; the **app** (SolidCraft) holds state and maps input
+to commands, with no geometry math.
+
 ## Rules that aren't negotiable
 
 1. **Independent.** SolidCraft is independent. Behaviour is designed from public

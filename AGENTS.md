@@ -13,7 +13,7 @@ Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelle
 - Model decisions (what an operation does, which bodies it touches, which face or edge a point or name means, depths, nearness) use exact geometry; a mesh is for display, export, previews and mesh bodies (`xtask/mesh-decisions.txt` only shrinks): `cargo xtask mesh-decisions`.
 - New kernel cases go in `solidcore`: `cargo xtask lists`.
 - Everything is a command and programmatic calls never open dialogs: `skills/solidcraft-commands/SKILL.md`.
-- Layering; only `crates/kernel` uses truck; solidcore only via `solidcore-ops`/`-tess`/`-record` (`xtask/solidcore-seam.txt`): `cargo xtask layers`.
+- Layering; only `crates/kernel` uses truck; solidcore only via `solidcore-ops`/`-tess`/`-record` (`xtask/solidcore-seam.txt`; see `solidcore/docs/layers.md`): `cargo xtask layers`.
 - One outer UI container, one camera path (`navigation::handle`), colours from theme tokens: `cargo xtask ui-containers`.
 - Application code is Rust only and builds for wasm: `cargo xtask wasm`, `cargo xtask web-offline-test`.
 - The product name is SolidCraft; the old name lives only in `docs/compatibility.md`.
@@ -25,7 +25,7 @@ Work: ROADMAP.md, "Where help is wanted most" in CONTRIBUTING.md, issues labelle
 - A regression test goes in the area's existing test file, never a per-bug file (#3226).
 - Look at open PRs first, claim with a draft PR (lowest number wins), one topic per PR: `skills/solidcraft-contributing/SKILL.md`.
 - A PR's title and first sentence make sense to someone who never saw your chat or the issue: `skills/solidcraft-contributing/SKILL.md`.
-- Code, comments, commit messages and docs are in English, always: `skills/solidcraft-contributing/SKILL.md` ("Working as an agent").
+- Code, comments, commits and docs are in English: `skills/solidcraft-contributing/SKILL.md` ("Working as an agent").
 - Independent work runs in parallel, dependent work stays sequential: `skills/solidcraft-contributing/SKILL.md` ("Working as an agent").
 - Show observable changes with real screenshots or a recording, captured yourself.
 - Run `cargo xtask ci` before every commit. `cargo xtask skills` keeps this file and `skills/` honest.
