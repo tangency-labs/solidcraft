@@ -248,23 +248,6 @@ fn sel_bodies(app: &SolveApp) -> Vec<String> {
     v
 }
 
-/// The bodies of everything selected (bodies, and the bodies of faces, edges and vertices), in
-/// selection order, each once: what Save As Mesh and Send to Slicer from a face or edge take.
-fn sel_solid_bodies(app: &SolveApp) -> Vec<String> {
-    let mut v: Vec<String> = Vec::new();
-    for s in &app.session.selection {
-        let name = match s {
-            Sel::Body { name } => name,
-            Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => body,
-            _ => continue,
-        };
-        if !v.contains(name) {
-            v.push(name.clone());
-        }
-    }
-    v
-}
-
 /// The sketch a selected sketch curve or point belongs to. Geometry of a sketch that is not
 /// being edited selects as `ExternalSketchCurve` or `ExternalSketchPoint`
 /// (`viewport::hit_candidate`). Those two carry the owning sketch's feature id. The entities of
@@ -493,7 +476,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
     // A selected browser body saves or sends the whole selection, as Appearance below acts on it;
     // a row outside the selection still takes only the body that was right-clicked.
     if let Target::Body { name } = target {
-        let bodies = sel_solid_bodies(app);
+        let bodies = touched_bodies(app);
         if bodies.contains(name) {
             each_item(&mut v, &mut |item: &mut Item| {
                 if matches!(item.id.as_str(), "ui.saveMesh" | "ui.sendToSlicer") {
@@ -676,7 +659,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act("ui.appearance", "Appearance", "appearance").key("A"));
         v.push(act("ui.properties", "Properties", "measure").with(json!({ "bodies": [face] })));
         // Every body selected goes, not only the one right-clicked.
-        let bodies = sel_solid_bodies(app);
+        let bodies = touched_bodies(app);
         v.push(act("ui.saveMesh", "Save As Mesh", "export").with(json!({ "bodies": bodies })));
         v.push(act("ui.sendToSlicer", "Send to Slicer", "export").with(json!({ "bodies": bodies })).on(crate::dialogs_save_mesh::available(app)));
         v.push(Item::sep());
@@ -698,7 +681,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": [body] })));
         v.push(Item::sep());
         v.push(act("ui.findBrowser", "Find in Browser", "list").with(json!({ "body": body })));
-        v.push(act("ui.saveMesh", "Save As Mesh", "export").with(json!({ "bodies": sel_solid_bodies(app) })));
+        v.push(act("ui.saveMesh", "Save As Mesh", "export").with(json!({ "bodies": touched_bodies(app) })));
         v.push(Item::sep());
         v.push(act("ui.tangentChain", "Select Tangent Chain", "chain"));
         v.push(cmd(app, "inspect.measure", "Measure"));
