@@ -142,7 +142,7 @@ mod tests {
         let post = cylinder(Vec3::ZERO, Vec3::Z, 1.5, 10.0).unwrap();
         let clone = post.clone();
         let first = post.exact_bounds().unwrap();
-        assert_eq!(clone.bounds.get(), Some(&first));
+        assert_eq!(*clone.bounds.lock().unwrap(), Some(first));
         assert_eq!(clone.exact_bounds().unwrap(), first);
         let moved = transform(&post, Vec3::new(5.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0).unwrap();
         let b = moved.exact_bounds().unwrap();

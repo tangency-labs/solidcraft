@@ -35,7 +35,7 @@ pub struct Body {
     pub(crate) volume: Option<std::sync::Arc<std::sync::Mutex<Option<(u64, f64)>>>>,
     /// The exact box ([`Body::exact_bounds`]), measured on first use and shared by clones
     /// because they share the record.
-    pub(crate) bounds: std::sync::Arc<std::sync::OnceLock<Aabb3>>,
+    pub(crate) bounds: std::sync::Arc<std::sync::Mutex<Option<Aabb3>>>,
     /// Set for mesh bodies (`record` is then empty).
     pub(crate) mesh: Option<std::sync::Arc<crate::meshbody::TriMesh>>,
     /// Display colour (linear RGB 0..1) from an imported file; operations drop it.
@@ -497,7 +497,7 @@ impl Body {
             smlib: std::sync::Arc::new(std::sync::OnceLock::new()),
             size,
             volume: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
-            bounds: std::sync::Arc::new(std::sync::OnceLock::new()),
+            bounds: std::sync::Arc::new(std::sync::Mutex::new(None)),
             mesh,
             color: None,
             paint: None,
@@ -1067,11 +1067,15 @@ impl Body {
         if self.is_mesh() {
             return Ok(self.outline_bounds());
         }
-        if let Some(b) = self.bounds.get() {
-            return Ok(*b);
+        // Held while measuring, so callers on other threads wait for this measurement.
+        let mut slot = self.bounds.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(b) = *slot {
+            return Ok(b);
         }
         let (lo, hi) = self.smlib()?.bounds().map_err(|e| KernelError::smlib("SMLib bounds", e))?;
-        Ok(*self.bounds.get_or_init(|| Aabb3 { min: v3(lo), max: v3(hi) }))
+        let b = Aabb3 { min: v3(lo), max: v3(hi) };
+        *slot = Some(b);
+        Ok(b)
     }
 
     /// The body's volume from a mesh at `tol`, measured once per (record, tolerance): clones of
