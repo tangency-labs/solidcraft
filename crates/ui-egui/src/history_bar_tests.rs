@@ -25,6 +25,8 @@ fn bar(steps: usize, marker: usize, play: bool) -> Bar<'static> {
 struct Steps {
     labels: Vec<&'static str>,
     folded: Option<(usize, usize)>,
+    /// Each step's state and whether it failed, by slot (default: neither).
+    marks: Vec<(StepState, bool)>,
 }
 
 impl Contents for Steps {
@@ -41,14 +43,15 @@ impl Contents for Steps {
                 continue;
             }
             let tip = || format!("{label} tip");
+            let (state, error) = self.marks.get(slot).copied().unwrap_or_default();
             strip.step(&Step {
                 id: slot as u64 + 1,
                 slot,
                 label,
                 icon: "box",
                 icon_accent: None,
-                state: StepState::default(),
-                error: false,
+                state,
+                error,
                 warning: false,
                 ink: None,
                 tip: &tip,
@@ -64,6 +67,7 @@ struct Rig {
     rect: Rect,
     labels: Vec<&'static str>,
     folded: Option<(usize, usize)>,
+    marks: Vec<(StepState, bool)>,
     time: Cell<f64>,
     hovered: Cell<Option<u64>>,
 }
@@ -76,6 +80,7 @@ impl Rig {
             rect: Rect::from_min_size(pos2(0.0, 100.0), vec2(700.0, 40.0)),
             labels: labels.to_vec(),
             folded: None,
+            marks: Vec::new(),
             time: Cell::new(0.0),
             hovered: Cell::new(None),
         };
@@ -84,6 +89,11 @@ impl Rig {
     }
 
     fn frame_with(&self, events: Vec<Event>, modifiers: Modifiers) -> Vec<Action> {
+        self.output(events, modifiers).0
+    }
+
+    /// A frame's actions and what it painted.
+    fn output(&self, events: Vec<Event>, modifiers: Modifiers) -> (Vec<Action>, egui::FullOutput) {
         solidcraft_ui_registry::clear_handles();
         self.time.set(self.time.get() + 1.0 / 60.0);
         let mut actions = Vec::new();
@@ -95,16 +105,16 @@ impl Rig {
             focused: true,
             ..Default::default()
         };
-        crate::test_support::frame(&self.ctx, input, |ui| {
+        let output = crate::test_support::frame(&self.ctx, input, |ui| {
             let head = header(ui, &self.bar, self.rect);
             actions.extend(head.actions);
             let strip_rect = Rect::from_min_max(pos2(head.x, self.rect.top()), self.rect.right_bottom());
-            let mut steps = Steps { labels: self.labels.clone(), folded: self.folded };
+            let mut steps = Steps { labels: self.labels.clone(), folded: self.folded, marks: self.marks.clone() };
             let out = strip(ui, &self.bar, self.rect, strip_rect, "test_strip", &mut steps);
             self.hovered.set(out.hovered);
             actions.extend(out.actions);
         });
-        actions
+        (actions, output)
     }
 
     fn frame(&self, events: Vec<Event>) -> Vec<Action> {
@@ -258,4 +268,67 @@ fn an_empty_bar_has_the_marker_at_its_start_and_returns_only_its_drop() {
     let first = rig.at("test:ctl:last");
     assert!(marker.x > first.x, "the marker after the controls");
     assert_eq!(rig.drag(marker, marker + vec2(80.0, 0.0)), vec![Action::Seek(Seek::Slot { slot: 0, before: false })]);
+}
+
+#[test]
+fn a_step_after_the_marker_dropped_at_the_marker_returns_the_side_it_is_dropped_on() {
+    let rig = Rig::new(&["A", "B", "C"], 2);
+    let c = rig.at("test:C");
+    let marker = rig.marker();
+    assert_eq!(rig.drag(c, marker - vec2(5.0, 0.0)), vec![Action::Reorder { step: 3, slot: 2, before: true }], "before it: built");
+    let marker = rig.marker();
+    assert_eq!(rig.drag(rig.at("test:C"), marker + vec2(5.0, 0.0)), vec![Action::Reorder { step: 3, slot: 2, before: false }], "after it");
+}
+
+/// Every filled rect and circle a frame painted.
+fn painted(output: &egui::FullOutput) -> (Vec<egui::epaint::RectShape>, Vec<egui::epaint::CircleShape>) {
+    let (mut rects, mut circles) = (Vec::new(), Vec::new());
+    for clipped in &output.shapes {
+        crate::test_support::each_shape(&clipped.shape, &mut |shape| match shape {
+            egui::Shape::Rect(rect) => rects.push(rect.clone()),
+            egui::Shape::Circle(circle) => circles.push(*circle),
+            _ => {}
+        });
+    }
+    (rects, circles)
+}
+
+#[test]
+fn a_steps_state_reaches_its_chip_and_the_floating_card_dots_the_last_done_step() {
+    let t = Tokens::get();
+    let mut rig = Rig::new(&["A", "B", "C", "D"], 4);
+    let done = StepState { last_done: true, ..StepState::default() };
+    rig.marks = vec![
+        (StepState::default(), false),
+        (StepState { highlighted: true, ..StepState::default() }, false),
+        (StepState { rolled_back: true, ..StepState::default() }, false),
+        (done, true),
+    ];
+    rig.frame(Vec::new());
+    let (_, output) = rig.output(Vec::new(), Modifiers::NONE);
+    let (rects, circles) = painted(&output);
+    let chip = |label: &str| {
+        let centre = rig.at(&format!("test:{label}"));
+        let rect = Rect::from_center_size(centre, vec2(28.0, 28.0));
+        rects.iter().find(|r| r.rect == rect).cloned().unwrap_or_else(|| panic!("{label}'s chip is painted"))
+    };
+    let (plain, lit, rolled, failed) = (chip("A"), chip("B"), chip("C"), chip("D"));
+    assert_eq!(plain.fill, t.timeline_item);
+    assert_eq!((lit.fill, lit.stroke.color), (t.hover, rig.bar.accent.color), "highlighted: lit as though hovered");
+    assert!(rolled.fill.a() < plain.fill.a(), "rolled back: faded");
+    assert_eq!((failed.fill, failed.stroke.color), (t.form_error_fill, t.form_error), "an error marks the chip");
+    let dot = |rig: &Rig| {
+        let d = rig.at("test:D");
+        let at = pos2(d.x, d.y + 14.0 + t.space_3);
+        let (_, output) = rig.output(Vec::new(), Modifiers::NONE);
+        painted(&output).1.iter().any(|c| c.center == at && c.fill == rig.bar.accent.color)
+    };
+    assert!(!circles.iter().any(|c| c.fill == rig.bar.accent.color && c.radius == t.space_2), "a docked bar draws no dot");
+    assert!(!dot(&rig));
+    rig.bar.floating = true;
+    rig.frame(Vec::new());
+    assert!(dot(&rig), "the floating card dots the last step before the marker");
+    rig.marks[3] = (StepState::default(), true);
+    rig.frame(Vec::new());
+    assert!(!dot(&rig), "only that step");
 }
