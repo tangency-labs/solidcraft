@@ -5,7 +5,7 @@ use solidcore_ops::boolean::{boolean, imprint, union_all};
 use solidcore_ops::{make_box, session, Body, BooleanOp, Error};
 
 fn all_fixes() {
-    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
 }
 
 fn volume(b: &Body) -> f64 {

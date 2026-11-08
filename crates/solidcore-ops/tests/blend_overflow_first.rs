@@ -38,7 +38,7 @@ fn fixes() {
         .iter()
         .copied()
         .filter(|n| !off.contains(n));
-    session::set_fixes(on).unwrap();
+    session::set_thread_fixes(on).unwrap();
 }
 
 /// The index of the edge nearest each point, read as `Body::from_smb` reads the file (the same

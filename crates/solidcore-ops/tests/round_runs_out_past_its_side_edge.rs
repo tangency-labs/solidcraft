@@ -28,7 +28,7 @@ fn rounded() -> Body {
     f.fillet_refuse_rounds_breaking_through = false;
     f.fillet_round_ends_on_outline = false;
     let on: Vec<&str> = f.flags().filter(|(_, on)| *on).map(|(n, _)| n).collect();
-    session::set_fixes(on.iter().copied()).unwrap();
+    session::set_thread_fixes(on.iter().copied()).unwrap();
     let b = make_box([0.0; 3], [60.0, 40.0, 20.0]).unwrap();
     let e = edge_at(&b, [30.0, 40.0, 20.0]);
     blend(&b, Blend::Round, &[e], &[5.0], &[], Corners::Filled).unwrap();

@@ -110,7 +110,7 @@ fn rounds_as_the_exact_wedge_does() {
         "../../solidcore/tests/kernel_cases/fixes.json"
     ))
     .unwrap();
-    session::set_fixes(fixes.iter().map(String::as_str)).unwrap();
+    session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
     let record: Record =
         serde_json::from_str(include_str!("data/raked_wedge_noisy_cylinders.json")).unwrap();
     let (noisy, _) = Body::from_record(&record, true).unwrap();

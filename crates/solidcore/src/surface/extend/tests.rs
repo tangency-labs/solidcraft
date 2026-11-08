@@ -88,8 +88,7 @@ fn arc(x: f64) -> f64 {
     0.5 * x * (1.0 + 4.0 * x * x).sqrt() + 0.25 * (2.0 * x).asinh()
 }
 
-/// The enclosure holds `d` within the stop: `max(1e-9 d, its truncation and rounding parts and
-/// the stored net's resolution)`,
+/// The enclosure holds `d` within the stop: `max(1e-9 d, its truncation and rounding parts)`,
 /// every leaf converged, the truncation part at most `1e-9 d` and the rounding part at most
 /// `1e-6 d` (owner); the source kept and the extension's bound finite.
 fn meets(e: &Extended, d: f64) {
@@ -103,7 +102,7 @@ fn meets(e: &Extended, d: f64) {
         e.extension
     );
     let b = a.enclosure;
-    let tol = (1e-9 * d).max(a.truncation + a.rounding + a.resolution);
+    let tol = (1e-9 * d).max(a.truncation + a.rounding);
     assert!(b.lower >= d - tol && b.upper <= d + tol, "{b:?} for {d}");
     assert_eq!(e.source, 0.0);
     assert!(e.extension >= 0.0, "{}", e.extension);
@@ -564,6 +563,11 @@ fn natural_carries_a_bound_that_holds_the_closed_form() {
 /// A length that is not measured to the stop is no measurement: not met however close
 /// (owner): a leaf not converged, a truncation part past `1e-9 d`, a rounding part past
 /// `1e-6 d`, an extension bound not finite, or no length at all.
+///
+/// The last case once expected a narrow enclosure 3e-9 off `d` to be `Met` when the stored
+/// net's resolution was 4e-9 (the stop then widened by the resolution) and `Short` at 1e-9.
+/// The stop is exact (#2977): the enclosure is 3e-9 off `d` and the stop is `max(1e-9 d, its
+/// parts)` = 1e-9, so it is `Short` at either resolution.
 #[test]
 fn a_length_not_measured_to_the_stop_is_unproved() {
     let at = |lower: f64, upper: f64, truncation: f64, rounding: f64, converged: bool| Across {
@@ -607,13 +611,12 @@ fn a_length_not_measured_to_the_stop_is_unproved() {
         says(Some(&at(2.0, 9.0, 0.0, 7.0, true)), 0.0, d),
         Says::Past(_)
     ));
-    // a narrow enclosure off d by more than the stop but within the stored net's own
-    // resolution (no net of floats is nearer): met; past its resolution: short
+    // a narrow enclosure off d by more than the stop: short, whatever the net's resolution
     let off = |resolution: f64| Across {
         resolution,
         ..at(1.0 - 3e-9, 1.0 - 3e-9 + 1e-15, 0.0, 1e-15, true)
     };
-    assert_eq!(says(Some(&off(4e-9)), 0.0, d), Says::Met);
+    assert!(matches!(says(Some(&off(4e-9)), 0.0, d), Says::Short(_)));
     assert!(matches!(says(Some(&off(1e-9)), 0.0, d), Says::Short(_)));
 }
 
@@ -2482,49 +2485,76 @@ fn reference_length(e: &Extended, side: BoxSide) -> f64 {
     total
 }
 
-/// A tolerance-sized extension (`1e-5`, a B-rep tolerance at part size; `1.0133e-3`, a
-/// pyramid file's) of a side about 170 from the origin is certified Natural and Ruled (the
-/// local operation's), past either end, on a polynomial and a rational net: the across
+/// A tolerance-sized extension of a side about 170 from the origin, past either end, on a
+/// polynomial and a rational net, Natural and Ruled (the local operation's): the across
 /// measure works on the net's differences from the joint, so its rounding is the extension's
 /// size times a few ulps, not the part's; the construction bound counts a weight's error at
-/// the weights' size. Its enclosure holds a high-precision reference length, and its parts
-/// bound the measure's real error. (Tangent and Curvature still carry their mirror's bound
-/// at the part's size: refused at `1e-5` here.)
+/// the weights' size. (Tangent and Curvature are certified at a far part in difference form:
+/// `a_mirror_extension_far_from_the_origin_is_bounded_in_difference_form`.)
+///
+/// The stop is exact (#2977). The stored points near 170 lie on a lattice of one ulp,
+/// `2^-45 = 2.8e-14`, so the length across moves in steps of that order and meets `d` to
+/// `1e-9 d` only where a step lands within it: for `d >= s / 2e-9` (`s` the step, 1.4e-5) every
+/// `d` is reachable by this argument, and `1e-4` and `1.0133e-3` (a pyramid file's tolerance)
+/// are asked below and built. `1e-5` (a B-rep tolerance at part size, which this test once
+/// asked and expected built, the stop then widened by the net's resolution) is reached only
+/// where a step lands within `1e-14` of it: where it is not, the extension is refused
+/// `NotExact`, naming the length it reaches (9.99999998706e-6 for the polynomial net's `UMax`,
+/// Ruled), and asking that length builds and meets it. The enclosure of every built extension
+/// holds a high-precision reference length and its parts bound the measure's real error.
 #[test]
 fn a_tolerance_sized_extension_of_a_part_size_side_is_certified() {
+    let check = |e: &Extended, side: BoxSide, d: f64, tag: &str| {
+        meets(e, d);
+        let a = e.across;
+        let exact = reference_length(e, side);
+        let b = a.enclosure;
+        assert!(
+            b.lower <= exact && exact <= b.upper,
+            "{tag}: {b:?} does not hold {exact}"
+        );
+        // the measure's real error within its rounding part (its truncation part is the
+        // leaves' gap, the rest of the enclosure's width)
+        let error = (b.mid() - exact).abs();
+        assert!(
+            error <= a.rounding + a.truncation,
+            "{tag}: error {error:e} past {a:?}"
+        );
+    };
+    let mut refused_polynomial_umax_ruled = false;
     for rational in [false, true] {
         let s = part_side(rational);
         for side in [BoxSide::UMin, BoxSide::UMax] {
             for how in [Continuity::Natural, Continuity::Ruled] {
-                for d in [1e-5, 1.013_333_358_765e-3] {
+                let ask = |d: f64| s.extended_by_distance(&k(), &dom(&s), side, how, d);
+                // reached: built
+                for d in [1e-4, 1.013_333_358_765e-3] {
                     let tag = format!("rational {rational} {side:?} {how:?} {d:e}");
-                    let e = s
-                        .extended_by_distance(&k(), &dom(&s), side, how, d)
+                    let e = ask(d)
                         .unwrap_or_else(|err| panic!("{tag}: {err:?}"))
                         .unwrap_or_else(|| panic!("{tag}: not extended"));
-                    meets(&e, d);
-                    let a = e.across;
-                    let exact = reference_length(&e, side);
-                    let b = a.enclosure;
-                    assert!(
-                        b.lower <= exact && exact <= b.upper,
-                        "{tag}: {b:?} does not hold {exact}"
-                    );
-                    // the measure's real error within its rounding part (its truncation
-                    // part is the leaves' gap, the rest of the enclosure's width)
-                    let error = (b.mid() - exact).abs();
-                    assert!(
-                        error <= a.rounding + a.truncation,
-                        "{tag}: error {error:e} past {a:?}"
-                    );
-                    if std::env::var("EXTEND_REPORT").is_ok() {
-                        eprintln!(
-                            "{tag}: rounding {:e} ({:e} of d), error {error:e}, extension {:e}",
-                            a.rounding,
-                            a.rounding / d,
-                            e.extension
-                        );
+                    check(&e, side, d, &tag);
+                }
+                // a tolerance whose step may not land within the stop: built, or refused
+                // naming the length reached, which builds
+                let d = 1e-5;
+                let tag = format!("rational {rational} {side:?} {how:?} {d:e}");
+                match ask(d) {
+                    Ok(Some(e)) => check(&e, side, d, &tag),
+                    Err(SolidError::ExtendRefused {
+                        refusal: ExtendRefusal::NotExact,
+                        distance: Some(named),
+                        ..
+                    }) => {
+                        refused_polynomial_umax_ruled |=
+                            !rational && side == BoxSide::UMax && how == Continuity::Ruled;
+                        assert!(named < d && d - named < 1e-7 * d, "{tag}: {named:e}");
+                        let e = ask(named)
+                            .unwrap_or_else(|err| panic!("{tag} named {named:e}: {err:?}"))
+                            .unwrap_or_else(|| panic!("{tag} named {named:e}: not extended"));
+                        check(&e, side, named, &tag);
                     }
+                    other => panic!("{tag}: {:?}", other.map(|e| e.map(|e| e.across))),
                 }
             }
         }
@@ -2535,6 +2565,10 @@ fn a_tolerance_sized_extension_of_a_part_size_side_is_certified() {
         assert_eq!(e.sides[1], SideExtension::Unchanged, "rational {rational}");
         assert_eq!(dom(&e.surface), dom(&s));
     }
+    assert!(
+        refused_polynomial_umax_ruled,
+        "1e-5 on the polynomial net's UMax, Ruled, is not reached by its lattice"
+    );
 }
 
 /// A side of the pyramid the difftest unit's `Solids/pyramid.smb` is: a bicubic patch over
@@ -2589,7 +2623,7 @@ fn a_pyramid_side_extends_by_its_tolerance_past_its_base_after_its_ends() {
             panic!("{side:?}: {done:?}");
         };
         assert!(a.rounding <= 1e-6 * d, "{side:?}: {a:?}");
-        let tol = (1e-9 * d).max(a.truncation + a.rounding + a.resolution);
+        let tol = (1e-9 * d).max(a.truncation + a.rounding);
         assert!(
             a.enclosure.lower >= d - tol && a.enclosure.upper <= d + tol,
             "{side:?}: {a:?}"
@@ -2866,7 +2900,19 @@ fn a_reflection_inside_the_merge_scale_snaps_and_one_outside_is_untouched() {
         let g = source.extended(Continuity::Tangent, e).unwrap().unwrap();
         let direct = source.mirrored(end - e, false).unwrap();
         assert_eq!(g.knots, direct.knots, "{delta}");
-        assert_eq!(g.rows, direct.rows, "{delta}");
+        // the extension is made in each row's local frame, so its rows differ from the
+        // direct mirror by the frame's translations: one rounding each way, within a few
+        // gamma_8 of the net's size
+        assert_eq!(g.rows.len(), direct.rows.len(), "{delta}");
+        let tol = 4.0 * gamma(8) * g.size();
+        for (a, b) in g.rows.iter().zip(&direct.rows) {
+            assert_eq!(a.len(), b.len(), "{delta}");
+            for (x, y) in a.iter().zip(b) {
+                for (u, v) in x.iter().zip(y) {
+                    assert!((u - v).abs() <= tol, "{delta}: {u} vs {v}");
+                }
+            }
+        }
         assert_ne!(g.knots, on.knots, "{delta}");
     }
 }
@@ -3089,4 +3135,84 @@ fn sides_extended_in_turn_each_meet_the_distance_at_the_face() {
         let reach = at(0.5, v_end).distance(at(0.5, v_face));
         assert!((reach - d).abs() <= 1e-9 * d, "{v_face}: {reach}");
     }
+}
+
+/// The parabola of [`parabola`] moved by `(o, o, o)`.
+fn moved_parabola(o: f64) -> Surface {
+    let row = |x: f64, y: f64| vec![[x + o, y + o, o, 1.0], [x + o, y + o, 1.0 + o, 1.0]];
+    spline(
+        &[row(0.0, 0.0), row(0.5, 0.0), row(1.0, 1.0)],
+        2,
+        1,
+        &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        &[0.0, 0.0, 1.0, 1.0],
+        false,
+    )
+}
+
+/// The mirror extension's rounding is measured in difference form about each row's own end
+/// point (#2977): at a part 1e5 from the origin its bound is the rounding of moving the points
+/// back (`2 gamma_2` of their size) and the origin's own bound, not the mirror's gain on the
+/// absolute coordinates (`gamma_12 gain` of 1e5, six times that and more).
+#[test]
+fn a_mirror_extension_far_from_the_origin_is_bounded_in_difference_form() {
+    let kk = k();
+    let o = 1e5;
+    let floor = 2.0 * gamma(2) * (o + 2.0) * (1.0 + gamma(16));
+    for how in [Continuity::Tangent, Continuity::Curvature] {
+        let d = 0.4;
+        let at = |o: f64| {
+            let s = moved_parabola(o);
+            s.extended_by_distance(&kk, &dom(&s), BoxSide::UMax, how, d)
+                .unwrap_or_else(|err| panic!("{how:?} at {o:e}: {err:?}"))
+                .unwrap_or_else(|| panic!("{how:?} at {o:e}: not extended"))
+        };
+        let (near, far) = (at(0.0), at(o));
+        meets(&near, d);
+        meets(&far, d);
+        assert!(
+            far.extension <= 2.0 * floor + 64.0 * near.extension,
+            "{how:?}: {:e} at 1e5, {:e} at the origin, floor {floor:e}",
+            far.extension,
+            near.extension
+        );
+    }
+}
+
+/// A straight strip of two points along x at 1e5, extended by Tangent: the end point's x is
+/// stored on the lattice of one ulp (`2^-36` there), so the length across takes only the
+/// values `k 2^-36`. A distance half a lattice step off every one of them is not met to the
+/// stop (1e-9 of it, 1e-12, is far below the step): the extension is refused as not exact,
+/// naming the longest length it does reach, and asking that length succeeds (#2977).
+#[test]
+fn a_distance_the_stored_net_cannot_resolve_is_refused_naming_the_reachable_length() {
+    let kk = k();
+    let o = 1e5;
+    let row = |z: f64| vec![[o, 0.0, z, 1.0], [o + 1.0, 0.0, z, 1.0]];
+    let s = spline(
+        &[row(0.0), row(1.0)],
+        1,
+        1,
+        &[0.0, 0.0, 1.0, 1.0],
+        &[0.0, 0.0, 1.0, 1.0],
+        false,
+    );
+    // the strip runs along v, the side extended is VMax
+    let step = 2f64.powi(-36);
+    let d = ((1e-3 / step).round() + 0.5) * step;
+    let ask = |d: f64| s.extended_by_distance(&kk, &dom(&s), BoxSide::VMax, Continuity::Tangent, d);
+    let Err(SolidError::ExtendRefused {
+        refusal: ExtendRefusal::NotExact,
+        distance: Some(named),
+        ..
+    }) = ask(d)
+    else {
+        panic!("{:?}", ask(d).map(|e| e.map(|e| e.across)));
+    };
+    assert!(named > 0.0 && named < d, "{named:e} for {d:e}");
+    assert!(d - named < 2.0 * step, "{named:e} for {d:e}");
+    let e = ask(named)
+        .unwrap_or_else(|err| panic!("the named {named:e}: {err:?}"))
+        .expect("extended");
+    meets(&e, named);
 }

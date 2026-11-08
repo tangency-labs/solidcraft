@@ -8,7 +8,7 @@ use solidcore_ops::session;
 use solidcore_ops::{make_box, make_sphere, make_torus, PointClass};
 
 fn all_fixes() {
-    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
 }
 
 fn near(a: f64, b: f64, tol: f64) -> bool {

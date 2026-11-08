@@ -34,7 +34,7 @@ fn fixes() {
         .iter()
         .copied()
         .filter(|n| !off.contains(n));
-    session::set_fixes(on).unwrap();
+    session::set_thread_fixes(on).unwrap();
 }
 
 fn operand() -> Body {

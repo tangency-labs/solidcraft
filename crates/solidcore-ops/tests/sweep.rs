@@ -475,20 +475,19 @@ fn run(op: &Op) -> solidcore_ops::Result<Body> {
     }
 }
 
-/// The rig's fix set, the corpus's `fixes.json`, on the process kernel, once.
+/// The rig's fix set, the corpus's `fixes.json`, on the calling thread's kernel. The setting
+/// is thread-local, so every test thread sets it: a `Once` would give the rig's set to the first
+/// thread only.
 fn rig_fixes() {
-    static SET: std::sync::Once = std::sync::Once::new();
-    SET.call_once(|| {
-        let path = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../solidcore/tests/kernel_cases/fixes.json"
-        );
-        let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}"));
-        // A flat JSON array of flag names: every other piece between quotes.
-        let names: Vec<&str> = text.split('"').skip(1).step_by(2).collect();
-        assert!(!names.is_empty(), "{path}: no fixes");
-        solidcore_ops::session::set_fixes(names).unwrap();
-    });
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../solidcore/tests/kernel_cases/fixes.json"
+    );
+    let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+    // A flat JSON array of flag names: every other piece between quotes.
+    let names: Vec<&str> = text.split('"').skip(1).step_by(2).collect();
+    assert!(!names.is_empty(), "{path}: no fixes");
+    solidcore_ops::session::set_thread_fixes(names).unwrap();
 }
 
 fn check(name: &str) {

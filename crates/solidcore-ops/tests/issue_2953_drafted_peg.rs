@@ -49,7 +49,7 @@ fn rounded() -> Body {
         "../../solidcore/tests/kernel_cases/fixes.json"
     ))
     .unwrap();
-    session::set_fixes(fixes.iter().map(String::as_str)).unwrap();
+    session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
     let gz = std::fs::File::open(format!("{CORPUS}/{CASE}.bodies.json.gz")).unwrap();
     let mut text = String::new();
     flate2::read::GzDecoder::new(gz)

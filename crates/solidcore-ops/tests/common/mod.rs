@@ -39,7 +39,7 @@ pub fn built(f: impl FnOnce(&mut Kernel) -> solidcore::Result<Brep>) -> Body {
 }
 
 pub fn all_fixes() {
-    session::set_fixes(UpstreamFixes::NAMES.iter().copied()).unwrap();
+    session::set_thread_fixes(UpstreamFixes::NAMES.iter().copied()).unwrap();
 }
 
 /// The 30 x 20 x 10 block at the origin.

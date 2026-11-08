@@ -20,7 +20,7 @@ use solidcore_ops::{make_box, make_cylinder, session, Body, BooleanOp, Error};
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
 
 fn all_fixes() {
-    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
 }
 
 fn v(x: f64, y: f64) -> Vec2 {

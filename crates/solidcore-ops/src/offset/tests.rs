@@ -95,7 +95,7 @@ fn a_cylinder_shells_open_at_its_top() {
 #[test]
 #[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
 fn a_basin_shells_past_its_rim_to_its_closed_form() {
-    session::set_fixes(
+    session::set_thread_fixes(
         solidcore::kernel::UpstreamFixes::NAMES
             .iter()
             .copied()

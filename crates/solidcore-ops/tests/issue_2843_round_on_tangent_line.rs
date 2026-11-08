@@ -21,7 +21,7 @@ fn operand(x0: f64) -> Result<Body, Error> {
         "../../solidcore/tests/kernel_cases/fixes.json"
     ))
     .unwrap();
-    session::set_fixes(fixes.iter().map(String::as_str)).unwrap();
+    session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
     let b = make_box([0.0; 3], [30.0, 20.0, 20.0]).unwrap();
     let e = edge_at(&b, [0.0, 0.0, 10.0]);
     blend(&b, Blend::Round, &[e], &[5.0], &[], Corners::Filled).unwrap();

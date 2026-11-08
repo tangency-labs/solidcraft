@@ -20,7 +20,7 @@ fn rounded(e: usize) -> (f64, f64) {
         "../../solidcore/tests/kernel_cases/fixes.json"
     ))
     .unwrap();
-    session::set_fixes(fixes.iter().map(String::as_str)).unwrap();
+    session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
     let record: Record = serde_json::from_str(include_str!("data/gear_tooth.record.json")).unwrap();
     let (body, _) = Body::from_record(&record, true).unwrap();
     let before = body.volume(1e-9).unwrap();

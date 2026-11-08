@@ -5,7 +5,7 @@ use solidcore_ops::stitch::stitch;
 use solidcore_ops::{make_box, session, Error};
 
 fn all_fixes() {
-    session::set_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
+    session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
 }
 
 #[test]

@@ -6,8 +6,8 @@
 //!   ([`set_fixes`], by `UpstreamFixes` flag name); which ones is the application's choice, never
 //!   ops'. Everything else about the kernel (its tolerances, context, caches) is the kernel's
 //!   default: ops offers no way to change it, so every kernel the session makes is configured
-//!   alike ([`fresh`]). Each call takes them as it starts. Under `cfg(test)` a test's thread
-//!   names its own, so tests with different fixes share the kernel without racing (#2983).
+//!   alike ([`fresh`]). Each call takes them as it starts. A thread may name its own
+//!   ([`set_thread_fixes`]), so tests with different fixes share the kernel without racing (#2983).
 //! - **Panics:** a panic inside a call is caught; the kernel, which it may have left half-updated,
 //!   is replaced by a fresh one of the same configuration, carrying the process-lifetime state the
 //!   kernel keeps as upstream keeps it for the process (the fillet solver's latched step), and the
@@ -108,9 +108,19 @@ pub fn set_fixes<'a>(
     Ok(())
 }
 
-/// [`set_fixes`] for this test's thread alone, whatever other tests on parallel threads name.
-#[cfg(test)]
-pub(crate) fn set_thread_fixes<'a>(
+/// [`set_fixes`] for the calling thread alone: its calls run with exactly these fixes whatever
+/// other threads name, so tests on parallel threads with different fixes share the one kernel
+/// without racing. A thread that never calls it runs with the process's ([`set_fixes`]).
+///
+/// Not part of the API: it is public only so that this crate's integration tests, which are
+/// separate crates, can name their fixes per test. An application names its fixes once
+/// ([`set_fixes`]); a result that depends on the calling thread is not one an application
+/// should rely on.
+///
+/// # Errors
+/// As [`set_fixes`].
+#[doc(hidden)]
+pub fn set_thread_fixes<'a>(
     on: impl IntoIterator<Item = &'a str>,
 ) -> std::result::Result<(), FixesRefused> {
     let fixes = named(on)?;
@@ -129,7 +139,6 @@ pub fn fixes() -> Vec<&'static str> {
 }
 
 fn current_fixes() -> UpstreamFixes {
-    #[cfg(test)]
     if let Some(fixes) = THREAD_FIXES.with(Cell::get) {
         return fixes;
     }
@@ -165,8 +174,7 @@ fn replacement(old: Option<&Kernel>) -> Kernel {
 }
 
 thread_local! {
-    /// A test's own fixes, when it named some ([`set_thread_fixes`]).
-    #[cfg(test)]
+    /// This thread's own fixes, when it named some ([`set_thread_fixes`]).
     static THREAD_FIXES: Cell<Option<UpstreamFixes>> = const { Cell::new(None) };
     /// How many kernel calls this thread is inside: a panic now is caught ([`run_on`]).
     static IN_CALL: Cell<u32> = const { Cell::new(0) };

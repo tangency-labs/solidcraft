@@ -41,7 +41,7 @@ fn rounded(r: f64) -> Body {
         "../../solidcore/tests/kernel_cases/fixes.json"
     ))
     .unwrap();
-    session::set_fixes(fixes.iter().map(String::as_str)).unwrap();
+    session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
     let gz = std::fs::File::open(format!(
         "{}/../solidcore/tests/kernel_cases/fillets/{CASE}.bodies.json.gz",
         env!("CARGO_MANIFEST_DIR")
