@@ -330,7 +330,25 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
             act(if app.session.visibility.hidden_bodies.contains(name) { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye")
                 .with(json!({"bodies":[name]})),
         ],
-        Target::Body { name } => body_items(app, std::slice::from_ref(name), true),
+        Target::Body { name } => {
+            let mut items = body_items(app, std::slice::from_ref(name), true);
+            // A right-click on one of several selected bodies keeps that selection for Move/Copy
+            // and Create Components (#12746). A row outside the selection still targets only the
+            // body that was right-clicked. Save As Mesh and Send to Slicer are the same question
+            // on #12334.
+            let selected = sel_bodies(app);
+            if selected.len() > 1 && selected.iter().any(|body| body == name) {
+                let names = json!(selected);
+                for item in &mut items {
+                    if item.id == "ui.moveBodies" || item.id == "component.from_bodies" {
+                        if let Some(params) = item.params.as_mut() {
+                            params["bodies"] = names.clone();
+                        }
+                    }
+                }
+            }
+            items
+        }
         Target::Sketch { id } => sketch_items(app, *id),
         Target::Feature { id } => feature_items(app, *id),
         Target::Plane { id } => plane_items(app, *id),
