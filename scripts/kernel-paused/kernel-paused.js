@@ -15,7 +15,8 @@ const TOPIC =
 // Crashes and lost work come first whatever the kernel is.
 const URGENT = /\b(crash\w*|panic\w*|data loss|lost (my )?work|corrupt\w*)\b/i;
 // What a pull request changes that makes it kernel work.
-const KERNEL_PATHS = ['crates/kernel/', 'crates/geom/', 'solidcore/'];
+// solidcore/ is not paused: kernel work happens there now, behind its code owners' review.
+const KERNEL_PATHS = ['crates/kernel/', 'crates/geom/'];
 
 function isTopic(title) {
   return TOPIC.test(title || '');

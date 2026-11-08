@@ -94,11 +94,11 @@ test('a pull request that changes crates/geom is labelled', async () => {
   assert.deepEqual(names(calls), ['addLabels']);
 });
 
-test('a pull request that changes the vendored kernel is labelled', async () => {
+test('a pull request that only changes solidcore/ is not labelled', async () => {
   const { github, calls } = fake({ files: ['solidcore/crates/solidcore/src/blend.rs'] });
   const pr = { number: 12, title: 'Tidy a helper', body: '', draft: false, node_id: 'PR_5', user: { login: 'someone' } };
   await paused.handleOpened({ github, context: { repo, payload: { pull_request: pr } } });
-  assert.deepEqual(names(calls), ['addLabels']);
+  assert.ok(!names(calls).includes('addLabels'));
 });
 
 test('a kernel discussion is labelled', async () => {
