@@ -59,6 +59,7 @@ pub enum ViewAction {
     /// The Home chip was clicked.
     Home,
     /// The compass was dragged by `(dx, dy)` screen points this frame (`snap`: Shift was held).
+    /// Only [`orbit`] returns it.
     Orbit { dx: f64, dy: f64, snap: bool },
 }
 
@@ -98,7 +99,8 @@ pub fn hit(tips: &[Tip], p: Pos2) -> Option<usize> {
     tips.iter().enumerate().rev().find(|(_, (_, _, at, _))| at.distance(p) <= AXIS_RADIUS).map(|(i, _)| i)
 }
 
-/// Draw the compass; a tip or Home clicked this frame.
+/// Draw the compass; a tip or Home clicked this frame (never [`ViewAction::Orbit`]: a drag is
+/// [`orbit`]'s).
 pub fn show(ui: &mut egui::Ui, compass: &Compass) -> Option<ViewAction> {
     let t = Tokens::get();
     let c = compass.centre;
