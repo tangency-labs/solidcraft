@@ -1,0 +1,12 @@
+id = "query.poly_properties"
+upstream = ["source/SMLib/src/SmPoly.cpp", "source/SMLib/inc/SmPoly.h", "source/SM_API/src/SmApiPolygons.cpp"]
+rust_module = "query::poly_properties"
+depends_on = ["query.poly", "geom.vector3d", "geom.extent3d"]
+soft_depends_on = []
+est_lines = 360
+layer = 45
+tests = ["tests/SM_API_test/src/TestSmGeneral.cpp", "tests/SM_API_test/src/TestSmBrep.cpp"]
+status = "green"
+claimed_by = ""
+claimed_at = ""
+notes = "GREEN: difftest 641 cases, 641 pass, 0 failed, 0 deferred (local integration run on bb06099f1). SM_API gap S5 (scratchpad table row 29/41/43). NOT IN callgraph/units.json: SmPolyBrep::IsManifoldSolid, SmPolyBrep::ComputeProperties and SmPolyFace::ComputeProperties are in harness/callgraph/unused_functions.txt; the SM_API entry points SmApiPolyBrepIsManifoldSolid / SmApiPolyBrepComputeVolume / SmApiPolyBrepComputeMassProperties are v1.0.1 additions. Owns those six functions plus SmPolyEdge::IsManifold and SmPolyEdge::GetOtherPolyVertex (as used here). Rust: PolyBrep::edge_is_manifold / is_manifold_solid / face_compute_properties / compute_properties, poly_brep_is_manifold_solid / poly_brep_compute_volume / poly_brep_compute_mass_properties. Fixtures mirror TestSmPolyBrepMassPropertiesWinding (box at (1,2,3), 2x4x6, outward and reversed, quads and triangles, density 2) with explicit meshes rather than SmApiTessellate output. Status pending the gate run."

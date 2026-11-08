@@ -1889,6 +1889,7 @@
   "material.editor.preserved_appearance": "Penampilan dikekalkan",
   "material.editor.public_reference": "Rujukan awam",
   "material.editor.reference": "Rujukan",
+  "material.editor.remove": "Buang",
   "material.editor.save_or_discard": "Simpan atau buang draf bahan sebelum menetapkan bahan.",
   "material.editor.saved": "Bahan disimpan. Penetapan jasad tidak berubah.",
   "material.editor.scope": "Simpan menyimpan bahan ini tanpa menetapkannya pada jasad. Sifat dan keadaan yang dibiarkan kosong kekal tidak diketahui. Ketumpatan kad tidak mengubah ketumpatan yang ditetapkan atau jisim.",

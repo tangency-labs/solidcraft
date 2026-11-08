@@ -27,7 +27,7 @@
 //!   section the viewport shows (no window needed); the ground grid and the origin's axes as the
 //!   window shows them, unless `grid` or `axes` says
 //! - `ui.icon_audit {reset?, stop?}`: collect/drain requested icon names, resolved masters and placeholder flags;
-//! - `ui.panel_fixture {enabled?, preset?}`: opt-in synthetic content in the real panel host;
+//! - `ui.panel_fixture {enabled?, preset?, translucency_percent?, reduced_motion?}`: opt-in synthetic content in the real panel host;
 //!   `{}` observes the current host, probe and Session without ticking or model commands
 //! - `ui.menu {x?, y?, target?, close?}`: open a context menu at a point (the viewport's marking
 //!   menu, or a browser menu with `target: {type: body|sketch|component, …}`); without a point,
@@ -46,10 +46,6 @@
 //! - `ui.resize {width, height}`, `app.quit`
 
 use solidcraft_engine::geom::prelude::*;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::mpsc::Sender;
-use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
-use std::time::Duration;
 
 use serde_json::{Value, json};
 use solidcraft_engine::io::vfs;
@@ -59,112 +55,14 @@ use solidcraft_engine::{batch_params, timing};
 
 use crate::SolveApp;
 
-pub type ControlResponse = Value;
+// The request, its reply and the design watch are the shared control channel's
+// (`solidcraft_control`); SolidCraft's handlers below answer them.
+pub(crate) use solidcraft_control::{ControlRequest, ControlResponse, DOCUMENT_WATCH, DocumentWatch, cancelled_chat_response, chat_turn_cancelled};
 
-pub struct ControlRequest {
-    pub method: String,
-    pub params: Value,
-    pub reply: Sender<ControlResponse>,
-    /// Set once the window starts on it; until then it waits its turn (`control.running`, #3654).
-    pub started: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    /// Chat requests already admitted by the gate may outlive a tab switch. This turn's
-    /// validity follows them through queues, computation and cursor animation.
-    pub(crate) chat_turn: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
-}
-
-impl ControlRequest {
-    pub fn new(method: impl Into<String>, params: Value) -> (Self, std::sync::mpsc::Receiver<ControlResponse>) {
-        let (tx, rx) = std::sync::mpsc::channel();
-        (Self { method: method.into(), params, reply: tx, started: Default::default(), chat_turn: None }, rx)
-    }
-
-    pub(crate) fn refuse_cancelled_chat(&self) -> bool {
-        if chat_turn_cancelled(self.chat_turn.as_deref()) {
-            let _ = self.reply.send(cancelled_chat_response());
-            true
-        } else {
-            false
-        }
-    }
-}
-
-pub(crate) fn chat_turn_cancelled(turn: Option<&std::sync::atomic::AtomicBool>) -> bool {
-    turn.is_some_and(|active| !active.load(std::sync::atomic::Ordering::Relaxed))
-}
-
-pub(crate) fn cancelled_chat_response() -> Value {
-    json!({"ok": false, "error": "not run: the agent chat turn ended or its document tab was left"})
-}
-
-/// The active design's id and revision for control connections that sent `control.subscribe`
-/// (#6985): the window publishes them each frame while one is subscribed, and each such
-/// connection waits for them to move, then sends a `design.changed` line.
-#[derive(Default)]
-pub struct DesignWatch {
-    subscribers: AtomicUsize,
-    now: Mutex<Option<(String, u64)>>,
-    moved: Condvar,
-}
-
-/// The app's [`DesignWatch`].
-pub static DESIGN_WATCH: DesignWatch = DesignWatch::new();
-
-impl DesignWatch {
-    pub const fn new() -> Self {
-        DesignWatch { subscribers: AtomicUsize::new(0), now: Mutex::new(None), moved: Condvar::new() }
-    }
-
-    fn now(&self) -> MutexGuard<'_, Option<(String, u64)>> {
-        self.now.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    /// The design as it is now; waiters wake only when it moved. Only the latest is kept, so
-    /// changes made faster than a connection sends them go out as one.
-    pub fn publish(&self, document_id: &str, revision: u64) {
-        let mut now = self.now();
-        if now.as_ref().is_some_and(|(id, r)| id == document_id && *r == revision) {
-            return;
-        }
-        *now = Some((document_id.to_string(), revision));
-        self.moved.notify_all();
-    }
-
-    /// Whether a connection is subscribed: the window publishes only then.
-    pub fn subscribed(&self) -> bool {
-        self.subscribers.load(Ordering::Relaxed) > 0
-    }
-
-    /// Count a subscribed connection until the returned guard is dropped.
-    pub fn join(&'static self) -> Subscriber {
-        self.subscribers.fetch_add(1, Ordering::Relaxed);
-        Subscriber(self)
-    }
-
-    /// Wait up to `wait` for the design to differ from `seen`, or for `stop`; the design then
-    /// (`None` before anything was published).
-    pub fn wait(&self, seen: &(String, u64), stop: &AtomicBool, wait: Duration) -> Option<(String, u64)> {
-        let unmoved = |now: &mut Option<(String, u64)>| now.as_ref() == Some(seen) && !stop.load(Ordering::Relaxed);
-        let (now, _) = self.moved.wait_timeout_while(self.now(), wait, unmoved).unwrap_or_else(PoisonError::into_inner);
-        now.clone()
-    }
-}
-
-/// A subscribed connection, counted by its [`DesignWatch`] while this lives.
-pub struct Subscriber(&'static DesignWatch);
-
-impl Drop for Subscriber {
-    fn drop(&mut self) {
-        self.0.subscribers.fetch_sub(1, Ordering::Relaxed);
-        // Under the lock, so a connection about to wait sees its `stop` set before it does.
-        let _now = self.0.now();
-        self.0.moved.notify_all();
-    }
-}
-
-/// Publish the active design for subscribed connections ([`DesignWatch`]). Called at the end of
+/// Publish the active design for subscribed connections ([`DocumentWatch`]). Called at the end of
 /// each frame's logic (which runs while the window is hidden too) and of its drawing, so a
 /// change made in either goes out in that frame.
-pub(crate) fn publish_design(app: &mut SolveApp, watch: &DesignWatch) {
+pub(crate) fn publish_design(app: &mut SolveApp, watch: &DocumentWatch) {
     if watch.subscribed() {
         let revision = app.session.design_revision();
         watch.publish(&app.session.document_id, revision);
@@ -287,6 +185,13 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
             for row in rows.iter_mut().filter_map(Value::as_object_mut) {
                 let key = row.get("id").and_then(Value::as_str).and_then(|id| crate::keymap::effective(app, id));
                 row.insert("shortcut".into(), json!(key));
+                if let Some(action) =
+                    row.get("id").and_then(Value::as_str).and_then(solidcraft_engine::panels::ContextualPanelAction::from_command_id)
+                {
+                    let reason = app.panel_contextual_disabled_reason(action);
+                    row.insert("enabled".into(), json!(reason.is_none()));
+                    row.insert("disabled_reason".into(), json!(reason));
+                }
             }
         }
         return Ok(commands);
@@ -355,6 +260,11 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
 /// A batch step's command id.
 fn command(step: &Value) -> Option<&str> {
     step.get("command").or_else(|| step.get("id")).and_then(Value::as_str)
+}
+
+/// A batch step's parameters: missing or null is no parameters.
+fn step_params(step: &Value) -> Value {
+    step.get("params").cloned().filter(|p| !p.is_null()).unwrap_or(json!({}))
 }
 
 /// Most steps in one `engine.batch` (as in the MCP `batch` tool).
@@ -427,9 +337,7 @@ fn batch(app: &mut SolveApp, p: &Value) -> Outcome {
         // checkpoint; previous application changes are truthfully retained.
         let mut results = Vec::new();
         for (i, step) in steps.iter().enumerate() {
-            let result = command(step)
-                .ok_or_else(|| "missing command".to_string())
-                .and_then(|id| execute(app, id, step.get("params").cloned().filter(|p| !p.is_null()).unwrap_or(json!({}))));
+            let result = command(step).ok_or_else(|| "missing command".to_string()).and_then(|id| execute(app, id, step_params(step)));
             match result {
                 Ok(result) => results.push(result),
                 Err(error) => return ok(solidcraft_engine::panels::commands::sequential_failure(i, command(step), error, results)),
@@ -476,7 +384,7 @@ fn batch(app: &mut SolveApp, p: &Value) -> Outcome {
         for i in singles {
             let Some(step) = steps.get(i) else { continue };
             let (r, took) = timing::time(profile, || match command(step) {
-                Some(id) => execute(app, id, step.get("params").cloned().filter(|v| !v.is_null()).unwrap_or(json!({}))),
+                Some(id) => execute(app, id, step_params(step)),
                 None => Err("missing `command`".to_string()),
             });
             if timed {
@@ -498,6 +406,43 @@ fn batch(app: &mut SolveApp, p: &Value) -> Outcome {
         let _ = app.run("edit.restore_checkpoint", json!({"checkpoint": id, "forget": true}));
     }
     ok(with_timings(json!({"completed": results.len(), "results": results, "undone": 0}), timed, rows, clock.ms()))
+}
+
+/// `engine.script {commands}` (or the bare array): each step runs as `engine.execute` runs it, so
+/// the window follows it as it follows a batch step (#12629). The first failure stops the script,
+/// and the steps before it stay. Its words are the engine script's, or the panel error when a step
+/// is a panel command.
+fn script(app: &mut SolveApp, p: &Value) -> Outcome {
+    let steps = match solidcraft_engine::script_steps(p) {
+        Ok(steps) => steps,
+        Err(e) => return err(e),
+    };
+    if let Some(c) = steps.iter().find_map(switches_design) {
+        return err(format!("engine.script unavailable: {c} switches to another design (send it on its own)"));
+    }
+    let panels = steps.iter().any(|step| command(step).is_some_and(solidcraft_engine::panels::commands::is_command));
+    let mut results = Vec::with_capacity(steps.len());
+    for (i, step) in steps.iter().enumerate() {
+        let Some(id) = command(step) else {
+            return if panels {
+                Outcome::Done(json!({"ok": false, "error": "missing command", "step": i + 1}))
+            } else {
+                err(format!("script step {}: missing `command`", i + 1))
+            };
+        };
+        match execute(app, id, step_params(step)) {
+            Ok(result) => results.push(result),
+            Err(error) if panels => {
+                let mut reply = json!({"ok": false, "error": error, "step": i + 1});
+                if let Some(reason) = solidcraft_engine::panels::commands::structured_error(&error) {
+                    reply["panel_error"] = reason;
+                }
+                return Outcome::Done(reply);
+            }
+            Err(error) => return err(format!("step {} ({id}): {error}", i + 1)),
+        }
+    }
+    ok(json!(results))
 }
 
 /// A batch reply with `timings` and `total_ms` when they were asked for.
@@ -791,7 +736,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         }
         "engine.execute" | "command" => {
             let Some(id) = s("command").or(s("id")) else { return err("missing `command`") };
-            wrap(execute(app, id, p.get("params").cloned().filter(|v| !v.is_null()).unwrap_or(json!({}))))
+            wrap(execute(app, id, step_params(p)))
         }
         "engine.batch" => batch(app, p),
         "ui.agent_cursor" => {
@@ -810,52 +755,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             }
             ok(json!(app.ui.agent_cursor))
         }
-        "engine.script" => {
-            let steps = p.as_array().or_else(|| p.get("commands").and_then(Value::as_array));
-            if let Some(c) = steps.and_then(|steps| steps.iter().find_map(switches_design)) {
-                return err(format!("engine.script unavailable: {c} switches to another design (send it on its own)"));
-            }
-            if let Some(steps) =
-                steps.filter(|steps| steps.iter().any(|step| command(step).is_some_and(solidcraft_engine::panels::commands::is_command)))
-            {
-                if steps.len() > 100_000 {
-                    return err("script too long");
-                }
-                let mut results = Vec::new();
-                for (i, step) in steps.iter().enumerate() {
-                    let result = command(step)
-                        .ok_or_else(|| "missing command".to_string())
-                        .and_then(|id| execute(app, id, step.get("params").cloned().filter(|p| !p.is_null()).unwrap_or(json!({}))));
-                    match result {
-                        Ok(result) => results.push(result),
-                        Err(error) => {
-                            let mut reply = json!({"ok":false,"error":error,"step":i + 1});
-                            if let Some(reason) = solidcraft_engine::panels::commands::structured_error(&error) {
-                                reply["panel_error"] = reason;
-                            }
-                            return Outcome::Done(reply);
-                        }
-                    }
-                }
-                return ok(json!(results));
-            }
-            let mut replaced = false;
-            let r = app
-                .session
-                .run_script_each(p, &mut |i, _| {
-                    let id = steps.and_then(|steps| steps.get(i)).and_then(command).and_then(solidcraft_engine::find_command).map(|spec| spec.id);
-                    replaced |= matches!(id, Some("file.new" | "doc.open" | "doc.recover"));
-                })
-                .map(|v| json!(v))
-                .map_err(|e| e.to_string());
-            // A successful replacement still happened if a later script step failed.
-            if replaced {
-                crate::documents::reset_chat(app);
-                app.edit_in_place.active = None;
-            }
-            app.follow_view_request(false);
-            wrap(r)
-        }
+        "engine.script" => script(app, p),
         "engine.commands" => wrap(execute(app, "engine.commands", json!({}))),
         "document.inspect" => wrap(app.session.execute("document.inspect", p).map_err(|e| e.to_string())),
         "document.revision" => wrap(app.session.execute("document.revision", p).map_err(|e| e.to_string())),
@@ -863,11 +763,11 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         "document.export" => wrap(crate::documents::export(app)),
         "document.import" => wrap(crate::documents::import(app, p)),
         "document.saved" => wrap(crate::documents::saved(app, p)),
-        // The connection already counts as subscribed (`DesignWatch::join`), and its events start
+        // The connection already counts as subscribed (`DocumentWatch::join`), and its events start
         // from this answer: published first, so no event repeats it and none older follows.
         "control.subscribe" => {
             let revision = app.session.design_revision();
-            DESIGN_WATCH.publish(&app.session.document_id, revision);
+            DOCUMENT_WATCH.publish(&app.session.document_id, revision);
             ok(json!({"document_id": app.session.document_id, "revision": revision}))
         }
         // What the MCP server bridged to this app shapes its output with (Preferences › AI).
@@ -1147,6 +1047,19 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                 o.insert("marker".into(), json!(app.session.doc.marker));
             }
             ok(reply)
+        }
+        "ui.editFolder" => {
+            let Some(id) = (match p.get("folder") {
+                Some(Value::Number(n)) => n.as_u64(),
+                Some(Value::String(x)) => app.session.doc.timeline_groups.iter().find(|group| group.name == *x).map(|group| group.id),
+                _ => return err("`folder` must be a timeline folder id or name"),
+            }) else {
+                return err("no such timeline folder");
+            };
+            if let Err(why) = crate::hole_folder::open(app, id) {
+                return err(why);
+            }
+            ok(started(app))
         }
         "ui.selection" => ok(json!({
             "selection": app.session.selection,
@@ -1429,17 +1342,18 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         },
         "ui.prefs" => wrap(crate::prefs::control(app, p)),
         "ui.agent_chat" => wrap(crate::agent_chat::control(app, ctx, p)),
-        "ui.help" => match s("item") {
-            Some(i @ ("about" | "updates" | "shortcuts" | "report" | "crashes")) => {
-                crate::help::run(app, ctx, i);
-                ok(
-                    json!({"diagnostics": crate::help::diagnostics(app), "version": crate::help::VERSION, "commit": crate::help::COMMIT, "built": crate::help::BUILD_DATE}),
-                )
+        "ui.help" => {
+            // The Help menu's items (the macOS menu bar sends the same); none only reports.
+            const ITEMS: [&str; 8] = ["about", "updates", "shortcuts", "report", "crashes", "docs", "messages", "install_cli"];
+            match s("item") {
+                Some(i) if !ITEMS.contains(&i) => return err(format!("unknown help item `{i}` ({})", ITEMS.join(", "))),
+                Some(i) => crate::help::run(app, ctx, i),
+                None => {}
             }
-            _ => ok(
+            ok(
                 json!({"diagnostics": crate::help::diagnostics(app), "version": crate::help::VERSION, "commit": crate::help::COMMIT, "built": crate::help::BUILD_DATE}),
-            ),
-        },
+            )
+        }
         "ui.selectOther" => wrap(crate::select_other::control(app, p)),
         "ui.menuPick" => {
             let Some(key) = s("item") else { return err("missing `item` (id or label)") };
@@ -1456,11 +1370,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             Ok(()) => ok(json!({"custom_titlebar": app.custom_titlebar, "maximized": ctx.input(|i| i.viewport().maximized)})),
             Err(e) => err(e),
         },
-        "ui.resize" => {
-            let (Some(w), Some(h)) = (f("width"), f("height")) else { return err("missing width/height") };
-            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w.clamp(320.0, 8192.0) as f32, h.clamp(240.0, 8192.0) as f32)));
-            ok(Value::Null)
-        }
+        "ui.resize" => wrap(solidcraft_control_egui::window::resize(ctx, p)),
         "ui.screenshot" => match s("path").map(vfs::check) {
             Some(Err(e)) => err(e),
             _ => Outcome::Screenshot { path: s("path").map(str::to_string) },
@@ -1628,16 +1538,8 @@ pub fn save_screenshot(image: &egui::ColorImage, path: Option<&str>) -> Value {
 /// [`vfs`] like every other save: the disk natively, a download or browser storage in the web
 /// app (#7192).
 pub(crate) fn write_screenshot(image: &egui::ColorImage, path: &str) -> Result<(), String> {
-    let [w, h] = image.size;
-    let mut buf = Vec::with_capacity(w * h * 4);
-    for c in &image.pixels {
-        buf.extend_from_slice(&c.to_array());
-    }
-    let img = image::RgbaImage::from_raw(w as u32, h as u32, buf).ok_or("bad image")?;
-    let format = image::ImageFormat::from_path(path).map_err(|e| e.to_string())?;
-    let mut bytes = std::io::Cursor::new(Vec::new());
-    img.write_to(&mut bytes, format).map_err(|e| e.to_string())?;
-    vfs::write(path, bytes.get_ref()).map_err(|e| e.to_string())
+    let bytes = solidcraft_control_egui::screenshot::encode(image, path)?;
+    vfs::write(path, &bytes).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -1875,6 +1777,74 @@ mod tests {
     use crate::Services;
 
     #[test]
+    fn contextual_command_metadata_matches_live_focus_without_side_effects() {
+        fn metadata(app: &mut SolveApp, reason_key: Option<&str>) {
+            let enabled = reason_key.is_none();
+            let document = app.session.doc.clone();
+            let model = app.session.model.state();
+            let revision = app.session.revision;
+            let evaluations = app.session.evaluation_count();
+            let undo = app.session.undo.len();
+            let before = crate::panel_runtime::inspect_host_specimen(app).unwrap();
+            let command = solidcraft_engine::find_command("panel.focus.next").unwrap();
+            let interactive = crate::render_workspace::interactive_command_info(app, command);
+            let commands = execute(app, "engine.commands", json!({})).unwrap();
+            let row = commands.as_array().unwrap().iter().find(|row| row["id"] == "panel.focus.next").unwrap();
+            assert_eq!(interactive.enabled, enabled);
+            assert_eq!(row["enabled"], enabled);
+            assert_eq!(row["disabled_reason"], json!(interactive.disabled_reason));
+            assert_eq!(row["disabled_reason"], json!(reason_key.map(|key| app.tr(key))), "each context reports its exact localized refusal");
+            assert_eq!(crate::panel_runtime::inspect_host_specimen(app).unwrap(), before);
+            assert!(std::sync::Arc::ptr_eq(&document, &app.session.doc));
+            assert!(std::sync::Arc::ptr_eq(&model, &app.session.model.state()));
+            assert_eq!(app.session.revision, revision);
+            assert_eq!(app.session.evaluation_count(), evaluations);
+            assert_eq!(app.session.undo.len(), undo);
+        }
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        metadata(&mut h.app, Some("ui.panel_host.rule.availability"));
+        crate::panel_runtime::control_specimen(&mut h.app, &json!({"preset":"docks"})).unwrap();
+        metadata(&mut h.app, Some("ui.panel_host.rule.availability")); // Host exists, but has no presented frame.
+        h.frames(4);
+        let header = h
+            .app
+            .universal_panel_frame()
+            .unwrap()
+            .controls
+            .iter()
+            .find(|control| {
+                control.enabled
+                    && matches!(
+                        control.target,
+                        crate::panel_runtime::HostControlTarget::Pointer(crate::panel_runtime::HostPointerTarget::Header { .. })
+                    )
+            })
+            .unwrap()
+            .clone();
+        h.ctx.memory_mut(|memory| memory.request_focus(header.id));
+        metadata(&mut h.app, None);
+        h.ctx.memory_mut(|memory| memory.request_focus(egui::Id::unique("foreign-contextual-focus")));
+        metadata(&mut h.app, Some("ui.panel_host.rule.availability"));
+        h.ctx.memory_mut(|memory| memory.request_focus(header.id));
+        let old_document_id = h.app.session.document_id.clone();
+        h.app.session.document_id = "metadata-incoming-document".into();
+        metadata(&mut h.app, Some("ui.panel_host.rule.availability"));
+        h.app.session.document_id = old_document_id;
+        metadata(&mut h.app, None);
+        let section = h.app.universal_panel_frame().unwrap().layout.sections[0].section.clone();
+        let stale_revision = h.app.universal_panel_frame().unwrap().layout.revision;
+        h.app
+            .dispatch_panel_layout(solidcraft_engine::panels::LayoutAction::Apply {
+                expected_revision: Some(stale_revision),
+                mutations: vec![solidcraft_engine::panels::Mutation::Collapse { section, collapsed: true }],
+            })
+            .unwrap();
+        assert_ne!(h.app.panel_runtime().unwrap().layout().inspect().revision, stale_revision);
+        metadata(&mut h.app, Some("ui.panel_host.rule.revision"));
+    }
+
+    #[test]
     fn panel_fixture_validates_whole_request_before_activation() {
         let mut app = SolveApp::new(Session::default(), Services::default());
         let doc = app.session.doc.clone();
@@ -1890,6 +1860,15 @@ mod tests {
             json!({"preset":"x".repeat(4096)}),
             json!({"enabled":false,"preset":"docks"}),
             json!({"enabled":true,"unknown":0}),
+            json!({"preset":"surfaces","translucency_percent":-1}),
+            json!({"preset":"surfaces","translucency_percent":101}),
+            json!({"preset":"surfaces","translucency_percent":"50"}),
+            json!({"preset":"surfaces","translucency_percent":null}),
+            json!({"translucency_percent":50}),
+            json!({"reduced_motion":true}),
+            json!({"preset":"docks","reduced_motion":null}),
+            json!({"enabled":false,"reduced_motion":true}),
+            json!({"enabled":false,"translucency_percent":50}),
         ] {
             assert!(crate::panel_runtime::control_specimen(&mut app, &params).is_err(), "{params}");
             assert!(app.panel_runtime().is_none());
@@ -1917,6 +1896,7 @@ mod tests {
             ("stack_tabs", 4),
             ("content_fill", 2),
             ("inline", 1),
+            ("surfaces", 6),
         ] {
             let before = crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap()["session"].clone();
             h.step(&json!({"panel_fixture":{"enabled":true,"preset":name}})).unwrap();
@@ -1936,6 +1916,138 @@ mod tests {
             h.step(&json!({"panel_fixture":{"enabled":false}})).unwrap();
             assert!(h.app.panel_runtime().is_none());
             assert!(!h.app.universal_panel_host_enabled());
+        }
+    }
+
+    #[test]
+    fn panel_surface_fixture_converts_translucency_without_saving_preferences() {
+        for percent in [0, 50, 100] {
+            let mut h = crate::scenario::Harness::new();
+            let preferences = serde_json::to_value(&h.app.preferences).unwrap();
+            crate::panel_runtime::control_specimen(&mut h.app, &json!({"preset":"surfaces","translucency_percent":percent})).unwrap();
+            h.frames(4);
+            let reply = crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap();
+            let sections = reply["host"]["sections"].as_array().unwrap();
+            assert!(!sections.is_empty());
+            for section in sections {
+                let alpha = section["paint_alpha"].as_u64().unwrap();
+                assert!(
+                    alpha >= ((100 - percent) as f64 * 255.0 / 100.0).ceil() as u64,
+                    "readability protection can only increase the requested opacity: {section}"
+                );
+                assert!(!section["contrast"].is_null(), "every painted surface reports its contrast decision");
+            }
+            assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), preferences);
+        }
+    }
+
+    #[test]
+    fn panel_fixture_live_opacity_updates_retain_controllers_layout_and_document() {
+        let mut h = crate::scenario::Harness::new();
+        crate::panel_runtime::control_specimen(&mut h.app, &json!({"preset":"surfaces","translucency_percent":0})).unwrap();
+        h.frames(4);
+        let document = h.app.session.doc.clone();
+        let model = h.app.session.model.state();
+        let camera = h.app.cam;
+        let preferences = serde_json::to_value(&h.app.preferences).unwrap();
+        let before = crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap();
+        let sections = h
+            .app
+            .universal_panel_frame()
+            .unwrap()
+            .layout
+            .sections
+            .iter()
+            .map(|section| (section.section.clone(), section.outer, section.body, section.surface))
+            .collect::<Vec<_>>();
+        for percent in [50, 100, 0] {
+            let prior = crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap();
+            let updated = crate::panel_runtime::control_specimen(&mut h.app, &json!({"translucency_percent":percent})).unwrap();
+            assert_eq!(updated["runtime"], prior["runtime"], "updating opacity does not tick, dispatch or replace content");
+            h.frames(4);
+            let after = crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap();
+            assert_eq!(after["runtime"]["layout"], before["runtime"]["layout"]);
+            for (old, new) in
+                before["runtime"]["probe"]["controllers"].as_array().unwrap().iter().zip(after["runtime"]["probe"]["controllers"].as_array().unwrap())
+            {
+                assert_eq!(new["controller_identity"], old["controller_identity"]);
+                assert_eq!(new["draft"], old["draft"]);
+                assert_eq!(new["transaction_live"], old["transaction_live"]);
+            }
+            assert_eq!(
+                h.app
+                    .universal_panel_frame()
+                    .unwrap()
+                    .layout
+                    .sections
+                    .iter()
+                    .map(|section| (section.section.clone(), section.outer, section.body, section.surface))
+                    .collect::<Vec<_>>(),
+                sections
+            );
+            assert!(std::sync::Arc::ptr_eq(&document, &h.app.session.doc));
+            assert!(std::sync::Arc::ptr_eq(&model, &h.app.session.model.state()));
+            assert_eq!(h.app.cam, camera);
+            assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), preferences);
+            if percent == 0 {
+                assert!(h.app.universal_panel_frame().unwrap().layout.sections.iter().all(|section| section.paint_alpha == Some(255)));
+            }
+        }
+        h.app.disable_universal_panel_host().unwrap();
+        assert!(crate::panel_runtime::control_specimen(&mut h.app, &json!({"translucency_percent":50})).is_err());
+    }
+
+    #[test]
+    fn panel_fixture_language_and_motion_refresh_preserve_layout_controllers_and_session() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.language = "en".into();
+        crate::panel_runtime::control_specimen(&mut h.app, &json!({"preset":"surfaces"})).unwrap();
+        h.frames(4);
+        let runtime = h.app.panel_runtime().unwrap();
+        let instance = runtime.layout().layout().instances.iter().find(|instance| instance.kind.0 == "fixture.editor").unwrap().id.clone();
+        h.app.run("panel.focus", json!({"target":{"type":"instance","id":instance}})).unwrap();
+        h.frames(4);
+        let owner = h.app.panel_runtime().unwrap().instance_owner(&instance).unwrap();
+        let draft_id = egui::Id::unique(("specimen-draft", &instance, &owner));
+        h.ctx.memory_mut(|memory| memory.request_focus(draft_id));
+        h.frame_with(vec![egui::Event::Text("retained locale selection".into())]);
+        let mut state = egui::TextEdit::load_state(&h.ctx, draft_id).unwrap();
+        state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(1), egui::text::CCursor::new(4))));
+        state.store(&h.ctx, draft_id);
+        h.frames(1);
+        let selection = egui::TextEdit::load_state(&h.ctx, draft_id).unwrap().cursor.char_range();
+        assert!(!selection.unwrap().is_empty(), "exercise an actual nonempty draft selection");
+        assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(draft_id));
+        let before = crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap();
+        let document = h.app.session.doc.clone();
+        let model = h.app.session.model.state();
+        let camera = h.app.cam;
+        for (language, expected) in [("ar", "rtl"), ("he", "rtl"), ("en", "ltr")] {
+            h.app.preferences.language = language.into();
+            h.frames(4);
+            assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(draft_id), "locale changes retain the actual focused draft");
+            assert_eq!(egui::TextEdit::load_state(&h.ctx, draft_id).unwrap().cursor.char_range(), selection);
+            let after = crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap();
+            assert_eq!(after["host"]["direction"], expected);
+            assert_eq!(after["runtime"]["layout"], before["runtime"]["layout"]);
+            for (old, new) in
+                before["runtime"]["probe"]["controllers"].as_array().unwrap().iter().zip(after["runtime"]["probe"]["controllers"].as_array().unwrap())
+            {
+                assert_eq!(new["controller_identity"], old["controller_identity"]);
+                assert_eq!(new["draft"], old["draft"]);
+                assert_eq!(new["transaction_live"], old["transaction_live"]);
+            }
+            assert!(std::sync::Arc::ptr_eq(&document, &h.app.session.doc));
+            assert!(std::sync::Arc::ptr_eq(&model, &h.app.session.model.state()));
+            assert_eq!(h.app.cam, camera);
+        }
+        for reduced in [true, false] {
+            let updated = crate::panel_runtime::control_specimen(&mut h.app, &json!({"reduced_motion":reduced})).unwrap();
+            assert_eq!(updated["runtime"]["reduced_motion"], reduced);
+            assert_eq!(updated["runtime"]["layout"], before["runtime"]["layout"]);
+            h.frames(4);
+            assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(draft_id), "motion updates retain the actual focused draft");
+            assert_eq!(egui::TextEdit::load_state(&h.ctx, draft_id).unwrap().cursor.char_range(), selection);
         }
     }
 
@@ -2278,8 +2390,10 @@ mod tests {
     /// only of the latest.
     #[test]
     fn subscribed_frames_publish_the_design() {
-        static WATCH: DesignWatch = DesignWatch::new();
-        let now = || WATCH.now().clone();
+        use std::sync::atomic::AtomicBool;
+        use std::time::Duration;
+        static WATCH: DocumentWatch = DocumentWatch::new();
+        let now = || WATCH.current();
         let mut h = crate::scenario::Harness::new();
         publish_design(&mut h.app, &WATCH);
         assert_eq!(now(), None, "nobody subscribed");
@@ -2348,7 +2462,7 @@ mod tests {
                 *counts.entry(img.get_pixel(x, 0).0).or_insert(0) += 1;
             }
             let top = counts.into_iter().max_by_key(|(_, n)| *n).map(|(c, _)| c).unwrap();
-            let want = if dark { crate::theme::Tokens::dark() } else { crate::theme::Tokens::light() }.viewport_top;
+            let want = if dark { solidcraft_theme::Tokens::dark() } else { solidcraft_theme::Tokens::light() }.viewport_top;
             let near = top.iter().zip([want.r(), want.g(), want.b()]).all(|(a, b)| a.abs_diff(b) <= 2);
             assert!(near, "{theme}: the render's top row is {top:?}, the view's background {want:?}");
         }
@@ -2585,6 +2699,82 @@ mod tests {
         assert!(v["result"].get("failed").is_none(), "{v}");
         assert!(frames <= 2, "a batch of 80 steps took {frames} frames");
         assert_eq!(inspect(&mut h)["sketches"].as_array().map(Vec::len), Some(40));
+    }
+
+    /// #12629: each step of `engine.script` gets what the window does after the command, as the
+    /// same step of `engine.batch` gets it: the grid, the tool, the spin, a preference, the echo.
+    #[test]
+    fn a_script_step_gets_the_windows_follow_up_like_a_batch_step() {
+        let steps = json!([
+            {"command": "view.grid", "params": {"on": false}},
+            {"command": "view.tool", "params": {"tool": "pan"}},
+            {"command": "view.spin", "params": {"on": true}},
+            {"command": "view.angle_readout", "params": {"enabled": true}},
+            {"command": "sketch.create", "params": {"plane": "XY"}},
+            {"command": "sketch.finish", "params": {}},
+        ]);
+        let window = |method: &str| {
+            let mut h = crate::scenario::Harness::new();
+            // No checkpoint, so the batch runs exactly the script's steps.
+            let v = h.call(method, json!({"commands": steps, "rollback": false}));
+            assert_eq!(v["ok"], true, "{method}: {v}");
+            let app = &h.app;
+            (app.ui.show_grid, app.viewport.nav, app.viewport.spin, app.preferences.show_view_angles, app.session.log.clone())
+        };
+        let batch = window("engine.batch");
+        assert_eq!((batch.0, batch.1, batch.2, batch.3), (false, Some(crate::viewport::NavMode::Pan), true, true));
+        assert_eq!(window("engine.script"), batch);
+    }
+
+    /// The first failing step stops a script, and the steps before it stay with what the window
+    /// did after them: a preference set by step 1 is kept when step 3 fails.
+    #[test]
+    fn a_script_stops_at_its_failing_step_and_keeps_the_ones_before() {
+        let mut h = crate::scenario::Harness::new();
+        assert!(!h.app.preferences.show_view_angles && h.app.ui.show_grid);
+        let v = h.call(
+            "engine.script",
+            json!({"commands": [
+                {"command": "view.angle_readout", "params": {"enabled": true}},
+                {"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}},
+                {"command": "no.such_command"},
+                {"command": "view.grid", "params": {"on": false}},
+            ]}),
+        );
+        assert_eq!(v["ok"], false, "{v}");
+        assert!(v["error"].as_str().is_some_and(|e| e.starts_with("step 3 (no.such_command): ")), "{v}");
+        assert!(h.app.preferences.show_view_angles, "step 1's preference stays");
+        assert_eq!(inspect(&mut h)["bodies"].as_array().map(Vec::len), Some(1), "step 2's box stays");
+        assert!(h.app.ui.show_grid, "nothing after the failing step ran");
+        let v = h.call("engine.script", json!([{"params": {}}]));
+        assert_eq!(v["error"], "script step 1: missing `command`", "{v}");
+    }
+
+    /// A panel command among a script's steps no longer changes how the other steps run.
+    #[test]
+    fn a_script_with_and_without_a_panel_step_leaves_the_window_alike() {
+        let window = |panel: bool| {
+            let mut app = panel_command_app();
+            let mut steps = vec![
+                json!({"command": "view.grid", "params": {"on": false}}),
+                json!({"command": "view.tool", "params": {"tool": "pan"}}),
+                json!({"command": "view.angle_readout", "params": {"enabled": true}}),
+            ];
+            if panel {
+                steps.push(json!({"command": "layout.get"}));
+            }
+            let v = panel_control(&mut app, "engine.script", json!({"commands": steps}));
+            assert_eq!(v["ok"], true, "{v}");
+            (app.ui.show_grid, app.viewport.nav, app.preferences.show_view_angles)
+        };
+        assert_eq!(window(false), window(true));
+        assert_eq!(window(false), (false, Some(crate::viewport::NavMode::Pan), true));
+        // A failing step of such a script is named by its number, with the panel's own reason.
+        let mut app = panel_command_app();
+        let steps = json!([{"command": "view.grid", "params": {"on": false}}, {"command": "panel.list", "params": {"unknown": true}}]);
+        let v = panel_control(&mut app, "engine.script", json!({"commands": steps}));
+        assert_eq!((&v["ok"], &v["step"], &v["panel_error"]["rule"]), (&json!(false), &json!(2), &json!("schema")), "{v}");
+        assert!(!app.ui.show_grid, "the step before it stays");
     }
 
     /// #5822: `engine.batch {coalesce_parameters}` sets a run of parameter edits together, one

@@ -7,13 +7,12 @@
 //! right of the viewport, the command palette and a bottom or left-sidebar feature timeline.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
-use crate::ui_kit::{Container, Surface};
+use crate::ui_kit::{Container, Surface, recent_colors};
 
 pub mod access;
 pub mod agent_chat;
 pub mod agent_cursor;
 pub mod ai_connect;
-pub mod bidi;
 pub mod blur;
 pub mod bom_panel;
 pub mod browser;
@@ -76,6 +75,7 @@ mod history_folds;
 pub(crate) mod history_rows;
 #[cfg(test)]
 mod hole_direction_ui_tests;
+pub(crate) mod hole_folder;
 pub(crate) mod hole_place;
 #[cfg(test)]
 mod hole_place_ui_tests;
@@ -140,6 +140,7 @@ mod timeline_marks_tests;
 mod status_tests {
     #[test]
     fn the_status_bar_names_commands_by_label() {
+        crate::i18n::install();
         assert_eq!(super::command_label("solid.fillet"), "Fillet");
         assert_eq!(
             super::friendly_error("solid.shell", "invalid parameters for `solid.shell`: offset: must be positive"),
@@ -148,7 +149,7 @@ mod status_tests {
         assert_eq!(super::friendly_error("edit.undo", "nothing to undo"), "Undo: nothing to undo");
         {
             // The label follows the interface language; the engine's words stay English.
-            let _polish = crate::i18n::scope("pl");
+            let _polish = solidcraft_ui_text::scope("pl");
             assert_eq!(super::friendly_error("edit.undo", "nothing to undo"), "Cofnij: nothing to undo");
             assert_eq!(
                 super::friendly_error("sketch.dimension", "invalid parameters for `sketch.dimension`: value: `mm` is a unit name"),
@@ -191,6 +192,7 @@ mod file_load_ui_tests;
 #[cfg(test)]
 mod fillet_spline_handle_tests;
 pub mod mouse_gesture;
+mod nav_bar;
 pub(crate) mod navigation;
 pub mod navigation_bar;
 mod navigation_bar_view;
@@ -208,7 +210,6 @@ pub(crate) mod plugins;
 pub mod point_clouds;
 pub mod prefs;
 pub mod prefs_notice;
-mod prefs_search;
 #[cfg(test)]
 mod preselect_tests;
 pub mod preview;
@@ -221,7 +222,6 @@ mod print_face_ui;
 pub(crate) mod quick_measure;
 #[cfg(test)]
 mod quick_measure_tests;
-pub(crate) mod recent_colors;
 pub mod recovery_ui;
 pub mod ref_images;
 pub(crate) mod refused_part;
@@ -319,6 +319,7 @@ mod ui_kit_guard_tests;
 pub mod update;
 mod value_step;
 pub(crate) mod view_angles;
+pub mod view_compass;
 mod view_confirm;
 pub mod view_gizmo;
 pub mod view_pick;
@@ -327,6 +328,7 @@ mod viewport_details;
 mod viewport_layout;
 mod viewport_status;
 mod viewport_status_fixture;
+pub mod window_chrome;
 pub mod workspace;
 
 use std::sync::mpsc::Receiver;
@@ -336,7 +338,7 @@ use serde_json::{Value, json};
 use solidcraft_engine::Session;
 use solidcraft_engine::render::{Camera, CameraAnim, StandardView};
 
-pub use control::{ControlRequest, ControlResponse};
+pub(crate) use control::ControlRequest;
 
 /// How close (radians) the camera must be to a standard axis view for the #2682 mode
 /// (`auto_ortho_faces`) to snap the projection to orthographic. One degree: exact axis views
@@ -348,7 +350,7 @@ pub const ORTHO_FACE_TOLERANCE: f64 = 1.0_f64.to_radians();
 #[serde(default, rename_all = "camelCase")]
 pub struct UiState {
     /// Effective shell mode; automation can override the saved preference for this session.
-    pub layout: shell::LayoutMode,
+    pub layout: ui_kit::LayoutMode,
     /// Ribbon tab; SHEET METAL and the contextual SKETCH join the seven design tabs.
     pub tab: String,
     /// The toolbar tab a sketch was started from; finishing the sketch goes back to it (#3250).
@@ -518,6 +520,17 @@ pub struct PreSketchComponent {
     pub opened_in: u64,
 }
 
+/// The active component (and placement) before a feature row inside a placed component was
+/// double-clicked in the Browser, which activates the feature's own component (#12720), and the
+/// component the editor opened in.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreEditComponent {
+    pub feature: u64,
+    pub component: u64,
+    pub path: Option<Vec<u64>>,
+    pub opened_in: u64,
+}
+
 /// Which late UI handler has first refusal of this frame's Escape. Reserving input
 /// is distinct from having performed cancellation (`esc_handled`).
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -529,6 +542,8 @@ pub(crate) enum EscapeOwner {
 pub struct SolveApp {
     /// Common panel foundation, internal opt-in; stays on the app across document tabs.
     pub(crate) panel_runtime: Option<panel_runtime::AppPanelRuntime>,
+    /// Current immutable geometry while production content borrows the app.
+    pub(crate) panel_content_frame: Option<panel_runtime::HostFrame>,
     pub(crate) panel_layout_preferences: panel_runtime::PanelLayoutPreferences,
     pub blur: blur::State,
     pub(crate) blur_session: blur::Session,
@@ -563,6 +578,9 @@ pub struct SolveApp {
     /// The component active before Edit Sketch activated the one the sketch is in (#8127);
     /// leaving the sketch makes it active again.
     pub pre_sketch_component: Option<PreSketchComponent>,
+    /// The component active before a Browser double-click activated the one a feature is in
+    /// (#12720); the end of that feature's editor makes it active again.
+    pub pre_edit_component: Option<PreEditComponent>,
     pub services: Services,
     file_picker: Option<file_picker::Pending>,
     /// A slicer started alone and waited for before the file is sent (Send to Slicer).
@@ -575,6 +593,8 @@ pub struct SolveApp {
     pub render_workspace: render_workspace::State,
     pub tool: Option<tools::Tool>,
     pub dialog: Option<dialogs::Dialog>,
+    /// The joint dialogs' picked and hovered snaps ([`dialogs_assembly::picked_snap`]).
+    pub(crate) snaps: dialogs_assembly::SnapMemo,
     /// Each command dialog's options and values as last applied (this session only).
     pub(crate) remembered_commands: Vec<dialogs::RememberedCommand>,
     /// The Change Parameters window, when open.
@@ -772,13 +792,8 @@ pub struct SolveApp {
     pub agent_chat: agent_chat::AgentChat,
     /// Making SolidCraft available to the AI apps installed here ([`ai_connect`]).
     pub ai_connect: ai_connect::State,
-    pending_shots: Vec<(u64, Option<String>, std::sync::mpsc::Sender<Value>, f64)>,
-    shot_chat_turns: std::collections::HashMap<u64, std::sync::Arc<std::sync::atomic::AtomicBool>>,
-    queued_shots: Vec<(u64, f64, u32)>,
-    /// Screenshots egui hands back, by token; egui calls back, `collect_screenshots` reads them.
-    shot_tx: std::sync::mpsc::Sender<(u64, std::sync::Arc<egui::ColorImage>)>,
-    shot_rx: std::sync::mpsc::Receiver<(u64, std::sync::Arc<egui::ColorImage>)>,
-    shot_token: u64,
+    /// The window's screenshots in flight: control requests' and the issue report's.
+    shots: solidcraft_control_egui::screenshot::Shots,
     styled: bool,
     fitted: bool,
     /// A framing to settle once the viewport's layout is known: the camera to frame from, the
@@ -820,7 +835,15 @@ impl Drop for SolveApp {
 }
 
 impl SolveApp {
+    /// Publish this frame's tab accent from the open tab, the sketch being edited and the active
+    /// tool or dialog, the three values [`theme::publish_tab`] takes.
+    pub(crate) fn publish_tab_accent(&self, ctx: &egui::Context) {
+        theme::publish_tab(&self.ui.tab, self.session.active_sketch.is_some(), self.tool.is_some() || self.dialog.is_some(), ctx);
+    }
+
     pub fn new(mut session: Session, services: Services) -> Self {
+        // The app's catalogs, once per process; later calls find them installed.
+        i18n::install();
         #[cfg(test)]
         let image_host = Some(solidcraft_engine::render::job::CpuHost::cooperative());
         #[cfg(not(test))]
@@ -833,9 +856,9 @@ impl SolveApp {
         #[cfg(not(target_arch = "wasm32"))]
         solidcraft_engine::slicer_files::clean_old();
         let tree = browser::TreeState::for_session(session.uid);
-        let (shot_tx, shot_rx) = std::sync::mpsc::channel();
         let mut app = SolveApp {
             panel_runtime: None,
+            panel_content_frame: None,
             panel_layout_preferences: panel_runtime::PanelLayoutPreferences::default(),
             viewport_status: Default::default(),
             blur: Default::default(),
@@ -852,6 +875,7 @@ impl SolveApp {
             pre_extrude_cam: None,
             pre_command_cam: None,
             pre_sketch_component: None,
+            pre_edit_component: None,
             services,
             file_picker: None,
             slicer_wait: None,
@@ -861,6 +885,7 @@ impl SolveApp {
             render_workspace,
             tool: None,
             dialog: None,
+            snaps: Default::default(),
             remembered_commands: Vec::new(),
             params: None,
             design_properties: None,
@@ -957,12 +982,7 @@ impl SolveApp {
             control_job: None,
             control_answering: Vec::new(),
             agent: Default::default(),
-            pending_shots: Vec::new(),
-            shot_chat_turns: Default::default(),
-            queued_shots: Vec::new(),
-            shot_tx,
-            shot_rx,
-            shot_token: 0,
+            shots: solidcraft_control_egui::screenshot::Shots::new("no frame was presented (window hidden?); use ui.render"),
             styled: false,
             fitted: false,
             pending_fit: None,
@@ -987,12 +1007,12 @@ impl SolveApp {
 
     /// Translate text using the active language preference.
     pub fn tr<'a>(&self, text: &'a str) -> &'a str {
-        i18n::Locale::for_language(&self.preferences.language).text(text)
+        solidcraft_ui_text::Locale::for_language(&self.preferences.language).text(text)
     }
 
     /// Translate a display label supplied by the engine, without changing its identifier.
     pub fn tr_label<'a>(&self, text: &'a str) -> &'a str {
-        i18n::Locale::for_language(&self.preferences.language).label(text)
+        solidcraft_ui_text::Locale::for_language(&self.preferences.language).label(text)
     }
 
     /// Draw the viewport on the GPU (eframe's wgpu render state, with the app's depth and
@@ -1124,6 +1144,7 @@ impl SolveApp {
             "auto_ortho_faces": self.ui.auto_ortho_faces,
             "pick_bodies": self.ui.pick_bodies,
             "auto_project": self.session.auto_project,
+            "project_construction": self.session.project_construction,
             "visual_style": self.ui.visual_style,
             "browser_collapsed": self.tree.collapsed,
             "browser_expanded": self.tree.expanded,
@@ -1193,6 +1214,9 @@ impl SolveApp {
         }
         if let Some(a) = flag("auto_project") {
             self.session.auto_project = a;
+        }
+        if let Some(c) = flag("project_construction") {
+            self.session.project_construction = c;
         }
         if let Some(m) = v.get("autosave_minutes").and_then(Value::as_f64).filter(|m| m.is_finite()) {
             self.autosave_minutes = m.clamp(0.0, 600.0);
@@ -1374,6 +1398,15 @@ impl SolveApp {
         if let Ok(v) = &r {
             match id {
                 "sketch.finish" | "sketch.cancel" => self.sketch_closed(v.get("sketch").and_then(Value::as_u64)),
+                // The sketch being edited has all new contents: a tool's picks named the old ones.
+                "sketch.replace" if v.get("sketch_id").and_then(Value::as_u64).is_some_and(|id| self.session.active_sketch == Some(id)) => {
+                    if let Some(tool) = self.tool.as_mut() {
+                        tool.pts.clear();
+                        tool.hover = None;
+                        tool.picks.clear();
+                        tool.point_picks.clear();
+                    }
+                }
                 "view.fit" | "view.home" => self.frame_view(id == "view.home"),
                 "view.tool" => {
                     self.viewport.nav = match v.get("tool").and_then(Value::as_str) {
@@ -1418,7 +1451,7 @@ impl SolveApp {
                 "timeline.redefine" if v.get("rolled_back").and_then(Value::as_bool) == Some(true) => {
                     let feature = v.get("feature").and_then(Value::as_u64).and_then(|f| self.session.doc.feature(f));
                     let name = feature.map(|f| f.name.clone()).unwrap_or_default();
-                    self.set_status(i18n::format("timeline.edited_rolled_back", &[("name", &name)]), false);
+                    self.set_status(solidcraft_ui_text::format("timeline.edited_rolled_back", &[("name", &name)]), false);
                 }
                 _ => {}
             }
@@ -1457,7 +1490,7 @@ impl SolveApp {
             }
             if id == "view.layout" {
                 let layout =
-                    if v.get("mode").and_then(Value::as_str) == Some("compact") { shell::LayoutMode::Docked } else { shell::LayoutMode::Floating };
+                    if v.get("mode").and_then(Value::as_str) == Some("compact") { ui_kit::LayoutMode::Docked } else { ui_kit::LayoutMode::Floating };
                 self.preferences.layout = layout;
                 self.ui.layout = layout;
             }
@@ -1589,7 +1622,7 @@ impl SolveApp {
                 // language scope, so resolve the echo from the saved preference instead of the
                 // thread-local scope. The command's own label is translated too, so the echo
                 // reads the same way the toolbar button it came from does.
-                let language = i18n::Locale::for_language(&self.preferences.language);
+                let language = solidcraft_ui_text::Locale::for_language(&self.preferences.language);
                 let label = language.label(command_label(id));
                 // Frames of a gesture (a continuous view move, a part dragged by its joints) are
                 // not echoed one by one.
@@ -1615,6 +1648,7 @@ impl SolveApp {
                     self.applying = None;
                     self.editing_state = None;
                     self.pending_feature_edit = None;
+                    self.pre_edit_component = None;
                     // So does what it had computing: none of it may land in the new design.
                     self.cancel_computing();
                     self.tool = None;
@@ -1642,7 +1676,7 @@ impl SolveApp {
             Err(e) => {
                 // The native menu runs Undo and Redo before `logic` installs the frame scope, so
                 // the error would be translated with the thread default.
-                let _language = i18n::scope(&self.preferences.language);
+                let _language = solidcraft_ui_text::scope(&self.preferences.language);
                 let msg = friendly_error(id, e);
                 self.session.echo(msg.clone());
                 self.set_status(msg, true);
@@ -1730,7 +1764,7 @@ impl SolveApp {
     fn start_with_variant_memory(&mut self, id: &str, remember_variant: bool, opener: Option<egui::Rect>, section_edit: bool) {
         // A tool can be started outside the frame's scope (a direct `start`, a shortcut in
         // `logic`): build its hint in the user's language, not the thread default.
-        let _language = crate::i18n::scope(&self.preferences.language);
+        let _language = solidcraft_ui_text::scope(&self.preferences.language);
         if solidcraft_engine::panels::commands::is_command(id) {
             if let Err(why) = self.run(id, json!({})) {
                 self.set_status(why, true);
@@ -1937,7 +1971,7 @@ impl SolveApp {
             return;
         }
         if id == "view.layout" {
-            let mode = if self.ui.layout == shell::LayoutMode::Floating { "compact" } else { "floating" };
+            let mode = if self.ui.layout == ui_kit::LayoutMode::Floating { "compact" } else { "floating" };
             let _ = self.run(id, json!({"mode":mode}));
             return;
         }
@@ -2147,12 +2181,12 @@ impl SolveApp {
             }
             let empty = sel.is_empty();
             self.start("solid.extrude");
-            if empty
-                && let Some(d) = &mut self.dialog
-                && let Some(input) = d.inputs.first_mut()
-            {
-                input.accept |= selection::FACES | selection::EDGES;
+            if let Some(d) = &mut self.dialog {
+                // Opened by Press Pull, so the dialog says so, whatever was picked (#11705).
                 d.press_pull = true;
+                if empty && let Some(input) = d.inputs.first_mut() {
+                    input.accept |= selection::FACES | selection::EDGES;
+                }
             }
             return;
         }
@@ -2347,6 +2381,48 @@ impl SolveApp {
         self.edit_feature_at(id, None);
     }
 
+    /// [`Self::edit_feature`] from a feature row inside one placement of a component (the
+    /// Browser's Features folder): that component is active while the feature is edited, so the
+    /// edit happens in its placement, and the one active before comes back when the editor ends
+    /// (#12720), as a sketch opened the same way does (#8127). A feature of the design itself, or
+    /// of the component already active, is edited as it is.
+    pub fn edit_feature_in(&mut self, id: u64, placement: Option<(u64, &[u64])>) {
+        let Some((component, path)) = placement.filter(|(_, path)| !path.is_empty()) else {
+            self.edit_feature(id);
+            return;
+        };
+        // An editor still open from an earlier double-click ends first, giving back its own
+        // component, so the one remembered here is the one the user sees before this click.
+        dialogs::cancel(self);
+        self.return_from_feature_edit();
+        let context = (self.session.active_component, self.session.active_occurrence_path.clone());
+        let _ = self.run("component.activate", json!({"component": component, "occurrence": path.last(), "path": path}));
+        let opened_in = self.session.active_component;
+        let moved = (opened_in, &self.session.active_occurrence_path) != (context.0, &context.1);
+        self.pre_edit_component = moved.then_some(PreEditComponent { feature: id, component: context.0, path: context.1, opened_in });
+        self.edit_feature(id);
+        // Nothing opened (a feature without an editor goes to the command palette): the
+        // component comes back at once.
+        self.return_from_feature_edit();
+    }
+
+    /// Once the editor of the feature a Browser double-click activated a component for has ended,
+    /// however it ended (OK, Cancel, another command, a sketch finished), the component active
+    /// before the double-click is active again (#12720). Unless another component was activated
+    /// meanwhile: that one stays, as after a sketch.
+    fn return_from_feature_edit(&mut self) {
+        let Some(id) = self.pre_edit_component.as_ref().map(|pre| pre.feature) else { return };
+        let open = self.dialog.as_ref().is_some_and(|d| d.editing.is_some_and(|(feature, _)| feature == id))
+            || self.pending_feature_edit.as_ref().is_some_and(|pending| pending.feature() == Some(id))
+            || self.session.active_sketch == Some(id);
+        if open {
+            return;
+        }
+        if let Some(pre) = self.pre_edit_component.take().filter(|pre| pre.opened_in == self.session.active_component) {
+            self.restore_component(pre.component, pre.path);
+        }
+    }
+
     /// [`Self::edit_feature`] opened from a click at `at` on what the feature made: the dialog's
     /// arrow sits by that point (a fillet's or chamfer's edge nearest it).
     pub(crate) fn edit_feature_at(&mut self, id: u64, at: Option<solidcore_record::Vec3>) {
@@ -2385,7 +2461,7 @@ impl SolveApp {
     /// they wait for it.
     pub(crate) fn close_editor_for_history(&mut self) -> Result<(), String> {
         if self.pending_feature_edit.is_some() {
-            let why = i18n::tr("ui.history_waits_for_editor").to_string();
+            let why = solidcraft_ui_text::tr("ui.history_waits_for_editor").to_string();
             self.set_status(why.clone(), true);
             return Err(why);
         }
@@ -2674,23 +2750,30 @@ impl SolveApp {
     pub(crate) fn say_newer_file(&mut self) {
         let Some(file) = self.session.doc.newer_file.clone() else { return };
         for what in &file.not_understood {
-            let text = i18n::format("document.newer_file_not_read", &[("what", what)]);
+            let text = solidcraft_ui_text::format("document.newer_file_not_read", &[("what", what)]);
             self.messages.push(&text, false, now_ms());
         }
         let text = if file.format <= file.reads_up_to && !file.unknown_changes.is_empty() {
             let change = file.unknown_changes.first().map_or("", String::as_str);
-            i18n::format("document.newer_file_change", &[("format", &file.format.to_string()), ("change", change)])
+            solidcraft_ui_text::format("document.newer_file_change", &[("format", &file.format.to_string()), ("change", change)])
         } else {
-            i18n::format("document.newer_file", &[("format", &file.format.to_string()), ("reads", &file.reads_up_to.to_string())])
+            solidcraft_ui_text::format("document.newer_file", &[("format", &file.format.to_string()), ("reads", &file.reads_up_to.to_string())])
         };
         self.set_status(text, false);
     }
 
-    pub fn open_path(&mut self, path: &str) {
+    /// Open the design (or file) at `path` here and now: it is read and evaluated before this
+    /// returns, which blocks the thread for a large design. The app opens through
+    /// [`Self::open_path_async`] or [`Self::open_path_answered`] (progress and Cancel, #10198);
+    /// this is for tests.
+    #[cfg(test)]
+    pub(crate) fn open_path(&mut self, path: &str) {
         self.open_path_with(path, &Default::default());
     }
 
-    /// [`Self::open_path`] with the import options of the request (`units` of an STL or OBJ file).
+    /// Open the design (or file) at `path` here and now, with the import options of the request
+    /// (`units` of an STL or OBJ file). The web file loader uses it for its own formats that have
+    /// no staged open.
     pub fn open_path_with(&mut self, path: &str, options: &serde_json::Map<String, Value>) {
         match documents::reuse_path(self, path) {
             Ok(true) => return,
@@ -3149,9 +3232,10 @@ impl SolveApp {
 
     /// Per-frame logic before layout.
     pub fn logic(&mut self, ctx: &egui::Context) {
+        params_dialog::install_expressions(ctx);
         // Shortcuts run here, before `ui` installs the language scope: a tool started by its
         // key must build its translated hint in the user's language, not in English.
-        let _language = crate::i18n::scope(&self.preferences.language);
+        let _language = solidcraft_ui_text::scope(&self.preferences.language);
         panel_runtime::tick_app(self, ctx);
         // Sleep/wake often skips frames without a device-lost signal; refresh egui GPU textures
         // when the frame clock jumps so the chrome is not stuck blank (#8749).
@@ -3190,15 +3274,15 @@ impl SolveApp {
         }
         prefs::apply(self, ctx);
         // The view's own dark or light only changes tokens, not egui's visuals: no restyle.
-        theme::set_viewport_dark(self.preferences.viewport_theme.dark());
-        theme::set_viewport_background(self.preferences.viewport_background);
-        if !self.styled || theme::is_dark() != self.ui.dark || theme::vision() != self.preferences.color_vision {
-            theme::set_dark(self.ui.dark);
-            theme::set_vision(self.preferences.color_vision);
-            theme::apply(ctx);
+        solidcraft_theme::set_viewport_dark(self.preferences.viewport_theme.dark());
+        solidcraft_theme::set_viewport_background(self.preferences.viewport_background);
+        if !self.styled || solidcraft_theme::is_dark() != self.ui.dark || solidcraft_theme::vision() != self.preferences.color_vision {
+            solidcraft_theme::set_dark(self.ui.dark);
+            solidcraft_theme::set_vision(self.preferences.color_vision);
+            solidcraft_theme::apply(ctx);
             self.styled = true;
         }
-        theme::TabAccent::publish(self, ctx);
+        self.publish_tab_accent(ctx);
         if !self.fitted {
             self.fit_view();
             self.fitted = true;
@@ -3212,6 +3296,7 @@ impl SolveApp {
         self.drain_control(ctx);
         self.follow_view_request(true);
         self.return_from_extrude_view();
+        self.return_from_feature_edit();
         agent_cursor::step(self, ctx);
         browser::eye_drag_frame(self, ctx);
         if !self.synthetic.is_empty() || !self.held_click.is_empty() {
@@ -3248,7 +3333,7 @@ impl SolveApp {
                 }
             }
         }
-        control::publish_design(self, &control::DESIGN_WATCH);
+        control::publish_design(self, &control::DOCUMENT_WATCH);
     }
 
     /// The frame's input before the app reads it: synthetic events, then what is typed while a
@@ -3324,6 +3409,7 @@ impl SolveApp {
 
     /// Lay out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        params_dialog::install_expressions(ui.ctx());
         prefs::prepare_blur(self, ui.ctx());
         render_workspace::displayed::begin(self);
         let blur_source = !self.home.open && !render_workspace::result_active(self);
@@ -3345,11 +3431,11 @@ impl SolveApp {
             self.applied_system_fonts = system_fonts;
             crate::fonts::setup_fonts_without_waiting(
                 ui.ctx(),
-                crate::i18n::effective_language(&self.preferences.language),
+                solidcraft_ui_text::effective_language(&self.preferences.language),
                 &self.preferences.ui_font,
             );
         }
-        let _language = crate::i18n::scope(&self.preferences.language);
+        let _language = solidcraft_ui_text::scope(&self.preferences.language);
         let mut report_input = None;
         issue_report::CadInput::block(self, ui, &mut report_input);
         semantic_content::begin(self, ui.ctx());
@@ -3370,7 +3456,7 @@ impl SolveApp {
         if self.file_picker_busy() {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
         }
-        control::publish_design(self, &control::DESIGN_WATCH);
+        control::publish_design(self, &control::DOCUMENT_WATCH);
         self.frame_ms = now_ms() - t0;
         frame_watch::end(self);
         render_workspace::displayed::finish(self, ui.ctx());
@@ -3378,14 +3464,14 @@ impl SolveApp {
 
     fn cad_ui(&mut self, ui: &mut egui::Ui, report_input: &mut Option<issue_report::CadInput>) {
         if self.embedded {
-            self.ui.layout = shell::LayoutMode::Docked;
+            self.ui.layout = ui_kit::LayoutMode::Docked;
             self.home.open = false;
             self.ui.show_browser = true;
             self.ui.show_timeline = true;
         }
         if self.embed_editor {
             // The host shows one design and has its own way to start one.
-            self.ui.layout = shell::LayoutMode::Docked;
+            self.ui.layout = ui_kit::LayoutMode::Docked;
             self.home.open = false;
         }
         self.ui.layout.publish(ui.ctx());
@@ -3427,6 +3513,7 @@ impl SolveApp {
         // The status bar first: it spans the window's width below History and the side panels.
         if self.universal_panel_host_enabled() {
             self.universal_workspace_ui(ui);
+            semantic_content::finalize(self, ui.ctx());
             // Browser-owned editors retain their independent legacy windows,
             // drafts and capture questions while the Browser host is suppressed.
             browser::editors(self, ui);
@@ -3441,7 +3528,7 @@ impl SolveApp {
             if !floating && !self.embedded {
                 toolbar::toolbar(self, ui);
             }
-            theme::TabAccent::publish(self, ui.ctx());
+            self.publish_tab_accent(ui.ctx());
             browser::publish_row_prefs(self, ui.ctx());
             if !floating {
                 agent_chat::show(self, ui);
@@ -3492,9 +3579,9 @@ impl SolveApp {
                     viewport_ui.disable();
                 }
                 self.show_workspace(&mut viewport_ui);
-                shell::paint_top_corners(ui.painter(), full, theme::Tokens::get().app_bar);
+                shell::paint_top_corners(ui.painter(), full, solidcraft_theme::Tokens::get().app_bar);
                 toolbar::toolbar(self, ui);
-                theme::TabAccent::publish(self, ui.ctx());
+                self.publish_tab_accent(ui.ctx());
             }
             if floating && show_timeline && !left_timeline {
                 timeline::timeline(self, ui);
@@ -3683,87 +3770,24 @@ impl SolveApp {
             control::Outcome::Done(v) => {
                 let _ = reply.send(v);
             }
-            // A window that is minimised or covered (another macOS Space) presents no frame:
-            // say so at once rather than after the deadline (#1677).
-            control::Outcome::Screenshot { .. } if window_hidden(ctx) => {
-                let _ = reply.send(json!({"ok": false, "hidden": true, "error": "no frame was presented (window hidden?); use ui.render"}));
-            }
-            control::Outcome::Screenshot { path } => {
-                self.shot_token += 1;
-                let token = self.shot_token;
-                if let Some(turn) = req.chat_turn {
-                    self.shot_chat_turns.insert(token, turn);
-                }
-                self.queued_shots.push((token, now_ms() + 150.0, 0));
-                self.pending_shots.push((token, path, reply, now_ms() + 8000.0));
-            }
+            control::Outcome::Screenshot { path } => self.shots.request(ctx, path, reply, req.chat_turn, now_ms()),
         }
         ctx.request_repaint();
     }
 
     fn issue_screenshots(&mut self, ctx: &egui::Context) {
-        let now = now_ms();
         // A view that just moved is drawn with fewer AO samples: shoot the full-quality frame
         // that follows (#7165), or after half a second a view that keeps moving as it is.
         let settled = viewport::ao_settled(self, ctx);
-        let shot_tx = &self.shot_tx;
-        self.queued_shots.retain_mut(|(token, at, frames)| {
-            *frames += 1;
-            if now >= *at && *frames >= 3 && (settled || now >= *at + 500.0) {
-                let (token, tx, ctx2) = (*token, shot_tx.clone(), ctx.clone());
-                ctx.request_screenshot(move |image| {
-                    let _ = tx.send((token, image));
-                    ctx2.request_repaint();
-                });
-                false
-            } else {
-                true
-            }
-        });
-        if !self.queued_shots.is_empty() || !self.pending_shots.is_empty() {
-            ctx.request_repaint_after(std::time::Duration::from_millis(16));
-        }
+        self.shots.issue(ctx, settled, now_ms());
     }
 
     fn collect_screenshots(&mut self, ctx: &egui::Context) {
-        // A screenshot requested in one tab must never return or save a frame of another.
-        let chat_turns = &mut self.shot_chat_turns;
-        let queued_shots = &mut self.queued_shots;
-        self.pending_shots.retain(|(token, _, reply, _)| {
-            if control::chat_turn_cancelled(chat_turns.get(token).map(std::sync::Arc::as_ref)) {
-                chat_turns.remove(token);
-                queued_shots.retain(|(queued, ..)| queued != token);
-                let _ = reply.send(control::cancelled_chat_response());
-                false
-            } else {
-                true
-            }
-        });
-        // Drained every frame: a shot that comes after its request was cancelled or timed out
-        // is dropped here instead of waiting in the channel.
-        let shots: Vec<_> = self.shot_rx.try_iter().collect();
-        if self.pending_shots.is_empty() && !issue_report::pending(self) {
-            return;
-        }
+        let report = issue_report::pending(self);
+        let shots = self.shots.collect(ctx, now_ms(), report, control::save_screenshot);
         for (token, image) in shots {
-            issue_report::receive(self, token, image.clone());
-            if let Some(i) = self.pending_shots.iter().position(|(t, ..)| *t == token) {
-                let (_, path, reply, _) = self.pending_shots.remove(i);
-                self.shot_chat_turns.remove(&token);
-                let _ = reply.send(control::save_screenshot(&image, path.as_deref()));
-            }
+            issue_report::receive(self, token, image);
         }
-        let now = now_ms();
-        // Hidden while waiting: no frame is coming.
-        let hidden = window_hidden(ctx);
-        self.pending_shots.retain(|(token, _, reply, deadline)| {
-            if now < *deadline && !hidden {
-                return true;
-            }
-            let _ = reply.send(json!({"ok": false, "error": "no frame was presented (window hidden?); use ui.render"}));
-            self.shot_chat_turns.remove(token);
-            false
-        });
     }
 }
 
@@ -3776,12 +3800,6 @@ fn finite_input(raw: &mut egui::RawInput) {
         egui::Event::Touch { pos, force, .. } => pos.is_finite() && force.is_none_or(f32::is_finite),
         _ => true,
     });
-}
-
-/// The window is minimised or fully covered, so it presents no frames (#1677). Unknown counts as
-/// shown: the screenshot deadline still ends a wait for a frame that never comes.
-fn window_hidden(ctx: &egui::Context) -> bool {
-    ctx.input(|i| i.viewport().visible()) == Some(false)
 }
 
 /// An edit in place command's result, saying when it waits for the end of the agent's turn.
@@ -3800,10 +3818,10 @@ pub fn command_label(id: &str) -> &str {
 /// An engine error with the command's label instead of its id: "Shell: offset must be …".
 /// The command label and catalogued engine messages follow the interface language.
 pub fn friendly_error(id: &str, e: &str) -> String {
-    let label = i18n::tr_label(command_label(id));
+    let label = solidcraft_ui_text::tr_label(command_label(id));
     let msg = e.replace(&format!("invalid parameters for `{id}`: "), "").replace(&format!("{id}: "), "").replace(&format!("`{id}`"), label);
     let msg = i18n::tr_engine_error(&msg);
-    let msg = i18n::tr_label(&msg);
+    let msg = solidcraft_ui_text::tr_label(&msg);
     if msg.starts_with(label) { msg.to_string() } else { format!("{label}: {msg}") }
 }
 

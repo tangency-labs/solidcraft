@@ -1,0 +1,110 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b18": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b19"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b19"
+      ],
+      "op": "stitch",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "tolerance": 0.00005540588203494177
+      }
+    }
+  ],
+  "case": "report-fillet-g2-corner-of-bar-running-into-cylinder",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "clear_mm": 0.48,
+      "curvature_jump_per_mm": 0.0025,
+      "near": [
+        0,
+        0,
+        10
+      ],
+      "within_mm": 4.4
+    },
+    "method": "a bar 40 x 16 x 10 whose far end is a half disc R8 about (40, 8), a disc R8 about the same centre sketched on its top (the top's outline projected) and extruded 10 up, joined: the bar's sides run tangent into the cylinder, V0 = 6400 + 960 pi; the rolling-ball answer: the three r2 rounds at the bar's other top corner (0, 0, 10): the front round's spandrel from x = 2 to the wall (30.5896671706), the vertical edge's and the left top edge's (1 - pi/4) r^2 over 8 and 14, the corner cube of side 2 less the rolling ball's eighth, 8 - 4 pi/3: removed 53.2858385868; the G2 patch differs from the ball only within the setback cube of side 3 about the vertex, so V is graded as V0 - removed with 3^3 as its tolerance (the rounds outside the cube exactly: ...-outside-setback); the patch meets the rounds and faces round it G2, graded as fillets/9-fillet-corner-r5-curvature-default-setback scaled by r = 2: at a hole corner the round is only tangent (G1) to the plane, so the curvature jump is bounded at stations at least 0.48 mm (0.24 r) from each turn, within 4.4 mm of the corner, at most 0.0025 per mm (0.5% of 1/r)",
+    "source": "analytic",
+    "tolerance": {
+      "rel": 0.002883801046998287
+    },
+    "volume_mm3": 9362.643108859389,
+    "what": "three r2 rounds at a top corner of a bar whose far end runs tangent into a cylinder, with the curvature (g2) corner set back 3: SMLib refused the result coming back (a cylinder over more than a turn); reported from the app (2026-10-30, test-peg part)"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 33,
+      "faces": 11,
+      "vertices": 24
+    }
+  },
+  "records": "report-fillet-g2-corner-of-bar-running-into-cylinder.bodies.json.gz",
+  "result": [
+    {
+      "body": "Peg",
+      "made": "b20"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 3138.362119077002,
+      "body_count": 1,
+      "edges": 27,
+      "faces": 11,
+      "vertices": 18,
+      "volume_mm3": 9362.194188165065
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": null,
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_setback_open",
+    "tagged",
+    "stitch"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "three r2 rounds at a top corner of a bar whose far end runs tangent into a cylinder, with the curvature (g2) corner set back 3: SMLib refused the result coming back (a cylinder over more than a turn); reported from the app (2026-10-30, test-peg part)",
+  "why_not": []
+}

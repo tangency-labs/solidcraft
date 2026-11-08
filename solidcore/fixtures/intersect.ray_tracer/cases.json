@@ -1,0 +1,2708 @@
+{
+ "cases": [
+  {
+   "name": "tess_test10_ray_setup_empty_grid",
+   "upstream_ref": "tests/prog_test/src/smTessTest.cpp:2742 (grid 20^3, tolerance SM_ZONE_TOL_3D, accuracy 1e-8, diagonal ray 40 long; poly brep elements not expressible)",
+   "inputs": {
+    "surfaces": [
+     {
+      "kind": "plane",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       0,
+       0,
+       4,
+       4
+      ]
+     }
+    ],
+    "grid": {
+     "bbox": [
+      -1,
+      -1,
+      -1,
+      11,
+      11,
+      11
+     ],
+     "size": [
+      20,
+      20,
+      20
+     ],
+     "ray_tol": 1e-05,
+     "ray_acc": 1e-08
+    },
+    "ops": [
+     {
+      "op": "fire",
+      "p": [
+       -3.6602540378443873,
+       -3.6602540378443873,
+       -3.6602540378443873
+      ],
+      "v": [
+       0.5773502691896258,
+       0.5773502691896258,
+       0.5773502691896258
+      ],
+      "max_t": 40.0,
+      "hit_any": false,
+      "skip": null
+     }
+    ]
+   }
+  },
+  {
+   "name": "ray_misses_grid",
+   "upstream_ref": "source/SMLib/src/SmRayTracer.cpp:1332 FireRay (bHitsNothing)",
+   "inputs": {
+    "surfaces": [
+     {
+      "kind": "plane",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       0,
+       0,
+       4,
+       4
+      ]
+     }
+    ],
+    "grid": {
+     "bbox": [
+      -1,
+      -1,
+      -1,
+      5,
+      5,
+      5
+     ],
+     "size": [
+      4,
+      4,
+      4
+     ],
+     "ray_tol": 1e-05,
+     "ray_acc": 1e-08
+    },
+    "ops": [
+     {
+      "op": "add_leaf",
+      "surface": 0,
+      "uv": [
+       0,
+       0,
+       4,
+       4
+      ],
+      "bbox": [
+       0,
+       0,
+       0,
+       4,
+       4,
+       0
+      ],
+      "pseudo": [
+       0,
+       0,
+       0,
+       4,
+       4,
+       0
+      ],
+      "polar": [
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      "elem_box": [
+       -0.1,
+       -0.1,
+       -0.1,
+       4.1,
+       4.1,
+       0.1
+      ]
+     },
+     {
+      "op": "fire",
+      "p": [
+       -3,
+       9,
+       2
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "max_t": 1e+20,
+      "hit_any": false,
+      "skip": null
+     }
+    ]
+   }
+  },
+  {
+   "name": "zero_vector_is_an_error",
+   "upstream_ref": "source/SMLib/src/SmRayTracer.cpp:1332 FireRay (Setup3DDDA error)",
+   "inputs": {
+    "surfaces": [
+     {
+      "kind": "plane",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       0,
+       0,
+       4,
+       4
+      ]
+     }
+    ],
+    "grid": {
+     "bbox": [
+      -1,
+      -1,
+      -1,
+      5,
+      5,
+      5
+     ],
+     "size": [
+      4,
+      4,
+      4
+     ],
+     "ray_tol": 1e-05,
+     "ray_acc": 1e-08
+    },
+    "ops": [
+     {
+      "op": "add_leaf",
+      "surface": 0,
+      "uv": [
+       0,
+       0,
+       4,
+       4
+      ],
+      "bbox": [
+       0,
+       0,
+       0,
+       4,
+       4,
+       0
+      ],
+      "pseudo": [
+       0,
+       0,
+       0,
+       4,
+       4,
+       0
+      ],
+      "polar": [
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      "elem_box": [
+       -0.1,
+       -0.1,
+       -0.1,
+       4.1,
+       4.1,
+       0.1
+      ]
+     },
+     {
+      "op": "fire",
+      "p": [
+       2,
+       2,
+       -3
+      ],
+      "v": [
+       0,
+       0,
+       0
+      ],
+      "max_t": 1e+20,
+      "hit_any": false,
+      "skip": null
+     }
+    ]
+   }
+  },
+  {
+   "name": "ray_through_element_box_misses_pseudo_box",
+   "upstream_ref": "source/SMLib/src/SmRayTracer.cpp:841 LocalSolve (pseudo box rejection)",
+   "inputs": {
+    "surfaces": [
+     {
+      "kind": "plane",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       0,
+       0,
+       4,
+       4
+      ]
+     }
+    ],
+    "grid": {
+     "bbox": [
+      -1,
+      -1,
+      -1,
+      5,
+      5,
+      5
+     ],
+     "size": [
+      4,
+      4,
+      4
+     ],
+     "ray_tol": 1e-05,
+     "ray_acc": 1e-08
+    },
+    "ops": [
+     {
+      "op": "add_leaf",
+      "surface": 0,
+      "uv": [
+       0,
+       0,
+       4,
+       4
+      ],
+      "bbox": [
+       0,
+       0,
+       0,
+       4,
+       4,
+       0
+      ],
+      "pseudo": [
+       0,
+       0,
+       0,
+       4,
+       4,
+       0
+      ],
+      "polar": [
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      "elem_box": [
+       -0.1,
+       -0.1,
+       -0.1,
+       4.1,
+       4.1,
+       0.1
+      ]
+     },
+     {
+      "op": "fire",
+      "p": [
+       4.05,
+       2,
+       -3
+      ],
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "max_t": 1e+20,
+      "hit_any": false,
+      "skip": null
+     },
+     {
+      "op": "fire",
+      "p": [
+       -3,
+       2,
+       0.05
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "max_t": 1e+20,
+      "hit_any": false,
+      "skip": null
+     }
+    ]
+   }
+  },
+  {
+   "name": "ray_at_leaf_hits_pseudo_box_defers",
+   "upstream_ref": "source/SMLib/src/SmRayTracer.cpp:841 LocalSolve (LocalLineIntersect)",
+   "inputs": {
+    "surfaces": [
+     {
+      "kind": "plane",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       0,
+       0,
+       4,
+       4
+      ]
+     }
+    ],
+    "grid": {
+     "bbox": [
+      -1,
+      -1,
+      -1,
+      5,
+      5,
+      5
+     ],
+     "size": [
+      4,
+      4,
+      4
+     ],
+     "ray_tol": 1e-05,
+     "ray_acc": 1e-08
+    },
+    "ops": [
+     {
+      "op": "add_leaf",
+      "surface": 0,
+      "uv": [
+       0,
+       0,
+       4,
+       4
+      ],
+      "bbox": [
+       0,
+       0,
+       0,
+       4,
+       4,
+       0
+      ],
+      "pseudo": [
+       0,
+       0,
+       0,
+       4,
+       4,
+       0
+      ],
+      "polar": [
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      "elem_box": [
+       -0.1,
+       -0.1,
+       -0.1,
+       4.1,
+       4.1,
+       0.1
+      ]
+     },
+     {
+      "op": "fire",
+      "p": [
+       2,
+       2,
+       -3
+      ],
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "max_t": 1e+20,
+      "hit_any": false,
+      "skip": null
+     }
+    ]
+   }
+  },
+  {
+   "name": "skipped_element",
+   "upstream_ref": "source/SMLib/src/SmRayTracer.cpp:1332 FireRay (m_pSkipElement)",
+   "inputs": {
+    "surfaces": [
+     {
+      "kind": "plane",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       0,
+       0,
+       4,
+       4
+      ]
+     }
+    ],
+    "grid": {
+     "bbox": [
+      -1,
+      -1,
+      -1,
+      5,
+      5,
+      5
+     ],
+     "size": [
+      4,
+      4,
+      4
+     ],
+     "ray_tol": 1e-05,
+     "ray_acc": 1e-08
+    },
+    "ops": [
+     {
+      "op": "add_leaf",
+      "surface": 0,
+      "uv": [
+       0,
+       0,
+       4,
+       4
+      ],
+      "bbox": [
+       0,
+       0,
+       0,
+       4,
+       4,
+       0
+      ],
+      "pseudo": [
+       0,
+       0,
+       0,
+       4,
+       4,
+       0
+      ],
+      "polar": [
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      "elem_box": [
+       -0.1,
+       -0.1,
+       -0.1,
+       4.1,
+       4.1,
+       0.1
+      ]
+     },
+     {
+      "op": "fire",
+      "p": [
+       2,
+       2,
+       -3
+      ],
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "max_t": 1e+20,
+      "hit_any": false,
+      "skip": 0
+     }
+    ]
+   }
+  },
+  {
+   "name": "max_ray_parameter_before_the_leaf",
+   "upstream_ref": "source/SMLib/src/SmRayTracer.cpp:1332 FireRay (rMinDistances > dHitT)",
+   "inputs": {
+    "surfaces": [
+     {
+      "kind": "plane",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       0,
+       0,
+       4,
+       4
+      ]
+     }
+    ],
+    "grid": {
+     "bbox": [
+      -1,
+      -1,
+      -1,
+      5,
+      5,
+      5
+     ],
+     "size": [
+      4,
+      4,
+      4
+     ],
+     "ray_tol": 1e-05,
+     "ray_acc": 1e-08
+    },
+    "ops": [
+     {
+      "op": "add_leaf",
+      "surface": 0,
+      "uv": [
+       0,
+       0,
+       4,
+       4
+      ],
+      "bbox": [
+       0,
+       0,
+       0,
+       4,
+       4,
+       0
+      ],
+      "pseudo": [
+       0,
+       0,
+       0,
+       4,
+       4,
+       0
+      ],
+      "polar": [
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      "elem_box": [
+       -0.1,
+       -0.1,
+       -0.1,
+       4.1,
+       4.1,
+       0.1
+      ]
+     },
+     {
+      "op": "fire",
+      "p": [
+       2,
+       2,
+       -3
+      ],
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "max_t": 0.5,
+      "hit_any": false,
+      "skip": null
+     }
+    ]
+   }
+  },
+  {
+   "name": "leaf_behind_the_ray",
+   "upstream_ref": "source/SMLib/src/SmRayTracer.cpp:1332 FireRay (m_dTMaxOfBBox < -SM_EFF_ZERO)",
+   "inputs": {
+    "surfaces": [
+     {
+      "kind": "plane",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       0,
+       0,
+       4,
+       4
+      ]
+     }
+    ],
+    "grid": {
+     "bbox": [
+      -1,
+      -1,
+      -1,
+      5,
+      5,
+      5
+     ],
+     "size": [
+      4,
+      4,
+      4
+     ],
+     "ray_tol": 1e-05,
+     "ray_acc": 1e-08
+    },
+    "ops": [
+     {
+      "op": "add_leaf",
+      "surface": 0,
+      "uv": [
+       0,
+       0,
+       4,
+       4
+      ],
+      "bbox": [
+       0,
+       0,
+       0,
+       4,
+       4,
+       0
+      ],
+      "pseudo": [
+       0,
+       0,
+       0,
+       4,
+       4,
+       0
+      ],
+      "polar": [
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      "elem_box": [
+       -0.1,
+       -0.1,
+       -0.1,
+       4.1,
+       4.1,
+       0.1
+      ]
+     },
+     {
+      "op": "fire",
+      "p": [
+       2,
+       2,
+       -3
+      ],
+      "v": [
+       0,
+       0,
+       -1
+      ],
+      "max_t": 1e+20,
+      "hit_any": false,
+      "skip": null
+     }
+    ]
+   }
+  },
+  {
+   "name": "several_leaves_one_voxel_row",
+   "upstream_ref": "source/SMLib/src/SmRayTracer.cpp:1332 FireRay (elements sorted by entry parameter)",
+   "inputs": {
+    "surfaces": [
+     {
+      "kind": "plane",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       0,
+       0,
+       4,
+       4
+      ]
+     },
+     {
+      "kind": "plane",
+      "o": [
+       0,
+       0,
+       1
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       0,
+       0,
+       4,
+       4
+      ]
+     }
+    ],
+    "grid": {
+     "bbox": [
+      -1,
+      -1,
+      -1,
+      5,
+      5,
+      5
+     ],
+     "size": [
+      4,
+      4,
+      4
+     ],
+     "ray_tol": 1e-05,
+     "ray_acc": 1e-08
+    },
+    "ops": [
+     {
+      "op": "add_leaf",
+      "surface": 0,
+      "uv": [
+       0,
+       0,
+       4,
+       4
+      ],
+      "bbox": [
+       0,
+       0,
+       0,
+       4,
+       4,
+       0
+      ],
+      "pseudo": [
+       0,
+       0,
+       0,
+       4,
+       4,
+       0
+      ],
+      "polar": [
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      "elem_box": [
+       -0.1,
+       -0.1,
+       -0.1,
+       4.1,
+       4.1,
+       0.1
+      ]
+     },
+     {
+      "op": "add_leaf",
+      "surface": 1,
+      "uv": [
+       0,
+       0,
+       4,
+       4
+      ],
+      "bbox": [
+       0,
+       0,
+       1,
+       4,
+       4,
+       1
+      ],
+      "pseudo": [
+       0,
+       0,
+       1,
+       4,
+       4,
+       1
+      ],
+      "polar": [
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      "elem_box": [
+       -0.1,
+       -0.1,
+       0.9,
+       4.1,
+       4.1,
+       1.1
+      ]
+     },
+     {
+      "op": "fire",
+      "p": [
+       4.05,
+       2,
+       -3
+      ],
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "max_t": 1e+20,
+      "hit_any": false,
+      "skip": null
+     },
+     {
+      "op": "fire",
+      "p": [
+       4.05,
+       2,
+       3
+      ],
+      "v": [
+       0,
+       0,
+       -1
+      ],
+      "max_t": 1e+20,
+      "hit_any": true,
+      "skip": null
+     }
+    ]
+   }
+  },
+  {
+   "name": "solver_tolerance_and_local_solve_miss",
+   "upstream_ref": "source/SMLib/inc/SmRayTracer.h:166 SetSolverTolerance; SmRayTracer.cpp:841 LocalSolve",
+   "inputs": {
+    "surfaces": [
+     {
+      "kind": "plane",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       0,
+       0,
+       4,
+       4
+      ]
+     }
+    ],
+    "grid": {
+     "bbox": [
+      -1,
+      -1,
+      -1,
+      5,
+      5,
+      5
+     ],
+     "size": [
+      4,
+      4,
+      4
+     ],
+     "ray_tol": 1e-05,
+     "ray_acc": 1e-08
+    },
+    "ops": [
+     {
+      "op": "solver_tol",
+      "tol": 0.0001
+     },
+     {
+      "op": "add_leaf",
+      "surface": 0,
+      "uv": [
+       0,
+       0,
+       4,
+       4
+      ],
+      "bbox": [
+       0,
+       0,
+       0,
+       4,
+       4,
+       0
+      ],
+      "pseudo": [
+       0,
+       0,
+       0,
+       4,
+       4,
+       0
+      ],
+      "polar": [
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      "elem_box": [
+       -0.1,
+       -0.1,
+       -0.1,
+       4.1,
+       4.1,
+       0.1
+      ]
+     },
+     {
+      "op": "local",
+      "leaf": 0,
+      "p": [
+       4.5,
+       2,
+       -3
+      ],
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "d3d_tol": 0.0,
+      "dist_tol": 1e-05,
+      "acc": 1e-08,
+      "ray_fire": true,
+      "have_t": true,
+      "t_min": 0.0,
+      "t_max": 10.0,
+      "interval": null
+     },
+     {
+      "op": "local",
+      "leaf": 0,
+      "p": [
+       -3,
+       2,
+       0.5
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "d3d_tol": 0.0,
+      "dist_tol": 1e-05,
+      "acc": 1e-08,
+      "ray_fire": true,
+      "have_t": true,
+      "t_min": 0.0,
+      "t_max": 10.0,
+      "interval": null
+     }
+    ]
+   }
+  },
+  {
+   "name": "local_solve_at_the_leaf_defers",
+   "upstream_ref": "source/SMLib/src/SmRayTracer.cpp:841 LocalSolve (corner guesses)",
+   "inputs": {
+    "surfaces": [
+     {
+      "kind": "plane",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       0,
+       0,
+       4,
+       4
+      ]
+     }
+    ],
+    "grid": {
+     "bbox": [
+      -1,
+      -1,
+      -1,
+      5,
+      5,
+      5
+     ],
+     "size": [
+      4,
+      4,
+      4
+     ],
+     "ray_tol": 1e-05,
+     "ray_acc": 1e-08
+    },
+    "ops": [
+     {
+      "op": "add_leaf",
+      "surface": 0,
+      "uv": [
+       0,
+       0,
+       4,
+       4
+      ],
+      "bbox": [
+       0,
+       0,
+       0,
+       4,
+       4,
+       0
+      ],
+      "pseudo": [
+       0,
+       0,
+       0,
+       4,
+       4,
+       0
+      ],
+      "polar": [
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      "elem_box": [
+       -0.1,
+       -0.1,
+       -0.1,
+       4.1,
+       4.1,
+       0.1
+      ]
+     },
+     {
+      "op": "local",
+      "leaf": 0,
+      "p": [
+       2,
+       2,
+       -3
+      ],
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "d3d_tol": 0.0,
+      "dist_tol": 1e-05,
+      "acc": 1e-08,
+      "ray_fire": true,
+      "have_t": true,
+      "t_min": 0.0,
+      "t_max": 10.0,
+      "interval": null
+     }
+    ]
+   }
+  },
+  {
+   "name": "local_solve_oblique_ray_uses_corners",
+   "upstream_ref": "source/SMLib/src/SmRayTracer.cpp:841 LocalSolve (bUseCorners)",
+   "inputs": {
+    "surfaces": [
+     {
+      "kind": "plane",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       0,
+       0,
+       4,
+       4
+      ]
+     }
+    ],
+    "grid": {
+     "bbox": [
+      -1,
+      -1,
+      -1,
+      5,
+      5,
+      5
+     ],
+     "size": [
+      4,
+      4,
+      4
+     ],
+     "ray_tol": 1e-05,
+     "ray_acc": 1e-08
+    },
+    "ops": [
+     {
+      "op": "add_leaf",
+      "surface": 0,
+      "uv": [
+       0,
+       0,
+       4,
+       4
+      ],
+      "bbox": [
+       0,
+       0,
+       0,
+       4,
+       4,
+       0
+      ],
+      "pseudo": [
+       0,
+       0,
+       0,
+       4,
+       4,
+       0
+      ],
+      "polar": [
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      "elem_box": [
+       -0.1,
+       -0.1,
+       -0.1,
+       4.1,
+       4.1,
+       0.1
+      ]
+     },
+     {
+      "op": "local",
+      "leaf": 0,
+      "p": [
+       10,
+       2,
+       0.2
+      ],
+      "v": [
+       -1,
+       0,
+       0
+      ],
+      "d3d_tol": 0.0,
+      "dist_tol": 1e-05,
+      "acc": 1e-08,
+      "ray_fire": true,
+      "have_t": true,
+      "t_min": 0.0,
+      "t_max": 10.0,
+      "interval": null
+     }
+    ]
+   }
+  },
+  {
+   "name": "local_solve_ray_in_the_leaf_plane_defers",
+   "upstream_ref": "source/SMLib/src/SmRayTracer.cpp:841 LocalSolve (bUseCorners)",
+   "inputs": {
+    "surfaces": [
+     {
+      "kind": "plane",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       0,
+       0,
+       4,
+       4
+      ]
+     }
+    ],
+    "grid": {
+     "bbox": [
+      -1,
+      -1,
+      -1,
+      5,
+      5,
+      5
+     ],
+     "size": [
+      4,
+      4,
+      4
+     ],
+     "ray_tol": 1e-05,
+     "ray_acc": 1e-08
+    },
+    "ops": [
+     {
+      "op": "add_leaf",
+      "surface": 0,
+      "uv": [
+       0,
+       0,
+       4,
+       4
+      ],
+      "bbox": [
+       0,
+       0,
+       0,
+       4,
+       4,
+       0
+      ],
+      "pseudo": [
+       0,
+       0,
+       0,
+       4,
+       4,
+       0
+      ],
+      "polar": [
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      "elem_box": [
+       -0.1,
+       -0.1,
+       -0.1,
+       4.1,
+       4.1,
+       0.1
+      ]
+     },
+     {
+      "op": "local",
+      "leaf": 0,
+      "p": [
+       10,
+       2,
+       0.0
+      ],
+      "v": [
+       -1,
+       0,
+       0
+      ],
+      "d3d_tol": 0.0,
+      "dist_tol": 1e-05,
+      "acc": 1e-08,
+      "ray_fire": true,
+      "have_t": true,
+      "t_min": 0.0,
+      "t_max": 10.0,
+      "interval": null
+     }
+    ]
+   }
+  },
+  {
+   "name": "bezier_leaf_misses",
+   "upstream_ref": "source/SMLib/src/SmRayTracer.cpp:1332 FireRay (Bezier surface leaf)",
+   "inputs": {
+    "surfaces": [
+     {
+      "kind": "bezier",
+      "p": 2,
+      "q": 2,
+      "net": [
+       [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         0,
+         1,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         1,
+         0.5,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         0,
+         2,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         2,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         2,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ]
+      ]
+     }
+    ],
+    "grid": {
+     "bbox": [
+      -1,
+      -1,
+      -1,
+      3,
+      3,
+      3
+     ],
+     "size": [
+      3,
+      3,
+      3
+     ],
+     "ray_tol": 1e-05,
+     "ray_acc": 1e-08
+    },
+    "ops": [
+     {
+      "op": "add_leaf",
+      "surface": 0,
+      "uv": [
+       0,
+       0,
+       1,
+       1
+      ],
+      "bbox": [
+       0,
+       0,
+       0,
+       2,
+       2,
+       1
+      ],
+      "pseudo": [
+       0,
+       0,
+       0,
+       2,
+       2,
+       1
+      ],
+      "polar": [
+       [
+        0,
+        0,
+        1
+       ],
+       [
+        0.2,
+        0,
+        1
+       ],
+       [
+        0,
+        0.2,
+        1
+       ]
+      ],
+      "elem_box": [
+       -0.2,
+       -0.2,
+       -0.2,
+       2.2,
+       2.2,
+       1.2
+      ]
+     },
+     {
+      "op": "fire",
+      "p": [
+       2.1,
+       1,
+       -2
+      ],
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "max_t": 1e+20,
+      "hit_any": false,
+      "skip": null
+     },
+     {
+      "op": "fire",
+      "p": [
+       -2,
+       1,
+       1.1
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "max_t": 1e+20,
+      "hit_any": false,
+      "skip": null
+     }
+    ]
+   }
+  },
+  {
+   "name": "bezier_leaf_hit_defers",
+   "upstream_ref": "source/SMLib/src/SmRayTracer.cpp:841 LocalSolve (Bezier surface)",
+   "inputs": {
+    "surfaces": [
+     {
+      "kind": "bezier",
+      "p": 2,
+      "q": 2,
+      "net": [
+       [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         0,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         0,
+         1,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         1,
+         0.5,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         0,
+         2,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         2,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         2,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ]
+      ]
+     }
+    ],
+    "grid": {
+     "bbox": [
+      -1,
+      -1,
+      -1,
+      3,
+      3,
+      3
+     ],
+     "size": [
+      3,
+      3,
+      3
+     ],
+     "ray_tol": 1e-05,
+     "ray_acc": 1e-08
+    },
+    "ops": [
+     {
+      "op": "add_leaf",
+      "surface": 0,
+      "uv": [
+       0,
+       0,
+       1,
+       1
+      ],
+      "bbox": [
+       0,
+       0,
+       0,
+       2,
+       2,
+       1
+      ],
+      "pseudo": [
+       0,
+       0,
+       0,
+       2,
+       2,
+       1
+      ],
+      "polar": [
+       [
+        0,
+        0,
+        1
+       ],
+       [
+        0.2,
+        0,
+        1
+       ],
+       [
+        0,
+        0.2,
+        1
+       ]
+      ],
+      "elem_box": [
+       -0.2,
+       -0.2,
+       -0.2,
+       2.2,
+       2.2,
+       1.2
+      ]
+     },
+     {
+      "op": "fire",
+      "p": [
+       1,
+       1,
+       -2
+      ],
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "max_t": 1e+20,
+      "hit_any": false,
+      "skip": null
+     }
+    ]
+   }
+  },
+  {
+   "name": "add_surface_to_grid_then_fire",
+   "upstream_ref": "source/SMLib/src/SmRayTracer.cpp:1711 AddSurfaceToGrid, then FireRay through the leaves it made",
+   "inputs": {
+    "surfaces": [
+     {
+      "kind": "plane",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       0,
+       0,
+       4,
+       4
+      ]
+     }
+    ],
+    "grid": {
+     "bbox": [
+      -1,
+      -1,
+      -1,
+      5,
+      5,
+      5
+     ],
+     "size": [
+      4,
+      4,
+      4
+     ],
+     "ray_tol": 1e-05,
+     "ray_acc": 1e-08
+    },
+    "ops": [
+     {
+      "op": "add_surface",
+      "surface": 0
+     },
+     {
+      "op": "fire",
+      "p": [
+       2,
+       2,
+       -0.5
+      ],
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "max_t": 1e+20,
+      "hit_any": false,
+      "skip": null
+     },
+     {
+      "op": "fire",
+      "p": [
+       -0.5,
+       3,
+       -0.5
+      ],
+      "v": [
+       0.5,
+       -0.25,
+       0.75
+      ],
+      "max_t": 1e+20,
+      "hit_any": true,
+      "skip": null
+     }
+    ]
+   }
+  },
+  {
+   "name": "grid_one_voxel_ray_along_leaf_plane",
+   "upstream_ref": "source/SMLib/src/SmRayTracer.cpp:1332 FireRay (single voxel grid)",
+   "inputs": {
+    "surfaces": [
+     {
+      "kind": "plane",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       0,
+       0,
+       4,
+       4
+      ]
+     }
+    ],
+    "grid": {
+     "bbox": [
+      -1,
+      -1,
+      -1,
+      5,
+      5,
+      5
+     ],
+     "size": [
+      1,
+      1,
+      1
+     ],
+     "ray_tol": 0.0,
+     "ray_acc": 0.0
+    },
+    "ops": [
+     {
+      "op": "add_leaf",
+      "surface": 0,
+      "uv": [
+       0,
+       0,
+       4,
+       4
+      ],
+      "bbox": [
+       0,
+       0,
+       0,
+       4,
+       4,
+       0
+      ],
+      "pseudo": [
+       0,
+       0,
+       0,
+       4,
+       4,
+       0
+      ],
+      "polar": [
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      "elem_box": [
+       -0.1,
+       -0.1,
+       -0.1,
+       4.1,
+       4.1,
+       0.1
+      ]
+     },
+     {
+      "op": "fire",
+      "p": [
+       -2,
+       2,
+       0.09
+      ],
+      "v": [
+       1,
+       0,
+       0
+      ],
+      "max_t": 1e+20,
+      "hit_any": false,
+      "skip": null
+     },
+     {
+      "op": "fire",
+      "p": [
+       2,
+       2,
+       0.09
+      ],
+      "v": [
+       0,
+       1,
+       0
+      ],
+      "max_t": 1e+20,
+      "hit_any": true,
+      "skip": null
+     }
+    ]
+   }
+  },
+  {
+   "name": "renderer_view_beside_the_leaf",
+   "upstream_ref": "source/SMLib/src/SmRayTracer.cpp:114 SmRayRenderer (RenderRay, RenderPixel, DoRender)",
+   "inputs": {
+    "surfaces": [
+     {
+      "kind": "plane",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       0,
+       0,
+       4,
+       4
+      ]
+     }
+    ],
+    "grid": {
+     "bbox": [
+      -1,
+      -1,
+      -1,
+      5,
+      5,
+      5
+     ],
+     "size": [
+      4,
+      4,
+      4
+     ],
+     "ray_tol": 1e-05,
+     "ray_acc": 1e-08
+    },
+    "ops": [
+     {
+      "op": "add_leaf",
+      "surface": 0,
+      "uv": [
+       0,
+       0,
+       4,
+       4
+      ],
+      "bbox": [
+       0,
+       0,
+       0,
+       4,
+       4,
+       0
+      ],
+      "pseudo": [
+       0,
+       0,
+       0,
+       4,
+       4,
+       0
+      ],
+      "polar": [
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      "elem_box": [
+       -0.1,
+       -0.1,
+       -0.1,
+       4.1,
+       4.1,
+       0.1
+      ]
+     },
+     {
+      "op": "renderer",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "view": [
+       4.05,
+       0,
+       -3,
+       8,
+       4,
+       -3
+      ],
+      "nx": 2,
+      "ny": 2,
+      "rate": 2
+     },
+     {
+      "op": "light",
+      "v": [
+       0,
+       0,
+       -1
+      ],
+      "point": false
+     },
+     {
+      "op": "light",
+      "v": [
+       0.3,
+       0.2,
+       -1
+      ],
+      "point": true
+     },
+     {
+      "op": "do_render",
+      "shadows": true,
+      "background": [
+       0.1,
+       0.2,
+       0.3
+      ],
+      "object": [
+       0.8,
+       0.5,
+       0.2
+      ]
+     },
+     {
+      "op": "render_pixel",
+      "x": 1,
+      "y": 1
+     },
+     {
+      "op": "render_ray",
+      "p": [
+       9,
+       9,
+       9
+      ],
+      "v": [
+       0,
+       0,
+       1
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "renderer_view_onto_the_leaf_defers",
+   "upstream_ref": "source/SMLib/src/SmRayTracer.cpp:114 SmRayRenderer (hit shading)",
+   "inputs": {
+    "surfaces": [
+     {
+      "kind": "plane",
+      "o": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "scale": [
+       1,
+       1
+      ],
+      "domain": [
+       0,
+       0,
+       4,
+       4
+      ]
+     }
+    ],
+    "grid": {
+     "bbox": [
+      -1,
+      -1,
+      -1,
+      5,
+      5,
+      5
+     ],
+     "size": [
+      4,
+      4,
+      4
+     ],
+     "ray_tol": 1e-05,
+     "ray_acc": 1e-08
+    },
+    "ops": [
+     {
+      "op": "add_leaf",
+      "surface": 0,
+      "uv": [
+       0,
+       0,
+       4,
+       4
+      ],
+      "bbox": [
+       0,
+       0,
+       0,
+       4,
+       4,
+       0
+      ],
+      "pseudo": [
+       0,
+       0,
+       0,
+       4,
+       4,
+       0
+      ],
+      "polar": [
+       [
+        0,
+        0,
+        1
+       ]
+      ],
+      "elem_box": [
+       -0.1,
+       -0.1,
+       -0.1,
+       4.1,
+       4.1,
+       0.1
+      ]
+     },
+     {
+      "op": "renderer",
+      "origin": [
+       0,
+       0,
+       0
+      ],
+      "x": [
+       1,
+       0,
+       0
+      ],
+      "y": [
+       0,
+       1,
+       0
+      ],
+      "view": [
+       0,
+       0,
+       -3,
+       4,
+       4,
+       -3
+      ],
+      "nx": 1,
+      "ny": 1,
+      "rate": 1
+     },
+     {
+      "op": "light",
+      "v": [
+       0,
+       0,
+       -1
+      ],
+      "point": false
+     },
+     {
+      "op": "do_render",
+      "shadows": false,
+      "background": [
+       0,
+       0,
+       0
+      ],
+      "object": [
+       1,
+       1,
+       1
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "degenerate_patch_all_corners_equal",
+   "upstream_ref": "SmGrid.cpp:252-290 SmSurfaceGridElement::Init (SE signals and carries on)",
+   "inputs": {
+    "surfaces": [
+     {
+      "kind": "bezier",
+      "p": 1,
+      "q": 1,
+      "net": [
+       [
+        [
+         5,
+         5,
+         5,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         5,
+         5,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         5,
+         5,
+         5,
+         -1.7976931348623157e+308
+        ],
+        [
+         5,
+         5,
+         5,
+         -1.7976931348623157e+308
+        ]
+       ]
+      ]
+     }
+    ],
+    "grid": {
+     "bbox": [
+      -1,
+      -1,
+      -1,
+      11,
+      11,
+      11
+     ],
+     "size": [
+      3,
+      3,
+      3
+     ],
+     "ray_tol": 1e-05,
+     "ray_acc": 1e-08
+    },
+    "ops": [
+     {
+      "op": "add_leaf",
+      "surface": 0,
+      "uv": [
+       0,
+       0,
+       1,
+       1
+      ],
+      "bbox": [
+       5,
+       5,
+       5,
+       5,
+       5,
+       5
+      ],
+      "pseudo": [
+       5,
+       5,
+       5,
+       5,
+       5,
+       5
+      ],
+      "polar": [
+       [
+        0,
+        0,
+        1
+       ],
+       [
+        0.2,
+        0,
+        1
+       ],
+       [
+        0,
+        0.2,
+        1
+       ]
+      ],
+      "elem_box": [
+       4.8,
+       4.8,
+       4.8,
+       5.2,
+       5.2,
+       5.2
+      ]
+     },
+     {
+      "op": "fire",
+      "p": [
+       -0.5,
+       -0.5,
+       -0.5
+      ],
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "max_t": 1e+20,
+      "hit_any": false,
+      "skip": null
+     }
+    ]
+   }
+  },
+  {
+   "name": "degenerate_patch_du_zero",
+   "upstream_ref": "SmGrid.cpp:252-290 SmSurfaceGridElement::Init (P00==P10, P01==P11)",
+   "inputs": {
+    "surfaces": [
+     {
+      "kind": "bezier",
+      "p": 1,
+      "q": 1,
+      "net": [
+       [
+        [
+         1,
+         1,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         3,
+         1,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         1,
+         1,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         3,
+         1,
+         -1.7976931348623157e+308
+        ]
+       ]
+      ]
+     }
+    ],
+    "grid": {
+     "bbox": [
+      -1,
+      -1,
+      -1,
+      11,
+      11,
+      11
+     ],
+     "size": [
+      3,
+      3,
+      3
+     ],
+     "ray_tol": 1e-05,
+     "ray_acc": 1e-08
+    },
+    "ops": [
+     {
+      "op": "add_leaf",
+      "surface": 0,
+      "uv": [
+       0,
+       0,
+       1,
+       1
+      ],
+      "bbox": [
+       1,
+       1,
+       1,
+       1,
+       3,
+       1
+      ],
+      "pseudo": [
+       1,
+       1,
+       1,
+       1,
+       3,
+       1
+      ],
+      "polar": [
+       [
+        0,
+        0,
+        1
+       ],
+       [
+        0.2,
+        0,
+        1
+       ],
+       [
+        0,
+        0.2,
+        1
+       ]
+      ],
+      "elem_box": [
+       0.8,
+       0.8,
+       0.8,
+       1.2,
+       3.2,
+       1.2
+      ]
+     },
+     {
+      "op": "fire",
+      "p": [
+       -0.5,
+       -0.5,
+       -0.5
+      ],
+      "v": [
+       0,
+       0,
+       1
+      ],
+      "max_t": 1e+20,
+      "hit_any": false,
+      "skip": null
+     }
+    ]
+   }
+  }
+ ]
+}

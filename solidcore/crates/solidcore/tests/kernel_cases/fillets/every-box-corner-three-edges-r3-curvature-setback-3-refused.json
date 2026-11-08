@@ -1,0 +1,37 @@
+{
+  "area": "fillets",
+  "bodies": {},
+  "calls": [],
+  "case": "every-box-corner-three-edges-r3-curvature-setback-3-refused",
+  "expected": {
+    "method": "on a corner of faces square to each other the rounds' contact lines meet r = 3 from the vertex along each edge; a setback of 3 starts the patch exactly there, which leaves it no room (the setback must be more than that), so the right answer is the refusal naming the radius, before SMLib runs (solid.fillet `setbacks`).",
+    "outcome": "refused",
+    "refusal": "the setback must be more than the radius (3 mm)",
+    "source": "invariants",
+    "sources": [],
+    "what": "the three edges at one box corner rounded r3, Corners: Curvature set back exactly 3, the radius: refused, naming the least setback"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 2 (solid.fillet): invalid input: the setback must be more than the radius (3 mm) at the corner (40.000, 30.000, 20.000): the rounds' contact lines meet 3 mm from it along its edges, and the corner's patch starts past that",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 2 (solid.fillet): invalid input: the setback must be more than the radius (3 mm) at the corner (40.000, 30.000, 20.000): the rounds' contact lines meet 3 mm from it along its edges, and the corner's patch starts past that",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude"
+  ],
+  "ungraded": [],
+  "what": "the three edges at one box corner rounded r3, Corners: Curvature set back exactly 3, the radius: refused, naming the least setback",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 2 (solid.fillet): invalid input: the setback must be more than the radius (3 mm) at the corner (40.000, 30.000, 20.000): the rounds' contact lines meet 3 mm from it along its edges, and the corner's patch starts past that"
+  ]
+}

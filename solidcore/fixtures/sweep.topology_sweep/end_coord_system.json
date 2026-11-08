@@ -1,0 +1,484 @@
+{
+ "cases": [
+  {
+   "name": "end_coord_base_0",
+   "upstream_ref": "source/SMLib/src/SmSweepGeometry.cpp GetEndCoordSystem (virtual)",
+   "inputs": {
+    "steps": [
+     [
+      16,
+      64,
+      64,
+      0
+     ],
+     [
+      8,
+      64,
+      64,
+      0
+     ],
+     [
+      16,
+      64,
+      64,
+      0
+     ]
+    ],
+    "kind": 0,
+    "vector": [
+     1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "end_coord_base_1",
+   "upstream_ref": "source/SMLib/src/SmSweepGeometry.cpp GetEndCoordSystem (virtual)",
+   "inputs": {
+    "steps": [
+     [
+      16,
+      64,
+      64,
+      0
+     ],
+     [
+      8,
+      64,
+      64,
+      0
+     ],
+     [
+      16,
+      64,
+      64,
+      0
+     ]
+    ],
+    "kind": 0,
+    "vector": [
+     0,
+     2,
+     3
+    ]
+   }
+  },
+  {
+   "name": "end_coord_base_2",
+   "upstream_ref": "source/SMLib/src/SmSweepGeometry.cpp GetEndCoordSystem (virtual)",
+   "inputs": {
+    "steps": [
+     [
+      16,
+      64,
+      64,
+      0
+     ],
+     [
+      8,
+      64,
+      64,
+      0
+     ],
+     [
+      16,
+      64,
+      64,
+      0
+     ]
+    ],
+    "kind": 0,
+    "vector": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "end_coord_base_3",
+   "upstream_ref": "source/SMLib/src/SmSweepGeometry.cpp GetEndCoordSystem (virtual)",
+   "inputs": {
+    "steps": [
+     [
+      16,
+      64,
+      64,
+      0
+     ],
+     [
+      8,
+      64,
+      64,
+      0
+     ],
+     [
+      16,
+      64,
+      64,
+      0
+     ]
+    ],
+    "kind": 0,
+    "vector": [
+     1000000.0,
+     -1e-06,
+     5
+    ]
+   }
+  },
+  {
+   "name": "end_coord_base_4",
+   "upstream_ref": "source/SMLib/src/SmSweepGeometry.cpp GetEndCoordSystem (virtual)",
+   "inputs": {
+    "steps": [
+     [
+      16,
+      64,
+      64,
+      0
+     ],
+     [
+      8,
+      64,
+      64,
+      0
+     ],
+     [
+      16,
+      64,
+      64,
+      0
+     ]
+    ],
+    "kind": 0,
+    "vector": [
+     -3,
+     4,
+     -0.5
+    ]
+   }
+  },
+  {
+   "name": "end_coord_translation_0",
+   "upstream_ref": "source/SMLib/src/SmSweepGeometry.cpp GetEndCoordSystem (virtual)",
+   "inputs": {
+    "steps": [
+     [
+      16,
+      64,
+      64,
+      0
+     ],
+     [
+      8,
+      64,
+      64,
+      0
+     ],
+     [
+      16,
+      64,
+      64,
+      0
+     ]
+    ],
+    "kind": 1,
+    "vector": [
+     1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "end_coord_translation_1",
+   "upstream_ref": "source/SMLib/src/SmSweepGeometry.cpp GetEndCoordSystem (virtual)",
+   "inputs": {
+    "steps": [
+     [
+      16,
+      64,
+      64,
+      0
+     ],
+     [
+      8,
+      64,
+      64,
+      0
+     ],
+     [
+      16,
+      64,
+      64,
+      0
+     ]
+    ],
+    "kind": 1,
+    "vector": [
+     0,
+     2,
+     3
+    ]
+   }
+  },
+  {
+   "name": "end_coord_translation_2",
+   "upstream_ref": "source/SMLib/src/SmSweepGeometry.cpp GetEndCoordSystem (virtual)",
+   "inputs": {
+    "steps": [
+     [
+      16,
+      64,
+      64,
+      0
+     ],
+     [
+      8,
+      64,
+      64,
+      0
+     ],
+     [
+      16,
+      64,
+      64,
+      0
+     ]
+    ],
+    "kind": 1,
+    "vector": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "end_coord_translation_3",
+   "upstream_ref": "source/SMLib/src/SmSweepGeometry.cpp GetEndCoordSystem (virtual)",
+   "inputs": {
+    "steps": [
+     [
+      16,
+      64,
+      64,
+      0
+     ],
+     [
+      8,
+      64,
+      64,
+      0
+     ],
+     [
+      16,
+      64,
+      64,
+      0
+     ]
+    ],
+    "kind": 1,
+    "vector": [
+     1000000.0,
+     -1e-06,
+     5
+    ]
+   }
+  },
+  {
+   "name": "end_coord_translation_4",
+   "upstream_ref": "source/SMLib/src/SmSweepGeometry.cpp GetEndCoordSystem (virtual)",
+   "inputs": {
+    "steps": [
+     [
+      16,
+      64,
+      64,
+      0
+     ],
+     [
+      8,
+      64,
+      64,
+      0
+     ],
+     [
+      16,
+      64,
+      64,
+      0
+     ]
+    ],
+    "kind": 1,
+    "vector": [
+     -3,
+     4,
+     -0.5
+    ]
+   }
+  },
+  {
+   "name": "end_coord_rotation_0",
+   "upstream_ref": "source/SMLib/src/SmSweepGeometry.cpp GetEndCoordSystem (virtual)",
+   "inputs": {
+    "steps": [
+     [
+      16,
+      64,
+      64,
+      0
+     ],
+     [
+      8,
+      64,
+      64,
+      0
+     ],
+     [
+      16,
+      64,
+      64,
+      0
+     ]
+    ],
+    "kind": 2,
+    "vector": [
+     1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "end_coord_rotation_1",
+   "upstream_ref": "source/SMLib/src/SmSweepGeometry.cpp GetEndCoordSystem (virtual)",
+   "inputs": {
+    "steps": [
+     [
+      16,
+      64,
+      64,
+      0
+     ],
+     [
+      8,
+      64,
+      64,
+      0
+     ],
+     [
+      16,
+      64,
+      64,
+      0
+     ]
+    ],
+    "kind": 2,
+    "vector": [
+     0,
+     2,
+     3
+    ]
+   }
+  },
+  {
+   "name": "end_coord_rotation_2",
+   "upstream_ref": "source/SMLib/src/SmSweepGeometry.cpp GetEndCoordSystem (virtual)",
+   "inputs": {
+    "steps": [
+     [
+      16,
+      64,
+      64,
+      0
+     ],
+     [
+      8,
+      64,
+      64,
+      0
+     ],
+     [
+      16,
+      64,
+      64,
+      0
+     ]
+    ],
+    "kind": 2,
+    "vector": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "end_coord_rotation_3",
+   "upstream_ref": "source/SMLib/src/SmSweepGeometry.cpp GetEndCoordSystem (virtual)",
+   "inputs": {
+    "steps": [
+     [
+      16,
+      64,
+      64,
+      0
+     ],
+     [
+      8,
+      64,
+      64,
+      0
+     ],
+     [
+      16,
+      64,
+      64,
+      0
+     ]
+    ],
+    "kind": 2,
+    "vector": [
+     1000000.0,
+     -1e-06,
+     5
+    ]
+   }
+  },
+  {
+   "name": "end_coord_rotation_4",
+   "upstream_ref": "source/SMLib/src/SmSweepGeometry.cpp GetEndCoordSystem (virtual)",
+   "inputs": {
+    "steps": [
+     [
+      16,
+      64,
+      64,
+      0
+     ],
+     [
+      8,
+      64,
+      64,
+      0
+     ],
+     [
+      16,
+      64,
+      64,
+      0
+     ]
+    ],
+    "kind": 2,
+    "vector": [
+     -3,
+     4,
+     -0.5
+    ]
+   }
+  }
+ ]
+}

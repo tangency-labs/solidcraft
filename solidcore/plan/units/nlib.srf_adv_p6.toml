@@ -1,0 +1,12 @@
+id = "nlib.srf_adv_p6"
+upstream = ["source/SMLib/src/NL_SrfAdv.cpp"]
+rust_module = "nurbs::srf_adv::p6"
+depends_on = ["nlib.crv_basic", "nlib.crv_nurb", "nlib.crv_tool_p1", "nlib.funcs_basic", "nlib.geom", "nlib.math", "nlib.srf_adv_p4", "nlib.srf_basic"]
+soft_depends_on = ["nlib.basis_basic", "nlib.crv_geom", "nlib.crv_tool_p2", "nlib.funcs_adv", "nlib.knots", "nlib.srf_adv_p1", "nlib.srf_adv_p5", "nlib.srf_tool_p1", "nlib.srf_tool_p2", "nlib.srf_tool_p3"]
+est_lines = 2214
+layer = 16
+tests = ["SM_API_test:TestSmCreateExtrude", "SM_API_test:TestSmCurveSweep", "SM_API_test:TestSmPipeSweep", "SM_API_test:TestSmCurveSweepFromFaces", "SM_API_test:TestSmCurveSweepFailureCleanup", "prog_test:my_test_bsplinesurface_nlib"]
+status = "green"
+claimed_by = "swarm-nlib.srf_adv_p6-a1"
+claimed_at = "2026-10-13T00:25:33Z"
+notes = "2 fns; largest: N_FillNSidedHole, N_CreateSweepScale; unit-SCC #22 (220 units); 51 upstream test entry points reach this unit; difftest: 1016 cases (16 fixtures + 1000 generated), 0 deferred, max_rel_err 0"

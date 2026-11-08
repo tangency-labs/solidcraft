@@ -1,0 +1,256 @@
+{
+ "cases": [
+  {
+   "name": "cov_reparam_end_weights_huge_start_weight",
+   "upstream_ref": "source/SMLib/src/NL_CrvAdv.cpp:13887 N_SrfReparamWeights alf*del-bet*gam < NL_PTOL -> NL_INP_ERR (coverage: nurbs/crv_adv/p2.rs:983)",
+   "inputs": {
+    "op": "reparam_end_weights",
+    "crv": {
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       1
+      ],
+      [
+       1,
+       2,
+       0,
+       1
+      ],
+      [
+       2,
+       1,
+       1,
+       1
+      ],
+      [
+       3,
+       0,
+       0,
+       1
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "wt0": 1e+60,
+    "wtn": 1.0
+   }
+  },
+  {
+   "name": "cov_reparam_end_weights_huge_end_weight",
+   "upstream_ref": "source/SMLib/src/NL_CrvAdv.cpp:13887 N_SrfReparamWeights alf*del-bet*gam < NL_PTOL -> NL_INP_ERR (coverage: nurbs/crv_adv/p2.rs:983)",
+   "inputs": {
+    "op": "reparam_end_weights",
+    "crv": {
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       1
+      ],
+      [
+       1,
+       2,
+       0,
+       1
+      ],
+      [
+       2,
+       1,
+       1,
+       1
+      ],
+      [
+       3,
+       0,
+       0,
+       1
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "wt0": 2.0,
+    "wtn": 1e+70
+   }
+  },
+  {
+   "name": "cov_reparam_end_weights_subnormal_inner_weight",
+   "upstream_ref": "source/SMLib/src/NL_CrvAdv.cpp:13887 N_SrfReparamWeights 1/w bad -> NL_WGT_ERR (coverage: nurbs/crv_adv/p2.rs:993)",
+   "inputs": {
+    "op": "reparam_end_weights",
+    "crv": {
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       1
+      ],
+      [
+       1e-310,
+       2e-310,
+       0,
+       1e-310
+      ],
+      [
+       2,
+       1,
+       1,
+       1
+      ],
+      [
+       3,
+       0,
+       0,
+       1
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "wt0": 1.0,
+    "wtn": 2.0
+   }
+  },
+  {
+   "name": "cov_non_rat_deriv_subnormal_knot_span_d1",
+   "upstream_ref": "source/SMLib/src/NL_CrvAdv.cpp:10995 N_CrvNonRatGetFirstDeriv (p-k+1)/(U[i+p+1]-U[i+k]) bad -> NL_NUM_ERR (coverage: nurbs/crv_adv/p2.rs:632)",
+   "inputs": {
+    "op": "non_rat_deriv",
+    "crv": {
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       2,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       2,
+       1,
+       1,
+       -1.7976931348623157e+308
+      ],
+      [
+       3,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       4,
+       1,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1e-310,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "d": 1
+   }
+  },
+  {
+   "name": "cov_non_rat_deriv_subnormal_knot_span_d2",
+   "upstream_ref": "source/SMLib/src/NL_CrvAdv.cpp:10995 N_CrvNonRatGetFirstDeriv (p-k+1)/(U[i+p+1]-U[i+k]) bad -> NL_NUM_ERR (coverage: nurbs/crv_adv/p2.rs:632)",
+   "inputs": {
+    "op": "non_rat_deriv",
+    "crv": {
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       2,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       2,
+       1,
+       1,
+       -1.7976931348623157e+308
+      ],
+      [
+       3,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       4,
+       1,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      1e-310,
+      1,
+      1,
+      1,
+      1
+     ]
+    },
+    "d": 2
+   }
+  }
+ ]
+}

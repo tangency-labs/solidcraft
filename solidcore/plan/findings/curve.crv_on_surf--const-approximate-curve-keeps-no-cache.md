@@ -1,0 +1,27 @@
+# curve.crv_on_surf: the const `ApproximateCurve` keeps no cache on the curve in the port (2026-10-29)
+
+- **Unit:** `curve.crv_on_surf` (callers in `curve.curve_p1` and `intersect.curve_class_p9`).
+- **The difference:**
+  - Upstream `SmCrvOnSurf::ApproximateCurve` (`source/SMLib/src/SmCrvOnSurf.cpp:348-388`, v1.0.1 `3fd5b95`) is `const`. It casts that away and calls `GetOrCreateBSApproxPointer(pBSCurve, dApproxTol3D, &crBreakParams, &bOptMatchParameterization)` (`:1309-1377`).
+  - That stores on `this` the approximation it makes, with the caller's tolerance, breaks and parameterisation flag (`m_pBSApproxCurve`, `m_dMaxGap3d`, `m_bParametrizationMatches`), and the breaks (`m_vBreaks`, `m_bNeedBreaks`). The caller gets a copy.
+  - The port's `Curve::approximate_curve` (`crates/solidcore/src/curve/curve/p1.rs:454`, the `SmCrvOnSurf` branch) runs `CrvOnSurf::approximate_curve` on a clone and drops the clone, so none of that state reaches the curve.
+  - `DropPoint` and `CalculateBoundingBox` on `&self` keep their caches on the curve since perf 2(d) (`keep_caches_of`). `ApproximateCurve` is the one const query that still does not.
+- **When it can matter:**
+  - The setup: a long-lived `SmCrvOnSurf` (e.g. an edge's 3D curve) gets an `ApproximateCurve` with a tolerance at or below `SM_APPROX_TOL_3D` and a matching parameterisation flag, then a `DropPoint` without a guess.
+  - Upstream: `DropPoint` reuses the caller's approximation, because `m_dMaxGap3d <= SM_APPROX_TOL_3D` and the flags match. Its nearest control point gives the guess parameter (`:1110-1130`).
+  - The port: `DropPoint` builds the default approximation instead, so the guess can differ, and so can the local solve's result.
+  - `CalculateBoundingBox` likewise boxes a different approximation.
+- **A lifetime mismatch on the same theme:**
+  - `intersect/curve_class/p9.rs:597` and `:621` (`IntersectTSBound`'s vertex visits) build a fresh `SmCrvOnSurf` lift for each vertex and each 3D check.
+  - Upstream `IntersectTSBound` builds one `SmCrvOnSurf sCrvOnSurf` per call (`SmCurveClass.cpp:15998`) and reuses it for every vertex and edge use.
+  - Today every request on that lift uses default arguments, so the results are identical. They would not be once a non-default request could leave state on it.
+- **Breaks matter more than the approximation.** `GetOrCreateBSApproxPointer` with caller breaks sets `m_vBreaks` and clears `m_bNeedBreaks`. `SmCrvOnSurf::GetKnots` (`:1156-1167`) then returns those breaks. So after an `ApproximateCurve` with only the interval ends as breaks, upstream's later `GetKnots` on that curve (and every later default approximation) uses those 2 breaks, not the computed knots.
+- **Where upstream calls `ApproximateCurve` on an `SmCrvOnSurf` (or `SmTangentField`):** I searched all 29 upstream call sites at `3fd5b95`. None leaves a reachable long-lived curve with that state:
+  - Temporaries: `SmFilletGeom.cpp:10249`, `SmBSplineCurve.cpp:2566`, `SmSurface.cpp:15055` and `:24267`, `SmOffsetGeometryCreation.cpp:2438` and `:2476`, `SmBSplineSurfaceNLib.cpp:3242` and `:3591` (the tangent fields are deleted after).
+  - The curve is replaced right after: `SmBrep::TurnToNURBS` (`SmBrep.cpp:33203`) and `SmCurve::DeformToEndPointTargetsOnSurface` (`SmCurve.cpp:21719`, the non-B-spline branch; the port's caller `topology/brep/p7.rs:1453` swaps in the new curve). The deform case leaves the original in place only when the approximation fails, which upstream then dereferences.
+  - Not reachable in the port: `SmBrepData::WriteToFile` with `bWriteAsBSplines` (`SmBrepData.cpp:5551`) approximates every edge curve in place with breaks `[min, max]`, but that option is not ported (`topology/brep_data_write.rs`). `SmCurve::CreateNonRationalNurb` (`SmCurve.cpp:2453`) has no callers.
+  - A composite's segments (`SmCompositeCurve.cpp:341`) are only reached through the composite's own approximation (e.g. `TurnToNURBS`, which replaces the curve).
+- **Effect:** none shown by any current difftest case or corpus file, and I found no ported flow that reaches it (2026-10-29).
+  - This is a candidate for a later fidelity pass, which needs a demonstrating case first.
+  - Fixing it (giving `p1.rs:454` the same write-back) invalidates the argument that made perf 2(d) safe: that every approximation stored on a long-lived port curve was built with default arguments, so reusing it equals rebuilding it. With the fix, long-lived holders must also match upstream's object lifetimes. The p9 sites above would then need one lift per `IntersectTSBound` call.
+- **Status:** open. No known mismatch and no fix.

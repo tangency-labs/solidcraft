@@ -1,0 +1,260 @@
+{
+ "cases": [
+  {
+   "name": "issue383_seed4_box_intersection_tangent_torus",
+   "note": "#383 seed 4: the tube (centre (20, 22.5, 25), R 10, r 2.5) is tangent to the box's bottom z = 22.5 along an arc inside that face. Intersection, post-process on. Independent reference: box n torus volume ~165.341 (240^3 midpoint grid), torus area in the box ~112.49. Rust on 2026-10-26 gave the intersection's merged torus face too little area (seed 4: 67.9, seed 86: 24.4 of 40.7).",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "box",
+     "origin": [
+      22.5,
+      25.0,
+      22.5
+     ],
+     "size": [
+      7.5,
+      7.5,
+      27.5
+     ]
+    },
+    "b": {
+     "kind": "torus",
+     "center": [
+      20.0,
+      22.5,
+      25.0
+     ],
+     "major": 10.0,
+     "minor": 2.5
+    },
+    "operation": 2,
+    "post_process": true
+   }
+  },
+  {
+   "name": "issue383_seed4_box_intersection_tangent_torus_no_post_process",
+   "note": "#383 seed 4: the tube (centre (20, 22.5, 25), R 10, r 2.5) is tangent to the box's bottom z = 22.5 along an arc inside that face. Intersection, post-process off. Independent reference: box n torus volume ~165.341 (240^3 midpoint grid), torus area in the box ~112.49. Rust on 2026-10-26 gave the intersection's merged torus face too little area (seed 4: 67.9, seed 86: 24.4 of 40.7).",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "box",
+     "origin": [
+      22.5,
+      25.0,
+      22.5
+     ],
+     "size": [
+      7.5,
+      7.5,
+      27.5
+     ]
+    },
+    "b": {
+     "kind": "torus",
+     "center": [
+      20.0,
+      22.5,
+      25.0
+     ],
+     "major": 10.0,
+     "minor": 2.5
+    },
+    "operation": 2,
+    "post_process": false
+   }
+  },
+  {
+   "name": "issue383_seed4_box_difference_tangent_torus",
+   "note": "#383 seed 4: the tube (centre (20, 22.5, 25), R 10, r 2.5) is tangent to the box's bottom z = 22.5 along an arc inside that face. Difference, post-process on. Independent reference: box volume minus ~165.341. Rust on 2026-10-26 gave the intersection's merged torus face too little area (seed 4: 67.9, seed 86: 24.4 of 40.7).",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "box",
+     "origin": [
+      22.5,
+      25.0,
+      22.5
+     ],
+     "size": [
+      7.5,
+      7.5,
+      27.5
+     ]
+    },
+    "b": {
+     "kind": "torus",
+     "center": [
+      20.0,
+      22.5,
+      25.0
+     ],
+     "major": 10.0,
+     "minor": 2.5
+    },
+    "operation": 3,
+    "post_process": true
+   }
+  },
+  {
+   "name": "issue383_seed4_box_difference_tangent_torus_no_post_process",
+   "note": "#383 seed 4: the tube (centre (20, 22.5, 25), R 10, r 2.5) is tangent to the box's bottom z = 22.5 along an arc inside that face. Difference, post-process off. Independent reference: box volume minus ~165.341. Rust on 2026-10-26 gave the intersection's merged torus face too little area (seed 4: 67.9, seed 86: 24.4 of 40.7).",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "box",
+     "origin": [
+      22.5,
+      25.0,
+      22.5
+     ],
+     "size": [
+      7.5,
+      7.5,
+      27.5
+     ]
+    },
+    "b": {
+     "kind": "torus",
+     "center": [
+      20.0,
+      22.5,
+      25.0
+     ],
+     "major": 10.0,
+     "minor": 2.5
+    },
+    "operation": 3,
+    "post_process": false
+   }
+  },
+  {
+   "name": "issue383_seed86_box_intersection_tangent_torus",
+   "note": "#383 seed 86: the tube (centre (20, 17.5, 30), R 12.5, r 2.5) is tangent to the box's top z = 32.5 along an arc inside that face. Intersection, post-process on. Independent reference: box n torus volume ~104.871 (240^3 midpoint grid), torus area in the box ~81.44. Rust on 2026-10-26 gave the intersection's merged torus face too little area (seed 4: 67.9, seed 86: 24.4 of 40.7).",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "box",
+     "origin": [
+      30.0,
+      20.0,
+      15.0
+     ],
+     "size": [
+      5.0,
+      10.0,
+      17.5
+     ]
+    },
+    "b": {
+     "kind": "torus",
+     "center": [
+      20.0,
+      17.5,
+      30.0
+     ],
+     "major": 12.5,
+     "minor": 2.5
+    },
+    "operation": 2,
+    "post_process": true
+   }
+  },
+  {
+   "name": "issue383_seed86_box_intersection_tangent_torus_no_post_process",
+   "note": "#383 seed 86: the tube (centre (20, 17.5, 30), R 12.5, r 2.5) is tangent to the box's top z = 32.5 along an arc inside that face. Intersection, post-process off. Independent reference: box n torus volume ~104.871 (240^3 midpoint grid), torus area in the box ~81.44. Rust on 2026-10-26 gave the intersection's merged torus face too little area (seed 4: 67.9, seed 86: 24.4 of 40.7).",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "box",
+     "origin": [
+      30.0,
+      20.0,
+      15.0
+     ],
+     "size": [
+      5.0,
+      10.0,
+      17.5
+     ]
+    },
+    "b": {
+     "kind": "torus",
+     "center": [
+      20.0,
+      17.5,
+      30.0
+     ],
+     "major": 12.5,
+     "minor": 2.5
+    },
+    "operation": 2,
+    "post_process": false
+   }
+  },
+  {
+   "name": "issue383_seed86_box_difference_tangent_torus",
+   "note": "#383 seed 86: the tube (centre (20, 17.5, 30), R 12.5, r 2.5) is tangent to the box's top z = 32.5 along an arc inside that face. Difference, post-process on. Independent reference: box volume minus ~104.871. Rust on 2026-10-26 gave the intersection's merged torus face too little area (seed 4: 67.9, seed 86: 24.4 of 40.7).",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "box",
+     "origin": [
+      30.0,
+      20.0,
+      15.0
+     ],
+     "size": [
+      5.0,
+      10.0,
+      17.5
+     ]
+    },
+    "b": {
+     "kind": "torus",
+     "center": [
+      20.0,
+      17.5,
+      30.0
+     ],
+     "major": 12.5,
+     "minor": 2.5
+    },
+    "operation": 3,
+    "post_process": true
+   }
+  },
+  {
+   "name": "issue383_seed86_box_difference_tangent_torus_no_post_process",
+   "note": "#383 seed 86: the tube (centre (20, 17.5, 30), R 12.5, r 2.5) is tangent to the box's top z = 32.5 along an arc inside that face. Difference, post-process off. Independent reference: box volume minus ~104.871. Rust on 2026-10-26 gave the intersection's merged torus face too little area (seed 4: 67.9, seed 86: 24.4 of 40.7).",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "box",
+     "origin": [
+      30.0,
+      20.0,
+      15.0
+     ],
+     "size": [
+      5.0,
+      10.0,
+      17.5
+     ]
+    },
+    "b": {
+     "kind": "torus",
+     "center": [
+      20.0,
+      17.5,
+      30.0
+     ],
+     "major": 12.5,
+     "minor": 2.5
+    },
+    "operation": 3,
+    "post_process": false
+   }
+  }
+ ]
+}
