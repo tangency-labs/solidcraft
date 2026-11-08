@@ -36,3 +36,25 @@ fn offsetting_an_arc_line_and_spline_chain_works() {
         }
     }
 }
+
+/// The 1 mm chain offset is the right curve, not just some curve: the chain's two ends are offset
+/// by exactly 1 mm. On main this fails with "offset source has a stationary tangent" (#11597).
+#[test]
+fn the_chain_offset_ends_lie_one_millimetre_from_the_source_ends() {
+    let (mut s, ids) = chain();
+    let r = run(&mut s, "sketch.offset", json!({"curves": ids, "distance": 1.0, "chain": true}));
+    let curves = r["curves"].as_array().unwrap();
+    println!("OFFSET_CURVES {}", curves.len());
+    let sk = s.model.state().sketch(s.active_sketch.unwrap()).unwrap().sketch.clone();
+    let ends: Vec<_> = curves
+        .iter()
+        .flat_map(|c| {
+            let k = &sk.curves[sk.curve_index(c.as_str().unwrap()).unwrap()].kind;
+            let (a, b) = k.ends().unwrap();
+            [sk.points[a].pos, sk.points[b].pos]
+        })
+        .collect();
+    let near = |x: f64, y: f64| ends.iter().any(|p| (((p.x - x).powi(2) + (p.y - y).powi(2)).sqrt() - 1.0).abs() < 1e-6);
+    assert!(near(27.057152168740334, 4.6392170815647855), "the arc's free end: {ends:?}");
+    assert!(near(16.7566174523, 22.8085245156), "the spline's free end: {ends:?}");
+}
