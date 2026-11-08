@@ -403,7 +403,7 @@
     "render.live.samples": "Reaaliaikainen · {width} × {height} · {current}/{target} näytettä",
     "render.live.source_current": "{method} · Reaaliaikainen",
     "render.live.source_outdated": "{method} · Edellinen kuva",
-    "render.live.source_outdated_help": "Näyttää viimeksi tallennetun kuvan, kun reaaliaikainen renderöinti päivittyy tai ei ole käytettävissä. Se voi poiketa nykyisestä näkymästä tai kuva-asetuksista.",
+    "render.live.source_outdated_help": "Näyttää viimeksi muodostetun kuvan, kun reaaliaikainen renderöinti päivittyy tai ei ole käytettävissä. Se voi poiketa nykyisestä näkymästä tai kuva-asetuksista.",
     "render.live.source_settings_help": "Avaa Tuloste muokataksesi renderöijän ja kuvan asetuksia.",
     "render.live.stopped": "Reaaliaikainen renderöinti pysäytetty",
     "render.live.updating": "Reaaliaikainen · Vuorovaikutteinen laatu (enintään 512 px) · Päivitetään",
