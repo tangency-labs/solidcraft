@@ -83,13 +83,15 @@ const MAX_SAMPLES: usize = 4096;
 /// EDGE_TOLERANCE and VERTEX_TOLERANCE, `solidcraft_smlib::flat::MAX_TOLERANCE`). Geometry that
 /// would need more is refused, with how far off it lies.
 const MAX_TOLERANCE: f64 = 1.0;
-/// A vertex's tolerance over its largest gap from its curves and surfaces.
-const VERTEX_GAP_MARGIN: f64 = 1.5;
+/// A vertex's tolerance over its largest gap from its curves and surfaces: a record tolerance is
+/// SMLib's intersection tolerance, twice the zone (the bridge halves it), and SMLib checks a
+/// vertex's gaps against half its zone, so a vertex covers its gap with margin at twice an edge's.
+const VERTEX_GAP_MARGIN: f64 = 2.0 * pcurve::SURFACE_GAP_MARGIN;
 /// Intervals an edge's curve is measured over against each face's surface it bounds.
 const EDGE_GAP_SAMPLES: usize = 16;
-/// An edge's tolerance over the largest gap measured between its pcurves and its curve, as the
-/// record check measures it: with margin, as a vertex's.
-const EDGE_GAP_MARGIN: f64 = 1.5;
+/// An edge's tolerance over the largest gap measured between its pcurves and its curve: SMLib's
+/// zone (half the record's) covers the gap with margin, as a surface's.
+const EDGE_GAP_MARGIN: f64 = pcurve::SURFACE_GAP_MARGIN;
 /// A solid (or sheet) read from the file.
 #[derive(Clone, Debug)]
 pub struct Solid {
@@ -533,6 +535,8 @@ struct Builder<'b, 'a> {
     sense_mismatches: usize,
     /// Edges whose tolerance was raised to the gap their curve has to a face's surface.
     raised_edges: HashSet<u32>,
+    /// The largest gap of a raised edge.
+    widest_gap: f64,
 }
 
 impl<'b, 'a> Builder<'b, 'a> {
@@ -551,6 +555,7 @@ impl<'b, 'a> Builder<'b, 'a> {
             faces: Vec::new(),
             sense_mismatches: 0,
             raised_edges: HashSet::new(),
+            widest_gap: 0.0,
         }
     }
 
@@ -643,12 +648,14 @@ impl<'b, 'a> Builder<'b, 'a> {
             return Err(format!("an edge lies {gap} mm off the face's surface"));
         }
         x.tolerance = margin * gap;
-        let (tolerance, ends) = (x.tolerance, x.vertices);
+        let ends = x.vertices;
         self.raised_edges.insert(e);
-        // A vertex's tolerance covers every edge that meets it, as in any tolerant record.
+        self.widest_gap = self.widest_gap.max(gap);
+        // A vertex's tolerance covers every edge that meets it, as in any tolerant record: its
+        // gap from the face at the edge's end is the edge's there, checked as a vertex's.
         for v in ends {
             if let Some(vx) = self.vertices.get_mut(v as usize) {
-                vx.tolerance = vx.tolerance.max(tolerance);
+                vx.tolerance = vx.tolerance.max(VERTEX_GAP_MARGIN * gap);
             }
         }
         Ok(())
@@ -1019,11 +1026,11 @@ impl<'b, 'a> Builder<'b, 'a> {
             return Err(format!("pcurves failed on {failed} of {} faces; first: {first}", self.faces.len()));
         }
         if !self.raised_edges.is_empty() {
-            let most = self.raised_edges.iter().filter_map(|&e| self.edges.get(e as usize)).map(|e| e.tolerance).fold(0.0, f64::max);
             notes.push(format!(
-                "{} edges lie off their faces' surfaces by more than {} mm: their tolerances are the gaps they have (up to {most:.3e} mm)",
+                "{} edges lie off their faces' surfaces farther than {} mm covers: their tolerances cover the gaps they have (up to {:.3e} mm)",
                 self.raised_edges.len(),
-                self.tol
+                self.tol,
+                self.widest_gap
             ));
         }
         let flipped = turned.iter().filter(|t| **t).count();
