@@ -2502,11 +2502,13 @@ mod tests {
     }
 
     /// The same cube, its top given a roof with a ridge: a degree-1 B-spline patch whose
-    /// interior knot is a crease. The roof has no exact class, so the reach of the moved
-    /// top has no certified bound: refused as `ReachUncertified` at the top, before any
-    /// body is built, the cube as it came in with the input's own failures.
+    /// interior knot is a crease. The roof is a bare net beside the sides, and the reach is
+    /// bounded where it meets them (across the crease too: the net is continuous there), so
+    /// a body is built; it fails more of the check than the cube did (the sides along the
+    /// ridge meet the roof in a kinked line), so the gate refuses it as `Unsound`, and the
+    /// cube is as it came in, with the input's own failures.
     #[test]
-    fn a_creased_roof_on_a_defective_input_is_refused_as_reach_uncertified() {
+    fn a_creased_roof_on_a_defective_input_is_refused_as_unsound() {
         use crate::nurbs::b_spline_surface::BSplineSurface;
         use crate::nurbs::math::{CPoint, NOW};
         use crate::nurbs::srf_basic::Surface as Net;
@@ -2527,7 +2529,15 @@ mod tests {
         .unwrap();
         let roof = Surface::from(BSplineSurface::from_gw_nurb(&roof));
         let why = refused_unchanged_or_returned(&mut k, &mut b, &[top], vec![roof]);
-        assert_eq!(why, Some(OffsetFailure::ReachUncertified { face: top }));
+        assert!(
+            matches!(
+                why,
+                Some(OffsetFailure::Unsound {
+                    what: crate::error::offset::Unsoundness::Check { .. }
+                })
+            ),
+            "{why:?}"
+        );
         assert_eq!(failure_classes(&mut k, &b), had);
     }
 
