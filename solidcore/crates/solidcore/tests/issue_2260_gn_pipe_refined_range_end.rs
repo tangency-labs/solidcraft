@@ -105,7 +105,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "cylinder_plane_tangent_within_tolerance",
     "cylinder_rebuild_mean_radius",
     "database_io_byte_swaps_read_boolean_and_u16",
-    "defeature_refuses_open_base",
     "degenerate_proto_edge_in_one_vertex",
     "degen_param_tiebreak_uses_actual_param",
     "delete_vertex_joins_seam_iso_curve",

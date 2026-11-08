@@ -139,6 +139,7 @@ crates/solidcore/src/blend/blend_setback/scale.rs	model_rounds	with_capacity	1	o
 crates/solidcore/src/blend/blend_setback/scale.rs	model_rounds	with_capacity	2	proven	Vec::with_capacity(6)	constant capacity
 crates/solidcore/src/blend/blend_setback/scale.rs	model_rounds	with_capacity	3	proven	Vec::with_capacity(6)	constant capacity
 crates/solidcore/src/blend/feature_executive.rs	FeatureExecutive::restore_features	Vec::remove	1	open	remove(ii)	
+crates/solidcore/src/blend/feature_executive.rs	FeatureExecutive::take_off	Vec::remove	1	proven	remove(f.feature)	the index was just read by self.features.get_mut(f.feature), and kept is walked in descending order
 crates/solidcore/src/blend/feature_executive.rs	collect_feature_loop_edges	Vec::remove	1	open	remove(kk)	
 crates/solidcore/src/blend/feature_executive.rs	fix_edge_chain_list	Vec::remove	1	open	remove(id)	
 crates/solidcore/src/blend/feature_executive.rs	fix_edge_chain_list	Vec::remove	2	open	remove(id)	

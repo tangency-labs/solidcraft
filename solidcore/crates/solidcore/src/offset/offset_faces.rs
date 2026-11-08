@@ -1241,9 +1241,9 @@ impl OffsetFacesExecutive {
                 else {
                     continue;
                 };
-                // (DoDefeature always succeeds and hands back the base B-rep itself; with
-                // `fixes.defeature_refuses_open_base`, not upstream, it refuses a base it
-                // could not patch, put back, which is the refusal below)
+                // (upstream's DoDefeature always succeeds and hands back the base B-rep
+                // itself; here, not upstream (WR-656), it refuses a base it could not patch,
+                // put back, which is the refusal below)
                 match defeature.do_defeature(k) {
                     Err(e) if is_open_base_refusal(&e) => false,
                     r => {

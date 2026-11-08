@@ -272,7 +272,6 @@
   "ellipse_adjust_step_interval_keeps_turns",
   "ellipse_open_arc_keeps_end_angle",
   "fillet_removal_takes_ring_fillets",
-  "defeature_refuses_open_base",
   "boolean_union_refuses_solid_leak",
   "simple_coincidence_crossing_is_point",
   "face_points_span_domain",

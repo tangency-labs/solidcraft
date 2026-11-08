@@ -2,9 +2,9 @@
 //! (one face of a 30 x 20 x 10 box, `SM_RB_EXTEND_SURFACE` / `SM_RB_FROM_OTHER_BREP`: the
 //! four side faces extended do not close the top) applies no patch and returns success
 //! with the face cut out and the hole open: 5 faces, not a manifold solid, volume 0 (as
-//! the pinned C++). The opt-in `Kernel::fixes.defeature_refuses_open_base` refuses it
-//! with `SM_ERR` at a loop edge and puts the box back. Features whose patch is built (a
-//! plate's hole, a rim round, a corner ball of a rounded box) come off as before.
+//! the pinned C++). The kernel refuses it with `SM_ERR` at a loop edge and puts the box
+//! back. Features whose patch is built (a plate's hole, a rim round, a corner ball of a
+//! rounded box) come off as before.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -80,9 +80,8 @@ fn shape(k: &Kernel, b: &mut Brep) -> Shape {
 
 /// Defeatures face `face` (index in the face list) of `make`'s body, as the matrix does;
 /// the shape before, `do_defeature`'s result and the shape after.
-fn defeature(fix: bool, make: Make, face: usize) -> (Shape, solidcore::Result<()>, Shape) {
+fn defeature(make: Make, face: usize) -> (Shape, solidcore::Result<()>, Shape) {
     let mut k = Kernel::default();
-    k.fixes.defeature_refuses_open_base = fix;
     let mut b = make(&mut k);
     let before = shape(&k, &mut b);
     let f = p1::faces(&b, None).unwrap()[face];
@@ -96,7 +95,7 @@ fn defeature(fix: bool, make: Make, face: usize) -> (Shape, solidcore::Result<()
         )
         .unwrap()
         .unwrap();
-        let r = ex.do_defeature(&mut k);
+        let r = ex.do_defeature(&mut k).map(drop);
         if r.is_err() {
             assert!(ex.features().is_empty());
         }
@@ -107,23 +106,9 @@ fn defeature(fix: bool, make: Make, face: usize) -> (Shape, solidcore::Result<()
 }
 
 #[test]
-fn wr_656_defeature_refuses_open_base_is_off_by_default() {
-    assert!(!Kernel::default().fixes.defeature_refuses_open_base);
-}
-
-#[test]
-fn wr_656_upstream_defeature_leaves_the_box_open() {
-    let (_, r, after) = defeature(false, box_30_20_10, 0);
-    r.unwrap();
-    assert_eq!(after.0, 5);
-    assert!(!after.1);
-    assert!(after.2.abs() < 1e-6, "volume {}", after.2);
-}
-
-#[test]
-fn wr_656_defeature_with_the_fix_refuses_and_keeps_the_box() {
+fn wr_656_defeature_refuses_and_keeps_the_box() {
     for face in 0..6 {
-        let (before, r, after) = defeature(true, box_30_20_10, face);
+        let (before, r, after) = defeature(box_30_20_10, face);
         match r {
             Err(SolidError::Upstream {
                 code,
@@ -139,10 +124,9 @@ fn wr_656_defeature_with_the_fix_refuses_and_keeps_the_box() {
     }
 }
 
-/// Features whose patch is built: the result is the flag-off one, with the volume the
-/// matrix measured.
+/// Features whose patch is built come off, sound, with the volume the matrix measured.
 #[test]
-fn wr_656_fix_leaves_patched_defeatures_alone() {
+fn wr_656_patched_defeatures_come_off() {
     let cases: [(Make, usize, f64); 3] = [
         // the hole's wall: the plate filled in
         (plate_hole, 6, 6000.0),
@@ -158,15 +142,8 @@ fn wr_656_fix_leaves_patched_defeatures_alone() {
         ),
     ];
     for (make, face, want) in cases {
-        let (_, off_r, off) = defeature(false, make, face);
-        let (_, on_r, on) = defeature(true, make, face);
-        off_r.unwrap();
-        on_r.unwrap();
-        assert_eq!((on.0, on.1), (off.0, off.1), "face {face}");
-        assert!(
-            (on.2 - off.2).abs() < 1e-9 * off.2,
-            "face {face}: {on:?} vs {off:?}"
-        );
+        let (_, r, on) = defeature(make, face);
+        r.unwrap();
         assert!(on.1, "face {face}");
         assert!((on.2 - want).abs() < 1e-4, "face {face}: volume {}", on.2);
     }
