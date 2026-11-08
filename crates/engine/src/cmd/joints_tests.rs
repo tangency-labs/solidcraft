@@ -2807,6 +2807,10 @@ fn a_joint_origin_on_a_repeated_sub_assembly_stays_on_the_copy_it_was_picked_on(
         assert!(matches!(&top.snap, solidcraft_doc::joints::Snap::FaceCenter { face: Some(_), .. }), "{how}: {top:?}");
         run(&mut s, "joint.create", json!({"type": "rigid", "a": "Top", "b": {"occurrence": "Probe", "face": [1, 1, 0]}}));
         assert!(near(probe_centre(&s), Vec3::new(95.0, 25.0, 11.0)), "{how}: {:?}", probe_centre(&s));
+        // joint.inspect lists the occurrences inside the copy; a side with none leaves the key out.
+        let sides = run(&mut s, "joint.inspect", json!({}))["joints"][0].clone();
+        assert_eq!((&sides["a"]["occurrence"], &sides["a"]["inside"]), (&json!(second), &json!([header])), "{how}: {sides}");
+        assert!(sides["b"].get("inside").is_none(), "{how}: {sides}");
         // It follows that copy when it moves, and keeps it through saving and opening again.
         run(&mut s, "occurrence.move", json!({"occurrence": second, "translate": [0, 20, 0], "move_grounded": true}));
         assert!(near(probe_centre(&s), Vec3::new(95.0, 45.0, 11.0)), "{how}: {:?}", probe_centre(&s));
@@ -2838,6 +2842,8 @@ fn a_joint_origin_on_the_first_copy_is_stored_as_before() {
     }
     run(&mut s, "joint.create", json!({"type": "rigid", "a": "ByPath", "b": {"occurrence": "Probe", "face": [1, 1, 0]}}));
     assert!(near(probe_centre(&s), Vec3::new(-5.0, 25.0, 11.0)), "{:?}", probe_centre(&s));
+    let sides = run(&mut s, "joint.inspect", json!({}))["joints"][0].clone();
+    assert!(sides["a"].get("inside").is_none(), "{sides}");
 }
 
 #[test]
