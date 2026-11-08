@@ -582,7 +582,7 @@ fn a_feature_drawn_both_exactly_and_from_geometry_is_not_covered() {
     let state = s.model.state();
     let drawn_so = |exact: bool| {
         state.bodies.iter().any(|b| {
-            let made_by_block = |name: &String| FaceName::parse(name).ok().and_then(|face| face.feature()).is_some_and(|f| f.0 == block);
+            let made_by_block = |name: &String| made_by(name) == Some(block);
             naming::face_names(b).iter().enumerate().any(|(i, name)| made_by_block(name) && naming::face_name_exact(b, i) == exact)
         })
     };

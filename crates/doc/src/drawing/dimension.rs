@@ -71,6 +71,7 @@ use solidcraft_geom::drawing_view::{Invalid, is_paper_coordinate};
 use solidcraft_geom::paper::MAX_SIDE_MM;
 use solidcraft_geom::prelude::*;
 
+use super::coverage::{edge_makers, face_maker};
 use super::{Drawing, Units, add_by_id, in_id_order, require};
 use crate::config::MAX_REFERENCE_NAME_BYTES;
 use crate::construct::{MAX_VERTEX_EDGES, as_circle, as_line, point_tolerance, shared_ends};
@@ -841,16 +842,6 @@ pub(super) struct Edges {
     pub(super) exact: bool,
     body: usize,
     frame: Mat,
-}
-
-/// The features that made the faces an edge's name says it separates.
-fn edge_makers(name: &str) -> Vec<FeatureId> {
-    EdgeName::parse(name).map_or_else(|_| Vec::new(), |edge| edge.faces.iter().filter_map(FaceName::feature).collect())
-}
-
-/// The feature that made the face a name says: none for a name without history.
-fn face_maker(name: &str) -> Option<FeatureId> {
-    FaceName::parse(name).ok()?.feature()
 }
 
 /// One body's face names, read once for the leads a lost reference lists: the edge each blend face

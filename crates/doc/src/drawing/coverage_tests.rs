@@ -90,3 +90,28 @@ fn a_dimensions_paths_and_coverage_read_one_list() {
     assert_eq!(kind.paths(), [&[7][..], &[8, 9][..]]);
     assert_eq!(kind.references().into_iter().map(|r| t.covers(r)).collect::<Vec<_>>(), [Some(2), Some(3)]);
 }
+
+/// The feature a face's name says made it: its own, a copy's pattern, none for a face of no
+/// feature or a name that doesn't read.
+#[test]
+fn a_face_is_made_by_the_feature_its_name_says() {
+    assert_eq!(made_by("F2:top"), Some(2));
+    assert_eq!(made_by("F1:side:l1@F2.1"), Some(2));
+    assert_eq!(made_by("F1:top#[F3:side:l2,F4:side:l2]"), Some(1));
+    for none in ["Body1:face:3", "Plate:rim.end", "", "F1:blend:"] {
+        assert_eq!(made_by(none), None, "{none}");
+    }
+}
+
+/// A cap is a whole face of the feature at its start, its end, or its sketch plane's top or bottom:
+/// not a side, a copy, a piece, or another feature's.
+#[test]
+fn a_cap_is_a_whole_start_end_top_or_bottom_face_of_the_feature() {
+    for cap in ["F3:start", "F3:end", "F3:top", "F3:bottom"] {
+        assert!(is_cap(cap, 3), "{cap}");
+        assert!(!is_cap(cap, 2), "{cap} isn't F2's");
+    }
+    for not in ["F3:side:l1", "F3:+z", "F3:top@F4.1", "F3:top#[F1:side:l2]", "F3:face:2", "", "F3:"] {
+        assert!(!is_cap(not, 3), "{not}");
+    }
+}

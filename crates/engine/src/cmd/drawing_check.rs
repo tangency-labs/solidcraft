@@ -14,9 +14,8 @@ use serde_json::Value;
 use solidcore_record::Vec2;
 use solidcraft_doc::bom::Tree;
 use solidcraft_doc::drawing::Drawing;
-use solidcraft_doc::drawing::coverage::Timeline;
+use solidcraft_doc::drawing::coverage::{Timeline, made_by};
 use solidcraft_doc::drawing::dimension::Status;
-use solidcraft_doc::persistent_name::FaceName;
 use solidcraft_doc::{ModelState, ids, naming};
 use solidcraft_geom::paper::{Item, ObjectKind};
 use solidcraft_geom::{Aabb2, EPS};
@@ -278,7 +277,7 @@ impl Drawn {
             }
             let Some(body) = state.bodies.get(shown.index) else { continue };
             for (i, name) in naming::face_names(body).iter().enumerate() {
-                let maker = FaceName::parse(name).ok().and_then(|face| face.feature()).map(|feature| feature.0);
+                let maker = made_by(name);
                 let set = match maker {
                     _ if shown.reference => &mut self.reference,
                     Some(_) if naming::face_name_exact(body, i) => &mut self.exact,

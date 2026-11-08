@@ -15,8 +15,8 @@ use std::sync::Arc;
 use serde_json::Value;
 use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_doc::drawing::Drawing;
+use solidcraft_doc::drawing::coverage::{is_cap, made_by};
 use solidcraft_doc::drawing::dimension::{CornerPick, Dimension, DimensionKind, EdgePick, ModelDimension, ModelFace, Status};
-use solidcraft_doc::persistent_name::{Base, FaceName, Role};
 use solidcraft_doc::{Feature, FeatureKind, ModelState, SolvedSketch, ids, naming};
 use solidcraft_geom::drawing_measure::{LinearDirection, Reading};
 use solidcraft_geom::prelude::*;
@@ -161,8 +161,7 @@ fn candidates(s: &Session, request: &FromModelParams, basis: &Plane) -> Result<V
         Some(name) => {
             let body = state.body(name).ok_or_else(|| bad(FROM_MODEL, format!("the design has no body `{}`", short(name))))?;
             let faces = naming::face_names(body);
-            let makers = faces.iter().filter_map(|n| FaceName::parse(n).ok()?.feature()).map(|f| f.0);
-            Some(makers.chain([body.feature]).collect::<HashSet<u64>>())
+            Some(faces.iter().filter_map(|name| made_by(name)).chain([body.feature]).collect::<HashSet<u64>>())
         }
         None => None,
     };
@@ -319,13 +318,7 @@ fn arc_middle(centre: Vec2, a: Vec2, b: Vec2) -> Vec2 {
 /// design. Whether that reads its distance is checked as every model dimension's value is.
 fn extrude_distance(s: &Session, state: &ModelState, f: &Feature) -> std::result::Result<Measure, (SkipReason, String)> {
     let expected = s.doc.length_input(f.id, EXTRUDE_DISTANCE).ok_or((SkipReason::NotFound, "its distance doesn't evaluate".to_string()))?;
-    let cap = |name: &String| match FaceName::parse(name) {
-        Ok(FaceName { base: Base::Made { feature, role: Role::Start | Role::End | Role::Top | Role::Bottom }, suffixes }) => {
-            feature.0 == f.id && suffixes.is_empty()
-        }
-        _ => false,
-    };
-    let caps = state.bodies.iter().find_map(|b| match naming::face_names(b).iter().filter(|name| cap(name)).collect::<Vec<_>>()[..] {
+    let caps = state.bodies.iter().find_map(|b| match naming::face_names(b).iter().filter(|name| is_cap(name, f.id)).collect::<Vec<_>>()[..] {
         [a, z] if a != z => Some((b, [a.clone(), z.clone()])),
         _ => None,
     });
