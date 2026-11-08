@@ -416,7 +416,7 @@ fn card_rows(ui: &mut egui::Ui, card: &mut CardDraft) {
                 optional_text(ui, tr("ui.design_properties.license"), &format!("source:{i}:license"), &mut source.license);
                 optional_text(ui, tr("material.editor.reference"), &format!("source:{i}:reference"), &mut source.reference);
                 let used = card.properties.iter().any(|p| p.source_id == source.id);
-                if ui_kit::button(ui, tr("Remove"), ui_kit::Button::Enabled(!used)).clicked() {
+                if ui_kit::button(ui, tr("material.editor.remove"), ui_kit::Button::Enabled(!used)).clicked() {
                     remove = Some(i);
                 }
             });
@@ -434,7 +434,7 @@ fn card_rows(ui: &mut egui::Ui, card: &mut CardDraft) {
         let label = format!("ui.material_review.{}", property.kind);
         ui_kit::section(ui, format!("physical:property:{}", property.kind), tr(&label), false, |ui| {
             property_rows(ui, property, &card.sources);
-            if ui_kit::button(ui, tr("Remove"), ui_kit::Button::Normal).clicked() {
+            if ui_kit::button(ui, tr("material.editor.remove"), ui_kit::Button::Normal).clicked() {
                 remove = Some(i);
             }
         });
