@@ -213,6 +213,44 @@ fn plane_through_axis_and_point_accepts_straight_model_and_sketch_lines() {
     assert!(parallel(plane(&s, "Side").normal(), Vec3::Y));
 }
 
+/// Issue #12851: construct.plane.axis_point with an edge pick whose circle centre lies on the
+/// axis (e.g. rim of a cylinder or revolved torus). The centre is on the axis, so resolving the
+/// edge pick to the centre would refuse with "the point is on the axis". Instead, resolve to the
+/// picked point on the edge, supporting picks at any angle around the rim.
+#[test]
+fn plane_through_axis_and_circular_edge_centered_on_axis_succeeds() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "axis": [0, 1, 0], "radius": 15, "height": 30, "body_name": "Cyl"}));
+    // Edge at 0 degrees round the rim (x = 15, y = 30, z = 0).
+    run(
+        &mut s,
+        "construct.plane.axis_point",
+        json!({
+            "axis": {"axis": "Y"},
+            "point": {"edge": [15, 30, 0]},
+            "name": "PlaneAt0Deg"
+        }),
+    );
+    let pl0 = plane(&s, "PlaneAt0Deg");
+    assert!(parallel(pl0.normal(), Vec3::Z), "normal is {:?}", pl0.normal());
+    assert!(on_plane(&pl0, Vec3::new(15.0, 30.0, 0.0)));
+    assert!(on_plane(&pl0, Vec3::new(0.0, 0.0, 0.0)));
+
+    // Edge pick at 90 degrees round the rim (x = 0, y = 30, z = 15).
+    run(
+        &mut s,
+        "construct.plane.axis_point",
+        json!({
+            "axis": {"axis": "Y"},
+            "point": {"edge": [0, 30, 15]},
+            "name": "PlaneAt90Deg"
+        }),
+    );
+    let pl90 = plane(&s, "PlaneAt90Deg");
+    assert!(parallel(pl90.normal(), Vec3::X), "normal is {:?}", pl90.normal());
+    assert!(on_plane(&pl90, Vec3::new(0.0, 30.0, 15.0)));
+}
+
 #[test]
 fn plane_through_axis_and_point_in_a_moved_component_keeps_its_world_picks() {
     let mut s = Session::default();
