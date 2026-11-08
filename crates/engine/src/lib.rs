@@ -2391,6 +2391,8 @@ mod extent_tests;
 #[cfg(test)]
 mod face_name_tests;
 #[cfg(test)]
+mod loft_sheet_tests;
+#[cfg(test)]
 mod hole_face_tests;
 #[cfg(test)]
 mod hole_matrix_tests;
