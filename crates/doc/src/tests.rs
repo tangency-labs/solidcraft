@@ -1282,3 +1282,34 @@ fn an_extruded_ellipse_or_spline_is_one_wall_named_by_its_curve() {
         assert_eq!(names(&Document::from_json(&doc.to_json()).unwrap()), first, "reopened");
     }
 }
+
+/// A construction plane of one component carries its place into the sketch of another (#11734):
+/// the sketch lies where the plane is, not where the plane's numbers fall in the sketch's own,
+/// placed component.
+#[test]
+fn a_sketch_on_the_construction_plane_of_another_component_lies_on_it() {
+    let mut doc = Document::new("planes between components");
+    let owner = doc.add_component(Some("Owner"), 0).unwrap();
+    let sketcher = doc.add_component(Some("Sketcher"), 0).unwrap();
+    let placed = rigid(Vec3::new(0.0, 138.0, -3.0), Vec3::ZERO, Vec3::Y, std::f64::consts::PI);
+    doc.occurrences.iter_mut().find(|o| o.component == sketcher).unwrap().transform = placed;
+    let offset = PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XZ".into() }), distance: "60 mm".into() };
+    let plane = doc.add_feature(FeatureKind::ConstructionPlane { plane: offset }, Some("Plane3")).unwrap();
+    doc.feature_mut(plane).unwrap().component = owner;
+    let mut sketch = Sketch::new();
+    let a = sketch.add_point(Vec2::new(0.0, 0.0), None).unwrap();
+    let b = sketch.add_point(Vec2::new(10.0, 5.0), None).unwrap();
+    sketch.add_line_pts(a, b, None).unwrap();
+    let on_plane = FeatureKind::Sketch { plane: PlaneRef::Construction { feature: plane.into() }, sketch };
+    let id = doc.add_feature(on_plane, Some("Sketch3")).unwrap();
+    doc.feature_mut(id).unwrap().component = sketcher;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.result(id).unwrap().error.is_none(), "{:?}", model.result(id).unwrap().error);
+    let state = model.state();
+    let solved = state.sketch(id).unwrap();
+    // The sketch is kept in its own component's frame: placed, it is in the plane y = 60.
+    let world = crate::apply_point(&doc.component_transform(sketcher), solved.plane.origin);
+    assert!((world.y - 60.0).abs() < 1e-6, "the sketch lies at y = {} instead of the plane's 60", world.y);
+}

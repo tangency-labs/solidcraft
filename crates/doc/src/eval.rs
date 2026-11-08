@@ -7698,7 +7698,12 @@ fn eval_feature(
                 // A plane of numbers alone reads no body: placing them all is the design's size.
                 None if plane_is_fixed(plane) => doc.resolve_plane_in(vals, plane, 0, Some(st))?,
                 // Picks on bodies of other (moved) components are where those bodies are shown.
-                None => doc.resolve_plane_in(vals, plane, 0, Some(&*construction_state(doc, st, f.component)?))?,
+                None => doc.resolve_plane_in(
+                    vals,
+                    &construction_planes_in_frame(doc, st, f.component, plane)?,
+                    0,
+                    Some(&*construction_state(doc, st, f.component)?),
+                )?,
             };
             st.construct.push(crate::construct::Construct {
                 feature: f.id,
@@ -8343,7 +8348,7 @@ fn eval_sketch(
             (doc.resolve_plane_in(vals, &sheet_face_plane_in_frame(doc, st, f.component, plane)?, 0, Some(&fst))?, None)
         }
         (None, PlaneRef::Face { plane: picked, at, name, anchor: None }) => face_plane(&fst, picked, *at, name.as_deref())?,
-        (None, other) => (doc.resolve_plane_in(vals, other, 0, Some(&fst))?, None),
+        (None, other) => (doc.resolve_plane_in(vals, &construction_planes_in_frame(doc, st, f.component, other)?, 0, Some(&fst))?, None),
     };
     let mut sk = sketch.clone();
     // A text's outlines are rebuilt from its numbers when the links are refreshed: the
@@ -9101,6 +9106,51 @@ pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut 
 
 /// `plane` moved by the placement `m`; an error when `m` does not keep it a plane (a placement
 /// that is not a rigid motion, which [`Document`] does not take).
+/// `plane` for a feature of component `comp`, with each construction plane of another component
+/// (under any offset or flip of it) given as the plane where that component puts it, in `comp`'s
+/// frame (#11734). A construction plane is kept in its own component's frame, as the axes are
+/// (`construction_axis_in`), so a plane read as it is would fall in the wrong place for a feature
+/// of a component placed differently.
+fn construction_planes_in_frame<'a>(doc: &Document, st: &ModelState, comp: u64, plane: &'a PlaneRef) -> Result<std::borrow::Cow<'a, PlaneRef>> {
+    use std::borrow::Cow;
+    fn foreign(doc: &Document, comp: u64, plane: &PlaneRef) -> bool {
+        match plane {
+            PlaneRef::Construction { feature } => doc.feature(feature.0).is_some_and(|f| f.component != comp),
+            PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::ThroughPoint { base, .. } => {
+                foreign(doc, comp, base)
+            }
+            _ => false,
+        }
+    }
+    fn map(doc: &Document, st: &ModelState, comp: u64, plane: &mut PlaneRef) -> Result<()> {
+        match plane {
+            PlaneRef::Construction { feature } => {
+                let owner = doc.feature(feature.0).map_or(comp, |f| f.component);
+                if owner == comp {
+                    return Ok(());
+                }
+                if let Some(crate::construct::ConstructGeom::Plane(pl)) = st.construct.iter().find(|c| c.feature == feature.0).map(|c| &c.geom) {
+                    let inverse = crate::mat_inverse(&doc.component_transform(comp))
+                        .ok_or_else(|| DocError::Invalid("the feature's component frame is invalid".into()))?;
+                    let m = crate::mat_mul(&inverse, &doc.component_transform(owner));
+                    *plane = PlaneRef::Custom { plane: placed_plane(&m, pl)? };
+                }
+            }
+            PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::ThroughPoint { base, .. } => {
+                map(doc, st, comp, base)?
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+    if doc.occurrences.is_empty() || !foreign(doc, comp, plane) {
+        return Ok(Cow::Borrowed(plane));
+    }
+    let mut mapped = plane.clone();
+    map(doc, st, comp, &mut mapped)?;
+    Ok(Cow::Owned(mapped))
+}
+
 fn placed_plane(m: &crate::Mat, plane: &Plane) -> Result<Plane> {
     Plane::new(crate::apply_point(m, plane.origin), crate::apply_vector(m, plane.x), crate::apply_vector(m, plane.y))
         .ok_or_else(|| DocError::Invalid("a sketch plane cannot be placed: the placement is not a rigid motion".into()))
