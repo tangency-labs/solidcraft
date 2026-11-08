@@ -31,12 +31,17 @@ fn misclassified(cyl: &Body) -> Vec<String> {
     // nearer the axis than the radius.
     for step in 0..=60 {
         let angle = 60.0 + 0.5 * f64::from(step);
-        for (radial, want) in [(R - 0.075, PointClass::Inside), (R + 0.075, PointClass::Outside)] {
+        for (radial, want) in [
+            (R - 0.075, PointClass::Inside),
+            (R + 0.075, PointClass::Outside),
+        ] {
             for z in [1.03, 10.0, 44.0] {
                 let p = at(angle, radial, z);
                 let got = cyl.classify_point(p).unwrap();
                 if got != want {
-                    wrong.push(format!("{angle} deg, {radial} from the axis, z {z}: {got:?}, want {want:?}"));
+                    wrong.push(format!(
+                        "{angle} deg, {radial} from the axis, z {z}: {got:?}, want {want:?}"
+                    ));
                 }
             }
         }
@@ -48,15 +53,26 @@ fn misclassified(cyl: &Body) -> Vec<String> {
 /// spline in four quarter-circle spans.
 #[test]
 fn points_beside_an_extruded_circle_wall_classify_by_their_distance_to_its_axis() {
-    let record: Record = serde_json::from_str(include_str!("data/extruded_circle_r30_475.json")).unwrap();
+    let record: Record =
+        serde_json::from_str(include_str!("data/extruded_circle_r30_475.json")).unwrap();
     let cyl = Body::from_record(&record, true).unwrap().0;
     let wrong = misclassified(&cyl);
-    assert!(wrong.is_empty(), "{} of 366 points misclassified:\n{}", wrong.len(), wrong.join("\n"));
+    assert!(
+        wrong.is_empty(),
+        "{} of 366 points misclassified:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
 }
 
 #[test]
 fn points_beside_a_cylinder_wall_classify_by_their_distance_to_its_axis() {
     let cyl = built(|k| create_cylinder(k, Point3::new(AXIS[0], AXIS[1], 0.0), R, 45.0));
     let wrong = misclassified(&cyl);
-    assert!(wrong.is_empty(), "{} of 366 points misclassified:\n{}", wrong.len(), wrong.join("\n"));
+    assert!(
+        wrong.is_empty(),
+        "{} of 366 points misclassified:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
 }

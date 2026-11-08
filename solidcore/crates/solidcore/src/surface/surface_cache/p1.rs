@@ -2617,6 +2617,60 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         Ok(last_polar)
     }
 
+    /// The axis aligned box and the normal map (polar box) of the cache's surface over
+    /// `domain`, any part of its domain, not grown by a tolerance (not upstream's: the line solve splits a leaf into parts the line crosses at
+    /// most once, [`crate::surface::surface::p2::LsiGlobalSolver`]). A B-spline's own
+    /// boxes are its whole net's whatever the domain, so the box is the net's of the
+    /// sub-patch over `domain` (`CopySubPatch`), its normals the surface's own; a plane's
+    /// is its domain's. A surface carried by no B-spline net (a procedural blend, a
+    /// curve-bounded or STEP surface) gets the whole surface's bounds, which hold for
+    /// any part. `None` for a box the surface cannot bound.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] and cancellations from the bounding.
+    pub(crate) fn boxes_over(
+        &self,
+        k: &Kernel,
+        domain: &Extent2d,
+    ) -> Result<(Option<crate::geom::extent3d::Extent3d>, Option<PolarBox>)> {
+        let req = BoundingBoxRequest {
+            normal: true,
+            pseudo: false,
+            polar: true,
+            pseudo_guess: None,
+            polar_guess: None,
+            // (the caller grows the box by its own tolerance: a sub-patch has no face to
+            // read a zone tolerance from)
+            expand_by_zone_tol: false,
+            expand_tolerance: None,
+        };
+        let surface = self.surface();
+        let net = match surface.kind_with_nurb(k)? {
+            SurfaceKind::BSpline(b) => Some(b),
+            SurfaceKind::BallPatch(bp) => Some(bp.net()),
+            SurfaceKind::Cone(s) => Some(s.rev().base()),
+            SurfaceKind::Sphere(s) => Some(s.base().base()),
+            SurfaceKind::Torus(s) => Some(s.base().base()),
+            SurfaceKind::SurfOfRevolution(s) => Some(s.base()),
+            SurfaceKind::SurfOfExtrusion(s) => Some(s.base()),
+            _ => None,
+        };
+        let boxes = match net {
+            Some(net) => match ignored(net.copy_sub_patch(domain))? {
+                Some(sub) => {
+                    ignored(sub.calculate_bounding_box_of(k, domain, &req, Some(surface)))?
+                }
+                None => None,
+            },
+            None => ignored(calculate_bounding_box(k, surface, domain, &req))?,
+        };
+        Ok(match boxes {
+            Some(b) => (b.normal, b.polar),
+            None => (None, None),
+        })
+    }
+
     /// `mBA_pSurface->CalculateBoundingBox(m_sUVDomain, NULL, NULL, &m_sPolarBox,
     /// NULL, guess)`; `None` when the (ignored) status is a failure.
     fn compute_polar_box(
