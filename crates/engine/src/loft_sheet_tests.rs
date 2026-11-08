@@ -30,7 +30,11 @@ fn square(s: &mut Session, name: &str, half: f64, z: f64) {
 #[test]
 fn a_loft_between_parallel_squares_converts_to_sheet_metal() {
     let mut s = Session::default();
-    run(&mut s, "sheet.manage_rules", json!({"name": "Steel 1.5mm", "thickness": "1.5 mm", "bend_radius": "1.5 mm", "k_factor": "0.4", "active": true}));
+    run(
+        &mut s,
+        "sheet.manage_rules",
+        json!({"name": "Steel 1.5mm", "thickness": "1.5 mm", "bend_radius": "1.5 mm", "k_factor": "0.4", "active": true}),
+    );
     square(&mut s, "Bottom", 55.0, 0.0);
     square(&mut s, "Top", 100.0, 120.0);
     run(&mut s, "solid.loft", json!({"sections": [{"sketch": "Bottom"}, {"sketch": "Top"}], "body_name": "Hopper"}));
@@ -39,7 +43,11 @@ fn a_loft_between_parallel_squares_converts_to_sheet_metal() {
     run(&mut s, "solid.shell", json!({"body": "Hopper", "faces": [[0, 0, 120], [0, 0, 0]], "thickness": "1.5 mm", "direction": "inside"}));
     let types = face_types(&mut s, "Hopper");
     assert_eq!(types["plane"].as_u64(), Some(10), "{types}");
-    run(&mut s, "sheet.convert", json!({"body": "Hopper", "face": [0, -77.5, 60], "bends": [[77.5, 77.5, 60], [77.5, -77.5, 60], [-77.5, -77.5, 60]]}));
+    run(
+        &mut s,
+        "sheet.convert",
+        json!({"body": "Hopper", "face": [0, -77.5, 60], "bends": [[77.5, 77.5, 60], [77.5, -77.5, 60], [-77.5, -77.5, 60]]}),
+    );
     assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
 }
 
