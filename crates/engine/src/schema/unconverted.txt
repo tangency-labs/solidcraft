@@ -88,11 +88,3 @@ surface.thicken
 surface.trim
 surface.unstitch
 surface.untrim
-timeline.group
-timeline.move_many
-timeline.move_to_group
-timeline.redefine
-timeline.rename_group
-timeline.reorder
-timeline.reorder_many
-timeline.ungroup
