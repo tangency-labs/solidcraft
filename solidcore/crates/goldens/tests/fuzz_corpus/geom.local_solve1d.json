@@ -1,0 +1,6 @@
+{
+  "unit": "geom.local_solve1d",
+  "cases": [
+    {"name": "fuzz01946_alloc_try_new", "origin": "fuzz-out/n2000/geom.local_solve1d/fuzz01946.json (enomem: rust: IterQueue1d::try_new sized from a 2^31/2^32 argument, outcome depended on the machine memory)", "issue": "#505", "cpp": "harness: invalid argument: queue operands", "rust": "harness: queue size: geom::local_solve1d::IterQueue1d::try_new: invalid input: queue size too large to allocate", "inputs": {"op": "queue", "size": 2147483648, "step": 0, "steps": []}}
+  ]
+}

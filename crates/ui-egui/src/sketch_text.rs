@@ -1092,7 +1092,7 @@ mod tests {
         h.frames(2);
         h.step(&json!({"click":{"handle":"menu:report"}})).unwrap();
         h.frames(3);
-        let token = h.app.shot_token;
+        let token = h.app.shots.token;
         crate::issue_report::receive(&mut h.app, token, std::sync::Arc::new(egui::ColorImage::new([2, 2], vec![egui::Color32::GREEN; 4])));
         h.frames(3);
         let focus = egui::Id::unique("issue_report_title");

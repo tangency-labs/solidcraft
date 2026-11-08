@@ -1,0 +1,1009 @@
+{
+  "cases": [
+    {
+      "name": "maps_clear0_copy0",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:8094,8108",
+      "inputs": {
+        "op": 0,
+        "data": [
+          -73,
+          1,
+          0,
+          0,
+          1,
+          -1,
+          3,
+          0,
+          -1,
+          2,
+          -1,
+          0,
+          3,
+          0,
+          1,
+          2,
+          2,
+          -1,
+          -1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "maps_clear0_copy1",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:8094,8108",
+      "inputs": {
+        "op": 0,
+        "data": [
+          -73,
+          1,
+          0,
+          1,
+          1,
+          -1,
+          3,
+          0,
+          -1,
+          2,
+          -1,
+          0,
+          3,
+          0,
+          1,
+          2,
+          2,
+          -1,
+          -1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "maps_clear1_copy0",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:8094,8108",
+      "inputs": {
+        "op": 0,
+        "data": [
+          -73,
+          1,
+          1,
+          0,
+          1,
+          -1,
+          3,
+          0,
+          -1,
+          2,
+          -1,
+          0,
+          3,
+          0,
+          1,
+          2,
+          2,
+          -1,
+          -1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "maps_clear1_copy1",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:8094,8108",
+      "inputs": {
+        "op": 0,
+        "data": [
+          -73,
+          1,
+          1,
+          1,
+          1,
+          -1,
+          3,
+          0,
+          -1,
+          2,
+          -1,
+          0,
+          3,
+          0,
+          1,
+          2,
+          2,
+          -1,
+          -1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "pivot_start",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:3242",
+      "inputs": {
+        "op": 1,
+        "data": [
+          0,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          4,
+          3,
+          0,
+          1e-08
+        ]
+      }
+    },
+    {
+      "name": "pivot_end",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:3242",
+      "inputs": {
+        "op": 1,
+        "data": [
+          0,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          4,
+          3,
+          0,
+          1e-08
+        ]
+      }
+    },
+    {
+      "name": "pivot_fallback",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:3242",
+      "inputs": {
+        "op": 1,
+        "data": [
+          0,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          0,
+          0,
+          5,
+          0,
+          4,
+          3,
+          0,
+          1e-08
+        ]
+      }
+    },
+    {
+      "name": "pivot_squared_below",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:3242",
+      "inputs": {
+        "op": 1,
+        "data": [
+          0,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0.01,
+          0,
+          4,
+          3,
+          0,
+          0.000101
+        ]
+      }
+    },
+    {
+      "name": "pivot_squared_above",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:3242",
+      "inputs": {
+        "op": 1,
+        "data": [
+          0,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0.01,
+          0,
+          4,
+          3,
+          0,
+          9.9e-05
+        ]
+      }
+    },
+    {
+      "name": "pivot_negative",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:3242",
+      "inputs": {
+        "op": 1,
+        "data": [
+          0,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          4,
+          3,
+          0,
+          -1.0
+        ]
+      }
+    },
+    {
+      "name": "extend_angle_0",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:5475",
+      "inputs": {
+        "op": 2,
+        "data": [
+          0,
+          0,
+          0.25,
+          2,
+          0,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          3.0,
+          0.0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "extend_angle_1.999",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:5475",
+      "inputs": {
+        "op": 2,
+        "data": [
+          0,
+          0,
+          0.25,
+          2,
+          0,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          2.9993914359780045,
+          0.03488205403674065,
+          0
+        ]
+      }
+    },
+    {
+      "name": "extend_angle_2.001",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:5475",
+      "inputs": {
+        "op": 2,
+        "data": [
+          0,
+          0,
+          0.25,
+          2,
+          0,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          2.999390217755755,
+          0.034916939357630294,
+          0
+        ]
+      }
+    },
+    {
+      "name": "extend_angle_90",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:5475",
+      "inputs": {
+        "op": 2,
+        "data": [
+          0,
+          0,
+          0.25,
+          2,
+          0,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          2.0,
+          1.0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "extend_angle_180",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:5475",
+      "inputs": {
+        "op": 2,
+        "data": [
+          0,
+          0,
+          0.25,
+          2,
+          0,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0,
+          1.0,
+          1.2246467991473532e-16,
+          0
+        ]
+      }
+    },
+    {
+      "name": "extend_single_closed0_periodic0",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:5475",
+      "inputs": {
+        "op": 2,
+        "data": [
+          0,
+          0,
+          0.25,
+          1,
+          0,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "extend_single_closed0_periodic1",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:5475",
+      "inputs": {
+        "op": 2,
+        "data": [
+          0,
+          1,
+          0.25,
+          1,
+          0,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "extend_single_closed1_periodic0",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:5475",
+      "inputs": {
+        "op": 2,
+        "data": [
+          1,
+          0,
+          0.25,
+          1,
+          0,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "extend_single_closed1_periodic1",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:5475",
+      "inputs": {
+        "op": 2,
+        "data": [
+          1,
+          1,
+          0.25,
+          1,
+          0,
+          0,
+          0,
+          0,
+          2,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "extend_empty",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:5475",
+      "inputs": {
+        "op": 2,
+        "data": [
+          1,
+          0,
+          0.3,
+          0
+        ]
+      }
+    },
+    {
+      "name": "extend_circle_and_line",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:5475",
+      "inputs": {
+        "op": 2,
+        "data": [
+          0,
+          0,
+          0.2,
+          2,
+          1,
+          0,
+          0,
+          0,
+          2,
+          0,
+          90,
+          0,
+          0,
+          2,
+          0,
+          2,
+          3,
+          0
+        ]
+      }
+    },
+    {
+      "name": "position_polygon_vertical",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:5543",
+      "inputs": {
+        "op": 3,
+        "data": [
+          3,
+          0,
+          1e-05,
+          0,
+          1,
+          2,
+          3,
+          1,
+          2,
+          7,
+          0,
+          2,
+          3,
+          0,
+          6,
+          3,
+          0,
+          0,
+          6,
+          3,
+          0,
+          3,
+          5,
+          0,
+          0,
+          3,
+          5,
+          0,
+          2,
+          3,
+          0
+        ]
+      }
+    },
+    {
+      "name": "position_polygon_skew",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:5543",
+      "inputs": {
+        "op": 3,
+        "data": [
+          3,
+          0,
+          1e-05,
+          0,
+          4,
+          -2,
+          1,
+          6,
+          1,
+          3,
+          0,
+          2,
+          3,
+          0,
+          6,
+          3,
+          0,
+          0,
+          6,
+          3,
+          0,
+          3,
+          5,
+          0,
+          0,
+          3,
+          5,
+          0,
+          2,
+          3,
+          0
+        ]
+      }
+    },
+    {
+      "name": "position_polygon_negative_x",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:5543",
+      "inputs": {
+        "op": 3,
+        "data": [
+          3,
+          0,
+          1e-05,
+          0,
+          3,
+          2,
+          1,
+          -4,
+          2,
+          1,
+          0,
+          2,
+          3,
+          0,
+          6,
+          3,
+          0,
+          0,
+          6,
+          3,
+          0,
+          3,
+          5,
+          0,
+          0,
+          3,
+          5,
+          0,
+          2,
+          3,
+          0
+        ]
+      }
+    },
+    {
+      "name": "position_existing_output",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:5543",
+      "inputs": {
+        "op": 3,
+        "data": [
+          3,
+          1,
+          -123.0,
+          0,
+          4,
+          -2,
+          1,
+          6,
+          1,
+          3,
+          0,
+          2,
+          3,
+          0,
+          6,
+          3,
+          0,
+          0,
+          6,
+          3,
+          0,
+          3,
+          5,
+          0,
+          0,
+          3,
+          5,
+          0,
+          2,
+          3,
+          0,
+          0,
+          8,
+          3,
+          1,
+          9,
+          4,
+          2
+        ]
+      }
+    },
+    {
+      "name": "position_circle",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:5543",
+      "inputs": {
+        "op": 3,
+        "data": [
+          1,
+          0,
+          1e-09,
+          0,
+          1,
+          2,
+          3,
+          1,
+          2,
+          7,
+          1,
+          2,
+          3,
+          0,
+          2.5,
+          0,
+          360
+        ]
+      }
+    },
+    {
+      "name": "position_empty",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:5543",
+      "inputs": {
+        "op": 3,
+        "data": [
+          0,
+          0,
+          1e-05,
+          0,
+          1,
+          2,
+          3,
+          1,
+          2,
+          7
+        ]
+      }
+    },
+    {
+      "name": "position_empty_with_existing",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:5543",
+      "inputs": {
+        "op": 3,
+        "data": [
+          0,
+          1,
+          1e-05,
+          0,
+          1,
+          2,
+          3,
+          1,
+          2,
+          7,
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ]
+      }
+    },
+    {
+      "name": "position_single_line",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:5543",
+      "inputs": {
+        "op": 3,
+        "data": [
+          1,
+          0,
+          1e-05,
+          0,
+          1,
+          2,
+          3,
+          1,
+          2,
+          7,
+          0,
+          2,
+          3,
+          0,
+          6,
+          3,
+          0
+        ]
+      }
+    },
+    {
+      "name": "extend_scale_tiny",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:5475,5543",
+      "inputs": {
+        "op": 2,
+        "data": [
+          0,
+          0,
+          2.5e-07,
+          2,
+          0,
+          0,
+          0,
+          0,
+          2e-06,
+          0,
+          0,
+          0,
+          2e-06,
+          0,
+          0,
+          2e-06,
+          3e-06,
+          0
+        ]
+      }
+    },
+    {
+      "name": "position_scale_tiny",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:5475,5543",
+      "inputs": {
+        "op": 3,
+        "data": [
+          1,
+          0,
+          1e-05,
+          0,
+          1e-06,
+          2e-06,
+          3e-06,
+          1e-06,
+          2e-06,
+          7e-06,
+          1,
+          2e-06,
+          3e-06,
+          0,
+          2.4999999999999998e-06,
+          0,
+          360
+        ]
+      }
+    },
+    {
+      "name": "extend_scale_huge",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:5475,5543",
+      "inputs": {
+        "op": 2,
+        "data": [
+          0,
+          0,
+          250000.0,
+          2,
+          0,
+          0,
+          0,
+          0,
+          2000000.0,
+          0,
+          0,
+          0,
+          2000000.0,
+          0,
+          0,
+          2000000.0,
+          3000000.0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "position_scale_huge",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:5475,5543",
+      "inputs": {
+        "op": 3,
+        "data": [
+          1,
+          0,
+          1e-05,
+          0,
+          1000000.0,
+          2000000.0,
+          3000000.0,
+          1000000.0,
+          2000000.0,
+          7000000.0,
+          1,
+          2000000.0,
+          3000000.0,
+          0,
+          2500000.0,
+          0,
+          360
+        ]
+      }
+    },
+    {
+      "name": "position_tilted_profile",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:5475,5543",
+      "inputs": {
+        "op": 3,
+        "data": [
+          3,
+          0,
+          1e-05,
+          0,
+          4,
+          -2,
+          1,
+          6,
+          1,
+          3,
+          0,
+          2,
+          3,
+          1,
+          5,
+          4,
+          3,
+          0,
+          5,
+          4,
+          3,
+          1,
+          7,
+          6,
+          0,
+          1,
+          7,
+          6,
+          2,
+          3,
+          1
+        ]
+      }
+    },
+    {
+      "name": "position_tied_tangent",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:5475,5543",
+      "inputs": {
+        "op": 3,
+        "data": [
+          3,
+          0,
+          1e-05,
+          0,
+          1,
+          2,
+          3,
+          3,
+          2,
+          5,
+          0,
+          2,
+          3,
+          1,
+          5,
+          4,
+          3,
+          0,
+          5,
+          4,
+          3,
+          1,
+          7,
+          6,
+          0,
+          1,
+          7,
+          6,
+          2,
+          3,
+          1
+        ]
+      }
+    },
+    {
+      "name": "position_curved_path",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:5475,5543",
+      "inputs": {
+        "op": 3,
+        "data": [
+          3,
+          0,
+          1e-05,
+          1,
+          3,
+          2,
+          1,
+          4,
+          -90,
+          90,
+          0,
+          2,
+          3,
+          1,
+          5,
+          4,
+          3,
+          0,
+          5,
+          4,
+          3,
+          1,
+          7,
+          6,
+          0,
+          1,
+          7,
+          6,
+          2,
+          3,
+          1
+        ]
+      }
+    }
+  ]
+}

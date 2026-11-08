@@ -58,7 +58,10 @@ impl CommandSearch {
         let spacing = FieldSpacing::at(0.0);
         let (hint, cap) = ctx.fonts_mut(|fonts| {
             (
-                fonts.layout_no_wrap(solidcraft_ui_text::tr_label("Search commands").to_owned(), FontId::proportional(t.font_button), t.form_dim).size().x,
+                fonts
+                    .layout_no_wrap(solidcraft_ui_text::tr_label("Search commands").to_owned(), FontId::proportional(t.font_button), t.form_dim)
+                    .size()
+                    .x,
                 key.map_or(0.0, |key| {
                     fonts.layout_no_wrap(key.to_owned(), FontId::monospace(t.font_small), t.form_dim).size().x + spacing.key_gap + spacing.key_padding
                 }),

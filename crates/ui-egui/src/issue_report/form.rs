@@ -50,7 +50,7 @@ fn screenshot_actions(app: &mut SolveApp, draft: &mut Draft, ui: &mut Ui) -> boo
             if ui_kit::button(ui, tr_label("Save screenshot…"), ui_kit::Button::Enabled(app.services.pick_save.is_some())).clicked()
                 && let Some(image) = draft.image.clone()
             {
-                app.pick_save(&format!("solidcraft-issue-{}.png", app.shot_token), &["png"], move |app, path| {
+                app.pick_save(&format!("solidcraft-issue-{}.png", app.shots.token), &["png"], move |app, path| {
                     let Some(path) = path else { return };
                     let result = crate::control::write_screenshot(&image, &path);
                     if let Some(draft) = app.issue_report.draft.as_mut() {
