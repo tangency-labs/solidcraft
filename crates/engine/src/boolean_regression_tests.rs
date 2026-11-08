@@ -913,17 +913,27 @@ fn unsupported_face_groups_are_atomic() {
     s.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
     let before = serde_json::to_value(s.doc.as_ref()).unwrap();
     let (revision, undo) = (s.revision, s.undo.len());
-    for faces in [
-        json!([]),
-        json!([[5, 5, 10], [5, 5, 0]]),
-        json!([[5, 5, 10], [5, 0, 5]]),
-        json!([[5, 5, 10], [1000, 1000, 1000]]),
-        json!(vec![[5, 5, 10]; 1025]),
-    ] {
+    for faces in
+        [json!([]), json!([[5, 5, 10], [1000, 1000, 1000]]), json!([[5, 5, 10], [5, 0, 5], [1000, 1000, 1000]]), json!(vec![[5, 5, 10]; 1025])]
+    {
         assert!(s.execute("solid.extrude", &json!({"faces":faces,"distance":5,"operation":"join"})).is_err());
         assert_eq!(serde_json::to_value(s.doc.as_ref()).unwrap(), before);
         assert_eq!((s.revision, s.undo.len()), (revision, undo));
     }
+}
+
+/// Faces in different planes extrude each from the body as picked (#11492): the top and a side of
+/// a block, a later face is not the one the earlier extrusion grew.
+#[test]
+fn faces_in_different_planes_extrude_each_from_the_picked_body() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length":40,"width":25,"height":3,"body_name":"Block"})).unwrap();
+    let before = s.undo.len();
+    s.execute("solid.extrude", &json!({"faces":[[20,12,3],[20,0,1.5]],"face_body":"Block","distance":10,"operation":"join"})).unwrap();
+    let volume = solidcraft_kernel::measure(&s.model.state().body("Block").unwrap().body).unwrap().volume;
+    // 3000 + 10000 (above the top) + 1200 (out of the y = 0 side, 3 mm high).
+    assert!((volume - 14_200.0).abs() < 1e-5, "{volume}");
+    assert_eq!(s.undo.len(), before + 1);
 }
 
 #[test]
