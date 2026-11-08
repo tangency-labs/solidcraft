@@ -128,7 +128,7 @@ pub(crate) fn navigation_anchor_picker(ui: &mut Ui, id: &str, selected: usize, l
             );
         }
         response.widget_info(|| egui::WidgetInfo::selected(egui::Role::RadioButton, ui.is_enabled(), on, *label));
-        crate::scenario::publish_target(&format!("prefs:navbar:anchor:{index}"), cell);
+        solidcraft_ui_registry::publish_target(&format!("prefs:navbar:anchor:{index}"), cell);
         if response.backing_on_hover_text(*label).clicked() {
             clicked = Some(index);
         }

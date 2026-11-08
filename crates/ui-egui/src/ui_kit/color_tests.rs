@@ -1,4 +1,5 @@
 use super::*;
+use crate::scenario;
 use crate::ui_kit::test_support::pointer;
 
 fn frame<R>(ctx: &egui::Context, events: Vec<egui::Event>, mut add: impl FnMut(&mut Ui) -> R) {

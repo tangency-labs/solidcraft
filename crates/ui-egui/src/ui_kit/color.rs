@@ -3,12 +3,12 @@ use super::{layout::label, metrics::dimension};
 use crate::recent_colors::{MAX_RECENT_COLORS, recent_colors, remember_color};
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Surface};
-use crate::{i18n, scenario, theme::Tokens};
+use crate::{i18n, theme::Tokens};
 use egui::{Color32, Response, Sense, Ui, ecolor::HsvaGamma, pos2, vec2};
 
 fn publish(key: &str, response: &Response) {
-    scenario::publish_rect(key, response.rect);
-    scenario::publish_handle(key, response.rect.center());
+    solidcraft_ui_registry::publish_rect(key, response.rect);
+    solidcraft_ui_registry::publish_handle(key, response.rect.center());
 }
 
 /// Linear RGB swatch and precise channel fields. The preview is clipped to display gamut;
@@ -144,7 +144,7 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
                     let rect =
                         egui::Rect::from_min_size(rect.min + vec2(index as f32 * rect.width() / 3.0, 0.0), vec2(rect.width() / 3.0, rect.height()));
                     ui.interact(rect, ui.scope_id().with(("format_tip", index)), Sense::hover()).backing_on_hover_text(i18n::tr(key));
-                    scenario::publish_handle(&format!("color:format:{name}"), rect.center());
+                    solidcraft_ui_registry::publish_handle(&format!("color:format:{name}"), rect.center());
                 }
             });
             hexadecimal = selected == 2;
@@ -320,7 +320,7 @@ fn color_popover_with_opacity(ui: &mut Ui, rgb: &mut [u8; 3], mut opacity: Optio
         d.insert_temp(hex_id, hex);
         d.insert_temp(format_id, hexadecimal);
     });
-    scenario::publish_rect("color:popover", ui.min_rect());
+    solidcraft_ui_registry::publish_rect("color:popover", ui.min_rect());
     *rgb != before_rgb || opacity.as_deref().copied() != before_opacity || hsv != before || accepted_mixed
 }
 

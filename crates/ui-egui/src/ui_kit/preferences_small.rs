@@ -75,14 +75,14 @@ pub(crate) fn settings_profile_button(ui: &mut Ui, label: &str, name: &str, edit
         let value = Rect::from_min_max(pos2(text_left, overline.bottom()), pos2(text_right, rect.center().y + t.space_16));
         super::text::paint_text(ui, overline, &label.to_uppercase(), crate::fonts::semibold(t.font_panel), t.form_dim, true);
         super::text::paint_text(ui, value, name, crate::fonts::semibold(t.font_label), t.form_ink, false);
-        crate::scenario::publish_rect("prefs:profile:icon", icon);
-        crate::scenario::publish_rect("prefs:profile:label", overline);
-        crate::scenario::publish_rect("prefs:profile:name", value);
-        crate::scenario::publish_rect("prefs:profile:chevron", chevron);
+        solidcraft_ui_registry::publish_rect("prefs:profile:icon", icon);
+        solidcraft_ui_registry::publish_rect("prefs:profile:label", overline);
+        solidcraft_ui_registry::publish_rect("prefs:profile:name", value);
+        solidcraft_ui_registry::publish_rect("prefs:profile:chevron", chevron);
         if edited {
             let dot = Rect::from_min_size(pos2(text_right + t.space_6, value.center().y - t.space_4), vec2(t.space_8, t.space_8));
             let response = ui.scope_builder(egui::UiBuilder::new().max_rect(dot), |ui| settings_change_dot(ui, changed_hint)).inner;
-            crate::scenario::publish_target("prefs:profile:edited", response.rect);
+            solidcraft_ui_registry::publish_target("prefs:profile:edited", response.rect);
         }
     });
     let response = ui.interact(card.response.rect, ui.make_persistent_id("profile_card"), Sense::click());
@@ -101,7 +101,7 @@ pub(crate) fn settings_profile_button(ui: &mut Ui, label: &str, name: &str, edit
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), name));
-    crate::scenario::publish_rect("prefs:profile:sidebar_card", response.rect);
+    solidcraft_ui_registry::publish_rect("prefs:profile:sidebar_card", response.rect);
     response.backing_on_hover_text(label)
 }
 
@@ -255,7 +255,7 @@ fn settings_block_body<R>(ui: &mut Ui, label: &str, hint: Option<&str>, label_wi
         )
         .inner
     });
-    crate::scenario::publish_rect(&format!("dialog:row:{label}"), response.response.rect);
+    solidcraft_ui_registry::publish_rect(&format!("dialog:row:{label}"), response.response.rect);
     response.inner
 }
 
@@ -281,7 +281,7 @@ pub(crate) fn settings_autosave_timeline(ui: &mut Ui, minutes: f64) {
     let (r, _) = ui.allocate_exact_size(vec2(super::metrics::dimension(ui.available_width()), t.space_24 + t.space_12 + t.space_2), Sense::hover());
     let line = r;
     if settings_page_active(ui) {
-        crate::scenario::publish_rect("prefs:autosave_timeline", r);
+        solidcraft_ui_registry::publish_rect("prefs:autosave_timeline", r);
     }
     ui.painter().hline(line.x_range(), r.top() + t.space_10, Stroke::new(2.0, t.dialog_rule));
     if minutes.is_finite() && minutes > 0.0 {

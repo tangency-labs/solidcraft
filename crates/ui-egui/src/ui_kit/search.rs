@@ -122,9 +122,9 @@ impl CommandSearch {
         // Closed with less room than its hint takes (a narrow bar): just the magnifier.
         if !open && progress == 0.0 && r.width() + 0.5 < Self::closed_width(ui.ctx()) {
             icons::paint_icon(ui.painter(), Rect::from_center_size(r.center(), vec2(t.space_16, t.space_16)), "zoom", 1.0);
-            crate::scenario::publish_target("ribbon:search", r);
-            crate::scenario::publish_target("shortcut:search", r);
-            crate::scenario::publish_target("palette:search", r);
+            solidcraft_ui_registry::publish_target("ribbon:search", r);
+            solidcraft_ui_registry::publish_target("shortcut:search", r);
+            solidcraft_ui_registry::publish_target("palette:search", r);
             return ui
                 .interact(r, egui::Id::unique("sc_sbox_compact"), Sense::click())
                 .backing_on_hover_text(crate::i18n::tr_label("Search commands"));
@@ -169,9 +169,9 @@ impl CommandSearch {
         if ui.rect_contains_pointer(r) {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Text);
         }
-        crate::scenario::publish_target("ribbon:search", r);
-        crate::scenario::publish_target("shortcut:search", r);
-        crate::scenario::publish_target("palette:search", r);
+        solidcraft_ui_registry::publish_target("ribbon:search", r);
+        solidcraft_ui_registry::publish_target("shortcut:search", r);
+        solidcraft_ui_registry::publish_target("palette:search", r);
         response
     }
 
@@ -239,8 +239,8 @@ impl CommandSearch {
         ui.painter().rect_stroke(sheet, t.radius_xl, frame.stroke, egui::StrokeKind::Inside);
         super::Container::paint_inset(ui.painter(), sheet, frame);
         ui.allocate_rect(sheet, Sense::hover());
-        crate::scenario::publish_target("ribbon:search_popup", sheet);
-        crate::scenario::publish_target("palette:outer", sheet);
+        solidcraft_ui_registry::publish_target("ribbon:search_popup", sheet);
+        solidcraft_ui_registry::publish_target("palette:outer", sheet);
         sheet
     }
 
@@ -257,7 +257,7 @@ impl CommandSearch {
         let frame = egui::Frame::NONE.fill(t.dialog_footer).corner_radius(egui::CornerRadius { nw: 0, ne: 0, sw: t.radius_xl, se: t.radius_xl });
         super::Container::set_backing(ui.painter(), background, frame, r);
         t.secondary_hline(ui.painter(), r.x_range(), r.top(), t.dialog_rule);
-        crate::scenario::publish_rect("ribbon:search_footer", r);
+        solidcraft_ui_registry::publish_rect("ribbon:search_footer", r);
     }
 }
 
@@ -358,7 +358,7 @@ impl super::MenuItem<'_> {
             super::text::paint_text(ui, path_rect, path, FontId::proportional(t.font_small), t.form_dim, false);
         }
         response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, self.enabled, label));
-        crate::scenario::publish_target(&format!("menu:{}", self.id), r);
+        solidcraft_ui_registry::publish_target(&format!("menu:{}", self.id), r);
         response
     }
 }

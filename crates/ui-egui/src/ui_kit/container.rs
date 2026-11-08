@@ -583,7 +583,7 @@ impl Container {
         tip.show(|ui| {
             let body = |ui: &mut egui::Ui| {
                 ui.label(text);
-                crate::scenario::publish_rect("kit:tooltip", ui.min_rect());
+                solidcraft_ui_registry::publish_rect("kit:tooltip", ui.min_rect());
             };
             match slot {
                 Some(slot) => slot.body(ui, body),
@@ -607,7 +607,7 @@ impl Container {
         tip.show(|ui| {
             let body = |ui: &mut egui::Ui| {
                 add(ui);
-                crate::scenario::publish_rect("kit:tooltip", ui.min_rect());
+                solidcraft_ui_registry::publish_rect("kit:tooltip", ui.min_rect());
             };
             match slot {
                 Some(slot) => slot.body(ui, body),

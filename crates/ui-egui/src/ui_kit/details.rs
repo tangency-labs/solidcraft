@@ -1,6 +1,6 @@
 //! Description-driven details content. No tool, document or command knowledge lives here.
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::{fonts::RichTextExt as _, scenario, theme::Tokens};
+use crate::{fonts::RichTextExt as _, theme::Tokens};
 use egui::{RichText, Ui};
 
 const FIELD_FOCUS: &str = "details_field_focus";
@@ -201,7 +201,7 @@ fn setting(ui: &mut Ui, field: &DetailSetting, focus: bool) -> Option<DetailEven
                 }
             };
             if let Some(response) = response {
-                scenario::publish_target(&format!("details:field:{}", field.id), response.rect);
+                solidcraft_ui_registry::publish_target(&format!("details:field:{}", field.id), response.rect);
                 // Visibility reads Context::will_discard. Never re-enter Context while
                 // holding its data write lock.
                 let visible = ui.is_visible() && ui.is_enabled() && ui.is_rect_visible(response.rect);
@@ -235,7 +235,7 @@ fn setting(ui: &mut Ui, field: &DetailSetting, focus: bool) -> Option<DetailEven
         && ![[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]].contains(vector)
     {
         let response = ui.add(egui::Label::new(RichText::new(current).monospace()).wrap()).backing_on_hover_text(current);
-        scenario::publish_target(&format!("details:current:{}", field.id), response.rect);
+        solidcraft_ui_registry::publish_target(&format!("details:current:{}", field.id), response.rect);
     }
     changed.then(|| DetailEvent::Change(field.id.clone(), value))
 }
@@ -257,7 +257,7 @@ pub(crate) fn details(ui: &mut Ui, id: &str, description: &Details, max_height: 
         if let Some(caption) = &description.caption {
             let response = ui.add(egui::Label::new(RichText::new(caption).size(t.font_label).color(t.text_dim)).wrap());
             caption_height = response.rect.height() + t.space_8;
-            scenario::publish_rect("details:caption", response.rect);
+            solidcraft_ui_registry::publish_rect("details:caption", response.rect);
         }
         let footer_height = if description.actions.is_empty() { 0.0 } else { t.control_height + t.space_16 };
         let body = egui::ScrollArea::vertical()
@@ -318,7 +318,7 @@ pub(crate) fn details(ui: &mut Ui, id: &str, description: &Details, max_height: 
                                             .push_id(&row.id, |ui| super::icon_button_at(ui, rect, "fit", crate::i18n::tr("ui.details_target")))
                                             .inner;
                                         remember_control(ui, response.id);
-                                        scenario::publish_target(&format!("details:target:{}", row.id), response.rect);
+                                        solidcraft_ui_registry::publish_target(&format!("details:target:{}", row.id), response.rect);
                                         if response.clicked() {
                                             events.push(DetailEvent::Target(row.id.clone()));
                                         }
@@ -327,7 +327,7 @@ pub(crate) fn details(ui: &mut Ui, id: &str, description: &Details, max_height: 
                             });
                         }
                     });
-                    scenario::publish_count(
+                    solidcraft_ui_registry::publish_count(
                         "details:findings_visible",
                         if expanded { description.findings.len() } else { description.findings.len().min(6) } as f64,
                     );
@@ -335,7 +335,7 @@ pub(crate) fn details(ui: &mut Ui, id: &str, description: &Details, max_height: 
                         let text = crate::i18n::format("ui.details_show_all", &[("count", &description.findings.len().to_string())]);
                         let response = super::button(ui, text, super::Button::Ghost);
                         remember_control(ui, response.id);
-                        scenario::publish_target("details:show_all", response.rect);
+                        solidcraft_ui_registry::publish_target("details:show_all", response.rect);
                         if response.clicked() {
                             ui.data_mut(|data| data.insert_temp(expanded_id, true));
                         }
@@ -357,7 +357,7 @@ pub(crate) fn details(ui: &mut Ui, id: &str, description: &Details, max_height: 
                             });
                         }
                     });
-                    scenario::publish_count(
+                    solidcraft_ui_registry::publish_count(
                         "details:readout_visible",
                         if expanded { description.readout.len() } else { description.readout.len().min(6) } as f64,
                     );
@@ -365,27 +365,27 @@ pub(crate) fn details(ui: &mut Ui, id: &str, description: &Details, max_height: 
                         let text = crate::i18n::format("ui.details_show_all", &[("count", &description.readout.len().to_string())]);
                         let response = super::button(ui, text, super::Button::Ghost);
                         remember_control(ui, response.id);
-                        scenario::publish_target("details:show_all", response.rect);
+                        solidcraft_ui_registry::publish_target("details:show_all", response.rect);
                         if response.clicked() {
                             ui.data_mut(|data| data.insert_temp(expanded_id, true));
                         }
                     }
                 }
             });
-        scenario::publish_rect("details:body", body.inner_rect);
+        solidcraft_ui_registry::publish_rect("details:body", body.inner_rect);
         if !description.actions.is_empty() {
             super::divider(ui, "details_actions");
             let actions = ui.horizontal(|ui| {
                 for (id, label) in description.actions.iter().take(2) {
                     let response = super::text_button(ui, label, true);
                     remember_control(ui, response.id);
-                    scenario::publish_target(&format!("details:action:{id}"), response.rect);
+                    solidcraft_ui_registry::publish_target(&format!("details:action:{id}"), response.rect);
                     if response.clicked() {
                         events.push(DetailEvent::Action(id.clone()));
                     }
                 }
             });
-            scenario::publish_rect("details:actions", actions.response.rect);
+            solidcraft_ui_registry::publish_rect("details:actions", actions.response.rect);
         }
     });
     events

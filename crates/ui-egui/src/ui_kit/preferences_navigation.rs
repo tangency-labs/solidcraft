@@ -96,7 +96,7 @@ pub(crate) fn settings_axis_row(
         super::layout::sized_row(ui, name, height, |ui| {
             // The row already owns these bounds; its centered cursor is not the top edge.
             let rect = ui.max_rect();
-            crate::scenario::publish_rect(&format!("prefs:axis:{name}"), rect);
+            solidcraft_ui_registry::publish_rect(&format!("prefs:axis:{name}"), rect);
             t.secondary_hline(ui.painter(), rect.x_range(), rect.bottom(), t.dialog_rule);
             if narrow {
                 let label_rect = Rect::from_min_size(rect.min, vec2(rect.width() * 0.5, line));

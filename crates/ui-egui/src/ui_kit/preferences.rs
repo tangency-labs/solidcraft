@@ -2,11 +2,8 @@
 //! never additional application viewports; every colour and control metric comes from tokens.
 pub(crate) use super::preferences_figure_data::{paint_assembly_move, paint_direct_interaction, paint_measure_axis_distances, paint_tool_cursor};
 use super::{metrics::dimension, text::paint_text};
+use crate::theme::{ColorVision, Tokens};
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::{
-    scenario,
-    theme::{ColorVision, Tokens},
-};
 use egui::{Color32, FontId, Pos2, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
 
 pub(super) const PAGE_SCROLL_GUTTER: &str = "sc_page_scroll_gutter";
@@ -35,7 +32,7 @@ fn blur_cost_meter(ui: &mut Ui, radius: f32) {
             ui.painter().rect_filled(bar, t.radius_sm, if i < filled { t.form_primary } else { t.dialog_rule });
         }
     }
-    scenario::publish_rect("prefs:blur_cost", rect);
+    solidcraft_ui_registry::publish_rect("prefs:blur_cost", rect);
     response.backing_on_hover_text(crate::i18n::tr("prefs.blur_cost"));
 }
 
@@ -52,11 +49,11 @@ pub(crate) fn theme_option_notice(ui: &mut Ui, id: &str, text: &str, can_undo: b
         let mut draw_actions = |ui: &mut Ui| {
             if can_undo {
                 let response = super::text_button(ui, crate::i18n::tr("ui.undo"), true);
-                scenario::publish_target("prefs:theme_notice_undo:guard", response.rect);
+                solidcraft_ui_registry::publish_target("prefs:theme_notice_undo:guard", response.rect);
                 undo = response.clicked();
             }
             let response = super::text_button(ui, dismiss_label, true);
-            scenario::publish_target(&format!("prefs:theme_notice_dismiss:{id}"), response.rect);
+            solidcraft_ui_registry::publish_target(&format!("prefs:theme_notice_dismiss:{id}"), response.rect);
             dismiss = response.clicked();
         };
         let width = dimension(ui.available_width());
@@ -80,7 +77,7 @@ pub(crate) fn theme_option_notice(ui: &mut Ui, id: &str, text: &str, can_undo: b
             });
         }
     });
-    scenario::publish_rect(&format!("prefs:theme_notice:{id}"), response.response.rect);
+    solidcraft_ui_registry::publish_rect(&format!("prefs:theme_notice:{id}"), response.response.rect);
     (undo, dismiss)
 }
 
@@ -218,11 +215,11 @@ pub(crate) fn theme_options_list(
         );
         if options.iter().any(|option| values.get(&option.definition.id).is_some_and(|v| *v != option.definition.default_value())) {
             let response = super::text_button(ui, crate::i18n::tr("prefs.theme_options_reset"), true);
-            scenario::publish_target("prefs:theme_options_reset", response.rect);
+            solidcraft_ui_registry::publish_target("prefs:theme_options_reset", response.rect);
             reset = response.clicked();
         }
     });
-    scenario::publish_rect("prefs:theme_options_header", header.response.rect);
+    solidcraft_ui_registry::publish_rect("prefs:theme_options_header", header.response.rect);
     let mut draw_rows = |ui: &mut Ui, rows: &[Vec<usize>]| {
         let mut section = None;
         for row in rows {
@@ -266,7 +263,10 @@ pub(crate) fn theme_options_list(
                             }
                         });
                         if let Some(option) = cell.first().and_then(|i| options.get(*i)) {
-                            scenario::publish_rect(&format!("prefs:theme_option_cell:{}", option.definition.id), response.response.rect);
+                            solidcraft_ui_registry::publish_rect(
+                                &format!("prefs:theme_option_cell:{}", option.definition.id),
+                                response.response.rect,
+                            );
                         }
                     });
                 }
@@ -278,8 +278,8 @@ pub(crate) fn theme_options_list(
         if plan.more_count > 0 {
             let title = crate::i18n::format("prefs.theme_options_more", &[("count", &plan.more_count.to_string())]);
             super::section(ui, "more", &title, false, |ui| draw_rows(ui, &plan.more));
-            if let Some(rect) = scenario::rect_of(&format!("dialog:section:{title}")) {
-                scenario::publish_target("prefs:theme_options_more", rect);
+            if let Some(rect) = solidcraft_ui_registry::rect_of(&format!("dialog:section:{title}")) {
+                solidcraft_ui_registry::publish_target("prefs:theme_options_more", rect);
             }
         }
     });
@@ -351,7 +351,7 @@ fn theme_option_control(
                                         super::text(ui, &label, super::Text::Inline);
                                     },
                                 );
-                                scenario::publish_rect(&format!("prefs:theme_option_readout:{}", def.id), readout.response.rect);
+                                solidcraft_ui_registry::publish_rect(&format!("prefs:theme_option_readout:{}", def.id), readout.response.rect);
                                 if option.blur {
                                     blur_cost_meter(ui, *n);
                                 }
@@ -378,10 +378,10 @@ fn theme_option_control(
         .response
     });
     let response = response.inner.backing_on_hover_text(&option.help);
-    scenario::publish_target(&format!("prefs:theme_option:{}", def.id), response.rect);
+    solidcraft_ui_registry::publish_target(&format!("prefs:theme_option:{}", def.id), response.rect);
     if let Some(reason) = &option.reason {
         let note = ui.horizontal(|ui| super::settings_inline_note(ui, reason));
-        scenario::publish_rect(&format!("prefs:theme_option_reason:{}", def.id), note.response.rect);
+        solidcraft_ui_registry::publish_rect(&format!("prefs:theme_option_reason:{}", def.id), note.response.rect);
     }
     if active && value != before {
         values.insert(def.id.clone(), value);
@@ -402,7 +402,7 @@ fn theme_option_switch(ui: &mut Ui, label: &str, on: &mut bool) {
         ui.painter().rect_stroke(rect, t.control_radius, Stroke::new(t.space_2, t.form_primary), egui::StrokeKind::Inside);
     }
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), *on, label));
-    scenario::publish_target(&format!("prefs:theme_option_switch:{label}"), response.rect);
+    solidcraft_ui_registry::publish_target(&format!("prefs:theme_option_switch:{label}"), response.rect);
 }
 
 /// Page scroller keeps content aligned while centring its bar in the window's right inset.
@@ -478,7 +478,7 @@ pub(crate) fn settings_heading_with_tag(ui: &mut Ui, title: &str, description: &
         super::text(ui, description, super::Text::Hint("settings_heading"));
     });
     if page {
-        scenario::publish_rect("prefs:page_heading", heading.response.rect);
+        solidcraft_ui_registry::publish_rect("prefs:page_heading", heading.response.rect);
     }
 }
 
@@ -547,14 +547,14 @@ fn settings_section_count_spaced<R>(
         ui.spacing_mut().item_spacing.y = t.space_10;
     }
     let result = super::section_count(ui, key, title, true, count, |ui| {
-        if let Some(rect) = scenario::rect_of(&format!("dialog:section:{title}")) {
-            scenario::publish_rect(&format!("prefs:section:{key}"), rect);
+        if let Some(rect) = solidcraft_ui_registry::rect_of(&format!("dialog:section:{title}")) {
+            solidcraft_ui_registry::publish_rect(&format!("prefs:section:{key}"), rect);
         }
         ui.spacing_mut().item_spacing.y = if page { t.space_14 } else { t.space_8 };
         let start = ui.next_widget_position();
         let result = add(ui);
         if page {
-            scenario::publish_rect(&format!("prefs:section:{key}:body"), Rect::from_min_max(start, ui.min_rect().max));
+            solidcraft_ui_registry::publish_rect(&format!("prefs:section:{key}:body"), Rect::from_min_max(start, ui.min_rect().max));
         }
         result
     });
@@ -725,7 +725,7 @@ pub(crate) fn option_card(ui: &mut Ui, label: &str, note: Option<&str>, selected
         ui.painter().line_segment([centre + vec2(-t.space_2, t.space_2), centre + vec2(t.space_4, -t.space_3)], Stroke::new(2.0, ink));
     }
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::RadioButton, enabled, selected, label));
-    scenario::publish_target(&format!("prefs:option:{label}"), rect);
+    solidcraft_ui_registry::publish_target(&format!("prefs:option:{label}"), rect);
     let response = response.backing_on_hover_text(label);
     if enabled { response.on_hover_cursor(egui::CursorIcon::PointingHand) } else { response }
 }
@@ -985,7 +985,7 @@ pub(crate) fn status_palette_sample(ui: &mut Ui, mode: ColorVision) {
             let label = crate::i18n::tr(label);
             let galley = ui.painter().layout_no_wrap(label.to_owned(), crate::fonts::semibold(t.font_small), ink);
             let (r, _) = ui.allocate_exact_size(vec2(galley.size().x + t.space_24 + t.space_16, t.space_24), Sense::hover());
-            scenario::publish_rect(&format!("prefs:status_sample:{label}"), r);
+            solidcraft_ui_registry::publish_rect(&format!("prefs:status_sample:{label}"), r);
             ui.painter().rect_filled(r, t.radius_xl, fill);
             crate::icons::paint_ink(
                 ui.painter(),
@@ -1015,11 +1015,11 @@ pub(crate) fn colour_vision_sample(ui: &mut egui::Ui, t: &Tokens) {
     let width = ((dimension(ui.available_width()) - gap * (count - 1.0)) / count).min(t.space_24 * 3.0 + t.space_12);
     let figure_height = t.space_24 + t.space_16 + t.space_4;
     let (area, _) = ui.allocate_exact_size(vec2(width * count + gap * (count - 1.0), figure_height + t.space_3 + t.space_16), Sense::hover());
-    scenario::publish_rect("prefs:colour_vision_samples", area);
+    solidcraft_ui_registry::publish_rect("prefs:colour_vision_samples", area);
     let p = ui.painter_at(area);
     for (i, name) in COLOUR_VISION_SAMPLE.iter().enumerate() {
         let cell = egui::Rect::from_min_size(area.min + vec2((width + gap) * i as f32, 0.0), vec2(width, figure_height));
-        scenario::publish_rect(&format!("prefs:colour_vision_sample:{i}"), cell);
+        solidcraft_ui_registry::publish_rect(&format!("prefs:colour_vision_sample:{i}"), cell);
         super::preferences_figure_ops::paint_colour_vision(&p, cell, i, t);
         centred_text(
             &p,

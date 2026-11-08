@@ -110,7 +110,7 @@ pub(crate) fn radial_menu(ui: &mut Ui, center: Pos2, items: &[Item], hot: Option
         let at = center + unit(a) * 104.0;
         let target = Rect::from_center_size(at, vec2(t.space_24 * 2.0 + t.space_12, t.space_24 + t.space_16 + t.space_2));
         let response = ui.interact(target, ui.scope_id().with(("radial", k)), Sense::hover());
-        crate::scenario::publish_target(&format!("radial:{}", item.id), target);
+        solidcraft_ui_registry::publish_target(&format!("radial:{}", item.id), target);
         let ink = if lit { accent.ink } else { t.form_ink };
         crate::icons::paint_accented(
             &painter,
