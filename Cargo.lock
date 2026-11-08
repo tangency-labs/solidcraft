@@ -4075,7 +4075,6 @@ dependencies = [
  "eframe",
  "egui",
  "embed-resource",
- "getrandom 0.3.4",
  "hidapi",
  "keyring",
  "libc",
@@ -4133,6 +4132,11 @@ version = "0.40.0-rc.3"
 [[package]]
 name = "solidcraft-control"
 version = "0.40.0-rc.3"
+dependencies = [
+ "getrandom 0.3.4",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "solidcraft-derive"
@@ -4400,6 +4404,7 @@ dependencies = [
  "sha2 0.10.9",
  "solidcore-record",
  "solidcraft-color",
+ "solidcraft-control",
  "solidcraft-engine",
  "solidcraft-gpu",
  "solidcraft-space-mouse",
@@ -4442,6 +4447,7 @@ dependencies = [
  "log",
  "percent-encoding",
  "serde_json",
+ "solidcraft-control",
  "solidcraft-engine",
  "solidcraft-ui-egui",
  "solidcraft-ui-text",

@@ -22,6 +22,7 @@ profile = ["solidcraft-engine/profile"]
 
 [dependencies]
 solidcraft-engine = { workspace = true }
+solidcraft-control = { workspace = true }
 solidcraft-ui-egui = { workspace = true }
 solidcraft-ui-text = { workspace = true }
 egui = { workspace = true }

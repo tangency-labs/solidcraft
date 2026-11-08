@@ -140,8 +140,8 @@ mod tests {
             assert_eq!(effect(m, &p), Effect::WritesFile, "{m} {p}");
             assert!(!reads_only(m, &p), "{m} {p}");
         }
-        assert!(Effect::WritesFile.when_done().contains("will still write the file") && !Effect::WritesFile.when_done().contains("apply"));
-        assert!(Effect::Changes.when_done().contains("will still apply"));
-        assert!(Effect::ReadsOnly.when_done().contains("nothing changes"));
+        assert!(Effect::WritesFile.when_done("design").contains("will still write the file") && !Effect::WritesFile.when_done("design").contains("apply"));
+        assert!(Effect::Changes.when_done("design").contains("will still apply"));
+        assert!(Effect::ReadsOnly.when_done("design").contains("nothing changes"));
     }
 }

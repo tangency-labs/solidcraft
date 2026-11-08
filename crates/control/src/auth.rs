@@ -36,8 +36,8 @@ pub struct App {
     pub default_port: u16,
 }
 
-/// Where the control channel listens, from the launch's `--control`/environment port and the
-/// "Let AI agents connect" preference.
+/// Where the control channel listens, from the launch's `--control`/environment port and the app's
+/// allow-agents setting.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Listen {
     /// Exactly this port (`--control PORT`, the app's `CONTROL_PORT`); no fallback.
@@ -46,8 +46,9 @@ pub enum Listen {
     Default,
 }
 
-/// What a launch listens on. An explicit port wins over the preference, so a scripted launch
-/// works with the setting off; with the setting off and no port, nothing listens.
+/// What a launch listens on. An explicit port wins over the app's allow-agents setting
+/// (`enabled`), so a scripted launch works with the setting off; with the setting off and no port,
+/// nothing listens.
 pub fn plan(explicit: Option<u16>, enabled: bool) -> Option<Listen> {
     match explicit {
         Some(port) => Some(Listen::Exact(port)),

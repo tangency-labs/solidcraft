@@ -334,7 +334,7 @@ use serde_json::{Value, json};
 use solidcraft_engine::Session;
 use solidcraft_engine::render::{Camera, CameraAnim, StandardView};
 
-pub use control::{ControlRequest, ControlResponse};
+pub(crate) use control::ControlRequest;
 
 /// How close (radians) the camera must be to a standard axis view for the #2682 mode
 /// (`auto_ortho_faces`) to snap the projection to orthographic. One degree: exact axis views

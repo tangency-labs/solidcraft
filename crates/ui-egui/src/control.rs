@@ -46,10 +46,6 @@
 //! - `ui.resize {width, height}`, `app.quit`
 
 use solidcraft_engine::geom::prelude::*;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::mpsc::Sender;
-use std::sync::{Condvar, Mutex, MutexGuard, PoisonError};
-use std::time::Duration;
 
 use serde_json::{Value, json};
 use solidcraft_engine::io::vfs;
@@ -59,107 +55,9 @@ use solidcraft_engine::{batch_params, timing};
 
 use crate::SolveApp;
 
-pub type ControlResponse = Value;
-
-pub struct ControlRequest {
-    pub method: String,
-    pub params: Value,
-    pub reply: Sender<ControlResponse>,
-    /// Set once the window starts on it; until then it waits its turn (`control.running`, #3654).
-    pub started: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    /// Chat requests already admitted by the gate may outlive a tab switch. This turn's
-    /// validity follows them through queues, computation and cursor animation.
-    pub(crate) chat_turn: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
-}
-
-impl ControlRequest {
-    pub fn new(method: impl Into<String>, params: Value) -> (Self, std::sync::mpsc::Receiver<ControlResponse>) {
-        let (tx, rx) = std::sync::mpsc::channel();
-        (Self { method: method.into(), params, reply: tx, started: Default::default(), chat_turn: None }, rx)
-    }
-
-    pub(crate) fn refuse_cancelled_chat(&self) -> bool {
-        if chat_turn_cancelled(self.chat_turn.as_deref()) {
-            let _ = self.reply.send(cancelled_chat_response());
-            true
-        } else {
-            false
-        }
-    }
-}
-
-pub(crate) fn chat_turn_cancelled(turn: Option<&std::sync::atomic::AtomicBool>) -> bool {
-    turn.is_some_and(|active| !active.load(std::sync::atomic::Ordering::Relaxed))
-}
-
-pub(crate) fn cancelled_chat_response() -> Value {
-    json!({"ok": false, "error": "not run: the agent chat turn ended or its document tab was left"})
-}
-
-/// The active design's id and revision for control connections that sent `control.subscribe`
-/// (#6985): the window publishes them each frame while one is subscribed, and each such
-/// connection waits for them to move, then sends a `design.changed` line.
-#[derive(Default)]
-pub struct DesignWatch {
-    subscribers: AtomicUsize,
-    now: Mutex<Option<(String, u64)>>,
-    moved: Condvar,
-}
-
-/// The app's [`DesignWatch`].
-pub static DESIGN_WATCH: DesignWatch = DesignWatch::new();
-
-impl DesignWatch {
-    pub const fn new() -> Self {
-        DesignWatch { subscribers: AtomicUsize::new(0), now: Mutex::new(None), moved: Condvar::new() }
-    }
-
-    fn now(&self) -> MutexGuard<'_, Option<(String, u64)>> {
-        self.now.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    /// The design as it is now; waiters wake only when it moved. Only the latest is kept, so
-    /// changes made faster than a connection sends them go out as one.
-    pub fn publish(&self, document_id: &str, revision: u64) {
-        let mut now = self.now();
-        if now.as_ref().is_some_and(|(id, r)| id == document_id && *r == revision) {
-            return;
-        }
-        *now = Some((document_id.to_string(), revision));
-        self.moved.notify_all();
-    }
-
-    /// Whether a connection is subscribed: the window publishes only then.
-    pub fn subscribed(&self) -> bool {
-        self.subscribers.load(Ordering::Relaxed) > 0
-    }
-
-    /// Count a subscribed connection until the returned guard is dropped.
-    pub fn join(&'static self) -> Subscriber {
-        self.subscribers.fetch_add(1, Ordering::Relaxed);
-        Subscriber(self)
-    }
-
-    /// Wait up to `wait` for the design to differ from `seen`, or for `stop`; the design then
-    /// (`None` before anything was published).
-    pub fn wait(&self, seen: &(String, u64), stop: &AtomicBool, wait: Duration) -> Option<(String, u64)> {
-        let unmoved = |now: &mut Option<(String, u64)>| now.as_ref() == Some(seen) && !stop.load(Ordering::Relaxed);
-        let (now, _) = self.moved.wait_timeout_while(self.now(), wait, unmoved).unwrap_or_else(PoisonError::into_inner);
-        now.clone()
-    }
-}
-
-/// A subscribed connection, counted by its [`DesignWatch`] while this lives.
-pub struct Subscriber(&'static DesignWatch);
-
-impl Drop for Subscriber {
-    fn drop(&mut self) {
-        self.0.subscribers.fetch_sub(1, Ordering::Relaxed);
-        // Under the lock, so a connection about to wait sees its `stop` set before it does.
-        let _now = self.0.now();
-        self.0.moved.notify_all();
-    }
-}
+// The request, its reply and the design watch are the shared control channel's
+// (`solidcraft_control`); SolidCraft's handlers below answer them.
+pub(crate) use solidcraft_control::{ControlRequest, ControlResponse, DESIGN_WATCH, DesignWatch, cancelled_chat_response, chat_turn_cancelled};
 
 /// Publish the active design for subscribed connections ([`DesignWatch`]). Called at the end of
 /// each frame's logic (which runs while the window is hidden too) and of its drawing, so a
@@ -2503,8 +2401,10 @@ mod tests {
     /// only of the latest.
     #[test]
     fn subscribed_frames_publish_the_design() {
+        use std::sync::atomic::AtomicBool;
+        use std::time::Duration;
         static WATCH: DesignWatch = DesignWatch::new();
-        let now = || WATCH.now().clone();
+        let now = || WATCH.current();
         let mut h = crate::scenario::Harness::new();
         publish_design(&mut h.app, &WATCH);
         assert_eq!(now(), None, "nobody subscribed");

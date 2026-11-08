@@ -48,7 +48,6 @@ rfd = { workspace = true }
 ron = "0.12"
 # Waits for wgpu's adapter list when choosing the graphics backend before the window opens.
 pollster = { workspace = true }
-getrandom = "0.3"
 # The update check (docs/updates.md): HTTPS with rustls, certificates from the operating system.
 ureq = { version = "3.4", default-features = false, features = ["rustls-no-provider", "platform-verifier"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }

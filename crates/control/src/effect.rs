@@ -15,12 +15,13 @@ pub enum Effect {
 
 impl Effect {
     /// What happens when the request finishes, for a message: "it only reads: nothing changes",
-    /// "it was not cancelled and will still write the file when it finishes", …
-    pub fn when_done(self) -> &'static str {
+    /// "it was not cancelled and will still write the file when it finishes; the design does not
+    /// change", … `document` is what the app calls its document ("design").
+    pub fn when_done(self, document: &str) -> String {
         match self {
-            Effect::ReadsOnly => "it only reads: nothing changes",
-            Effect::WritesFile => "it was not cancelled and will still write the file when it finishes; the design does not change",
-            Effect::Changes => "it was not cancelled and will still apply when it finishes",
+            Effect::ReadsOnly => "it only reads: nothing changes".into(),
+            Effect::WritesFile => format!("it was not cancelled and will still write the file when it finishes; the {document} does not change"),
+            Effect::Changes => "it was not cancelled and will still apply when it finishes".into(),
         }
     }
 }

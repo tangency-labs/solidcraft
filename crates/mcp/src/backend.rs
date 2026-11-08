@@ -384,7 +384,8 @@ impl Remote {
     /// The tool error for the outstanding request still running after its wait.
     fn still_running(&self, earlier: bool) -> String {
         let Some(o) = &self.outstanding else { return format!("{STILL_RUNNING} a request is still running in the app") };
-        let effect = o.effect.map_or("it was not cancelled and may still change the design when it finishes", solidcraft_control::Effect::when_done);
+        let effect =
+            o.effect.map_or_else(|| "it was not cancelled and may still change the design when it finishes".into(), |e| e.when_done("design"));
         let settle = self.waits.settle.as_secs();
         if earlier {
             format!(

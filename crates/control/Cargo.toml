@@ -7,3 +7,12 @@ license.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# The loopback server is for desktop apps; the web app is driven through the page instead.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# The per-launch control token: 32 random bytes from the operating system (MIT OR Apache-2.0).
+getrandom = "0.3"
