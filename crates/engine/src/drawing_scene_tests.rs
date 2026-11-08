@@ -2830,3 +2830,40 @@ fn a_held_drawing_keeps_its_notes_and_exports_them_from_a_scratch_copy() {
     assert_ne!(bytes_of(group_of(&now.scene, id)), bytes_of(group_of(&before.scene, id)), "its leader to the edge 40 tall");
     assert!(!listed(&mut s, sheet).contains(&json!(ids::encode(id))));
 }
+
+/// A held deferred drawing lists a note out of date on a view that still shows the same: after a
+/// sketch (a new world state that adds no body), the top view takes the new state, up to date, but
+/// its note was read from the old one. Updated, the note is read again.
+#[test]
+fn a_held_drawing_lists_a_note_whose_view_shows_the_same() {
+    let (mut s, sheet, [_, top]) = front_and_top();
+    let id = view_note(&mut s, top, None, [0.0, -30.0], json!("Top"));
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    run(&mut s, "drawing.update", json!({}));
+    settled(&mut s, sheet);
+    assert!(!listed(&mut s, sheet).contains(&json!(ids::encode(id))));
+    // Closed during the change and opened again, as a held drawing is (a drawing open refuses a model change).
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Note"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "drawing.open", drawing);
+    assert!(!extract(&mut s, sheet).unwrap().stale.contains(&top), "the top view shows the same");
+    assert!(listed(&mut s, sheet).contains(&json!(ids::encode(id))), "held, the note is out of date");
+
+    run(&mut s, "drawing.update", json!({}));
+    settled(&mut s, sheet);
+    assert!(!listed(&mut s, sheet).contains(&json!(ids::encode(id))), "updated, the note is read again");
+}
+
+/// A sheet's note edited is drawn with its new text: the scene kept for the sheet isn't shown again.
+#[test]
+fn a_sheet_note_edited_draws_its_new_text() {
+    let (mut s, sheet, _) = front_and_top();
+    let id = sheet_note(&mut s, sheet, [60.0, 40.0], json!("General note"));
+    settled(&mut s, sheet);
+    run(&mut s, "drawing.note.edit", json!({"note": ids::encode(id), "set": {"content": "Revised note"}}));
+    let after = settled(&mut s, sheet);
+    assert_eq!(text_and_tips(group_of(&after.scene, id)).0, vec!["Revised note".to_string()]);
+    assert_eq!(bytes(&after.scene), bytes(&built(&s, sheet).scene));
+}
