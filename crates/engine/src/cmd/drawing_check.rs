@@ -7,16 +7,16 @@
 //! or note points at a face it made, by the saved names ([`Timeline::covers`]), and whether a view
 //! draws one. Nothing is changed.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use serde_json::Value;
 use solidcore_record::Vec2;
 use solidcraft_doc::bom::Tree;
 use solidcraft_doc::drawing::Drawing;
-use solidcraft_doc::drawing::coverage::{Timeline, made_by};
+use solidcraft_doc::drawing::coverage;
 use solidcraft_doc::drawing::dimension::Status;
-use solidcraft_doc::{ModelState, ids, naming};
+use solidcraft_doc::{ModelState, ids};
 use solidcraft_geom::paper::{Item, ObjectKind};
 use solidcraft_geom::{Aabb2, EPS};
 
@@ -52,10 +52,10 @@ fn check(s: &mut Session, p: &Value) -> Result<Value> {
     };
     // Each sheet read once, as it shows the model: for its findings and for what its views draw.
     let mut findings = Vec::new();
-    let mut drawn = Drawn::default();
+    let (mut drawn, mut seen) = (coverage::Drawn::default(), Vec::new());
     for &sheet in &sheets {
         let shown = crate::drawing_scene::as_shown(s, &d, sheet)?;
-        drawn.add(&shown);
+        add_drawn(&mut drawn, &mut seen, &shown);
         findings.extend(on_sheet(&d, sheet, shown)?);
     }
     findings.extend(references(s, &d, &sheets)?);
@@ -70,7 +70,7 @@ fn check(s: &mut Session, p: &Value) -> Result<Value> {
         .map(|kind| KindCount { kind, count: findings.iter().filter(|f| f.kind == kind).count() })
         .filter(|count| count.count > 0)
         .collect();
-    let coverage = coverage(s, &d, &sheets, &drawn);
+    let coverage = feature_coverage(s, &d, &sheets, &drawn);
     let coverage_counts = CoverageState::ALL
         .into_iter()
         .map(|state| StateCount { state, count: coverage.iter().filter(|c| c.state == state).count() })
@@ -213,78 +213,31 @@ fn fields_and_rows(s: &Session, d: &Drawing, sheets: &[u64]) -> Vec<Finding> {
 }
 
 /// Each feature of the design, in timeline order, and whether the dimensions and notes on `sheets`
-/// point at a face it made: covered, or else not covered or unknown by what the views on `sheets`
-/// draw of it (`drawn`). Each annotation's names are read once.
-fn coverage(s: &Session, d: &Drawing, sheets: &[u64], drawn: &Drawn) -> Vec<Coverage> {
-    let timeline = Timeline::of(&s.doc);
+/// point at a face it made ([`coverage::of`]), with what the views on them draw (`drawn`).
+fn feature_coverage(s: &Session, d: &Drawing, sheets: &[u64], drawn: &coverage::Drawn) -> Vec<Coverage> {
     let on = |view: u64| d.view(view).is_some_and(|v| sheets.contains(&v.sheet));
     let dimensions = d.dimensions.iter().filter(|dim| on(dim.view)).map(|dim| (object(CheckedKind::Dimension, dim.id), dim.kind.references()));
     let notes = d.notes.iter().filter(|n| n.anchor.view().is_some_and(on));
-    let notes = notes.map(|n| (object(CheckedKind::Note, n.id), n.anchor.reference().into_iter().collect::<Vec<_>>()));
-    let mut by: HashMap<u64, Vec<CheckedObject>> = HashMap::new();
-    for (object, references) in dimensions.chain(notes) {
-        let mut features: Vec<u64> = references.iter().filter_map(|r| timeline.covers(*r)).collect();
-        features.sort_unstable();
-        features.dedup();
-        for feature in features {
-            by.entry(feature).or_default().push(object.clone());
-        }
-    }
-    let rolled_back = s.doc.marker.unwrap_or(usize::MAX);
-    let mut out = Vec::with_capacity(s.doc.features.len());
-    for (at, f) in s.doc.features.iter().enumerate() {
-        let by = by.remove(&f.id).unwrap_or_default();
-        let (state, why) = if f.suppressed {
-            (CoverageState::NotApplicable, Some("it is suppressed"))
-        } else if at >= rolled_back {
-            (CoverageState::NotApplicable, Some("it is rolled back"))
-        } else if !by.is_empty() {
-            (CoverageState::Covered, None)
-        } else if drawn.exact.contains(&f.id) {
-            (CoverageState::NotCovered, None)
-        } else if drawn.inexact.contains(&f.id) {
-            (CoverageState::Unknown, Some("the faces a view draws of it aren't named from exact history, so what it made can't be told"))
-        } else if drawn.reference.contains(&f.id) {
-            (CoverageState::NotApplicable, Some("only reference parts draw it"))
-        } else {
-            (CoverageState::NotApplicable, Some("no view draws a face it made"))
-        };
-        out.push(Coverage { feature: f.id, name: f.name.clone(), state, by, why: why.map(str::to_string) });
-    }
-    out
+    let notes = notes.map(|n| (object(CheckedKind::Note, n.id), n.anchor.reference().into_iter().collect()));
+    let state = |state: coverage::State| match state {
+        coverage::State::Covered => CoverageState::Covered,
+        coverage::State::NotCovered => CoverageState::NotCovered,
+        coverage::State::Unknown => CoverageState::Unknown,
+        coverage::State::NotApplicable => CoverageState::NotApplicable,
+    };
+    let features = coverage::of(&s.doc, dimensions.chain(notes), drawn).into_iter();
+    features.map(|f| Coverage { feature: f.feature, name: f.name, state: state(f.state), by: f.by, why: f.why.map(str::to_string) }).collect()
 }
 
-/// The features that made a face a view on the sheets read draws, by how the face is named.
-#[derive(Default)]
-struct Drawn {
-    /// From exact history.
-    exact: HashSet<u64>,
-    /// Worked out from geometry, or with no feature in the name (the body's feature, then).
-    inexact: HashSet<u64>,
-    /// On a reference part only.
-    reference: HashSet<u64>,
-    /// The bodies read ([`first_read`]).
-    seen: Vec<(Arc<ModelState>, HashSet<usize>)>,
-}
-
-impl Drawn {
-    /// What the views in `shown` draw, as the sheet shows it, each body once however many views draw
-    /// it. A view that draws no lines draws nothing here; its finding says why.
-    fn add(&mut self, shown: &SheetScene) {
-        for (state, shown) in shown.bodies_drawn() {
-            if !first_read(&mut self.seen, state, shown.index) {
-                continue;
-            }
-            let Some(body) = state.bodies.get(shown.index) else { continue };
-            for (i, name) in naming::face_names(body).iter().enumerate() {
-                let maker = made_by(name);
-                let set = match maker {
-                    _ if shown.reference => &mut self.reference,
-                    Some(_) if naming::face_name_exact(body, i) => &mut self.exact,
-                    _ => &mut self.inexact,
-                };
-                set.insert(maker.unwrap_or(body.feature));
-            }
+/// What the views in `shown` draw, as the sheet shows it, each body once however many views and
+/// sheets draw it ([`first_read`]). A view that draws no lines draws nothing here; its finding says
+/// why.
+fn add_drawn(drawn: &mut coverage::Drawn, seen: &mut Vec<(Arc<ModelState>, HashSet<usize>)>, shown: &SheetScene) {
+    for (state, shown) in shown.bodies_drawn() {
+        if first_read(seen, state, shown.index)
+            && let Some(body) = state.bodies.get(shown.index)
+        {
+            drawn.body(body, shown.reference);
         }
     }
 }

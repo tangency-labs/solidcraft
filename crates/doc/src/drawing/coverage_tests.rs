@@ -115,3 +115,41 @@ fn a_cap_is_a_whole_start_end_top_or_bottom_face_of_the_feature() {
         assert!(!is_cap(not, 3), "{not}");
     }
 }
+
+/// Each feature's state, by the module's order of rules: suppressed and rolled back first, then
+/// covered, then by how the views draw it. An annotation that names one feature twice covers it
+/// once; one that covers two features is listed by each.
+#[test]
+fn each_state_comes_from_its_rule_in_order() {
+    let mut doc = design();
+    let order: Vec<u64> = doc.features.iter().map(|f| f.id).collect();
+    assert_eq!(order, [1, 2, 4, 3]);
+    let (top, side) = (edge("F1:+z|F2:top"), edge("F1:+x|F1:-y"));
+    let annotations =
+        || vec![("d1", vec![Reference::Edge(&top), Reference::Edge(&top)]), ("d2", vec![Reference::Edge(&top), Reference::Edge(&side)])];
+    let mut drawn = Drawn::default();
+    drawn.exact.extend([1, 2, 4]);
+    drawn.inexact.extend([3, 4]);
+    let states =
+        |doc: &Document, drawn: &Drawn| of(doc, annotations(), drawn).into_iter().map(|f| (f.feature, f.state, f.by, f.why)).collect::<Vec<_>>();
+    assert_eq!(
+        states(&doc, &drawn),
+        [
+            (1, State::Covered, vec!["d2"], None),
+            (2, State::Covered, vec!["d1", "d2"], None),
+            (4, State::NotCovered, vec![], None),
+            (3, State::Unknown, vec![], Some("the faces a view draws of it aren't named from exact history, so what it made can't be told")),
+        ]
+    );
+    // Only reference parts draw F3, and nothing draws F4.
+    let drawn = Drawn { reference: [3].into(), ..Drawn::default() };
+    let left: Vec<_> = states(&doc, &drawn).into_iter().skip(2).map(|(_, state, _, why)| (state, why)).collect();
+    assert_eq!(left, [(State::NotApplicable, Some("no view draws a face it made")), (State::NotApplicable, Some("only reference parts draw it"))]);
+    // Suppressed F2 and rolled-back F3 are not applicable, covered or not.
+    doc.features[1].suppressed = true;
+    doc.marker = Some(3);
+    let all = states(&doc, &drawn);
+    assert_eq!((all[1].1, all[1].3), (State::NotApplicable, Some("it is suppressed")));
+    assert_eq!((all[3].1, all[3].3), (State::NotApplicable, Some("it is rolled back")));
+    assert_eq!(all[0].1, State::Covered);
+}
