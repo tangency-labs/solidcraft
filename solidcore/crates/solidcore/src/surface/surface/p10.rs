@@ -50,8 +50,9 @@
 //!   first crossing behind a ray's start was dropped before that, so a line just under
 //!   a cylinder's top missed the crossing ahead. Such a leaf is solved part by part
 //!   ([`LsiGlobalSolver::parts_crossed_once`]): halved until each part's normal map has
-//!   no perpendicular to the line, so each holds at most one crossing. A leaf without
-//!   one is solved as upstream solves it.
+//!   no perpendicular to the line, so each holds at most one crossing, or until its
+//!   normals lie within the angular tolerance. A leaf without one is solved as upstream
+//!   solves it.
 //! - **Bounds.** Each leaf, or part of one, takes at most six guesses (upstream's fixed
 //!   arrays). A leaf is halved into parts at most [`MAX_PART_DEPTH`] deep, with an
 //!   explicit stack. No recursion.
@@ -70,11 +71,12 @@ use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::LineHit as BoxHit;
 use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::global_solver::{Branch, GlobalSolve, SolverOperation};
+use crate::geom::polar_box::PolarBox;
 use crate::geom::pseudo_box::LineHit as PseudoHit;
 use crate::geom::solution_array::{
     Solution, SolutionArray, SolutionEnd, SolutionObject, SolutionType, SortKey,
 };
-use crate::geom::tol::{are_same, scaled_zero2};
+use crate::geom::tol::{are_same, scaled_zero2, ANG_TOL_RAD};
 use crate::geom::tree::{AuxDataType, NodeId, Tree};
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{Point3, Vec3};
@@ -330,6 +332,26 @@ struct LeafPart {
 /// The infinite line through `point` along `vector` (`sTmpLine`).
 fn line_curve(point: Point3, vector: Vec3) -> Curve {
     Curve::from(Line::infinite(point, vector, 3, false))
+}
+
+/// The widest angle between two corners of `polar` (pi when it has no corners: unbounded or
+/// uninitialised).
+fn normal_spread(polar: &PolarBox) -> f64 {
+    let Ok(corners) = polar.boundary_vectors() else {
+        return std::f64::consts::PI;
+    };
+    let mut spread = 0.0_f64;
+    for (i, a) in corners.iter().enumerate() {
+        for b in corners.iter().skip(i + 1) {
+            spread = spread.max(
+                a.unitize_or_z()
+                    .dot(b.unitize_or_z())
+                    .clamp(-1.0, 1.0)
+                    .acos(),
+            );
+        }
+    }
+    spread
 }
 
 /// How far the unit normals of `surface` turn across `domain` in `u` (`along_u`) or `v`:
@@ -644,7 +666,10 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
     /// the line misses within `leaf`'s interval, or only behind a ray's start, is
     /// dropped; each part kept carries the line interval its box allows. A part that
     /// still has a perpendicular after [`MAX_PART_DEPTH`] halvings is a near-tangent
-    /// spot, kept with `once` false, as is one whose normals cannot be bounded. An explicit stack, at most [`MAX_PART_DEPTH`] deep.
+    /// spot, kept with `once` false, as is one whose normals cannot be bounded and one
+    /// whose normals lie within the angular tolerance ([`ANG_TOL_RAD`]): halving a flat
+    /// part does not narrow its normals, and a line lying in it is a coincidence, which
+    /// the leaf's own solve takes. An explicit stack, at most [`MAX_PART_DEPTH`] deep.
     fn parts_crossed_once(
         &self,
         k: &Kernel,
@@ -678,9 +703,12 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
                 continue;
             }
             // a part whose normals cannot be bounded is solved as it is: halving it tells
-            // nothing more
+            // nothing more. Nor does halving a part flat to the angular tolerance: its halves'
+            // normals are as close to the line's normal plane, and a line lying in it is a
+            // coincidence, which the leaf's own solve takes.
             let once = polar.is_some_and(|b| !b.has_perpendicular_to_vector(line_vec));
-            if once || polar.is_none() || depth >= MAX_PART_DEPTH {
+            let flat = polar.is_some_and(|b| normal_spread(&b) <= ANG_TOL_RAD);
+            if once || flat || polar.is_none() || depth >= MAX_PART_DEPTH {
                 parts.push(LeafPart {
                     domain,
                     interval,

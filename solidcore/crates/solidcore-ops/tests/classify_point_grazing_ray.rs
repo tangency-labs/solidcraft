@@ -18,6 +18,7 @@ const R: f64 = 30.475;
 const AXIS: [f64; 2] = [-8.0, 0.0];
 
 /// The point at `angle` degrees round the axis, `radial` from it, at height `z`.
+#[allow(clippy::disallowed_methods)] // the test's sample points, not ops computing geometry
 fn at(angle: f64, radial: f64, z: f64) -> [f64; 3] {
     let a = angle.to_radians();
     [AXIS[0] + radial * a.cos(), AXIS[1] + radial * a.sin(), z]
