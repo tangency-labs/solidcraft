@@ -620,10 +620,12 @@ enum FileAction {
     Shortcuts,
     Crashes,
     About,
-    Recovery(solidcraft_engine::recovery::Entry, bool),
-    OpenRecent(String),
-    ForgetRecent(String),
-    ShowInFolder(String),
+    /// Recover (true) or discard the recoverable design at this index.
+    Recovery(usize, bool),
+    /// The recent design at this index in `HomeState::recent`.
+    OpenRecent(usize),
+    ForgetRecent(usize),
+    ShowInFolder(usize),
     Sample(usize),
 }
 
@@ -779,19 +781,16 @@ fn start_body(app: &SolveApp) -> start_page::Start<'_, FileAction> {
             .path
             .as_deref()
             .and_then(|path| std::path::Path::new(path).file_name())
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| entry.name.clone());
+            .map(|name| name.to_string_lossy())
+            .unwrap_or_else(|| entry.name.as_str().into());
         let single = app.recoverable.len() == 1;
         start_page::Banner {
             title: solidcraft_ui_text::format("home.recovery_count", &[("count", &app.recoverable.len().to_string())]).into(),
             before_filename: " · ".into(),
-            filename: filename.into(),
+            filename,
             after_filename: format!(" · {}", crate::recovery_ui::ago(entry.saved_at)).into(),
-            recover: (
-                app.tr_label("Recover").into(),
-                if single { FileAction::Recovery(entry.clone(), true) } else { FileAction::Section(Section::Recovery) },
-            ),
-            discard: single.then(|| (app.tr_label("Discard").into(), FileAction::Recovery(entry.clone(), false))),
+            recover: (app.tr_label("Recover").into(), if single { FileAction::Recovery(0, true) } else { FileAction::Section(Section::Recovery) }),
+            discard: single.then(|| (app.tr_label("Discard").into(), FileAction::Recovery(0, false))),
         }
     });
     let shortcut = if cfg!(target_os = "macos") { "⌘O" } else { "Ctrl+O" };
@@ -812,7 +811,7 @@ fn start_body(app: &SolveApp) -> start_page::Start<'_, FileAction> {
         chosen,
     })
     .collect();
-    let recent = app.home.recent.iter().map(|path| recent_entry(app, path)).collect();
+    let recent = app.home.recent.iter().enumerate().map(|(index, path)| recent_entry(app, index, path)).collect();
     let samples = solidcraft_engine::sample::samples()
         .iter()
         .enumerate()
@@ -836,9 +835,9 @@ fn start_body(app: &SolveApp) -> start_page::Start<'_, FileAction> {
     }
 }
 
-fn recent_entry<'a>(app: &'a SolveApp, path: &str) -> start_page::Recent<'a, FileAction> {
+fn recent_entry<'a>(app: &'a SolveApp, index: usize, path: &'a str) -> start_page::Recent<'a, FileAction> {
     // Keep the extension so plate.step and plate.stl are not both "plate" (#9081).
-    let title = std::path::Path::new(path).file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_else(|| path.to_owned());
+    let title = std::path::Path::new(path).file_name().map_or_else(|| path.into(), |name| name.to_string_lossy());
     let missing = !available(app, path);
     let when = if app.session.path.as_deref() == Some(path) { app.tr("home.open_now").to_string() } else { recent_time(app, path) };
     let shown_path: start_page::Label<'a> = if missing {
@@ -850,20 +849,13 @@ fn recent_entry<'a>(app: &'a SolveApp, path: &str) -> start_page::Recent<'a, Fil
     } else {
         friendly_path(path).into()
     };
-    let mut menu = vec![start_page::MenuEntry {
-        label: app.tr_label("Remove from list").into(),
-        icon: "delete",
-        chosen: FileAction::ForgetRecent(path.to_owned()),
-    }];
+    let mut menu =
+        vec![start_page::MenuEntry { label: app.tr_label("Remove from list").into(), icon: "delete", chosen: FileAction::ForgetRecent(index) }];
     if !cfg!(target_arch = "wasm32") {
-        menu.push(start_page::MenuEntry {
-            label: app.tr_label("Show in folder").into(),
-            icon: "folder",
-            chosen: FileAction::ShowInFolder(path.to_owned()),
-        });
+        menu.push(start_page::MenuEntry { label: app.tr_label("Show in folder").into(), icon: "folder", chosen: FileAction::ShowInFolder(index) });
     }
     start_page::Recent {
-        title: title.into(),
+        title,
         path: shown_path,
         when: when.into(),
         kind: recent_kind(app, path).into(),
@@ -871,7 +863,7 @@ fn recent_entry<'a>(app: &'a SolveApp, path: &str) -> start_page::Recent<'a, Fil
         // A design whose picture could not be made shows a dimmed placeholder, distinct from the
         // one shown while a picture is still loading (#4655).
         thumbnail_failed: app.home.thumb_failed(path),
-        chosen: FileAction::OpenRecent(path.to_owned()),
+        chosen: FileAction::OpenRecent(index),
         menu,
     }
 }
@@ -951,7 +943,8 @@ fn recovery_body(app: &SolveApp) -> start_page::Reviews<'_, FileAction> {
         .recoverable
         .iter()
         .take(20)
-        .map(|entry| start_page::Review {
+        .enumerate()
+        .map(|(index, entry)| start_page::Review {
             title: entry.name.as_str().into(),
             detail: solidcraft_ui_text::format(
                 "recovery.detail",
@@ -962,8 +955,8 @@ fn recovery_body(app: &SolveApp) -> start_page::Reviews<'_, FileAction> {
                 ],
             )
             .into(),
-            recover: (app.tr_label("Recover").into(), FileAction::Recovery(entry.clone(), true)),
-            discard: (app.tr_label("Discard").into(), FileAction::Recovery(entry.clone(), false)),
+            recover: (app.tr_label("Recover").into(), FileAction::Recovery(index, true)),
+            discard: (app.tr_label("Discard").into(), FileAction::Recovery(index, false)),
         })
         .collect();
     start_page::Reviews { empty: app.tr("home.recovery_empty").into(), items }
@@ -1057,12 +1050,24 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
         }
         FileAction::Crashes => crate::help::run(app, ctx, "crashes"),
         FileAction::About => crate::help::run(app, ctx, "about"),
-        FileAction::Recovery(entry, recover) => crate::recovery_ui::apply(app, entry, recover),
-        FileAction::OpenRecent(path) => open_recent(app, &path),
-        FileAction::ForgetRecent(path) => app.home.forget(&path),
-        FileAction::ShowInFolder(path) => {
-            if let Some(show) = &app.services.show_in_folder {
-                show(&path);
+        FileAction::Recovery(index, recover) => {
+            if let Some(entry) = app.recoverable.get(index).cloned() {
+                crate::recovery_ui::apply(app, entry, recover);
+            }
+        }
+        FileAction::OpenRecent(index) => {
+            if let Some(path) = app.home.recent.get(index).cloned() {
+                open_recent(app, &path);
+            }
+        }
+        FileAction::ForgetRecent(index) => {
+            if let Some(path) = app.home.recent.get(index).cloned() {
+                app.home.forget(&path);
+            }
+        }
+        FileAction::ShowInFolder(index) => {
+            if let (Some(show), Some(path)) = (&app.services.show_in_folder, app.home.recent.get(index)) {
+                show(path);
             }
         }
         FileAction::Sample(index) => open_sample(app, index),
