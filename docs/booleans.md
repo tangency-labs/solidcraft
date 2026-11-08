@@ -99,6 +99,12 @@ vertex used by one common edge (`close_intersection_loop`) and, with more than o
 closes the gaps (`fix_gaps`); it repeats at most ten times. The classify and select steps also repeat
 (at most ten times) when a coincidence repair changes the topology (§5).
 
+After the cleanup of step 5, `place_vertices_on_face_corners` (`merge/p1.rs`) moves a vertex that lies
+more than the intersection tolerance off one of its faces to the corner its faces define, only within
+half its tolerance and only when the corner leaves every face gap under the intersection tolerance
+(measured at the corner before the move); otherwise the vertex stays. It runs after the cleanup because
+the faces and edges the vertex keeps are final there.
+
 Ops never computes a geometric quantity here: `boolean` takes the operands, calls
 `api_brep::boolean`, and `finish` asks the kernel whether the result is a solid
 (`is_outward_touching_solids`, `solidcore/src/topology/brep.rs`). Which `UpstreamFixes` run is the

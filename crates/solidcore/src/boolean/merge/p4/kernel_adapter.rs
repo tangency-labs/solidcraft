@@ -1509,7 +1509,8 @@ impl ManifoldIntersector for ManifoldKernelAdapter<'_> {
                 &cleanup,
                 check_all_edges,
                 Some(&mut env),
-            )
+            )?;
+            p1::place_vertices_on_face_corners(k, primary, &cleanup.vertices, &mut env)
         })
         .and_then(|r| r);
         self.merge.intersector = cleanup.mates;
