@@ -123,6 +123,7 @@ pub mod sketch_modify;
 pub mod sketch_project;
 pub mod sketch_session;
 pub mod sketch_shapes;
+pub mod split;
 pub mod surface;
 pub mod surface_analysis;
 pub mod surface_boundary;

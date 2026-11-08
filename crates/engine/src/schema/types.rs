@@ -974,6 +974,42 @@ pick_list!(
     "The edges, 1 to 1000."
 );
 
+/// A face of a body whose surface, extended, cuts like a plane: the `tool` of `solid.split_body`,
+/// `solid.split_face` and `surface.trim`, which read `tool.body` and then `tool.point` with these
+/// messages. Other keys in it are ignored, as the handlers ignore them. Whether the body exists
+/// and the point is on one of its faces is the handler's to check.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ToolFace {
+    pub body: String,
+    pub point: Vec3,
+}
+
+impl<'de> Deserialize<'de> for ToolFace {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        // In the handlers' order: the body (anything but an object has none), then the point.
+        let body = v.get("body").and_then(Value::as_str).ok_or_else(|| D::Error::custom(whole("`tool.body` must name a body")))?;
+        let point =
+            v.get("point").and_then(params::vec3).ok_or_else(|| D::Error::custom(whole("`tool.point` must be [x, y, z] on the tool face")))?;
+        Ok(ToolFace { body: body.to_string(), point })
+    }
+}
+
+impl JsonSchema for ToolFace {
+    fn schema_name() -> Cow<'static, str> {
+        "ToolFace".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let point = generator.subschema_for::<Point3>();
+        json_schema!({
+            "description": "A face of a body, its surface extended: the body's name and a point in mm on the face.",
+            "type": "object",
+            "properties": {"body": {"type": "string"}, "point": point},
+            "required": ["body", "point"]
+        })
+    }
+}
+
 /// A sketch referred to by its feature id (a number) or its name, as `features::sketch_id` reads
 /// it, with its message for a top-level key (`path_sketch`, `solid.split_face`'s `sketch`…);
 /// for a nested one (a section's `sketch`) the message names the key as `sections[0].sketch`

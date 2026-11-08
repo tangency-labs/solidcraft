@@ -40,8 +40,6 @@ solid.press_pull
 solid.replace_face
 solid.revolve
 solid.shell
-solid.split_body
-solid.split_face
 solid.thread
 surface.blend
 surface.extend
