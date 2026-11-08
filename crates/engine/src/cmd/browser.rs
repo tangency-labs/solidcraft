@@ -19,7 +19,7 @@ use crate::params::{bad, bool_, expr, str_};
 use crate::schema::browser::{
     BodyRenameParams, BodyRenamed, BrowserFoldParams, BrowserFoldResult, BrowserGroupMade, BrowserGroupParams, BrowserGroupRenamed,
     BrowserMoveParams, BrowserMoved, BrowserOrderParams, BrowserOrdered, BrowserRenameGroupParams, BrowserUngroupParams, BrowserUngrouped,
-    BrowserVisibilityParams, BrowserVisibilityResult, DocumentUnitsParams, DocumentUnitsResult, Isolated, PlaneFrame, RedefineAttachment,
+    BrowserVisibilityParams, BrowserVisibilityResult, DocumentUnitsParams, DocumentUnitsResult, Isolated, PlaneFrame, PlaneSizeParams, PlaneSized, RedefineAttachment,
     RedefineSketchParams, RedefineSketchResult, RepairDone, RepairFace, RepairHole, RepairParams, RepairResult, RepairSewn, ViewApplyParams,
     ViewDeleteParams, ViewDeleted, ViewListParams, ViewListResult, ViewRenameParams, ViewRenamed, ViewSaveParams, ViewSaved, VisibilityState,
 };
@@ -43,6 +43,7 @@ const VIEW_RENAME_CONTRACT: TypedContract<ViewRenameParams> = TypedContract::new
 const VIEW_DELETE_CONTRACT: TypedContract<ViewDeleteParams> = TypedContract::new();
 const VIEW_LIST_CONTRACT: TypedContract<ViewListParams> = TypedContract::new();
 const VIEW_APPLY_CONTRACT: TypedContract<ViewApplyParams> = TypedContract::new();
+const PLANE_SIZE_CONTRACT: TypedContract<PlaneSizeParams> = TypedContract::new();
 
 /// A reply as JSON: the commands here build their replies from the types their output schemas
 /// describe, so the two can't drift apart.
@@ -99,6 +100,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&VIEW_SAVE_CONTRACT)
         .output(output_schema_for::<ViewSaved>)
         .params("name?; camera: {target: [x,y,z], yaw, pitch, distance, fov?} (replaces a view of the same name)"),
+    CommandSpec::new("view.plane_size", "Resize Plane", crate::checked!("view.plane_size", plane_size))
+        .icon("scale")
+        .contract(&PLANE_SIZE_CONTRACT)
+        .output(output_schema_for::<PlaneSized>)
+        .params(
+            "plane: construction plane name; extent: [x0, y0, x1, y1] (mm, in the plane's own x and y about its origin) | null (back to a size that follows the zoom). Display only",
+        ),
     CommandSpec::new("view.rename", "Rename Named View", crate::checked!("view.rename", view_rename))
         .icon("rename")
         .contract(&VIEW_RENAME_CONTRACT)
@@ -1134,6 +1142,41 @@ fn view_save(s: &mut Session, p: &Value) -> Result<Value> {
     d.named_views.retain(|x| x.name != name);
     d.named_views.push(v);
     reply(cmd, ViewSaved { view: name, param_warnings: Vec::new() })
+}
+
+/// Most a plane's drawn rectangle reaches from its origin, mm.
+const MAX_PLANE_EXTENT: f64 = 1e7;
+
+/// The size a construction plane is drawn at: a rectangle of its own (dragged by its edges and
+/// corners in the view), or (`extent: null`) a square that follows the zoom.
+fn plane_size(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.plane_size";
+    let name = str_(p, "plane").ok_or_else(|| bad(cmd, "`plane` must name a construction plane"))?;
+    let id = crate::view::construction_planes(s)
+        .into_iter()
+        .find(|(_, n, _)| n == name)
+        .map(|(id, _, _)| id)
+        .ok_or_else(|| bad(cmd, format!("no construction plane `{name}`")))?;
+    let extent = match p.get("extent") {
+        None => return Err(bad(cmd, "`extent` must be [x0, y0, x1, y1] or null")),
+        Some(Value::Null) => None,
+        Some(v) => {
+            let e: [f64; 4] = serde_json::from_value(v.clone()).map_err(|_| bad(cmd, "`extent` must be [x0, y0, x1, y1] or null"))?;
+            if !e.iter().all(|x| x.is_finite() && x.abs() <= MAX_PLANE_EXTENT) || e[2] - e[0] < 1e-3 || e[3] - e[1] < 1e-3 {
+                return Err(bad(cmd, "`extent` must be finite, within 10 km of the plane's origin, with x1 > x0 and y1 > y0"));
+            }
+            Some(e)
+        }
+    };
+    if s.doc.plane_extents.get(&id).copied() == extent {
+        return Err(bad(cmd, "the plane already has that size"));
+    }
+    let d = s.doc_mut();
+    match extent {
+        Some(e) => d.plane_extents.insert(id, e),
+        None => d.plane_extents.remove(&id),
+    };
+    reply(cmd, PlaneSized { plane: name.to_string(), extent, param_warnings: Vec::new() })
 }
 
 fn view_apply(s: &mut Session, p: &Value) -> Result<Value> {

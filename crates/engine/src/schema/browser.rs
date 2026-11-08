@@ -1299,6 +1299,30 @@ pub struct ViewDeleted {
     pub param_warnings: Vec<String>,
 }
 
+/// Set the size a construction plane is drawn at. Display only: the plane itself does not
+/// change.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct PlaneSizeParams {
+    /// The construction plane, by name.
+    pub plane: String,
+    /// `[x0, y0, x1, y1]` in mm, in the plane's own x and y about its origin (x1 > x0, y1 > y0,
+    /// within 10 km), or null: back to a size that follows the zoom.
+    pub extent: Option<[f64; 4]>,
+}
+
+/// What `view.plane_size` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PlaneSized {
+    /// The plane, by name.
+    pub plane: String,
+    /// Its drawn rectangle now; null: a square that follows the zoom.
+    pub extent: Option<[f64; 4]>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 /// `view.list` takes no parameters.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
