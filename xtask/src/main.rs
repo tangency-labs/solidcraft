@@ -28,6 +28,7 @@ mod ui_containers;
 mod web_offline;
 mod web_offline_test;
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
@@ -191,9 +192,23 @@ fn main() -> ExitCode {
 }
 
 /// Workspace root (parent of the xtask crate).
+///
+/// `cargo xtask` (`cargo run`) sets `CARGO_MANIFEST_DIR` for the process, so that names the
+/// checkout the command runs in. The compile-time value is only a fallback for running the
+/// binary directly: git worktrees that share one `CARGO_TARGET_DIR` share one `xtask` binary,
+/// and its baked-in path names whichever worktree built it last.
 pub fn root() -> PathBuf {
-    let here = Path::new(env!("CARGO_MANIFEST_DIR"));
-    here.parent().unwrap_or(here).to_path_buf()
+    root_from(std::env::var_os("CARGO_MANIFEST_DIR"), Path::new(env!("CARGO_MANIFEST_DIR")))
+}
+
+/// The workspace root from the runtime `CARGO_MANIFEST_DIR` (when set and not empty), else from
+/// the compile-time one.
+fn root_from(runtime: Option<OsString>, compiled: &Path) -> PathBuf {
+    let here = match runtime.filter(|dir| !dir.is_empty()) {
+        Some(dir) => PathBuf::from(dir),
+        None => compiled.to_path_buf(),
+    };
+    here.parent().map(Path::to_path_buf).unwrap_or(here)
 }
 
 pub fn cargo() -> Command {
@@ -458,4 +473,23 @@ fn cmd_ci() -> Result<(), String> {
     web_offline_test::run(&root(), None, false)?;
     eprintln!("ci: all gates passed");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn root_prefers_the_runtime_manifest_dir() {
+        let compiled = Path::new("/built/here/xtask");
+        let runtime = Some(OsString::from("/run/there/xtask"));
+        assert_eq!(root_from(runtime, compiled), PathBuf::from("/run/there"));
+    }
+
+    #[test]
+    fn root_falls_back_to_the_compiled_manifest_dir() {
+        let compiled = Path::new("/built/here/xtask");
+        assert_eq!(root_from(None, compiled), PathBuf::from("/built/here"));
+        assert_eq!(root_from(Some(OsString::new()), compiled), PathBuf::from("/built/here"));
+    }
 }
