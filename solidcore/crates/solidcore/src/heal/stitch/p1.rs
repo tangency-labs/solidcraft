@@ -2554,7 +2554,7 @@ pub(crate) fn glue_edges_general(
 /// `b`'s progress tag to keep it under: the map kept for this B-rep value, or an empty
 /// one when it was kept for another value (record keys are arena identities, which
 /// repeat across B-reps).
-fn take_arena_records(
+pub(crate) fn take_arena_records(
     k: &mut Kernel,
     b: &mut Brep,
 ) -> (
