@@ -210,14 +210,15 @@ enum MergeMethod {
 /// solids (`SmBrep::IsManifoldSolid`) and `NonManifoldBoolean` otherwise.
 /// One edge of a boolean operand, as [`glue_self_touching_edges`] compares them: its
 /// vertices (the lower index first), its shell, its faces, its curve's kind and three
-/// points along it.
+/// points along it (the kind and points only for an edge that shares its vertices with
+/// another).
 struct TouchingEdge {
     edge: EdgeId,
     start: crate::topology::VertexId,
     ends: (u32, u32),
     shell: Option<crate::topology::ShellId>,
     faces: Vec<crate::topology::FaceId>,
-    kind: core::mem::Discriminant<crate::curve::curve::p2::CurveKind>,
+    kind: Option<core::mem::Discriminant<crate::curve::curve::p2::CurveKind>>,
     samples: [crate::Point3; 3],
 }
 
@@ -231,6 +232,7 @@ impl TouchingEdge {
         if self.shell.is_none()
             || other.shell.is_none()
             || self.ends != other.ends
+            || self.kind.is_none()
             || self.kind != other.kind
             || self.faces.iter().any(|f| other.faces.contains(f))
         {
@@ -266,10 +268,16 @@ impl TouchingEdge {
 /// on both sides of the line: the kernel's crack edges, which its check refuses glued) are
 /// left alone. Returns the number of edges glued away.
 ///
+/// The edges are bucketed by their vertex pair; only a bucket of two or more edges has its
+/// curves evaluated and its pairs compared, so a body without self-touch costs one pass over
+/// its edges.
+///
 /// # Errors
 ///
 /// Those of the topology walk, the curve evaluations and `GlueEdgesGeneral`.
 fn glue_self_touching_edges(k: &mut Kernel, b: &mut Brep) -> Result<usize> {
+    use std::collections::{HashMap, HashSet};
+
     use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
     use crate::topology::brep::p2::ArenaNotifyState;
     use crate::topology::brep::p7::glue_edges_general;
@@ -277,12 +285,14 @@ fn glue_self_touching_edges(k: &mut Kernel, b: &mut Brep) -> Result<usize> {
     use crate::topology::edgeuse::p1 as eu1;
 
     let tol = b.tolerance();
+    // Every edge with two vertices, by vertex pair.
     let mut touches: Vec<TouchingEdge> = Vec::new();
+    let mut buckets: HashMap<(u32, u32), Vec<usize>> = HashMap::new();
     for &e in b.edge_list() {
         let data = b.edge(e)?;
-        let Some(curve) = data.curve.as_ref() else {
+        if data.curve.is_none() {
             continue;
-        };
+        }
         let Some(start) = edge::start_vertex(b, e)? else {
             continue;
         };
@@ -292,54 +302,74 @@ fn glue_self_touching_edges(k: &mut Kernel, b: &mut Brep) -> Result<usize> {
         if start == end {
             continue;
         }
+        let (a, z) = (start.index(), end.index());
+        let ends = (a.min(z), a.max(z));
+        buckets.entry(ends).or_default().push(touches.len());
+        touches.push(TouchingEdge {
+            edge: e,
+            start,
+            ends,
+            shell: None,
+            faces: Vec::new(),
+            kind: None,
+            samples: [crate::Point3::ZERO; 3],
+        });
+    }
+    let mut crowded: Vec<Vec<usize>> = buckets.into_values().filter(|v| v.len() > 1).collect();
+    crowded.sort_unstable();
+    // The shells, faces, curve kinds and points of the edges that share their vertices.
+    for &i in crowded.iter().flatten() {
+        let Some(touch) = touches.get_mut(i) else {
+            continue;
+        };
+        let data = b.edge(touch.edge)?;
+        let Some(curve) = data.curve.as_ref() else {
+            continue;
+        };
         let interval = data.interval;
-        let mut samples = [crate::Point3::ZERO; 3];
-        for (s, t) in samples.iter_mut().zip([0.25, 0.5, 0.75]) {
+        for (s, t) in touch.samples.iter_mut().zip([0.25, 0.5, 0.75]) {
             *s = curve.evaluate_point(k, interval.evaluate(t))?;
         }
-        let mut shell = None;
-        let mut faces = Vec::new();
+        touch.kind = Some(core::mem::discriminant(curve.kind()));
         for &eu in &data.edgeuses {
             let Some(fu) = eu1::faceuse(b, eu)? else {
                 continue;
             };
             if let Some(f) = b.faceuse(fu)?.face {
-                faces.push(f);
+                touch.faces.push(f);
             }
-            if shell.is_none() {
-                shell = eu1::faceuse_shell(b, fu)?;
+            if touch.shell.is_none() {
+                touch.shell = eu1::faceuse_shell(b, fu)?;
             }
         }
-        faces.sort_unstable();
-        faces.dedup();
-        let (a, z) = (start.index(), end.index());
-        touches.push(TouchingEdge {
-            edge: e,
-            start,
-            ends: (a.min(z), a.max(z)),
-            shell,
-            faces,
-            kind: core::mem::discriminant(curve.kind()),
-            samples,
-        });
+        touch.faces.sort_unstable();
+        touch.faces.dedup();
     }
     let mut pairs: Vec<(EdgeId, EdgeId, OrientType)> = Vec::new();
-    let mut taken: Vec<EdgeId> = Vec::new();
-    for (i, first) in touches.iter().enumerate() {
-        if taken.contains(&first.edge) {
-            continue;
-        }
-        for other in touches.iter().skip(i + 1) {
-            if taken.contains(&other.edge) || !first.is_copy_of(other, tol) {
+    let mut taken: HashSet<EdgeId> = HashSet::new();
+    for bucket in &crowded {
+        for (n, &i) in bucket.iter().enumerate() {
+            let Some(first) = touches.get(i) else {
+                continue;
+            };
+            if taken.contains(&first.edge) {
                 continue;
             }
-            let orientation = if first.start == other.start {
-                OrientType::Same
-            } else {
-                OrientType::Opposite
-            };
-            pairs.push((first.edge, other.edge, orientation));
-            taken.push(other.edge);
+            for &j in bucket.iter().skip(n + 1) {
+                let Some(other) = touches.get(j) else {
+                    continue;
+                };
+                if taken.contains(&other.edge) || !first.is_copy_of(other, tol) {
+                    continue;
+                }
+                let orientation = if first.start == other.start {
+                    OrientType::Same
+                } else {
+                    OrientType::Opposite
+                };
+                pairs.push((first.edge, other.edge, orientation));
+                taken.insert(other.edge);
+            }
         }
     }
     if pairs.is_empty() {
