@@ -1,0 +1,114 @@
+{
+  "en": {
+    "prefs.tab_colours": "Tab colours",
+    "prefs.tab_colours_individual": "Each tab its own colour"
+  },
+  "en-GB": {
+    "prefs.tab_colours": "Tab colours",
+    "prefs.tab_colours_individual": "Each tab its own colour"
+  },
+  "ar": {
+    "prefs.tab_colours": "ألوان الألسنة",
+    "prefs.tab_colours_individual": "لكل لسان لونه"
+  },
+  "cs": {
+    "prefs.tab_colours": "Barvy karet",
+    "prefs.tab_colours_individual": "Každá karta vlastní barvou"
+  },
+  "da": {
+    "prefs.tab_colours": "Fanefarver",
+    "prefs.tab_colours_individual": "Hver fane sin egen farve"
+  },
+  "de": {
+    "prefs.tab_colours": "Registerfarben",
+    "prefs.tab_colours_individual": "Jedes Register in eigener Farbe"
+  },
+  "es": {
+    "prefs.tab_colours": "Colores de pestañas",
+    "prefs.tab_colours_individual": "Cada pestaña con su color"
+  },
+  "fr": {
+    "prefs.tab_colours": "Couleurs des onglets",
+    "prefs.tab_colours_individual": "Une couleur par onglet"
+  },
+  "gl": {
+    "prefs.tab_colours": "Cores das lapelas",
+    "prefs.tab_colours_individual": "Cada lapela coa súa cor"
+  },
+  "he": {
+    "prefs.tab_colours": "צבעי לשוניות",
+    "prefs.tab_colours_individual": "לכל לשונית צבע משלה"
+  },
+  "hu": {
+    "prefs.tab_colours": "Lapszínek",
+    "prefs.tab_colours_individual": "Minden lap saját színnel"
+  },
+  "id": {
+    "prefs.tab_colours": "Warna tab",
+    "prefs.tab_colours_individual": "Setiap tab dengan warnanya"
+  },
+  "it": {
+    "prefs.tab_colours": "Colori delle schede",
+    "prefs.tab_colours_individual": "Ogni scheda con il suo colore"
+  },
+  "ja": {
+    "prefs.tab_colours": "タブの色",
+    "prefs.tab_colours_individual": "タブごとに固有の色"
+  },
+  "ko": {
+    "prefs.tab_colours": "탭 색상",
+    "prefs.tab_colours_individual": "탭마다 고유한 색"
+  },
+  "ms": {
+    "prefs.tab_colours": "Warna tab",
+    "prefs.tab_colours_individual": "Setiap tab dengan warnanya"
+  },
+  "nb": {
+    "prefs.tab_colours": "Fanefarger",
+    "prefs.tab_colours_individual": "Hver fane sin egen farge"
+  },
+  "nl": {
+    "prefs.tab_colours": "Tabbladkleuren",
+    "prefs.tab_colours_individual": "Elk tabblad een eigen kleur"
+  },
+  "pl": {
+    "prefs.tab_colours": "Kolory kart",
+    "prefs.tab_colours_individual": "Każda karta w swoim kolorze"
+  },
+  "pt-BR": {
+    "prefs.tab_colours": "Cores das abas",
+    "prefs.tab_colours_individual": "Cada aba com sua cor"
+  },
+  "ro": {
+    "prefs.tab_colours": "Culorile filelor",
+    "prefs.tab_colours_individual": "Fiecare filă cu culoarea ei"
+  },
+  "ru": {
+    "prefs.tab_colours": "Цвета вкладок",
+    "prefs.tab_colours_individual": "У каждой вкладки свой цвет"
+  },
+  "sv": {
+    "prefs.tab_colours": "Flikfärger",
+    "prefs.tab_colours_individual": "Varje flik sin egen färg"
+  },
+  "tr": {
+    "prefs.tab_colours": "Sekme renkleri",
+    "prefs.tab_colours_individual": "Her sekmeye kendi rengi"
+  },
+  "uk": {
+    "prefs.tab_colours": "Кольори вкладок",
+    "prefs.tab_colours_individual": "Кожна вкладка своїм кольором"
+  },
+  "vi": {
+    "prefs.tab_colours": "Màu thẻ",
+    "prefs.tab_colours_individual": "Mỗi thẻ một màu riêng"
+  },
+  "zh": {
+    "prefs.tab_colours": "选项卡颜色",
+    "prefs.tab_colours_individual": "每个选项卡使用自己的颜色"
+  },
+  "zh-TW": {
+    "prefs.tab_colours": "分頁顏色",
+    "prefs.tab_colours_individual": "每個分頁使用自己的顏色"
+  }
+}

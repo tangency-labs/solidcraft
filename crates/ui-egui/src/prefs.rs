@@ -1273,6 +1273,13 @@ preference_settings! {
     theme: String = "dark".into(), PAGE_APPEARANCE;
     /// A picture behind the model in place of the view's background; empty for none.
     background_image: String = String::new(), PAGE_APPEARANCE;
+    /// The user's own colour (`#rrggbb`) for ribbon tabs (`theme::COLOURED_TABS` ids: `MODEL`,
+    /// `SKETCH`, …): their pills, lines, soft selections and accented icons. A tab left out keeps
+    /// the theme's.
+    tab_colors: BTreeMap<String, String> = BTreeMap::new(), PAGE_APPEARANCE;
+    /// Each ribbon tab that shares the theme's accent gets a standard colour of its own
+    /// (`theme::STANDARD_TAB_COLOURS`); off keeps the theme's. The user's own colours win.
+    tab_colours_individual: bool = false, PAGE_APPEARANCE;
     /// Theme used when the operating system is light; unknown ids resolve to Light.
     theme_day: String = "light".into(), PAGE_APPEARANCE;
     /// Theme used when the operating system is dark; unknown ids resolve to Dark.
@@ -2383,6 +2390,13 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     }
     sync_window_theme(app, ctx, follows_system);
     if crate::theme::set_logo_accent(app.preferences.logo_accent) {
+        app.styled = false;
+    }
+    let tab_colors = app.preferences.tab_colors.iter().filter_map(|(tab, color)| {
+        let [r, g, b] = crate::dialogs_appearance::parse_color(&json!(color))?;
+        Some((tab.clone(), egui::Color32::from_rgb(r, g, b)))
+    });
+    if crate::theme::set_tab_colors(tab_colors.collect()) | crate::theme::set_individual_tabs(app.preferences.tab_colours_individual) {
         app.styled = false;
     }
     // egui's end-of-frame shortcuts only change its context; the saved preference would
@@ -4220,6 +4234,12 @@ fn prepare_preferences(
     }
     if !accepted::dimension_step_mm(&new) || !accepted::dimension_step_deg(&new) {
         return Err("`dimension_step_mm` must be 0.001…1000 and `dimension_step_deg` 0.001…180".into());
+    }
+    if new.tab_colors.iter().any(|(tab, color)| {
+        !crate::theme::COLOURED_TABS.iter().any(|(id, _)| id == tab) || crate::dialogs_appearance::parse_color(&json!(color)).is_none()
+    }) {
+        let tabs: Vec<&str> = crate::theme::COLOURED_TABS.iter().map(|(id, _)| *id).collect();
+        return Err(format!("`tab_colors` maps tabs ({}) to #rrggbb colours", tabs.join(", ")));
     }
     if solidcraft_engine::doc::display_quality::DisplayQuality::parse(&new.display_quality).is_none() {
         return Err("`display_quality` must be coarse, normal, fine or ultra".into());
