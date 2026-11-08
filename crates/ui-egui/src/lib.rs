@@ -839,6 +839,12 @@ impl Drop for SolveApp {
 }
 
 impl SolveApp {
+    /// Publish this frame's tab accent from the open tab, the sketch being edited and the active
+    /// tool or dialog, the three values [`theme::TabAccent::publish`] takes.
+    pub(crate) fn publish_tab_accent(&self, ctx: &egui::Context) {
+        theme::TabAccent::publish(&self.ui.tab, self.session.active_sketch.is_some(), self.tool.is_some() || self.dialog.is_some(), ctx);
+    }
+
     pub fn new(mut session: Session, services: Services) -> Self {
         #[cfg(test)]
         let image_host = Some(solidcraft_engine::render::job::CpuHost::cooperative());
@@ -3283,7 +3289,7 @@ impl SolveApp {
             theme::apply(ctx);
             self.styled = true;
         }
-        theme::TabAccent::publish(self, ctx);
+        self.publish_tab_accent(ctx);
         if !self.fitted {
             self.fit_view();
             self.fitted = true;
@@ -3528,7 +3534,7 @@ impl SolveApp {
             if !floating && !self.embedded {
                 toolbar::toolbar(self, ui);
             }
-            theme::TabAccent::publish(self, ui.ctx());
+            self.publish_tab_accent(ui.ctx());
             browser::publish_row_prefs(self, ui.ctx());
             if !floating {
                 agent_chat::show(self, ui);
@@ -3581,7 +3587,7 @@ impl SolveApp {
                 self.show_workspace(&mut viewport_ui);
                 shell::paint_top_corners(ui.painter(), full, theme::Tokens::get().app_bar);
                 toolbar::toolbar(self, ui);
-                theme::TabAccent::publish(self, ui.ctx());
+                self.publish_tab_accent(ui.ctx());
             }
             if floating && show_timeline && !left_timeline {
                 timeline::timeline(self, ui);

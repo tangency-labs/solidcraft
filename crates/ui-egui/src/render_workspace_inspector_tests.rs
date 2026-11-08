@@ -519,7 +519,7 @@ fn stage_catalogs_fill_a_290_by_530_panel_and_keep_two_line_labels_inside_tiles(
             h.app.preferences.render_browser_side = "left".into();
             super::super::select_image_method(&mut h.app, method);
             library::open_category(&mut h.app, kind);
-            crate::theme::TabAccent::publish(&h.app, &h.ctx);
+            h.app.publish_tab_accent(&h.ctx);
             let document = h.app.session.doc.to_json();
             let history = (h.app.session.undo.len(), h.app.session.redo.len());
             // Panel::workspace reserves an 8 pt bottom gap in these bounds.

@@ -1112,7 +1112,7 @@ impl crate::SolveApp {
         self.shell.history_dock_space = None;
         self.shell.history_folding = None;
         self.shell.history_fold_motion = None;
-        crate::theme::TabAccent::publish(self, ui.ctx());
+        self.publish_tab_accent(ui.ctx());
         crate::browser::publish_row_prefs(self, ui.ctx());
         let mut placement = render_domain;
         self.shell.status_bar = if crate::status_bar::shown(self) {
