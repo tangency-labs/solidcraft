@@ -185,7 +185,7 @@ fn fields_and_rows(s: &Session, d: &Drawing, sheets: &[u64]) -> Vec<Finding> {
     let mut tree = Tree::new(&s.doc, &state);
     let mut out = Vec::new();
     for (at, sheet) in d.sheets.iter().enumerate().filter(|(_, sheet)| sheets.contains(&sheet.id)) {
-        for cell in title_block_text::shown(&s.doc, &mut tree, d, at) {
+        title_block_text::shown_with(&s.doc, &mut tree, d, at, |cell, content, values| {
             let block = object(CheckedKind::TitleBlock, sheet.id);
             match cell.replaced {
                 // Typed text over an empty value fills the cell: nothing is hidden.
@@ -194,12 +194,13 @@ fn fields_and_rows(s: &Session, d: &Drawing, sheets: &[u64]) -> Vec<Finding> {
                     out.push(Finding { cell: Some(cell.name), ..finding(FindingKind::Overridden, sheet.id, block, why) });
                 }
                 Some(_) => {}
-                None => out.extend(cell.empty.into_iter().map(|field| {
+                // Read only here: the sheet itself never needs them.
+                None => out.extend(values.empty_fields(content).into_iter().map(|field| {
                     let why = format!("{field} has no value");
                     Finding { cell: Some(cell.name.clone()), field: Some(field), ..finding(FindingKind::EmptyField, sheet.id, block.clone(), why) }
                 })),
             }
-        }
+        });
     }
     // A parts list that can't be made has no rows to count.
     for (table, rows) in super::drawing::ballooned(d, &mut tree) {

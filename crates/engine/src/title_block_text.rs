@@ -32,8 +32,6 @@ pub struct CellText {
     pub text: String,
     /// The cell's own value, when text typed over it is shown instead.
     pub replaced: Option<String>,
-    /// The fields of its own value with nothing to show ([`Values::empty_fields`]).
-    pub empty: Vec<String>,
 }
 
 /// What a cell's text on paper says of itself: what doesn't fit, or why the text is off the sheet.
@@ -74,8 +72,16 @@ impl Set {
 /// the text typed over it, or its content as [`read`] reads it. A cell that shows a logo shows no
 /// text (`TextCell::image`).
 pub fn shown(doc: &Document, tree: &mut Tree<'_>, d: &Drawing, at: usize) -> Vec<CellText> {
-    let Some(sheet) = d.sheets.get(at) else { return Vec::new() };
-    let Some(block) = &sheet.title_block else { return Vec::new() };
+    let mut out = Vec::new();
+    shown_with(doc, tree, d, at, |cell, _, _| out.push(cell));
+    out
+}
+
+/// [`shown`], each cell given to `each` with its own content and the values its fields read, for a
+/// caller that reads more of them than the sheet shows (`drawing.check`'s empty fields).
+pub fn shown_with(doc: &Document, tree: &mut Tree<'_>, d: &Drawing, at: usize, mut each: impl FnMut(CellText, &Content, &Values)) {
+    let Some(sheet) = d.sheets.get(at) else { return };
+    let Some(block) = &sheet.title_block else { return };
     let texts: Vec<(&String, &Content)> = block
         .cells
         .iter()
@@ -85,15 +91,15 @@ pub fn shown(doc: &Document, tree: &mut Tree<'_>, d: &Drawing, at: usize) -> Vec
         })
         .collect();
     with_values(doc, tree, d, at, texts.iter().map(|(_, content)| *content), |values| {
-        let cell = |&(name, content): &(&String, &Content)| {
-            let (value, empty) = (values.text(content), values.empty_fields(content));
-            match sheet.title_block_overrides.get(name) {
-                Some(typed) => CellText { name: name.clone(), text: typed.clone(), replaced: Some(value), empty },
-                None => CellText { name: name.clone(), text: value, replaced: None, empty },
-            }
-        };
-        texts.iter().map(cell).collect()
-    })
+        for &(name, content) in &texts {
+            let value = values.text(content);
+            let cell = match sheet.title_block_overrides.get(name) {
+                Some(typed) => CellText { name: name.clone(), text: typed.clone(), replaced: Some(value) },
+                None => CellText { name: name.clone(), text: value, replaced: None },
+            };
+            each(cell, content, values);
+        }
+    });
 }
 
 /// `contents` as sheet `at` of `d` shows them, in their order: text as written, each field read
