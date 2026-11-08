@@ -483,3 +483,57 @@ fn a_views_centre_is_its_point_or_lined_up_with_its_parent() {
     }
     assert_eq!(d.view_centre(99).unwrap_err().to_string(), format!("the drawing has no view {}", ids::encode(99)));
 }
+
+/// A drawing with a flat pattern view of body `Plate` at 1:1, placed at (300, 150) and turned
+/// `turn`, beside the front view, and the flat view's id.
+fn flat(turn: QuarterTurn) -> (Drawing, IdSource, u64) {
+    let (mut d, mut id_source, _) = front();
+    let source = d.sources[0].id;
+    let kind = ViewKind::Flat { source, body: "Plate".into(), turn };
+    let id = add(&mut d, &mut id_source, kind, ViewPlace::At([300.0, 150.0]), scaled("1:1"));
+    d.validate().unwrap();
+    (d, id_source, id)
+}
+
+/// A flat pattern view saves its source, its body and its quarter turn, in degrees, and reads back as
+/// saved. It resolves to its turn's basis with its body and turn, a base view to none, and its centre
+/// is its place.
+#[test]
+fn a_flat_view_saves_its_body_and_turn_and_resolves_to_its_basis() {
+    let (d, _, id) = flat(QuarterTurn::Quarter);
+    let v = file(&d);
+    let saved = v["views"].as_array().unwrap().iter().find(|view| view["id"] == json!(ids::encode(id))).unwrap();
+    let source = ids::encode(d.sources[0].id);
+    assert_eq!(saved["kind"], json!({"flat": {"source": source, "body": "Plate", "turn": 90}}));
+    assert_eq!(Drawing::from_json(&d.to_json().unwrap()).unwrap(), d);
+    let resolved = d.resolve_view(id).unwrap();
+    assert_eq!(resolved.basis, QuarterTurn::Quarter.basis());
+    assert_eq!(resolved.flat, Some(FlatOf { body: "Plate".into(), turn: QuarterTurn::Quarter }));
+    let base = d.views.iter().find(|v| matches!(v.kind, ViewKind::Base { .. })).unwrap().id;
+    assert_eq!(d.resolve_view(base).unwrap().flat, None);
+    assert_eq!(d.view_centre(id).unwrap(), Vec2::new(300.0, 150.0));
+}
+
+/// A flat view's rules, saved or made: its body is 1 to 255 bytes with no control characters, its turn
+/// a quarter turn, it has a scale and is placed at a point, and no view is projected from it yet.
+#[test]
+fn a_flat_view_keeps_its_rules() {
+    let (d, mut id_source, id) = flat(QuarterTurn::None);
+    let at = file(&d)["views"].as_array().unwrap().iter().position(|view| view["id"] == json!(ids::encode(id))).unwrap();
+    let edits: [(fn(&mut Value), &str); 6] = [
+        (|view| view["kind"]["flat"]["body"] = json!(""), "body is 1 to 255 bytes"),
+        (|view| view["kind"]["flat"]["body"] = json!("Pl\u{7}ate"), "no control characters"),
+        (|view| view["kind"]["flat"]["body"] = json!("x".repeat(256)), "body is 1 to 255 bytes"),
+        (|view| view["kind"]["flat"]["turn"] = json!(45), "0, 90, 180 or 270"),
+        (|view| view["settings"] = json!({}), "a flat pattern view has a scale"),
+        (|view| view["place"] = json!({"aligned": 10.0}), "a flat pattern view is placed at a point"),
+    ];
+    for (edit, why) in edits {
+        let error = refused(&d, |v| edit(&mut v["views"][at]));
+        assert!(error.contains(why), "{why}: {error}");
+    }
+    let mut projected_from = d.clone();
+    add(&mut projected_from, &mut id_source, projected(id, ProjectedSide::Right), ViewPlace::Aligned(450.0), ViewOverrides::default());
+    let error = projected_from.validate().unwrap_err().to_string();
+    assert!(error.contains("not supported yet: a view projected from a flat pattern view"), "{error}");
+}

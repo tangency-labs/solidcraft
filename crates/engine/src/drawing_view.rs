@@ -28,6 +28,11 @@ mod lines;
 
 pub use lines::{CHORD_MM, CHORD_RANGE, LineRequest, Lines, MIN_MODEL_CHORD_MM, Piece, Stats, ViewLine, lines, paper_group, paper_lines};
 
+#[path = "drawing_view_flat.rs"]
+mod flat;
+
+pub use flat::{Flat, flat, flat_from, flat_group};
+
 /// The paper millimetres each way of a view's boundary when there's nothing to measure, round its
 /// centre, so it can still be picked, moved and deleted.
 pub const PLACEHOLDER_MM: f64 = 20.0;
@@ -52,6 +57,8 @@ pub enum Unmeasured {
     NotPlaced,
     /// The view's `source` and `hide` leave nothing, as when the occurrences it drew were deleted.
     NothingChosen,
+    /// A flat pattern view's body has no flat pattern ([`flat`] says why).
+    NoFlat,
 }
 
 /// Why a choice of occurrences that draws nothing is refused.
@@ -65,6 +72,7 @@ impl Unmeasured {
             Unmeasured::NoBodies => "no_bodies",
             Unmeasured::NotPlaced => "not_placed",
             Unmeasured::NothingChosen => "nothing_chosen",
+            Unmeasured::NoFlat => "no_flat",
         }
     }
 }
@@ -79,6 +87,7 @@ impl fmt::Display for Unmeasured {
             Unmeasured::NoBodies => f.write_str("the view's source has no bodies"),
             Unmeasured::NotPlaced => f.write_str("the assembly's bodies can't be placed"),
             Unmeasured::NothingChosen => write!(f, "{NOTHING_CHOSEN}: the occurrences it chose may have been deleted"),
+            Unmeasured::NoFlat => f.write_str("the view's body has no flat pattern"),
         }
     }
 }
@@ -285,10 +294,27 @@ pub fn frame(basis: Plane, scale: Scale, model: &Aabb2, centre: Vec2, cmd: &str)
 /// is evaluated: no model is evaluated.
 pub fn on_sheet(s: &Session, drawing: &Drawing, id: u64, cmd: &str) -> Result<OnSheet> {
     let view = drawing.resolve_view(id).map_err(|e| bad(cmd, e.to_string()))?;
+    if let Some(of) = &view.flat {
+        return flat_on_sheet(drawing, id, &flat(s, of, cmd), cmd);
+    }
     let centre = drawing.view_centre(id).map_err(|e| bad(cmd, e.to_string()))?;
     let shown = shown(s);
     let measured = measured(&shown, &view).map(|(set, e)| (e, shows(&set, &view.basis, &e, view.reference_shown_percent)));
     placed(&view, measured, centre, cmd)
+}
+
+/// Flat pattern view `id` of `drawing` on its sheet, from its `flat` as already read: [`on_sheet`] for
+/// a flat view, so a command that has read the flat doesn't read it again.
+pub fn flat_on_sheet(drawing: &Drawing, id: u64, flat: &Result<Flat>, cmd: &str) -> Result<OnSheet> {
+    let view = drawing.resolve_view(id).map_err(|e| bad(cmd, e.to_string()))?;
+    let centre = drawing.view_centre(id).map_err(|e| bad(cmd, e.to_string()))?;
+    placed(&view, flat_measured(flat), centre, cmd)
+}
+
+/// A flat pattern view's extents and what it shows, from its [`flat`]: [`placed`]'s input.
+pub fn flat_measured(flat: &Result<Flat>) -> std::result::Result<(Extents, Aabb2), Unmeasured> {
+    let flat = flat.as_ref().map_err(|_| Unmeasured::NoFlat)?;
+    Ok((Extents { model: flat.model, error_mm: 0.0, bodies: 1 }, flat.model))
 }
 
 /// A view drawing as `view` does on its sheet, from what [`measure`] and [`shows`] said of it, with the

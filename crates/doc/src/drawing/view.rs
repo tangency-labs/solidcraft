@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use solidcore_record::{Plane, Vec2};
-use solidcraft_geom::drawing_view::{ProjectedSide, Scale, is_paper_coordinate, projected_basis};
+use solidcraft_geom::drawing_view::{ProjectedSide, QuarterTurn, Scale, is_paper_coordinate, projected_basis};
 use solidcraft_geom::paper::MAX_SIDE_MM;
 use solidcraft_geom::paper::line::LineGroup;
 use solidcraft_render::VisualStyle;
@@ -62,7 +62,7 @@ pub struct View {
 }
 
 /// What a view draws, and from where.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum ViewKind {
     /// The design of `source`, seen from `view`.
@@ -77,6 +77,50 @@ pub enum ViewKind {
         parent: u64,
         side: ProjectedSide,
     },
+    /// The flat pattern of sheet-metal body `body` of the design of `source` (#13030), turned `turn`.
+    Flat {
+        #[serde(with = "crate::ids")]
+        source: u64,
+        body: String,
+        turn: QuarterTurn,
+    },
+}
+
+impl ViewKind {
+    /// Its name in replies: `base`, `projected` or `flat`.
+    pub fn name(&self) -> &'static str {
+        match self {
+            ViewKind::Base { .. } => "base",
+            ViewKind::Projected { .. } => "projected",
+            ViewKind::Flat { .. } => "flat",
+        }
+    }
+
+    /// What a view of this kind is called in messages, when it has no parent.
+    pub fn unparented(&self) -> Option<&'static str> {
+        match self {
+            ViewKind::Base { .. } => Some("a base view"),
+            ViewKind::Flat { .. } => Some("a flat pattern view"),
+            ViewKind::Projected { .. } => None,
+        }
+    }
+}
+
+/// The longest body name a flat pattern view saves, in bytes.
+pub const MAX_BODY_BYTES: usize = 255;
+
+/// A flat pattern view's body and turn, as it draws ([`ResolvedView::flat`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct FlatOf {
+    pub body: String,
+    pub turn: QuarterTurn,
+}
+
+/// What body name a flat pattern view may draw, saved or asked for: 1 to [`MAX_BODY_BYTES`] bytes,
+/// with no control characters.
+pub fn check_flat_body(body: &str) -> Result<()> {
+    require((1..=MAX_BODY_BYTES).contains(&body.len()), || format!("its body is 1 to {MAX_BODY_BYTES} bytes"))?;
+    require(!body.chars().any(char::is_control), || "its body has no control characters".into())
 }
 
 /// Where a view's centre sits on its sheet, in paper millimetres.
@@ -129,6 +173,8 @@ pub struct ResolvedView {
     /// The line group its lines are drawn in: the chain's, else its sheet's, else the drawing's.
     pub line_group: Setting<LineGroup>,
     pub reference_shown_percent: f64,
+    /// A flat pattern view's body and turn; none for a view of the model.
+    pub flat: Option<FlatOf>,
 }
 
 fn is_zero(v: &f64) -> bool {
@@ -168,7 +214,7 @@ fn chain<'a>(id: u64, find: impl Fn(u64) -> Option<&'a View>) -> Result<Vec<&'a 
         require(chain.iter().all(|v| v.id != at), || "its chain of parents loops".into())?;
         chain.push(view);
         match view.kind {
-            ViewKind::Base { .. } => return Ok(chain),
+            ViewKind::Base { .. } | ViewKind::Flat { .. } => return Ok(chain),
             ViewKind::Projected { parent, .. } => at = parent,
         }
         require(chain.len() < MAX_VIEW_DEPTH, || format!("a chain of views is at most {MAX_VIEW_DEPTH} views"))?;
@@ -249,21 +295,34 @@ impl Drawing {
         };
         require(place, || format!("its place is at most {MAX_SIDE_MM} mm from the sheet's origin"))?;
         check_occurrence_paths(view.settings.occurrences.as_deref().unwrap_or_default(), view.settings.hide.as_deref().unwrap_or_default())?;
-        match view.kind {
+        match &view.kind {
             ViewKind::Base { source, view: direction } => {
-                let drawn = || format!("it draws source {}, which the drawing doesn't have", ids::encode(source));
-                require(self.sources.iter().any(|s| s.id == source), drawn)?;
-                require(view.settings.scale.is_some(), || "a base view has a scale".into())?;
-                require(matches!(view.place, ViewPlace::At(_)), || "a base view is placed at a point: it has no parent to line up with".into())?;
+                self.check_unparented(view, *source)?;
                 direction.basis().map(|_| ()).map_err(|e| DocError::Invalid(e.to_string()))
             }
+            ViewKind::Flat { source, body, .. } => {
+                self.check_unparented(view, *source)?;
+                check_flat_body(body)
+            }
             ViewKind::Projected { parent, .. } => {
-                self.chain_of(view.id)?;
-                let parent_sheet = self.view(parent).map(|p| p.sheet);
+                let chain = self.chain_of(view.id)?;
+                let from_flat = matches!(chain.last().map(|end| &end.kind), Some(ViewKind::Flat { .. }));
+                require(!from_flat, || "not supported yet: a view projected from a flat pattern view".into())?;
+                let parent_sheet = self.view(*parent).map(|p| p.sheet);
                 let lined_up = matches!(view.place, ViewPlace::Aligned(_));
                 require(!lined_up || parent_sheet == Some(view.sheet), || "a view lined up with its parent is on its parent's sheet".into())
             }
         }
+    }
+
+    /// The rules of a view that ends a chain, a base or flat pattern view: it draws one of the
+    /// drawing's sources, has a scale and is placed at a point.
+    fn check_unparented(&self, view: &View, source: u64) -> Result<()> {
+        let what = view.kind.unparented().unwrap_or("a view");
+        let drawn = || format!("it draws source {}, which the drawing doesn't have", ids::encode(source));
+        require(self.sources.iter().any(|s| s.id == source), drawn)?;
+        require(view.settings.scale.is_some(), || format!("{what} has a scale"))?;
+        require(matches!(view.place, ViewPlace::At(_)), || format!("{what} is placed at a point: it has no parent to line up with"))
     }
 
     /// View `id` as it draws: its base view's source, its basis turned down its chain of parents
@@ -271,10 +330,12 @@ impl Drawing {
     /// of the chain that sets it, then the default. One rule for every reader of a view.
     pub fn resolve_view(&self, id: u64) -> Result<ResolvedView> {
         let chain = self.chain_of(id)?;
-        let Some(ViewKind::Base { source, view: direction }) = chain.last().map(|base| base.kind) else {
-            return Err(DocError::Invalid(format!("view {} has no base view", ids::encode(id))));
+        let (source, mut basis, flat) = match chain.last().map(|end| &end.kind) {
+            Some(ViewKind::Base { source, view: direction }) => (*source, direction.basis().map_err(|e| DocError::Invalid(e.to_string()))?, None),
+            // A flat lies on its own plane, so the turn alone says which way it looks.
+            Some(ViewKind::Flat { source, body, turn }) => (*source, turn.basis(), Some(FlatOf { body: body.clone(), turn: *turn })),
+            _ => return Err(DocError::Invalid(format!("view {} has no base view", ids::encode(id)))),
         };
-        let mut basis = direction.basis().map_err(|e| DocError::Invalid(e.to_string()))?;
         for view in chain.iter().rev() {
             if let ViewKind::Projected { side, .. } = view.kind {
                 basis = projected_basis(&basis, side, self.projection).map_err(|e| DocError::Invalid(e.to_string()))?;
@@ -299,6 +360,7 @@ impl Drawing {
             hide: or_default(&chain, |s| s.hide.clone().map(Some), None),
             line_group,
             reference_shown_percent: chain.first().map_or(0.0, |view| view.reference_shown_percent),
+            flat,
         })
     }
 
@@ -310,11 +372,12 @@ impl Drawing {
         let mut centre = Vec2::ZERO;
         // From the base view down to this one, each lined up with the one before or placed apart.
         for view in self.chain_of(id)?.iter().rev() {
-            centre = match (view.place, view.kind) {
+            centre = match (view.place, &view.kind) {
                 (ViewPlace::At([x, y]), _) => Vec2::new(x, y),
                 (ViewPlace::Aligned(along), ViewKind::Projected { side, .. }) => side.on_free_axis(centre, along),
-                (ViewPlace::Aligned(_), ViewKind::Base { .. }) => {
-                    return Err(DocError::Invalid(format!("base view {} isn't placed at a point", ids::encode(view.id))));
+                (ViewPlace::Aligned(_), kind @ (ViewKind::Base { .. } | ViewKind::Flat { .. })) => {
+                    let what = if matches!(kind, ViewKind::Flat { .. }) { "flat pattern view" } else { "base view" };
+                    return Err(DocError::Invalid(format!("{what} {} isn't placed at a point", ids::encode(view.id))));
                 }
             };
         }

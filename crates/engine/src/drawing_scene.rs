@@ -52,7 +52,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use solidcore_record::{Loop2, Region2, Seg2, Vec2};
 use solidcraft_doc::bom::Tree;
 use solidcraft_doc::drawing::dimension::{self, Dimension};
-use solidcraft_doc::drawing::view::{ResolvedView, View};
+use solidcraft_doc::drawing::view::{FlatOf, ResolvedView, View};
 use solidcraft_doc::drawing::{Drawing, Sheet, Updates};
 use solidcraft_doc::drawing_view::TangentEdges;
 use solidcraft_doc::{DocError, Document, ModelState, ids};
@@ -407,6 +407,9 @@ impl Lettering {
 /// [`MIN_MODEL_CHORD_MM`]; centred on the view ([`assemble`] moves them to its centre). Lines past
 /// the paper scene's [`MAX_RECORDS`] are refused here, so no view holds more than a scene takes.
 fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64, view: &ResolvedView) -> Drawn {
+    if let Some(of) = &view.flat {
+        return draw_flat(s, id, view, of);
+    }
     // What the view chooses to show ([`crate::drawing_view::measured`]), and its reference parts' reach.
     let measured = crate::drawing_view::measured(shown, view).map(|(set, extents)| {
         let around = crate::drawing_view::shows(&set, &view.basis, &extents, view.reference_shown_percent);
@@ -455,6 +458,28 @@ fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64,
         }
         Err(e) => none(Status::Failed(reason(e))),
     }
+}
+
+/// Flat pattern view `id`, drawing as `view` does, of its body's flat `of` ([`crate::drawing_view::flat`]):
+/// centred on the view as [`draw`]'s lines are. Its lines name no body, so nothing is picked on them.
+fn draw_flat(s: &Session, id: u64, view: &ResolvedView, of: &FlatOf) -> Drawn {
+    let flat = crate::drawing_view::flat(s, of, CMD);
+    let placing = crate::drawing_view::flat_measured(&flat);
+    let boundary = crate::drawing_view::placed(view, placing, Vec2::ZERO, CMD).ok().map(|placed| placed.boundary);
+    let none = |status| Drawn { group: None, status, stats: None, boundary, frame: None, owners: None };
+    let flat = match flat {
+        Ok(flat) => flat,
+        Err(e) => return none(Status::Failed(reason(e))),
+    };
+    let frame = match crate::drawing_view::frame(view.basis, view.scale.value, &flat.model, Vec2::ZERO, CMD) {
+        Ok(frame) => frame,
+        Err(e) => return none(Status::Failed(reason(e))),
+    };
+    let group = crate::drawing_view::flat_group(&flat, &frame, id, view.line_group.value);
+    if group.records() > MAX_RECORDS {
+        return none(Status::Failed(format!("its lines are more than a paper scene's {MAX_RECORDS} records: choose a smaller scale")));
+    }
+    Drawn { group: Some(group), status: Status::Drawn, stats: None, boundary, frame: Some(frame), owners: None }
 }
 
 /// The records of `wanted` read once, each drawn through its view's frame (`None`: its view isn't

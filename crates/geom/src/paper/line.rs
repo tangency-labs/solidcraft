@@ -6,7 +6,7 @@
 //!   steps down the series, half as wide (wide : narrow = 2 : 1).
 //! - A visible edge is a wide line; a hidden edge, a centre line and a thin line (dimension,
 //!   leader, a reference part's edge, hatching) are narrow. A hidden line is dashed, 12 line widths
-//!   on and 3 off.
+//!   on and 3 off; a centre line is a long dash and a dot, a phantom line a long dash and two dots.
 
 /// A line group, named by its wide line's width, and saved by it as text: `"0.25"` to `"2"`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -34,6 +34,8 @@ pub enum LineKind {
     Visible,
     Hidden,
     Centre,
+    /// A bend line bent down on a flat pattern: ISO 128's long dash and two dots.
+    Phantom,
     Thin,
 }
 
@@ -64,20 +66,22 @@ impl LineKind {
         let (wide, narrow) = group.widths_mm();
         match self {
             LineKind::Visible => wide,
-            LineKind::Hidden | LineKind::Centre | LineKind::Thin => narrow,
+            LineKind::Hidden | LineKind::Centre | LineKind::Phantom | LineKind::Thin => narrow,
         }
     }
 
-    /// Its dash and gap in `group`, for a hidden line: ISO 128-20's dashed line, 12 and 3 line widths.
-    /// The other kinds are solid until a writer draws them otherwise.
-    pub fn dashes_mm(self, group: LineGroup) -> Option<[f64; 2]> {
-        match self {
-            LineKind::Hidden => {
-                let d = self.width_mm(group);
-                Some([12.0 * d, 3.0 * d])
-            }
-            LineKind::Visible | LineKind::Centre | LineKind::Thin => None,
-        }
+    /// Its dashes and gaps in `group`, in line widths: a hidden line is ISO 128-20's dashed line (12
+    /// on, 3 off), a centre line its long dash and dot (20, 3, 1, 3), a phantom line its long dash and
+    /// two dots (20, 3, 1, 3, 1, 3). Visible and thin lines are solid.
+    pub fn dashes_mm(self, group: LineGroup) -> Option<Vec<f64>> {
+        let widths: &[f64] = match self {
+            LineKind::Hidden => &[12.0, 3.0],
+            LineKind::Centre => &[20.0, 3.0, 1.0, 3.0],
+            LineKind::Phantom => &[20.0, 3.0, 1.0, 3.0, 1.0, 3.0],
+            LineKind::Visible | LineKind::Thin => return None,
+        };
+        let d = self.width_mm(group);
+        Some(widths.iter().map(|w| w * d).collect())
     }
 }
 

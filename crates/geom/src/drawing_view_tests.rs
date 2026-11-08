@@ -395,3 +395,35 @@ fn a_sides_free_axis_is_x_beside_its_parent_and_y_above_or_below() {
         assert_eq!((side.along(p), side.on_free_axis(p, 9.0)), (4.0, Vec2::new(3.0, 9.0)), "{side:?}");
     }
 }
+
+/// A flat pattern turned in quarter turns maps its points exactly: the corner (100, 0) of a flat
+/// lands at (100, 0), (0, 100), (-100, 0) and (0, -100), turned anticlockwise on paper, with no
+/// rounding, and each basis is orthonormal.
+#[test]
+fn a_quarter_turn_maps_a_flat_exactly() {
+    let want = [Vec2::new(100.0, 0.0), Vec2::new(0.0, 100.0), Vec2::new(-100.0, 0.0), Vec2::new(0.0, -100.0)];
+    for (turn, want) in QuarterTurn::ALL.into_iter().zip(want) {
+        let basis = turn.basis();
+        validate_plane(&basis).unwrap();
+        assert_eq!(basis.to_local(Vec3::new(100.0, 0.0, 0.0)), want, "{turn:?}");
+    }
+}
+
+/// A turn is saved as its degrees, and read only as 0, 90, 180 or 270.
+#[test]
+fn a_quarter_turn_is_saved_as_its_degrees() {
+    for (turn, degrees) in QuarterTurn::ALL.into_iter().zip([0, 90, 180, 270]) {
+        assert_eq!(serde_json::to_value(turn).unwrap(), serde_json::json!(degrees));
+        assert_eq!(serde_json::from_value::<QuarterTurn>(serde_json::json!(degrees)).unwrap(), turn);
+    }
+    for bad in [
+        serde_json::json!(45),
+        serde_json::json!(-90),
+        serde_json::json!(360),
+        serde_json::json!("90"),
+        serde_json::json!(90.5),
+        serde_json::json!(null),
+    ] {
+        assert!(serde_json::from_value::<QuarterTurn>(bad.clone()).is_err(), "{bad}");
+    }
+}

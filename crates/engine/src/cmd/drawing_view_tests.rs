@@ -4,12 +4,12 @@ use serde_json::json;
 use solidcraft_doc::MAX_PLACEMENT_DEPTH;
 use solidcraft_doc::drawing::DEFAULT_DPI;
 use solidcraft_geom::cell::Projection;
-use solidcraft_geom::drawing_view::ProjectedSide;
+use solidcraft_geom::drawing_view::{ProjectedSide, QuarterTurn};
 use solidcraft_geom::paper::NoPictures;
 use solidcraft_geom::paper::line::{LineGroup, LineKind};
 
 use super::*;
-use crate::drawing_scene::tests::two_cubes;
+use crate::drawing_scene::tests::{plate as sheet_plate, two_cubes};
 use crate::schema::tests::conforms;
 
 const EPS: f64 = 1e-9;
@@ -2161,4 +2161,269 @@ fn a_left_out_part_says_where_each_kind_of_setter_set_it() {
     assert_eq!(set_on(SetBy::Sheet), " (set on its sheet)");
     assert_eq!(set_on(SetBy::Drawing), " (set on the drawing)");
     assert_eq!((set_on(SetBy::This), set_on(SetBy::Default)), (String::new(), String::new()));
+}
+
+const FLAT: &str = "drawing.view.flat";
+
+/// `change` made with the drawing closed, then the drawing opened again.
+fn with_drawing_closed(s: &mut Session, change: impl FnOnce(&mut Session)) {
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    run(s, "drawing.close", json!({}));
+    change(s);
+    run(s, "drawing.open", drawing);
+}
+
+/// `drawing.view.flat` with `p`: the new view's id and the reply, checked against its schema.
+fn flat_view(s: &mut Session, p: Value) -> (u64, Value) {
+    let reply = run(s, FLAT, p);
+    let schema = output_schema_for::<CreateResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+    (ids::decode(reply["view"].as_str().unwrap()).unwrap(), reply)
+}
+
+/// `sheet.flat_pattern`'s reply. It's a model command, so while a drawing is open it runs with the
+/// drawing closed.
+fn flat_pattern(s: &mut Session) -> Value {
+    if s.open_drawing.is_none() {
+        return run(s, "sheet.flat_pattern", json!({}));
+    }
+    let mut reply = Value::Null;
+    with_drawing_closed(s, |s| reply = run(s, "sheet.flat_pattern", json!({})));
+    reply
+}
+
+/// The flat pattern's size, width and height.
+fn flat_size(s: &mut Session) -> Vec2 {
+    point(&flat_pattern(s)["flat_size_mm"])
+}
+
+/// View `id`'s strokes on its sheet, drawn at once: each path with its dash lengths, and the view's
+/// state.
+fn flat_strokes(s: &Session, id: u64) -> (Vec<(Vec<solidcore_record::Seg2>, Option<Vec<f64>>)>, crate::drawing_scene::Status) {
+    let d = s.drawing("test").unwrap();
+    let sheet = d.view(id).unwrap().sheet;
+    let built = crate::drawing_scene::build(s, d, sheet).unwrap();
+    let status = built.views.iter().find(|v| v.view == id).unwrap().status.clone();
+    let items = built.scene.groups.iter().filter(|g| g.object == id).flat_map(|g| &g.items);
+    let stroke = |item: &solidcraft_geom::paper::Item| match item {
+        solidcraft_geom::paper::Item::Stroke { path, pattern, .. } => Some((path.clone(), pattern.as_ref().map(|p| p.lengths_mm.clone()))),
+        _ => None,
+    };
+    (items.filter_map(stroke).collect(), status)
+}
+
+/// The box round the ends of `segs`' lines.
+fn line_box<'a>(segs: impl Iterator<Item = &'a solidcore_record::Seg2>) -> Aabb2 {
+    segs.filter_map(|seg| match seg {
+        solidcore_record::Seg2::Line { a, b } => Some([*a, *b]),
+        _ => None,
+    })
+    .flatten()
+    .collect()
+}
+
+/// How far `p` is from the nearest line of `segs`.
+fn off_lines<'a>(p: Vec2, segs: impl Iterator<Item = &'a solidcore_record::Seg2>) -> f64 {
+    let from = |a: Vec2, b: Vec2| {
+        let t = ((p - a).dot(b - a) / (b - a).dot(b - a)).clamp(0.0, 1.0);
+        (a + (b - a) * t - p).len()
+    };
+    segs.filter_map(|seg| if let solidcore_record::Seg2::Line { a, b } = seg { Some(from(*a, *b)) } else { None }).fold(f64::INFINITY, f64::min)
+}
+
+/// The issue's plate: a flat view's boundary, and its outline on the sheet, measure the flat size
+/// `sheet.flat_pattern` reports, to 1e-6 mm, at 1:1 and at 1:2, centred where it was placed.
+#[test]
+fn a_flat_view_measures_the_flat_size_at_its_scale() {
+    let mut s = sheet_plate();
+    let size = flat_size(&mut s);
+    for (scale, factor) in [("1:1", 1.0), ("1:2", 0.5)] {
+        let (id, reply) = flat_view(&mut s, json!({"sheet": "Sheet 1", "body": "Plate", "scale": scale, "position_mm": [200, 150]}));
+        let (on_sheet, centre) = boundary(&reply);
+        assert!((on_sheet - size * factor).len() < 1e-6 && (centre - Vec2::new(200.0, 150.0)).len() < 1e-6, "{scale}: {reply}");
+        let (strokes, status) = flat_strokes(&s, id);
+        assert_eq!(status.name(), "drawn", "{status:?}");
+        let outline = line_box(strokes.iter().filter(|(_, dashes)| dashes.is_none()).flat_map(|(path, _)| path));
+        assert!((outline.size() - size * factor).len() < 1e-6 && (outline.center() - Vec2::new(200.0, 150.0)).len() < 1e-6, "{scale}: {outline:?}");
+    }
+}
+
+/// A round hole is one circle of its exact diameter on the flat view, never a polyline, and each
+/// loop of the flat is drawn once.
+#[test]
+fn a_round_hole_is_one_circle_on_a_flat_view() {
+    let mut s = sheet_plate();
+    with_drawing_closed(&mut s, |s| {
+        run(s, "sketch.create", json!({"plane": "XY", "name": "Hole"}));
+        run(s, "sketch.circle.center", json!({"center": [50, 30], "radius": 5}));
+        run(s, "sketch.finish", json!({}));
+        run(s, "solid.extrude", json!({"sketch": "Hole", "through_all": true, "direction": "symmetric", "operation": "cut"}));
+    });
+    let flat = flat_pattern(&mut s);
+    let loops = flat["outline"].as_array().unwrap().len() + flat["cutouts"].as_array().unwrap().len();
+    let (id, _) = flat_view(&mut s, json!({"sheet": "Sheet 1", "scale": "1:2"}));
+    let (strokes, _) = flat_strokes(&s, id);
+    let solid: Vec<_> = strokes.iter().filter(|(_, dashes)| dashes.is_none()).map(|(path, _)| path).collect();
+    assert_eq!(solid.len(), loops, "one stroke per loop");
+    let circle = |path: &&Vec<solidcore_record::Seg2>| {
+        let arcs: Option<Vec<(Vec2, f64, f64)>> = path
+            .iter()
+            .map(|seg| if let solidcore_record::Seg2::Arc { center, radius, sweep, .. } = seg { Some((*center, *radius, *sweep)) } else { None })
+            .collect();
+        arcs.filter(|arcs| arcs.iter().all(|(c, r, _)| (*r - 2.5).abs() < 1e-9 && (*c - arcs[0].0).len() < 1e-9))
+            .is_some_and(|arcs| (arcs.iter().map(|(_, _, sweep)| sweep.abs()).sum::<f64>() - std::f64::consts::TAU).abs() < 1e-9)
+    };
+    assert_eq!(solid.iter().copied().filter(circle).count(), 1, "{solid:?}");
+}
+
+/// A bend up and a bend down are drawn in two line types, ISO 128's long dash and dot and its long
+/// dash and two dots, narrow, one stroke per bend line, each where its own bend is; each bend line
+/// ends on the outline, unturned and turned a quarter.
+#[test]
+fn bends_up_and_down_draw_in_two_line_types_and_end_on_the_outline() {
+    let mut s = sheet_plate();
+    with_drawing_closed(&mut s, |s| {
+        run(s, "sheet.flange", json!({"edges": [[50, 60, 2]], "height": 20, "flip": true}));
+    });
+    let reply = flat_pattern(&mut s);
+    let bends = reply["bends"].as_array().unwrap();
+    let count = |direction: &str| bends.iter().filter(|b| b["direction"] == direction).count();
+    assert_eq!((count("up"), count("down")), (1, 1), "{bends:?}");
+    let (id, view) = flat_view(&mut s, json!({"sheet": "Sheet 1", "scale": "1:1"}));
+    let (strokes, _) = flat_strokes(&s, id);
+    let group = LineGroup::DEFAULT;
+    let (up, down) = (LineKind::Centre.dashes_mm(group), LineKind::Phantom.dashes_mm(group));
+    let drawn = |dashes: &Option<Vec<f64>>| strokes.iter().filter(|(_, d)| d == dashes).map(|(path, _)| path).collect::<Vec<_>>();
+    assert_eq!((drawn(&up).len(), drawn(&down).len()), (1, 1), "{strokes:?}");
+    // Unturned at 1:1, the flat only moves onto the sheet: its box's corner goes to the boundary's.
+    let flat = crate::drawing_view::flat_from(&reply, QuarterTurn::None, FLAT).unwrap().model;
+    let on_sheet = |p: &Value| point(p) - flat.min + point(&view["boundary_mm"]["min"]);
+    for bend in bends {
+        let dashes = if bend["direction"] == "up" { &up } else { &down };
+        let [solidcore_record::Seg2::Line { a, b }] = drawn(dashes)[0].as_slice() else { panic!("a bend line is one line") };
+        let (start, end) = (on_sheet(&bend["start"]), on_sheet(&bend["end"]));
+        let at = |p: Vec2, q: Vec2| (*a - p).len() < 1e-9 && (*b - q).len() < 1e-9;
+        assert!(at(start, end) || at(end, start), "{bend}: drawn from {a:?} to {b:?}");
+    }
+    // Turned a quarter too, the bend lines turn with the outline and end on it.
+    let (turned, _) = flat_view(&mut s, json!({"sheet": "Sheet 1", "scale": "1:1", "turn": 90}));
+    for strokes in [strokes, flat_strokes(&s, turned).0] {
+        let outline: Vec<_> = strokes.iter().filter(|(_, d)| d.is_none()).flat_map(|(path, _)| path).collect();
+        let bend_lines: Vec<_> = strokes.iter().filter(|(_, d)| *d == up || *d == down).map(|(path, _)| path).collect();
+        assert_eq!(bend_lines.len(), 2, "{strokes:?}");
+        for path in bend_lines {
+            let [solidcore_record::Seg2::Line { a, b }] = path.as_slice() else { panic!("a bend line is one line: {path:?}") };
+            for end in [*a, *b] {
+                assert!(off_lines(end, outline.iter().copied()) < 1e-6, "{end:?} isn't on the outline");
+            }
+        }
+    }
+}
+
+/// Each quarter turn turns the flat on the sheet: at 90 and 270 degrees its boundary is the flat's
+/// height wide and its width high. On its plane, each turn puts the flat's corners exactly where
+/// that turn anticlockwise takes them, so 90 and 270 degrees can't be told apart only by size.
+#[test]
+fn a_quarter_turn_turns_a_flat_view() {
+    let mut s = sheet_plate();
+    let reply = flat_pattern(&mut s);
+    let turned = |turn| crate::drawing_view::flat_from(&reply, turn, FLAT).unwrap().model;
+    let flat = turned(QuarterTurn::None);
+    // A box centred on the plane's origin would turn to the same box at 90 and 270 degrees.
+    assert!(flat.min.x != -flat.max.x || flat.min.y != -flat.max.y, "{flat:?}");
+    let corners = [flat.min, Vec2::new(flat.max.x, flat.min.y), flat.max, Vec2::new(flat.min.x, flat.max.y)];
+    let rules: [(QuarterTurn, fn(Vec2) -> Vec2); 3] = [
+        (QuarterTurn::Quarter, |p| Vec2::new(-p.y, p.x)),
+        (QuarterTurn::Half, |p| Vec2::new(-p.x, -p.y)),
+        (QuarterTurn::ThreeQuarters, |p| Vec2::new(p.y, -p.x)),
+    ];
+    for (turn, rule) in rules {
+        let at = corners.map(rule);
+        let min = at.iter().fold(Vec2::new(f64::INFINITY, f64::INFINITY), |m, p| Vec2::new(m.x.min(p.x), m.y.min(p.y)));
+        let max = at.iter().fold(Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY), |m, p| Vec2::new(m.x.max(p.x), m.y.max(p.y)));
+        let got = turned(turn);
+        assert!(got.min == min && got.max == max, "{turn:?}: {got:?}, want {min:?} to {max:?}");
+    }
+    let size = flat_size(&mut s);
+    for (turn, want) in [(0, size), (90, Vec2::new(size.y, size.x)), (180, size), (270, Vec2::new(size.y, size.x))] {
+        let (_, reply) = flat_view(&mut s, json!({"sheet": "Sheet 1", "scale": "1:1", "turn": turn}));
+        assert!((boundary(&reply).0 - want).len() < 1e-9, "{turn}: {reply}");
+    }
+    let error = s.execute(FLAT, &json!({"sheet": "Sheet 1", "scale": "1:1", "turn": 45})).unwrap_err().to_string();
+    assert!(error.contains("0, 90, 180 or 270"), "{error}");
+}
+
+/// A body that isn't sheet metal is refused in `sheet.flat_pattern`'s words, and so is a design with
+/// none. A body renamed after its flat view was made fails that view with the reason, and the sheet
+/// still draws.
+#[test]
+fn a_flat_view_of_a_body_that_isnt_sheet_metal_is_refused() {
+    let mut s = block();
+    run(&mut s, "drawing.create", json!({}));
+    let error = s.execute(FLAT, &json!({"sheet": "Sheet 1", "body": "Block"})).unwrap_err().to_string();
+    assert!(error.contains("`Block` is not a sheet metal body"), "{error}");
+    let error = s.execute(FLAT, &json!({"sheet": "Sheet 1"})).unwrap_err().to_string();
+    assert!(error.contains("there is no sheet metal body"), "{error}");
+
+    let mut s = sheet_plate();
+    let (id, _) = flat_view(&mut s, json!({"sheet": "Sheet 1", "body": "Plate", "scale": "1:1"}));
+    with_drawing_closed(&mut s, |s| {
+        run(s, "body.rename", json!({"body": "Plate", "name": "Blank"}));
+    });
+    let (strokes, status) = flat_strokes(&s, id);
+    assert!(strokes.is_empty() && status.reason().is_some_and(|why| why.contains("`Plate` is not a sheet metal body")), "{status:?}");
+}
+
+/// A flat view follows the model: a taller flange and a smaller K-factor each change its size by what
+/// the flat pattern's size changes.
+#[test]
+fn a_flat_view_follows_the_flange_and_the_rule() {
+    let mut s = sheet_plate();
+    let (id, _) = flat_view(&mut s, json!({"sheet": "Sheet 1", "scale": "1:1"}));
+    let size_on_sheet = |s: &mut Session| boundary(&inspect_view(s, id)).0;
+    assert!((size_on_sheet(&mut s) - flat_size(&mut s)).len() < 1e-6);
+    let (mut taller, mut smaller) = (Vec2::ZERO, Vec2::ZERO);
+    with_drawing_closed(&mut s, |s| {
+        let names = s.doc.features.last().map(|f| f.param_names.clone()).unwrap_or_default();
+        run(s, "parameters.change", json!({"name": names[0], "expression": "30"}));
+        taller = flat_size(s);
+        run(s, "sheet.manage_rules", json!({"name": "T2", "k_factor": 0.3}));
+        smaller = flat_size(s);
+    });
+    assert!(taller.y > 69.0 && smaller.y < taller.y, "{taller:?} {smaller:?}");
+    assert!((size_on_sheet(&mut s) - smaller).len() < 1e-6);
+}
+
+/// A flat view inspects as `flat`, with the sheet's status and its other dimensions untouched; a
+/// dimension on it isn't supported yet.
+#[test]
+fn a_flat_view_inspects_as_flat_and_takes_no_dimension_yet() {
+    let mut s = sheet_plate();
+    let (id, _) = flat_view(&mut s, json!({"sheet": "Sheet 1", "scale": "1:1"}));
+    assert_eq!(inspect_view(&mut s, id)["kind"], json!("flat"));
+    run(&mut s, "drawing.status", json!({}));
+    let error =
+        s.execute("drawing.dimension.add", &json!({"view": ids::encode(id), "kind": {"length": {"edge": [50, 60, 2]}}})).unwrap_err().to_string();
+    assert!(error.contains("not supported yet: dimensions on a flat pattern view"), "{error}");
+}
+
+/// A flat view saved with its design and opened again in a new session keeps its body and turn, and
+/// draws the same lines.
+#[test]
+fn a_flat_view_is_the_same_after_saving_and_opening() {
+    let mut s = sheet_plate();
+    let (id, _) = flat_view(&mut s, json!({"sheet": "Sheet 1", "scale": "1:1", "turn": 90}));
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    let dir = std::env::temp_dir().join(format!("solidcraft-flat-view-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(format!("part.{}", solidcraft_io::DESIGN_EXT));
+    run(&mut s, "file.save_as", json!({"path": path}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": path}));
+    run(&mut opened, "drawing.open", drawing);
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(opened.drawing("test").unwrap().view(id).unwrap().kind, s.drawing("test").unwrap().view(id).unwrap().kind);
+    let ((lines, status), (was, before)) = (flat_strokes(&opened, id), flat_strokes(&s, id));
+    assert_eq!(status.name(), "drawn", "{status:?}");
+    assert_eq!((lines, status.name()), (was, before.name()));
 }

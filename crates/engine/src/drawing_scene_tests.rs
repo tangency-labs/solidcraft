@@ -29,6 +29,22 @@ pub(crate) fn front_and_top() -> (Session, u64, [u64; 2]) {
     front_and_top_of(s)
 }
 
+/// The flat pattern view's plate (#13030): rule `T2` (2 mm thick, K-factor 0.5, inner radius 1 mm),
+/// a 100 x 60 mm base flange named `Plate` on XY, a 20 mm flange bent up along its edge y = 0, and a
+/// drawing of it, open.
+pub(crate) fn plate() -> Session {
+    let mut s = Session::default();
+    let rule = json!({"name": "T2", "thickness": "2 mm", "k_factor": 0.5, "bend_radius": "1 mm", "gap": "0.5 mm", "active": true});
+    run(&mut s, "sheet.manage_rules", rule);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base", "body_name": "Plate"}));
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20}));
+    run(&mut s, "drawing.create", json!({}));
+    s
+}
+
 /// [`front_and_top`]'s drawing of the design `s`.
 fn front_and_top_of(mut s: Session) -> (Session, u64, [u64; 2]) {
     run(&mut s, "drawing.create", json!({}));
@@ -2525,4 +2541,30 @@ fn seeded_edits_steps_and_jobs_always_end_at_the_built_scene() {
         assert!(end.stale.is_empty(), "seed {seed}");
         assert_eq!(bytes(&end.scene), bytes(&built(&s, sheet).scene), "seed {seed}");
     }
+}
+
+/// A rule's K-factor changes the flat pattern: after the change, the plate's flat view is out of date
+/// and draws again, beside its base view. A change the flat doesn't show (a sketch: a new world state
+/// that adds no body) keeps it, as it keeps every view.
+#[test]
+fn a_rule_change_draws_the_flat_view_again() {
+    let mut s = plate();
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let made = |s: &mut Session, command: &str, p: Value| ids::decode(run(s, command, p)["view"].as_str().unwrap()).unwrap();
+    let flat = made(&mut s, "drawing.view.flat", json!({"sheet": "Sheet 1", "scale": "1:2", "position_mm": [300, 150]}));
+    made(&mut s, "drawing.view.base", json!({"sheet": "Sheet 1", "scale": "1:2", "position_mm": [100, 150]}));
+    settled(&mut s, sheet);
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Note"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "drawing.open", drawing.clone());
+    assert!(extract(&mut s, sheet).unwrap().stale.is_empty());
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "sheet.manage_rules", json!({"name": "T2", "k_factor": 0.3}));
+    run(&mut s, "drawing.open", drawing);
+    let stale = extract(&mut s, sheet).unwrap().stale;
+    assert!(stale.contains(&flat), "{stale:?}");
+    settled(&mut s, sheet);
+    assert!(extract(&mut s, sheet).unwrap().stale.is_empty());
 }

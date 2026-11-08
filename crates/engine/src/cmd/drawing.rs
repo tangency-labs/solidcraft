@@ -298,9 +298,14 @@ fn view_label(d: &Drawing, view: &View) -> String {
     let mut label = String::new();
     let mut at = view;
     for _ in 0..MAX_VIEW_DEPTH {
-        match at.kind {
+        match &at.kind {
+            ViewKind::Flat { body, .. } => {
+                label.push_str("Flat pattern of ");
+                label.push_str(body);
+                break;
+            }
             ViewKind::Base { view: ViewDirection::Named(named), .. } => {
-                let name = super::drawing_view::snake_name(named).replace('_', " ");
+                let name = super::drawing_view::snake_name(*named).replace('_', " ");
                 let mut letters = name.chars();
                 label.extend(letters.next().map(|first| first.to_ascii_uppercase()));
                 label.push_str(letters.as_str());
@@ -317,7 +322,7 @@ fn view_label(d: &Drawing, view: &View) -> String {
                     ProjectedSide::Above => "Above ",
                     ProjectedSide::Below => "Below ",
                 });
-                let Some(next) = d.view(parent) else { break };
+                let Some(next) = d.view(*parent) else { break };
                 at = next;
             }
         }
@@ -342,7 +347,7 @@ fn sheet_views(d: &Drawing, sheet: u64, dimensions: &BTreeMap<u64, Vec<String>>,
     while let Some(view) = stack.pop() {
         let mut entry = json!({
             "id": ids::encode(view.id),
-            "kind": if matches!(view.kind, ViewKind::Base { .. }) { "base" } else { "projected" },
+            "kind": view.kind.name(),
             "label": view_label(d, view),
             "dimensions": dimensions.get(&view.id).map_or(&[][..], Vec::as_slice),
             "balloons": balloons.get(&view.id).map_or(&[][..], Vec::as_slice),
