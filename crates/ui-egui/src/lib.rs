@@ -71,6 +71,7 @@ pub mod frame_rate;
 pub mod gizmo;
 pub mod gpu;
 pub mod help;
+pub mod history_bar;
 mod history_folds;
 pub(crate) mod history_rows;
 #[cfg(test)]
