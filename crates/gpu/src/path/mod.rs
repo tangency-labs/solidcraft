@@ -894,10 +894,10 @@ impl Task {
             [
                 [bounds[0][0], bounds[0][1], bounds[0][2], v.extinction_per_mm as f32],
                 [bounds[1][0], bounds[1][1], bounds[1][2], v.anisotropy as f32],
-                [v.scattering_albedo[0] as f32, v.scattering_albedo[1] as f32, v.scattering_albedo[2] as f32, clamp_indirect],
+                [v.scattering_albedo[0] as f32, v.scattering_albedo[1] as f32, v.scattering_albedo[2] as f32, 0.0],
             ]
         } else {
-            [[0.0; 4], [0.0; 4], [0.0, 0.0, 0.0, clamp_indirect]]
+            [[0.0; 4]; 3]
         };
         if let Some(resources) = &request.textures {
             resources.validate_scene(&scene)?;

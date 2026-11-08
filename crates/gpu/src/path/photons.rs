@@ -105,7 +105,7 @@ pub(super) struct Pipelines {
     clear: wgpu::ComputePipeline,
     emit: wgpu::ComputePipeline,
     // The camera program with the indirect clamp compiled in, built by the first clamped job.
-    clamped_render: std::sync::OnceLock<wgpu::ComputePipeline>,
+    pub(super) clamped_render: std::sync::OnceLock<wgpu::ComputePipeline>,
 }
 impl Pipelines {
     pub(super) fn shared(context: &Context) -> Result<&Self> {

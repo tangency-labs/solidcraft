@@ -2796,7 +2796,7 @@ fn gpu_indirect_clamp_keeps_hue_caps_the_brightest_channel_and_spares_the_first_
     ];
     for volume in [None, Some(solidcraft_render::job::volume::HomogeneousVolume { extinction_per_mm: 0.01, ..Default::default() })] {
         for &(limit, bounce, value, expected) in cases {
-            let lighting = Some(solidcraft_render::job::StudioLighting { environment: [1.0; 3], sun: None, area_lights: Default::default() });
+            let lighting = Some(solidcraft_render::job::StudioLighting { environment: [1.0; 3], ..Default::default() });
             let options = JobOptions { clamp_indirect: limit, volume, lighting, ..Default::default() };
             options.validate().unwrap();
             let mut task = Task::new(context.clone(), sphere(white()), request(1), options, CancelToken::default()).unwrap();
