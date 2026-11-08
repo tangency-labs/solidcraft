@@ -149,8 +149,14 @@ fn resolve_uncached(
                 LinkKind::Intersect => section(plane, &mesh, Some(f)),
                 _ => {
                     let target = st.bodies.get(bi).ok_or_else(|| lost("the projection body"))?;
-                    let g = projected_edges(target, &mesh, plane, &projection_face_edges(target, &mesh, f, plane)?);
-                    if certified_planar_construction(target, f as usize) { merge_family_lines(g)? } else { g }
+                    // A mesh body is one face with no edges: the flat patch of triangles picked,
+                    // traced (#13464).
+                    if target.body.is_mesh() {
+                        crate::project3d::flat_outline(&mesh, q).iter().flat_map(|outline| fit_world(plane, outline)).collect()
+                    } else {
+                        let g = projected_edges(target, &mesh, plane, &projection_face_edges(target, &mesh, f, plane)?);
+                        if certified_planar_construction(target, f as usize) { merge_family_lines(g)? } else { g }
+                    }
                 }
             }
         }

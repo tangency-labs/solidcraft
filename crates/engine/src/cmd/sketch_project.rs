@@ -428,8 +428,10 @@ fn add_link_unless_present(
     if skip_present && r.wires.is_empty() && sk.link_geometry_present(&r.geom) {
         return Ok(None);
     }
+    // A mesh body is one face whose name says nothing of the flat patch picked: the link keeps
+    // the point instead (#13464), as an edge of a mesh body keeps no name.
     let name = if let LinkSource::Face { body, at } = &r.source {
-        st.body(body).and_then(|body| {
+        st.body(body).filter(|body| !body.body.is_mesh()).and_then(|body| {
             if let Some(index) = r.face_index {
                 solidcraft_doc::naming::face_names(body).get(index).filter(|name| !name.is_empty()).cloned()
             } else {

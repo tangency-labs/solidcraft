@@ -278,6 +278,114 @@ fn ray_hit(o: Vec3, d: Vec3, t: &[Vec3; 3]) -> Option<f64> {
     Some(e2.dot(q) * inv)
 }
 
+/// Most triangles [`flat_outline`] looks through.
+const FLAT_OUTLINE_TRIANGLES: usize = 2_000_000;
+
+/// The outline of the flat patch of a mesh body's triangles at `at`: the triangle nearest `at`
+/// and every triangle joined to it edge to edge on its plane, traced as closed loops, each with its
+/// first point again at its end. An imported mesh is one face, so this flat patch is what a pick
+/// on one of its faces means (#13464). Empty when the mesh has no triangle or is too large.
+pub(crate) fn flat_outline(m: &Mesh, at: Vec3) -> Vec<Vec<Vec3>> {
+    use std::collections::{HashMap, HashSet, VecDeque};
+    if m.triangles.is_empty() || m.triangles.len() > FLAT_OUTLINE_TRIANGLES {
+        return Vec::new();
+    }
+    let size = m.bounds().diagonal().max(1e-9);
+    // Corners at one place are one corner: an STL repeats each corner for every triangle.
+    let weld = size * 1e-9;
+    let mut ids: HashMap<(i64, i64, i64), usize> = HashMap::new();
+    let mut corners: Vec<Vec3> = Vec::new();
+    let mut tri: Vec<[usize; 3]> = Vec::with_capacity(m.triangles.len());
+    for t in &m.triangles {
+        let Some(ps) = m.tri(t) else { continue };
+        let mut out = [0; 3];
+        for (o, p) in out.iter_mut().zip(ps) {
+            if !p.is_finite() {
+                return Vec::new();
+            }
+            let key = ((p.x / weld).round() as i64, (p.y / weld).round() as i64, (p.z / weld).round() as i64);
+            *o = *ids.entry(key).or_insert_with(|| {
+                corners.push(p);
+                corners.len() - 1
+            });
+        }
+        tri.push(out);
+    }
+    let at_of = |t: &[usize; 3]| t.map(|i| corners.get(i).copied().unwrap_or_default());
+    let normal = |t: &[usize; 3]| {
+        let [a, b, c] = at_of(t);
+        (b - a).cross(c - a).normalized()
+    };
+    // The triangle nearest the pick, and its plane.
+    let Some(seed) = (0..tri.len()).filter(|i| tri.get(*i).and_then(normal).is_some()).min_by(|x, y| {
+        let d = |i: &usize| {
+            tri.get(*i).map_or(f64::INFINITY, |t| {
+                let [a, b, c] = at_of(t);
+                crate::project::closest_on_triangle(at, a, b, c).dist(at)
+            })
+        };
+        d(x).total_cmp(&d(y))
+    }) else {
+        return Vec::new();
+    };
+    let Some((n0, p0)) = tri.get(seed).and_then(|t| Some((normal(t)?, at_of(t)[0]))) else { return Vec::new() };
+    let flat = |t: &[usize; 3]| normal(t).is_some_and(|n| n.dot(n0) > 1.0 - 1e-6) && at_of(t).iter().all(|p| (*p - p0).dot(n0).abs() <= size * 1e-6);
+    // Triangles by the edges they share.
+    let mut by_edge: HashMap<(usize, usize), Vec<usize>> = HashMap::new();
+    for (i, t) in tri.iter().enumerate() {
+        for k in 0..3 {
+            let (a, b) = (t[k], t[(k + 1) % 3]);
+            by_edge.entry((a.min(b), a.max(b))).or_default().push(i);
+        }
+    }
+    // The flat patch: from the seed across shared edges onto triangles on its plane.
+    let mut patch: HashSet<usize> = HashSet::from([seed]);
+    let mut queue = VecDeque::from([seed]);
+    while let Some(i) = queue.pop_front() {
+        let Some(t) = tri.get(i) else { continue };
+        for k in 0..3 {
+            let (a, b) = (t[k], t[(k + 1) % 3]);
+            for j in by_edge.get(&(a.min(b), a.max(b))).into_iter().flatten() {
+                if !patch.contains(j) && tri.get(*j).is_some_and(flat) {
+                    patch.insert(*j);
+                    queue.push_back(*j);
+                }
+            }
+        }
+    }
+    // Its outline: the edges only one of its triangles has, each the way its triangle runs.
+    let mut next: HashMap<usize, Vec<usize>> = HashMap::new();
+    for i in &patch {
+        let Some(t) = tri.get(*i) else { continue };
+        for k in 0..3 {
+            let (a, b) = (t[k], t[(k + 1) % 3]);
+            let inside = by_edge.get(&(a.min(b), a.max(b))).map_or(0, |ts| ts.iter().filter(|j| patch.contains(j)).count());
+            if inside == 1 {
+                next.entry(a).or_default().push(b);
+            }
+        }
+    }
+    let mut loops = Vec::new();
+    let mut starts: Vec<usize> = next.keys().copied().collect();
+    starts.sort_unstable();
+    for start in starts {
+        while let Some(mut v) = next.get_mut(&start).and_then(Vec::pop) {
+            let mut pts: Vec<Vec3> = [start, v].iter().filter_map(|i| corners.get(*i).copied()).collect();
+            let mut steps = 0;
+            while v != start && steps < patch.len() * 3 {
+                let Some(w) = next.get_mut(&v).and_then(Vec::pop) else { break };
+                pts.extend(corners.get(w).copied());
+                v = w;
+                steps += 1;
+            }
+            if v == start && pts.len() >= 4 {
+                loops.push(pts);
+            }
+        }
+    }
+    loops
+}
+
 /// Project a world polyline onto face `f` along `dir` (either way, nearest hit). Points that
 /// miss the face split the result.
 pub(crate) fn onto_face(m: &Mesh, f: u32, pts: &[Vec3], dir: Vec3) -> Vec<Vec<Vec3>> {
