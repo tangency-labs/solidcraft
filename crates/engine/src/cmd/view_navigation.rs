@@ -876,6 +876,34 @@ mod tests {
         }
     }
 
+    /// #12995: an arrow key step to the left or right turns the view about the up axis only: from a tilted
+    /// view the pitch stays, and the yaw changes by the step. Up and down keep the yaw.
+    #[test]
+    fn left_and_right_steps_from_a_tilted_view_change_only_the_yaw() {
+        let mut s = Session::default();
+        let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
+        for (yaw, pitch) in [(0.0, 0.0), (0.4, 0.61), (-2.0, -0.8), (3.0, 1.2)] {
+            let cam = Camera { yaw, pitch, distance: 100.0, ..Default::default() };
+            let mut turn = |action: &str| -> Camera {
+                let result = s.execute("view.navigate", &json!({"camera": cam, "action": action, "degrees": 15})).unwrap();
+                serde_json::from_value(result["camera"].clone()).unwrap()
+            };
+            let (left, right) = (turn("left"), turn("right"));
+            for to in [&left, &right] {
+                assert!(close(to.pitch, pitch), "pitch {pitch} became {}", to.pitch);
+                assert!(close((to.yaw - yaw).abs(), f64::to_radians(15.0)), "yaw {yaw} became {}", to.yaw);
+            }
+            assert!(close(left.yaw - yaw, yaw - right.yaw), "left and right turn opposite ways");
+            for (action, step) in [("up", 15.0), ("down", -15.0)] {
+                let to = turn(action);
+                let expected = (pitch + f64::to_radians(step)).clamp(-std::f64::consts::FRAC_PI_2, std::f64::consts::FRAC_PI_2);
+                if expected.abs() < 1.5 {
+                    assert!(close(to.yaw, yaw) && close(to.pitch, expected), "{action}: {} {}", to.yaw, to.pitch);
+                }
+            }
+        }
+    }
+
     /// #10091: a turn asked to frame the model reports `fit`, as home does; a motion can't.
     #[test]
     fn a_turn_with_fit_asks_the_window_to_frame_the_model() {
