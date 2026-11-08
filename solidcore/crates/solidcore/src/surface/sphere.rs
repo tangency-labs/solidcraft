@@ -133,12 +133,15 @@ use crate::geom::tol::{are_same, are_same_to_tol, is_zero};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{asin, sqrt, Point3, Vec3};
 use crate::kernel::Kernel;
-use crate::math::{max2, min2, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE};
+use crate::math::{
+    max2, min2, rad_to_deg, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE,
+};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::p2::EditNotify;
 use crate::nurbs::b_spline_surface::{
     BSplineSurface, BoundingBoxRequest, IsoCurveOptions, LocationType, SurfParamType,
 };
+use crate::nurbs::math::gamma;
 use crate::nurbs::nurbs_crv::to_euclid;
 use crate::nurbs::nurbs_srf::copy_nurb_surface;
 use crate::surface::cone::Cone;
@@ -2109,14 +2112,27 @@ impl Sphere {
         } else {
             EFF_ZERO
         };
+        // not upstream: the meridian's angles are read off points known to the rounding of
+        // their evaluation, `gamma_K |P|` (`K = 16 (p + q + 2)`, as `implicit::evaluates_as`
+        // bounds a form's evaluation), and of the circle's centre fitted to them, the same
+        // again: an angle at radius `r` to `2 gamma_K |P| / r` radians at each end, so the
+        // half turn's length to twice that. Far from the origin this outgrows the fixed
+        // half-meridian tolerance: a sphere of radius 2.5 at 1e5 reads 180 + 6.7e-10 degrees
+        let rounding = |radius: Option<f64>| match radius {
+            Some(r) if r > 0.0 => {
+                let size = 1.0 + min_pnt.max_dimension().max(max_pnt.max_dimension()) + 2.0 * r;
+                rad_to_deg(4.0 * gamma(16 * 6) * size / r)
+            }
+            _ => 0.0,
+        };
         let is_sphere_with_swap_uv = iso_u.parallel_planes
             && !iso_u.same_plane // [ 080625 ]
             && iso_v.coaxial_centers
-            && angles_v.length() <= 180.0 + half_meridian_tol;
+            && angles_v.length() <= 180.0 + half_meridian_tol + rounding(iso_v.radius);
         let is_sphere_no_swap_uv = iso_v.parallel_planes
             && !iso_v.same_plane // [ 080625 ]
             && iso_u.coaxial_centers
-            && angles_u.length() <= 180.0 + half_meridian_tol;
+            && angles_u.length() <= 180.0 + half_meridian_tol + rounding(iso_u.radius);
 
         // quit when not a properly oriented sphere
         if !is_sphere_with_swap_uv && !is_sphere_no_swap_uv {
@@ -2224,9 +2240,10 @@ impl Sphere {
         // If pCircle's STEP interval does not match the v-interval of sAnalUVDomain,
         // then the Sphere constructor will complain and the resulting bad surface can
         // lead to crashes.  [B414]
+        // (not upstream: its angles to the same rounding as the half meridian's)
         if !circle
             .step_interval()
-            .are_equal(&anal_uv_domain.v_interval(), EFF_ZERO)
+            .are_equal(&anal_uv_domain.v_interval(), EFF_ZERO + rounding(Some(rad)))
         {
             // upstream: WARN("Bad result in IsNurbSurfaceSphere(): GenCurve STEP
             // interval does not match sAnalUVDomain VInterval")
