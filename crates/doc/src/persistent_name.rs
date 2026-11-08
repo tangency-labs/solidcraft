@@ -168,7 +168,15 @@ pub enum NameError {
 /// written into a name and read back, and it must read back as itself. A list would have
 /// to follow every change of the grammar (#5861), and would miss an id that reads back as
 /// something else (`s1.l4` reads as profile 1 of curve `l4`).
+///
+/// The parentheses are the one exception: they are the name's own, for the name it holds
+/// (`F5:blend(F2:side:l2|F2:top)`), and the round trip cannot see that an id holds one.
+/// The name `F0:side:c(1` reads back as itself, but the name it lands in
+/// (`F5:blend(F2:side:c(1|F2:top)`) closes at the wrong `)`, so the id is refused.
 pub fn text_fits_name(text: &str) -> bool {
+    if text.contains('(') || text.contains(')') {
+        return false;
+    }
     let name = format!("F0:side:{text}");
     match FaceName::parse(&name) {
         Ok(f) => f.to_string() == name && matches!(&f.base, Base::Made { role: Role::Side { profile: None, curve }, .. } if curve == text),

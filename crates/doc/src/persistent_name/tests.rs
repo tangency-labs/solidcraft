@@ -287,7 +287,7 @@ fn a_text_that_cannot_be_written_into_a_name_whole_is_told() {
     for good in ["c1", "l4", "s01.l4", "c-1", "c_1", "a.b", "x"] {
         assert!(text_fits_name(good), "`{good}` fits a name");
     }
-    for bad in ["c|1", "c,1", "c~1", "c]1", "c#1", "", "s1.l4"] {
+    for bad in ["c|1", "c,1", "c~1", "c]1", "c#1", "c(1", "c)1", "", "s1.l4"] {
         assert!(!text_fits_name(bad), "`{bad}` does not fit a name");
     }
 }

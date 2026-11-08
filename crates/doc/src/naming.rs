@@ -415,7 +415,7 @@ fn face_name_end(s: &str, from: usize) -> Option<usize> {
 /// The edge a blend face's name holds: inside its parentheses (`F5:blend(F2:side:l2|F2:top)`), or
 /// after the colon of the older form (`F5:blend:F2:side:l2|F2:top`).
 fn blend_edge(name: &str) -> Option<&str> {
-    let rest = name.split_once(":blend")?.1;
+    let rest = name.split_once(':')?.1.strip_prefix("blend")?;
     if let Some(rest) = rest.strip_prefix('(') {
         let close = matching_close(rest)?;
         Some(&rest[..close])
@@ -1380,6 +1380,16 @@ mod tests {
         let end = read(pair).expect("the first face of a pair ends at its bar");
         assert_eq!(&pair[..end], "F5:blend(F2:side:曲|F2:top)", "the first face of a pair is the blend face");
         assert_eq!(face_name_end(pair, end + 1), Some(pair.len()), "the second face of a pair ends at the end of the text");
+    }
+
+    /// The `:blend` mark is the outer face's role. A name that holds a blend inside it (an inner
+    /// face naming a blend) is not a blend face, and the edge it holds is not one it replaced.
+    #[test]
+    fn test_blend_edge_is_read_at_the_outer_face_role_only() {
+        assert_eq!(blend_edge("F5:blend(F4:+y|F4:+z)"), Some("F4:+y|F4:+z"));
+        assert_eq!(blend_edge("F5:blend:F4:+y|F4:+z"), Some("F4:+y|F4:+z"));
+        assert_eq!(blend_edge("F3:inner(F5:blend(F4:+y|F4:+z))"), None);
+        assert_eq!(blend_edge("F4:+x|F5:blend(F4:+y|F4:+z)"), None);
     }
 
     /// A cone's tip repeats its apex vertex, so a triangle can have a zero-length edge. The nearest
