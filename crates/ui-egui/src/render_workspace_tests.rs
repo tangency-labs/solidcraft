@@ -1356,6 +1356,7 @@ fn opaque_pbr_product_gpu_and_cpu_share_color_and_material_semantics() {
                 [eye[0], eye[1], eye[2], 0.0],
                 SIZE,
                 srgb,
+                None,
             ) else {
                 eprintln!("skipping: no GPU adapter");
                 return;
@@ -1383,6 +1384,65 @@ fn opaque_pbr_product_gpu_and_cpu_share_color_and_material_semantics() {
             let mean = error as f64 / (3 * core) as f64;
             eprintln!("PBR m={metallic} r={roughness} srgb={srgb}: core={core}, mean={mean}, outliers={outliers}");
             assert!(mean < 2.0 && outliers * 100 < core * 2, "CPU/GPU color or material interpretation differs");
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn product_preview_lights_decode_simple_colours_as_the_cpu_image_does() {
+    use solidcraft_engine::render::StandardView;
+    // The CPU image's transfer (`job::image` decode/encode, `studio::tone_map`).
+    let decode = |s: f64| if s <= 0.04045 { s / 12.92 } else { ((s + 0.055) / 1.055).powf(2.4) };
+    let encode = |l: f64| if l <= 0.0031308 { l * 12.92 } else { 1.055 * l.powf(1.0 / 2.4) - 0.055 };
+    // One uniform light of radiance π: every lit pixel is the albedo itself, whatever its normal.
+    let mut light = [0.0_f32; 16];
+    light[3] = 4.0;
+    light[4..7].fill(std::f32::consts::PI);
+    const SIZE: u32 = 64;
+    let mut s = Session::default();
+    s.execute("solid.sphere", &json!({"radius":10,"body_name":"Sphere"})).unwrap();
+    // Black, both sides of the decoder's 0.04045 knee (#0a = 0.0392, #0b = 0.0431), and mid-tones.
+    for hex in ["000000", "050505", "0a0a0a", "0b0b0b", "202020", "808080", "b47846"] {
+        s.execute("appearance.assign", &json!({"bodies":["Sphere"],"color":format!("#{hex}")})).unwrap();
+        let scene = solidcraft_engine::product_scene::extract(&s).unwrap();
+        let (_, gpu) = gpu_scene(&scene).unwrap();
+        let mut camera = Camera { fov: 0.0, ..Default::default() };
+        camera.set_view(StandardView::Iso);
+        camera.fit(&scene.bounds);
+        let radius = scene.bounds.diagonal().max(10.0) + scene.bounds.center().dist(camera.target);
+        let eye = camera.eye().to_f32();
+        let expected: Vec<u8> = (0..3)
+            .map(|c| {
+                let l = decode(f64::from(u8::from_str_radix(&hex[2 * c..2 * c + 2], 16).unwrap()) / 255.0);
+                (encode(l / (1.0 + l)) * 255.0).round() as u8
+            })
+            .collect();
+        for srgb in [false, true] {
+            let Some(pixels) = crate::gpu::render_product_offscreen(
+                gpu.clone(),
+                None,
+                camera.view_proj(1.0, radius).to_f32(),
+                camera.back().to_f32(),
+                [eye[0], eye[1], eye[2], 0.0],
+                SIZE,
+                srgb,
+                Some(vec![light]),
+            ) else {
+                eprintln!("skipping: no GPU adapter");
+                return;
+            };
+            // The middle of the sphere, well inside its silhouette.
+            for y in SIZE / 2 - 4..SIZE / 2 + 4 {
+                for x in SIZE / 2 - 4..SIZE / 2 + 4 {
+                    let i = ((y * SIZE + x) * 4) as usize;
+                    let got = &pixels[i..i + 3];
+                    assert!(
+                        got.iter().zip(&expected).all(|(a, b)| a.abs_diff(*b) <= 1),
+                        "#{hex} srgb={srgb}: preview {got:?}, CPU image {expected:?}"
+                    );
+                }
+            }
         }
     }
 }
@@ -5787,6 +5847,7 @@ fn render_workspace_product_pass_draws_only_requested_face_or_body_overlay() {
             [eye[0], eye[1], eye[2], 1.0],
             256,
             false,
+            None,
         )
     };
     let Some(clean) = draw(None) else {
