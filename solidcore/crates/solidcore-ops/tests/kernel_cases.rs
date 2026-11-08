@@ -3907,6 +3907,36 @@ fn record_picks_preserve_order_and_duplicate_parameter_alignment() {
     ));
 }
 
+/// Bad pick data fails wherever it sits in the list; a traced miss is unsupported only when
+/// every other pick is well formed (#2993).
+#[test]
+fn a_traced_miss_is_unsupported_only_among_well_formed_picks() {
+    let list = |picked: Value| serde_json::json!({"kind": "edge", "picked": picked});
+    for bad in [
+        serde_json::json!([{"miss": "none"}, {"index": 999}]),
+        serde_json::json!([{"index": 999}, {"miss": "none"}]),
+        serde_json::json!([{"miss": "none"}, {}]),
+        serde_json::json!([{"miss": "none"}, {"miss": "none", "index": 0}]),
+    ] {
+        assert!(
+            matches!(
+                record_picks("blend", &list(bad.clone()), "edge", 2),
+                Err(Stop::Fail(_))
+            ),
+            "{bad}"
+        );
+    }
+    assert!(matches!(
+        record_picks(
+            "blend",
+            &list(serde_json::json!([{"index": 0}, {"miss": "none"}])),
+            "edge",
+            2
+        ),
+        Err(Stop::Unsupported(_))
+    ));
+}
+
 /// Captured split followed by merging its redundant faces, with the original grading.
 #[test]
 fn split_body_replays_face_plane() {
