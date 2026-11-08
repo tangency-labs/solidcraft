@@ -35,6 +35,11 @@
 //! | [`GlobalSolver::identical_solutions_in`]     | `SmGlobalSolver::IdenticalSolutions` (object domains read through a caller's resolver) |
 //!
 //! Deviations:
+//! - **Projected extrema bounds.** Sphere bounds use the same
+//!   `|N x V x N|` metric as the point objective: physical projected distances
+//!   and radii scale by `N . N`, with tolerance added in objective units. A zero
+//!   normal or nonfinite bound cannot certify exclusion and does not cull.
+//!   The C++ compares unscaled distances (WR-764).
 //! - WR-21 (#2155): `fixes.global_solver_identical_prefers_larger_when_maximizing`
 //!   opts into preferring the larger `start.solution_value` in
 //!   [`GlobalSolver::identical_solutions_in`] when [`GlobalSolver::operation`] is
@@ -962,6 +967,39 @@ impl<'t, O: SolutionObject> GlobalSolver<'t, O> {
         let mut sph1_radius = s1.radius;
         let mut sph2_radius = s2.radius;
 
+        if matches!(
+            self.operation,
+            SolverOperation::ProjectedMinimize | SolverOperation::ProjectedMaximize
+        ) {
+            // The objective is |N x V x N| = (N . N) |P(V)|, whereas
+            // point_project_to_plane computes the unscaled orthogonal P(V).
+            // Its linear map sends a sphere of radius r inside radius r*(N.N).
+            // Compare bounds and incumbents in the same objective units.
+            let normal = self.opt_vector(0)?;
+            let scale = normal.dot(normal);
+            if scale <= 0.0 || !scale.is_finite() {
+                return Ok(true);
+            }
+            let projected = point_project_to_plane(sph2_center, sph1_center, normal);
+            let center_distance = sph1_center.distance(projected) * scale;
+            let first_radius = sph1_radius * scale + tol;
+            let second_radius = sph2_radius * scale;
+            let bound = if self.operation == SolverOperation::ProjectedMinimize {
+                center_distance - first_radius - second_radius
+            } else {
+                center_distance + first_radius + second_radius
+            };
+            if !bound.is_finite() {
+                return Ok(true);
+            }
+            let excluded = if self.operation == SolverOperation::ProjectedMinimize {
+                bound > 0.0 && bound * bound > self.best_answer_so_far_sq
+            } else {
+                bound * bound < self.best_answer_so_far_sq
+            };
+            return Ok(!excluded);
+        }
+
         // Factor 3D tolerance by adding it to just one sphere radii.
         sph1_radius += tol;
 
@@ -1044,19 +1082,6 @@ impl<'t, O: SolutionObject> GlobalSolver<'t, O> {
             | SolverOperation::PerspectiveIntersect => {
                 let min_proj_dist = proj_pnt1.distance(proj_pnt2) - sph1_radius - sph2_radius;
                 if min_proj_dist > 0.0 {
-                    return Ok(false); // No answers in this branch
-                }
-            }
-            SolverOperation::ProjectedMinimize => {
-                let min_proj_dist = proj_pnt1.distance(proj_pnt2) - sph1_radius - sph2_radius;
-                if min_proj_dist > 0.0 && min_proj_dist * min_proj_dist > self.best_answer_so_far_sq
-                {
-                    return Ok(false); // No answers in this branch
-                }
-            }
-            SolverOperation::ProjectedMaximize => {
-                let max_proj_dist = proj_pnt1.distance(proj_pnt2) + sph1_radius + sph2_radius;
-                if max_proj_dist * max_proj_dist < self.best_answer_so_far_sq {
                     return Ok(false); // No answers in this branch
                 }
             }
@@ -2370,6 +2395,53 @@ mod tests {
         s.end.solution_value = v1;
         s.end.parameters[0] = p1;
         s
+    }
+
+    #[test]
+    fn projected_extrema_bounds_share_objective_units() {
+        fn may(normal: Vec3, op: SolverOperation, incumbent: f64, tol: f64) -> bool {
+            let mut first = Tree::new(None);
+            let ia = first.add_node(leaf([0.0, 0.0, 0.0], [0.0, 0.0, 0.0]));
+            first.set_top_node(Some(ia));
+            let mut second = Tree::new(None);
+            // The branch is the segment x in [2,4], at y=0,z=7. Its sphere
+            // has center (3,0,7), radius 1; these projected bounds are exact.
+            let ib = second.add_node(leaf([2.0, 0.0, 7.0], [4.0, 0.0, 7.0]));
+            second.set_top_node(Some(ib));
+            let mut solver = GlobalSolver::with_trees(&first, &second, 0);
+            solver.operation = op;
+            solver.opt_vectors = vec![normal];
+            solver.best_answer_so_far_sq = incumbent * incumbent;
+            solver.tolerance_3d = tol;
+            solver
+                .branch_may_contain_answers(&[Some(ia), Some(ib), None])
+                .unwrap()
+        }
+        for normal_scale in [0.5, 1.0, 2.0, -2.0] {
+            let normal = Vec3::Z * normal_scale;
+            let q = normal_scale * normal_scale;
+            let min = SolverOperation::ProjectedMinimize;
+            let max = SolverOperation::ProjectedMaximize;
+            // Actual minimum=2q, maximum=4q. Retain every improving branch,
+            // and exclude a branch whose best possible value is worse.
+            assert!(may(normal, min, 2.5 * q, 0.0));
+            assert!(!may(normal, min, 1.5 * q, 0.0));
+            assert!(may(normal, max, 3.5 * q, 0.0));
+            assert!(!may(normal, max, 4.5 * q, 0.0));
+            // Tolerance belongs to the reported objective, not physical space.
+            assert!(may(normal, min, 2.0 * q - 0.0625, 0.125));
+            assert!(!may(normal, min, 2.0 * q - 0.25, 0.125));
+            assert!(may(normal, max, 4.0 * q + 0.0625, 0.125));
+            assert!(!may(normal, max, 4.0 * q + 0.25, 0.125));
+        }
+        for normal in [Vec3::ZERO, Vec3::new(f64::INFINITY, 0.0, 0.0)] {
+            for op in [
+                SolverOperation::ProjectedMinimize,
+                SolverOperation::ProjectedMaximize,
+            ] {
+                assert!(may(normal, op, 1.0, 0.0));
+            }
+        }
     }
 
     #[test]
