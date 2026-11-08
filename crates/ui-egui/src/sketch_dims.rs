@@ -285,17 +285,17 @@ fn line_boxes(a: Vec2, e: Vec2, px: f64, off: f64) -> Vec<(f64, Vec2)> {
 /// measure so they don't cover it.
 fn live(app: &SolveApp, t: &Tool, e: Vec2, px: f64) -> Vec<(f64, Vec2)> {
     let off = 20.0 * px;
-    // Before any click the field beside the pointer is the offset: the distance from the
-    // reference. Typing it shifts an infinite construction line. The length box (#10258) is the
-    // other control, further along and clear of that click, and only a value typed there makes
-    // a segment. With no offset (perpendicular, or parallel before the reference) the length
-    // box keeps the place beside the pointer.
+    // A one-click construction line's Length box waits beside the pointer before any click.
+    // A bare digit goes there, so a typed length still makes a segment. Offset sits further
+    // along and takes a digit only once that box has the keyboard.
     if t.pts.is_empty() && t.dims.iter().any(|b| construction_length(t, b)) {
-        let beside = e + Vec2::new(2.5 * off, -1.5 * off);
-        let has_offset = t.dims.iter().any(|b| b.label == "Offset");
+        let length_at = e + Vec2::new(2.5 * off, -1.5 * off);
         let distance = construction_offset_live(app, t, e, px).map(|v| v[0].0).unwrap_or(0.0);
-        let length_at = if has_offset { beside + Vec2::new(6.0 * off, 0.0) } else { beside };
-        return t.dims.iter().map(|b| if b.label == "Offset" { (distance, beside) } else { (0.0, length_at) }).collect();
+        return t
+            .dims
+            .iter()
+            .map(|b| if b.label == "Offset" { (distance, length_at + Vec2::new(6.0 * off, 0.0)) } else { (0.0, length_at) })
+            .collect();
     }
     let Some(a) = t.pts.last().map(|p| p.0) else { return Vec::new() };
     let first = t.pts.first().map(|p| p.0).unwrap_or(a);
@@ -557,7 +557,9 @@ pub fn dimensions(t: &Tool) -> Value {
 /// Invalid values stay in the current field, so users can correct them before another stage.
 pub fn validate(app: &SolveApp, t: &Tool) -> Result<(), String> {
     for dimension in t.dim_history.iter().chain(&t.dims).filter(|dimension| dimension.locked) {
-        if construction_length(t, dimension) && dimension.value.trim().is_empty() {
+        // An empty Length keeps the infinite line (#10258). An empty Offset means through the
+        // point, the same as no offset, rather than a parameter error.
+        if (construction_length(t, dimension) || dimension.label == "Offset") && dimension.value.trim().is_empty() {
             continue;
         }
         if dimension.value.len() > 4096 {

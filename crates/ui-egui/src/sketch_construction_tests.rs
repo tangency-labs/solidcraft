@@ -160,10 +160,31 @@ fn typed_offset_places_the_line_and_its_dimension() {
     assert!(!sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Length { .. })));
 }
 
-/// A digit in the field beside the pointer is the offset. One click places an infinite construction
-/// line at that distance; it does not start a finite segment.
 #[test]
-fn a_digit_beside_the_pointer_sets_the_offset_and_keeps_the_line_infinite() {
+fn an_empty_locked_offset_box_places_the_line_through_the_click() {
+    let mut h = sketch();
+    h.step(&json!({"start":"sketch.construction_line.horizontal"})).unwrap();
+    let tool = h.app.tool.as_mut().unwrap();
+    tool.dims = crate::sketch_dims::boxes_for(tool.cmd, 1);
+    let dim = tool.dims.iter_mut().find(|d| d.label == "Offset").unwrap();
+    dim.locked = true;
+    dim.value.clear();
+    let mut tool = h.app.tool.take().unwrap();
+    super::place_point(&mut h.app, &mut tool, (solidcore_record::Vec2::new(2., -4.), None));
+    let sid = h.app.session.active_sketch.unwrap();
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    let curve = sk.curves.last().unwrap();
+    assert!(curve.infinite && curve.construction, "{curve:?}");
+    let CurveKind::Line { a, .. } = curve.kind else { panic!("line") };
+    let start = sk.point(a).unwrap();
+    assert!((start.y + 4.).abs() < 1e-6, "an empty offset is through the click: {start:?}");
+    assert!(!sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::DistanceY { .. })));
+}
+
+/// The Offset box is opt-in. Once it has the keyboard, a digit sets the distance and one click
+/// places an infinite construction line. It does not start a finite segment.
+#[test]
+fn a_focused_offset_box_places_an_infinite_line() {
     let cases: &[(&str, &[[f64; 2]], [f64; 2])] = &[
         ("sketch.construction_line.horizontal", &[], [2., -4.]),
         ("sketch.construction_line.vertical", &[], [-3., 4.]),
@@ -176,6 +197,7 @@ fn a_digit_beside_the_pointer_sets_the_offset_and_keeps_the_line_infinite() {
         steps(&mut h, id, picks);
         h.step(&json!({"move":{"sketch":at}})).unwrap();
         h.settle();
+        focus_box(&mut h, "Offset");
         digit(&mut h, '8');
         h.frames(30);
         h.step(&json!({"click":{"sketch":at}})).unwrap();
@@ -278,14 +300,9 @@ fn length_box_focused(h: &Harness) -> bool {
     h.ctx.memory(|m| m.focused()) == Some(crate::sketch_dims::box_id(0))
 }
 
-fn box_focused(h: &Harness, label: &str) -> bool {
-    let Some(i) = h.app.tool.as_ref().and_then(|t| t.dims.iter().position(|b| b.label == label)) else { return false };
-    h.ctx.memory(|m| m.focused()) == Some(crate::sketch_dims::box_id(i))
-}
-
-/// Give the Length box the keyboard. A bare digit goes to the offset box when that field is beside the pointer.
-fn focus_length(h: &mut Harness) {
-    let i = h.app.tool.as_ref().unwrap().dims.iter().position(|b| b.label == "Length").expect("Length box");
+/// Give one value box the keyboard. A bare digit still goes to Length until a box is focused.
+fn focus_box(h: &mut Harness, label: &str) {
+    let i = h.app.tool.as_ref().unwrap().dims.iter().position(|b| b.label == label).unwrap_or_else(|| panic!("{label}"));
     h.ctx.memory_mut(|m| m.request_focus(crate::sketch_dims::box_id(i)));
     h.frames(2);
 }
@@ -320,17 +337,10 @@ fn a_waiting_length_box_leaves_letters_to_the_shortcuts_and_takes_a_digit() {
         digit(&mut h, '2');
         digit(&mut h, '5');
         h.frames(2);
-        let tool = h.app.tool.as_ref().unwrap();
-        if id.ends_with("horizontal") {
-            assert!(box_focused(&h, "Offset"), "{id}: a digit fills the offset beside the pointer");
-            let offset = tool.dims.iter().find(|b| b.label == "Offset").unwrap();
-            assert_eq!((offset.value.as_str(), offset.locked), ("25", true), "{id}");
-            assert_eq!((tool.dims[0].value.as_str(), tool.dims[0].locked), ("\u{221e}", false), "{id}: the length box is a different control");
-        } else {
-            assert!(length_box_focused(&h), "{id}: a digit gives the length box the keyboard");
-            assert_eq!((tool.dims[0].value.as_str(), tool.dims[0].locked), ("25", true), "{id}");
-        }
-        assert_eq!(Some(tool.cmd), Some(id), "{id}: digits are not shortcuts");
+        assert!(length_box_focused(&h), "{id}: a digit gives the length box the keyboard");
+        let b = &h.app.tool.as_ref().unwrap().dims[0];
+        assert_eq!((b.value.as_str(), b.locked), ("25", true), "{id}");
+        assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some(id), "{id}: digits are not shortcuts");
     }
 }
 
@@ -351,11 +361,6 @@ fn a_typed_length_makes_two_clicks_draw_a_dimensioned_segment() {
         steps(&mut h, id, picks);
         h.step(&json!({"move":{"sketch":start}})).unwrap();
         h.settle();
-        // The field beside the pointer is the offset once that distance has a reference. A length
-        // is typed into the length box.
-        if h.app.tool.as_ref().unwrap().dims.iter().any(|b| b.label == "Offset") {
-            focus_length(&mut h);
-        }
         digit(&mut h, '8');
         // Apart from the reference pick, so the two clicks are not one double click.
         h.frames(30);
@@ -429,7 +434,6 @@ fn the_normal_switch_needs_a_length_and_draws_a_normal_line() {
 
     h.step(&json!({"move":{"sketch":[20,0]}})).unwrap();
     h.settle();
-    focus_length(&mut h);
     digit(&mut h, '8');
     h.frames(2);
     click_switch(&mut h, "normal");

@@ -136,7 +136,8 @@ fn offset_side(signed: f64) -> f64 {
 /// The typed offset as its driving parameter and the length in millimetres. `name = expression`
 /// defines the user parameter `name`, the same way a dimension does.
 fn typed_offset(doc: &mut solidcraft_doc::Document, p: &Value, mode: &str) -> Result<Option<(String, f64)>> {
-    if p.get("offset").is_none() {
+    // `offset` is optional. A missing key and JSON null both mean "through `at`", as `length` does.
+    if p.get("offset").is_none_or(Value::is_null) {
         return Ok(None);
     }
     if !matches!(mode, "parallel" | "horizontal" | "vertical") {

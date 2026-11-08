@@ -147,6 +147,12 @@ fn construction_offset_is_a_driving_constraint_on_the_chosen_side() {
     run(&mut s, "parameters.change", json!({"name":"span","expression":"7 mm"}));
     assert!((line_anchor(&s, vid).x + 7.0).abs() < 1e-6);
 
+    let through_null = run(&mut s, "sketch.construction_line.horizontal", json!({"at":[3, 5], "offset": null}));
+    let nid = through_null["curves"][0].as_str().unwrap();
+    assert!(curve(&sketch(&s), nid).infinite);
+    assert!((line_anchor(&s, nid).y - 5.0).abs() < 1e-6, "a null offset is through the click");
+    run(&mut s, "sketch.construction_line.perpendicular", json!({"curve":"a","at":[4, 1],"offset":null}));
+
     let before = s.doc.to_json();
     for p in [
         json!({"mode":"parallel","curve":"a","at":[4, 1],"offset":0}),

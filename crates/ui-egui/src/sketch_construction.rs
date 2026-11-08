@@ -29,11 +29,10 @@ pub(crate) fn typed_length(t: &Tool) -> Option<&str> {
     crate::sketch_dims::locked_expression(t, "Length").map(str::trim).filter(|text| !text.is_empty())
 }
 
-/// A digit typed while a one-click tool's value box waits gives that box the keyboard, so the
-/// digit is its first character. The box beside the pointer is the offset when the line has
-/// one: that digit is the distance from the reference, and the line stays infinite. The length
-/// box takes the digit only when it is the box waiting (a perpendicular line, or a parallel
-/// line before its reference is picked). A letter still reaches the shortcuts.
+/// A digit typed while a one-click tool's Length box waits gives that box the keyboard, so the
+/// digit is its first character. Horizontal, vertical and parallel keep that: two clicks then
+/// draw a dimensioned segment. The Offset box is opt-in and takes a digit only after it already
+/// has the keyboard. A letter still reaches the shortcuts.
 pub fn claim_typed_length(app: &SolveApp, ctx: &egui::Context) {
     let Some(t) = app.tool.as_ref() else { return };
     if !construction_line_mode(t.cmd).is_some_and(length_box_at_start) || !t.pts.is_empty() || t.hover.is_none() {
@@ -42,9 +41,7 @@ pub fn claim_typed_length(app: &SolveApp, ctx: &egui::Context) {
     if ctx.memory(|m| m.focused().is_some()) {
         return;
     }
-    let Some(index) = t.dims.iter().position(|b| b.label == "Offset").or_else(|| t.dims.iter().position(|b| b.label == "Length")) else {
-        return;
-    };
+    let Some(index) = t.dims.iter().position(|b| b.label == "Length") else { return };
     let digit = ctx.input(|i| {
         !i.modifiers.command
             && !i.modifiers.alt
@@ -152,7 +149,8 @@ fn params(app: &SolveApp, t: &Tool, pointer: &(Vec2, Option<String>), preview: b
         if let Some(offset) = crate::sketch_dims::locked_value(app, t, "Offset") {
             p["offset"] = json!(offset);
         }
-        if !preview && let Some(expression) = crate::sketch_dims::locked_expression(t, "Offset") {
+        // A locked box the user cleared is no offset. An empty string is not a length expression.
+        if !preview && let Some(expression) = crate::sketch_dims::locked_expression(t, "Offset").filter(|text| !text.trim().is_empty()) {
             p["offset"] = json!(expression);
         }
     }
