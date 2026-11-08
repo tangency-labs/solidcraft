@@ -98,7 +98,7 @@ pub const HEBREW_FALLBACK: &str = "hebrew_fallback";
 
 /// Name of the Arabic fallback entry in [`egui::FontDefinitions`]: first of the fallbacks for an
 /// Arabic UI, last otherwise. It stays after the Latin interface font, which keeps drawing spaces,
-/// digits and Latin text, so each Arabic word is one shaped run (see [`crate::bidi`]).
+/// digits and Latin text, so each Arabic word is one shaped run (see [`solidcraft_ui_text::bidi`]).
 pub const ARABIC_FALLBACK: &str = "arabic_fallback";
 
 /// egui's built-in monospace face, also the last fallback of every sans family (#2955).
@@ -110,22 +110,6 @@ pub const CJK_LANGUAGES: &[&str] = &["ja", "zh", "zh-TW", "ko"];
 /// Whether the UI language needs a CJK font (the web app fetches one only then).
 pub fn needs_cjk_font(language: &str) -> bool {
     CJK_LANGUAGES.contains(&language)
-}
-
-/// Whether the UI language needs the Simplified or Traditional Chinese web font (#8894).
-pub fn needs_chinese_font(language: &str) -> bool {
-    matches!(language, "zh" | "zh-TW")
-}
-
-/// Which on-demand web face a CJK UI language loads: `"zh"`, `"zh-TW"`, or `"ja"` (also for
-/// Korean until a Hangul face ships). `None` when the language uses only the bundled Latin faces.
-pub fn web_script_font_kind(language: &str) -> Option<&'static str> {
-    match language {
-        "zh" => Some("zh"),
-        "zh-TW" => Some("zh-TW"),
-        "ja" | "ko" => Some("ja"),
-        _ => None,
-    }
 }
 
 /// Whether `text` has characters only the CJK fallback draws: kana, CJK ideographs and their
@@ -345,11 +329,6 @@ mod tests {
         assert!(loader.tick(&mut language, false), "Chinese needs its own face (#8894)");
         loader.finished(true, &mut language);
         assert!(!loader.tick(&mut language, true));
-        assert_eq!(web_script_font_kind("zh"), Some("zh"));
-        assert_eq!(web_script_font_kind("zh-TW"), Some("zh-TW"));
-        assert_eq!(web_script_font_kind("ja"), Some("ja"));
-        assert!(needs_chinese_font("zh"));
-        assert!(!needs_chinese_font("ja"));
     }
 
     #[test]

@@ -132,6 +132,22 @@ fn promote_font_to_front(fonts: &mut FontDefinitions, name: &str) {
     }
 }
 
+/// Whether the UI language needs the Simplified or Traditional Chinese web font (#8894).
+pub fn needs_chinese_font(language: &str) -> bool {
+    matches!(language, "zh" | "zh-TW")
+}
+
+/// Which on-demand web face a CJK UI language loads: `"zh"`, `"zh-TW"`, or `"ja"` (also for
+/// Korean until a Hangul face ships). `None` when the language uses only the bundled Latin faces.
+pub fn web_script_font_kind(language: &str) -> Option<&'static str> {
+    match language {
+        "zh" => Some("zh"),
+        "zh-TW" => Some("zh-TW"),
+        "ja" | "ko" => Some("ja"),
+        _ => None,
+    }
+}
+
 /// Install the downloaded Japanese font with the CJK UI's shared mixed-script baseline.
 pub fn install_cjk_font_for(ctx: &egui::Context, bytes: Vec<u8>, language: &str) -> bool {
     install_web_script_fonts(ctx, Some(bytes), None, language)
@@ -1336,5 +1352,16 @@ mod tests {
         let mut output = ctx.run_ui(egui::RawInput::default(), |_| {});
         output.textures_delta.clear();
         assert!(ctx.fonts_mut(|f| f.has_glyphs(&semibold(14.0), "设置")));
+    }
+
+    /// The web shell fetches the Chinese face for a Chinese UI and the Japanese one for Japanese
+    /// and Korean (#8894).
+    #[test]
+    fn the_web_shell_fetches_the_face_each_cjk_language_needs() {
+        assert_eq!(web_script_font_kind("zh"), Some("zh"));
+        assert_eq!(web_script_font_kind("zh-TW"), Some("zh-TW"));
+        assert_eq!(web_script_font_kind("ja"), Some("ja"));
+        assert!(needs_chinese_font("zh"));
+        assert!(!needs_chinese_font("ja"));
     }
 }

@@ -1016,8 +1016,7 @@ mod web {
 
         /// Whether the shell already has the on-demand face the live language needs.
         fn script_font_ready(&self) -> bool {
-            match solidcraft_ui_egui::ui_kit::type_face::web_script_font_kind(solidcraft_ui_text::effective_language(&self.app.preferences.language))
-            {
+            match solidcraft_ui_egui::fonts::web_script_font_kind(solidcraft_ui_text::effective_language(&self.app.preferences.language)) {
                 Some("zh") => self.chinese_bytes.is_some() && self.chinese_kind == Some("zh"),
                 Some("zh-TW") => self.chinese_bytes.is_some() && self.chinese_kind == Some("zh-TW"),
                 Some("ja") => self.cjk_bytes.is_some(),
@@ -1070,7 +1069,7 @@ mod web {
             let ready = self.script_font_ready();
             let effective = solidcraft_ui_text::effective_language(&self.app.preferences.language);
             if self.font.tick(&mut self.app.preferences.language, ready) {
-                self.fetch_font(ctx, solidcraft_ui_egui::ui_kit::type_face::web_script_font_kind(effective).unwrap_or("ja"));
+                self.fetch_font(ctx, solidcraft_ui_egui::fonts::web_script_font_kind(effective).unwrap_or("ja"));
             }
             // The CJK face leads only a CJK UI: its Cyrillic glyphs are full-width, so switching
             // to Ukrainian (or English) must put the Latin face back in front.
