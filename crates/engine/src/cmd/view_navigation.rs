@@ -890,6 +890,8 @@ mod tests {
     fn left_and_right_steps_from_a_tilted_view_change_only_the_yaw() {
         let mut s = Session::default();
         let close = |a: f64, b: f64| (a - b).abs() < 1e-9;
+        // The yaw change, wrapped into (-pi, pi].
+        let turned = |to: f64, from: f64| (to - from + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
         for (yaw, pitch) in [(0.0, 0.0), (0.4, 0.61), (-2.0, -0.8), (3.0, 1.2)] {
             let cam = Camera { yaw, pitch, distance: 100.0, ..Default::default() };
             let mut turn = |action: &str| -> Camera {
@@ -899,9 +901,9 @@ mod tests {
             let (left, right) = (turn("left"), turn("right"));
             for to in [&left, &right] {
                 assert!(close(to.pitch, pitch), "pitch {pitch} became {}", to.pitch);
-                assert!(close((to.yaw - yaw).abs(), f64::to_radians(15.0)), "yaw {yaw} became {}", to.yaw);
+                assert!(close(turned(to.yaw, yaw).abs(), f64::to_radians(15.0)), "yaw {yaw} became {}", to.yaw);
             }
-            assert!(close(left.yaw - yaw, yaw - right.yaw), "left and right turn opposite ways");
+            assert!(close(turned(left.yaw, yaw), -turned(right.yaw, yaw)), "left and right turn opposite ways");
             for (action, step) in [("up", 15.0), ("down", -15.0)] {
                 let to = turn(action);
                 let expected = (pitch + f64::to_radians(step)).clamp(-std::f64::consts::FRAC_PI_2, std::f64::consts::FRAC_PI_2);
