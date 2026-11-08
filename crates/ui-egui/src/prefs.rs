@@ -1614,14 +1614,15 @@ preference_settings! {
     /// choice here (`save_mesh_send`, `save_mesh_slicer`); a settings file that still has them loads,
     /// and they are ignored.
     save_mesh_format: String = "stl".into();
-    /// URDF export writes motion links as `<mimic>` (false: each joint is free, as before).
-    urdf_mimic: bool = true;
-    /// URDF export writes the meshes where the mesh prefix points, making its folder (false:
-    /// next to the URDF whatever the prefix says, as before).
-    urdf_place_meshes: bool = true, PAGE_GENERAL => check_tr("prefs.urdf_place_meshes");
-    /// File › Export URDF… asks for its options first (false: straight to the save picker, as
-    /// before, exporting with the options last chosen).
-    urdf_export_dialog: bool = true, PAGE_GENERAL => check_tr("prefs.urdf_export_dialog");
+    /// URDF export writes motion links as `<mimic>`. Default false: each joint is free, as
+    /// before; the options dialog remembers the last choice.
+    urdf_mimic: bool = false;
+    /// URDF export writes the meshes where the mesh prefix points, making its folder. Default
+    /// false: next to the URDF whatever the prefix says, as before.
+    urdf_place_meshes: bool = false, PAGE_GENERAL => check_tr("prefs.urdf_place_meshes");
+    /// File › Export URDF… asks for its options first. Default false: straight to the save
+    /// picker, as before, exporting with the options last chosen.
+    urdf_export_dialog: bool = false, PAGE_GENERAL => check_tr("prefs.urdf_export_dialog");
     /// Hidden edges in the current-view DXF export (false: omit, true: dashed).
     view_dxf_dashed: bool = false;
     /// Model-space chord tolerance for current-view DXF curves, in millimetres.

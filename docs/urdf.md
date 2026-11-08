@@ -5,12 +5,11 @@ Description Format), the format ROS, Gazebo, Isaac Sim, PyBullet and MuJoCo read
 becomes a link with its mesh, mass and inertia. Each joint becomes a URDF joint, or a short
 chain of them, that moves the parts the way SolidCraft does.
 
-- **Desktop:** **File → Export URDF…** asks for the options below and remembers two of them:
-  **Couple motion links** (preference `urdf_mimic`) and **Write meshes where the prefix points**
-  (`urdf_place_meshes`), both on by default. Turning off **URDF export: ask for options before
-  saving** (`urdf_export_dialog`, in Preferences › General) goes straight to the save picker, as
-  before, with the options last chosen. With all three off the export is the one older versions
-  wrote.
+- **Desktop:** **File → Export URDF…** goes straight to the save picker and writes the URDF older
+  versions wrote. Turn on **URDF export: ask for options before saving** (`urdf_export_dialog`, in
+  Preferences › General) to choose the options below first. The dialog remembers **Couple motion
+  links** (`urdf_mimic`) and **Write meshes where the prefix points** (`urdf_place_meshes`, also in
+  Preferences › General) for the next export. All three are off by default.
 - **Commands:** `file.export {"path": "robot.urdf"}` (or `"format": "urdf"`)
 - **MCP:** the `export` tool with a `.urdf` path or `format: "urdf"`
 - **CLI:** `solidcraft-cli run script.json --out robot.urdf`
@@ -45,8 +44,8 @@ way, the error names the files already written and the one that failed.
 | `effort` | 1000 | Effort limit for joint values with none saved, in N (sliding) or N m (turning). |
 | `velocity` | 10 | Velocity limit for joint values with none saved, in m/s or rad/s. |
 | `collision` | mesh | What a body left on `auto` becomes: `mesh` or `convex_hull`. See [Collision shapes](#collision-shapes). |
-| `mimic` | false | Write `<mimic>` for motion links. `false` leaves each joint free, as older versions did. The desktop dialog turns it on (`urdf_mimic`). |
-| `place_meshes` | false | Write the meshes where `mesh_prefix` points, making the folder. `false` writes them next to the URDF whatever the prefix says, as older versions did; copy them where the prefix points yourself. The desktop dialog turns it on. |
+| `mimic` | false | Write `<mimic>` for motion links. `false` leaves each joint free, as older versions did. The desktop dialog's **Couple motion links** (`urdf_mimic`). |
+| `place_meshes` | false | Write the meshes where `mesh_prefix` points, making the folder. `false` writes them next to the URDF whatever the prefix says, as older versions did; copy them where the prefix points yourself. The desktop dialog's **Write meshes where the prefix points** (`urdf_place_meshes`). |
 
 URDF requires `effort` and `velocity` on every moving joint. A joint's own values come first, then
 these parameters, then the defaults, with a warning naming the joints that used them. A value that
