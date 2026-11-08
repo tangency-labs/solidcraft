@@ -581,12 +581,14 @@ fn g_integral(cn: &Nurbs, u: Ivl, a: f64, b: f64, z0: f64) -> Result<f64> {
 
 /// The largest magnitude of a vector enclosure's length, bounded by its components' sum.
 fn mag3(v: [Ivl; 3]) -> f64 {
-    v.iter().map(|c| c.mag()).sum()
+    v.iter()
+        .fold(Ivl::from(0.0), |sum, c| sum + Ivl::from(c.mag()))
+        .hi
 }
 
-/// `hi - lo` of an interval, a bound on its width.
+/// `hi - lo` of an interval, rounded up: a bound on its width.
 fn width(x: Ivl) -> f64 {
-    x.hi - x.lo
+    (Ivl::from(x.hi) - Ivl::from(x.lo)).hi
 }
 
 /// `int |x|^i` over `[xl, xh]` (`xl <= 0 <= xh`), enclosed: also `int x^i` for even `i`.
