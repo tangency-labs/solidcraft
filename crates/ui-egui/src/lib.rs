@@ -541,6 +541,8 @@ pub(crate) enum EscapeOwner {
 pub struct SolveApp {
     /// Common panel foundation, internal opt-in; stays on the app across document tabs.
     pub(crate) panel_runtime: Option<panel_runtime::AppPanelRuntime>,
+    /// Current immutable geometry while production content borrows the app.
+    pub(crate) panel_content_frame: Option<panel_runtime::HostFrame>,
     pub(crate) panel_layout_preferences: panel_runtime::PanelLayoutPreferences,
     pub blur: blur::State,
     pub(crate) blur_session: blur::Session,
@@ -853,6 +855,7 @@ impl SolveApp {
         let (shot_tx, shot_rx) = std::sync::mpsc::channel();
         let mut app = SolveApp {
             panel_runtime: None,
+            panel_content_frame: None,
             panel_layout_preferences: panel_runtime::PanelLayoutPreferences::default(),
             viewport_status: Default::default(),
             blur: Default::default(),
@@ -1143,6 +1146,7 @@ impl SolveApp {
             "auto_ortho_faces": self.ui.auto_ortho_faces,
             "pick_bodies": self.ui.pick_bodies,
             "auto_project": self.session.auto_project,
+            "project_construction": self.session.project_construction,
             "visual_style": self.ui.visual_style,
             "browser_collapsed": self.tree.collapsed,
             "browser_expanded": self.tree.expanded,
@@ -1212,6 +1216,9 @@ impl SolveApp {
         }
         if let Some(a) = flag("auto_project") {
             self.session.auto_project = a;
+        }
+        if let Some(c) = flag("project_construction") {
+            self.session.project_construction = c;
         }
         if let Some(m) = v.get("autosave_minutes").and_then(Value::as_f64).filter(|m| m.is_finite()) {
             self.autosave_minutes = m.clamp(0.0, 600.0);
@@ -2176,12 +2183,12 @@ impl SolveApp {
             }
             let empty = sel.is_empty();
             self.start("solid.extrude");
-            if empty
-                && let Some(d) = &mut self.dialog
-                && let Some(input) = d.inputs.first_mut()
-            {
-                input.accept |= selection::FACES | selection::EDGES;
+            if let Some(d) = &mut self.dialog {
+                // Opened by Press Pull, so the dialog says so, whatever was picked (#11705).
                 d.press_pull = true;
+                if empty && let Some(input) = d.inputs.first_mut() {
+                    input.accept |= selection::FACES | selection::EDGES;
+                }
             }
             return;
         }
@@ -3506,6 +3513,7 @@ impl SolveApp {
         // The status bar first: it spans the window's width below History and the side panels.
         if self.universal_panel_host_enabled() {
             self.universal_workspace_ui(ui);
+            semantic_content::finalize(self, ui.ctx());
             // Browser-owned editors retain their independent legacy windows,
             // drafts and capture questions while the Browser host is suppressed.
             browser::editors(self, ui);

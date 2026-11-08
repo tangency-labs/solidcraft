@@ -309,6 +309,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     app.tree.picked_components.clear();
     // Preferences the session holds go with the user, not the tab (#680).
     app.session.auto_project = out.session.auto_project;
+    app.session.project_construction = out.session.project_construction;
     app.session.set_validation(out.session.validation());
     // So does the host's pre-command check: every tab is held to it.
     app.session.set_command_check(out.session.command_check());
@@ -2193,6 +2194,28 @@ mod tests {
         adopt(&mut a, Session::default());
         assert_eq!(a.docs.count(), 1);
         assert!(!a.session.auto_project, "a design adopted over a blank one");
+    }
+
+    /// Projecting references as construction geometry is the user's too (#13142), like
+    /// auto-projection: it holds in new tabs, the tab switched to, after the last tab closes and
+    /// in a design adopted over a blank one, and the preferences file keeps it.
+    #[test]
+    fn project_construction_follows_the_user_across_tabs() {
+        let mut a = app();
+        a.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        a.session.project_construction = true;
+        new_design(&mut a);
+        assert!(a.session.project_construction, "a new tab");
+        a.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).unwrap();
+        switch(&mut a, 0);
+        assert!(a.session.project_construction, "the tab switched to");
+        let prefs: Value = serde_json::from_str(&a.prefs()).unwrap();
+        assert_eq!(prefs["project_construction"], true);
+        close(&mut a, 1, true);
+        close(&mut a, 0, true);
+        assert!(active_is_blank(&a) && a.session.project_construction, "after the last tab closes");
+        adopt(&mut a, Session::default());
+        assert!(a.session.project_construction, "a design adopted over a blank one");
     }
 
     /// The host's pre-command check holds in every tab: new ones, the one switched to, a design

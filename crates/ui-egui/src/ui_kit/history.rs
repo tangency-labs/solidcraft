@@ -224,7 +224,7 @@ impl HistoryTransport {
         }
     }
 
-    fn label(self, playing: bool) -> &'static str {
+    pub(crate) fn label(self, playing: bool) -> &'static str {
         crate::i18n::tr(match self {
             Self::First => "ui.history_first",
             Self::Back => "ui.history_back",

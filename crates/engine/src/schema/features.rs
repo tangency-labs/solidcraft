@@ -529,7 +529,8 @@ pub struct FilletParams {
     /// The radius; the chord's width with `type: chord`, the equivalent circular setback with
     /// `type: curvature`, the start radius with `type: variable` or `spline`.
     pub radius: LengthExpr,
-    /// The body whose edges the points pick. Default: whichever body has an edge there.
+    /// The body whose edges the points pick. Default: each point is looked up on every placed
+    /// body, shown or hidden, and a point on edges of 2 bodies is refused, naming them.
     #[serde(default)]
     pub body: Option<String>,
     /// Round each picked edge's tangent chain with it. Default: true; false rounds exactly the

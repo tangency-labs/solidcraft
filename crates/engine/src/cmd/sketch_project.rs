@@ -40,16 +40,16 @@ const AUTO_PROJECT_CONTRACT: TypedContract<AutoProjectParams> = TypedContract::n
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.project", "Project", crate::checked!("sketch.project", project_cmd)).at("SKETCH", "CREATE").icon("project").key("P").enabled(in_sketch).contract(&PROJECT_CONTRACT).output(output_schema_for::<ProjectResult>).params(
-        concat!(refs_doc!(), "; projection_link?: bool (default true)", created_doc!()),
+        concat!(refs_doc!(), "; projection_link?: bool (default true); construction?: bool (default the session's preference, off: the created curves are construction geometry)", created_doc!()),
     ),
     CommandSpec::new("sketch.intersect", "Intersect", crate::checked!("sketch.intersect", intersect_cmd)).at("SKETCH", "CREATE").icon("intersect").enabled(in_sketch).contract(&INTERSECT_CONTRACT).output(output_schema_for::<ProjectResult>).params(
-        concat!("refs: [{body}, {face: [x,y,z], body?}, {edge: [x,y,z], body?}, {sketch, curve}]: section curves (or points) with the sketch plane; projection_link?: bool (default true)", created_doc!()),
+        concat!("refs: [{body}, {face: [x,y,z], body?}, {edge: [x,y,z], body?}, {sketch, curve}]: section curves (or points) with the sketch plane; projection_link?: bool (default true); construction?: bool (default the session's preference, off: the created curves are construction geometry)", created_doc!()),
     ),
     CommandSpec::new("sketch.include_3d", "Include 3D Geometry", crate::checked!("sketch.include_3d", include_cmd))
         .at("SKETCH", "CREATE")
         .icon("include")
         .enabled(in_sketch)
-        .contract(&INCLUDE_3D_CONTRACT).output(output_schema_for::<ProjectResult>).params(concat!("refs: like Project (edges, vertices, sketch curves and points); curves out of the sketch plane are flattened onto it", created_doc!())),
+        .contract(&INCLUDE_3D_CONTRACT).output(output_schema_for::<ProjectResult>).params(concat!("refs: like Project (edges, vertices, sketch curves and points); curves out of the sketch plane are flattened onto it; construction?: bool (default the session's preference, off: the created curves are construction geometry)", created_doc!())),
     CommandSpec::new("sketch.project_to_surface", "Project To Surface", crate::checked!("sketch.project_to_surface", project_to_surface))
         .at("SKETCH", "CREATE")
         .icon("project_surface")
@@ -452,6 +452,26 @@ fn add_link_unless_present(
     Ok(Some(link))
 }
 
+/// Make the curves of `link` construction geometry: references to draw against, left out of
+/// profiles (#13142). They stay linked; a link rebuilt because its shape changed comes back as
+/// normal geometry, as curves switched to construction by hand do.
+fn mark_construction(sk: &mut Sketch, link: &str) {
+    for c in sk.link_curves(link) {
+        if let Some(curve) = sk.curves.get_mut(c) {
+            curve.construction = true;
+        }
+    }
+}
+
+/// [`mark_construction`] for `link` in sketch `id`, as the session's preference asks of the face
+/// edges a new sketch projects (#13142).
+pub(super) fn construct_link(s: &mut Session, id: u64, link: &str) -> Result<()> {
+    sketch_store::update(s, id, |_, _, sk| {
+        mark_construction(sk, link);
+        Ok(())
+    })
+}
+
 /// A command's reply as JSON: they build their replies from the types their output schemas
 /// describe, so the two can't drift apart.
 fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
@@ -474,6 +494,11 @@ fn run_links(s: &mut Session, p: &Value, cmd: &str, kind: LinkKind, projection_l
     if refs.is_empty() {
         return Err(bad(cmd, "`refs` is empty"));
     }
+    let construction = match p.get("construction") {
+        None => s.project_construction,
+        Some(Value::Bool(value)) => *value,
+        Some(_) => return Err(bad(cmd, "`construction` must be a boolean")),
+    };
     let id = sketch_store::active(s).ok_or_else(|| EngineError::Other("no sketch is being edited".into()))?;
     let sources: Vec<LinkSource> = refs.iter().map(|v| source(s, v, cmd)).collect::<Result<_>>()?;
     let (out, present) = sketch_store::update(s, id, |s, doc, sk| {
@@ -487,6 +512,9 @@ fn run_links(s: &mut Session, p: &Value, cmd: &str, kind: LinkKind, projection_l
             match add_link_unless_present(s, doc, id, sk, kind, src, kind == LinkKind::Project) {
                 Ok(Some(l)) => {
                     let (curves, points) = link_parts(sk, &l);
+                    if construction {
+                        mark_construction(sk, &l);
+                    }
                     let mut result = ProjectedLink { link: Some(l.clone()), curves, points };
                     if !projection_link {
                         result.link = None;
