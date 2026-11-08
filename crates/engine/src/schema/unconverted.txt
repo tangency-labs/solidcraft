@@ -7,7 +7,6 @@ doc.recover
 doc.recovery_discard
 doc.recovery_list
 face.delete
-file.export
 file.insert_mesh
 file.insert_step
 file.new
