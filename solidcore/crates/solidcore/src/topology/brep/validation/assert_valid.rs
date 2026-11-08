@@ -737,22 +737,45 @@ mod tests {
         let checked = |spec| {
             let mut c = check(false, 19, None);
             c.reports = AssertArray::new();
-            c.reports.add_unique_delete_duplicate(AssertReport::new(spec).unwrap());
+            c.reports
+                .add_unique_delete_duplicate(AssertReport::new(spec).unwrap());
             c
         };
         let input = checked(spec.clone());
         for changed in [
-            ReportSpec { reporter: Some(ObjectKey(4)), ..spec.clone() },
-            ReportSpec { owner: Some(ObjectKey(4)), ..spec.clone() },
-            ReportSpec { other: Some(ObjectKey(4)), ..spec.clone() },
-            ReportSpec { other_type: 16021, ..spec.clone() },
-            ReportSpec { other: None, ..spec.clone() },
+            ReportSpec {
+                reporter: Some(ObjectKey(4)),
+                ..spec.clone()
+            },
+            ReportSpec {
+                owner: Some(ObjectKey(4)),
+                ..spec.clone()
+            },
+            ReportSpec {
+                other: Some(ObjectKey(4)),
+                ..spec.clone()
+            },
+            ReportSpec {
+                other_type: 16021,
+                ..spec.clone()
+            },
+            ReportSpec {
+                other: None,
+                ..spec.clone()
+            },
         ] {
             let result = checked(changed);
             assert_eq!(result.failure_classes(), input.failure_classes());
-            assert_eq!(result.failures_beyond(&input).first().map(|(_, n)| *n), Some(1));
+            assert_eq!(
+                result.failures_beyond(&input).first().map(|(_, n)| *n),
+                Some(1)
+            );
         }
-        let measured = checked(ReportSpec { value: 0.25, tol3d: 0.5, ..spec });
+        let measured = checked(ReportSpec {
+            value: 0.25,
+            tol3d: 0.5,
+            ..spec
+        });
         assert!(measured.failures_beyond(&input).is_empty());
         assert!(input.failures_beyond(&input).is_empty());
     }
@@ -772,7 +795,8 @@ mod tests {
                 test_index: 19,
                 owner: Some(ObjectKey(4)),
                 ..ReportSpec::default()
-            }).unwrap(),
+            })
+            .unwrap(),
         );
         assert!(matches!(
             result.failures_beyond(&input).as_slice(),

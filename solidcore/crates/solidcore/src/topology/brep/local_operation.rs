@@ -2522,7 +2522,8 @@ mod tests {
         );
         let (v0, manifold) = volume_and_manifold(&k, &mut b);
         assert!(manifold && (v0 - 8000.0).abs() <= 1e-9 * 8000.0, "{v0}");
-        let input = validation::standing(&mut k, &mut b.clone_standing_for_self().unwrap()).unwrap();
+        let input =
+            validation::standing(&mut k, &mut b.clone_standing_for_self().unwrap()).unwrap();
         refuse_unsound(&mut k, &b, &input).unwrap();
         let top = box_top(&k, &b);
         let raised = Surface::from(Plane::from_normal(Vec3::new(0.0, 0.0, 25.0), Vec3::Z));
@@ -2600,7 +2601,9 @@ mod tests {
         };
         let input = check(&[(4, 0), (4, 1), (6, 2)]);
         assert!(check(&[(4, 0), (6, 2)]).failures_beyond(&input).is_empty());
-        assert!(check(&[(4, 0), (4, 1), (6, 2)]).failures_beyond(&input).is_empty());
+        assert!(check(&[(4, 0), (4, 1), (6, 2)])
+            .failures_beyond(&input)
+            .is_empty());
         let more = check(&[(4, 0), (4, 1), (4, 3), (6, 2)]).failures_beyond(&input);
         assert_eq!(more.len(), 1);
         assert_eq!(more.first().map(|&(_, n)| n), Some(1));
