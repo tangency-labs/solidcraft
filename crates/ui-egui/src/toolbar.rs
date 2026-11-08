@@ -438,7 +438,8 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         // Compatibility for scenarios that used the former Home tab.
         crate::scenario::publish_target_as("tab:home", "titlebar:home", home);
         crate::scenario::publish_rect("appbar:home", home);
-        if idle && (home_response.hovered() || home_response.has_focus()) {
+        let plated = t.plate_button(ui.painter(), home.shrink(3.0), t.app_bar_tint(), crate::plate::Lit::of(&home_response, idle, false));
+        if !plated && idle && (home_response.hovered() || home_response.has_focus()) {
             ui.painter().rect_filled(home.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
         }
         icons::paint_app_bar(ui.painter(), home.shrink(7.0), "home", if idle { 1.0 } else { 0.35 });
@@ -477,7 +478,8 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, tip));
             crate::scenario::publish_target(&format!("appbar:{icon}"), br);
             crate::scenario::publish_target(&format!("titlebar:{icon}"), br);
-            if enabled && (resp.hovered() || resp.has_focus()) {
+            let plated = t.plate_button(ui.painter(), br.shrink(3.0), t.app_bar_tint(), crate::plate::Lit::of(&resp, enabled, false));
+            if !plated && enabled && (resp.hovered() || resp.has_focus()) {
                 ui.painter().rect_filled(br.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
             }
             icons::paint_app_bar(ui.painter(), Rect::from_center_size(br.center(), vec2(18.0, 18.0)), icon, if enabled { 1.0 } else { 0.35 });
@@ -578,8 +580,10 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
             icons::paint_app_bar(ui.painter(), report.shrink(7.0), "bug_report", 1.0);
             report_text
         } else {
-            ui.painter().rect_filled(report, t.radius_sm, if hot { t.app_bar_hover_button } else { t.app_bar });
-            ui.painter().rect_stroke(report, t.radius_sm, Stroke::new(1.0, t.app_bar_separator), egui::StrokeKind::Inside);
+            if !t.plate_button(ui.painter(), report, t.app_bar_tint(), crate::plate::Lit::of(&response, true, false)) {
+                ui.painter().rect_filled(report, t.radius_sm, if hot { t.app_bar_hover_button } else { t.app_bar });
+                ui.painter().rect_stroke(report, t.radius_sm, Stroke::new(1.0, t.app_bar_separator), egui::StrokeKind::Inside);
+            }
             let icon = Rect::from_center_size(pos2(report.left() + 14.0, report.center().y), vec2(18.0, 18.0));
             icons::paint_app_bar(ui.painter(), icon, "bug_report", 1.0);
             if report_label {
@@ -599,7 +603,8 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         // Settings sits immediately left of Help (also Ctrl+,).
         let gear = Rect::from_center_size(pos2(report.left() - 52.0, r.center().y), vec2(32.0, 32.0));
         let gresp = ui.interact(gear, ui.scope_id().with("sc_prefs_button"), Sense::click());
-        if gresp.hovered() || gresp.has_focus() {
+        let plated = t.plate_button(ui.painter(), gear.shrink(3.0), t.app_bar_tint(), crate::plate::Lit::of(&gresp, true, false));
+        if !plated && (gresp.hovered() || gresp.has_focus()) {
             ui.painter().rect_filled(gear.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
         }
         icons::paint_app_bar(ui.painter(), gear.shrink(7.0), "settings", 1.0);
@@ -1978,12 +1983,23 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                 // Cancel, Finish Edit) never show pressed; a tool pinned into their group does.
                 let exit =
                     finish && matches!(selected.id, "sketch.finish" | "sketch.finish_auto_constrain" | "sketch.cancel" | "component.finish_edit");
-                let neutral = if !exit
+                let on = !exit
                     && (resp.is_pointer_button_down_on()
                         || (ribbon_shows_pressed(app, selected.id) && !(persistent && app.preferences.persistent_ribbon_pressed))
                         || family_open
-                        || (selected.id == "view.shots_strip" && app.preferences.render_shots_strip))
-                {
+                        || (selected.id == "view.shots_strip" && app.preferences.render_shots_strip));
+                // A plated theme's plate in place of the flat face, over the whole button and
+                // nearly touching its neighbours.
+                let plated = !persistent
+                    && t.plate_button(
+                        &painter,
+                        whole.expand2(vec2(BUTTON_GAP * 0.5 - 0.5, 0.0)),
+                        t.accent,
+                        crate::plate::Lit::of(&resp, info.enabled, on),
+                    );
+                let neutral = if plated {
+                    egui::Shape::Noop
+                } else if on {
                     egui::Shape::Rect(egui::epaint::RectShape::new(
                         whole,
                         t.radius_sm,
@@ -2472,7 +2488,8 @@ fn quick_access_bar(app: &mut SolveApp, ui: &mut egui::Ui, bar: Rect, mut x: f32
         let label = app.tr_label(info.label).to_string();
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, &label));
         crate::scenario::publish_target(&format!("appbar:quick:{}", c.id), br);
-        if enabled && (resp.hovered() || resp.has_focus()) {
+        let plated = t.plate_button(ui.painter(), br.shrink(3.0), t.app_bar_tint(), crate::plate::Lit::of(&resp, enabled, false));
+        if !plated && enabled && (resp.hovered() || resp.has_focus()) {
             ui.painter().rect_filled(br.shrink(3.0), t.radius_sm, t.app_bar_hover_button);
         }
         icons::paint_on(ui.painter(), Rect::from_center_size(br.center(), vec2(20.0, 20.0)), info.icon, Some(true), if enabled { 1.0 } else { 0.35 });
