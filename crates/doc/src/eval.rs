@@ -9104,8 +9104,6 @@ pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut 
     Ok(out)
 }
 
-/// `plane` moved by the placement `m`; an error when `m` does not keep it a plane (a placement
-/// that is not a rigid motion, which [`Document`] does not take).
 /// `plane` for a feature of component `comp`, with each construction plane of another component
 /// (under any offset or flip of it) given as the plane where that component puts it, in `comp`'s
 /// frame (#11734). A construction plane is kept in its own component's frame, as the axes are
@@ -9155,6 +9153,8 @@ fn construction_planes_in_frame<'a>(doc: &Document, st: &ModelState, comp: u64, 
     Ok(Cow::Owned(mapped))
 }
 
+/// `plane` moved by the placement `m`; an error when `m` does not keep it a plane (a placement
+/// that is not a rigid motion, which [`Document`] does not take).
 fn placed_plane(m: &crate::Mat, plane: &Plane) -> Result<Plane> {
     Plane::new(crate::apply_point(m, plane.origin), crate::apply_vector(m, plane.x), crate::apply_vector(m, plane.y))
         .ok_or_else(|| DocError::Invalid("a sketch plane cannot be placed: the placement is not a rigid motion".into()))

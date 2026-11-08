@@ -1,4 +1,4 @@
-use solidcore_record::{Vec2, Vec3};
+use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_kernel::measure;
 use solidcraft_sketch::{ConstraintKind, Sketch};
 
@@ -1309,7 +1309,15 @@ fn a_sketch_on_the_construction_plane_of_another_component_lies_on_it() {
     assert!(model.result(id).unwrap().error.is_none(), "{:?}", model.result(id).unwrap().error);
     let state = model.state();
     let solved = state.sketch(id).unwrap();
-    // The sketch is kept in its own component's frame: placed, it is in the plane y = 60.
-    let world = crate::apply_point(&doc.component_transform(sketcher), solved.plane.origin);
-    assert!((world.y - 60.0).abs() < 1e-6, "the sketch lies at y = {} instead of the plane's 60", world.y);
+    // The sketch is kept in its own component's frame; placed, it lies on the plane where the
+    // owner puts it (the owner is not moved): the same origin, axes, normal and line end.
+    let want = Plane::named("XZ").unwrap().offset(60.0);
+    let m = doc.component_transform(sketcher);
+    let close = |a: Vec3, b: Vec3, what: &str| assert!((a - b).len() < 1e-6, "{what}: {a:?} instead of {b:?}");
+    close(crate::apply_point(&m, solved.plane.origin), want.origin, "origin");
+    close(crate::apply_vector(&m, solved.plane.x), want.x, "x axis");
+    close(crate::apply_vector(&m, solved.plane.y), want.y, "y axis");
+    close(crate::apply_vector(&m, solved.plane.normal()), want.normal(), "normal");
+    let end = solved.plane.origin + solved.plane.x * 10.0 + solved.plane.y * 5.0;
+    close(crate::apply_point(&m, end), want.origin + want.x * 10.0 + want.y * 5.0, "line end");
 }
