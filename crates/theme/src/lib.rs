@@ -404,7 +404,8 @@ pub struct Custom {
 }
 
 /// Use a theme file's palette for its base, or the built-in palettes (`None`). Returns whether
-/// that changed anything (the visuals follow on the next [`apply`]).
+/// that changed anything (the visuals follow on the next [`apply`]). This sets tokens only: a host with an icon
+/// renderer sets that renderer's palette with it (SolidCraft: `theme::set_file_palette`).
 pub fn set_custom(custom: Option<Custom>) -> bool {
     let changed = CUSTOM.with(|c| c.replace(custom) != custom);
     if changed {
@@ -425,7 +426,8 @@ pub fn custom() -> Option<Custom> {
 }
 
 /// Draw with `tokens` as the theme's palette for the current base until the returned guard drops, which restores the
-/// previous one, even when a test's assertion fails.
+/// previous one, even when a test's assertion fails. Like [`set_custom`] it sets tokens only, not a host's icon
+/// palette (SolidCraft: `theme::scoped_file`).
 pub fn scoped_tokens(tokens: Tokens) -> impl Drop {
     struct Restore(Option<Custom>);
     impl Drop for Restore {

@@ -139,7 +139,7 @@ fn analysis_colours_reach_the_shader_in_its_order() {
 
 /// The most colour literals each UI file may hold, and why. None of them carries a meaning that a
 /// colour vision mode must change. A file with more fails here: make the new colour a token in
-/// `solidcraft_theme::Tokens` (and `assets/styles/ui/palettes.rs`) instead, or, if it carries no meaning,
+/// `solidcraft_theme::Tokens` (and `crates/theme/src/palettes.rs`) instead, or, if it carries no meaning,
 /// raise the file's count here and give the reason. Fewer is always fine. The icon sources may
 /// hold none at all.
 const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[

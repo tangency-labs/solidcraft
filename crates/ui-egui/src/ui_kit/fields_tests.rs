@@ -886,15 +886,19 @@ fn selection_field_has_three_distinct_looks_in_every_theme() {
         });
         (rects, ink)
     };
-    let mut palettes: Vec<(String, Option<solidcraft_theme::Custom>, bool)> = vec![("dark".into(), None, true), ("light".into(), None, false)];
+    let mut palettes: Vec<(String, Option<crate::theme::FilePalette>, bool)> = vec![("dark".into(), None, true), ("light".into(), None, false)];
     for theme in crate::theme_files::builtin() {
         let dark = theme.base.is_dark();
-        palettes.push((theme.id.clone(), Some(solidcraft_theme::Custom { dark, tokens: crate::theme_files::resolve(theme) }), dark));
+        palettes.push((theme.id.clone(), Some(crate::theme::FilePalette {
+                dark,
+                tokens: crate::theme_files::resolve(theme),
+                icons: crate::theme_files::resolve_icon_palette(theme, &Default::default()),
+            }), dark));
     }
     let previous = solidcraft_theme::is_dark();
     for (name, custom, dark) in palettes {
         solidcraft_theme::set_dark(dark);
-        solidcraft_theme::set_custom(custom);
+        crate::theme::set_file_palette(custom);
         let t = solidcraft_theme::Tokens::get();
         let [active_filled, active_empty, filled, empty] = [(true, true), (true, false), (false, true), (false, false)].map(|(a, f)| look(a, f));
         let accented = |l: &Look| l.0.iter().any(|&(fill, stroke)| stroke == t.form_primary || fill == t.selected_bg);
@@ -930,7 +934,7 @@ fn selection_field_has_three_distinct_looks_in_every_theme() {
         assert_eq!(filled.1, Some(t.form_ink), "{name}: a filled input's count is in text colour");
         assert_eq!(empty.1, Some(t.form_dim), "{name}: an empty input's prompt is dim");
     }
-    solidcraft_theme::set_custom(None);
+    crate::theme::set_file_palette(None);
     solidcraft_theme::set_dark(previous);
 }
 
