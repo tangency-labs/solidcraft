@@ -3,7 +3,6 @@
 # type, remove its line. Never add one: a new command comes with both schemas. Sorted, one id
 # per line.
 face.delete
-file.export
 file.insert_mesh
 file.insert_step
 file.new
