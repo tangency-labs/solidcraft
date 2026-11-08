@@ -2,8 +2,8 @@
 //! (`solidcraft_ui_egui::window_chrome::native_menu`), each with a command id or a `ui.*` id, run
 //! through the same actions as the application bar's File menu (`toolbar::FileAction`).
 //!
-//! Entries that are control actions use their ids: `app.quit`, `ui.prefs {open}` (Settings and
-//! Keyboard Shortcuts), `ui.agent_chat`, `ui.help {item}`. Undo and Redo are the commands
+//! Entries that are control actions use their ids and do the same there: `app.quit`,
+//! `ui.prefs {open}` (Settings and Keyboard Shortcuts), `ui.agent_chat {toggle}`, `ui.help {item}`. Undo and Redo are the commands
 //! `edit.undo` and `edit.redo`. The other entries' ids are defined here: `ui.file.new`,
 //! `ui.file.open`, `ui.file.open_recent {path}`, `ui.file.clear_recent`, `ui.file.save`,
 //! `ui.file.save_as`, `ui.file.save_json`, `ui.file.export {format}`,
@@ -108,7 +108,7 @@ fn id_of(action: &FileAction) -> (String, Option<Value>) {
         FileAction::Command(command) => fixed(command),
         FileAction::Undo => fixed("edit.undo"),
         FileAction::Redo => fixed("edit.redo"),
-        FileAction::AgentChat => fixed("ui.agent_chat"),
+        FileAction::AgentChat => ("ui.agent_chat".into(), Some(json!({ "toggle": true }))),
     }
 }
 
@@ -277,7 +277,7 @@ mod tests {
         assert_eq!(id_of(&FileAction::Quit), ("app.quit".to_string(), None));
         assert_eq!(id_of(&FileAction::Settings), ("ui.prefs".to_string(), Some(json!({"open": "General"}))));
         assert_eq!(id_of(&FileAction::Shortcuts), ("ui.prefs".to_string(), Some(json!({"open": "Shortcuts"}))));
-        assert_eq!(id_of(&FileAction::AgentChat), ("ui.agent_chat".to_string(), None));
+        assert_eq!(id_of(&FileAction::AgentChat), ("ui.agent_chat".to_string(), Some(json!({"toggle": true}))));
         assert_eq!(entry_of("ui.file.export", Some(&json!({"format": "step"}))), Some(Entry::File(FileAction::Export("step"))));
         for (id, params) in [
             ("ui.file.export", None),
@@ -348,5 +348,34 @@ mod tests {
             assert!(entry_of(&item.id, item.params.as_ref()).is_some(), "`{}` {:?} runs nothing", item.id, item.params);
         }
         assert!(bar.menus.iter().all(|m| m.id.starts_with("menu.")), "menu ids are never actions");
+    }
+
+    /// The entries whose ids are control actions do over the control channel what they do in
+    /// the menu.
+    #[test]
+    fn shared_ids_mean_the_same_over_the_control_channel() {
+        use solidcraft_ui_egui::scenario::Harness;
+        let mut h = Harness::new();
+        h.app.preferences.ai_features = true;
+        h.app.agent_chat.open = false;
+        let (id, params) = id_of(&FileAction::AgentChat);
+        for open in [true, false] {
+            let out = h.call(&id, params.clone().unwrap_or_default());
+            assert_eq!(out["ok"], true, "{out}");
+            assert_eq!(h.app.agent_chat.open, open, "Agent Chat toggles as in the menu");
+        }
+        for action in [FileAction::Settings, FileAction::Shortcuts] {
+            let (id, params) = id_of(&action);
+            let out = h.call(&id, params.unwrap_or_default());
+            assert_eq!(out["ok"], true, "{action:?}: {out}");
+        }
+        // install_cli links into the system; its menu and control paths are the same `help::run`.
+        for item in HELP.into_iter().filter(|h| *h != "install_cli") {
+            let out = h.call(HELP_ID, json!({ "item": item }));
+            assert_eq!(out["ok"], true, "{item}: {out}");
+        }
+        assert_eq!(h.call(HELP_ID, json!({"item": "nothing"}))["ok"], false, "an unknown help item is an error");
+        let out = h.call(&id_of(&FileAction::Quit).0, json!({}));
+        assert_eq!((out["ok"].clone(), h.app.quit_requested), (json!(true), true), "{out}");
     }
 }
