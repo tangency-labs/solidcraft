@@ -33,6 +33,9 @@ pub struct Body {
     /// The last volume measured for this record and the tolerance it was measured at, shared by
     /// clones because they share the record.
     pub(crate) volume: Option<std::sync::Arc<std::sync::Mutex<Option<(u64, f64)>>>>,
+    /// The exact box ([`Body::exact_bounds`]), measured on first use and shared by clones
+    /// because they share the record.
+    pub(crate) bounds: std::sync::Arc<std::sync::OnceLock<Aabb3>>,
     /// Set for mesh bodies (`record` is then empty).
     pub(crate) mesh: Option<std::sync::Arc<crate::meshbody::TriMesh>>,
     /// Display colour (linear RGB 0..1) from an imported file; operations drop it.
@@ -494,6 +497,7 @@ impl Body {
             smlib: std::sync::Arc::new(std::sync::OnceLock::new()),
             size,
             volume: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
+            bounds: std::sync::Arc::new(std::sync::OnceLock::new()),
             mesh,
             color: None,
             paint: None,
@@ -1057,13 +1061,17 @@ impl Body {
     }
 
     /// The exact box of the body's faces, edges and vertices (SMLib's tight box); a mesh body's
-    /// is its triangles'.
+    /// is its triangles'. Measured once per record: a boolean asks for the box of every body it
+    /// meets, and the same bodies come back feature after feature. A failure is not kept.
     pub fn exact_bounds(&self) -> Result<Aabb3> {
         if self.is_mesh() {
             return Ok(self.outline_bounds());
         }
+        if let Some(b) = self.bounds.get() {
+            return Ok(*b);
+        }
         let (lo, hi) = self.smlib()?.bounds().map_err(|e| KernelError::smlib("SMLib bounds", e))?;
-        Ok(Aabb3 { min: v3(lo), max: v3(hi) })
+        Ok(*self.bounds.get_or_init(|| Aabb3 { min: v3(lo), max: v3(hi) }))
     }
 
     /// The body's volume from a mesh at `tol`, measured once per (record, tolerance): clones of
