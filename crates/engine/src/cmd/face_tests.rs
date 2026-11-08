@@ -595,6 +595,24 @@ fn a_face_pick_on_one_body_of_several_saves_that_body_in_the_feature() {
 }
 
 #[test]
+fn a_face_pick_where_two_round_walls_touch_on_a_line_is_on_both() {
+    // Two discs touching along the line x = 10 (gears in mesh): a point there is on both walls
+    // exactly, though their display meshes put it nearer one. Nothing is saved, and evaluation
+    // decides as before, so the first disc (radius 10 → 12) is the one changed, and the result
+    // says the pick was on both.
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "axis": [0, 0, 1], "radius": 10, "height": 5, "operation": "new", "body_name": "A"}));
+    run(&mut s, "solid.cylinder", json!({"base": [30, 0, 0], "axis": [0, 0, 1], "radius": 20, "height": 5, "operation": "new", "body_name": "B"}));
+    let out = run(&mut s, "solid.offset_face", json!({"faces": [[10, 0, 2.5]], "distance": 2}));
+    let warning = out["warning"].as_str().unwrap_or_default();
+    assert!(warning.contains("A and B") && warning.contains("A was changed"), "{out}");
+    let id = out["feature"].as_u64().unwrap();
+    assert_eq!(s.doc.feature(id).unwrap().kind.face_body(), None);
+    assert!((body_volume(&mut s, "A") - PI * 144.0 * 5.0).abs() < 1.0);
+    assert!((body_volume(&mut s, "B") - PI * 400.0 * 5.0).abs() < 1.0);
+}
+
+#[test]
 fn replace_face_moves_the_named_body_of_a_flush_face_and_warns_for_an_unnamed_one() {
     let target = json!({"origin": [0, -3, 0], "normal": [0, 1, 0]});
     // Unnamed, the shared face says neither body: the planar face is still found, Big takes it

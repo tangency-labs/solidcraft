@@ -164,24 +164,26 @@ pub(super) fn face_ref(s: &Session, v: &Value, body: Option<&str>, cmd: &str) ->
 /// evaluation decides as it always has, and the command's result warns and names them
 /// ([`FacesBody::warn`]). With one body, names among the picks or picks on no face, nothing is
 /// chosen here and evaluation decides as before.
+/// Which bodies a point lies on is decided by each body's exact boundary
+/// ([`bodies_on_boundary`]), never by its display mesh: two bodies that touch along a line (gears
+/// in mesh) both hold a point on that line, whichever tessellation comes out nearer.
 pub(super) fn faces_body(s: &Session, p: &Value, refs: &[Value], points: &[Vec3]) -> FacesBody {
     if let Some(n) = str_(p, "body") {
         return FacesBody { body: Some(n.to_string()), tie: None };
     }
     let none = FacesBody { body: None, tie: None };
-    if s.model.state().bodies.len() < 2 || refs.iter().any(Value::is_string) {
+    let st = s.model.state();
+    if st.bodies.len() < 2 || refs.iter().any(Value::is_string) {
         return none;
     }
     let mut found: Option<String> = None;
     for &pt in points {
-        let name = match face_at_in(s, pt, None) {
-            Ok(Some((m, _, d, name))) if near_face(&m, d) => name,
-            Ok(_) => return none,
-            Err(tied) => {
-                let on = tied.first().is_some_and(|b| matches!(face_at_in(s, pt, Some(b)), Ok(Some((m, _, d, _))) if near_face(&m, d)));
-                // Evaluation still decides, as it always has; the result says the pick was shared.
-                return FacesBody { body: None, tie: on.then_some((pt, tied)) };
-            }
+        let mut on = bodies_on_boundary(&st, pt);
+        let name = match on.len() {
+            0 => return none,
+            1 => on.remove(0),
+            // Evaluation still decides, as it always has; the result says the pick was shared.
+            _ => return FacesBody { body: None, tie: Some((pt, on)) },
         };
         match &found {
             Some(f) if *f != name => return none,
@@ -190,6 +192,26 @@ pub(super) fn faces_body(s: &Session, p: &Value, refs: &[Value], points: &[Vec3]
         }
     }
     FacesBody { body: found, tie: None }
+}
+
+/// The bodies whose exact boundary holds `p`, in model order. A pick of the running command
+/// that was resolved against the placed model names its bodies, as for [`face_at_in`] (#419).
+/// A body's exact box, grown by a micrometre, skips bodies away from the point before the
+/// kernel's exact classification decides.
+fn bodies_on_boundary(st: &solidcraft_doc::ModelState, p: Vec3) -> Vec<String> {
+    if let Some(names) = crate::frames::picked(p).filter(|n| !n.is_empty()) {
+        return model_names(st, &names);
+    }
+    st.bodies
+        .iter()
+        .filter(|b| {
+            let Ok(bounds) = b.body.exact_bounds() else { return true };
+            let (lo, hi, grow) = (bounds.min, bounds.max, 1e-3);
+            p.x >= lo.x - grow && p.x <= hi.x + grow && p.y >= lo.y - grow && p.y <= hi.y + grow && p.z >= lo.z - grow && p.z <= hi.z + grow
+        })
+        .filter(|b| matches!(b.body.classify_point(p), Ok(solidcraft_kernel::PointClass::OnBoundary)))
+        .map(|b| b.name.clone())
+        .collect()
 }
 
 /// What [`faces_body`] found for a command's face picks.
