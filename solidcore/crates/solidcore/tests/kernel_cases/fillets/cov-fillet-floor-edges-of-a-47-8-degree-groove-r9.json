@@ -1,0 +1,294 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b2": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 20.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                80.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                80.0,
+                30.0,
+                0.0
+              ],
+              "start": [
+                80.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                60.8809,
+                30.0,
+                0.0
+              ],
+              "start": [
+                80.0,
+                30.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                50.0,
+                18.0,
+                0.0
+              ],
+              "start": [
+                60.8809,
+                30.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                30.0,
+                18.0,
+                0.0
+              ],
+              "start": [
+                50.0,
+                18.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                19.1191,
+                30.0,
+                0.0
+              ],
+              "start": [
+                30.0,
+                18.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                30.0,
+                0.0
+              ],
+              "start": [
+                19.1191,
+                30.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                30.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b2"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b3"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b5"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b6"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  30.0,
+                  18.0,
+                  0.0
+                ],
+                [
+                  30.0,
+                  18.0,
+                  20.0
+                ]
+              ],
+              "index": 22
+            },
+            {
+              "at": [
+                [
+                  50.0,
+                  18.0,
+                  0.0
+                ],
+                [
+                  50.0,
+                  18.0,
+                  20.0
+                ]
+              ],
+              "index": 20
+            }
+          ],
+          "points": [
+            [
+              30.0,
+              18.0,
+              10.0
+            ],
+            [
+              50.0,
+              18.0,
+              10.0
+            ]
+          ],
+          "tolerance": 4.388482193696062
+        },
+        "kind": "round",
+        "sizes": [
+          9.0,
+          9.0
+        ],
+        "turn": "mitre"
+      }
+    }
+  ],
+  "case": "cov-fillet-floor-edges-of-a-47-8-degree-groove-r9",
+  "expected": {
+    "body_count": 1,
+    "method": "Plan area 80*30 - (41.7618 + 20)/2 * 12 = 2400 - 370.5708 = 2029.4292 mm2, extruded 20: base volume 40588.584 mm3. A round of radius R on a concave edge of deviation angle phi adds R^2 (tan(phi/2) - phi/2) per mm of edge length. Each floor edge runs the 20 mm extrusion depth and turns the profile by the flank's angle, phi = atan2(12, 10.8809) = 47.80009 degrees (0.834269 rad). Added = 2 * 20 * 81 * (tan(phi/2) - phi/2) = 3240 * 0.02600547 ≈ 84.257729 mm3, so V = 40672.84172945406 mm3.",
+    "source": "analytic",
+    "sources": [],
+    "tolerance": {
+      "rel": 1e-6
+    },
+    "volume_mm3": 40672.84172945406,
+    "what": "R9 round on the two floor edges of a groove with flanks turning atan(12/10.8809) ≈ 47.8 degrees from the floor (the outline's coordinates as written are the reference), in a profile 80x30 in plan extruded 20 mm (plan outline (0,0) (80,0) (80,30) (60.8809,30) (50,18) (30,18) (19.1191,30) (0,30), picked at (30,18,10) and (50,18,10))."
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 30,
+      "faces": 12,
+      "vertices": 20
+    }
+  },
+  "records": "cov-fillet-floor-edges-of-a-47-8-degree-groove-r9.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b6"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 8661.26742172974,
+      "body_count": 1,
+      "edges": 30,
+      "faces": 12,
+      "vertices": 20,
+      "volume_mm3": 40672.8417297351
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "R9 round on the two floor edges of a groove with flanks turning atan(12/10.8809) ≈ 47.8 degrees from the floor (the outline's coordinates as written are the reference), in a profile 80x30 in plan extruded 20 mm (plan outline (0,0) (80,0) (80,30) (60.8809,30) (50,18) (30,18) (19.1191,30) (0,30), picked at (30,18,10) and (50,18,10)).",
+  "why_not": []
+}
