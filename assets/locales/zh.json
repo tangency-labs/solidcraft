@@ -2218,6 +2218,7 @@
   "material.editor.preserved_appearance": "保留的外观",
   "material.editor.public_reference": "公开参考资料",
   "material.editor.reference": "参考",
+  "material.editor.remove": "删除",
   "material.editor.save_or_discard": "指定材料前，请保存或放弃材料草稿。",
   "material.editor.saved": "材料已保存。实体的材料指定未变。",
   "material.editor.scope": "保存材料不会将其指定给实体。空白属性和条件仍为未知。属性卡密度不会改变指定密度或质量。",
