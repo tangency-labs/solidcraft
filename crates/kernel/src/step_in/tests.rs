@@ -662,6 +662,69 @@ fn a_surface_models_closed_shell_beside_a_sheet_is_a_solid_of_its_own() {
     assert!(imp.bodies.iter().all(|b| b.color == Some([1.0, 0.5, 0.0])));
 }
 
+/// A surface model whose shells are all OPEN_SHELLs, one of them closed all the same (a unit
+/// cube) beside a sheet of two faces, the first used against its plane (as SolidWorks 2011 wrote
+/// a vendor part): SMLib's export walks that face as its plane faces and numbers the edges and
+/// vertices otherwise than the reader, its faces still in the reader's order. The model comes in
+/// as one body of all its faces, each the file's face it was; it once came in as nothing ("SMLib
+/// renumbered the solid's faces"), and the file with it.
+#[test]
+fn a_surface_model_of_open_shells_one_closed_beside_a_turned_sheet_imports() {
+    let mut t = String::from(HEAD);
+    t += &cube_entities().replace("#100=CLOSED_SHELL", "#100=OPEN_SHELL");
+    // Two unit squares at z = 5 sharing the edge x = 1, both facing +z: the first on a plane
+    // facing -z used against it, the second on a plane facing +z.
+    let corners = [(0, 0), (1, 0), (2, 0), (2, 1), (1, 1), (0, 1)];
+    for (i, (x, y)) in corners.iter().enumerate() {
+        t += &format!("#{}=CARTESIAN_POINT('',({x}.,{y}.,5.));\n#{}=VERTEX_POINT('',#{});\n", 800 + i, 810 + i, 800 + i);
+    }
+    let edges = [(0, 1), (1, 4), (4, 5), (5, 0), (1, 2), (2, 3), (3, 4)];
+    for (k, (a, b)) in edges.iter().enumerate() {
+        let (p, q) = (corners[*a], corners[*b]);
+        t += &format!("#{}=DIRECTION('',({}.,{}.,0.));\n#{}=VECTOR('',#{},1.);\n", 900 + 2 * k, q.0 - p.0, q.1 - p.1, 901 + 2 * k, 900 + 2 * k);
+        t += &format!(
+            "#{}=LINE('',#{},#{});\n#{}=EDGE_CURVE('',#{},#{},#{},.T.);\n",
+            820 + k,
+            800 + a,
+            901 + 2 * k,
+            830 + k,
+            810 + a,
+            810 + b,
+            820 + k
+        );
+    }
+    let faces: [(&[(usize, bool)], i32, &str); 2] =
+        [(&[(0, true), (1, true), (2, true), (3, true)], -1, ".F."), (&[(4, true), (5, true), (6, true), (1, false)], 1, ".T.")];
+    for (f, (lp, nz, sense)) in faces.iter().enumerate() {
+        let base = 940 + 20 * f;
+        let oes: Vec<String> = lp
+            .iter()
+            .enumerate()
+            .map(|(j, (e, fwd))| {
+                t += &format!("#{}=ORIENTED_EDGE('',*,*,#{},{});\n", base + j, 830 + e, if *fwd { ".T." } else { ".F." });
+                format!("#{}", base + j)
+            })
+            .collect();
+        t += &format!("#{}=EDGE_LOOP('',({}));\n#{}=FACE_OUTER_BOUND('',#{},.T.);\n", base + 5, oes.join(","), base + 6, base + 5);
+        t += &format!("#{}=CARTESIAN_POINT('',(0.,0.,5.));\n#{}=DIRECTION('',(0.,0.,{nz}.));\n", base + 7, base + 8);
+        t += &format!("#{}=AXIS2_PLACEMENT_3D('',#{},#{},$);\n#{}=PLANE('',#{});\n", base + 9, base + 7, base + 8, base + 10, base + 9);
+        t += &format!("#{}=ADVANCED_FACE('',(#{}),#{},{sense});\n", base + 11, base + 6, base + 10);
+    }
+    t += "#130=OPEN_SHELL('',(#951,#971));\n#110=SHELL_BASED_SURFACE_MODEL('Bracket',(#130,#100));\n";
+    t += &context(20, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += "#60=MANIFOLD_SURFACE_SHAPE_REPRESENTATION('',(#110),#20);\n";
+    t += TAIL;
+    let imp = step_import(&t).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let b = &imp.bodies[0];
+    assert_eq!((b.source_item, b.file_faces, b.body.face_count()), (110, 8, 8), "{:?}", imp.warnings);
+    assert!(b.refused.is_none(), "{:?}", b.refused);
+    // Each face is the file's face it was: the sheet's first, then the cube's.
+    assert_eq!(b.face_origin, [951, 971, 411, 431, 451, 471, 491, 511]);
+    let m = measure(&b.body).unwrap();
+    assert!(rel(m.area, 8.0) < 1e-9, "area {}", m.area);
+}
+
 #[test]
 fn hand_written_part_in_inches_with_colour() {
     let mut t = String::from(HEAD);
