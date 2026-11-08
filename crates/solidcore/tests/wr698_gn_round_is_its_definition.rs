@@ -909,9 +909,20 @@ fn a_round_on_a_reopened_round_lies_on_it() {
             // Newton step, of 150 948), and the session's question (`round_too_small`)
             // whether the round changes the part, which reads the faces' normals across the
             // edge on the reopened round's definition: one evaluation and one solve more
-            // (65 and 13 measured with it, 64 and 12 before it). Three solves more since the
-            // section's curve ends on the crossing, not at the given point (#2907): 16 of one
-            // Newton step, the evaluations still 65; with the given point back, the 13 hold
+            // (65 evaluations measured with it, 64 before it).
+            //
+            // The 16 solves are a measured pin, not a derived count. Each is a station solve of
+            // one Newton step, on the station memo's miss (4 stations, keyed on exact s and
+            // side), traced by caller:
+            // - 2: the blend edge use's binormal at s = 20, one per side;
+            // - 6: `round_too_small`'s 3 stations, both sides. All 3 lie on the end section
+            //   s = 20, but the edge's pcurve, whose control points all have u = 20.0, evaluates
+            //   to 20, 20 + 4e-15 and 20 + 7e-15; the third key evicts 20.0, solved again;
+            // - 2: the solver's setup, `is_periodic` at s = 60 and 25.714;
+            // - 6: the stitch's seam checks (`find_infinite_region`).
+            // The 3 solves above the 13 measured before the section's curve ended on the crossing
+            // (#2907) are that evaluator drift (#3159). The ceiling becomes a derived count once
+            // #3159 is decided.
             assert!(pb.bound() < 1e-8, "the bound {:e}", pb.bound());
             assert!(
                 counts.evaluations <= 65
