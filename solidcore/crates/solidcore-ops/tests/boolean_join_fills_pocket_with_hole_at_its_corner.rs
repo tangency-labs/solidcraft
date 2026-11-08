@@ -17,7 +17,7 @@ use std::f64::consts::TAU;
 
 use solidcore_ops::boolean::{boolean, BooleanOp};
 use solidcore_ops::sweep::{extrude, Curve, DraftCorner};
-use solidcore_ops::{Body, CheckLevel};
+use solidcore_ops::{session, Body, CheckLevel};
 
 /// The hexagon's circumradius.
 const R: f64 = 6.3685;
@@ -126,9 +126,10 @@ fn filling_a_pocket_whose_corner_a_hole_reaches_joins() {
 }
 
 /// The same body after its record round trip: the corner segment is two coincident edges of
-/// two faces each, and the join must work as well.
+/// two faces each, and with `boolean_glues_self_touching_edges` the join works as well.
 #[test]
 fn filling_a_pocket_whose_corner_a_hole_reaches_joins_after_a_record_round_trip() {
+    session::set_fixes(["boolean_glues_self_touching_edges"]).unwrap();
     let target = round_tripped(&target());
     assert_eq!(target.counts().unwrap(), [15, 38, 24]);
     assert!(target.check(CheckLevel::All).unwrap().is_valid());

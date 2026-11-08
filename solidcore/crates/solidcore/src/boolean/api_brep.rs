@@ -208,6 +208,167 @@ enum MergeMethod {
 /// (`SmMerge sMerge(*pContext, pBrep1, pBrep2)`, or with `0, 0, &sOptions` when
 /// `options` is given), then run `ManifoldBoolean` when both operands are manifold
 /// solids (`SmBrep::IsManifoldSolid`) and `NonManifoldBoolean` otherwise.
+/// One edge of a boolean operand, as [`glue_self_touching_edges`] compares them: its
+/// vertices (the lower index first), its shell, its faces, its curve's kind and three
+/// points along it.
+struct TouchingEdge {
+    edge: EdgeId,
+    start: crate::topology::VertexId,
+    ends: (u32, u32),
+    shell: Option<crate::topology::ShellId>,
+    faces: Vec<crate::topology::FaceId>,
+    kind: core::mem::Discriminant<crate::curve::curve::p2::CurveKind>,
+    samples: [crate::Point3; 3],
+}
+
+impl TouchingEdge {
+    /// Whether `other` is a second copy of this edge: the same vertices and curve kind,
+    /// points within `tol`, both on faces (not wires), and no face in common (two faces
+    /// meeting across the line, the kernel's crack edges, are not copies). The shells may
+    /// differ: the record round trip leaves a solid touching itself in two shells joined
+    /// along the line, and the kernel shares one edge between shells that touch.
+    fn is_copy_of(&self, other: &Self, tol: f64) -> bool {
+        if self.shell.is_none()
+            || other.shell.is_none()
+            || self.ends != other.ends
+            || self.kind != other.kind
+            || self.faces.iter().any(|f| other.faces.contains(f))
+        {
+            return false;
+        }
+        if self.start == other.start {
+            self.samples
+                .iter()
+                .zip(&other.samples)
+                .all(|(a, c)| a.distance(*c) <= tol)
+        } else {
+            self.samples
+                .iter()
+                .zip(other.samples.iter().rev())
+                .all(|(a, c)| a.distance(*c) <= tol)
+        }
+    }
+}
+
+/// Not upstream (opt-in, `Kernel::fixes.boolean_glues_self_touching_edges`, WR-754): the
+/// coincident edges along which a solid touches itself, glued back into one edge each.
+///
+/// A solid touching itself along a line (a hole's bottom meeting two pocket walls along a
+/// segment of their corner edge) is one edge of four faces in the kernel's own results, and
+/// its merge handles that form. The record format writes such an edge as one edge per face
+/// pair (`split_touching`), and the merge of an operand in that form gives a body that is not
+/// a closed solid, or fails in `topology_intersector::p1::relate`
+/// (tangency-labs/solidcraft#12785). So each group of edges with the same two vertices, the
+/// same curve kind and coincident points (three samples within the B-rep tolerance), whose
+/// faces are all distinct, is glued into its first edge (`GlueEdgesGeneral`, no gap, with
+/// region nesting), whether the copies lie in one shell or in two shells that touch along the
+/// line (the round trip leaves a self-touching solid in two). Edges whose faces repeat (a face
+/// on both sides of the line: the kernel's crack edges, which its check refuses glued) are
+/// left alone. Returns the number of edges glued away.
+///
+/// # Errors
+///
+/// Those of the topology walk, the curve evaluations and `GlueEdgesGeneral`.
+fn glue_self_touching_edges(k: &mut Kernel, b: &mut Brep) -> Result<usize> {
+    use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+    use crate::topology::brep::p2::ArenaNotifyState;
+    use crate::topology::brep::p7::glue_edges_general;
+    use crate::topology::edge;
+    use crate::topology::edgeuse::p1 as eu1;
+
+    let tol = b.tolerance();
+    let mut touches: Vec<TouchingEdge> = Vec::new();
+    for &e in b.edge_list() {
+        let data = b.edge(e)?;
+        let Some(curve) = data.curve.as_ref() else {
+            continue;
+        };
+        let Some(start) = edge::start_vertex(b, e)? else {
+            continue;
+        };
+        let Some(end) = edge::other_vertex(b, e, Some(start))? else {
+            continue;
+        };
+        if start == end {
+            continue;
+        }
+        let interval = data.interval;
+        let mut samples = [crate::Point3::ZERO; 3];
+        for (s, t) in samples.iter_mut().zip([0.25, 0.5, 0.75]) {
+            *s = curve.evaluate_point(k, interval.evaluate(t))?;
+        }
+        let mut shell = None;
+        let mut faces = Vec::new();
+        for &eu in &data.edgeuses {
+            let Some(fu) = eu1::faceuse(b, eu)? else {
+                continue;
+            };
+            if let Some(f) = b.faceuse(fu)?.face {
+                faces.push(f);
+            }
+            if shell.is_none() {
+                shell = eu1::faceuse_shell(b, fu)?;
+            }
+        }
+        faces.sort_unstable();
+        faces.dedup();
+        let (a, z) = (start.index(), end.index());
+        touches.push(TouchingEdge {
+            edge: e,
+            start,
+            ends: (a.min(z), a.max(z)),
+            shell,
+            faces,
+            kind: core::mem::discriminant(curve.kind()),
+            samples,
+        });
+    }
+    let mut pairs: Vec<(EdgeId, EdgeId, OrientType)> = Vec::new();
+    let mut taken: Vec<EdgeId> = Vec::new();
+    for (i, first) in touches.iter().enumerate() {
+        if taken.contains(&first.edge) {
+            continue;
+        }
+        for other in touches.iter().skip(i + 1) {
+            if taken.contains(&other.edge) || !first.is_copy_of(other, tol) {
+                continue;
+            }
+            let orientation = if first.start == other.start {
+                OrientType::Same
+            } else {
+                OrientType::Opposite
+            };
+            pairs.push((first.edge, other.edge, orientation));
+            taken.push(other.edge);
+        }
+    }
+    if pairs.is_empty() {
+        return Ok(0);
+    }
+    let mut state = ArenaNotifyState::with_attributes_of(b);
+    let mut result = Ok(());
+    for &(surviving, to_delete, orientation) in &pairs {
+        if let Err(e) = glue_edges_general(
+            k,
+            b,
+            Some(surviving),
+            orientation,
+            0.0,
+            true,
+            Some(to_delete),
+            None,
+            &mut state.env(None),
+        ) {
+            result = Err(e);
+            break;
+        }
+    }
+    state.restore_attributes(b)?;
+    result?;
+    b.refresh_cached_topology();
+    Ok(pairs.len())
+}
+
 fn merge_boolean(
     k: &mut Kernel,
     brep1: Brep,
@@ -223,8 +384,8 @@ fn merge_boolean(
 /// B-rep (`SmMerge::m_vEdges`) as it left them.
 fn merge_boolean_by(
     k: &mut Kernel,
-    brep1: Brep,
-    brep2: Brep,
+    mut brep1: Brep,
+    mut brep2: Brep,
     operation: BooleanOperation,
     options: Option<MergeOptions>,
     method: MergeMethod,
@@ -232,6 +393,11 @@ fn merge_boolean_by(
     // SmMerge sMerge(*pContext, pBrep1, pBrep2) (or 0, 0, &sOptions): tolerance and
     // angle 0, both computed by the constructor.
     use crate::boolean::merge::p3::BooleanDriver;
+    // (not upstream, opt-in: WR-754) the operands' self-touch edge copies glued first
+    if k.fixes.boolean_glues_self_touching_edges {
+        glue_self_touching_edges(k, &mut brep1)?;
+        glue_self_touching_edges(k, &mut brep2)?;
+    }
     // (not upstream) the driver carries the operands' attributes through the merge, as
     // upstream's live on the objects the merge edits
     let mut driver = crate::boolean::merge::p3::DependencyMerge::carrying_attributes();
