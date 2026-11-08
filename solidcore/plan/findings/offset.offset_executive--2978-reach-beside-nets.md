@@ -14,9 +14,11 @@ with a pole at the apex: faces 3 and 4 lie on a plane to 7.1e-15, faces 1 and 2 
 **The bound.** In each normal section of an edge, the plane's trace `x0 + τ u` meets the net
 at a `(u, v, τ)`. Krawczyk's operator proves that meeting for every section of a piece of the
 edge's parameters [Krawczyk 1969; Moore 1977], and the reach is `√(|x0 − p|² + τ²)`. Past a side,
-the net is the extension the executive builds (`Ruled`): `H + s′ H_v` in homogeneous
-coordinates, and `H + s′ H_u + t′ H_v + s′ t′ H_uv` past a corner, where both sides' rows end
-in one weight ratio. A test checks this model against the built extension.
+the net is the extension the executive builds (`Ruled`): the lines `G + λ G_v` along the
+side's tangents (where the rows end in different weight ratios, the same lines on other
+parameters, or the product form), and `G + Δu G_u + Δv G_v + Δu Δv G_uv` past a corner, where
+both sides' rows end in one weight ratio. A test checks this model against the built
+extension.
 
 ![In a normal section: the net's trace runs to the side of its box and on along the Ruled extension's line; the moved plane's trace meets that line, and the Krawczyk box around the meeting proves it.](offset.offset_executive--2978-reach-beside-nets/reach-beside-a-net.png)
 
