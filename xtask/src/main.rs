@@ -269,7 +269,7 @@ fn cmd_action_matrix(bless: bool, results: Option<&str>, from: Option<&str>) -> 
 }
 
 fn cmd_layers() -> Result<(), String> {
-    let crates = layers::from_metadata(&metadata()?)?;
+    let crates = layers::from_metadata(&metadata()?, Some(&root()))?;
     println!("Dependency layering (plan/architecture.md §3)\n");
     println!("{:<28} {:<14} workspace deps", "crate", "layer");
     for c in &crates {
@@ -288,10 +288,12 @@ fn cmd_layers() -> Result<(), String> {
             .collect();
         println!("{:<28} {:<14} {}", c.name, layers::describe(layers::classify(&c.name)), ws.join(", "));
     }
-    let violations = layers::check(&crates);
+    let mut violations: Vec<String> = layers::check(&crates).iter().map(ToString::to_string).collect();
+    let allow = std::fs::read_to_string(root().join(layers::SEAM_LIST)).map_err(|e| format!("{}: {e}", layers::SEAM_LIST))?;
+    violations.extend(layers::seam_check(&crates, &allow, &layers::read_public(&root())?));
     println!();
     if violations.is_empty() {
-        println!("OK: {} crates, no layering violations.", crates.len());
+        println!("OK: {} crates, no layering or solidcore seam violations.", crates.len());
         Ok(())
     } else {
         println!("{} violation(s):", violations.len());
@@ -445,7 +447,7 @@ fn cmd_wasm() -> Result<(), String> {
 /// The wasm check and how many crates it covers. It uses the ci profile so the host build
 /// scripts and proc macros built for clippy and the tests are reused.
 fn wasm_check() -> Result<(Command, usize), String> {
-    let crates = layers::from_metadata(&metadata()?)?;
+    let crates = layers::from_metadata(&metadata()?, Some(&root()))?;
     let mut set: Vec<String> = crates
         .iter()
         .filter(|c| matches!(layers::classify(&c.name), Some(layers::Class::Layer(_) | layers::Class::Shared)))
