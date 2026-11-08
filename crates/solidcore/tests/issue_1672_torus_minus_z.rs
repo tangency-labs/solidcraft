@@ -1,7 +1,9 @@
 //! tangency-labs/solidcore#1672 (SolidCraft rig sweeps/4007): the outer half of a disc
 //! of radius 14 centred 14 from the z axis, revolved 270 degrees about -z with
 //! `fixes.revolve_analytic_profile_faces`, has an `SmTorus` face that `orient_body`
-//! swaps (`SwapUV`), which rebuilds the torus from its NURB.
+//! swaps (`SwapUV`). Upstream's swap rebuilt the torus from its NURB; the swap now keeps
+//! the torus as it was made (WR-701), so the body is valid without the torus fixes below,
+//! which hold for the rebuilds that remain (`Reverse`).
 //!
 //! - Upstream's rebuild mirrors the tube interval -90..90 to 90..450 (WR-408), so the
 //!   torus fails `SmSurfOfRevolution` test 2 and `SmTorus` test 2. The fix is
@@ -138,15 +140,11 @@ fn issue_1672_revolve_without_fixes_is_valid() {
     }
 }
 
-/// Upstream's torus fixes off: the rebuilt torus is the inner half of the tube
-/// (WR-408), and its two parameterisation tests fail.
+/// The torus fixes off: the swapped torus keeps its definition (WR-701), so it is not
+/// rebuilt into the inner half of the tube (WR-408) and passes its parameterisation tests.
 #[test]
-fn issue_1672_upstream_torus_rebuild_fails_test_2() {
+fn issue_1672_swapped_torus_keeps_its_definition() {
     let mut k = Kernel::default();
     k.fixes.revolve_analytic_profile_faces = true;
-    let mut b = revolve(&mut k, Vec3::new(0.0, 0.0, -1.0));
-    assert_eq!(
-        check(&mut k, &mut b),
-        (Some(false), vec![(15020, 2), (15015, 2)])
-    );
+    assert_valid_with_volume(&mut k, Vec3::new(0.0, 0.0, -1.0));
 }

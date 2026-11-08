@@ -203,7 +203,6 @@ fn exact_reconstruction_completes_r70_and_validates_through_step(
     let mut k = Kernel::default();
     k.fixes.fillet_exact_round_classes = true;
     k.fixes.fillet_exact_arc_sections = true;
-    k.fixes.swap_uv_keeps_analytic_definition = true;
     let mut b = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), CYLINDER_RADIUS, TOP)?;
     for &(x, y) in &centers {
         let tool = create_cylinder(

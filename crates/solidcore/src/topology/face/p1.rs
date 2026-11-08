@@ -27,11 +27,14 @@
 //! | [`FixSeamPlanType`]                          | `SmFixSeamPlanType` (`SmTypes.h`)            |
 //!
 //! Deviations:
-//! - **Opt-in shrink fixes (the fork's, not upstream).** `shrink_geometry` keeps the
-//!   face's trim curves where its surface's trim keeps the surface's parameterization
-//!   (WR-700, `Kernel::fixes.face_trim_curves_kept_where_exact`), and takes a bound
-//!   within 64 ulp of a B-spline knot as that knot (WR-702,
-//!   `Kernel::fixes.face_shrink_bound_on_knot`).
+//! - **Shrink keeps exact trims and ends on knots (the fork's, not upstream).**
+//!   `shrink_geometry` keeps the face's trim curves where its surface's trim keeps the
+//!   surface's parameterization (WR-700, the fork's tangency-labs/smlib@6f811b8), and
+//!   takes a bound within 64 ulp of the knot vector's largest |knot| of a B-spline knot as
+//!   that knot (WR-702, @d80ea93; the fork scales by the knot's own magnitude, which misses a
+//!   knot at 0).
+//!   Upstream removes every trim curve and projects the edges again, and keeps a
+//!   sliver span past a knot.
 //! - **Object model.** A face is a record in the [`Brep`]'s arenas; the methods are free
 //!   functions taking the B-rep and the face's id. Out-parameters are return values,
 //!   with an additional UV-domain `_into` entry point for partial outputs on error.
@@ -1701,28 +1704,31 @@ fn shrink_geometry_notifying(
     }
 
     // Not upstream (WR-702, the fork's tangency-labs/smlib@d80ea93): a bound within
-    // rounding of one of the surface's knots (64 ulp of the knot's magnitude) is that
-    // knot. A computed end parameter lands a rounding step either side of the knot it
+    // rounding of one of the surface's knots is that knot. A computed end parameter (a
+    // trim curve's end control point, from knot insertion and evaluation on the surface's
+    // parameters) lands a few roundings of those parameters either side of the knot it
     // stands for, and TrimWithDomain would space a bound just past a knot off it by its
-    // snapping tolerance and keep a sliver span past the knot.
-    if k.fixes.face_shrink_bound_on_knot {
-        let surface = fp2::surface(b, f)?.ok_or_else(|| null("face without surface"))?;
-        if surface.is_kind_of(B_SPLINE_SURFACE_TYPE)? {
-            for dir in [SurfParamType::U, SurfParamType::V] {
-                let (knots, _) = surface.knots_with_nurb(k, dir, None)?;
-                let (lo, hi) = if dir == SurfParamType::U {
-                    (&mut min.x, &mut max.x)
-                } else {
-                    (&mut min.y, &mut max.y)
-                };
-                for &knot in &knots {
-                    let round = 64.0 * f64::EPSILON * knot.abs();
-                    if (*lo - knot).abs() <= round {
-                        *lo = knot;
-                    }
-                    if (*hi - knot).abs() <= round {
-                        *hi = knot;
-                    }
+    // snapping tolerance and keep a sliver span past the knot. The rounding is of the
+    // parameters' magnitude, the knot vector's largest |knot|, not the knot's own (a knot
+    // at 0 has none); 64 ulp of it is far above a few roundings and far below any span a
+    // surface means (a span that short is the sliver).
+    let surface = fp2::surface(b, f)?.ok_or_else(|| null("face without surface"))?;
+    if surface.is_kind_of(B_SPLINE_SURFACE_TYPE)? {
+        for dir in [SurfParamType::U, SurfParamType::V] {
+            let (knots, _) = surface.knots_with_nurb(k, dir, None)?;
+            let (lo, hi) = if dir == SurfParamType::U {
+                (&mut min.x, &mut max.x)
+            } else {
+                (&mut min.y, &mut max.y)
+            };
+            let scale = knots.iter().fold(0.0_f64, |m, k| m.max(k.abs()));
+            let round = 64.0 * f64::EPSILON * scale;
+            for &knot in &knots {
+                if (*lo - knot).abs() <= round {
+                    *lo = knot;
+                }
+                if (*hi - knot).abs() <= round {
+                    *hi = knot;
                 }
             }
         }
@@ -1735,11 +1741,10 @@ fn shrink_geometry_notifying(
     // Not upstream (WR-700, the fork's tangency-labs/smlib@6f811b8): whether the trim
     // keeps the surface's parameterization, by its kind's construction
     // (`TrimKeepsParameterization`), asked before it is trimmed
-    let same_map = k.fixes.face_trim_curves_kept_where_exact
-        && match fp2::surface(b, f)? {
-            Some(s) => s.trim_keeps_parameterization(k, &new_domain)?,
-            None => false,
-        };
+    let same_map = match fp2::surface(b, f)? {
+        Some(s) => s.trim_keeps_parameterization(k, &new_domain)?,
+        None => false,
+    };
 
     // Trim the surface (status ignored)
     if let Some(s) = b.face_mut(f)?.surface.as_mut() {
@@ -1747,8 +1752,8 @@ fn shrink_geometry_notifying(
     }
 
     // remove all associated UVTrimCurves (status ignored; passed on with the opt-in fix,
-    // tangency-labs/smlib 6997962, which keeps the curve trims below ignored); with
-    // WR-700, not where the trim kept the surface's parameterization: they lie on it as
+    // tangency-labs/smlib 6997962, which keeps the curve trims below ignored); not
+    // where the trim kept the surface's parameterization (WR-700): they lie on it as
     // they did and are kept
     if !same_map {
         ignore_status(pass(k, remove_uv_trim_curves_notifying(b, f, notify))?)?;
@@ -3547,5 +3552,82 @@ mod tests {
         let k = Kernel::default();
         // no face use: upstream dereferences null
         assert!(create_oriented_trim_boundary(&k, &mut b, f, true, true, None, &key_of).is_err());
+    }
+}
+
+#[cfg(test)]
+mod swap_refused_tests {
+    use super::*;
+    use crate::math::Point3;
+    use crate::nurbs::b_spline_surface::p1::CanonicalSurfaceData;
+    use crate::primitive::api_primitives::create_cylinder;
+    use crate::surface::surface::SurfaceKind;
+
+    /// WR-701 through the face's `SwapUV` (the step `StitchAndOrient` and the cavity swap of
+    /// `topology::brep::p6` run on each face they turn): a cylinder face whose net lies on
+    /// the axis (every sweep iso circle degenerate, so the polar converter cannot be made on
+    /// the transposed net) is refused with the converter's error, and the face is as it was:
+    /// its surface's definition and net, its domain, its face use and every trim. Upstream
+    /// ignored the rebuild's status and swapped a surface whose definition it could not make.
+    #[test]
+    fn a_face_whose_surface_refuses_the_swap_is_left_as_it_was() {
+        let mut k = Kernel::default();
+        let mut b = create_cylinder(&mut k, Point3::ZERO, 1.0, 2.0).unwrap();
+        let face = b
+            .faces()
+            .ids()
+            .find(|&f| {
+                b.face(f)
+                    .unwrap()
+                    .surface
+                    .as_ref()
+                    .is_some_and(|s| matches!(s.kind(), SurfaceKind::Cone(_)))
+            })
+            .unwrap();
+        let Some(SurfaceKind::Cone(cone)) = b
+            .face_mut(face)
+            .unwrap()
+            .surface
+            .as_mut()
+            .map(Surface::kind_mut)
+        else {
+            panic!("a cylinder face");
+        };
+        let net = cone.base_mut();
+        let c = net.canonical().unwrap();
+        let points: Vec<Point3> = c
+            .control_points
+            .iter()
+            .map(|p| Point3::new(0.0, 0.0, p.z))
+            .collect();
+        net.set_canonical(&CanonicalSurfaceData {
+            u_degree: c.u_degree,
+            v_degree: c.v_degree,
+            control_points: &points,
+            form: c.form,
+            u_multiplicities: &c.u_multiplicities,
+            v_multiplicities: &c.v_multiplicities,
+            u_knots: &c.u_knots,
+            v_knots: &c.v_knots,
+            knot_type: c.knot_type,
+            weights: Some(&c.weights),
+            uv_domain: None,
+        })
+        .unwrap();
+        // the face's record, its surface's kind and every edge use's trim, as they are
+        let state = |b: &Brep| {
+            let f = b.face(face).unwrap();
+            let kind = f.surface.as_ref().map(|s| format!("{:?}", s.kind()));
+            let trims: Vec<String> = b
+                .edgeuses()
+                .ids()
+                .map(|eu| format!("{:?}", eu1::uv_trim_curve(b, eu).unwrap().0))
+                .collect();
+            (f.uv_domain, f.faceuse, kind, trims)
+        };
+        let before = state(&b);
+        let e = swap_uv(&k, &mut b, face).unwrap_err();
+        assert!(matches!(e, SolidError::Upstream { .. }), "{e:?}");
+        assert!(state(&b) == before, "the refused swap changed the face");
     }
 }

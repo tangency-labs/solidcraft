@@ -13,7 +13,10 @@
 //! (the volume integrator's tolerance, as in `wr685_gn_section.rs`). A lone box edge's
 //! rails run past the box in the fork (3 spans over s in [0, 80], at d01d7b0 too) and
 //! along it here (2 spans), with or without this change: there only the section's own
-//! values (control point (1, 2)'s y, z and weight) are compared.
+//! values (control point (1, 2)'s y, z and weight) are compared. So they are for the
+//! chamfered box's and the pipe's rounds: the fork's nets keep a sliver span past the
+//! edge's end (7 rows in u, the last three 4e-4 to 6e-4 past it), which the shrink here
+//! ends on the knot (WR-702): each is one span along the edge, its x the edge's own.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -78,6 +81,8 @@ struct Net {
     sum: [f64; 4],
     abs: f64,
     cp12: [f64; 4],
+    /// The x coordinates of the first and of the last row of control points in u.
+    x_ends: [Vec<f64>; 2],
 }
 
 /// The blend faces (B-spline surfaces of degree `vdeg` in v), in face order.
@@ -100,6 +105,7 @@ fn blend_nets(b: &Brep, vdeg: usize) -> Vec<Net> {
             sum: [0.0; 4],
             abs: 0.0,
             cp12: [0.0; 4],
+            x_ends: [Vec::new(), Vec::new()],
         };
         for iu in 0..nu {
             for iv in 0..nv {
@@ -114,11 +120,39 @@ fn blend_nets(b: &Brep, vdeg: usize) -> Vec<Net> {
                 if iu == 1 && iv == 2 {
                     net.cp12 = [p.x, p.y, p.z, w];
                 }
+                if iu == 0 {
+                    net.x_ends[0].push(p.x);
+                }
+                if iu + 1 == nu {
+                    net.x_ends[1].push(p.x);
+                }
             }
         }
         out.push(net);
     }
     out
+}
+
+/// Every net is one cubic span along the edge from x = 0 to `length` (WR-702: no sliver
+/// span past its end): its first row of control points at x = 0, its last at x = `length`,
+/// and its rows' x summing to `nv` times 0 + L/3 + 2L/3 + L.
+fn one_span_along(what: &str, nets: &[Net], length: f64) {
+    for n in nets {
+        assert_eq!(n.nu, 4, "{what}: one span along the edge: {n:?}");
+        for (row, at) in n.x_ends.iter().zip([0.0, length]) {
+            assert_eq!(row.len(), n.nv, "{what}: an end row of the net");
+            assert!(
+                row.iter().all(|&x| close(x, at)),
+                "{what}: end row x {row:?} want {at}"
+            );
+        }
+        let want = n.nv as f64 * 2.0 * length;
+        assert!(
+            close(n.sum[0], want),
+            "{what}: x sum {} want {want}",
+            n.sum[0]
+        );
+    }
 }
 
 /// `|a - b| <= 1e-9 max(|a|, |b|)`, with an absolute floor of 1e-9 times the body's size
@@ -386,14 +420,10 @@ fn equal_area_thumbweight_is_each_station_s_own() {
         let es: Vec<EdgeId> = order.iter().map(|&i| both[i]).collect();
         fillet_edges(&mut k, &mut b, &es, 2.0, 2, 2, GN_DEFAULT_THUMBWEIGHT).unwrap();
         let v = volume_of(&k, &mut b);
-        check(
-            &format!("edges {order:?}"),
-            v,
-            want_v,
-            &blend_nets(&b, 7),
-            &nets,
-            true,
-        );
+        let what = format!("edges {order:?}");
+        let got = blend_nets(&b, 7);
+        check(&what, v, want_v, &got, &nets, false);
+        one_span_along(&what, &got, 40.0);
     }
 }
 
@@ -491,14 +521,10 @@ fn pipe_root_rounds_are_the_fork_s() {
         let e = pick(&k, &b, [30.0, 28.0, 10.0]);
         fillet_edges(&mut k, &mut b, &[e], 2.0, 2, n as u32, w).unwrap();
         let v = volume_of(&k, &mut b);
-        check(
-            &format!("pipe n {n} w {w}"),
-            v,
-            want_v,
-            &blend_nets(&b, 3 * n + 1),
-            &[net],
-            true,
-        );
+        let what = format!("pipe n {n} w {w}");
+        let got = blend_nets(&b, 3 * n + 1);
+        check(&what, v, want_v, &got, &[net], false);
+        one_span_along(&what, &got, 60.0);
     }
 }
 

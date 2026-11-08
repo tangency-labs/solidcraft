@@ -938,6 +938,72 @@ mod tests {
         }
     }
 
+    /// WR-701, the invariant behind this unit's swap goldens: every swap case of the golden
+    /// (its fixtures and its 16 generated seeds) builds and swaps, and keeps its
+    /// definition (the frame bit for bit), and the swapped surface at the domain fractions
+    /// (b, a) of its natural domain is the unswapped one at (a, b) of its own, to 1e-12 of
+    /// the surface's size, on a 9 x 9 grid.
+    #[test]
+    fn every_swap_case_is_its_surface_with_u_and_v_exchanged() {
+        let ctx = CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 16,
+        };
+        let k = Kernel::default();
+        let (mut swaps, mut checked) = (0, 0);
+        for case in Runner.cases(&ctx).unwrap() {
+            let i: Inputs = case.parse().unwrap();
+            if !matches!(i.op, OpIn::Swap {}) {
+                continue;
+            }
+            swaps += 1;
+            let Ok(Ok(made)) = rust_surf(&k, &i.surf) else {
+                continue;
+            };
+            let unswapped = Surface::from(made.clone());
+            let mut swapped = Surface::from(made);
+            if swapped.swap_uv(&k).is_err() {
+                continue;
+            }
+            let (Ok(r0), Ok(r1)) = (revolution(&unswapped), revolution(&swapped)) else {
+                panic!("{}: not a surface of revolution", case.name);
+            };
+            assert_eq!(r0.position(), r1.position(), "{}: frame moved", case.name);
+            assert_eq!(r0.swap_uv(), !r1.swap_uv(), "{}: swap bit", case.name);
+            let d0 = unswapped.natural_uv_domain_with_nurb(&k).unwrap();
+            let d1 = swapped.natural_uv_domain_with_nurb(&k).unwrap();
+            let mut size = 0.0_f64;
+            let mut off = 0.0_f64;
+            for a in 0..=8 {
+                for b in 0..=8 {
+                    let (a, b) = (f64::from(a) / 8.0, f64::from(b) / 8.0);
+                    let p = unswapped
+                        .evaluate_point(&k, Point2::new(
+                            d0.min().x + a * (d0.max().x - d0.min().x),
+                            d0.min().y + b * (d0.max().y - d0.min().y),
+                        ))
+                        .unwrap();
+                    let q = swapped
+                        .evaluate_point(&k, Point2::new(
+                            d1.min().x + b * (d1.max().x - d1.min().x),
+                            d1.min().y + a * (d1.max().y - d1.min().y),
+                        ))
+                        .unwrap();
+                    size = size.max(p.x.abs()).max(p.y.abs()).max(p.z.abs());
+                    off = off.max((p - q).length());
+                }
+            }
+            assert!(
+                off <= 1e-12 * size.max(1.0),
+                "{}: swapped off the unswapped by {off:e} (size {size:e})",
+                case.name
+            );
+            checked += 1;
+        }
+        assert!(swaps > 0);
+        assert_eq!(checked, swaps, "every swap case builds and swaps");
+    }
+
     /// The generators reach a successful run of every op on the Rust side.
     #[test]
     fn generated_cases_cover_every_op() {

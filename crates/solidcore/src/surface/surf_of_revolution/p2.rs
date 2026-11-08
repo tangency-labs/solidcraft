@@ -20,7 +20,7 @@
 //!
 //! Deviations:
 //! - **`TrimKeepsParameterization`** (WR-700) is the fork's
-//!   (tangency-labs/smlib@6f811b8), for `Kernel::fixes.face_trim_curves_kept_where_exact`.
+//!   (tangency-labs/smlib@6f811b8), for the shrink's kept trims (`SmFace::ShrinkGeometry`).
 //! - **Rejected generator intervals (#428).** With
 //!   `Kernel::fixes.ellipse_step_interval_checks`, the surface analytic domain is
 //!   stored only after its generator accepts the STEP interval. Default order is C++.

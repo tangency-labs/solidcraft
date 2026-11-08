@@ -4,7 +4,7 @@
 //!
 //! The case is the fork's capi `analytic_frames_survive_swap_uv`. A cone, a sphere, a
 //! torus and a plane on one oblique frame 45 from the origin are each swapped once and
-//! back. With the flag on, the frame (a plane's two axes swapped on each turn) and the
+//! back. The frame (a plane's two axes swapped on each turn) and the
 //! radii are exactly as made, and the net's points are where they were, u and v swapped,
 //! to 1e-13. Upstream fits the frame again to the net, and on the fork's base it came back
 //! 3.6e-15 to 2.7e-14 off.
@@ -160,8 +160,7 @@ fn surfaces(k: &Kernel) -> Vec<(&'static str, Surface, bool)> {
 
 #[test]
 fn analytic_frames_survive_swap_uv() {
-    let mut k = Kernel::default();
-    k.fixes.swap_uv_keeps_analytic_definition = true;
+    let k = Kernel::default();
     for (what, s, plane) in surfaces(&k) {
         let (once, twice, net) = turn(&k, s, plane);
         assert!(
@@ -169,18 +168,4 @@ fn analytic_frames_survive_swap_uv() {
             "{what}: frame and radii off by {once:e}, back by {twice:e}; net off by {net:e}"
         );
     }
-}
-
-#[test]
-fn upstream_rederives_the_frames_from_the_net() {
-    let k = Kernel::default();
-    let moved: Vec<_> = surfaces(&k)
-        .into_iter()
-        .filter_map(|(what, s, plane)| {
-            let (once, twice, _) = turn(&k, s, plane);
-            (once > 0.0 || twice > 0.0).then_some(what)
-        })
-        .collect();
-    // the fork's base moved every one of them
-    assert_eq!(moved, ["cone", "sphere", "torus", "plane"]);
 }

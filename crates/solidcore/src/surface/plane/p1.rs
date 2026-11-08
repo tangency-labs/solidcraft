@@ -40,10 +40,9 @@
 //! | [`Plane::max_analytic_domain`], [`Plane::is_parallel_to_vector`], [`Plane::is_parallel_to_vector_opt_in`], [`Plane::is_parallel_to_vector_with_kernel`], [`Plane::reverse`], [`Plane::swap_uv`] | `SmBSplineSurface::GetMaxAnalyticDomain`, `IsParallelToVector`, `Reverse`, `SwapUV` (inherited, re-dispatched) |
 //!
 //! Deviations:
-//! - **`SwapUV` keeps the plane's definition (WR-701, opt-in).** With
-//!   `Kernel::fixes.swap_uv_keeps_analytic_definition` the swap keeps the axes, domain
+//! - **`SwapUV` keeps the plane's definition (WR-701).** The swap keeps the axes, domain
 //!   and scales [`Plane::toggle_swap_uv_bit`] swapped (`SmPlane::SwapUVDefinition`, the
-//!   fork's tangency-labs/smlib@0c00de7) instead of rebuilding them from the net.
+//!   fork's tangency-labs/smlib@0c00de7); upstream rebuilds them from the net.
 //! - **Derived class.** `SmPlane` derives from `SmBSplineSurface`; a [`Plane`] holds
 //!   its B-spline part ([`Plane::base`]) next to the analytic data, and is the
 //!   [`SurfaceKind::Plane`] kind of [`Surface`]. Inherited methods whose upstream
@@ -981,13 +980,13 @@ impl Plane {
     }
 
     /// `SmBSplineSurface::SwapUV` (inherited): records the swap
-    /// ([`Plane::toggle_swap_uv_bit`]), transposes the NURB, then rebuilds the
-    /// analytic data from it.
+    /// ([`Plane::toggle_swap_uv_bit`], which swaps the analytic data), then transposes
+    /// the NURB; the swapped analytic data is kept (WR-701), not rebuilt from it.
     ///
     /// # Errors
     ///
-    /// Those of [`BSplineSurface::canonical`], [`BSplineSurface::set_canonical`] (the
-    /// swap bit is then restored) and [`Plane::rebuild_step_from_nurb_parameters`].
+    /// Those of [`BSplineSurface::canonical`] and [`BSplineSurface::set_canonical`] (the
+    /// swap bit is then restored).
     pub fn swap_uv(&mut self) -> Result<()> {
         self.swap_uv_notifying(&mut |_| Ok(()))
     }
@@ -1001,22 +1000,6 @@ impl Plane {
     pub(crate) fn swap_uv_notifying(
         &mut self,
         notify: &mut crate::nurbs::b_spline_surface::p2::EditNotify<'_>,
-    ) -> Result<()> {
-        self.swap_uv_notifying_keeping(notify, false)
-    }
-
-    /// [`Plane::swap_uv_notifying`]; with `keep_definition` (not upstream, WR-701, the
-    /// fork's tangency-labs/smlib@0c00de7, `SmPlane::SwapUVDefinition`) the definition
-    /// [`Plane::toggle_swap_uv_bit`] has swapped (axes, domain, scales) is kept, not
-    /// rebuilt from the transposed net.
-    ///
-    /// # Errors
-    ///
-    /// Those of [`Plane::swap_uv`].
-    pub(crate) fn swap_uv_notifying_keeping(
-        &mut self,
-        notify: &mut crate::nurbs::b_spline_surface::p2::EditNotify<'_>,
-        keep_definition: bool,
     ) -> Result<()> {
         // get current surface description
         self.ensure_nurb();
@@ -1053,10 +1036,10 @@ impl Plane {
             self.toggle_swap_uv_bit();
             return Err(e);
         }
-        if keep_definition {
-            return Ok(());
-        }
-        self.rebuild_step_from_nurb_parameters()
+        // not upstream (WR-701, the fork's tangency-labs/smlib@0c00de7,
+        // `SmPlane::SwapUVDefinition`): the definition the bit has swapped (axes, domain,
+        // scales) is kept, not rebuilt from the transposed net
+        Ok(())
     }
 
     // ---- solvers ----------------------------------------------------------------------

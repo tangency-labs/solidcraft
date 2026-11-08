@@ -1,11 +1,13 @@
 //! WR-385 (the SolidCraft fork's tangency-labs/smlib@5df5b27, a cherry-pick of f06b48a), the
 //! fork's own capi `check.cpp` case: a ring r 10 / r 9, each circle drawn as 256 arcs, extruded
-//! 3. `StitchAndOrient` turns the hole's walls over (`SwapUV`) and each `SmCylinder`'s analytic
-//! form is rebuilt from its NURB, whose radii read back differ by rounding (9.0000000000985 and
-//! 9.0000000000757 in the fork's trace). Upstream equalises them only within
-//! `SM_EFF_ZERO * (1 + r)`, which gives the cylinders a semi-angle their own check
-//! (`SmCylinder::Test #0 Zero SemiAngle`) refuses. With
-//! `Kernel::fixes.cylinder_rebuild_mean_radius` the ring checks clean at level 2.
+//! 3. `StitchAndOrient` turns the hole's walls over (`SwapUV`). Upstream rebuilt each
+//! `SmCylinder`'s analytic form from its swapped NURB, whose radii read back differ by rounding
+//! (9.0000000000985 and 9.0000000000757 in the fork's trace), and equalised them only within
+//! `SM_EFF_ZERO * (1 + r)`, which gave the cylinders a semi-angle their own check
+//! (`SmCylinder::Test #0 Zero SemiAngle`) refuses. `SwapUV` now keeps the cylinder as it was made
+//! (WR-701), so the ring checks clean at level 2 on the default kernel, and with
+//! `Kernel::fixes.cylinder_rebuild_mean_radius` too. That fix's rebuild is tested on its own in
+//! `surface/cone/p2.rs`.
 //!
 //! The arcs are built as the fork's capi `smlib_extrude` builds them (`arc` in
 //! `capi/src/smlib_sweeps.cpp`): the frame turned to the arc's start, the interval
@@ -95,15 +97,13 @@ fn cylinder_semi_angles(b: &Brep) -> Vec<f64> {
 }
 
 #[test]
-fn wr385_default_gives_the_hole_walls_a_semi_angle() {
+fn wr701_the_turned_hole_walls_stay_cylinders() {
     let (mut k, mut b) = ring(false);
-    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
-        .unwrap()
-        .lines();
-    assert!(
-        lines.iter().any(|l| l.contains("Zero SemiAngle")),
-        "the pinned rebuild's semi-angle is refused: {lines:?}"
-    );
+    let angles = cylinder_semi_angles(&b);
+    assert_eq!(angles.len(), 2 * ARCS, "every arc's wall is an SmCylinder");
+    assert!(angles.iter().all(|&a| a == 0.0), "{angles:?}");
+    let check = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap();
+    assert_eq!(check.failure_count(), 0, "{:?}", check.lines());
 }
 
 #[test]

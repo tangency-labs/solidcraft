@@ -5985,6 +5985,122 @@ mod tests {
             Err(RESERVED_KEY)
         );
     }
+
+    /// WR-701 through a caller: `orient_trimmed_surfaces` asked to swap a cylinder face. With
+    /// the face's net moved onto the axis the polar converter cannot be made on the
+    /// transposed net: the run returns the same error the face's own swap returns when
+    /// `brep_edit_statuses_pass_on` passes statuses on, and succeeds without it (the status
+    /// dropped as upstream drops it); either way the face keeps its surface, domain, face use
+    /// and trims. The control: the unmoved face's own swap succeeds, and so does the run.
+    #[test]
+    fn orienting_with_a_face_whose_swap_is_refused_leaves_that_face_as_it_was() {
+        use crate::nurbs::b_spline_surface::p1::CanonicalSurfaceData;
+        use crate::primitive::api_primitives::create_cylinder;
+
+        // the cylinder and its side face, the face's net moved onto the axis if `on_axis`
+        let cylinder = |k: &mut Kernel, on_axis: bool| {
+            let mut b = create_cylinder(k, Point3::ZERO, 1.0, 2.0).unwrap();
+            let face = b
+                .faces()
+                .ids()
+                .find(|&f| {
+                    b.face(f)
+                        .unwrap()
+                        .surface
+                        .as_ref()
+                        .is_some_and(|s| matches!(s.kind(), SurfaceKind::Cone(_)))
+                })
+                .unwrap();
+            if on_axis {
+                let Some(SurfaceKind::Cone(cone)) = b
+                    .face_mut(face)
+                    .unwrap()
+                    .surface
+                    .as_mut()
+                    .map(Surface::kind_mut)
+                else {
+                    panic!("a cylinder face");
+                };
+                let net = cone.base_mut();
+                let c = net.canonical().unwrap();
+                let points: Vec<Point3> = c
+                    .control_points
+                    .iter()
+                    .map(|p| Point3::new(0.0, 0.0, p.z))
+                    .collect();
+                net.set_canonical(&CanonicalSurfaceData {
+                    u_degree: c.u_degree,
+                    v_degree: c.v_degree,
+                    control_points: &points,
+                    form: c.form,
+                    u_multiplicities: &c.u_multiplicities,
+                    v_multiplicities: &c.v_multiplicities,
+                    u_knots: &c.u_knots,
+                    v_knots: &c.v_knots,
+                    knot_type: c.knot_type,
+                    weights: Some(&c.weights),
+                    uv_domain: None,
+                })
+                .unwrap();
+            }
+            (b, face)
+        };
+        // the face's domain, face use, surface and the trims of its own edge uses
+        let state = |b: &Brep, face: FaceId| {
+            let f = b.face(face).unwrap();
+            let kind = f.surface.as_ref().map(|s| format!("{:?}", s.kind()));
+            let trims: Vec<String> = b
+                .edgeuses()
+                .ids()
+                .filter(|&eu| {
+                    eu1::faceuse(b, eu)
+                        .unwrap()
+                        .and_then(|fu| eu1::faceuse_face(b, fu).unwrap())
+                        == Some(face)
+                })
+                .map(|eu| format!("{:?}", eu1::uv_trim_curve(b, eu).unwrap().0))
+                .collect();
+            (format!("{:?}", f.uv_domain), f.faceuse, kind, trims)
+        };
+
+        for pass_on in [false, true] {
+            for on_axis in [false, true] {
+                let mut k = Kernel::default();
+                k.fixes.brep_edit_statuses_pass_on = pass_on;
+                // the face's own swap on a second, equal body: its error, if refused
+                let (mut direct, f2) = cylinder(&mut k, on_axis);
+                let swapped = face1::swap_uv(&k, &mut direct, f2);
+                assert_eq!(swapped.is_err(), on_axis, "{swapped:?}");
+
+                let (mut b, face) = cylinder(&mut k, on_axis);
+                let before = state(&b, face);
+                b.set_editing_enabled(true);
+                let mut marks = Marks::default();
+                let r = with_env(|env| {
+                    orient_trimmed_surfaces(
+                        &mut k,
+                        &mut b,
+                        env,
+                        &mut marks,
+                        true,
+                        true,
+                        Some(&[face]),
+                    )
+                });
+                let what = format!("pass_on {pass_on}, on_axis {on_axis}");
+                if on_axis {
+                    match (pass_on, &r, &swapped) {
+                        (true, Err(e), Err(d)) => assert_eq!(e, d, "{what}"),
+                        (false, Ok(_), _) => {}
+                        _ => panic!("{what}: {r:?}"),
+                    }
+                    assert_eq!(state(&b, face), before, "{what}: the refused face changed");
+                } else {
+                    assert!(r.is_ok(), "{what}: {r:?}");
+                }
+            }
+        }
+    }
 }
 
 /// Test fixtures shared with the callers' tests.

@@ -11,13 +11,12 @@
 //! The fork's test asserts the result passes `smlib_brep_check` (level 2). This bar is
 //! rebuilt here (the fork reads its own, `tests/data/corner-after-round.txt`, with other
 //! residues and nine faces), and on it the pinned SMLib with the fork's hunk gives what
-//! the port gives, bit for bit: the fix clears the loop gap the off-axis rail leaves, but
-//! the corner's surface of revolution still fails `SmSurfOfRevolution` #7 by roundoff
-//! (its polar circle starts 1.19e-10 degrees past the sweep's 0; the check allows
-//! 9.1e-11). On the fork's own input the same build passes, so the fork's pass depends on
-//! its input, not on another fix:
-//! `plan/findings/blend.fillet_solver_p2--wr592-revolution-polar-start-angle.md`. The
-//! checks below are those expectations.
+//! the port gave, bit for bit: the fix clears the loop gap the off-axis rail leaves, but
+//! the corner's surface of revolution, turned round (`SwapUV`) and rebuilt from its net,
+//! failed `SmSurfOfRevolution` #7 by roundoff (its polar circle started 1.19e-10 degrees
+//! past the sweep's 0; the check allows 9.1e-11):
+//! `plan/findings/blend.fillet_solver_p2--wr592-revolution-polar-start-angle.md`. `SwapUV`
+//! now keeps the surface's definition (WR-701), so with the fix the corner checks clean.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -181,12 +180,9 @@ fn corner_round_rail_is_on_the_axis_with_the_fix() {
         "{removed_volume} {}",
         removed()
     );
-    // the loop gap is gone; #7 is left, as the pinned SMLib with the fix leaves it on
-    // this bar (the fork's own input passes)
-    assert_eq!(
-        report,
-        ["SmSurfOfRevolution::Test #7 Parameterization: Bad PolarCurve Anal and NURB intervals does not match appropriate Surface Domain Intervals (tolerance= 1e-12) [owner SmSurfOfRevolution]"]
-    );
+    // the loop gap is gone, and the swap keeps the surface of revolution's polar circle
+    // (WR-701): no #7
+    assert_eq!(report, Vec::<String>::new());
 }
 
 #[test]

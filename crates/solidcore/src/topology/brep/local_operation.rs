@@ -2159,12 +2159,14 @@ mod tests {
         }
     }
 
-    /// Second review, finding 6: a cylinder's side given its own cylinder with u and v
-    /// swapped (the same surface, its placement rebuilt to rounding, so not its own) is
-    /// closed in one direction, as the side is, but round its v: the side's seam lines
-    /// (u = 0 and u = 2π) lift to two circles 2π apart along the axis, so the seam has no
-    /// edge there: refused as a seam opened before anything is built. Unswapped, it keeps
-    /// the seam.
+    /// Second review, finding 6: a cylinder's side given a cylinder of its radius off its own
+    /// axis (1e-12: any offset will do, as `is_own_surface` compares exactly; so not its
+    /// own surface) with u and v swapped is closed in one direction, as the side is, but
+    /// round its v: the side's seam lines (u = 0 and u = 2π) lift to two circles 2π apart
+    /// along the axis, so the seam has no edge there:
+    /// refused as a seam opened before anything is built. Unswapped, it keeps the seam.
+    /// Its own cylinder swapped is its own surface (`SwapUV` keeps the definition, WR-701,
+    /// and the parametrisation is not compared): the face keeps its own copy.
     #[test]
     fn a_cylinder_given_its_cylinder_swapped_is_refused_as_a_seam_opened() {
         use crate::primitive::api_primitives as ap;
@@ -2172,7 +2174,7 @@ mod tests {
         let mut b = ap::create_cylinder(&mut k, Point3::ZERO, 1.0, 2.0).unwrap();
         let face = curved_face(&b);
         let mut s = Surface::from(
-            ap::create_cylinder_surface(&k, Point3::new(0.0, 0.0, -1.0), 1.0, 4.0).unwrap(),
+            ap::create_cylinder_surface(&k, Point3::new(1e-12, 0.0, -1.0), 1.0, 4.0).unwrap(),
         );
         assert!(keeps_seams(&k, &mut b, face, &s).unwrap());
         s.swap_uv(&k).unwrap();
@@ -2182,6 +2184,16 @@ mod tests {
             matches!(why, Some(OffsetFailure::SeamOpened { face: f }) if f == face),
             "{why:?}"
         );
+        let mut own = Surface::from(
+            ap::create_cylinder_surface(&k, Point3::new(0.0, 0.0, -1.0), 1.0, 4.0).unwrap(),
+        );
+        own.swap_uv(&k).unwrap();
+        assert!(is_own_surface(
+            face_ops::surface(&b, face).unwrap().unwrap(),
+            &own
+        ));
+        let why = refused_unchanged_or_returned(&mut k, &mut b, &[face], vec![own]);
+        assert!(why.is_none(), "{why:?}");
     }
 
     /// The largest tolerance of `face`'s edges.

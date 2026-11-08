@@ -29,6 +29,7 @@ use solidcore::geom::global_solver::SolverOperation;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point3, BIG_DOUBLE};
+use solidcore::nurbs::b_spline_surface::SurfParamType;
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::query::api_queries::{get_edges, get_faces};
 use solidcore::surface::surface::p2::SurfaceKind;
@@ -217,15 +218,16 @@ fn unequal_rounds_are_not_swept_yet() {
     assert!(why.contains("constant rounds of one radius"), "{why}");
 }
 
-/// The swept boss base's torus faces turned round (`SmFace::SwapUV`, rebuilding each torus
-/// from its NURB) `times` times: the volume, check lines and tori after.
-fn turned_round(times: usize) -> (f64, Vec<String>, Vec<(f64, f64)>) {
+/// The swept boss base's torus faces turned round (`SmFace::SwapUV`, which keeps each
+/// torus's definition, WR-701) `times` times: the volume, check lines and tori after, and
+/// each torus face's surface then rebuilt from its NURB (`Surface::reverse` along u runs
+/// the torus's `RebuildSTEPFromNURBParameters` on the swapped net): its radii.
+type Turned = (f64, Vec<String>, Vec<(f64, f64)>, Vec<(f64, f64)>);
+
+fn turned_round(times: usize) -> Turned {
     let mut k = all_fixes();
     let mut b = boss_base(&mut k);
     round(&mut k, &mut b, &BASE, &[1.0; 4]).unwrap();
-    // the rebuild from the NURB is what `SwapUV` runs without WR-701's
-    // `swap_uv_keeps_analytic_definition` (which keeps the analytic torus instead)
-    k.fixes.swap_uv_keeps_analytic_definition = false;
     let torus_faces: Vec<_> = get_faces(&b)
         .unwrap()
         .into_iter()
@@ -241,22 +243,34 @@ fn turned_round(times: usize) -> (f64, Vec<String>, Vec<(f64, f64)>) {
             solidcore::topology::face::p1::swap_uv(&k, &mut b, f).unwrap();
         }
     }
+    let rebuilt = torus_faces
+        .iter()
+        .map(|&f| {
+            let mut s = face2::surface(&b, f).unwrap().unwrap().clone();
+            s.reverse(&k, SurfParamType::U).unwrap();
+            let SurfaceKind::Torus(t) = s.kind() else {
+                panic!("rebuilt as {:?}", s.kind());
+            };
+            (t.major_radius(), t.minor_radius())
+        })
+        .collect();
     let v = volume(&k, &mut b);
     let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
         .unwrap()
         .lines();
-    (v, lines, tori(&b))
+    (v, lines, tori(&b), rebuilt)
 }
 
-/// The fork's af7a4d9 (`turn swept_tori_turned_round`): a horn torus rebuilt from its
-/// NURB after `SwapUV` stays the horn torus it was, its faces' edges on it.
+/// The fork's af7a4d9 (`turn swept_tori_turned_round`): a horn torus turned round stays
+/// the horn torus it was, its faces' edges on it, and rebuilt from its swapped NURB it is
+/// the horn torus again.
 #[test]
 fn horn_tori_turned_round_stay_horn_tori() {
     for times in [1, 2] {
-        let (v, lines, tori) = turned_round(times);
-        eprintln!("turned {times}: volume {v:.12}, tori {tori:?}, {lines:?}");
+        let (v, lines, tori, rebuilt) = turned_round(times);
+        eprintln!("turned {times}: volume {v:.12}, tori {tori:?}, rebuilt {rebuilt:?}, {lines:?}");
         assert!(lines.is_empty(), "{lines:?}");
-        for (major, minor) in tori {
+        for (major, minor) in tori.into_iter().chain(rebuilt) {
             assert!((major - minor).abs() <= 0.0, "{major} {minor}");
         }
         assert!(
