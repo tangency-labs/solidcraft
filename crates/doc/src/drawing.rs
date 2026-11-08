@@ -77,6 +77,7 @@ pub mod note;
 pub mod symbol;
 pub mod table;
 pub mod template;
+pub mod thread_lines;
 pub mod view;
 
 use balloon::Balloon;
