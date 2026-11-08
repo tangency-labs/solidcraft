@@ -1,8 +1,8 @@
 //! Panel elements for dense cards; see `docs/ui-kit.md` for tokens and usage.
 use super::{actions::icon_button_at, metrics::*, text::paint_text};
-use crate::theme::Tokens;
 use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Ui, vec2};
+use solidcraft_theme::Tokens;
 
 const WINDOW_PAGES_NARROW_WIDTH: f32 = 150.0;
 const WINDOW_PAGES_NARROW_AT: f32 = 700.0;
@@ -16,7 +16,7 @@ pub(crate) fn within(v: f32, lo: f32, hi: f32) -> f32 {
 /// Shared active-tab hover tint for the browser and collapsible panel chrome.
 pub(crate) fn panel_header_hover(painter: &egui::Painter, rect: egui::Rect) {
     let t = Tokens::get();
-    painter.rect_filled(rect, t.radius_lg.saturating_sub(t.space_4 as u8), crate::theme::TabAccent::current(painter.ctx()).soft);
+    painter.rect_filled(rect, t.radius_lg.saturating_sub(t.space_4 as u8), solidcraft_theme::TabAccent::current(painter.ctx()).soft);
 }
 
 /// Feature title/icon/close band. Tokens: `form_header_height, form_icon_size, form_close_size, form_inset, font_label, text, dialog_rule, space_8/10; icon_button_at tokens`.
@@ -58,7 +58,7 @@ fn header_actions(
         vec2(t.form_icon_size, t.form_icon_size),
     );
     if icon.0.is_empty() {
-        ui.painter().circle_filled(icon_rect.center(), t.space_3, crate::theme::TabAccent::current(ui.ctx()).ink);
+        ui.painter().circle_filled(icon_rect.center(), t.space_3, solidcraft_theme::TabAccent::current(ui.ctx()).ink);
     } else if let Some(ink) = icon.1 {
         crate::icons::paint_ink(ui.painter(), icon_rect, icon.0, ink);
     } else {
@@ -245,7 +245,7 @@ pub(crate) fn inspector_header(ui: &mut Ui, icon: &str, title: &str, kind: &str)
     let mut action = None;
     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), header_height()), egui::Sense::hover());
     let icon_rect = egui::Rect::from_center_size(egui::pos2(rect.left() + (t.space_16 + t.space_4), rect.center().y), vec2(t.space_14, t.space_14));
-    crate::icons::paint_ink(ui.painter(), icon_rect, icon, crate::theme::TabAccent::current(ui.ctx()).ink);
+    crate::icons::paint_ink(ui.painter(), icon_rect, icon, solidcraft_theme::TabAccent::current(ui.ctx()).ink);
     let close_rect = egui::Rect::from_center_size(
         egui::pos2(rect.right() - (t.space_16 + t.space_4), rect.center().y),
         vec2(t.form_close_size, t.form_close_size),

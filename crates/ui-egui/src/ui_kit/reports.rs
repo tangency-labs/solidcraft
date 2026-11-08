@@ -1,7 +1,7 @@
 //! Read-only report and library containers, sharing the form's typography and actions.
-use crate::theme::Tokens;
 use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Ui, vec2};
+use solidcraft_theme::Tokens;
 
 /// Bordered list with a bounded scroll viewport. Tokens: dialog_rule, radius_md, space_10.
 pub(crate) fn report_list<R>(ui: &mut Ui, key: &str, height: f32, add: impl FnOnce(&mut Ui) -> R) -> R {

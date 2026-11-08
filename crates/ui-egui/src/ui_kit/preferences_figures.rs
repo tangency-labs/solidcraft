@@ -1,8 +1,8 @@
 //! Deliberately composed preference illustrations. A shared orthographic projection keeps
 //! faces, ground contact, rotation cues and axes consistent at their small display size.
-use crate::theme::Tokens;
 use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Color32, Painter, Pos2, Rect, Shape, Stroke, Vec2, vec2};
+use solidcraft_theme::Tokens;
 
 struct Canvas {
     rect: Rect,
@@ -151,7 +151,7 @@ pub(crate) fn paint_orientation(p: &Painter, rect: Rect, y_up: bool) {
         p.line_segment([centre, end], Stroke::new(c.width(4.2), t.viewport_top));
         arrow(&p, centre, end, colour, c.width(2.3), c.width(6.5));
         let text_pos = if y < 20.0 { c.at(x, y - 6.0) } else { c.at(x + if x < 60.0 { -7.0 } else { 7.0 }, y + 3.0) };
-        let ink = if crate::theme::contrast_ratio(colour, t.viewport_top) >= 4.5 { colour } else { t.form_ink };
+        let ink = if solidcraft_theme::contrast_ratio(colour, t.viewport_top) >= 4.5 { colour } else { t.form_ink };
         p.text(text_pos, egui::Align2::CENTER_CENTER, label, crate::fonts::semibold(t.font_small), ink);
     }
     p.circle_filled(centre, c.width(2.7), t.form_ink);
@@ -308,10 +308,10 @@ mod tests {
     #[test]
     fn live_layout_preview_follows_each_choice_in_both_themes() {
         use crate::ui_kit::LayoutPreview;
-        let previous = crate::theme::is_dark();
+        let previous = solidcraft_theme::is_dark();
         let baseline = LayoutPreview { compact: false, labels: true, history: 0, translucent: false, dialog_left: false };
         for dark in [false, true] {
-            crate::theme::set_dark(dark);
+            solidcraft_theme::set_dark(dark);
             let draw = |state| {
                 let ctx = crate::fonts::test_context();
                 let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
@@ -340,7 +340,7 @@ mod tests {
             assert!(browser.contains_rect(dialog), "the left-column dialog remains inside the Browser region");
             assert!(!dialog.intersects(history), "the dialog cannot cover the Under browser History caption");
         }
-        crate::theme::set_dark(previous);
+        solidcraft_theme::set_dark(previous);
     }
 
     /// Both orientation figures draw right-handed axes (#5680): seen from above, the turn from X
@@ -362,9 +362,9 @@ mod tests {
     }
 
     use super::{ThemeSample, paint_theme_thumbnail, paint_theme_thumbnail_rounded};
-    use crate::theme::Tokens;
     use crate::ui_kit::preferences_figure_data::FIGURES;
     use egui::{Pos2, Rect, vec2};
+    use solidcraft_theme::Tokens;
 
     /// Shapes a figure paints into `rect` on a fresh frame, in the given theme.
     fn shapes(rect: Rect, paint: impl Fn(&egui::Painter, Rect)) -> Vec<egui::epaint::ClippedShape> {
@@ -426,9 +426,9 @@ mod tests {
     /// panicking, and at a normal size stays inside its rectangle with a bounded number of shapes.
     #[test]
     fn every_preference_figure_paints_safely_at_any_size_in_both_themes() {
-        let previous = crate::theme::is_dark();
+        let previous = solidcraft_theme::is_dark();
         for dark in [false, true] {
-            crate::theme::set_dark(dark);
+            solidcraft_theme::set_dark(dark);
             assert!(!FIGURES.is_empty());
             for (name, size, paint) in FIGURES {
                 for rect in rects() {
@@ -445,16 +445,16 @@ mod tests {
                 }
             }
         }
-        crate::theme::set_dark(previous);
+        solidcraft_theme::set_dark(previous);
     }
 
     /// The figures read the theme: the same figure paints different colours in light and dark.
     #[test]
     fn preference_figures_follow_the_theme() {
-        let previous = crate::theme::is_dark();
+        let previous = solidcraft_theme::is_dark();
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(120.0, 64.0));
         let colours = |dark: bool| {
-            crate::theme::set_dark(dark);
+            solidcraft_theme::set_dark(dark);
             let mut all = Vec::new();
             for shape in shapes(rect, super::super::preferences_figure_data::paint_orbit_origin) {
                 if let egui::Shape::Rect(r) = shape.shape {
@@ -465,7 +465,7 @@ mod tests {
         };
         let (light, dark) = (colours(false), colours(true));
         assert!(!light.is_empty() && light != dark);
-        crate::theme::set_dark(previous);
+        solidcraft_theme::set_dark(previous);
     }
 
     #[test]

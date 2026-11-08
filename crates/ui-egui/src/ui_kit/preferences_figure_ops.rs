@@ -3,8 +3,8 @@
 //! `docs/design/preferences/figures/`), painted with egui shapes in the colours of the current
 //! `Tokens`. Nothing is rasterised and no image is loaded; every figure costs a few dozen shapes.
 //! Any rectangle, including an empty, infinite or enormous one, is safe to paint into.
-use crate::theme::Tokens;
 use egui::{Align2, Color32, CornerRadius, FontId, Mesh, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, Vec2, pos2, vec2};
+use solidcraft_theme::Tokens;
 
 /// Colour roles of the figures. Each reads one `Tokens` field (`docs/design/preferences/tokens.md`).
 #[derive(Clone, Copy, Debug)]
@@ -210,10 +210,10 @@ impl Ctx<'_> {
                 (Some(2), Ink::AxisZ) => Some(t.axis_z),
                 (Some(3), Ink::Cv1) => Some(t.bend_up),
                 (Some(3), Ink::Cv3) => Some(t.bend_down),
-                (Some(4), Ink::Cv3) => Some(crate::theme::srgb(t.analysis.draft[0])),
-                (Some(4), Ink::Cv1) => Some(crate::theme::srgb(t.analysis.draft[1])),
-                (Some(4), Ink::Cv4) => Some(crate::theme::srgb(t.analysis.draft[2])),
-                (Some(4), Ink::Black) => Some(crate::theme::srgb(t.analysis.draft[2].map(|c| c * 0.6))),
+                (Some(4), Ink::Cv3) => Some(solidcraft_theme::srgb(t.analysis.draft[0])),
+                (Some(4), Ink::Cv1) => Some(solidcraft_theme::srgb(t.analysis.draft[1])),
+                (Some(4), Ink::Cv4) => Some(solidcraft_theme::srgb(t.analysis.draft[2])),
+                (Some(4), Ink::Black) => Some(solidcraft_theme::srgb(t.analysis.draft[2].map(|c| c * 0.6))),
                 (Some(5), Ink::Cv2) => Some(t.error),
                 (Some(5), Ink::NoteFill) => Some(t.timeline_item_error),
                 _ => None,
@@ -266,14 +266,14 @@ impl Ctx<'_> {
             if let Some(axis) = axis {
                 let ground = if matches!(ink, Ink::White) { axis } else { t.cube_face };
                 let intended = if matches!(ink, Ink::White) { t.on_accent } else { axis };
-                if crate::theme::contrast_ratio(intended, ground) >= 4.5 {
+                if solidcraft_theme::contrast_ratio(intended, ground) >= 4.5 {
                     return intended;
                 }
                 // Lettering has its own foreground role. Preserve the actual axis colour on
                 // discs and strokes, choosing a legible token only for the tiny glyph.
                 return [intended, t.cube_text, t.on_accent, t.tab_on_fill_dark]
                     .into_iter()
-                    .max_by(|a, b| crate::theme::contrast_ratio(*a, ground).total_cmp(&crate::theme::contrast_ratio(*b, ground)))
+                    .max_by(|a, b| solidcraft_theme::contrast_ratio(*a, ground).total_cmp(&solidcraft_theme::contrast_ratio(*b, ground)))
                     .unwrap_or(intended);
             }
         }
@@ -803,8 +803,8 @@ mod tests {
             assert_eq!(ctx.ink(Ink::Text, 1.0), t.cube_text);
             for (ink, axis, label) in [(Ink::AxisX, t.axis_x, "X"), (Ink::AxisY, t.axis_y, "Y"), (Ink::AxisZ, t.axis_z, "Z")] {
                 assert_eq!(ctx.ink(ink, 1.0), axis, "the navigator's real axis palette");
-                assert!(crate::theme::contrast_ratio(ctx.text_ink(Ink::White, 1.0, label), axis) >= 4.5);
-                assert!(crate::theme::contrast_ratio(ctx.text_ink(ink, 1.0, label), t.cube_face) >= 4.5);
+                assert!(solidcraft_theme::contrast_ratio(ctx.text_ink(Ink::White, 1.0, label), axis) >= 4.5);
+                assert!(solidcraft_theme::contrast_ratio(ctx.text_ink(ink, 1.0, label), t.cube_face) >= 4.5);
             }
             let ordinary = Ctx { palette: Palette::Figure, ..ctx };
             assert_eq!(ordinary.ink(Ink::AxisX, 1.0), t.figure_axis_x, "other illustrations keep their palette");

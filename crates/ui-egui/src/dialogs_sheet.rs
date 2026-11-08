@@ -18,7 +18,7 @@ use solidcraft_engine::geom::prelude::*;
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind, edge_sel, face_sel, form_row, profile_indices};
 use crate::selection::{AXES, BODIES, CURVES, EDGES, FACES, PLANAR_FACES, PROFILES, SelInput, SelectionExt as _, items, point_value as pt};
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 const PERFORATION_PATTERNS: [&str; 2] = ["staggered", "square"];
 const PERFORATION_LABELS: [&str; 2] = ["ui.perforate_staggered", "ui.perforate_square"];
@@ -1011,7 +1011,7 @@ pub fn hem_handle(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Vec3)> {
 /// Bend line colours: up and down (theme tokens, legible on either theme and in every colour
 /// vision mode).
 fn bend_colors() -> (Color32, Color32) {
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     (t.bend_up, t.bend_down)
 }
 
@@ -1027,7 +1027,7 @@ pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dial
             rect.center(),
             Align2::CENTER_CENTER,
             "no sheet metal body",
-            FontId::proportional(crate::theme::Tokens::get().font_heading),
+            FontId::proportional(solidcraft_theme::Tokens::get().font_heading),
             t.text_dim,
         );
         return true;
@@ -1122,7 +1122,7 @@ pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dial
         }
     }
     for (anchor, labels) in pocket_annotations {
-        painter.text(anchor, Align2::CENTER_BOTTOM, labels.join("\n"), FontId::proportional(crate::theme::Tokens::get().font_body), t.accent);
+        painter.text(anchor, Align2::CENTER_BOTTOM, labels.join("\n"), FontId::proportional(solidcraft_theme::Tokens::get().font_body), t.accent);
     }
     for b in v["bends"].as_array().into_iter().flatten() {
         let (Some(a), Some(e)) = (read(&b["start"]), read(&b["end"])) else { continue };
@@ -1135,13 +1135,19 @@ pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dial
         pos2(rect.left() + 14.0, y),
         Align2::LEFT_TOP,
         "FLAT PATTERN",
-        FontId::proportional(crate::theme::Tokens::get().font_button),
+        FontId::proportional(solidcraft_theme::Tokens::get().font_button),
         t.text,
     );
     for (label, col) in [("Bend up", up_col), ("Bend down", down_col)] {
         y += 20.0;
         painter.line_segment([pos2(rect.left() + 14.0, y + 7.0), pos2(rect.left() + 38.0, y + 7.0)], Stroke::new(2.0, col));
-        painter.text(pos2(rect.left() + 44.0, y), Align2::LEFT_TOP, label, FontId::proportional(crate::theme::Tokens::get().font_body), t.text_dim);
+        painter.text(
+            pos2(rect.left() + 44.0, y),
+            Align2::LEFT_TOP,
+            label,
+            FontId::proportional(solidcraft_theme::Tokens::get().font_body),
+            t.text_dim,
+        );
     }
     if !pockets.is_empty() {
         y += 20.0;
@@ -1155,7 +1161,7 @@ pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dial
             pos2(rect.left() + 44.0, y),
             Align2::LEFT_TOP,
             "Pocket boundary (material remains)",
-            FontId::proportional(crate::theme::Tokens::get().font_body),
+            FontId::proportional(solidcraft_theme::Tokens::get().font_body),
             t.text_dim,
         );
     }

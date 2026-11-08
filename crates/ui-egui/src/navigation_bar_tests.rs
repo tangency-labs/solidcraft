@@ -218,9 +218,9 @@ fn navigation_slot_visuals_never_use_focus_as_a_fill() {
 
 #[test]
 fn navigation_slot_pointer_clicks_release_focus_and_leave_no_fill() {
-    use crate::theme::Tokens;
     use crate::ui_kit::{NavigationButton, navigation_button};
     use egui::{Color32, Event, RawInput, Shape};
+    use solidcraft_theme::Tokens;
 
     fn fill(output: &egui::FullOutput, bounds: Rect) -> Option<Color32> {
         let mut fill = None;
@@ -391,8 +391,8 @@ fn navigation_preview_and_viewport_share_the_row_painter() {
         if let (egui::Shape::Rect(live), egui::Shape::Rect(preview)) = (&live.shape, &preview.shape)
             && live.fill != preview.fill
         {
-            assert_eq!(live.fill, crate::theme::Tokens::get().dialog_body.gamma_multiply(0.97));
-            assert_eq!(preview.fill, crate::theme::Tokens::get().dialog_body);
+            assert_eq!(live.fill, solidcraft_theme::Tokens::get().dialog_body.gamma_multiply(0.97));
+            assert_eq!(preview.fill, solidcraft_theme::Tokens::get().dialog_body);
             let mut opaque = live.clone();
             opaque.fill = preview.fill;
             assert_eq!(&opaque, preview, "only the board's opaque editing surface differs");
@@ -502,8 +502,8 @@ fn navigation_board_metrics_and_state_colors_are_shared_in_both_themes() {
         (NAV_MARKER_HEIGHT, NAV_GHOST_OPACITY, NAV_TILE_DRAG_OPACITY, NAV_IDLE_OPACITY, NAV_FADE_SECONDS, NAV_TOOLTIP_DELAY),
         (24.0, 0.7, 0.55, 0.45, 0.12, 0.8)
     );
-    for tokens in [crate::theme::Tokens::light(), crate::theme::Tokens::dark()] {
-        let _theme = crate::theme::scoped_tokens(tokens);
+    for tokens in [solidcraft_theme::Tokens::light(), solidcraft_theme::Tokens::dark()] {
+        let _theme = solidcraft_theme::scoped_tokens(tokens);
         assert_eq!(navigation_fill(&tokens, NavigationFill::None), None);
         assert_eq!(navigation_fill(&tokens, NavigationFill::Hover), Some(tokens.nav_hover));
         assert_eq!(navigation_fill(&tokens, NavigationFill::Press), Some(tokens.nav_press));
@@ -526,8 +526,8 @@ fn navigation_board_metrics_and_state_colors_are_shared_in_both_themes() {
 fn navigation_board_popup_width_includes_its_border_and_padding() {
     use crate::ui_kit::*;
     let ctx = crate::fonts::test_context();
-    for tokens in [crate::theme::Tokens::light(), crate::theme::Tokens::dark()] {
-        let _theme = crate::theme::scoped_tokens(tokens);
+    for tokens in [solidcraft_theme::Tokens::light(), solidcraft_theme::Tokens::dark()] {
+        let _theme = solidcraft_theme::scoped_tokens(tokens);
         for width in [NAV_POPUP_WIDTH, NAV_CONTEXT_WIDTH, NAV_MORE_WIDTH] {
             let mut outer = Rect::NOTHING;
             let mut row = Rect::NOTHING;
@@ -571,7 +571,7 @@ fn a_long_menu_row_label_ends_in_an_ellipsis_inside_its_row() {
         });
         let text = crate::test_support::text_shapes(&output).find(|t| t.galley.text() == label).unwrap_or_else(|| panic!("{label} is drawn"));
         assert_eq!(text.galley.elided, cut, "{label}");
-        let end = row.right() - NAV_MENU_INSET - if selected { crate::theme::Tokens::get().space_14 } else { 0.0 };
+        let end = row.right() - NAV_MENU_INSET - if selected { solidcraft_theme::Tokens::get().space_14 } else { 0.0 };
         let drawn = text.pos.x + text.galley.size().x;
         assert!(drawn <= end, "{label}: ends at {drawn}, past {end}");
     }

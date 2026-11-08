@@ -1,8 +1,8 @@
 //! Layout elements for dense cards; see `docs/ui-kit.md` for tokens and usage.
 use super::{metrics::*, text::paint_text};
-use crate::theme::Tokens;
 use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Response, RichText, Ui, vec2};
+use solidcraft_theme::Tokens;
 
 pub(super) const FORM: &str = "sc_dense_form";
 

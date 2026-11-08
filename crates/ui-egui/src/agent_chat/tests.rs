@@ -3200,7 +3200,7 @@ fn the_agent_list_keeps_the_panels_side_margin() {
             });
         }
         let at = |label: &str| texts.iter().find(|(text, r)| text == label && panel.contains(r.center())).map(|(_, r)| *r);
-        let margin = crate::theme::Tokens::get().space_12 - 0.5;
+        let margin = solidcraft_theme::Tokens::get().space_12 - 0.5;
         let agent = at(tr("ui.agent_chat_pick")).expect("the Agent row");
         assert!(agent.left() >= panel.left() + margin, "{layout:?}: Agent at {agent:?} in {panel:?}");
         let refresh = at(tr("ui.agent_chat_refresh")).expect("Refresh");
@@ -4622,7 +4622,7 @@ fn the_composer_hint_stays_on_one_row_at_the_narrowest_width() {
             let hint = solidcraft_ui_text::tr(key).to_owned();
             let mut rows = 0;
             let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                rows = crate::ui_kit::assistant_hint_galley(ui, &hint, width - 2.0 * crate::theme::Tokens::get().form_inset).rows.len();
+                rows = crate::ui_kit::assistant_hint_galley(ui, &hint, width - 2.0 * solidcraft_theme::Tokens::get().form_inset).rows.len();
             });
             output.textures_delta.clear();
             assert_eq!(rows, 1, "{language} {key} at {width} wide: {hint}");
@@ -4702,7 +4702,7 @@ fn a_prompt_at_the_top_of_the_conversation_is_as_tall_as_its_content() {
     let button = crate::scenario::handle_at("agent_chat:copy:0").expect("the prompt's Copy message button");
     let prompt = crate::scenario::rect_of("agent_chat:msg:0").expect("the prompt's message area");
     let reply = crate::scenario::rect_of("agent_chat:msg:1").expect("the reply's message area");
-    let row = crate::theme::Tokens::get().control_height;
+    let row = solidcraft_theme::Tokens::get().control_height;
     assert!(prompt.bottom() - button.y < row, "the bubble ends {} below its button", prompt.bottom() - button.y);
     assert!(reply.top() - button.y < 2.0 * row, "the reply starts {} below the prompt's button", reply.top() - button.y);
 }

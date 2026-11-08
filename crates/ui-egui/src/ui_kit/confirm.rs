@@ -1,7 +1,7 @@
 //! Modal confirmations share the Panel/Window frame and the single kit footer.
 use super::{Action, Footer, Window, actions::footer_with_left, text::paint_text};
-use crate::theme::Tokens;
 use egui::{Ui, vec2};
+use solidcraft_theme::Tokens;
 
 #[derive(Clone, Copy)]
 pub(crate) enum Tone {

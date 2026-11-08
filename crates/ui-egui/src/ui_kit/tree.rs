@@ -1,8 +1,9 @@
 //! Shared Browser tree rows; feature modules supply content and dispatch commands.
+use crate::icons;
 use crate::icons::glyphs::badge;
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::{icons, theme::Tokens};
 use egui::{Color32, FontId, Pos2, Rect, Sense, Stroke, pos2, vec2};
+use solidcraft_theme::Tokens;
 const ROW_H: f32 = super::TREE_ROW_HEIGHT;
 const INDENT: f32 = 14.0;
 const DIM_ICON_OPACITY: f32 = 0.4;
@@ -157,7 +158,7 @@ pub(crate) fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
     let dragged_over = egui::DragAndDrop::has_any_payload(ui.ctx()) && ui.input(|i| i.pointer.hover_pos()).is_some_and(|p| r.contains(p));
     let mut out = RowResp { rect: Some(r), hovered: resp.hovered() || dragged_over, ..Default::default() };
     if row.selected {
-        ui.painter().rect_filled(r, if row.compact { 0 } else { t.radius_sm.saturating_sub(1) }, crate::theme::TabAccent::current(ui.ctx()).soft);
+        ui.painter().rect_filled(r, if row.compact { 0 } else { t.radius_sm.saturating_sub(1) }, solidcraft_theme::TabAccent::current(ui.ctx()).soft);
     } else if resp.hovered() || row.mark == Mark::Here {
         ui.painter().rect_filled(r, t.radius_sm.saturating_sub(1), t.hover);
     }
@@ -319,8 +320,11 @@ pub(crate) fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         ui.painter().rect_stroke(swatch, radius, t.control_border_stroke(t.control_border), egui::StrokeKind::Inside);
         x += if row.compact { t.space_14 + t.space_6 } else { t.space_16 };
     }
-    let col =
-        if row.selected { crate::theme::TabAccent::current(ui.ctx()).ink } else { row.color.unwrap_or(if row.dim { t.text_dim } else { t.text }) };
+    let col = if row.selected {
+        solidcraft_theme::TabAccent::current(ui.ctx()).ink
+    } else {
+        row.color.unwrap_or(if row.dim { t.text_dim } else { t.text })
+    };
     let label_display = if row.name { crate::i18n::tr_name(row.label) } else { crate::i18n::tr_dyn(row.label) };
     let font = if row.selected { crate::fonts::semibold(t.font_label) } else { FontId::proportional(t.font_label) };
     // The label stops before the badges and the card's edge; a longer name ends in an ellipsis

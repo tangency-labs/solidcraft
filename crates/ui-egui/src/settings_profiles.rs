@@ -583,7 +583,7 @@ fn act(app: &mut SolveApp, id: &str, params: Value, done: &'static str) {
 
 /// General's saved profiles and row actions. All mutations still use settings.profile.*.
 pub(crate) fn section(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let count = solidcraft_ui_text::format("prefs.reports_saved", &[("n", &app.settings_profiles.list.len().to_string())]);
     ui_kit::settings_section_count(ui, "profiles", app.tr("ui.profiles"), Some(&count), |ui| {
         let names = app.settings_profiles.names();

@@ -1,9 +1,9 @@
 //! Dense editable tables. Geometry and typography share the form label-column tokens.
 use super::metrics::*;
-use crate::theme::Tokens;
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Surface};
 use egui::{Response, Ui, vec2};
+use solidcraft_theme::Tokens;
 
 /// A column's minimum width is a multiple of the measured form label column.
 pub(crate) struct Column<'a> {

@@ -1,10 +1,8 @@
 //! Shared history chips, dense name rows, drop bars and rollback markers.
+use crate::icons;
 use crate::ui_kit::BackingTooltipExt as _;
-use crate::{
-    icons,
-    theme::{TabAccent, Tokens},
-};
 use egui::{Painter, Rect, Stroke, pos2, vec2};
+use solidcraft_theme::{TabAccent, Tokens};
 
 /// Browser and named history rows use the same density.
 pub(crate) const TREE_ROW_HEIGHT: f32 = 26.0;
@@ -87,7 +85,7 @@ fn feature_icon_accent(kind: &str, icon: &str) -> Option<&'static str> {
     } else {
         "MODEL"
     };
-    crate::theme::icon_accent_for_tab(tab)
+    solidcraft_theme::icon_accent_for_tab(tab)
 }
 
 impl HistoryChip<'_> {
@@ -418,9 +416,9 @@ mod tests {
 
     #[test]
     fn seam_geometry_and_paint_states_follow_tokens_in_both_themes() {
-        let previous = crate::theme::is_dark();
+        let previous = solidcraft_theme::is_dark();
         for dark in [false, true] {
-            crate::theme::set_dark(dark);
+            solidcraft_theme::set_dark(dark);
             for names in [false, true] {
                 let card = Rect::from_min_size(pos2(20.0, 30.0), vec2(history_width(names), 280.0));
                 let seam = HistorySeam::new(card);
@@ -464,7 +462,7 @@ mod tests {
                 }
             }
         }
-        crate::theme::set_dark(previous);
+        solidcraft_theme::set_dark(previous);
     }
 
     struct SeamHarness {
@@ -577,9 +575,9 @@ mod tests {
 
     #[test]
     fn chip_selection_error_and_rollback_use_tokens_in_both_themes() {
-        let previous = crate::theme::is_dark();
+        let previous = solidcraft_theme::is_dark();
         for dark in [false, true] {
-            crate::theme::set_dark(dark);
+            solidcraft_theme::set_dark(dark);
             let t = Tokens::get();
             let accent = TabAccent::for_tab(&t, "SURFACE");
             for style in [HistoryStyle::Icons, HistoryStyle::Names] {
@@ -632,14 +630,14 @@ mod tests {
                 }
             }
         }
-        crate::theme::set_dark(previous);
+        solidcraft_theme::set_dark(previous);
     }
 
     #[test]
     fn chips_have_no_connector_shapes_in_either_theme_or_width() {
-        let previous = crate::theme::is_dark();
+        let previous = solidcraft_theme::is_dark();
         for dark in [false, true] {
-            crate::theme::set_dark(dark);
+            solidcraft_theme::set_dark(dark);
             let t = Tokens::get();
             for style in [HistoryStyle::Bottom, HistoryStyle::Icons, HistoryStyle::Names] {
                 let ctx = crate::fonts::test_context();
@@ -678,7 +676,7 @@ mod tests {
                 assert_eq!(connections, 0, "dark={dark}");
             }
         }
-        crate::theme::set_dark(previous);
+        solidcraft_theme::set_dark(previous);
     }
 
     #[test]
@@ -699,9 +697,9 @@ mod tests {
             assert_eq!(lines[0].1, Stroke::new(t.space_2, accent.color));
             assert_eq!(lines[0].0, if vertical { [rect.left_center(), rect.right_center()] } else { [rect.center_top(), rect.center_bottom()] });
         }
-        let previous = crate::theme::is_dark();
+        let previous = solidcraft_theme::is_dark();
         for dark in [false, true] {
-            crate::theme::set_dark(dark);
+            solidcraft_theme::set_dark(dark);
             let t = Tokens::get();
             let accent = TabAccent::for_tab(&t, "SURFACE");
             // Both vertical widths retain the 12 pt marker row; the bottom strip rotates it.
@@ -749,6 +747,6 @@ mod tests {
                 assert!(!out.shapes.iter().any(|s| matches!(s.shape, egui::Shape::Path(_))), "no arrowheads");
             }
         }
-        crate::theme::set_dark(previous);
+        solidcraft_theme::set_dark(previous);
     }
 }

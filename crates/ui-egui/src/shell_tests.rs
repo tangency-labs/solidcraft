@@ -834,7 +834,7 @@ fn host_full_canvas_and_same_pass_controls_follow_actual_sizing_footprints_witho
                             assert!(frame.layout.usable.contains_rect(logical_rect(bounds)));
                             assert!(frame.layout.usable.obstacles.iter().all(|obstacle| {
                                 !bounds
-                                    .expand(crate::theme::Tokens::get().space_4)
+                                    .expand(solidcraft_theme::Tokens::get().space_4)
                                     .intersect(crate::panel_runtime::egui_rect(*obstacle))
                                     .is_positive()
                             }));
@@ -946,7 +946,7 @@ fn actual_host_fit_and_centring_respect_the_measured_sketch_palette_at_both_scal
         for (name, control) in [("nav:outer", layout.navigation), ("axis_view:outer", layout.axis_view)] {
             if control.is_positive() {
                 assert_eq!(rect_of(name), Some(control), "published controls must match the actual same-pass footprint");
-                assert!(!control.expand(crate::theme::Tokens::get().space_4).intersect(palette).is_positive());
+                assert!(!control.expand(solidcraft_theme::Tokens::get().space_4).intersect(palette).is_positive());
                 assert!(effective.contains_rect(logical_rect(control)));
                 assert!(frame.layout.usable.obstacles.iter().all(|obstacle| !control.intersect(egui_rect(*obstacle)).is_positive()));
             } else {
@@ -985,7 +985,7 @@ fn actual_host_fit_and_centring_respect_the_measured_sketch_palette_at_both_scal
             h.settle();
             assert_eq!(h.app.viewport.rect, Some(domain), "explicit fitting preserves the full render domain");
             let footprint = projected_extent(&h, bounds);
-            let padded = footprint.expand(crate::theme::Tokens::get().space_8 - 0.01);
+            let padded = footprint.expand(solidcraft_theme::Tokens::get().space_8 - 0.01);
             assert!(
                 h.app.viewport.layout.as_ref().unwrap().usable.as_ref().unwrap().contains_rect(logical_rect(padded)),
                 "{scale}x {mode:?}: the full 100 mm line and its clearance must avoid the palette, host and controls: {padded:?}"
@@ -1929,7 +1929,7 @@ fn compact_chrome_is_flush_and_browser_hugs_content_in_both_themes() {
         assert!(browser.height() < h.app.viewport.rect.unwrap().height() / 2.0, "Browser hugs its contents");
         let compact = crate::ui_kit::Container::new(&h.ctx, crate::ui_kit::Surface::Panel);
         assert_eq!(compact.gap(), 0.0);
-        let frame = compact.frame(&h.ctx, crate::theme::Tokens::get().panel, crate::frame::Side::Left);
+        let frame = compact.frame(&h.ctx, solidcraft_theme::Tokens::get().panel, crate::frame::Side::Left);
         assert_eq!(frame.shadow, egui::Shadow::NONE);
         assert_eq!(frame.corner_radius, egui::CornerRadius::ZERO);
         h.app.start("solid.extrude");
@@ -1942,7 +1942,7 @@ fn compact_chrome_is_flush_and_browser_hugs_content_in_both_themes() {
         let moved = h.app.viewport.dialog_rect.unwrap();
         assert!(moved.right() < before.right() - 100.0, "compact tool sheets detach from the right edge");
         let feature = crate::ui_kit::Container::new(&h.ctx, crate::ui_kit::Surface::Feature);
-        assert_eq!(feature.frame(&h.ctx, crate::theme::Tokens::get().dialog_body, crate::frame::Side::Right).shadow, egui::Shadow::NONE);
+        assert_eq!(feature.frame(&h.ctx, solidcraft_theme::Tokens::get().dialog_body, crate::frame::Side::Right).shadow, egui::Shadow::NONE);
         h.app.run("view.layout", json!({"mode":"floating"})).unwrap();
         h.settle();
         assert_eq!(rect_of("browser:card").unwrap().left(), SHELL_GAP);
@@ -2111,7 +2111,7 @@ fn a_host_keeps_the_design_and_gives_it_back_with_its_timeline() {
 /// beside it, and OK, Cancel or Esc bring the column back exactly as it was.
 #[test]
 fn a_dialog_in_the_left_column_takes_the_place_of_browser_and_history() {
-    let card = crate::theme::Tokens::get().form_card_width;
+    let card = solidcraft_theme::Tokens::get().form_card_width;
     for mode in [LayoutMode::Floating, LayoutMode::Docked] {
         for (dock, close) in [("bottom", "Cancel"), ("left", "Escape"), ("under_browser", "OK")] {
             let what = format!("{mode:?}, History {dock}, {close}");
@@ -2168,7 +2168,7 @@ fn a_dialog_in_the_left_column_takes_the_place_of_browser_and_history() {
 /// the left column docks at the left edge at its own width, above the bottom History strip.
 #[test]
 fn without_a_left_column_a_dialog_docks_at_the_left_edge_at_its_own_width() {
-    let card = crate::theme::Tokens::get().form_card_width;
+    let card = solidcraft_theme::Tokens::get().form_card_width;
     for (mode, browser) in [(LayoutMode::Floating, "hidden"), (LayoutMode::Docked, "hidden"), (LayoutMode::Floating, "translucent")] {
         let what = format!("{mode:?}, browser {browser}");
         let mut h = Harness::new();

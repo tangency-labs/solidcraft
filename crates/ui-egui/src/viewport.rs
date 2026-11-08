@@ -16,8 +16,8 @@ use std::hash::{Hash, Hasher};
 use crate::gpu::{Frame, GpuScene, GpuTarget, SceneSlot, ViewportCallback};
 use crate::navigation::{CameraInput, NavCaps, orbit_drag};
 use crate::selection::{BoxSel, origin_quads, origin_size, ray_quad};
-use crate::theme::Tokens;
 use crate::{SolveApp, icons};
+use solidcraft_theme::Tokens;
 
 #[cfg(test)]
 #[path = "viewport_appearance_tests.rs"]
@@ -574,8 +574,8 @@ fn base_scene_key(app: &SolveApp) -> u64 {
     app.preview.rolled_back.hash(&mut h);
     app.preferences.cosmetic_threads.hash(&mut h);
     app.preferences.section_hatch.hash(&mut h);
-    crate::theme::is_dark().hash(&mut h);
-    crate::theme::vision().hash(&mut h);
+    solidcraft_theme::is_dark().hash(&mut h);
+    solidcraft_theme::vision().hash(&mut h);
     // Two themes may share a light/dark base while drawing different geometry colours.
     crate::theme_files::color_key(&Tokens::base()).hash(&mut h);
     app.session.active_sketch.hash(&mut h);
@@ -2111,7 +2111,7 @@ fn ground_shadow(sc: &mut GpuScene, app: &SolveApp, framed: Vec<solidcraft_engin
     }
     // Every ellipse lies on the lowest body's ground, so none floats beside a lower body.
     let z = ground_height(app, all);
-    let dark = if crate::theme::viewport_dark() { 150 } else { 80 };
+    let dark = if solidcraft_theme::viewport_dark() { 150 } else { 80 };
     for b in shadow_groups(framed) {
         let (c, (rx, ry)) = (b.center(), shadow_radii(&b));
         if !(rx > 0.0 && ry > 0.0) {
@@ -3940,8 +3940,8 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
     (app.dialog.is_some(), app.tool.is_some()).hash(&mut h);
     // Which input is active decides what a round edge or face under the cursor stands for.
     app.dialog.as_ref().and_then(|d| d.active_input()).map(|i| i.accept).hash(&mut h);
-    crate::theme::is_dark().hash(&mut h);
-    crate::theme::vision().hash(&mut h);
+    solidcraft_theme::is_dark().hash(&mut h);
+    solidcraft_theme::vision().hash(&mut h);
     // Two themes may share a light/dark base while drawing different geometry colours.
     crate::theme_files::color_key(&Tokens::base()).hash(&mut h);
     app.preview.effective_replaced().hash(&mut h);
@@ -7107,8 +7107,8 @@ fn loose_end_markers(
 /// dark or the light theme and a colour vision mode, from the tokens the window draws with, so the
 /// picture matches the window. The light theme's tokens (Off) are the engine's own colours, so a light
 /// render is unchanged.
-pub(crate) fn scene_palette(dark: bool, mode: crate::theme::ColorVision) -> solidcraft_engine::view::Palette {
-    let t = if dark == crate::theme::viewport_dark() && mode == crate::theme::vision() { Tokens::view() } else { Tokens::themed(dark, mode) };
+pub(crate) fn scene_palette(dark: bool, mode: solidcraft_theme::ColorVision) -> solidcraft_engine::view::Palette {
+    let t = if dark == solidcraft_theme::viewport_dark() && mode == solidcraft_theme::vision() { Tokens::view() } else { Tokens::themed(dark, mode) };
     let rgb = |c: Color32| Rgb(c.r(), c.g(), c.b());
     solidcraft_engine::view::Palette {
         background: (rgb(t.viewport_top), rgb(t.viewport_bottom)),
@@ -8744,8 +8744,8 @@ mod tests {
     /// mode's axis colours, so the two can't drift apart.
     #[test]
     fn pictures_are_drawn_in_the_windows_theme() {
-        use crate::theme::ColorVision;
         use solidcraft_engine::view::Palette;
+        use solidcraft_theme::ColorVision;
         assert_eq!(scene_palette(false, ColorVision::Off), Palette::DEFAULT, "the light theme is the engine's colours");
         let rgb = |c: Color32| Rgb(c.r(), c.g(), c.b());
         let (p, t) = (scene_palette(true, ColorVision::Off), Tokens::dark());
@@ -12941,7 +12941,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn draft_analysis_on_the_gpu_draws_the_modes_colours_and_stripes() {
-        use crate::theme::ColorVision;
+        use solidcraft_theme::ColorVision;
         let mut s = solidcraft_engine::Session::default();
         s.run_script(&solidcraft_engine::sample::script()).unwrap();
         let mut app = SolveApp::new(s, crate::Services::default());
@@ -13001,7 +13001,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn the_view_picture_draws_in_the_colour_vision_mode() {
-        use crate::theme::ColorVision;
+        use solidcraft_theme::ColorVision;
         if !crate::gpu::test_picture_renderer() {
             return;
         }
@@ -13029,7 +13029,7 @@ mod tests {
     /// changes, and nothing else (the light theme in Off is the engine's own colours).
     #[test]
     fn picture_palette_follows_the_colour_vision_mode() {
-        use crate::theme::ColorVision;
+        use solidcraft_theme::ColorVision;
         let rgb = |c: Color32| Rgb(c.r(), c.g(), c.b());
         let off = scene_palette(false, ColorVision::Off);
         let rg = scene_palette(false, ColorVision::Protan);
@@ -13049,7 +13049,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn colour_vision_mode_reaches_the_frame_and_the_view_caches() {
-        use crate::theme::ColorVision;
+        use solidcraft_theme::ColorVision;
         let mut h = crate::scenario::Harness::new();
         h.app.preferences.language = "en".into();
         h.app.home.open = false;
@@ -13060,13 +13060,13 @@ mod tests {
         let before = keys(&h.app);
         h.step(&json!({"click":{"handle":"dialog:Mode:Deutan"}})).unwrap();
         h.frame();
-        assert_eq!(crate::theme::vision(), ColorVision::Deutan);
-        assert_eq!(Tokens::get(), Tokens::themed(crate::theme::is_dark(), ColorVision::Deutan));
+        assert_eq!(solidcraft_theme::vision(), ColorVision::Deutan);
+        assert_eq!(Tokens::get(), Tokens::themed(solidcraft_theme::is_dark(), ColorVision::Deutan));
         let after = keys(&h.app);
         assert!(before.0 != after.0 && before.1 != after.1, "both caches are keyed on the mode");
         h.call("ui.prefs", json!({"button": "cancel"}));
         h.frame();
-        assert_eq!((h.app.preferences.color_vision, crate::theme::vision()), (ColorVision::Off, ColorVision::Off));
+        assert_eq!((h.app.preferences.color_vision, solidcraft_theme::vision()), (ColorVision::Off, ColorVision::Off));
         assert_eq!(keys(&h.app), before);
         // `ui.render` shows the mode too: a fixed sketch line in Deutan's value (in the light
         // theme, where the red-green table changes it; the render follows the theme).
