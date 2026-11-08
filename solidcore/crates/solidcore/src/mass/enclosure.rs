@@ -584,6 +584,11 @@ fn mag3(v: [Ivl; 3]) -> f64 {
     v.iter().map(|c| c.mag()).sum()
 }
 
+/// `hi - lo` of an interval, a bound on its width.
+fn width(x: Ivl) -> f64 {
+    x.hi - x.lo
+}
+
 /// `int |x|^i` over `[xl, xh]` (`xl <= 0 <= xh`), enclosed: also `int x^i` for even `i`.
 fn abs_moment(xl: Ivl, xh: Ivl, i: usize) -> Ivl {
     let mut a = Ivl::from(1.0);
@@ -826,7 +831,7 @@ impl<'a> Work<'a> {
         let fg = self.faces.get(face).ok_or_else(|| SolidError::sm_err(OP))?;
         let p = partials_at(&fg.cn, end.x, end.y, 1)?;
         let (s, su, sv) = (p.at(0, 0), p.at(1, 0), p.at(0, 1));
-        let (du, dv) = (end.x.hi - end.x.lo, end.y.hi - end.y.lo);
+        let (du, dv) = (width(end.x), width(end.y));
         *zcap = zcap.max((s.z - Ivl::from(self.z0)).mag());
         *open_length = *open_length
             + Ivl::from(mag3([su.x, su.y, su.z])) * Ivl::from(du)
@@ -849,8 +854,8 @@ impl<'a> Work<'a> {
         }
         let p = partials_at(&fg.cn, u, v, 1)?;
         let (su, sv) = (p.at(1, 0), p.at(0, 1));
-        Ok(Ivl::from(mag3([su.x, su.y, su.z])) * Ivl::from(u.hi - u.lo)
-            + Ivl::from(mag3([sv.x, sv.y, sv.z])) * Ivl::from(v.hi - v.lo))
+        Ok(Ivl::from(mag3([su.x, su.y, su.z])) * Ivl::from(width(u))
+            + Ivl::from(mag3([sv.x, sv.y, sv.z])) * Ivl::from(width(v)))
     }
 
     /// Adds the cells of one pcurve on face `face`: each polynomial piece, cut where it may
@@ -1262,7 +1267,11 @@ impl<'a> Work<'a> {
         let comp = |s: &[Bs; 3], i: usize| [s[0].at(i, 0), s[1].at(i, 0), s[2].at(i, 0)];
         let diff = |a: [Ivl; 3], b: [Ivl; 3]| [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
         // |X_1'| + |D'| and max |z - z0| over the cell
-        let speed = mag3(comp(o1, 1)) + mag3(diff(comp(o1, 1), comp(o2, 1)));
+        let speed = mag3([
+            Ivl::from(mag3(comp(o1, 1))),
+            Ivl::from(mag3(diff(comp(o1, 1), comp(o2, 1)))),
+            IZ,
+        ]);
         let zmax = (o1[2].at(0, 0) - z0).mag().max((o2[2].at(0, 0) - z0).mag());
         // int |D| over the cell
         let gap = match (taylor, mid.first(), mid.get(1)) {
@@ -1457,8 +1466,8 @@ fn side_length(cn: &Nurbs, u: Ivl, v: Ivl) -> Option<Ivl> {
     // mixed partial over the box between
     let between = |x: Ivl, k: f64| Ivl::new(x.lo.min(k), x.hi.max(k));
     let (bu, bv, off, extent) = match across {
-        Across::V(k) => (u, between(v, k), (v, k), u.hi - u.lo),
-        Across::U(k) => (between(u, k), v, (u, k), v.hi - v.lo),
+        Across::V(k) => (u, between(v, k), (v, k), width(u)),
+        Across::U(k) => (between(u, k), v, (u, k), width(v)),
     };
     let d = (off.0.lo - off.1).abs().max((off.0.hi - off.1).abs());
     let mixed = if d > 0.0 {
@@ -1572,7 +1581,11 @@ fn side_speed_bound(cn: &Nurbs, u: Ivl, v: Ivl) -> Option<Ivl> {
         wmax = wmax.max(w);
     }
     let h = hull?;
-    let delta = (h[0].hi - h[0].lo) + (h[1].hi - h[1].lo) + (h[2].hi - h[2].lo);
+    let delta = mag3([
+        Ivl::from(width(h[0])),
+        Ivl::from(width(h[1])),
+        Ivl::from(width(h[2])),
+    ]);
     // the shortest knot span the range meets
     let mut shortest = f64::INFINITY;
     for k in span(knots, p, n, along.lo)..=span(knots, p, n, along.hi) {
@@ -1587,7 +1600,7 @@ fn side_speed_bound(cn: &Nurbs, u: Ivl, v: Ivl) -> Option<Ivl> {
     }
     let speed = Ivl::from(2.0 * p as f64) / Ivl::from(shortest) * Ivl::from(wmax) / Ivl::from(wmin)
         * Ivl::from(delta);
-    Some(speed * Ivl::from(along.hi - along.lo))
+    Some(speed * Ivl::from(width(along)))
 }
 
 /// The straight uv segment from `a` to `z` as a degree 1 curve on `[0, 1]`.
@@ -1650,6 +1663,14 @@ mod tests {
         let d = s.dx(2);
         assert!(d.at(0, 0).lo <= 2.0 && 2.0 <= d.at(0, 0).hi);
         assert!(d.at(0, 1).lo <= 2.0 && 2.0 <= d.at(0, 1).hi);
+    }
+
+    /// The bounds' sums and widths round up: 1 + 1e-16 is not a double, and rounded to the
+    /// nearest it is 1, below the true sum.
+    #[test]
+    fn bounds_round_up() {
+        assert!(mag3([Ivl::from(1.0), Ivl::from(1e-16), IZ]) > 1.0);
+        assert!(width(Ivl::new(-1e-16, 1.0)) > 1.0);
     }
 
     /// The moments hold the closed forms.
