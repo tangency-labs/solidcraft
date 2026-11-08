@@ -1100,6 +1100,34 @@ fn a_body_a_mesh_body_could_hide_is_drawn_from_the_mesh() {
     assert!(e.contains("bodies drawn from the mesh: 1 for mesh bodies, 1 for a mesh body in front"), "{e}");
 }
 
+/// A sheet's three views prepare the block for exact lines once between them (#13218). A mesh body
+/// beside it is drawn from its mesh in every view, not only in the view that met it first. Two
+/// copies of a part and a pin of their own: two bodies prepared, each drawn exact in every view by
+/// its own edges (the pin has 3, the cube 12).
+#[test]
+fn a_sheets_views_prepare_each_body_once() {
+    // Per view: the bodies it prepared, and the triangles it drew from meshes.
+    let views = |s: &Session| -> Vec<(usize, usize)> {
+        let d = s.drawing("test").unwrap().clone();
+        let scene = crate::drawing_scene::build(s, &d, d.sheets[0].id).unwrap();
+        scene.views.iter().map(|v| v.stats.map_or((0, 0), |stats| (stats.prepared, stats.triangles))).collect()
+    };
+    let prepared = |views: &[(usize, usize)]| views.iter().map(|(prepared, _)| prepared).sum::<usize>();
+    let (s, _) = three_views();
+    let drawn = views(&s);
+    assert_eq!((drawn.len(), prepared(&drawn)), (3, 1), "{drawn:?}");
+    assert!(drawn.iter().all(|(_, triangles)| *triangles == 0), "nothing from the mesh: {drawn:?}");
+    let mut mesh = block();
+    with_mesh_cube(&mut mesh, [150.0, 0.0, 0.0], "sheet");
+    let drawn = views(&three_views_of(mesh).0);
+    assert!(prepared(&drawn) == 1 && drawn.iter().all(|(_, triangles)| *triangles > 0), "{drawn:?}");
+    let (mut copies, _) = two_cubes();
+    run(&mut copies, "solid.cylinder", json!({"diameter": 6, "height": 10, "base": [5, 40, 0], "body_name": "Pin", "operation": "new"}));
+    let drawn = views(&three_views_of(copies).0);
+    assert_eq!((drawn.len(), prepared(&drawn)), (3, 2), "{drawn:?}");
+    assert!(drawn.iter().all(|(_, triangles)| *triangles == 0), "nothing from the mesh: {drawn:?}");
+}
+
 /// A mirrored copy of a plate with a hole is drawn from its own record, not the mesh: from the top,
 /// its outline and rim are the original's mirrored about the plane. The original's pieces and both
 /// rims are analytic. The copy's straight edges come from the kernel as splines (a mirror isn't a

@@ -19,7 +19,7 @@ use solidcraft_geom::{Aabb2, EPS, Similarity2};
 use solidcraft_kernel::PlanarPiece;
 
 use super::ShownSet;
-use super::exact::{self, Fallback};
+use super::exact::{self, Fallback, PreparedBodies};
 use crate::mesh_lines::{self, Ask, Origin, Owner, Refused, Scene, View};
 use crate::params::bad;
 use crate::{Result, Session};
@@ -94,6 +94,8 @@ pub struct Stats {
     pub shared_meshes: usize,
     pub triangles: usize,
     pub segments: usize,
+    /// Bodies the view prepared for its exact lines; an earlier view of its sheet lent it the rest.
+    pub prepared: usize,
     pub prepare_ms: f64,
     pub projection_ms: f64,
     pub occlusion_ms: f64,
@@ -119,13 +121,23 @@ pub struct LineRequest {
 /// Why a view refuses a set of bodies: it names each line by its body's name.
 const ONE_NAME: &str = "two shown bodies have one name: the view can't tell their lines apart";
 
-/// The lines of the bodies `shown` holds in the view `frame` places on paper, as `request` asks.
-pub fn lines(s: &Session, shown: &ShownSet, frame: &ViewFrame, request: &LineRequest, cmd: &str) -> Result<Lines> {
-    lines_with(s, shown, frame, request, &exact::options(), cmd)
+/// The lines of the bodies `shown` holds in the view `frame` places on paper, as `request` asks. The
+/// bodies the exact lines need come from `prepared` when another view of `shown` prepared them, and
+/// stay there for the next.
+pub fn lines(s: &Session, shown: &ShownSet, frame: &ViewFrame, request: &LineRequest, prepared: &mut PreparedBodies, cmd: &str) -> Result<Lines> {
+    lines_with(s, shown, frame, request, &exact::options(), prepared, cmd)
 }
 
 /// [`lines`], with `hlr`'s options `opts`.
-fn lines_with(s: &Session, shown: &ShownSet, frame: &ViewFrame, request: &LineRequest, opts: &hlr::Options, cmd: &str) -> Result<Lines> {
+fn lines_with(
+    s: &Session,
+    shown: &ShownSet,
+    frame: &ViewFrame,
+    request: &LineRequest,
+    opts: &hlr::Options,
+    prepared: &mut PreparedBodies,
+    cmd: &str,
+) -> Result<Lines> {
     let chord_mm = request.chord_mm;
     let scale = frame.scale();
     let model_chord_mm = chord_mm / scale.factor();
@@ -143,11 +155,12 @@ fn lines_with(s: &Session, shown: &ShownSet, frame: &ViewFrame, request: &LineRe
     }
     // The edges a view draws are the display mesh's, the same rule the mesh projection follows.
     let ask = Ask { tangent_edges: request.tangent_edges, sources: true };
-    let drawn = exact::lines(&placed, shown, frame, request, opts, &|item| mesh_lines::drawn_edges(&item.body.mesh(), ask))
+    let drawn = exact::lines(&placed, shown, frame, request, opts, &|item| mesh_lines::drawn_edges(&item.body.mesh(), ask), prepared)
         .ok_or_else(|| bad(cmd, refused(Refused::Cancelled)))?;
     let mut made = Made { uncertain: drawn.uncertain, ..Made::default() };
     let mut stats = Stats {
         bodies: placed.len(),
+        prepared: drawn.prepared,
         prepare_ms: drawn.prepare_ms,
         projection_ms: drawn.projection_ms,
         occlusion_ms: drawn.occlusion_ms,
@@ -266,6 +279,7 @@ fn meshed(s: &Session, shown: &ShownSet, frame: &ViewFrame, request: &LineReques
         prepare_ms,
         projection_ms: drawing.projection_ms,
         occlusion_ms: drawing.occlusion_ms,
+        ..Stats::default()
     };
     Ok(Lines { lines: out, covered, model_chord_mm, stats, made: Made::default() })
 }
@@ -747,7 +761,7 @@ mod tests {
     /// as a view draws them, and every one from the mesh.
     fn both_ways(s: &Session, view: solidcraft_geom::drawing_view::NamedView, tangent_edges: bool) -> (Lines, Lines) {
         let (set, frame, request) = asked(s, view, tangent_edges);
-        let exact = lines(s, &set, &frame, &request, "test").unwrap();
+        let exact = lines(s, &set, &frame, &request, &mut PreparedBodies::default(), "test").unwrap();
         let mesh = meshed(s, &set, &frame, &request, CHORD_MM, &vec![true; set.bodies.len()], "test").unwrap();
         (exact, mesh)
     }
@@ -773,11 +787,56 @@ mod tests {
         run(&mut s, "solid.box", serde_json::json!({"length": 100, "width": 50, "height": 20, "body_name": "Block"}));
         let (set, frame, request) = asked(&s, solidcraft_geom::drawing_view::NamedView::IsoFrontRight, false);
         let budget = hlr::Options { max_tracks: 1, ..exact::options() };
-        let refused = lines_with(&s, &set, &frame, &request, &budget, "test").unwrap();
+        let refused = lines_with(&s, &set, &frame, &request, &budget, &mut PreparedBodies::default(), "test").unwrap();
         assert_eq!((refused.made.exact, refused.made.provenance()), (0, "mesh_projection"), "{:?}", refused.made);
         assert_eq!(refused.made.from_mesh, BTreeMap::from([(Fallback::Refused, 1)]));
         let mesh = meshed(&s, &set, &frame, &request, CHORD_MM, &[true], "test").unwrap();
         assert_eq!((refused.lines.len(), edges(&refused, None)), (mesh.lines.len(), edges(&mesh, None)));
+    }
+
+    /// Views of one shown set share the bodies they prepare (#13218): the block's iso view, after its
+    /// front view, prepares nothing and draws the lines it draws alone. A view of another model
+    /// state prepares its own and lends nothing, so the first state's views still share.
+    #[test]
+    fn views_of_one_shown_set_share_their_prepared_bodies() {
+        use solidcraft_geom::drawing_view::NamedView::{Front, IsoFrontRight};
+        let block = || {
+            let mut s = Session::default();
+            run(&mut s, "solid.box", serde_json::json!({"length": 100, "width": 50, "height": 20, "body_name": "Block"}));
+            s
+        };
+        let (s, other) = (block(), block());
+        let drawn = |s: &Session, view, prepared: &mut PreparedBodies| {
+            let (set, frame, request) = asked(s, view, false);
+            lines(s, &set, &frame, &request, prepared, "test").unwrap()
+        };
+        let mut prepared = PreparedBodies::default();
+        let front = drawn(&s, Front, &mut prepared);
+        let iso = drawn(&s, IsoFrontRight, &mut prepared);
+        let alone = drawn(&s, IsoFrontRight, &mut PreparedBodies::default());
+        assert_eq!((front.stats.prepared, iso.stats.prepared, alone.stats.prepared), (1, 0, 1));
+        assert_eq!((iso.made.exact, &iso.lines), (1, &alone.lines));
+        assert_eq!(drawn(&other, Front, &mut prepared).stats.prepared, 1);
+        assert_eq!(drawn(&s, Front, &mut prepared).lines, front.lines);
+        assert_eq!(drawn(&s, IsoFrontRight, &mut prepared).stats.prepared, 0);
+    }
+
+    /// Two copies of a part share one prepared body in a view of both. A view that leaves the first
+    /// copy out places the second at the head of its group: that copy is prepared once, for it and
+    /// the views after it, and drawn exact.
+    #[test]
+    fn a_view_without_a_parts_first_copy_prepares_the_next() {
+        let (s, _) = crate::drawing_scene::tests::two_cubes();
+        let (both, frame, request) = asked(&s, solidcraft_geom::drawing_view::NamedView::Front, false);
+        let second = ShownSet { state: both.state.clone(), bodies: both.bodies[1..].to_vec() };
+        let mut prepared = PreparedBodies::default();
+        let drawn = |set: &ShownSet, prepared: &mut PreparedBodies| lines(&s, set, &frame, &request, prepared, "test").unwrap();
+        let all = drawn(&both, &mut prepared);
+        assert_eq!((both.bodies.len(), all.stats.prepared, all.made.exact), (2, 1, 2));
+        let one = drawn(&second, &mut prepared);
+        assert_eq!((one.stats.prepared, one.made.exact), (1, 1));
+        assert_eq!(one.lines, drawn(&second, &mut PreparedBodies::default()).lines);
+        assert_eq!(drawn(&second, &mut prepared).stats.prepared, 0);
     }
 
     /// Each shown body's edges a view draws with a piece at `visibility` or any (`None`), with their

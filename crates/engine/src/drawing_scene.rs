@@ -67,7 +67,7 @@ use solidcraft_geom::{Aabb2, ArcMap};
 use solidcraft_sketch::PaperFonts;
 
 use crate::drawing_picture::{picture_items, view_parts};
-use crate::drawing_view::{CHORD_MM, LineRequest, MIN_MODEL_CHORD_MM, Shown, ShownSet, Stats, Styles, Unmeasured, paper_lines};
+use crate::drawing_view::{CHORD_MM, LineRequest, MIN_MODEL_CHORD_MM, PreparedBodies, Shown, ShownSet, Stats, Styles, Unmeasured, paper_lines};
 use crate::params::bad;
 use crate::title_block_text::{self, CellText, Set};
 use crate::{EngineError, Result, Session};
@@ -297,10 +297,12 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     // Where the design places its parts, as the provider draws them.
     let copy = (!s.pending_moves.is_empty()).then(|| designed(s));
     let s = copy.as_ref().unwrap_or(s);
-    // Worked out once for the sheet: every view draws from the same one. Each view's lines are
-    // placed as they are drawn, so at most one view's are held beside the scene.
+    // Worked out once for the sheet: every view draws from the same one, and lends the next the
+    // bodies it prepared for exact lines. Each view's lines are placed as they are drawn, so at most
+    // one view's are held beside the scene.
     let shown = crate::drawing_view::shown(s);
-    let drawn = on.iter().map(|(id, view, centre)| (*id, *centre, draw(s, &shown, *id, view)));
+    let mut prepared = PreparedBodies::default();
+    let drawn = on.iter().map(|(id, view, centre)| (*id, *centre, draw(s, &shown, &mut prepared, *id, view)));
     let (text, _) = block_text(record, &Lettering::of(s, drawing), &cell_texts(s, drawing, sheet), true)?;
     let mut assembly = assemble(record, drawing.projection, &text, &crate::drawing_pictures::groups(drawing, sheet), drawn)?;
     // After the views, as they need the views' frames: one read for the sheet's dimensions.
@@ -406,7 +408,8 @@ impl Lettering {
 /// [`CHORD_MM`] on paper, or coarser past 100:1, where that would ask the mesh for chords finer than
 /// [`MIN_MODEL_CHORD_MM`]; centred on the view ([`assemble`] moves them to its centre). Lines past
 /// the paper scene's [`MAX_RECORDS`] are refused here, so no view holds more than a scene takes.
-fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64, view: &ResolvedView) -> Drawn {
+/// The bodies its exact lines need come from `prepared`, as the sheet's other views left them.
+fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, prepared: &mut PreparedBodies, id: u64, view: &ResolvedView) -> Drawn {
     // What the view chooses to show ([`crate::drawing_view::measured`]), and its reference parts' reach.
     let measured = crate::drawing_view::measured(shown, view).map(|(set, extents)| {
         let around = crate::drawing_view::shows(&set, &view.basis, &extents, view.reference_shown_percent);
@@ -435,7 +438,7 @@ fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64,
         Err(e) => return none(Status::Failed(reason(e))),
     };
     let lines = frame.boundary(&around).map_err(|e| bad(CMD, e.to_string())).and_then(|rect| {
-        let mut lines = crate::drawing_view::lines(s, &set, &frame, &request, CMD)?;
+        let mut lines = crate::drawing_view::lines(s, &set, &frame, &request, prepared, CMD)?;
         styles.leave_shaded_to_pictures(&mut lines);
         Ok((lines, rect))
     });
@@ -1181,7 +1184,8 @@ impl Job {
             Some((was, shown)) if Arc::ptr_eq(&was, &state) => shown,
             _ => crate::drawing_view::shown(&copy),
         };
-        let drawn = draw(&copy, &shown, ticket.view, &ticket.resolved);
+        // One view a job, so nothing it prepares is lent to another.
+        let drawn = draw(&copy, &shown, &mut PreparedBodies::default(), ticket.view, &ticket.resolved);
         let shows = SourceKey::of(&shown);
         // The view's dimensions through its new frame, taken in the same swap as its lines.
         let frame = drawn.frame.map(|frame| (frame, ticket.resolved.line_group.value));

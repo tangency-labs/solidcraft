@@ -50,7 +50,9 @@ use solidcraft_io::paper::MAX_PICTURE_DPI;
 use solidcraft_render::VisualStyle;
 
 use super::CommandSpec;
-use crate::drawing_view::{CHORD_RANGE, Extents, LeftOut, LineRequest, Lines, NOTHING_CHOSEN, OnSheet, Room, ShownSet, Styles, Unmeasured};
+use crate::drawing_view::{
+    CHORD_RANGE, Extents, LeftOut, LineRequest, Lines, NOTHING_CHOSEN, OnSheet, PreparedBodies, Room, ShownSet, Styles, Unmeasured,
+};
 use crate::params::bad;
 use crate::schema::drawing_view::{
     AccuracyResult, AlongParam, AngleFromParam, BaseParams, BoxResult, ChoicesResult, CopyParams, CreateResult, DPI_RANGE, EditParams, EditResult,
@@ -182,7 +184,7 @@ fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
         tangent_edges: settings.tangent_edges == TangentEdges::Show,
         chord_mm,
     };
-    let mut drawn = crate::drawing_view::lines(s, &set, &frame, &asked, CMD)?;
+    let mut drawn = crate::drawing_view::lines(s, &set, &frame, &asked, &mut PreparedBodies::default(), CMD)?;
     styles.leave_shaded_to_pictures(&mut drawn);
     if let Some(max) = request.max_error_mm {
         certify(&drawn, max, scale)?;
