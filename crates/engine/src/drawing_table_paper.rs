@@ -1,4 +1,5 @@
-//! A sheet's tables placed and on paper (#3874 P8b, P8c): each parts list's or revision table's rows
+//! A sheet's tables placed and on paper (#3874 P8b, P8c): each parts list's, revision table's or
+//! family table's rows
 //! read, its columns fitted to what the drawing's fonts really set, the whole where its record says,
 //! and its words in its cells. A table's corner can only be named once its size is known, so it is
 //! laid out at the origin first and placed second; one measure of each word serves both, and its
@@ -21,7 +22,7 @@ use std::collections::HashMap;
 
 use solidcore_record::Vec2;
 use solidcraft_doc::bom::{self, Tree};
-use solidcraft_doc::drawing::table::{Corner, Kind, Place, SheetTable};
+use solidcraft_doc::drawing::table::{Corner, Family, Kind, Place, SheetTable};
 use solidcraft_doc::drawing::{Drawing, Sheet};
 use solidcraft_geom::Aabb2;
 use solidcraft_geom::cell::{HAlign, Part};
@@ -81,6 +82,7 @@ pub(crate) fn kind_of(record: &SheetTable) -> ObjectKind {
     match record.kind {
         Kind::PartsList(_) => ObjectKind::PartsList,
         Kind::Revision => ObjectKind::RevisionTable,
+        Kind::Family(_) => ObjectKind::FamilyTable,
     }
 }
 
@@ -202,11 +204,16 @@ fn corner_of(place: Place, sized: Aabb2, space: Aabb2) -> Vec2 {
     top_left - Vec2::new(sized.min.x, sized.max.y)
 }
 
-/// `record`'s rows: a revision table's from the drawing's revisions; a parts list's from the design
-/// open, or why it can't be listed.
+/// `record`'s rows: a revision table's from the drawing's revisions; a family table's from the
+/// design's configurations; a parts list's from the design open; or why it can't be listed.
 fn rows_of(s: &Session, d: &Drawing, record: &SheetTable) -> std::result::Result<Vec<Row>, String> {
     let list = match &record.kind {
         Kind::Revision => return Ok(d.revisions.table_rows(d.revisions.per_sheet.then_some(record.sheet))),
+        // A design's configurations are its own: a component in it has none to list.
+        Kind::Family(family) if family.of.component != 0 => {
+            return Err(format!("component {} has no configurations: a design's configurations are its own", family.of.component));
+        }
+        Kind::Family(_) => return Ok(Family::rows(&s.doc)),
         Kind::PartsList(list) => list,
     };
     let state = s.model.state();

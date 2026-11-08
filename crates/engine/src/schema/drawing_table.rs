@@ -31,12 +31,13 @@ impl JsonSchema for TableIdParam {
     }
 }
 
-/// What a table lists: `revision`, or `parts_list`.
+/// What a table lists: `revision`, `parts_list` or `family`.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum KindParam {
     Revision,
     PartsList,
+    Family,
 }
 
 /// The view a parts list lists, as `assembly.bom` takes it: each left out stays as it is, or is the

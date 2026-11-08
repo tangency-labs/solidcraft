@@ -6,6 +6,9 @@
 //!   with the options [`crate::bom::ItemNumbers`] saves. Its source is checked against the
 //!   drawing's sources; a component deleted since is for what draws it to report.
 //!   [`PartsList::rows`] gives a list's rows as a table reads them.
+//! - **A family table** lists the design's configurations, a row each, with a column per
+//!   configuration column ([`Family::table`]). Only the design has configurations: one of another
+//!   component is for what draws it to report.
 //! - **Where it sits** is a corner of the sheet's drawing space with an offset, so a change of
 //!   paper takes it along and moves nothing else, or a free place on paper.
 //!
@@ -13,8 +16,10 @@
 //! [`Table::validate`]; its place is on paper ([`is_paper_coordinate`]); at most [`MAX_TABLES`],
 //! listed by id.
 
+use std::collections::{BTreeMap, HashSet};
+
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::cell::{Content, Format, HAlign, Part, Source};
+use solidcraft_geom::cell::{self, Content, Format, HAlign, MAX_NAME_BYTES, Part, Source};
 use solidcraft_geom::drawing_view::is_paper_coordinate;
 use solidcraft_geom::paper::MAX_SIDE_MM;
 use solidcraft_geom::table::{self, BALLOONED, Column, Filter, Heading, Table};
@@ -23,13 +28,16 @@ use super::by_id::Record;
 use super::{Drawing, SheetComponent, require};
 use crate::assembly::BomType;
 use crate::bom::{self, Bom, Group, Mass, Quantity, Request, View};
+use crate::config::Column as ConfigColumn;
 use crate::display_units::{NumberFormat, format_length, format_number};
-use crate::{DocError, Result, ids};
+use crate::{DocError, Document, Result, ids};
 
 /// The most tables a drawing may have.
 pub const MAX_TABLES: usize = 1_000;
 /// The most decimals a mass may show.
 const MAX_MASS_DECIMALS: u8 = 6;
+/// The row field that marks a family table's active configuration, which no new table prints.
+pub const ACTIVE: &str = "active";
 
 /// A table on a sheet.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -52,6 +60,24 @@ pub enum Kind {
     PartsList(PartsList),
     /// The drawing's revision rows ([`Drawing::revisions`]).
     Revision,
+    Family(Family),
+}
+
+/// How many configuration columns a new family table leaves out, by why.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct LeftOut {
+    /// Appearance columns: a look can't be printed as text.
+    pub looks: usize,
+    /// Those a table has no room for, that no row could fill or whose heading no label can show.
+    pub others: usize,
+}
+
+/// The configurations a family table lists.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Family {
+    /// The component whose configurations it lists (0: the design, the only one that has them).
+    pub of: SheetComponent,
 }
 
 /// The bill of materials view a parts list lists, in the words [`crate::bom::ItemNumbers`] saves.
@@ -177,6 +203,97 @@ impl PartsList {
     }
 }
 
+impl Family {
+    /// The definition a new family table starts with: a new table's NAME column, then one for each
+    /// of `doc`'s configuration columns in its order, as many as a table has room for, with those
+    /// left out. An appearance column is left out: a look can't be printed as text. A column reads the cell its configuration column gives each row
+    /// ([`Document::config_key`]); its heading is the parameter's name, or the column's kind and
+    /// target, in capitals, as a parts list's headings are; its name is the key in snake case,
+    /// numbered on a clash, so a filter, an override or a sort can name it.
+    pub fn table(&self, doc: &Document) -> (Table, LeftOut) {
+        let mut table = Kind::Family(*self).default_table();
+        let mut taken: HashSet<String> = table.columns.iter().map(|c| c.name.clone()).collect();
+        let mut left_out = LeftOut::default();
+        for config in &doc.configs.columns {
+            if matches!(config, ConfigColumn::Appearance(_) | ConfigColumn::ComponentAppearance(_) | ConfigColumn::FaceAppearance(_)) {
+                left_out.looks += 1;
+                continue;
+            }
+            if table.columns.len() == table::MAX_COLUMNS {
+                left_out.others += 1;
+                continue;
+            }
+            // A column no row could fill, or with a heading no label can show, is left out.
+            let key = doc.config_key(config);
+            let heading = heading_of(&key);
+            if key.len() > table::MAX_KEY_BYTES || cell::check_label(&heading).is_err() {
+                left_out.others += 1;
+                continue;
+            }
+            let name = unique(snake_case(&key), &mut taken);
+            table.columns.push(Column { name, ..column(&key, &heading, HAlign::Left) });
+        }
+        (table, left_out)
+    }
+
+    /// Each of `doc`'s configurations as a table reads it, in its table's order: its name, the cell
+    /// of each configuration column as the design saves it, and [`ACTIVE`] `yes` on the active one.
+    /// A cell is an expression with its units, so it is text and sorts as text.
+    pub fn rows(doc: &Document) -> Vec<table::Row> {
+        let configs = &doc.configs;
+        let keys: Vec<String> = configs.columns.iter().map(|c| doc.config_key(c)).collect();
+        let row = |config: &crate::config::ConfigRow| {
+            // A key longer than a row's field key can be names no column, so it is left out.
+            let cells = keys.iter().zip(&config.cells).filter(|(key, _)| key.len() <= table::MAX_KEY_BYTES);
+            let mut fields: BTreeMap<String, String> = cells.map(|(key, cell)| (key.clone(), cell.clone())).collect();
+            fields.insert("name".into(), config.name.clone());
+            if configs.active.as_deref() == Some(config.name.as_str()) {
+                fields.insert(ACTIVE.into(), "yes".into());
+            }
+            table::Row { key: config.name.clone(), kind: table::RowKind::Part, purchased: false, fields, level: 0, numbers: BTreeMap::new() }
+        };
+        configs.rows.iter().map(row).collect()
+    }
+}
+
+/// A configuration column's heading: a parameter's name, or the column's kind and target, in
+/// capitals. [`Document::config_key`] names a column `<kind>:<target>`.
+fn heading_of(key: &str) -> String {
+    let heading = match key.split_once(':') {
+        Some(("param", name)) => name.to_string(),
+        Some((kind, target)) => format!("{} {target}", kind.replace('_', " ")),
+        None => key.to_string(),
+    };
+    heading.to_uppercase()
+}
+
+/// `key` as a column's name: its letters and digits in lower case, each run of anything else one
+/// `_`, short enough for a `_N` to follow. A configuration key starts with its kind's letters.
+fn snake_case(key: &str) -> String {
+    let mut name = String::new();
+    for c in key.chars() {
+        if c.is_ascii_alphanumeric() {
+            name.push(c.to_ascii_lowercase());
+        } else if !name.is_empty() && !name.ends_with('_') {
+            name.push('_');
+        }
+    }
+    // All ASCII, so any length is a character boundary.
+    name.truncate(MAX_NAME_BYTES - 8);
+    name.trim_end_matches('_').to_string()
+}
+
+/// `base`, or `base_2`, `base_3`... the first that isn't `taken`, which it then is.
+fn unique(base: String, taken: &mut HashSet<String>) -> String {
+    let mut name = base.clone();
+    let mut n = 2;
+    while !taken.insert(name.clone()) {
+        name = format!("{base}_{n}");
+        n += 1;
+    }
+    name
+}
+
 impl MassFormat {
     /// A mass as this format shows it, without its unit: the column's heading says that.
     fn text(self, mass: Mass) -> Option<String> {
@@ -205,6 +322,7 @@ impl Kind {
                 column("mass", "MASS", HAlign::Right),
                 Column { printed: false, ..column(BALLOONED, "BALLOONED", HAlign::Centre) },
             ],
+            Kind::Family(_) => vec![column("name", "NAME", HAlign::Left)],
             Kind::Revision => vec![
                 column("revision", "REV", HAlign::Centre),
                 column("description", "DESCRIPTION", HAlign::Left),
@@ -228,13 +346,23 @@ impl Kind {
     }
 
     /// Where a new table of this kind goes: a parts list at the top right, a revision table at the
-    /// bottom left.
+    /// bottom left, a family table at the top left.
     pub fn default_place(&self) -> Place {
         let corner = match self {
             Kind::PartsList(_) => Corner::TopRight,
             Kind::Revision => Corner::BottomLeft,
+            Kind::Family(_) => Corner::TopLeft,
         };
         Place::Anchor { corner, offset_mm: [0.0, 0.0] }
+    }
+
+    /// The component it lists, if it lists one.
+    pub fn of(&self) -> Option<SheetComponent> {
+        match self {
+            Kind::PartsList(list) => Some(list.of),
+            Kind::Family(family) => Some(family.of),
+            Kind::Revision => None,
+        }
     }
 }
 
@@ -258,9 +386,11 @@ impl Drawing {
     fn check_table(&self, t: &SheetTable) -> Result<()> {
         require(self.sheets.iter().any(|s| s.id == t.sheet), || format!("it is on sheet {}, which the drawing doesn't have", ids::encode(t.sheet)))?;
         t.table.validate().map_err(|e| DocError::Invalid(e.to_string()))?;
+        if let Some(of) = t.kind.of() {
+            let named = || format!("it lists source {}, which the drawing doesn't have", ids::encode(of.source));
+            require(self.sources.iter().any(|s| s.id == of.source), named)?;
+        }
         if let Kind::PartsList(list) = &t.kind {
-            let named = || format!("it lists source {}, which the drawing doesn't have", ids::encode(list.of.source));
-            require(self.sources.iter().any(|s| s.id == list.of.source), named)?;
             require(list.mass.decimals <= MAX_MASS_DECIMALS, || format!("a mass shows at most {MAX_MASS_DECIMALS} decimals"))?;
         }
         let [x, y] = match t.place {

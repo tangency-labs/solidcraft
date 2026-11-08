@@ -56,7 +56,7 @@ use crate::cell::MISSING;
 /// The distance between baselines, in cap heights: ISO 3098-0's line spacing.
 pub const LINE_PITCH: f64 = 10.0 / 7.0;
 /// The longest row field key or field.
-const MAX_KEY_BYTES: usize = 256;
+pub const MAX_KEY_BYTES: usize = 256;
 /// The longest row key: room for a parts list's deepest row, which names 65 members.
 const MAX_ROW_KEY_BYTES: usize = 2048;
 const MAX_ROW_HEIGHT_MM: f64 = 1000.0;

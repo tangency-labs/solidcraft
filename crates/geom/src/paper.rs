@@ -148,6 +148,8 @@ pub enum ObjectKind {
     PartsList,
     /// The sheet table that lists the drawing's revisions.
     RevisionTable,
+    /// The sheet table that lists a design's configurations, a row each.
+    FamilyTable,
     /// An image placed on the sheet, such as a logo or a photo.
     SheetImage,
     /// A drawing view's lines.
@@ -168,6 +170,7 @@ impl ObjectKind {
             ObjectKind::TitleBlock => "TITLE_BLOCK",
             ObjectKind::PartsList => "PARTS_LIST",
             ObjectKind::RevisionTable => "REVISION_TABLE",
+            ObjectKind::FamilyTable => "FAMILY_TABLE",
             ObjectKind::SheetImage => "SHEET_IMAGE",
             ObjectKind::View => "VIEW",
             ObjectKind::Dimension => "DIMENSION",

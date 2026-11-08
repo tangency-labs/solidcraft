@@ -582,6 +582,120 @@ fn a_sorted_table_orders_its_rows_and_an_empty_sort_is_the_lists_order() {
     assert_eq!(keys(&mut s).len(), 1);
 }
 
+/// A box whose width is a parameter in four configurations (Default, active, and three more), and a
+/// drawing, open.
+fn configured() -> Session {
+    let mut s = Session::default();
+    s.execute("parameters.change", &json!({"name": "width", "expression": "20 mm"})).unwrap();
+    s.execute("solid.box", &json!({"length": 20, "width": 10, "height": 10})).unwrap();
+    s.execute("config.configure", &json!({"params": ["width"]})).unwrap();
+    for (name, width) in [("Small", "10 mm"), ("Large", "30 mm"), ("Tiny", "9 mm")] {
+        s.execute("config.row", &json!({"name": name, "values": {"param:width": width}})).unwrap();
+    }
+    s.execute("drawing.create", &json!({})).unwrap();
+    s
+}
+
+/// A family table lists the design's configurations at the top left: NAME and WIDTH, a row each in
+/// the table's order, as the sheet draws it; a configuration added later shows on the next read; it
+/// sorts like any table, and adding it is one undo step. Without configurations it lists none and
+/// still draws.
+#[test]
+fn a_family_table_lists_the_designs_configurations() {
+    let mut s = configured();
+    let sheet = sheet_of(&s);
+    let steps = s.undo.len();
+    let added = run(&mut s, ADD, json!({"sheet": sheet, "kind": "family"}));
+    assert_eq!(s.undo.len(), steps + 1);
+    assert_eq!(added.get("warnings"), None, "{added}");
+    let record = &added["record"];
+    assert_eq!(record["place"]["anchor"]["corner"], json!("top_left"), "{record}");
+    assert_eq!(record["kind"]["family"]["of"]["component"], json!(0));
+    let headings: Vec<&str> = record["table"]["columns"].as_array().unwrap().iter().map(|c| c["heading"].as_str().unwrap()).collect();
+    assert_eq!(headings, ["NAME", "WIDTH"]);
+    let id = id_of(&added);
+    let keys = |s: &mut Session| -> Vec<String> {
+        inspected(s, id)["rows"].as_array().unwrap().iter().map(|r| r["key"].as_str().unwrap().to_string()).collect()
+    };
+    assert_eq!(inspected(&mut s, id)["listed"].as_u64(), Some(4));
+    assert_eq!(keys(&mut s), ["Default", "Small", "Large", "Tiny"]);
+    let (state, bounds) = on_sheet(&s, id);
+    assert!(state.drawn && !state.failed, "{state:?}");
+    let (bounds, drawing) = (bounds.unwrap(), space(&s));
+    assert!(near(Vec2::new(bounds.min.x, bounds.max.y), Vec2::new(drawing.min.x, drawing.max.y)), "{bounds:?} {drawing:?}");
+    let d = s.drawing("test").unwrap().clone();
+    let built = crate::drawing_scene::build(&s, &d, d.sheets[0].id).unwrap();
+    let object = built.objects.iter().find(|o| o.object == id).unwrap();
+    assert_eq!(object.kind, solidcraft_geom::paper::ObjectKind::FamilyTable);
+    // The words in its cells, as the sheet sets them.
+    let record = d.tables.by_id(id).unwrap();
+    let placed = crate::drawing_table_paper::place(&s, &d, record, drawing, &PaperFonts::new(&d.font, &d.language, true)).ok().unwrap();
+    let cell = |row: &solidcraft_geom::table::RowLayout, at: usize| row.cells[at].lines[0].text.clone();
+    assert_eq!(cell(&placed.layout.heading, 1), "WIDTH");
+    assert_eq!(
+        placed.layout.rows.iter().map(|row| (cell(row, 0), cell(row, 1))).collect::<Vec<_>>(),
+        [("Default", "20 mm"), ("Small", "10 mm"), ("Large", "30 mm"), ("Tiny", "9 mm")].map(|(a, b)| (a.to_string(), b.to_string()))
+    );
+
+    with_the_drawing_closed(&mut s, |s| {
+        s.execute("config.row", &json!({"name": "Huge", "values": {"param:width": "90 mm"}})).unwrap();
+    });
+    assert_eq!(keys(&mut s), ["Default", "Small", "Large", "Tiny", "Huge"], "a new configuration shows on the next read");
+    run(&mut s, EDIT, json!({"table": ids::encode(id), "set": {"sort": [{"column": "param_width"}]}}));
+    assert_eq!(keys(&mut s), ["Tiny", "Small", "Default", "Large", "Huge"], "9 mm before 10 mm");
+    run(&mut s, EDIT, json!({"table": ids::encode(id), "set": {"sort": [{"column": "name", "descending": true}]}}));
+    assert_eq!(keys(&mut s), ["Tiny", "Small", "Large", "Huge", "Default"]);
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(keys(&mut s)[0], "Tiny", "undo puts the width sort back");
+
+    let mut plain = assembly();
+    let sheet = sheet_of(&plain);
+    let id = id_of(&run(&mut plain, ADD, json!({"sheet": sheet, "kind": "family"})));
+    let reply = inspected(&mut plain, id);
+    assert_eq!((reply["status"].as_str(), reply["listed"].as_u64()), (Some("ok"), Some(0)), "{reply}");
+    assert!(on_sheet(&plain, id).0.drawn);
+}
+
+/// A family table of a component, which has no configurations of its own, says why and the sheet
+/// still draws; a design with more configuration columns than a table holds gets as many as fit and
+/// a warning; a family table takes no list options, and a column naming nothing shows nothing.
+#[test]
+fn a_family_table_says_what_it_cannot_list() {
+    let mut s = configured();
+    let sheet = sheet_of(&s);
+    let id = id_of(&run(&mut s, ADD, json!({"sheet": sheet, "kind": "family"})));
+    put_table(&mut s, id, |t| {
+        if let Kind::Family(family) = &mut t.kind {
+            family.of.component = 7;
+        }
+    });
+    let reply = inspected(&mut s, id);
+    assert_eq!(reply["status"], json!("failed"), "{reply}");
+    assert!(reply["why"].as_str().unwrap().contains("no configurations"), "{reply}");
+    let (state, _) = on_sheet(&s, id);
+    assert!(!state.drawn && state.failed, "{state:?}");
+    assert!(s.execute("drawing.export", &json!({"sheet": sheet, "format": "svg"})).is_ok(), "the sheet still draws");
+
+    assert!(refused(&mut s, ADD, json!({"sheet": sheet, "kind": "family", "set": {"list": {}}})).contains("parts list"));
+    let columns = json!([{"name": "name", "heading": "NAME", "content": [{"field": {"source": "row", "key": "name"}}]}, {"name": "gone", "heading": "GONE", "content": [{"field": {"source": "row", "key": "param:gone"}}]}]);
+    let other = id_of(&run(&mut s, ADD, json!({"sheet": sheet, "kind": "family", "set": {"columns": columns}})));
+    let reply = inspected(&mut s, other);
+    assert_eq!((reply["status"].as_str(), reply["listed"].as_u64()), (Some("ok"), Some(4)), "{reply}");
+
+    let names: Vec<String> = (0..70).map(|i| format!("p{i}")).collect();
+    with_the_drawing_closed(&mut s, |s| {
+        for name in &names {
+            s.execute("parameters.change", &json!({"name": name, "expression": "1 mm"})).unwrap();
+        }
+        s.execute("config.configure", &json!({"params": names})).unwrap();
+    });
+    let wide = run(&mut s, ADD, json!({"sheet": sheet, "kind": "family"}));
+    assert_eq!(wide["record"]["table"]["columns"].as_array().map(Vec::len), Some(64), "{wide}");
+    let warning = wide["warnings"][0].as_str().unwrap_or_default();
+    assert!(warning.starts_with("8 configuration columns are left out"), "{wide}");
+    assert_eq!(inspected(&mut s, id_of(&wide))["status"], json!("ok"));
+}
+
 /// A table's id is drawn from the ids the drawing shares, and a damaged file's table is refused.
 #[test]
 fn hostile_tables_are_refused_with_nothing_changed() {

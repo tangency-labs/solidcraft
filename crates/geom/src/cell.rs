@@ -38,7 +38,7 @@ pub const MAX_PARTS: usize = 64;
 /// The most bytes of text a cell's content may hold in all, and a label.
 pub const MAX_TEXT_BYTES: usize = 4096;
 /// The longest name a cell or a column may have.
-const MAX_NAME_BYTES: usize = 64;
+pub const MAX_NAME_BYTES: usize = 64;
 /// What a cell shows for a field without a value, a row field its row doesn't have or a property
 /// nobody gave: nothing.
 pub const MISSING: &str = "";

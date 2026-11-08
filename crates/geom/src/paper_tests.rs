@@ -83,6 +83,7 @@ fn each_kind_names_its_layer_in_the_capitals_of_its_id() {
         (TitleBlock, "TITLE_BLOCK"),
         (PartsList, "PARTS_LIST"),
         (RevisionTable, "REVISION_TABLE"),
+        (FamilyTable, "FAMILY_TABLE"),
         (SheetImage, "SHEET_IMAGE"),
         (View, "VIEW"),
         (Dimension, "DIMENSION"),

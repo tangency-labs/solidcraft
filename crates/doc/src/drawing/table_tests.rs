@@ -355,3 +355,145 @@ fn the_tables_cap_holds() {
     d.tables.reverse();
     assert!(d.validate().unwrap_err().to_string().contains("by id"));
 }
+
+/// A design with a width and a hole parameter, a body's material and a feature's suppression in its
+/// configuration table, and four configurations, Large active.
+fn configured() -> Document {
+    use crate::config::{Column as ConfigColumn, ConfigRow};
+    let mut doc = Document::new("Bracket");
+    doc.configs.columns = vec![
+        ConfigColumn::Param("width".into()),
+        ConfigColumn::Param("hole_d".into()),
+        ConfigColumn::Material("Body 1".into()),
+        ConfigColumn::Suppress(99),
+    ];
+    let row =
+        |name: &str, width: &str, hole: &str| ConfigRow { name: name.into(), cells: vec![width.into(), hole.into(), "Steel".into(), "false".into()] };
+    doc.configs.rows =
+        vec![row("Default", "20 mm", "5 mm"), row("Small", "10 mm", "3 mm"), row("Large", "9 mm", "8 mm"), row("Medium", "w * 2", "6 mm")];
+    doc.configs.active = Some("Large".into());
+    doc
+}
+
+/// A family table lists each configuration in its table's order, by its name, with each of its
+/// cells as the design saves it and the active one marked; every row on the first level, with no
+/// numbers, so its cells sort as text.
+#[test]
+fn a_family_table_lists_each_configuration_in_order() {
+    let doc = configured();
+    let rows = Family::rows(&doc);
+    assert_eq!(rows.iter().map(|r| r.key.as_str()).collect::<Vec<_>>(), ["Default", "Small", "Large", "Medium"]);
+    let read = |row: usize, key: &str| rows[row].fields.get(key).map(String::as_str);
+    assert_eq!((read(0, "name"), read(0, "param:width"), read(0, "param:hole_d")), (Some("Default"), Some("20 mm"), Some("5 mm")));
+    assert_eq!((read(3, "param:width"), read(3, "material:Body 1"), read(3, "suppress:99")), (Some("w * 2"), Some("Steel"), Some("false")));
+    assert_eq!(rows.iter().map(|r| r.fields.get(ACTIVE).map(String::as_str)).collect::<Vec<_>>(), [None, None, Some("yes"), None]);
+    assert!(rows.iter().all(|r| r.level == 0 && r.numbers.is_empty() && r.kind == table::RowKind::Part && !r.purchased));
+    assert!(Family::rows(&Document::new("None")).is_empty(), "no configurations, no rows");
+
+    let family = Family { of: SheetComponent { source: 1, component: 0 } };
+    let (mut definition, left_out) = family.table(&doc);
+    assert_eq!(left_out, LeftOut::default());
+    definition.sort = vec![table::SortKey { column: "param_width".into(), descending: false }];
+    let measure = |text: &str, cap: f64| text.chars().count() as f64 * cap / 2.0;
+    let laid = definition.layout(&rows, solidcore_record::Vec2::new(0.0, 280.0), &measure).unwrap();
+    let cell = |row: usize, at: usize| laid.rows[row].cells[at].lines.first().map(|l| l.text.clone());
+    // Natural text order: 9 mm before 10 mm, and an expression after the numbers' text.
+    assert_eq!((0..4).map(|row| cell(row, 1)).collect::<Vec<_>>(), ["9 mm", "10 mm", "20 mm", "w * 2"].map(|t| Some(t.to_string())));
+    assert_eq!(cell(0, 0).as_deref(), Some("Large"));
+
+    // A configuration column the design no longer has shows the missing value; the rest still read.
+    let mut fewer = doc.clone();
+    fewer.configs.columns.remove(1);
+    for row in &mut fewer.configs.rows {
+        row.cells.remove(1);
+    }
+    let laid = definition.layout(&Family::rows(&fewer), solidcore_record::Vec2::new(0.0, 280.0), &measure).unwrap();
+    assert!(laid.rows.iter().all(|row| row.cells[2].lines.is_empty()), "HOLE_D is gone from the design");
+    assert_eq!(laid.rows[0].cells[1].lines[0].text, "9 mm");
+}
+
+/// A family table's columns: NAME, then one per configuration column, headed by the parameter's
+/// name or the column's kind and target in capitals, named by its key in snake case, numbered on a
+/// clash. Those a table has no room for, or that no row could fill or no label show, are counted;
+/// appearance columns are left out and counted on their own, as a look can't be printed as text.
+#[test]
+fn a_family_tables_columns_have_headings_names_and_a_cap() {
+    use crate::config::Column as ConfigColumn;
+    let family = Family { of: SheetComponent { source: 1, component: 0 } };
+    let (definition, left_out) = family.table(&configured());
+    let read = |f: fn(&Column) -> String| definition.columns.iter().map(f).collect::<Vec<_>>();
+    assert_eq!(read(|c| c.heading.clone()), ["NAME", "WIDTH", "HOLE_D", "MATERIAL BODY 1", "SUPPRESS 99"]);
+    assert_eq!(read(|c| c.name.clone()), ["name", "param_width", "param_hole_d", "material_body_1", "suppress_99"]);
+    assert_eq!(left_out, LeftOut::default());
+    assert!(definition.columns.iter().all(|c| c.printed && c.align == HAlign::Left));
+    definition.validate().unwrap();
+
+    let mut doc = Document::new("Clashes");
+    doc.configs.columns = ["a b", "a_b", "a-b", "Ä"].map(|n| ConfigColumn::Param(n.into())).into();
+    let (definition, _) = family.table(&doc);
+    assert_eq!(definition.columns.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["name", "param_a_b", "param_a_b_2", "param_a_b_3", "param"]);
+    definition.validate().unwrap();
+
+    for (count, kept, out) in [(62, 63, 0), (63, 64, 0), (64, 64, 1), (500, 64, 437)] {
+        doc.configs.columns = (0..count).map(|i| ConfigColumn::Param(format!("p{i}"))).collect();
+        let (definition, left_out) = family.table(&doc);
+        assert_eq!((definition.columns.len(), left_out), (kept, LeftOut { looks: 0, others: out }), "{count} configuration columns");
+        definition.validate().unwrap();
+    }
+    // A key no row field can carry, and a heading on two lines, are left out and counted.
+    let long = "x".repeat(table::MAX_KEY_BYTES);
+    doc.configs.columns = [long.as_str(), "line\nbreak", "kept"].map(|n| ConfigColumn::Param(n.into())).into();
+    let (definition, left_out) = family.table(&doc);
+    assert_eq!((definition.columns.len(), left_out), (2, LeftOut { looks: 0, others: 2 }));
+    assert_eq!(definition.columns[1].name, "param_kept");
+    let long_name = format!("param_{}", "y".repeat(80));
+    doc.configs.columns = vec![ConfigColumn::Param(long_name.clone()), ConfigColumn::Param(long_name)];
+    let (definition, _) = family.table(&doc);
+    definition.validate().unwrap();
+    assert!(definition.columns.iter().all(|c| c.name.len() <= MAX_NAME_BYTES), "short enough to number");
+
+    // Looks stay out whatever room is left, and count apart from the rest.
+    let mut looks: Vec<ConfigColumn> = (0..64).map(|i| ConfigColumn::Param(format!("p{i}"))).collect();
+    looks.splice(1..1, [ConfigColumn::Appearance("Body 1".into()), ConfigColumn::ComponentAppearance(3), ConfigColumn::Material("Body 1".into())]);
+    doc.configs.columns = looks;
+    let (definition, left_out) = family.table(&doc);
+    assert_eq!(left_out, LeftOut { looks: 2, others: 2 }, "62 parameters and the material fit beside NAME");
+    assert_eq!(definition.columns.iter().take(4).map(|c| c.name.as_str()).collect::<Vec<_>>(), ["name", "param_p0", "material_body_1", "param_p1"]);
+    assert!(definition.columns.iter().all(|c| !c.name.contains("appearance")));
+}
+
+/// A family table saves and reads back, starts at the top left, points no balloon at it, and is
+/// refused when it names a source the drawing lacks.
+#[test]
+fn a_family_table_saves_and_its_source_is_checked() {
+    let (mut d, _) = tabled();
+    let mut id_source = IdSource::seeded(13056);
+    let id = d.allocate_id(&mut id_source).unwrap();
+    let kind = Kind::Family(Family { of: SheetComponent { source: d.sources[0].id, component: 0 } });
+    assert_eq!(kind.default_place(), Place::Anchor { corner: Corner::TopLeft, offset_mm: [0.0, 0.0] });
+    let (table, _) = Family { of: SheetComponent { source: d.sources[0].id, component: 0 } }.table(&configured());
+    let sheet = d.sheets[0].id;
+    d.tables.add([Arc::new(SheetTable { id, sheet, table, place: kind.default_place(), kind })]);
+    d.validate().unwrap();
+    let saved = d.to_json().unwrap();
+    assert_eq!(Drawing::from_json(&saved).unwrap(), d);
+    let v: Value = serde_json::from_str(&saved).unwrap();
+    let family = v["tables"].as_array().unwrap().iter().find(|t| t["kind"].get("family").is_some()).cloned().unwrap();
+    assert_eq!(family["kind"]["family"]["of"]["component"], json!(0), "{family}");
+    let why = damaged(&d, |v| {
+        for t in v["tables"].as_array_mut().unwrap() {
+            if let Some(of) = t["kind"].get_mut("family") {
+                of["of"]["source"] = json!(crate::ids::encode(99));
+            }
+        }
+    });
+    assert!(why.contains("source"), "{why}");
+    let unknown = damaged(&d, |v| {
+        for t in v["tables"].as_array_mut().unwrap() {
+            if let Some(of) = t["kind"].get_mut("family") {
+                of["columns"] = json!([]);
+            }
+        }
+    });
+    assert!(unknown.contains("columns"), "{unknown}");
+}

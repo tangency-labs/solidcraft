@@ -12,11 +12,12 @@
 use std::sync::Arc;
 
 use serde_json::Value;
-use solidcraft_doc::drawing::table::{Kind, MassFormat, PartsList, SheetTable};
+use solidcraft_doc::drawing::table::{Family, Kind, LeftOut, MassFormat, PartsList, SheetTable};
 use solidcraft_doc::drawing::{Drawing, OnSheet, SheetComponent};
 use solidcraft_doc::ids;
 use solidcraft_geom::Aabb2;
 use solidcraft_geom::cell::Warning;
+use solidcraft_geom::table::{MAX_COLUMNS, MAX_KEY_BYTES};
 use solidcraft_sketch::PaperFonts;
 
 use super::CommandSpec;
@@ -48,7 +49,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<TableResult>)
         .params(
             "sheet: id or name; kind: parts_list (at the top right; lists the component its sheet documents, else the design) or \
-             revision (at the bottom left); set?: as drawing.table.edit → {table, sheet, record: as saved, warnings?}. A parts \
+             revision (at the bottom left) or family (at the top left; the design's configurations, a row each, with NAME and a \
+             column per configuration column, as many as a table has room for); set?: as drawing.table.edit → {table, sheet, record: as saved, warnings?}. A parts \
              list saves the numbers its view shows, if it has none saved, so what is printed doesn't move. One undo step; no \
              model is evaluated.",
         ),
@@ -94,16 +96,31 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     let kind = match request.kind {
         KindParam::Revision => Kind::Revision,
         KindParam::PartsList => Kind::PartsList(new_list(&record, sheet)?),
+        KindParam::Family => Kind::Family(Family { of: sheet_component(&record, sheet)? }),
     };
+    let (start, left_out) = match &kind {
+        Kind::Family(family) => family.table(&s.doc),
+        _ => (kind.default_table(), LeftOut::default()),
+    };
+    let mut warnings = Vec::new();
+    if left_out.looks > 0 {
+        warnings.push(format!("{} appearance columns are left out: a look can't be printed as text", left_out.looks));
+    }
+    if left_out.others > 0 {
+        warnings.push(format!(
+            "{} configuration columns are left out: a table has at most {MAX_COLUMNS} columns, and a column needs a key of at most {MAX_KEY_BYTES} bytes and a one-line heading",
+            left_out.others
+        ));
+    }
     let id = record.allocate_id(&mut s.ids).map_err(|e| bad(ADD, e.to_string()))?;
-    let mut table = SheetTable { id, sheet, table: kind.default_table(), place: kind.default_place(), kind };
+    let mut table = SheetTable { id, sheet, table: start, place: kind.default_place(), kind };
     apply(s, &record, &mut table, request.set, ADD)?;
     let list = listed(&table);
     s.edit_drawing(ADD, |d| {
         d.tables.add([Arc::new(table)]);
         Ok(())
     })?;
-    answer(s, ADD, id, list)
+    answer(s, ADD, id, list, warnings)
 }
 
 fn edit(s: &mut Session, p: &Value) -> Result<Value> {
@@ -121,7 +138,7 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
         }
         Ok(())
     })?;
-    answer(s, EDIT, id, list)
+    answer(s, EDIT, id, list, Vec::new())
 }
 
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {
@@ -194,18 +211,23 @@ fn warning_word(warning: Warning) -> &'static str {
     }
 }
 
-/// The list a parts list on `sheet` starts with: what its sheet documents, else the design.
-fn new_list(d: &Drawing, sheet: u64) -> Result<PartsList> {
+/// The component a new table on `sheet` lists: what its sheet documents, else the design.
+fn sheet_component(d: &Drawing, sheet: u64) -> Result<SheetComponent> {
     let documents = d.sheets.iter().find(|s| s.id == sheet).and_then(|s| s.documents);
     let design = || d.sources.first().map(|source| SheetComponent { source: source.id, component: 0 });
-    let of = documents.or_else(design).ok_or_else(|| bad(ADD, "the drawing draws no design to list"))?;
+    documents.or_else(design).ok_or_else(|| bad(ADD, "the drawing draws no design to list"))
+}
+
+/// The list a parts list on `sheet` starts with.
+fn new_list(d: &Drawing, sheet: u64) -> Result<PartsList> {
+    let of = sheet_component(d, sheet)?;
     Ok(PartsList { of, view: Default::default(), group: Default::default(), fold: false, purchased_contents: false, mass: MassFormat::default() })
 }
 
 fn listed(table: &SheetTable) -> Option<PartsList> {
     match table.kind {
         Kind::PartsList(list) => Some(list),
-        Kind::Revision => None,
+        Kind::Revision | Kind::Family(_) => None,
     }
 }
 
@@ -271,9 +293,8 @@ fn merged<T: serde::Serialize + serde::de::DeserializeOwned, const N: usize>(rec
     serde_json::from_value(v).map_err(|e| bad(cmd, e.to_string()))
 }
 
-/// Table `id` of the open drawing, with `list`'s view numbered when it is new here.
-fn answer(s: &mut Session, cmd: &str, id: u64, list: Option<PartsList>) -> Result<Value> {
-    let mut warnings = Vec::new();
+/// Table `id` of the open drawing, with `list`'s view numbered when it is new here, and `warnings`.
+fn answer(s: &mut Session, cmd: &str, id: u64, list: Option<PartsList>, mut warnings: Vec<String>) -> Result<Value> {
     if let Some(list) = list
         && let Err(why) = super::bom::keep_shown_numbers(s, &list.request())
     {
