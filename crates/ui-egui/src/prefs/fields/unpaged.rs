@@ -63,8 +63,6 @@ macro_rules! unpaged_preferences {
             /// choice here (`save_mesh_send`, `save_mesh_slicer`); a settings file that still has them loads,
             /// and they are ignored.
             save_mesh_format: String = "stl".into();
-            /// URDF export writes motion links as `<mimic>` (false: each joint is free, as before).
-            urdf_mimic: bool = true;
             /// Save as mesh: the last quality (`standard`, `fine` or `finest`, #4747).
             save_mesh_quality: String = "standard".into();
             /// Send to Slicer: the last slicer used (an installed slicer's id or a program path).
@@ -93,6 +91,9 @@ macro_rules! unpaged_preferences {
             stand_up_answers: crate::stand_up::Answers = Default::default();
             /// When the last update check ran, and the versions skipped or put off (`update::Memo`).
             update: crate::update::Memo = crate::update::Memo::default();
+            /// URDF export writes motion links as `<mimic>`. Default false: each joint is free, as
+            /// before; the options dialog remembers the last choice.
+            urdf_mimic: bool = false;
             /// Share anonymous usage statistics (docs/privacy.md, `usage_stats`): on unless the person,
             /// the environment or the organization turns them off. A build without the `usage-stats`
             /// feature keeps the value and does nothing with it.

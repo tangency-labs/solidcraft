@@ -38,12 +38,6 @@ macro_rules! general_preferences {
             /// Off (the default): they show only while the Send to Slicer window is open, a save leaves
             /// them out, and a design that has them opens without them.
             keep_print_faces: bool = false, PAGE_GENERAL;
-            /// URDF export writes the meshes where the mesh prefix points, making its folder (false:
-            /// next to the URDF whatever the prefix says, as before).
-            urdf_place_meshes: bool = true, PAGE_GENERAL => check_tr("prefs.urdf_place_meshes");
-            /// File › Export URDF… asks for its options first (false: straight to the save picker, as
-            /// before, exporting with the options last chosen).
-            urdf_export_dialog: bool = true, PAGE_GENERAL => check_tr("prefs.urdf_export_dialog");
             keep_unsaved_also_asks: bool = true, PAGE_GENERAL;
             /// Web app (#10220): keep each open design's unsaved changes current in the browser's
             /// private storage, so closing or reloading the tab doesn't ask through the browser's own
@@ -88,6 +82,12 @@ macro_rules! general_preferences {
             show_home_on_startup: bool = true, PAGE_GENERAL;
             /// Slicers that can load a file into the window that is already open do so (default on).
             slicer_single_instance: bool = true, 0;
+            /// File › Export URDF… asks for its options first. Default false: straight to the save
+            /// picker, as before, exporting with the options last chosen.
+            urdf_export_dialog: bool = false, PAGE_GENERAL => check_tr("prefs.urdf_export_dialog");
+            /// URDF export writes the meshes where the mesh prefix points, making its folder. Default
+            /// false: next to the URDF whatever the prefix says, as before.
+            urdf_place_meshes: bool = false, PAGE_GENERAL => check_tr("prefs.urdf_place_meshes");
         }
     };
 }
