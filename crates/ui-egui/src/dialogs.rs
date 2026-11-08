@@ -2041,7 +2041,8 @@ fn fillet_edge_ids(s: &Session, items: &[Sel]) -> Vec<(String, usize)> {
                 if let Some(b) = st.body(body) {
                     let m = b.mesh();
                     for e in m.face_edges(u32::try_from(*index).unwrap_or(u32::MAX)) {
-                        if !m.seams.get(e).copied().unwrap_or(false) {
+                        // Not the seams, nor the edges where a round already meets the face (#10863).
+                        if !m.seams.get(e).copied().unwrap_or(false) && !m.is_smooth_edge(e, 2f64.to_radians()) {
                             ids.push((body.clone(), e));
                         }
                     }
@@ -5302,6 +5303,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                             let m = b.mesh();
                             for e in m.face_edges(u32::try_from(*index).unwrap_or(u32::MAX)) {
                                 if !m.seams.get(e).copied().unwrap_or(false)
+                                    && !m.is_smooth_edge(e, 2f64.to_radians())
                                     && let Some(p) = m.edges.get(e)
                                 {
                                     pts.push(polyline_mid(p));

@@ -494,6 +494,11 @@ impl Mesh {
         let sample = if p.len() == 2 { &both[..] } else { std::slice::from_ref(&mid) };
         sample.iter().all(|&q| matches!((normal_near(*a, q), normal_near(*b, q)), (Some(na), Some(nb)) if na.dot(nb) > cos))
     }
+    /// Whether the faces at edge `i` meet tangentially, within `max_angle` between their normals
+    /// (a round's join with the face beside it: nothing there to fillet).
+    pub fn is_smooth_edge(&self, i: usize, max_angle: f64) -> bool {
+        self.smooth_seam(i, max_angle.cos())
+    }
     /// The edges reached from `e` through vertices where the next edge continues smoothly
     /// (angle between the end tangents below `max_angle`), including `e` itself.
     pub fn tangent_chain(&self, e: usize, max_angle: f64) -> Vec<usize> {
