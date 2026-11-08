@@ -27,9 +27,18 @@ pub struct BomPanel {
     pub fields: Vec<String>,
     /// The last refusal.
     pub error: Option<String>,
+    /// The design revision, the picked row and its fields when Apply was refused: `error` stays
+    /// only while they still are.
+    refused: Option<(u64, Option<usize>, Vec<String>)>,
 }
 
 impl BomPanel {
+    /// Show why Apply was refused, for as long as the design, the row and its fields stay as they are.
+    fn refuse(&mut self, revision: u64, error: String) {
+        self.refused = Some((revision, self.picked, self.fields.clone()));
+        self.error = Some(error);
+    }
+
     fn params(&self) -> Value {
         json!({"levels": if self.top { "top" } else { "flat" }, "group_by": [if self.by_definition { "definition" } else { "part_number" }],
             "group_children": self.group_children})
@@ -116,22 +125,29 @@ fn apply(app: &mut SolveApp, d: &mut BomPanel, row: &Value) {
         params.insert("component".into(), c.clone());
         let r = app.run("component.metadata.set", Value::Object(params.clone()));
         if let Err(e) = r {
-            d.error = Some(e);
+            d.refuse(app.session.revision, e);
             return;
         }
     }
     d.error = None;
+    d.refused = None;
 }
 
 /// Draw the window when it is open. Called once per frame.
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut d) = app.bom.take() else { return };
+    // A refused Apply's message is about the design, row and fields it ran with (#641): once they
+    // change, it goes.
+    if d.refused.as_ref().is_some_and(|(rev, row, fields)| (*rev, *row, fields) != (app.session.revision, d.picked, &d.fields)) {
+        d.error = None;
+        d.refused = None;
+    }
     let t = Tokens::get();
     let bom = d.rows(app);
     let rows: Vec<Value> = bom["rows"].as_array().cloned().unwrap_or_default();
     let (mut export, mut apply_row) = (None, None);
     let closed =
-        crate::ui_kit::Window::new(egui::Id::new("sc_bom"), "bom", crate::i18n::tr_label("Bill of Materials")).cards(3.0).show_body(ctx, |ui| {
+        crate::ui_kit::Window::new(egui::Id::unique("sc_bom"), "bom", crate::i18n::tr_label("Bill of Materials")).cards(3.0).show_body(ctx, |ui| {
             ui.horizontal_wrapped(|ui| {
                 let was = (d.top, d.by_definition, d.group_children);
                 let mut levels = usize::from(d.top);
@@ -261,6 +277,61 @@ mod tests {
         assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
         h.frames(2);
         assert!(h.widget("PL-100").is_some(), "the list follows the change");
+    }
+
+    #[test]
+    fn a_refused_apply_keeps_its_message_until_the_row_or_its_fields_change() {
+        let mut h = Harness::new();
+        h.app.run("component.create", json!({"name": "Plate"})).unwrap();
+        h.app.run("solid.box", json!({"length": 40, "width": 20, "height": 3})).unwrap();
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+        h.app.run("component.create", json!({"name": "Bracket"})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+        // Plate placed three times and Bracket once, so no Qty cell reads "1" before row 1's item
+        // number or "2" before row 2's.
+        h.app.run("occurrence.copy", json!({"component": "Plate", "translate": [50, 0, 0]})).unwrap();
+        h.app.run("occurrence.copy", json!({"component": "Plate", "translate": [100, 0, 0]})).unwrap();
+        h.step(&json!({"start": "assembly.bom"})).unwrap();
+        h.frames(2);
+        let undo = h.app.session.undo.len();
+        h.step(&json!({"widget": "1"})).unwrap();
+        h.app.bom.as_mut().unwrap().fields[0] = "PL\u{7}".into();
+        h.frames(2);
+        h.step(&json!({"widget": "Apply"})).unwrap();
+        let refused = h.app.bom.as_ref().unwrap().error.clone();
+        assert!(refused.as_deref().is_some_and(|e| e.contains("control character")), "{refused:?}");
+        assert_eq!(h.app.session.undo.len(), undo, "nothing applied");
+        // Correcting the field takes the refusal away before Apply is clicked again.
+        h.app.bom.as_mut().unwrap().fields[0] = "PL-100".into();
+        h.frames(2);
+        assert_eq!(h.app.bom.as_ref().unwrap().error, None, "the message was about the control character, which is gone");
+        // The message is about the row and fields Apply ran with (#641): a change to another
+        // field takes it away too, and the next Apply refuses again.
+        h.app.bom.as_mut().unwrap().fields[0] = "PL\u{7}".into();
+        h.frames(2);
+        h.step(&json!({"widget": "Apply"})).unwrap();
+        assert_eq!(h.app.bom.as_ref().unwrap().error, refused);
+        h.app.bom.as_mut().unwrap().fields[1] = "Plate, 3 mm".into();
+        h.frames(2);
+        assert_eq!(h.app.bom.as_ref().unwrap().error, None, "the fields differ from the refused ones");
+        h.step(&json!({"widget": "Apply"})).unwrap();
+        assert_eq!(h.app.bom.as_ref().unwrap().error, refused, "the same reason again");
+        assert_eq!(h.app.session.undo.len(), undo, "nothing applied");
+        // Picking another row takes it away: the message was about the Plate row.
+        h.step(&json!({"widget": "2"})).unwrap();
+        assert_eq!(h.app.bom.as_mut().unwrap().picked, Some(1));
+        assert_eq!(h.app.bom.as_ref().unwrap().error, None, "another row is picked");
+        h.step(&json!({"widget": "1"})).unwrap();
+        h.app.bom.as_mut().unwrap().fields[0] = "PL\u{7}".into();
+        h.frames(2);
+        h.step(&json!({"widget": "Apply"})).unwrap();
+        assert_eq!(h.app.bom.as_ref().unwrap().error, refused);
+        // So does a change to the design, whose rows the picked index counts: the message was
+        // about the design Apply ran on.
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.bom.as_ref().unwrap().error, None, "the design changed under the row");
     }
 
     #[test]

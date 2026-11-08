@@ -2,7 +2,8 @@
 //! positive side is hidden). It changes no geometry and is not an undo step.
 
 use serde_json::Value;
-use solidcraft_geom::{Plane, Vec3};
+use solidcore_record::{Plane, Vec3};
+use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, expr, vec3};
@@ -24,7 +25,7 @@ fn section(s: &mut Session, p: &Value) -> Result<Value> {
     if bool_(p, "clear").unwrap_or(false) {
         s.section = None;
         s.status_slot(crate::status_items::StatusId::Section, false);
-        s.revision += 1;
+        s.refresh_display();
         return serde_json::to_value(contract::SectionResult { section: None, param_warnings: Vec::new() }).map_err(|e| bad(cmd, e.to_string()));
     }
     // A named plane's world axis: which component of a point lies along its normal.
@@ -37,11 +38,12 @@ fn section(s: &mut Session, p: &Value) -> Result<Value> {
             let axis = [normal.x, normal.y, normal.z].iter().position(|c| c.abs() > 0.5);
             (pl.origin, normal, axis)
         }
-        // A construction plane (name or id): where it is now.
+        // A construction plane (name or id): where it stands in the world, its component placed,
+        // as the viewport draws it. The cut and the reply are in the world.
         Some(v @ (Value::String(_) | Value::Number(_))) => {
             let r = super::features::plane_param(s, Some(v), cmd)?;
             let solidcraft_doc::PlaneRef::Construction { feature } = &r else { return Err(bad(cmd, "`plane` must be a plane")) };
-            let st = s.model.state();
+            let st = s.world_state()?;
             let c = st
                 .construct
                 .iter()
@@ -82,7 +84,7 @@ fn section(s: &mut Session, p: &Value) -> Result<Value> {
     s.section_hatch = bool_(p, "hatch").unwrap_or(true);
     s.status_slot(crate::status_items::StatusId::Section, true);
     s.status_activated(crate::status_items::StatusId::Section);
-    s.revision += 1;
+    s.refresh_display();
     let section = contract::Section {
         origin: [origin.x, origin.y, origin.z],
         normal: [normal.x, normal.y, normal.z],

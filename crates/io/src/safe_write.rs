@@ -226,13 +226,17 @@ fn write_steps(path: &Path, bytes: &[u8], backup: bool, stop: Option<Step>) -> s
         return Err(e);
     }
     sync_dir(path);
-    // Temporary files of saves that crashed part way (a minute old or more) go.
-    for t in stale_temps(path) {
-        if fs::metadata(&t).and_then(|m| m.modified()).ok().and_then(|m| m.elapsed().ok()).is_some_and(|age| age.as_secs() >= 60) {
+    remove_old_temps(path);
+    Ok(())
+}
+
+/// Temporary files of saves that crashed part way (a minute old or more) go.
+fn remove_old_temps(path: &Path) {
+    for t in temps_beside(path) {
+        if fs::symlink_metadata(&t).and_then(|m| m.modified()).ok().and_then(|m| m.elapsed().ok()).is_some_and(|age| age.as_secs() >= 60) {
             let _ = fs::remove_file(t);
         }
     }
-    Ok(())
 }
 
 /// Write `bytes` to `path` atomically; with `backup`, the file being replaced is kept as
@@ -249,6 +253,34 @@ pub fn write_atomic(path: &Path, bytes: &[u8], backup: bool) -> std::io::Result<
     write_steps(&resolve_links(path)?, bytes, backup, None)
 }
 
+/// Write `bytes` to the file named `path` itself, atomically: a link at `path` is never followed,
+/// and what it points to is never touched. Anything there that isn't a regular file is refused. For
+/// the app's own small files beside a design, which never live anywhere else.
+pub fn write_atomic_no_follow(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    if cfg!(target_arch = "wasm32") {
+        return crate::vfs::write(&path.to_string_lossy(), bytes);
+    }
+    let there = fs::symlink_metadata(path).ok();
+    if there.as_ref().is_some_and(|m| !m.is_file()) {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("{}: not a regular file", path.display())));
+    }
+    let tmp = temp_beside(path, "new");
+    if let Err(e) = write_synced(&tmp, bytes) {
+        let _ = fs::remove_file(&tmp);
+        return Err(e);
+    }
+    keep_permissions(&there.map(|m| m.permissions()), &tmp);
+    // A rename replaces the name itself, so a link put there since the check above goes, and the
+    // file it pointed to stays as it was.
+    if let Err(e) = replace_synced(&tmp, path) {
+        let _ = fs::remove_file(&tmp);
+        return Err(e);
+    }
+    sync_dir(path);
+    remove_old_temps(path);
+    Ok(())
+}
+
 /// Publish a complete new file without replacing an existing destination, even if another
 /// writer creates it after this call starts. Unsupported filesystems return an error.
 pub fn create_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
@@ -261,9 +293,11 @@ pub fn create_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     }
     let tmp = temp_beside(path, "create");
     // Only remove a temporary file that this invocation successfully created.
-    let mut file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
-    let result = file.write_all(bytes).and_then(|_| flush(&file));
-    drop(file);
+    // The file closes at the end of this block, before it is linked into place.
+    let result = {
+        let mut file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+        file.write_all(bytes).and_then(|_| flush(&file))
+    };
     let result = result.and_then(|_| fs::hard_link(&tmp, path));
     let _ = fs::remove_file(&tmp);
     if result.is_ok() {
@@ -275,8 +309,11 @@ pub fn create_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 /// Leftover temporary files of saves that never finished (a crash part way), next to `path`
 /// (next to the file a link at `path` points to, where a save puts them).
 pub fn stale_temps(path: &Path) -> Vec<PathBuf> {
-    let resolved = resolve_links(path).unwrap_or_else(|_| path.to_path_buf());
-    let path = resolved.as_path();
+    temps_beside(&resolve_links(path).unwrap_or_else(|_| path.to_path_buf()))
+}
+
+/// The leftover temporary files of the file named `path` itself.
+fn temps_beside(path: &Path) -> Vec<PathBuf> {
     let Some(name) = path.file_name().map(|n| n.to_string_lossy().to_string()) else { return Vec::new() };
     let dir = path.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
     let prefix = format!(".{name}.");
@@ -404,6 +441,104 @@ mod tests {
         assert!(!lock::changed_since(&design.to_string_lossy(), &known));
         std::fs::write(&design, b"written elsewhere").unwrap();
         assert!(lock::changed_since(&design.to_string_lossy(), &known));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// A link at the lock's path is neither written through nor read through, and closing the
+    /// design leaves it alone. A save still follows a link at the design's own path.
+    #[cfg(unix)]
+    #[test]
+    fn a_link_at_the_lock_path_is_never_followed() {
+        use crate::design_lock as lock;
+        use std::os::unix::fs::symlink;
+        let d = dir("design-lock-link");
+        let design = d.join("Bracket.solidcraft");
+        std::fs::write(&design, b"one").unwrap();
+        let lock_file = lock::lock_path(&design);
+        let now = lock::now_secs();
+        let mine = lock::Lock::mine(now);
+
+        let victim = d.join("victim.txt");
+        std::fs::write(&victim, b"keep me").unwrap();
+        symlink(&victim, &lock_file).unwrap();
+        assert!(lock::write(&design, &mine).is_err());
+        assert_eq!(std::fs::read(&victim).unwrap(), b"keep me");
+        assert!(std::fs::symlink_metadata(&lock_file).unwrap().file_type().is_symlink(), "the link is refused, not replaced");
+        std::fs::remove_file(&lock_file).unwrap();
+
+        // A link to a place with nothing there doesn't make the file either.
+        let missing = d.join("made-by-the-link.txt");
+        symlink(&missing, &lock_file).unwrap();
+        assert!(lock::write(&design, &mine).is_err());
+        assert!(!missing.exists());
+        std::fs::remove_file(&lock_file).unwrap();
+
+        // A link to a real lock is no lock: nothing is read through it, and closing leaves it.
+        let elsewhere = d.join("elsewhere.lock");
+        std::fs::write(&elsewhere, serde_json::to_vec(&mine).unwrap()).unwrap();
+        symlink(&elsewhere, &lock_file).unwrap();
+        assert!(lock::read(&design).is_none());
+        lock::remove(&design);
+        assert!(std::fs::symlink_metadata(&lock_file).is_ok() && elsewhere.exists());
+        std::fs::remove_file(&lock_file).unwrap();
+
+        // A hard link is a regular file: its name is replaced, the other name keeps its content.
+        let other_name = d.join("other-name.txt");
+        std::fs::write(&other_name, b"keep me too").unwrap();
+        std::fs::hard_link(&other_name, &lock_file).unwrap();
+        lock::write(&design, &mine).unwrap();
+        assert_eq!(std::fs::read(&other_name).unwrap(), b"keep me too");
+        assert!(lock::read(&design).is_some_and(|l| l.is_mine()));
+        std::fs::remove_file(&lock_file).unwrap();
+
+        // Nothing there, and no temporary file left: a plain lock is still written.
+        lock::write(&design, &mine).unwrap();
+        assert_eq!(lock::read(&design), Some(mine));
+        assert!(stale_temps(&lock_file).is_empty());
+
+        // The design's own link is still followed by a save.
+        let real = d.join("real.solidcraft");
+        std::fs::write(&real, b"old").unwrap();
+        let linked = d.join("linked.solidcraft");
+        symlink(&real, &linked).unwrap();
+        write_atomic(&linked, b"new", false).unwrap();
+        assert_eq!(std::fs::read(&real).unwrap(), b"new");
+        assert!(std::fs::symlink_metadata(&linked).unwrap().file_type().is_symlink());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// A lock path that isn't a regular file is ignored at once. Read on a thread, so a regression
+    /// fails here rather than holding up the test run.
+    #[cfg(unix)]
+    #[test]
+    fn a_lock_path_that_is_not_a_regular_file_is_ignored_at_once() {
+        use crate::design_lock as lock;
+        use std::os::unix::fs::symlink;
+        let d = dir("design-lock-special");
+        let design = d.join("Bracket.solidcraft");
+        let lock_file = lock::lock_path(&design);
+        let read_soon = |design: &Path| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let design = design.to_path_buf();
+            std::thread::spawn(move || {
+                let _ = tx.send(lock::read(&design));
+            });
+            rx.recv_timeout(std::time::Duration::from_secs(10)).expect("read returned")
+        };
+        let cases: [&dyn Fn(&Path); 3] = [&|p| symlink("/dev/zero", p).unwrap(), &|p| std::fs::create_dir(p).unwrap(), &|p| {
+            assert!(std::process::Command::new("mkfifo").arg(p).status().unwrap().success())
+        }];
+        for make in cases {
+            make(&lock_file);
+            assert!(read_soon(&design).is_none());
+            assert!(lock::held_elsewhere(&design, lock::now_secs()).is_none());
+            assert!(lock::write(&design, &lock::Lock::mine(lock::now_secs())).is_err());
+            assert!(std::fs::symlink_metadata(&lock_file).is_ok(), "left where it is");
+            let _ = std::fs::remove_file(&lock_file).or_else(|_| std::fs::remove_dir(&lock_file));
+        }
+        // A regular file too large to be a lock is not read either.
+        std::fs::write(&lock_file, vec![b' '; 4097]).unwrap();
+        assert!(read_soon(&design).is_none());
         let _ = std::fs::remove_dir_all(&d);
     }
 

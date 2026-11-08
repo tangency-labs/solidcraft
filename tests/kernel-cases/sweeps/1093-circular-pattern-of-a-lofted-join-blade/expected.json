@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1093",
+  "tangency-labs/solidcraft#1107"
+ ],
+ "what": "a tapered lofted blade (6 x 3 root embedded 2 mm into a disk, 3 x 1.5 tip) joined to a disk and patterned 9 times round the axis as joins (31 minutes with eight retries, or \"cavity ownership is ambiguous\")",
+ "source": "analytic",
+ "method": "the blade is a ruled loft of two rectangles (a prismatoid): above the disk top z = 5 its section runs from 5.838 x 2.919 to 3 x 1.5; with the section area quadratic in z, V_blade = 35/6 (A(5) + 4 A(22.5) + A(40)) = 353.464. The blades stand 40 mm out on a circle and are far apart, each embedded in the disk (pi 60^2 5 = 56548.7): V = disk + 9 V_blade = 59729.8. One body.",
+ "body_count": 1,
+ "volume_mm3": 59729.84563167252
+}

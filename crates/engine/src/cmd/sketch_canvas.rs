@@ -1,26 +1,59 @@
 //! Canvases (reference images on planes) and decals (images on planar faces).
 
 use serde_json::{Value, json};
+use solidcore_record::Vec2;
 use solidcraft_doc::canvas::{Canvas, MAX_CANVAS_BYTES, base64_decode, base64_encode, image_info};
-use solidcraft_geom::Vec2;
+use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, num, str_, vec2};
+use crate::schema::canvas::{
+    CanvasCalibrateParams, CanvasCalibrated, CanvasDecalParams, CanvasDeleteParams, CanvasDeleted, CanvasEditParams, CanvasEdited,
+    CanvasInsertParams, CanvasPlaced,
+};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
+const INSERT_CONTRACT: TypedContract<CanvasInsertParams> = TypedContract::new();
+const DECAL_CONTRACT: TypedContract<CanvasDecalParams> = TypedContract::new();
+const EDIT_CONTRACT: TypedContract<CanvasEditParams> = TypedContract::new();
+const CALIBRATE_CONTRACT: TypedContract<CanvasCalibrateParams> = TypedContract::new();
+const DELETE_CONTRACT: TypedContract<CanvasDeleteParams> = TypedContract::new();
+
+/// A canvas command's reply, built from its schema's type so the two can't drift apart.
+fn canvas_reply(cmd: &str, r: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(r).map_err(|e| bad(cmd, e.to_string()))
+}
+
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("canvas.insert", "Canvas", add_canvas)
+    CommandSpec::new("canvas.insert", "Canvas", crate::checked!("canvas.insert", add_canvas))
         .at("SKETCH", "INSERT")
         .icon("canvas")
+        .contract(&INSERT_CONTRACT)
+        .output(output_schema_for::<CanvasPlaced>)
         .params("path | data (base64 PNG or JPEG); plane?: XY|XZ|YZ|{face: [x,y,z]}|… (default XY); center?: [x,y] on the plane, or at?: [x,y,z]; width?: mm (default 100); angle?: deg; opacity?: 0…1 (default 0.5); flip?; name?"),
-    CommandSpec::new("canvas.decal", "Decal", add_decal)
+    CommandSpec::new("canvas.decal", "Decal", crate::checked!("canvas.decal", add_decal))
         .at("SKETCH", "INSERT")
         .icon("decal")
+        .contract(&DECAL_CONTRACT)
+        .output(output_schema_for::<CanvasPlaced>)
         .params("path | data; face: [x,y,z] on a planar face (the image is centred there), or the picked face as sketch.create's plane takes it ({face, body, index, path?}); width?: mm; angle?: deg; opacity?: (default 1)"),
-    CommandSpec::new("canvas.edit", "Edit Canvas", edit_canvas).at("SKETCH", "INSERT").icon("canvas").params("canvas: id or name; center?, width?, angle?: deg, opacity?, flip?, visible?, name?"),
-    CommandSpec::new("canvas.calibrate", "Calibrate Canvas", calibrate).icon("measure")
+    CommandSpec::new("canvas.edit", "Edit Canvas", crate::checked!("canvas.edit", edit_canvas))
+        .at("SKETCH", "INSERT")
+        .icon("canvas")
+        .contract(&EDIT_CONTRACT)
+        .output(output_schema_for::<CanvasEdited>)
+        .params("canvas: id or name; center?, width?, angle?: deg, opacity?, flip?, visible?, name?, locked? (a locked canvas refuses center, width, angle, flip, Calibrate and Delete)"),
+    CommandSpec::new("canvas.calibrate", "Calibrate Canvas", crate::checked!("canvas.calibrate", calibrate))
+        .icon("measure")
+        .contract(&CALIBRATE_CONTRACT)
+        .output(output_schema_for::<CanvasCalibrated>)
         .params("canvas: id or name; a, b: two points on the canvas plane [x,y]; distance: their true distance (mm): scales the image about a"),
-    CommandSpec::new("canvas.delete", "Delete Canvas", delete_canvas).icon("delete").params("canvas: id or name"),
+    CommandSpec::new("canvas.delete", "Delete Canvas", crate::checked!("canvas.delete", delete_canvas))
+        .icon("delete")
+        .contract(&DELETE_CONTRACT)
+        .output(output_schema_for::<CanvasDeleted>)
+        .params("canvas: id or name"),
 ];
 
 fn image_bytes(p: &Value, cmd: &str) -> Result<Vec<u8>> {
@@ -67,7 +100,7 @@ fn make(s: &mut Session, p: &Value, cmd: &str, decal: bool) -> Result<Value> {
         id,
         name: name.clone(),
         format: format.into(),
-        data: base64_encode(&bytes),
+        data: base64_encode(&bytes).into(),
         pixels,
         plane,
         center,
@@ -76,9 +109,10 @@ fn make(s: &mut Session, p: &Value, cmd: &str, decal: bool) -> Result<Value> {
         opacity,
         flip: bool_(p, "flip").unwrap_or(false),
         visible: true,
+        locked: false,
         component,
     });
-    Ok(json!({"canvas": id, "name": name, "pixels": pixels}))
+    canvas_reply(cmd, CanvasPlaced { canvas: id, name, pixels, param_warnings: Vec::new() })
 }
 
 fn add_canvas(s: &mut Session, p: &Value) -> Result<Value> {
@@ -106,6 +140,19 @@ fn find(s: &Session, p: &Value, cmd: &str) -> Result<usize> {
     s.doc.canvases.iter().position(|c| c.id.to_string() == key || c.name == key).ok_or_else(|| bad(cmd, format!("no canvas `{key}`")))
 }
 
+/// A locked canvas (#12310) keeps its place and is not deleted: the refusal names it.
+fn refuse_locked(s: &Session, i: usize, cmd: &str) -> Result<()> {
+    match s.doc.canvases.get(i) {
+        Some(c) if c.locked => Err(bad(cmd, locked_reason(c))),
+        _ => Ok(()),
+    }
+}
+
+/// Why a locked canvas is left as it is.
+pub(crate) fn locked_reason(c: &Canvas) -> String {
+    format!("{} is locked; unlock it first", c.name)
+}
+
 fn edit_canvas(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "canvas.edit";
     let i = find(s, p, cmd)?;
@@ -113,7 +160,15 @@ fn edit_canvas(s: &mut Session, p: &Value) -> Result<Value> {
     if width.is_some_and(|w| !(w > 1e-6 && w < 1e7)) {
         return Err(bad(cmd, "`width` must be positive"));
     }
+    // Unlocking in the same call lets the other changes through.
+    let moves = ["center", "width", "angle", "flip"].iter().any(|k| p.get(*k).is_some_and(|v| !v.is_null()));
+    if moves && bool_(p, "locked") != Some(false) {
+        refuse_locked(s, i, cmd)?;
+    }
     let c = s.doc_mut().canvases.get_mut(i).ok_or_else(|| bad(cmd, "canvas"))?;
+    if let Some(l) = bool_(p, "locked") {
+        c.locked = l;
+    }
     if let Some(v) = p.get("center").and_then(vec2) {
         c.center = v;
     }
@@ -135,7 +190,7 @@ fn edit_canvas(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(n) = str_(p, "name").filter(|n| !n.trim().is_empty()) {
         c.name = n.to_string();
     }
-    Ok(json!({"canvas": c.id}))
+    canvas_reply(cmd, CanvasEdited { canvas: c.id, param_warnings: Vec::new() })
 }
 
 fn calibrate(s: &mut Session, p: &Value) -> Result<Value> {
@@ -149,16 +204,19 @@ fn calibrate(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "the points must differ"));
     }
     let k = d / now;
+    refuse_locked(s, i, cmd)?;
     let c = s.doc_mut().canvases.get_mut(i).ok_or_else(|| bad(cmd, "canvas"))?;
     c.width *= k;
     c.center = a + (c.center - a) * k;
-    Ok(json!({"canvas": c.id, "width": c.width}))
+    canvas_reply(cmd, CanvasCalibrated { canvas: c.id, width: c.width, param_warnings: Vec::new() })
 }
 
 fn delete_canvas(s: &mut Session, p: &Value) -> Result<Value> {
-    let i = find(s, p, "canvas.delete")?;
+    let cmd = "canvas.delete";
+    let i = find(s, p, cmd)?;
+    refuse_locked(s, i, cmd)?;
     let c = s.doc_mut().canvases.remove(i);
-    Ok(json!({"deleted": c.id}))
+    canvas_reply(cmd, CanvasDeleted { deleted: c.id, param_warnings: Vec::new() })
 }
 
 #[cfg(test)]
@@ -187,6 +245,48 @@ mod tests {
         let second = s.execute("canvas.insert", &params).unwrap()["canvas"].as_u64().unwrap();
         assert!(second > first, "deleted canvas {first} was reused as {second}");
         assert!(s.execute("canvas.edit", &json!({"canvas": first, "width": 500})).is_err());
+    }
+
+    /// A locked canvas (#12310) refuses a move, a resize, a turn, a flip, Calibrate and Delete,
+    /// keeps taking opacity, visibility and a new name, is saved locked, and moves again once
+    /// unlocked. Delete of a selection with it deletes the rest and says why it stayed.
+    #[test]
+    fn a_locked_canvas_keeps_its_place_and_is_not_deleted() {
+        let mut s = Session::default();
+        let id = s.execute("canvas.insert", &json!({"data": png(10, 10), "width": 50})).unwrap()["canvas"].as_u64().unwrap();
+        let other = s.execute("canvas.insert", &json!({"data": png(10, 10)})).unwrap()["canvas"].as_u64().unwrap();
+        s.execute("canvas.edit", &json!({"canvas": id, "locked": true})).unwrap();
+        let locked = s.doc.canvases[0].clone();
+        assert!(locked.locked);
+        for p in [
+            json!({"canvas": id, "center": [5, 5]}),
+            json!({"canvas": id, "width": 80}),
+            json!({"canvas": id, "angle": 30}),
+            json!({"canvas": id, "flip": true}),
+            json!({"canvas": id, "locked": true, "width": 80}),
+        ] {
+            let e = s.execute("canvas.edit", &p).unwrap_err().to_string();
+            assert!(e.contains("Canvas1 is locked"), "{p}: {e}");
+        }
+        assert!(s.execute("canvas.calibrate", &json!({"canvas": id, "a": [0, 0], "b": [10, 0], "distance": 20})).is_err());
+        assert!(s.execute("canvas.delete", &json!({"canvas": id})).is_err());
+        assert_eq!(s.doc.canvases[0], locked, "nothing changed");
+        s.execute("canvas.edit", &json!({"canvas": id, "opacity": 0.9, "visible": false, "name": "Blueprint"})).unwrap();
+        assert!(s.doc.canvases[0].locked && !s.doc.canvases[0].visible && s.doc.canvases[0].name == "Blueprint");
+        // Saved locked; a design without the field opens unlocked.
+        let back = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+        assert!(back.canvases[0].locked && !back.canvases[1].locked);
+        assert!(serde_json::to_value(&s.doc.canvases[1]).unwrap().get("locked").is_none(), "an unlocked canvas saves as before");
+        // Delete of both deletes the unlocked one and names the locked one.
+        let r = s.execute("selection.delete", &json!({"canvases": [id, other]})).unwrap();
+        assert_eq!(r["skipped"], json!(["Blueprint is locked; unlock it first"]));
+        assert_eq!(s.doc.canvases.iter().map(|c| c.id).collect::<Vec<_>>(), [id]);
+        assert!(s.execute("selection.delete", &json!({"canvases": [id]})).is_err());
+        // Unlocking in the same call lets the move through.
+        s.execute("canvas.edit", &json!({"canvas": id, "locked": false, "width": 80})).unwrap();
+        assert!(!s.doc.canvases[0].locked && (s.doc.canvases[0].width - 80.0).abs() < 1e-12);
+        s.execute("canvas.delete", &json!({"canvas": id})).unwrap();
+        assert!(s.doc.canvases.is_empty());
     }
 
     #[test]

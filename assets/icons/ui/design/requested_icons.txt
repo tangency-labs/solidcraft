@@ -60,7 +60,6 @@ circle_ttt	false
 close	false
 coil	false
 colored_components	false
-colored_components_off	false
 combine	false
 compare	false
 component	false
@@ -161,6 +160,7 @@ min_radius	false
 mirror	false
 motion_link	false
 move	false
+nav_settings	false
 new	false
 normal	false
 offset	false
@@ -181,6 +181,7 @@ pipe	false
 plane	false
 plane_along_path	false
 plane_angle	false
+plane_axis_point	false
 plane_midplane	false
 plane_perpendicular	false
 plane_tangent	false
@@ -200,6 +201,18 @@ point_vertex	false
 polygon	false
 polygon_circumscribed	false
 polygon_edge	false
+prefs_appearance	false
+prefs_assistant	false
+prefs_design	false
+prefs_general	false
+prefs_graphics	false
+prefs_layout	false
+prefs_mouse3d	false
+prefs_navigation	false
+prefs_plugins	false
+prefs_shortcuts	false
+prefs_sketch	false
+prefs_tools	false
 presspull	false
 print_face	false
 project	false
@@ -231,11 +244,7 @@ section	false
 select	false
 send	false
 settings	false
-settings_keyboard	false
-settings_monitor	false
-settings_mouse	false
-settings_palette	false
-settings_plug	false
+settings_profile	false
 sheet	false
 sheet_rules	false
 shell	false

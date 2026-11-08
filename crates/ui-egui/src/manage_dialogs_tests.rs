@@ -379,7 +379,7 @@ fn appearance_card_keeps_the_approved_width_with_no_preselection() {
     h.app.start("appearance.assign");
     h.frames(4);
     let header = scenario::rect_of("dialog:header").unwrap();
-    let card = h.ctx.memory(|m| m.area_rect(egui::Id::new(("sc_dialog", "APPEARANCE")))).unwrap();
+    let card = h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dialog", "APPEARANCE")))).unwrap();
     let t = Tokens::get();
     let approved = t.form_card_width + t.form_label_width + t.space_6;
     assert!((card.width() - approved).abs() <= t.space_2, "card {card:?}, header {header:?}");
@@ -388,6 +388,7 @@ fn appearance_card_keeps_the_approved_width_with_no_preselection() {
 #[test]
 fn parameter_inventory_remains_reachable_with_regular_draft_rows() {
     let mut h = fixture();
+    h.app.preferences.language = "en".into();
     h.app.start("parameters.change");
     h.frames(4);
     for label in ["Filter", "Import…", "Export CSV…", "Export JSON…", "User Parameters", "Model Parameters"] {
@@ -417,7 +418,7 @@ fn parameter_inventory_remains_reachable_with_regular_draft_rows() {
     h.step(&json!({"text":"missing_parameter"})).unwrap();
     h.step(&json!({"key":"Enter"})).unwrap();
     assert_eq!(scenario::count_of("param:new:valid"), Some(0.0));
-    assert!(h.app.params.as_ref().unwrap().error.is_some());
+    assert!(h.app.params.as_ref().unwrap().banner().is_some());
     assert_eq!(h.app.session.doc.params.iter().filter(|p| !p.model).count(), 2);
     h.step(&json!({"click":{"handle":"dialog:Filter"}})).unwrap();
     assert!(!h.app.params.as_ref().unwrap().adding, "an abandoned nameless draft disappears");
@@ -540,6 +541,32 @@ fn configuration_add_column_menu_filters_as_typed_and_resets_on_close() {
     assert!(h.widget(&format!("Suppress {feature}")).is_none(), "an added column leaves the menu");
     h.step(&json!({"key":"Escape"})).unwrap();
     assert!(h.app.dialog.is_some(), "menu Escape leaves the card open");
+}
+
+#[test]
+fn a_rule_says_why_then_lists_only_the_tables_columns() {
+    // A rule drives or restricts a column of the table only, so Then leaves out a parameter or a
+    // feature without one, where When lists them all: a note says so and how to add one (#10532).
+    let parameters = "Only parameters with a column in the table are listed. Add one with Add Column (+) to use it here.";
+    let features = "Only features with a Suppress column in the table are listed. Add one with Add Column (+) to drive it here.";
+    let mut h = fixture();
+    h.app.run("parameters.add", json!({"name":"depth","expression":"5 mm"})).unwrap();
+    h.app.run("config.configure", json!({"params":["width"]})).unwrap();
+    h.app.start("config.table");
+    h.frames(4);
+    h.step(&json!({"click":{"handle":"dialog:section:Add or edit rule"}})).unwrap();
+    h.frames(3);
+    assert!(h.widget(parameters).is_some(), "depth has no column, so Drive parameter says why it is not listed");
+    h.step(&json!({"click":{"handle":"dialog:Then"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Then:Drive suppression"}})).unwrap();
+    h.frames(3);
+    assert!(h.widget(features).is_some(), "no feature has a Suppress column, so the empty list says why");
+    assert!(h.widget(parameters).is_none(), "the parameter note belongs to the parameter effects");
+    for feature in h.app.session.doc.features.iter().map(|f| f.name.clone()).collect::<Vec<_>>() {
+        h.app.run("config.column", json!({"feature": feature})).unwrap();
+    }
+    h.frames(3);
+    assert!(h.widget(features).is_none(), "with a column for every feature, all are listed and the note goes");
 }
 
 #[test]
@@ -772,6 +799,53 @@ fn physical_material_discard_and_invalid_save_leave_document_and_history_unchang
     assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc));
     assert_eq!(history, (h.app.session.undo.len(), h.app.session.redo.len()));
     assert_eq!(revision, h.app.session.revision);
+}
+
+#[test]
+fn physical_material_refused_save_keeps_its_message_until_the_draft_changes() {
+    let mut h = fixture();
+    h.app.start("material.assign");
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"material:new"}})).unwrap();
+    physical_type(&mut h, "name", "Steel");
+    physical_type(&mut h, "density", "7.8");
+    h.step(&json!({"click":{"handle":"material:save"}})).unwrap();
+    assert!(physical_editor(&mut h).editing(), "a built-in name is refused");
+    let refused = physical_editor(&mut h).error().map(str::to_owned);
+    assert!(refused.as_deref().is_some_and(|e| e.contains("Steel")), "{refused:?}");
+    h.frames(3);
+    assert_eq!(physical_editor(&mut h).error().map(str::to_owned), refused, "the message stays while the draft does");
+    // Renaming the draft takes the refusal away before Save is clicked again.
+    physical_type(&mut h, "name", "Steel 2");
+    h.frames(2);
+    assert_eq!(physical_editor(&mut h).error(), None, "the message was about the name Steel, which is gone");
+    // The message is about the command Save ran (#641): the same draft again is refused again.
+    physical_type(&mut h, "name", "Steel");
+    h.frames(2);
+    h.step(&json!({"click":{"handle":"material:save"}})).unwrap();
+    assert!(physical_editor(&mut h).editing());
+    assert_eq!(physical_editor(&mut h).error().map(str::to_owned), refused, "the same reason again");
+}
+
+/// A refusal that depends on the design (the name is taken) goes once the design changes under
+/// the same draft (#641): after an undo, Save would succeed.
+#[test]
+fn physical_material_refused_save_goes_when_the_design_changes() {
+    let mut h = fixture();
+    h.app.run("material.create", json!({"name":"Alu","density_g_cm3":2.7})).unwrap();
+    h.app.start("material.assign");
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"material:new"}})).unwrap();
+    physical_type(&mut h, "name", "Alu");
+    physical_type(&mut h, "density", "2.7");
+    h.step(&json!({"click":{"handle":"material:save"}})).unwrap();
+    assert!(physical_editor(&mut h).editing(), "a taken name is refused");
+    let refused = physical_editor(&mut h).error().map(str::to_owned);
+    assert!(refused.as_deref().is_some_and(|e| e.contains("Alu")), "{refused:?}");
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.frames(2);
+    assert!(physical_editor(&mut h).editing(), "the draft stays open");
+    assert_eq!(physical_editor(&mut h).error(), None, "the design no longer has an Alu, so the message is stale");
 }
 
 fn complete_physical_card() -> serde_json::Value {

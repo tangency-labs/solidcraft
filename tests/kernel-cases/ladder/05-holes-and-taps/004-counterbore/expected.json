@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a counterbored hole: d6.6 through, d11 x 6.4 counterbore",
+ "source": "analytic",
+ "method": "removed pi 3.3^2 (20 - 6.4) + pi 5.5^2 6.4; + bore, counterbore wall, its floor annulus",
+ "body_count": 1,
+ "volume_mm3": 46926.505223898,
+ "faces": 9
+}

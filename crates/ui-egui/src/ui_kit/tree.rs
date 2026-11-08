@@ -1,5 +1,6 @@
 //! Shared Browser tree rows; feature modules supply content and dispatch commands.
 use crate::icons::glyphs::badge;
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{icons, theme::Tokens};
 use egui::{Color32, FontId, Pos2, Rect, Sense, Stroke, pos2, vec2};
 const ROW_H: f32 = super::TREE_ROW_HEIGHT;
@@ -126,7 +127,7 @@ pub(crate) struct RowResp {
 /// The state a drag over the eyes sets them to: the first eye's new state, while the button is
 /// down (egui temporary data). Absent when no eye drag is under way.
 pub(crate) fn eye_drag_id() -> egui::Id {
-    egui::Id::new("sc_tree_eye_drag")
+    egui::Id::unique("sc_tree_eye_drag")
 }
 
 /// Geometry used by Browser culling and the shared row painter.
@@ -186,16 +187,16 @@ pub(crate) fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
                     if show {
                         super::quiet_icon_button_at(ui, rect, action.icon, action.label)
                     } else {
-                        ui.interact(rect, ui.id().with(action.target), Sense::hover())
+                        ui.interact(rect, ui.scope_id().with(action.target), Sense::hover())
                     }
                 })
                 .inner
             })
             .inner;
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, response.enabled(), action.label));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, response.enabled(), action.label));
         let response = match action.reason {
-            Some(reason) => response.on_disabled_hover_text(format!("{}\n{reason}", action.label)),
-            None => response.on_hover_text(action.label),
+            Some(reason) => response.backing_on_disabled_hover_text(format!("{}\n{reason}", action.label)),
+            None => response.backing_on_hover_text(action.label),
         };
         crate::scenario::publish_rect(action.target, rect);
         if action.reason.is_none() {
@@ -225,7 +226,8 @@ pub(crate) fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
     let radio_x = x + 14.0 + slot + 6.0;
     let radio_r = Rect::from_center_size(pos2(radio_x, cy), vec2(t.space_12 + t.space_3, r.height()));
     // The button right after the name takes room from the label; it is placed once the label is laid out.
-    let name_action_width = if row.action.is_some() { 22.0 } else { 0.0 };
+    let (name_action_gap, name_action_size) = (t.space_8, t.space_16 + t.space_4);
+    let name_action_width = if row.action.is_some() { name_action_gap + name_action_size } else { 0.0 };
     let at = |p: Pos2| -> u8 {
         if !row.actions.is_empty() && p.x >= action_left {
             4
@@ -380,7 +382,10 @@ pub(crate) fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         bx += 15.0;
     }
     // The name's action button sits right after the label; a press on it is not a press on the row.
-    let action_r = Rect::from_min_size(pos2(x + lw + 2.0, r.top()), vec2(t.space_16 + t.space_4, r.height()));
+    // The gap before it belongs to the row: a click that lands just past the end of the name, or
+    // a press on the name that slips a few points before its release, selects the row instead of
+    // opening the feature's sketch (#10079). The gap is wider than egui's click slop (6 points).
+    let action_r = Rect::from_min_size(pos2(x + lw + name_action_gap, r.top()), vec2(name_action_size, r.height()));
     let over_action = |p: Option<Pos2>| row.action.is_some() && p.is_some_and(|p| action_r.contains(p));
     let action_hover = over_action(resp.hover_pos());
     let action_click = over_action(resp.interact_pointer_pos());
@@ -408,16 +413,16 @@ pub(crate) fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         (Some(t), _) if hover_on == 2 && eye_end => {
             let mut at_eye = resp.clone();
             (at_eye.rect, at_eye.interact_rect) = (eye_r, eye_r);
-            at_eye.on_hover_text(t);
+            at_eye.backing_on_hover_text(t);
             resp
         }
-        (Some(t), _) => resp.on_hover_text(t),
-        (None, Some(state)) if elided => resp.on_hover_text(format!("{label_display}\n{state}")),
-        (None, Some(state)) => resp.on_hover_text(state),
+        (Some(t), _) => resp.backing_on_hover_text(t),
+        (None, Some(state)) if elided => resp.backing_on_hover_text(format!("{label_display}\n{state}")),
+        (None, Some(state)) => resp.backing_on_hover_text(state),
         (None, None) if !row.secondary.is_empty() || !row.count.is_empty() => {
-            resp.on_hover_text(format!("{label_display}\n{}\n{}", row.secondary, row.count))
+            resp.backing_on_hover_text(format!("{label_display}\n{}\n{}", row.secondary, row.count))
         }
-        (None, None) if elided => resp.on_hover_text(label_display.to_string()),
+        (None, None) if elided => resp.backing_on_hover_text(label_display.to_string()),
         (None, None) => resp,
     };
     out.on_control = press_on != 0 || over_action(ui.input(|i| i.pointer.press_origin()));

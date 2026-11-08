@@ -1,0 +1,294 @@
+[
+ {
+  "source": "tangency-labs/solidcraft#24",
+  "why": "not geometry: a diagnostics/warning feature (report which boolean fallback ran and by how much), no wrong result"
+ },
+ {
+  "source": "tangency-labs/solidcraft#141",
+  "why": "needs the basin design (a floor of four 0.5 degree facets around a drain with a boss ring, from #119/#126); not attached, no recipe in the issue"
+ },
+ {
+  "source": "tangency-labs/solidcraft#206",
+  "why": "no design attached (a 146-curved-face target); only the join's params and the failure text"
+ },
+ {
+  "source": "tangency-labs/solidcraft#367",
+  "why": "needs the example plastic enclosure (not attached); only the drilled-hole params and the failure text"
+ },
+ {
+  "source": "tangency-labs/solidcraft#456",
+  "why": "no design attached (cut with a freeform tool from a sketch 'to' a point); only the params and failure text"
+ },
+ {
+  "source": "tangency-labs/solidcraft#458",
+  "why": "no design attached: a cut from a sketch that projects the body's top edges; the steps in the report are not enough to rebuild it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#522",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#586",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#608",
+  "why": "no design attached: a second cut onto a face with an existing cut leaving a tiny edge; only the extrude cut's parameters"
+ },
+ {
+  "source": "tangency-labs/solidcraft#632",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#746",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#823",
+  "why": "other area: import (an imported STEP body: 'lumps: nested shells do not alternate material and void'); the file is not attached"
+ },
+ {
+  "source": "tangency-labs/solidcraft#858",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#864",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#873",
+  "why": "the hexagon positions 'next to' the screw are not given, so the touching contact cannot be rebuilt faithfully; the report has only the join's params"
+ },
+ {
+  "source": "tangency-labs/solidcraft#887",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#938",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#953",
+  "why": "no design attached: a cup with a square on its inside floor; the square's size and position are not given"
+ },
+ {
+  "source": "tangency-labs/solidcraft#967",
+  "why": "tracking issue for the Hole tool audit; its open refusals (slanted faces, #559) are covered by the case 559-through-hole-into-shelled-box-rim and the hole matrix; the rest is UI"
+ },
+ {
+  "source": "tangency-labs/solidcraft#990",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#999",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1002",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1025",
+  "why": "private design not attached (join of 23 cone/cylinder tools); no recipe"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1125",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1126",
+  "why": "no design attached: a Draft of a face with non-perpendicular neighbours about a custom neutral plane; only the Draft parameters"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1133",
+  "why": "no design attached (a text sketch extruded from another object, tool with 21 freeform faces)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1137",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1216",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1225",
+  "why": "needs the user's design (extrudecrash.txt attachment): tapered extrude of tangent circles on an existing body; steps not reproducible from the text"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1253",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1343",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1409",
+  "why": "feature request: Emboss on non-planar ('complex') faces; the current refusal is documented, and no geometry or design is given"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1436",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1440",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1441",
+  "why": "no design attached and the report text is empty beyond the feature's parameters"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1451",
+  "why": "other area: import (a STEP model from a public site, not attached; join of a 1 mm extrusion refused)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1467",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1471",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1511",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1552",
+  "why": "feature request: sketch entities as Split Body tools; not a wrong result"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1662",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1672",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1760",
+  "why": "no design attached ('CPR Sensor' split by a construction plane: 'Intersect: no result')"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1807",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1834",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1848",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1882",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1926",
+  "why": "no design attached; a freeze in a symmetric cut, only a screenshot"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1944",
+  "why": "empty report: no parameters, no text"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1946",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1963",
+  "why": "empty report: no parameters, no text"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1964",
+  "why": "screenshot only, no parameters or text; no recipe"
+ },
+ {
+  "source": "tangency-labs/solidcraft#1965",
+  "why": "not a geometry failure: booleans on mesh bodies are refused by design ('a boolean needs a solid body')"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2048",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2059",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2073",
+  "why": "not boolean geometry: inspect.hole_stacks (an inspection command for aligned holes), no wrong kernel result"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2075",
+  "why": "not boolean geometry: parts.fasten (assembly fasteners sized to hole stacks)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2090",
+  "why": "not boolean geometry: inspect.clearance measuring (a shared volume against the union), a measurement feature"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2156",
+  "why": "clearance/interference measurement of a pin in its bore (inspect.clearance), not a modelling boolean; the facet crossing tolerance is not a right-answer number a recipe can state"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2205",
+  "why": "persistent face names (exact history of a prism boolean) only; the solid it gives is already right, so no geometry answer to grade"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2407",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2418",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2450",
+  "why": "other area: tessellation (Section Analysis shows a white line at the part's edge; display only)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2454",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2461",
+  "why": "other area: sheet metal ('this machining intersects a folded bend or a nonparallel panel')"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2466",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2495",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2497",
+  "why": "not boolean geometry: assembly joint relations (parallel, angle, point on plane)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2503",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2522",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2525",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2527",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ },
+ {
+  "source": "tangency-labs/solidcraft#2534",
+  "why": "no design or file attached: the report carries only the failure text and the feature's parameters, so no synthetic geometry can be rebuilt from it"
+ }
+]

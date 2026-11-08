@@ -84,7 +84,7 @@ impl RichTextExt for RichText {
 // Keep pending definitions too: set_fonts takes effect on the next frame, while the web
 // fetch and preference update can both finish before that frame starts.
 fn installed_fonts_id() -> egui::Id {
-    egui::Id::new("solidcraft_interface_fonts")
+    egui::Id::unique("solidcraft_interface_fonts")
 }
 
 fn install(ctx: &egui::Context, fonts: FontDefinitions) {
@@ -387,7 +387,8 @@ impl CjkFontLoader {
         self.status
     }
 
-    /// Called every frame with the live language. `ready` is true when the shell already has the
+    /// Called every frame with the live language (a `system` preference resolves to its catalog
+    /// via [`crate::i18n::effective_language`]). `ready` is true when the shell already has the
     /// on-demand face that language needs. Returns true when a fetch should start now. After a
     /// failed load a CJK language falls back to English for this session; the saved preference is
     /// kept (see [`Self::persisted_language`]). Switching to another CJK language that still needs
@@ -400,7 +401,7 @@ impl CjkFontLoader {
                 self.status = CjkFontStatus::Unloaded;
             }
         }
-        if !needs_cjk_font(language) {
+        if !needs_cjk_font(crate::i18n::effective_language(language)) {
             return false;
         }
         if ready {
@@ -436,13 +437,14 @@ impl CjkFontLoader {
         self.status == CjkFontStatus::Unloaded
     }
 
-    /// Record the outcome of the fetch and install.
+    /// Record the outcome of the fetch and install. A `system` preference resolves to its
+    /// catalog first ([`Self::tick`]).
     pub fn finished(&mut self, installed: bool, language: &mut String) {
         if installed {
             self.status = CjkFontStatus::Installed;
         } else {
             self.status = CjkFontStatus::Failed;
-            if needs_cjk_font(language) {
+            if needs_cjk_font(crate::i18n::effective_language(language)) {
                 self.fall_back(language);
             }
         }
@@ -1087,7 +1089,7 @@ mod tests {
         fonts.families[&egui::FontFamily::Proportional]
             .iter()
             .filter_map(|name| fonts.font_data.get(name))
-            .any(|data| ttf_parser::Face::parse(&data.font, data.index).unwrap().glyph_index(c).is_some())
+            .any(|data| ttf_parser::Face::parse(data.bytes(), data.index).unwrap().glyph_index(c).is_some())
     }
 
     /// The symbols the built-in Latin faces lack draw through the built-in Hack (#2955), which
@@ -1144,14 +1146,14 @@ mod tests {
             assert_eq!(list[0], name);
             assert_eq!(&list[1..], defaults.families[&FontFamily::Proportional]);
             let data = &fonts.font_data[name];
-            assert_eq!(data.font.as_ref(), PLEX_SANS);
+            assert_eq!(data.bytes(), PLEX_SANS);
             assert_eq!(data.tweak.coords.as_ref()[0].1, weight);
             assert!(data.variation_axes().iter().any(|a| a.tag == *b"wght"));
         }
         let mono = &fonts.families[&FontFamily::Monospace];
         assert_eq!(mono[0], "plex-mono");
         assert_eq!(&mono[1..], defaults.families[&FontFamily::Monospace]);
-        assert_eq!(fonts.font_data["plex-mono"].font.as_ref(), PLEX_MONO);
+        assert_eq!(fonts.font_data["plex-mono"].bytes(), PLEX_MONO);
     }
 
     #[test]
@@ -1237,12 +1239,14 @@ mod tests {
     fn latin_font_bytes() -> Vec<u8> {
         let defaults = base_font_definitions();
         let name = &defaults.families[&egui::FontFamily::Proportional][0];
-        defaults.font_data[name].font.to_vec()
+        defaults.font_data[name].bytes().to_vec()
     }
 
     #[test]
-    fn default_ui_language_is_english() {
-        assert_eq!(crate::prefs::Prefs::default().language, "en");
+    fn default_ui_language_follows_the_system() {
+        // A first start follows the system (#10138); English, the fallback it lands on when
+        // nothing matches, needs no CJK face.
+        assert_eq!(crate::prefs::Prefs::default().language, crate::i18n::SYSTEM);
         assert!(!needs_cjk_font("en"));
     }
 

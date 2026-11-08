@@ -8,13 +8,16 @@
 //!   text (with `near`: the one in that label's row)
 //! - `{"click": AT, "double"?, "shift"?, "ctrl"?, "button"?}`, `{"move": AT, "shift"?, "alt"?, "ctrl"?, "cmd"?}`,
 //!   `{"hold": AT, "frames"?}` (press and hold still: Select Other),
-//!   `{"drag": [AT, AT], "shift"?, "ctrl"?, "steps"?}` where AT is `[x, y]` (screen), `{"world": [x,y,z]}`
+//!   `{"drag": [AT, AT, ...], "shift"?, "ctrl"?, "steps"?}` (through any points between, `steps` moves
+//!   each) where AT is `[x, y]` (screen), `{"world": [x,y,z]}`
 //!   or `{"sketch": [x,y]}` (the sketch being edited)
 //! - `{"queued": "engine.execute", "params": {…}, "min_frames"?: n, "max_frames"?: n}`: a request sent the way an
 //!   agent's arrive (through the app's request queue, answered between frames, so the agent
 //!   cursor can act it out first); fails if the answer came in fewer than `min_frames` frames
 //! - `{"call": "ui.view", "params": {…}}`: any other control request (`fail: true` expects an
 //!   error)
+//! - `{"panel_fixture": {"enabled": true, "preset": "docks"}}`: explicit synthetic content
+//!   in the real workspace panel host; `{}` inspects and `{"enabled": false}` tears it down
 //! - `{"make_image": "pic.png"}`: a picture in the scenario's folder
 //! - `{"choose_file": "part.step"}`: the next Open picker returns that file of the scenario's
 //!   folder (Save pickers save there)
@@ -39,6 +42,7 @@
 //!
 //! The same files drive the live app over the control channel for screenshots.
 
+use solidcraft_engine::geom::prelude::*;
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -177,6 +181,7 @@ impl Drop for Harness {
 
 impl Harness {
     pub fn new() -> Harness {
+        crate::i18n::pin_system_language();
         let mut h = Harness {
             app: SolveApp::new(Session::default(), Services::default()),
             ctx: {
@@ -215,6 +220,12 @@ impl Harness {
         crate::recovery_ui::start(&mut self.app, &self.dir.join("recovery"), std::time::Duration::ZERO);
     }
 
+    /// The next frame's time, 1/60 s on. A frame run without a time (the control channel's) moves
+    /// the context's clock by egui's f32 `predicted_dt`, so follow it: time never goes backwards.
+    fn tick(&mut self) {
+        self.time = self.time.max(self.ctx.input(|i| i.time)) + 1.0 / 60.0;
+    }
+
     /// Lay out and draw one frame (feeding queued pointer and key events).
     pub fn frame(&mut self) {
         self.frame_with(Vec::new());
@@ -223,7 +234,7 @@ impl Harness {
     /// One frame that receives all these events at once (a quick tap, or input queued during a
     /// slow frame), before any queued ones.
     pub fn frame_with(&mut self, events: Vec<egui::Event>) {
-        self.time += 1.0 / 60.0;
+        self.tick();
         let mut raw = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, self.size)),
             time: Some(self.time),
@@ -258,7 +269,7 @@ impl Harness {
     /// One frame in which files are dragged over the window (`hovered`) or dropped, the pointer
     /// last seen at `at`.
     pub fn drag_files(&mut self, at: egui::Pos2, hovered: Vec<egui::HoveredFile>, dropped: Vec<egui::DroppedFileHandle>) {
-        self.time += 1.0 / 60.0;
+        self.tick();
         let raw = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, self.size)),
             time: Some(self.time),
@@ -384,7 +395,7 @@ impl Harness {
     }
 
     /// Centres of the visible widgets whose label or value is `text`, last drawn first.
-    fn widgets(&self, text: &str) -> Vec<[f64; 2]> {
+    pub fn widgets(&self, text: &str) -> Vec<[f64; 2]> {
         let Some(tree) = self.output.accesskit_update.as_ref() else { return Vec::new() };
         let centre =
             |n: &egui::accesskit::Node| n.bounds().filter(|b| b.x1 > b.x0 && b.y1 > b.y0).map(|b| [(b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0]);
@@ -433,7 +444,7 @@ impl Harness {
         for i in 0..240 {
             self.frame();
             let now = basis(&self.app.cam);
-            let ang = |a: solidcraft_engine::geom::Vec3, b: solidcraft_engine::geom::Vec3| a.dot(b).clamp(-1.0, 1.0).acos().to_degrees();
+            let ang = |a: solidcore_record::Vec3, b: solidcore_record::Vec3| a.dot(b).clamp(-1.0, 1.0).acos().to_degrees();
             let d = ang(prev.0, now.0).max(ang(prev.2, now.2));
             if d > worst.0 {
                 worst = (d, i);
@@ -449,11 +460,26 @@ impl Harness {
         Err(format!("view_anim {v}: still animating after 240 frames"))
     }
 
+    /// A drag step's first and last points, and the screen points it passes through between them
+    /// (a lasso's loop, #4376).
+    fn drag_points(&mut self, d: &Value) -> Result<([f64; 2], [f64; 2], Vec<Value>), String> {
+        let pts = d.as_array().map(Vec::as_slice).unwrap_or_default();
+        let start = self.at(pts.first().unwrap_or(&Value::Null))?;
+        let end = self.at(pts.get(pts.len().saturating_sub(1).max(1)).unwrap_or(&Value::Null))?;
+        let mut via = Vec::new();
+        for q in pts.iter().skip(1).take(pts.len().saturating_sub(2)) {
+            via.push(json!(self.at(q)?));
+        }
+        Ok((start, end, via))
+    }
+
     /// Run one step.
     pub fn step(&mut self, s: &Value) -> Result<(), String> {
         let flag = |k: &str| s.get(k).and_then(Value::as_bool).unwrap_or(false);
         let res =
-            if let Some(id) = s.get("start").and_then(Value::as_str) {
+            if let Some(params) = s.get("panel_fixture") {
+                self.call("ui.panel_fixture", params.clone())
+            } else if let Some(id) = s.get("start").and_then(Value::as_str) {
                 self.call("ui.start", json!({ "command": id }))
             } else if let Some(k) = s.get("key").and_then(Value::as_str) {
                 {
@@ -504,13 +530,12 @@ impl Harness {
                 let [x, y] = self.at(at)?;
                 self.call("ui.move", json!({"x": x, "y": y,"shift":flag("shift"),"alt":flag("alt"),"ctrl":flag("ctrl"),"cmd":flag("cmd")}))
             } else if let Some(d) = s.get("drag") {
-                let [x0, y0] = self.at(d.get(0).unwrap_or(&Value::Null))?;
-                let [x1, y1] = self.at(d.get(1).unwrap_or(&Value::Null))?;
+                let ([x0, y0], [x1, y1], via) = self.drag_points(d)?;
                 let steps = s.get("steps").cloned().unwrap_or(json!(8));
-                self.call(
-                    "ui.drag",
-                    json!({"x0": x0, "y0": y0, "x1": x1, "y1": y1, "steps": steps, "shift": flag("shift"), "ctrl": flag("ctrl"), "alt": flag("alt")}),
-                )
+                let mut p =
+                    json!({"x0": x0, "y0": y0, "x1": x1, "y1": y1, "steps": steps, "shift": flag("shift"), "ctrl": flag("ctrl"), "alt": flag("alt")});
+                p["via"] = Value::Array(via);
+                self.call("ui.drag", p)
             } else if let Some(m) = s.get("queued").and_then(Value::as_str) {
                 let (v, frames) = self.call_queued(m, s.get("params").cloned().unwrap_or(json!({})));
                 let min = s.get("min_frames").and_then(Value::as_u64).unwrap_or(0);
@@ -582,6 +607,20 @@ impl Harness {
             } else if let Some(how) = s.get("restart").and_then(Value::as_str) {
                 // "crash": the app dies (its autosave lock goes with it, the entry stays);
                 // "close": it closes normally. Then a new app starts on the same folders.
+                if how == "crash" {
+                    // The work so far is autosaved before the crash: the write runs on a worker
+                    // thread, which a loaded machine had not finished (#10690). The autosave's
+                    // own ticks write it; a bounded wait, so an autosave that stopped writing
+                    // still fails the recovery that follows.
+                    for _ in 0..600 {
+                        let caught_up = self.app.autosave.as_ref().and_then(|a| a.active.as_ref()).is_none_or(|a| a.caught_up(&self.app.session));
+                        if caught_up {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                        self.frames(1);
+                    }
+                }
                 let mut old = std::mem::replace(&mut self.app, SolveApp::new(Session::default(), Services::default()));
                 if how == "close" {
                     crate::recovery_ui::close(&mut old);
@@ -884,14 +923,16 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
                 }
             }
             "dialog" => {
-                let d = &ui["dialog"];
+                // A word of the dialog's state as the code holds it: scenarios check fields that
+                // `ui.inspect` reports only as the command OK runs.
+                let d = h.app.dialog.as_ref().map(|d| format!("{d:?}"));
                 let ok = match v {
-                    Value::Null => d.is_null(),
-                    Value::String(w) => d.as_str().is_some_and(|d| d.contains(w.as_str())),
+                    Value::Null => d.is_none() && ui["dialog"].is_null(),
+                    Value::String(w) => d.as_deref().is_some_and(|d| d.contains(w.as_str())),
                     _ => false,
                 };
                 if !ok {
-                    return Err(format!("dialog: got {d}, want {v}"));
+                    return Err(format!("dialog: got {d:?}, want {v}"));
                 }
             }
             "tool" => {

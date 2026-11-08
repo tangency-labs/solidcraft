@@ -23,7 +23,7 @@ fn piece_names_parse_into_stem_and_bounding_faces() {
 }
 
 fn named(names: &[&str]) -> Vec<Named> {
-    names.iter().map(|n| Named { name: n.to_string(), aliases: Vec::new(), verified: true, origins: None }).collect()
+    names.iter().map(|n| Named { name: n.to_string(), verified: true, ..Named::default() }).collect()
 }
 
 #[test]
@@ -125,6 +125,28 @@ fn a_merged_face_takes_the_shared_stem_or_the_first_name_and_answers_to_the_othe
     assert_eq!(matches(&names, 0, "F9:top"), Some(Match::Alias));
 }
 
+/// A side drawn in two collinear pieces is one face its feature made from both: each piece's role
+/// names that very face, a piece of it once it is split. Joined with another feature's face, it
+/// keeps them, and the other face's names are aliases only.
+#[test]
+fn a_face_made_from_several_roles_is_named_by_each_and_keeps_them_when_merged() {
+    let side = Named { name: "F2:side:c1".into(), synonyms: vec!["F2:side:c2".into()], verified: true, ..Named::default() };
+    let names = qualify(vec![side.clone()], &[]);
+    assert_eq!(names.faces[0], "F2:side:c1");
+    assert_eq!(matches(&names, 0, "F2:side:c2"), Some(Match::Exact));
+    let other = Named { name: "F9:side:a".into(), synonyms: vec!["F9:side:b".into()], verified: true, ..Named::default() };
+    let m = merged(vec![side.clone(), other]).unwrap();
+    assert_eq!((m.name.as_str(), m.synonyms.as_slice()), ("F2:side:c1", ["F2:side:c2".to_string()].as_slice()));
+    assert_eq!(m.aliases, vec!["F9:side:a".to_string(), "F9:side:b".to_string()]);
+    let names = qualify(vec![m], &[]);
+    assert_eq!(matches(&names, 0, "F2:side:c2"), Some(Match::Exact));
+    assert_eq!(matches(&names, 0, "F9:side:b"), Some(Match::Alias));
+    // Split by a cut: each piece is a piece of what either role names.
+    let names = qualify(vec![side.clone(), side, Named { name: "F4:side:x".into(), ..Named::default() }], &[(0, 2)]);
+    assert_eq!(names.faces[0], "F2:side:c1#[F4:side:x]");
+    assert_eq!(matches(&names, 0, "F2:side:c2"), Some(Match::Piece));
+}
+
 /// #3330: a linked design's faces are named after the names that design gave them, so what the
 /// name holds must mean nothing else in the assembly, while its pieces stay pieces.
 #[test]
@@ -148,4 +170,22 @@ fn a_linked_designs_face_names_keep_their_pieces_and_nothing_else() {
     for n in ["", "#", "#[", "]", "a#[", "#[]", "x#[[]]]", "#1", "a#[b]#", "é#[ü]"] {
         let _ = role(n);
     }
+}
+
+/// A face that was split when a name was stored and is whole again (#11731): the stored piece
+/// is all of it, when the face still touches the faces that told the piece apart.
+#[test]
+fn a_piece_name_finds_its_face_once_it_is_whole_again() {
+    let faces = named(&["top", "left", "right", "start"]);
+    let names = qualify(faces, &[(0, 1), (0, 3)]);
+    assert_eq!(names.faces[0], "top");
+    assert_eq!(matches(&names, 0, "top#[left]"), Some(Match::Piece));
+    assert_eq!(matches(&names, 0, "top#[left,start]"), Some(Match::Piece));
+    // It no longer touches a face the qualifier names: some other piece, gone since.
+    assert_eq!(matches(&names, 0, "top#[right]"), Some(Match::Stem));
+    assert_eq!(matches(&names, 0, "top#[left]@F9.1"), None, "a copy's piece");
+    // A numbered piece (nothing told it apart, or a tie) says nothing about which part it was.
+    assert_eq!(matches(&names, 0, "top#1"), Some(Match::Stem));
+    assert_eq!(matches(&names, 0, "top#[left]#2"), Some(Match::Stem));
+    assert_eq!(matches(&names, 0, "top#[]"), Some(Match::Stem));
 }

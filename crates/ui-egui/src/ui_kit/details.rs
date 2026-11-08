@@ -1,4 +1,5 @@
 //! Description-driven details content. No tool, document or command knowledge lives here.
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{fonts::RichTextExt as _, scenario, theme::Tokens};
 use egui::{RichText, Ui};
 
@@ -6,7 +7,7 @@ const FIELD_FOCUS: &str = "details_field_focus";
 const CONTROL_FOCUS: &str = "details_control_focus";
 const OWNED_POPUPS: &str = "details_owned_popups";
 pub(crate) fn dismiss_details_popups(ctx: &egui::Context) {
-    let popups = ctx.data(|data| data.get_temp::<Vec<egui::Id>>(egui::Id::new(OWNED_POPUPS))).unwrap_or_default();
+    let popups = ctx.data(|data| data.get_temp::<Vec<egui::Id>>(egui::Id::unique(OWNED_POPUPS))).unwrap_or_default();
     for popup in popups {
         egui::Popup::close_id(ctx, popup);
     }
@@ -16,18 +17,18 @@ fn remember_control(ui: &Ui, id: egui::Id) {
         return;
     }
     ui.ctx().data_mut(|data| {
-        let key = egui::Id::new(CONTROL_FOCUS);
+        let key = egui::Id::unique(CONTROL_FOCUS);
         let mut ids = data.get_temp::<Vec<egui::Id>>(key).unwrap_or_default();
         ids.push(id);
         data.insert_temp(key, ids);
     });
 }
 pub(crate) fn details_control_owns_focus(ctx: &egui::Context) -> bool {
-    let ids = ctx.data(|data| data.get_temp::<Vec<egui::Id>>(egui::Id::new(CONTROL_FOCUS))).unwrap_or_default();
+    let ids = ctx.data(|data| data.get_temp::<Vec<egui::Id>>(egui::Id::unique(CONTROL_FOCUS))).unwrap_or_default();
     ctx.memory(|memory| memory.focused().is_some_and(|id| ids.contains(&id)))
 }
 pub(crate) fn details_field_owns_focus(ctx: &egui::Context) -> bool {
-    let fields = ctx.data(|data| data.get_temp::<Vec<(egui::Id, egui::Rect)>>(egui::Id::new(FIELD_FOCUS))).unwrap_or_default();
+    let fields = ctx.data(|data| data.get_temp::<Vec<(egui::Id, egui::Rect)>>(egui::Id::unique(FIELD_FOCUS))).unwrap_or_default();
     let focused = ctx.memory(|memory| memory.focused());
     focused.is_some_and(|id| {
         fields.iter().any(|(field, rect)| *field == id || ctx.read_response(id).is_some_and(|response| rect.contains(response.rect.center())))
@@ -37,7 +38,7 @@ pub(crate) fn details_field_owned_escape(ctx: &egui::Context) -> bool {
     if details_field_owns_focus(ctx) {
         return true;
     }
-    let fields = ctx.data(|data| data.get_temp::<Vec<(egui::Id, egui::Rect)>>(egui::Id::new(FIELD_FOCUS))).unwrap_or_default();
+    let fields = ctx.data(|data| data.get_temp::<Vec<(egui::Id, egui::Rect)>>(egui::Id::unique(FIELD_FOCUS))).unwrap_or_default();
     // egui blurs native value editors before global shortcuts see Escape. The
     // preceding visible frame still owns that press, just as a text editor does.
     ctx.memory(|memory| memory.focused().is_none() && fields.iter().any(|(id, _)| memory.had_focus_last_frame(*id)))
@@ -45,13 +46,33 @@ pub(crate) fn details_field_owned_escape(ctx: &egui::Context) -> bool {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum DetailValue {
-    Number { value: f64, min: f64, max: f64, suffix: String },
-    Length { value: f64, units: String },
+    Number {
+        value: f64,
+        min: f64,
+        max: f64,
+        suffix: String,
+    },
+    /// Shown to `decimals` places, as the design shows lengths.
+    Length {
+        value: f64,
+        units: String,
+        decimals: u8,
+    },
     Angle(f64),
-    Slider { value: f64, min: f64, max: f64 },
-    Axis { value: [f64; 3], current: String },
+    Slider {
+        value: f64,
+        min: f64,
+        max: f64,
+    },
+    Axis {
+        value: [f64; 3],
+        current: String,
+    },
     Check(bool),
-    Choice { selected: usize, options: Vec<String> },
+    Choice {
+        selected: usize,
+        options: Vec<String>,
+    },
 }
 
 pub(crate) struct DetailSetting {
@@ -136,7 +157,7 @@ fn setting(ui: &mut Ui, field: &DetailSetting, focus: bool) -> Option<DetailEven
             ui.style_mut().drag_value_text_style = egui::TextStyle::Monospace;
             let response = match &mut value {
                 DetailValue::Number { value, min, max, suffix } => Some(super::number_field(ui, value, *min..=*max, 0.01, suffix)),
-                DetailValue::Length { value, units } => Some(super::length_field(ui, value, units, 6)),
+                DetailValue::Length { value, units, decimals } => Some(super::length_field(ui, value, units, *decimals)),
                 DetailValue::Angle(value) => Some(super::angle_field(ui, value)),
                 DetailValue::Slider { value, min, max } => Some(super::slider(ui, value, *min..=*max, Default::default())),
                 DetailValue::Check(value) => Some(super::checkbox(ui, "", value)),
@@ -169,7 +190,7 @@ fn setting(ui: &mut Ui, field: &DetailSetting, focus: bool) -> Option<DetailEven
                         }
                     });
                     ui.ctx().data_mut(|data| {
-                        let key = egui::Id::new(OWNED_POPUPS);
+                        let key = egui::Id::unique(OWNED_POPUPS);
                         let mut popups = data.get_temp::<Vec<egui::Id>>(key).unwrap_or_default();
                         // ComboBox's native popup is keyed by the returned button response.
                         popups.push(response.id.with("popup"));
@@ -196,7 +217,7 @@ fn setting(ui: &mut Ui, field: &DetailSetting, focus: bool) -> Option<DetailEven
                     *id == response.id || ui.ctx().read_response(*id).is_some_and(|native| response.rect.contains(native.rect.center()))
                 });
                 ui.ctx().data_mut(|data| {
-                    let key = egui::Id::new(FIELD_FOCUS);
+                    let key = egui::Id::unique(FIELD_FOCUS);
                     let mut fields = data.get_temp::<Vec<(egui::Id, egui::Rect)>>(key).unwrap_or_default();
                     if visible {
                         fields.push((response.id, response.rect));
@@ -213,7 +234,7 @@ fn setting(ui: &mut Ui, field: &DetailSetting, focus: bool) -> Option<DetailEven
     if let DetailValue::Axis { value: vector, current } = &value
         && ![[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]].contains(vector)
     {
-        let response = ui.add(egui::Label::new(RichText::new(current).monospace()).wrap()).on_hover_text(current);
+        let response = ui.add(egui::Label::new(RichText::new(current).monospace()).wrap()).backing_on_hover_text(current);
         scenario::publish_target(&format!("details:current:{}", field.id), response.rect);
     }
     changed.then(|| DetailEvent::Change(field.id.clone(), value))
@@ -224,10 +245,13 @@ fn setting(ui: &mut Ui, field: &DetailSetting, focus: bool) -> Option<DetailEven
 pub(crate) fn details(ui: &mut Ui, id: &str, description: &Details, max_height: f32, focus: Option<&str>) -> Vec<DetailEvent> {
     let t = Tokens::get();
     let mut events = Vec::new();
-    ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new(FIELD_FOCUS), Vec::<(egui::Id, egui::Rect)>::new()));
-    ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new(CONTROL_FOCUS), Vec::<egui::Id>::new()));
-    ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new(OWNED_POPUPS), Vec::<egui::Id>::new()));
+    ui.ctx().data_mut(|data| data.insert_temp(egui::Id::unique(FIELD_FOCUS), Vec::<(egui::Id, egui::Rect)>::new()));
+    ui.ctx().data_mut(|data| data.insert_temp(egui::Id::unique(CONTROL_FOCUS), Vec::<egui::Id>::new()));
+    ui.ctx().data_mut(|data| data.insert_temp(egui::Id::unique(OWNED_POPUPS), Vec::<egui::Id>::new()));
     ui.set_width((t.form_card_width + if description.findings.is_empty() { 0.0 } else { t.space_24 * 2.0 }).min(ui.available_width()));
+    // A card's area is as tall as it was last frame: allowed `max_height`, a body that grew
+    // after the first frame scrolls instead, and its last row was cut off (#10708).
+    ui.set_max_height(max_height);
     super::scope(ui, |ui| {
         let mut caption_height = 0.0;
         if let Some(caption) = &description.caption {
@@ -281,11 +305,11 @@ pub(crate) fn details(ui: &mut Ui, id: &str, description: &Details, max_height: 
                                             let (rect, _) = ui.allocate_exact_size(egui::vec2(t.space_16, t.space_16), egui::Sense::hover());
                                             crate::icons::paint_icon(ui.painter(), rect, "warning", 1.0);
                                         }
-                                        ui.label(&row.label).on_hover_text(&row.label);
+                                        ui.label(&row.label).backing_on_hover_text(&row.label);
                                     });
                                 });
                                 cells.cell(|ui| {
-                                    ui.label(RichText::new(&row.value).monospace().size(t.font_small)).on_hover_text(&row.value);
+                                    ui.label(RichText::new(&row.value).monospace().size(t.font_small)).backing_on_hover_text(&row.value);
                                 });
                                 cells.cell(|ui| {
                                     if row.target {

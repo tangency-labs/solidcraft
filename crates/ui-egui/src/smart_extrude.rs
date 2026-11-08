@@ -17,8 +17,9 @@
 //!   distance changes nothing. Choosing an operation by hand ends the automatic choice for
 //!   the rest of the extrude.
 
+use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
-use solidcraft_engine::geom::Vec3;
+use solidcraft_engine::geom::prelude::*;
 
 /// The extrude window's automatic state.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -31,12 +32,21 @@ pub struct Smart {
     pub latch: Option<(usize, i8)>,
     /// The To Object target the distance was last set from.
     pub target: Option<Sel>,
+    /// The profiles the taper handle's limits were last worked out for, and their radii
+    /// (`canvas::taper_radii`): too slow to work out every frame on a profile with many holes.
+    pub taper_radii: Option<(Vec<solidcore_record::Region2>, (f64, f64))>,
     /// Where the extrude starts (its From Object and start offset) when the latch was decided.
     pub start: serde_json::Value,
     /// The bodies shown when the latch was decided (None: every one), as `shown_scope` gives them.
     pub shown: Option<Vec<String>>,
     /// Picks off the profile plane become the To Object target (Preferences › Design).
     pub auto_to_object: bool,
+    /// The user clicked into the Profiles box: until another input is chosen, an off-plane pick
+    /// is one more profile, not the To Object target.
+    pub profiles_chosen: bool,
+    /// The engine's automatic operation for the last parameters and design: a key over all it
+    /// depends on, and its answer. It probes the bodies' triangles, too slow to ask every frame.
+    pub auto: Option<(u64, Option<&'static str>)>,
 }
 
 /// One-side direction for a new pick: 0 (along the normal) or 1 (reversed). `ray` is the view

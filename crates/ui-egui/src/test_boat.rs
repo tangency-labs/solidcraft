@@ -9,10 +9,11 @@
 //! camera takes (`navigation::device_camera`), so calibration, reassigned axes, invert, speed and
 //! the zoom direction all show. Pan and zoom are held so the boat never leaves its box.
 
+use solidcraft_engine::geom::prelude::*;
 use std::sync::OnceLock;
 
 use egui::{Pos2, Rect, pos2};
-use solidcraft_engine::geom::Vec3;
+use solidcore_record::Vec3;
 use solidcraft_engine::render::Camera;
 
 use crate::space_mouse::DeviceMotion;

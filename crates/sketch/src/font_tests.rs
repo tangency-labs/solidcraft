@@ -2,9 +2,10 @@
 //! known by hand; the repository's second font (BIZ UDPGothic, `assets/fonts/biz-udp-gothic`) stands for
 //! a real one.
 
+use solidcraft_geom::prelude::*;
 use std::path::PathBuf;
 
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
 
 use crate::fonts::find_family_in;
 use crate::tests::v;
@@ -441,7 +442,7 @@ fn installed_families_are_listed_by_name_once_without_the_built_in_one() {
     // sorted; the built-in family is not among the installed ones, broken files and other files are skipped.
     std::fs::write(folder.0.join("copy.ttf"), tiny_font()).unwrap();
     std::fs::copy(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../assets/fonts/liberation-sans/LiberationSans-Regular.ttf"),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/fonts/liberation-sans/LiberationSans-Regular.ttf"),
         folder.0.join("lib.ttf"),
     )
     .unwrap();

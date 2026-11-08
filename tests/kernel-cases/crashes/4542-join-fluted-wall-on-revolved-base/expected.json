@@ -1,0 +1,22 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4542"
+ ],
+ "what": "a fluted cup wall (a 72-point periodic fit spline round r 31.5..32.5 outside, a circle r 25 inside) extruded 90 mm as a join onto the top face of a revolved base disc of r 32: the app hung in the boolean",
+ "source": "analytic",
+ "method": "the wall's ring stands on the base's top face (z = 7), overlapping it between r 25 and the disc's rim and overhanging it where the flutes pass r 32, so the join is one connected solid: one valid closed body. The two only share the face z = 7, so V is their sum. Base: Pappus on the profile (0,0)-(25,0), the arc through (29.5,1.5) to (32,7) (centre (25.25, 6.75), r 6.75463), (32,7)-(0,7): area 214.2728, V = 2 pi int x dA = 20655.013. Wall: the sketch's periodic fit spline is the C2 cyclic cubic through the 72 points with chord-length spans (closed back to the first point), its area by Green on its 72 Bezier pieces 3217.3851 (star-shaped, r 31.5002..32.5002); less the r 25 circle: 1253.8897, times 90 = 112850.069. V = 133505.08 (either part alone, or a wall sunk into the base, falls outside the tolerance). Box: the spline's extremes x, y +-32.5 (it reaches 32.5 on the axes and no further), z 0..97",
+ "body_count": 1,
+ "volume_mm3": 133505.08,
+ "bbox": {
+  "min": [
+   -32.5,
+   -32.5,
+   0.0
+  ],
+  "max": [
+   32.5,
+   32.5,
+   97.0
+  ]
+ }
+}

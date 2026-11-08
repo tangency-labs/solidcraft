@@ -12,9 +12,10 @@
 //! merged into regions. Walls that cross or meet (a honeycomb, a ring and a cross) come out as
 //! one region where they touch.
 
+use solidcraft_geom::prelude::*;
 use std::f64::consts::{PI, TAU};
 
-use solidcraft_geom::{Loop2, Region2, Seg2, Vec2};
+use solidcore_record::{Loop2, Region2, Seg2, Vec2};
 
 use crate::model::{CurveKind, Result, Sketch, SketchError};
 use crate::profiles::{find_profiles, merge_regions};
@@ -378,7 +379,7 @@ fn outline_sketch(boundary: &[Seg2]) -> Result<Sketch> {
             }
             Seg2::Cubic { p0, p1, p2, p3 } => {
                 let pts = [p0, p1, p2, p3].iter().map(|p| sk.add_point(*p, None)).collect::<Result<Vec<_>>>()?;
-                sk.add_curve(CurveKind::Spline { pts, control: true, degree: 3, periodic: false }, None)?;
+                sk.add_curve(CurveKind::Spline { pts, control: true, degree: 3, periodic: false, nurbs: None }, None)?;
             }
             _ => return Err(bad("not supported yet: this kind of wall curve")),
         }
