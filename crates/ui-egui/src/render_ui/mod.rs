@@ -17,7 +17,7 @@ pub(crate) fn focused(app: &SolveApp) -> bool {
 }
 
 pub(crate) fn compact(app: &SolveApp, width: f32) -> bool {
-    width < 1100.0 || app.ui.layout == crate::shell::LayoutMode::Docked
+    width < 1100.0 || app.ui.layout == crate::ui_kit::LayoutMode::Docked
 }
 
 pub(crate) fn focus_shortcut(app: &mut SolveApp, ui: &mut egui::Ui) {

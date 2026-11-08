@@ -4915,7 +4915,7 @@ fn render_workspace_stage_chips_dispatch_without_mutations_and_remember_each_doc
 
 #[test]
 fn render_workspace_stage_shell_degrades_without_overlap_at_small_window_sizes() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = Harness::new();
         enter(&mut h.app, true).unwrap();
         h.app.ui.layout = mode;
@@ -5342,7 +5342,7 @@ fn render_workspace_shots_toggle_persists_and_design_roundtrip_preserves_state()
 
 #[test]
 fn render_workspace_canvas_controls_and_fit_respect_panels_and_shots_in_both_layouts() {
-    for layout in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for layout in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = Harness::new();
         h.app.ui.layout = layout;
         h.call("ui.resize", json!({"width":1600,"height":1000}));
@@ -5427,7 +5427,7 @@ fn assert_product_fits_canvas(app: &SolveApp) {
 
 #[test]
 fn render_workspace_hosts_float_and_shield_input_in_both_ribbon_layouts() {
-    for (layout, page) in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked]
+    for (layout, page) in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked]
         .into_iter()
         .flat_map(|layout| [inspector::Editor::Scene, inspector::Editor::Appearance].map(|page| (layout, page)))
     {
@@ -5516,7 +5516,7 @@ fn render_workspace_hosts_float_and_shield_input_in_both_ribbon_layouts() {
 
 #[test]
 fn render_workspace_assignment_footer_fits_stacked_card_with_shots_shown_and_hidden() {
-    for layout in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for layout in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = Harness::new();
         h.app.ui.layout = layout;
         h.call("ui.resize", json!({"width":1600,"height":1000}));
@@ -5539,7 +5539,7 @@ fn render_workspace_assignment_footer_fits_stacked_card_with_shots_shown_and_hid
 
 #[test]
 fn render_workspace_card_grips_swap_sides_and_resize_without_design_edits() {
-    for layout in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for layout in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = Harness::new();
         h.app.ui.layout = layout;
         h.call("ui.resize", json!({"width":1600,"height":1000}));
@@ -5559,7 +5559,7 @@ fn render_workspace_card_grips_swap_sides_and_resize_without_design_edits() {
         h.step(&json!({"drag":[[rail.x,rail.y],[rail.x+50.0,rail.y]],"steps":8})).unwrap();
         h.frames(3);
         // A compact dock keeps its minimum width and leaves the remembered width alone.
-        if layout == crate::shell::LayoutMode::Docked {
+        if layout == crate::ui_kit::LayoutMode::Docked {
             assert_eq!(h.app.preferences.render_inspector_width, width);
             assert_eq!(h.app.shell.workspace_panels["render:inspector"].0.width(), card_width);
         } else {
@@ -5985,7 +5985,7 @@ fn render_workspace_browser_look_lens_counts_distinct_objects_and_selects_them()
 
 #[test]
 fn render_workspace_dock_command_swaps_sides_without_design_edits() {
-    for layout in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for layout in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = Harness::new();
         h.app.ui.layout = layout;
         h.call("ui.resize", json!({"width":1600,"height":1000}));
@@ -6027,7 +6027,7 @@ fn render_workspace_dock_command_swaps_sides_without_design_edits() {
 
 #[test]
 fn render_workspace_dock_grip_menus_dispatch_the_other_side() {
-    for layout in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for layout in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = Harness::new();
         h.app.ui.layout = layout;
         h.call("ui.resize", json!({"width":1600,"height":1000}));
@@ -6601,7 +6601,7 @@ fn render_workspace_shots_heading_matches_design_history_typography_and_strip_ba
     }
     let mut h = Harness::new();
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
-    h.app.ui.layout = crate::shell::LayoutMode::Docked;
+    h.app.ui.layout = crate::ui_kit::LayoutMode::Docked;
     h.app.preferences.timeline_left = false;
     h.app.ui.show_timeline = true;
     h.frames(3);
@@ -11392,7 +11392,7 @@ fn cpu_general_glass_path_availability_uses_reviewed_unsaved_saved_optics_withou
 fn render_ui_at_world_points_hit_the_painted_surface_and_letterbox_does_not_select() {
     use solidcore_record::Vec3;
     use solidcraft_engine::Sel;
-    for layout in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
+    for layout in [crate::ui_kit::LayoutMode::Docked, crate::ui_kit::LayoutMode::Floating] {
         for side in ["left", "right"] {
             let mut h = Harness::new();
             h.app.run("solid.box", json!({"corner":[-10,-10,-10],"length":20,"width":20,"height":20,"body_name":"Pick target"})).unwrap();
@@ -11471,7 +11471,7 @@ fn render_ui_at_world_points_hit_the_painted_surface_and_letterbox_does_not_sele
 
 #[test]
 fn rendered_camera_layout_cache_and_fit_share_the_exact_frame_without_moving_outer_controls() {
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         for side in ["left", "right"] {
             let mut h = Harness::new();
             h.app.ui.layout = mode;
@@ -11672,7 +11672,7 @@ fn light_stage_describes_world_coordinates_without_inert_frame_settings_or_edits
             let preview = light::preview(&h.app).unwrap();
             assert!(!lights.is_empty());
             let lights = serde_json::to_value(lights).unwrap();
-            for layout in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
+            for layout in [crate::ui_kit::LayoutMode::Docked, crate::ui_kit::LayoutMode::Floating] {
                 h.app.ui.layout = layout;
                 for width in [800.0, 1440.0] {
                     let output = draw(&mut h, width, vec![]);

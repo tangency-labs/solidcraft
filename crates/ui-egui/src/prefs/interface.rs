@@ -229,7 +229,7 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                 |ui| {
                     ui_kit::settings_form(ui, t.form_label_width + t.space_16, |ui| {
                         ui_kit::row(ui, app.tr("ui.panel_layout.panel_style"), |ui| {
-                            let mut selected = usize::from(app.ui.layout == crate::shell::LayoutMode::Docked);
+                            let mut selected = usize::from(app.ui.layout == crate::ui_kit::LayoutMode::Docked);
                             if ui_kit::segmented(
                                 ui,
                                 &mut selected,
@@ -283,7 +283,7 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                         layout_check(ui, app.tr("prefs.status_bar"), app.tr("prefs.status_bar_note"), &mut app.preferences.status_bar, "status_bar");
                     });
                     ui_kit::LayoutPreview {
-                        compact: app.ui.layout == crate::shell::LayoutMode::Docked,
+                        compact: app.ui.layout == crate::ui_kit::LayoutMode::Docked,
                         labels: app.preferences.ribbon_labels,
                         history: history_choice(app),
                         translucent: app.preferences.browser_float,
@@ -346,7 +346,7 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                         app.tr("prefs.browser"),
                         &options,
                         usize::from(app.preferences.browser_float),
-                        app.ui.layout == crate::shell::LayoutMode::Floating,
+                        app.ui.layout == crate::ui_kit::LayoutMode::Floating,
                     ) {
                         app.preferences.browser_float = selected == 1;
                     }

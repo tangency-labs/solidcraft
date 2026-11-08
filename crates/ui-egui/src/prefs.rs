@@ -1297,7 +1297,7 @@ preference_settings! {
     /// on every start (#10138). A saved language keeps winning, so existing users don't change.
     language: String = "system".into(), 0;
     /// Shared workspace composition; system windows and popups retain their purpose.
-    layout: crate::shell::LayoutMode = Default::default(), PAGE_LAYOUT;
+    layout: crate::ui_kit::LayoutMode = Default::default(), PAGE_LAYOUT;
     /// Ordered view controls and their appearance.
     #[serde(default)]
     navigation_bar: crate::navigation_bar::NavigationBar = Default::default(), PAGE_LAYOUT;
@@ -1902,7 +1902,7 @@ struct Snapshot {
     /// With no record yet, keep the small deferred legacy import state too.
     panel_layout_deferred: Option<crate::panel_runtime::PanelLayoutPreferences>,
     dark: bool,
-    layout: crate::shell::LayoutMode,
+    layout: crate::ui_kit::LayoutMode,
     grid: bool,
     navigation_bar: bool,
     tool_cursor: bool,
@@ -6590,7 +6590,7 @@ mod tests {
             app.autosave_minutes = 9.0;
             app.ui.dark = false;
             app.prefs_window.follow.launch = Some("theme.json".into());
-            app.ui.layout = crate::shell::LayoutMode::Docked;
+            app.ui.layout = crate::ui_kit::LayoutMode::Docked;
             app.ui.show_navigation_bar = false;
             app.ui.tool_cursor = true;
             app.ui.visual_style = 2;
@@ -6605,7 +6605,7 @@ mod tests {
             assert_eq!(app.autosave_minutes, if page == PAGE_GENERAL { 5.0 } else { 9.0 });
             assert_eq!(app.ui.dark, page == PAGE_APPEARANCE);
             assert_eq!(app.prefs_window.follow.launch.is_none(), page == PAGE_APPEARANCE);
-            assert_eq!(app.ui.layout == crate::shell::LayoutMode::Floating, page == PAGE_LAYOUT);
+            assert_eq!(app.ui.layout == crate::ui_kit::LayoutMode::Floating, page == PAGE_LAYOUT);
             assert_eq!(app.ui.show_navigation_bar, page == PAGE_LAYOUT);
             assert_eq!(app.ui.tool_cursor, page != PAGE_TOOLS);
             assert_eq!(app.ui.visual_style, if page == PAGE_GRAPHICS { 0 } else { 2 });

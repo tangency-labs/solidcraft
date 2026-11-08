@@ -2,8 +2,9 @@
 //! A surface declares its purpose; the shell supplies the layout once per frame. Never infer
 //! floating/docked presentation from a panel name or keep a second layout preference here.
 use crate::frame::Side;
-use crate::{shell::LayoutMode, theme::Tokens};
+use crate::theme::Tokens;
 use egui::{Color32, Context, Frame, Id, Stroke, WidgetText};
+use serde::{Deserialize, Serialize};
 
 pub(super) type Background = fn(&egui::Painter, Frame, egui::Rect, egui::Shape) -> egui::Shape;
 
@@ -464,9 +465,45 @@ impl DockEdges {
     pub const ALL: Self = Self { left: true, right: true, top: true, bottom: true };
 }
 
+/// Saved workspace layout; automation may override it for a session.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LayoutMode {
+    #[default]
+    Floating,
+    #[serde(rename = "compact", alias = "docked")]
+    Docked,
+}
+
+impl LayoutMode {
+    pub(crate) fn publish(self, ctx: &egui::Context) {
+        ctx.data_mut(|data| data.insert_temp(egui::Id::unique("sc_container_layout"), self));
+    }
+
+    pub(crate) fn current(ctx: &egui::Context) -> Self {
+        ctx.data(|data| data.get_temp(egui::Id::unique("sc_container_layout"))).unwrap_or_default()
+    }
+}
+
+/// The gap from the viewport edge to the floating cards and between the cards.
+pub(crate) const SHELL_GAP: f32 = 7.0;
+
 thread_local! {
     /// The areas built as [`Surface::Canvas`]: a value box, a dimension's editor, a readout.
     static CANVAS_AREAS: std::cell::RefCell<std::collections::HashSet<Id>> = std::cell::RefCell::default();
+    /// Set by the host while something else owns the input over the CAD view (a reviewed issue
+    /// report, a native file picker): kit surfaces other than [`Surface::InputShield`] take none.
+    static INPUT_BLOCKED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Does the host hold the CAD input back this frame? See [`set_input_blocked`].
+pub(crate) fn input_blocked() -> bool {
+    INPUT_BLOCKED.with(std::cell::Cell::get)
+}
+
+/// The host marks the CAD input as blocked, or no longer blocked.
+pub(crate) fn set_input_blocked(blocked: bool) {
+    INPUT_BLOCKED.with(|cell| cell.set(blocked));
 }
 
 /// Is `layer` a model-anchored editor or readout ([`Surface::Canvas`])? Such an area sits on the
@@ -629,7 +666,7 @@ impl Container {
 
     /// Separation between adaptive workspace surfaces; compact surfaces meet their edge.
     pub fn gap(self) -> f32 {
-        if self.floating() { crate::shell::SHELL_GAP } else { 0.0 }
+        if self.floating() { SHELL_GAP } else { 0.0 }
     }
 
     /// Tokenised outer chrome. Callers may supply content padding, not another card surface.
@@ -1085,6 +1122,6 @@ impl Container {
     }
 
     fn input_enabled(self) -> bool {
-        self.surface == Surface::InputShield || !crate::issue_report::cad_input_blocked()
+        self.surface == Surface::InputShield || !input_blocked()
     }
 }

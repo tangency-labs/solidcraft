@@ -1520,15 +1520,15 @@ fn dropdown_arrow(painter: &egui::Painter, at: egui::Pos2, ink: Color32) {
     crate::ui_kit::dropdown_indicator(painter, Rect::from_center_size(at, vec2(10.0, 10.0)), ink);
 }
 
-pub(crate) fn shell_layout(app: &SolveApp) -> crate::shell::LayoutMode {
-    if crate::render_workspace::active(app) { crate::shell::LayoutMode::Floating } else { app.ui.layout }
+pub(crate) fn shell_layout(app: &SolveApp) -> crate::ui_kit::LayoutMode {
+    if crate::render_workspace::active(app) { crate::ui_kit::LayoutMode::Floating } else { app.ui.layout }
 }
 
-pub(crate) fn shell_cards(app: &SolveApp, available: Rect) -> crate::shell::Cards {
+pub(crate) fn shell_cards(app: &SolveApp, available: Rect) -> crate::ui_kit::Cards {
     if crate::render_workspace::active(app) {
         crate::ui_kit::StageBar::cards(available)
     } else {
-        crate::shell::Cards::new(available, shell_layout(app), reserved_height(app))
+        crate::ui_kit::Cards::new(available, shell_layout(app), reserved_height(app), WORKSPACE_WIDTH)
     }
 }
 
@@ -1549,7 +1549,7 @@ pub(crate) fn reserved_height(app: &SolveApp) -> f32 {
 #[derive(Clone, Copy)]
 struct RibbonShape {
     floating: bool,
-    cards: crate::shell::Cards,
+    cards: crate::ui_kit::Cards,
     r: Rect,
     ws: Rect,
     folded: bool,
@@ -1599,7 +1599,7 @@ fn open_ribbon(app: &mut SolveApp, ui: &mut egui::Ui, available: Rect, folded: R
     let layout = shell_layout(app);
     let floating = Container::for_layout(layout, Surface::Panel).floating();
     let full = ribbon_height(app.preferences.ribbon_labels);
-    let cards = crate::shell::Cards::new(available, layout, full);
+    let cards = crate::ui_kit::Cards::new(available, layout, full, WORKSPACE_WIDTH);
     let r = if floating {
         Rect::from_min_max(cards.workspace.min, cards.ribbon.max)
     } else {
@@ -4841,7 +4841,7 @@ mod dropdown_tests {
     /// reached with the arrow keys and comes into view.
     #[test]
     fn a_tall_drop_down_scrolls_inside_a_short_window() {
-        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             let mut h = crate::scenario::Harness::new();
             h.app.home.open = false;
             h.call("ui.set", json!({"layout":mode}));
@@ -5125,12 +5125,12 @@ mod dropdown_tests {
     /// button's own right-click menu takes it off again, with both options on.
     #[test]
     fn a_pinned_button_is_removed_from_its_own_menu() {
-        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
             a_pinned_button_is_removed_in(mode);
         }
     }
 
-    fn a_pinned_button_is_removed_in(mode: crate::shell::LayoutMode) {
+    fn a_pinned_button_is_removed_in(mode: crate::ui_kit::LayoutMode) {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.call("ui.set", json!({"layout":mode}));
@@ -5452,7 +5452,7 @@ mod dropdown_toggle_tests {
             assert_eq!(h.app.ui.tab, "SURFACE");
             assert!(h.app.ui.ribbon_open, "{layout}: the tab's panels open");
             let open = rect_of("ribbon:open").unwrap();
-            assert!((open.height() - whole.height()).abs() <= 2.0 * crate::shell::SHELL_GAP + 1.0, "{layout}: {open:?} vs {whole:?}");
+            assert!((open.height() - whole.height()).abs() <= 2.0 * crate::ui_kit::SHELL_GAP + 1.0, "{layout}: {open:?} vs {whole:?}");
             assert!(rect_of("panel:SURFACE:CREATE").is_some(), "{layout}: the panels are drawn");
             if layout == "compact" {
                 let top = h.app.viewport.rect.unwrap().top();

@@ -74,7 +74,8 @@ pub(crate) use choice::*;
 pub(crate) use color::*;
 pub(crate) use compare::*;
 pub(crate) use confirm::{Confirm, Tone};
-pub use container::{BackingTooltipExt, Container, DockEdges, Edge, Surface};
+pub use container::{BackingTooltipExt, Container, DockEdges, Edge, LayoutMode, Surface};
+pub(crate) use container::{SHELL_GAP, input_blocked, set_input_blocked};
 pub(crate) use details::*;
 pub(crate) use disclosure::*;
 pub(crate) use drag::*;
@@ -95,7 +96,7 @@ pub use navigation::{NavigationEdge, NavigationIdle, NavigationSize};
 pub(crate) use navigation_menu::*;
 pub(crate) use navigation_settings::*;
 pub(crate) use panel::{
-    ComputeStatus, FeatureOptions, InspectorAction, Panel, Part, WindowPage, WorkspaceOptions, inspector_header, panel_header_hover,
+    ComputeStatus, FeatureOptions, InspectorAction, Panel, Part, WindowPage, WorkspaceOptions, inspector_header, panel_header_hover, within,
 };
 pub use panel::{DialogButtons, Window};
 #[cfg(test)]
@@ -121,7 +122,7 @@ pub(crate) use shortcuts::*;
 pub(crate) use sphere::sphere_preview;
 pub use sphere::{FinishKind, Sphere, sphere_thumbnail};
 pub(crate) use sphere::{SphereTile, sphere_cursor, sphere_grid, sphere_grid_drag, sphere_preview_with_source};
-pub(crate) use stages::{StageAction, StageBar};
+pub(crate) use stages::{Cards, StageAction, StageBar};
 pub(crate) use status::*;
 pub(crate) use table::*;
 #[cfg(test)]

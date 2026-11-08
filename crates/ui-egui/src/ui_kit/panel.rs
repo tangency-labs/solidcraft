@@ -7,6 +7,12 @@ use egui::{Ui, vec2};
 const WINDOW_PAGES_NARROW_WIDTH: f32 = 150.0;
 const WINDOW_PAGES_NARROW_AT: f32 = 700.0;
 
+/// `v` kept within `lo..=hi`, or `lo` when that range is empty: `f32::clamp` panics on
+/// `lo > hi`, which a rect squeezed to nothing between cards gives.
+pub(crate) fn within(v: f32, lo: f32, hi: f32) -> f32 {
+    if lo <= hi { v.clamp(lo, hi) } else { lo }
+}
+
 /// Shared active-tab hover tint for the browser and collapsible panel chrome.
 pub(crate) fn panel_header_hover(painter: &egui::Painter, rect: egui::Rect) {
     let t = Tokens::get();
@@ -594,12 +600,12 @@ impl<'a> Panel<'a> {
     }
 
     /// Feature surface; shared container policy supplies the border and shadow.
-    pub(crate) fn feature_frame(ctx: &egui::Context, layout: crate::shell::LayoutMode, side: crate::frame::Side) -> egui::Frame {
+    pub(crate) fn feature_frame(ctx: &egui::Context, layout: super::LayoutMode, side: crate::frame::Side) -> egui::Frame {
         super::Container::for_layout(layout, super::Surface::Feature).frame(ctx, Tokens::get().dialog_body, side).inner_margin(0.0)
     }
 
     /// Sketch palette uses the same layout policy as every other workspace panel.
-    pub(crate) fn palette_frame(ctx: &egui::Context, layout: crate::shell::LayoutMode) -> egui::Frame {
+    pub(crate) fn palette_frame(ctx: &egui::Context, layout: super::LayoutMode) -> egui::Frame {
         let t = Tokens::get();
         super::Container::for_layout(layout, super::Surface::Palette)
             .frame(ctx, t.panel.gamma_multiply(t.sketch_palette_alpha), crate::frame::Side::Right)
@@ -680,7 +686,7 @@ impl<'a> Panel<'a> {
                 viewport.left() + width,
                 (viewport.right() - if gap > 0.0 { Tokens::get().space_8 } else { 0.0 }).max(viewport.left() + width),
             ),
-            crate::frame::Side::Left => crate::shell::within(self.anchor.x, viewport.left(), viewport.right() - width),
+            crate::frame::Side::Left => within(self.anchor.x, viewport.left(), viewport.right() - width),
         };
         let t = Tokens::get();
         let chrome = t.form_header_height + t.form_footer_height + t.form_gap_y * 2.0 + self.frame.total_margin().sum().y + gap;
