@@ -75,6 +75,7 @@ pub mod features;
 pub mod features_more;
 pub mod file;
 pub mod frame;
+pub mod gears;
 pub mod insert_mesh;
 pub mod insert_step;
 pub mod inspect;
