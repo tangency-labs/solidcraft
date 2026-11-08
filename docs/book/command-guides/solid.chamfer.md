@@ -11,7 +11,7 @@ Cut a flat bevel along edges of a solid: the "break all edges" or "0.03 × 45°"
 | Choice in the dialog | Meaning | Example or reason to choose it |
 | --- | --- | --- |
 | Edges | The edges to chamfer. Click edges one by one, or click a face to take all of its edges. | The four top edges of a block, or the top face. |
-| Chamfer Type | Equal Distance: the same leg on both faces (a 45° chamfer). Two Distances: a different leg on each face. Distance and Angle: one leg and an angle. | Equal Distance for a standard 45° edge break. Distance and Angle for a callout like 0.06 × 30°. |
+| Chamfer Type | Equal Distance: the same leg on both faces. That is a 45° chamfer only where the faces meet at 90°. Two Distances: a different leg on each face. Distance and Angle: one leg and an angle. | Equal Distance for a standard edge break on a square corner. Distance and Angle whenever the print gives an angle, like 0.06 × 30°, and for any chamfer on a sloped face. |
 | Distance (Equal Distance) | The leg length on both faces. | 0.03 in for a typical edge break. |
 | Distance 1 and Distance 2 (Two Distances) | The leg on each face. | 0.06 in by 0.03 in. |
 | Distance 1 and Angle (Distance and Angle) | The leg on the first face, and the angle off that face. | 0.06 in at 45°. |
