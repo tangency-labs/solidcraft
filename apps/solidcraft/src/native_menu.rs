@@ -49,7 +49,7 @@ const EXPORTS: [(&str, FileAction); 7] = [
 const DESIGN_PROPERTIES: FileAction = FileAction::Command("document.metadata");
 
 /// The other actions with a fixed id (all but Open Recent), to map an id back to its action.
-const FIXED: [FileAction; 13] = [
+const FIXED: &[FileAction] = &[
     FileAction::Settings,
     FileAction::Shortcuts,
     FileAction::Quit,
@@ -122,7 +122,7 @@ fn entry_of(id: &str, params: Option<&Value>) -> Option<Entry> {
         return HELP.into_iter().find(|h| Some(*h) == item).map(Entry::Help);
     }
     let wanted = (id.to_string(), params.cloned());
-    FIXED.into_iter().chain(INSERTS.map(|(_, a)| a)).chain(EXPORTS.map(|(_, a)| a)).find(|a| id_of(a) == wanted).map(Entry::File)
+    FIXED.iter().cloned().chain(INSERTS.map(|(_, a)| a)).chain(EXPORTS.map(|(_, a)| a)).find(|a| id_of(a) == wanted).map(Entry::File)
 }
 
 /// The entries with a key, as menu accelerators.
@@ -256,7 +256,7 @@ mod tests {
 
     /// Every action the menu offers, Open Recent with a path.
     fn actions() -> Vec<FileAction> {
-        let mut all: Vec<FileAction> = FIXED.into_iter().chain(INSERTS.map(|(_, a)| a)).chain(EXPORTS.map(|(_, a)| a)).collect();
+        let mut all: Vec<FileAction> = FIXED.iter().cloned().chain(INSERTS.map(|(_, a)| a)).chain(EXPORTS.map(|(_, a)| a)).collect();
         all.push(FileAction::OpenRecent("/work/a.solidcraft".into()));
         all
     }
