@@ -33,6 +33,10 @@ pub struct Body {
     /// The last volume measured for this record and the tolerance it was measured at, shared by
     /// clones because they share the record.
     pub(crate) volume: Option<std::sync::Arc<std::sync::Mutex<Option<(u64, f64)>>>>,
+    /// SMLib's tight box of `record` ([`Body::exact_bounds`]), measured on first use and shared
+    /// by clones because they share the record: a cut's skip test ([`crate::apart`]) asks it of
+    /// the same body before every cut, and on a curved body it is not cheap (#13480).
+    pub(crate) exact_box: std::sync::Arc<std::sync::OnceLock<Aabb3>>,
     /// Set for mesh bodies (`record` is then empty).
     pub(crate) mesh: Option<std::sync::Arc<crate::meshbody::TriMesh>>,
     /// Display colour (linear RGB 0..1) from an imported file; operations drop it.
@@ -494,6 +498,7 @@ impl Body {
             smlib: std::sync::Arc::new(std::sync::OnceLock::new()),
             size,
             volume: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
+            exact_box: std::sync::Arc::new(std::sync::OnceLock::new()),
             mesh,
             color: None,
             paint: None,
@@ -1056,14 +1061,17 @@ impl Body {
         b
     }
 
-    /// The exact box of the body's faces, edges and vertices (SMLib's tight box); a mesh body's
-    /// is its triangles'.
+    /// The exact box of the body's faces, edges and vertices (SMLib's tight box), measured once
+    /// per record: clones of a body share it. A mesh body's is its triangles'.
     pub fn exact_bounds(&self) -> Result<Aabb3> {
         if self.is_mesh() {
             return Ok(self.outline_bounds());
         }
+        if let Some(b) = self.exact_box.get() {
+            return Ok(*b);
+        }
         let (lo, hi) = self.smlib()?.bounds().map_err(|e| KernelError::smlib("SMLib bounds", e))?;
-        Ok(Aabb3 { min: v3(lo), max: v3(hi) })
+        Ok(*self.exact_box.get_or_init(|| Aabb3 { min: v3(lo), max: v3(hi) }))
     }
 
     /// The body's volume from a mesh at `tol`, measured once per (record, tolerance): clones of
