@@ -3340,7 +3340,7 @@ impl SolveApp {
                 }
             }
         }
-        control::publish_design(self, &control::DESIGN_WATCH);
+        control::publish_design(self, &control::DOCUMENT_WATCH);
     }
 
     /// The frame's input before the app reads it: synthetic events, then what is typed while a
@@ -3463,7 +3463,7 @@ impl SolveApp {
         if self.file_picker_busy() {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
         }
-        control::publish_design(self, &control::DESIGN_WATCH);
+        control::publish_design(self, &control::DOCUMENT_WATCH);
         self.frame_ms = now_ms() - t0;
         frame_watch::end(self);
         render_workspace::displayed::finish(self, ui.ctx());

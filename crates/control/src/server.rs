@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 
 use crate::Effect;
 use crate::auth::tokens_match;
-use crate::request::{ControlRequest, DESIGN_WATCH, DesignWatch, Subscriber};
+use crate::request::{ControlRequest, DOCUMENT_WATCH, DocumentWatch, Subscriber};
 
 /// What the server needs to know of a request before it sends it to the window: how to name it
 /// in messages, what it does if it outlasts its wait, and what `control.running` shows of it.
@@ -37,6 +37,13 @@ pub trait Protocol: Send + Sync {
     fn summary(&self, method: &str, params: &Value) -> Summary;
     /// What the app calls its document in messages ("design").
     fn document(&self) -> &'static str;
+    /// The event a subscribed connection is sent when the document moves ("design.changed").
+    fn change_event(&self) -> &'static str;
+    /// The method that answers the document's id and revision now ("document.revision").
+    fn revision_method(&self) -> &'static str;
+    /// Where a client reads how to talk to the channel, named when its token is refused
+    /// ("docs/control-protocol.md").
+    fn docs(&self) -> &'static str;
     /// The `control.capabilities` result: what this app's channel does beyond the methods every
     /// version has, for a client to find out before it relies on it (an older app answers
     /// `control.capabilities` with "unknown method").
@@ -51,7 +58,7 @@ pub struct Hub {
     /// Longest request line accepted.
     max_line: usize,
     waits: Waits,
-    design: &'static DesignWatch,
+    watch: &'static DocumentWatch,
     running: Arc<Running>,
     open: AtomicUsize,
 }
@@ -64,7 +71,7 @@ impl Hub {
             wake: Box::new(wake),
             max_line,
             waits: Waits::default(),
-            design: &DESIGN_WATCH,
+            watch: &DOCUMENT_WATCH,
             running: Arc::new(Running::new()),
             open: AtomicUsize::new(0),
         }
@@ -76,16 +83,21 @@ impl Hub {
         self
     }
 
-    /// Another design watch than the app's [`DESIGN_WATCH`] (tests).
-    pub fn with_design(mut self, design: &'static DesignWatch) -> Self {
-        self.design = design;
+    /// Another document watch than the app's [`DOCUMENT_WATCH`] (tests).
+    pub fn with_watch(mut self, watch: &'static DocumentWatch) -> Self {
+        self.watch = watch;
         self
     }
 
-    /// Serve `listener` (loopback) with `token` on threads of their own, at most
-    /// [`MAX_CONNECTIONS`] connections at once. `patient`: every request may wait as long as a
-    /// batch (a person decides on it).
-    pub fn listen(self: &Arc<Self>, listener: TcpListener, token: String, requests: Sender<ControlRequest>, patient: bool) {
+    /// Serve `listener` with `token` on threads of their own, at most [`MAX_CONNECTIONS`]
+    /// connections at once. `patient`: every request may wait as long as a batch (a person decides
+    /// on it). A listener that is not on a loopback address is refused: the channel never goes on
+    /// the network.
+    pub fn listen(self: &Arc<Self>, listener: TcpListener, token: String, requests: Sender<ControlRequest>, patient: bool) -> std::io::Result<()> {
+        let addr = listener.local_addr()?;
+        if !addr.ip().is_loopback() {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("the control channel listens on loopback only, not {addr}")));
+        }
         let hub = Arc::clone(self);
         let token = Arc::new(token);
         std::thread::spawn(move || {
@@ -103,6 +115,7 @@ impl Hub {
                 });
             }
         });
+        Ok(())
     }
 }
 
@@ -195,17 +208,18 @@ fn token_of(line: &str) -> Option<String> {
     token
 }
 
-/// The reply to a connection that didn't show the token; the connection is then closed.
-fn unauthorized() -> Value {
-    json!({"ok": false, "error": "unauthorized: send the control token as \"token\" (see docs/control-protocol.md)"})
+/// The reply to a connection that didn't show the token, naming the app's `docs`; the
+/// connection is then closed.
+fn unauthorized(docs: &str) -> Value {
+    json!({"ok": false, "error": format!("unauthorized: send the control token as \"token\" (see {docs})")})
 }
 
 /// Refuse the connection: the reply, then the end of what we send, then what the client had
 /// already sent read and dropped (a little, briefly). Closing a socket with unread input resets
 /// the connection, and a reset can reach the client before it has read the refusal.
-fn refuse(out: &mut TcpStream, reader: &mut BufReader<ClientInput>) {
+fn refuse(out: &mut TcpStream, reader: &mut BufReader<ClientInput>, docs: &str) {
     use std::io::Read;
-    let _ = send(out, &unauthorized());
+    let _ = send(out, &unauthorized(docs));
     let _ = out.shutdown(std::net::Shutdown::Write);
     reader.get_mut().deadline = Some(Instant::now() + Duration::from_millis(500));
     let _ = std::io::copy(&mut reader.by_ref().take(64 * 1024), &mut std::io::sink());
@@ -452,7 +466,8 @@ impl Subscription {
     /// `out`, then send `design`'s changes after it: the reply goes out before any event. `None`,
     /// with nothing written, when no thread or socket was left for the events.
     fn start(
-        design: &'static DesignWatch,
+        watch: &'static DocumentWatch,
+        event: &'static str,
         counted: Subscriber,
         out: &TcpStream,
         seen: (String, u64),
@@ -467,7 +482,7 @@ impl Subscription {
         // does, so the next failed write to a closed client retires it even while the connection's
         // own thread is slow to see the end of the stream (#7226). The connection's own thread
         // leaves it too, so a closed connection stops counting at once (#8315).
-        std::thread::Builder::new().stack_size(64 * 1024).spawn(move || send_events(design, &l, &s, seen, watch_seat)).ok()?;
+        std::thread::Builder::new().stack_size(64 * 1024).spawn(move || send_events(watch, event, &l, &s, seen, watch_seat)).ok()?;
         let sent = send(&mut &lines.socket, reply);
         drop(first);
         Some((Subscription { lines, stop, seat }, sent))
@@ -475,7 +490,7 @@ impl Subscription {
 }
 
 /// The design a `control.subscribe` reply names.
-fn design_of(reply: &Value) -> Option<(String, u64)> {
+fn document_of(reply: &Value) -> Option<(String, u64)> {
     let result = reply.get("result")?;
     Some((result.get("document_id")?.as_str()?.to_string(), result.get("revision")?.as_u64()?))
 }
@@ -496,10 +511,10 @@ impl Drop for Subscription {
 /// last one it was told of (`seen`), until `stop`. Holds the connection's seat on the watch
 /// (`seat`), which it leaves when the thread ends: on `stop`, or on the first write a closed
 /// client refuses (#7226).
-fn send_events(design: &DesignWatch, lines: &Lines, stop: &AtomicBool, mut seen: (String, u64), seat: Arc<Seat>) {
+fn send_events(watch: &DocumentWatch, event: &str, lines: &Lines, stop: &AtomicBool, mut seen: (String, u64), seat: Arc<Seat>) {
     while !stop.load(Ordering::Relaxed) {
-        let Some(now) = design.wait(&seen, stop, Duration::from_secs(1)).filter(|now| *now != seen) else { continue };
-        if lines.send(&json!({"event": "design.changed", "params": {"document_id": now.0, "revision": now.1}})).is_err() {
+        let Some(now) = watch.wait(&seen, stop, Duration::from_secs(1)).filter(|now| *now != seen) else { continue };
+        if lines.send(&json!({"event": event, "params": {"document_id": now.0, "revision": now.1}})).is_err() {
             break;
         }
         seen = now;
@@ -522,7 +537,7 @@ impl Hub {
     /// Serve one connection until it closes: the token first, then one request per line, each
     /// sent to the window on `requests` and its reply written back.
     pub fn serve(&self, stream: TcpStream, token: &str, requests: Sender<ControlRequest>, patient: bool) {
-        let (waits, running, design, tx) = (self.waits, &self.running, self.design, requests);
+        let (waits, running, documents, tx) = (self.waits, &self.running, self.watch, requests);
         let connection = running.connections.fetch_add(1, Ordering::Relaxed) + 1;
         let Ok(read) = stream.try_clone() else { return };
         let mut out = stream;
@@ -559,7 +574,7 @@ impl Hub {
                         authenticated = true;
                     }
                     _ => {
-                        refuse(&mut out, &mut reader);
+                        refuse(&mut out, &mut reader, self.protocol.docs());
                         break;
                     }
                 }
@@ -604,7 +619,11 @@ impl Hub {
                         }
                         // Its events already say how the design moves; a second answer could only
                         // arrive behind a newer one.
-                        json!({"ok": false, "error": "already subscribed: this connection is sent design.changed lines; ask document.revision for the design now"})
+                        {
+                            let (event, revision, document) =
+                                (self.protocol.change_event(), self.protocol.revision_method(), self.protocol.document());
+                            json!({"ok": false, "error": format!("already subscribed: this connection is sent {event} lines; ask {revision} for the {document} now")})
+                        }
                     } else {
                         if late.is_some() {
                             // Finished, and the client moved on without asking: it is dropped.
@@ -615,7 +634,7 @@ impl Hub {
                         let wait = if patient || long { waits.long } else { waits.short };
                         // Counted before the window answers, so it publishes every change from its
                         // answer on.
-                        joining = (method == "control.subscribe").then(|| design.join());
+                        joining = (method == "control.subscribe").then(|| documents.join());
                         let (req, rrx) = ControlRequest::new(method.clone(), params);
                         let ticket = running.add(connection, &id, &req, command, steps);
                         if tx.send(req).is_err() {
@@ -642,8 +661,8 @@ impl Hub {
                 }
             };
             // Subscribed once the window named the design (not when it refused or timed out).
-            let sent = match joining.and_then(|counted| design_of(&reply).map(|seen| (counted, seen))) {
-                Some((counted, seen)) => match Subscription::start(design, counted, &out, seen, &reply) {
+            let sent = match joining.and_then(|counted| document_of(&reply).map(|seen| (counted, seen))) {
+                Some((counted, seen)) => match Subscription::start(documents, self.protocol.change_event(), counted, &out, seen, &reply) {
                     Some((subscription, sent)) => {
                         events = Some(subscription);
                         sent
@@ -682,14 +701,36 @@ mod tests {
         fn document(&self) -> &'static str {
             "design"
         }
+        fn change_event(&self) -> &'static str {
+            "design.changed"
+        }
+        fn revision_method(&self) -> &'static str {
+            "document.revision"
+        }
+        fn docs(&self) -> &'static str {
+            "docs/control-protocol.md"
+        }
         fn capabilities(&self) -> Value {
             json!({})
         }
     }
 
-    /// A server for [`Plain`] with these waits and this design watch.
-    fn hub(waits: Waits, design: &'static DesignWatch) -> Arc<Hub> {
-        Arc::new(Hub::new(Plain, || {}, MAX_LINE).with_waits(waits).with_design(design))
+    /// A server for [`Plain`] with these waits and this document watch.
+    fn hub(waits: Waits, watch: &'static DocumentWatch) -> Arc<Hub> {
+        Arc::new(Hub::new(Plain, || {}, MAX_LINE).with_waits(waits).with_watch(watch))
+    }
+
+    /// The channel never goes on the network: a listener on any address but loopback is refused,
+    /// and nothing is served on it.
+    #[test]
+    fn a_listener_off_loopback_is_refused() {
+        let (tx, _rx) = channel::<ControlRequest>();
+        let open = TcpListener::bind("0.0.0.0:0").unwrap();
+        let e = hub(Waits::default(), &DOCUMENT_WATCH).listen(open, "0123456789abcdef0123456789abcdef".into(), tx.clone(), false).unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::InvalidInput, "{e}");
+        assert!(e.to_string().contains("loopback only"), "{e}");
+        let local = TcpListener::bind("127.0.0.1:0").unwrap();
+        assert!(hub(Waits::default(), &DOCUMENT_WATCH).listen(local, "0123456789abcdef0123456789abcdef".into(), tx, false).is_ok());
     }
 
     /// A connection that doesn't show the token in time is closed without a word, however it fills
@@ -708,7 +749,7 @@ mod tests {
             }
         });
         let waits = Waits { short: Duration::from_secs(10), long: Duration::from_secs(10), token: limit };
-        let hub = hub(waits, &DESIGN_WATCH);
+        let hub = hub(waits, &DOCUMENT_WATCH);
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
                 let (tx, hub) = (tx.clone(), Arc::clone(&hub));
@@ -790,7 +831,7 @@ mod tests {
             }
         });
         let waits = Waits { short: Duration::from_millis(100), long: Duration::from_millis(100), token: TOKEN_WAIT };
-        let hub = hub(waits, &DESIGN_WATCH);
+        let hub = hub(waits, &DOCUMENT_WATCH);
         std::thread::spawn(move || {
             if let Some(stream) = listener.incoming().flatten().next() {
                 hub.serve(stream, token, tx, false);
@@ -840,7 +881,7 @@ mod tests {
     /// subscribe gets no events, and one that closed is no longer counted.
     #[test]
     fn subscribed_connections_are_told_of_design_changes() {
-        static WATCH: DesignWatch = DesignWatch::new();
+        static WATCH: DocumentWatch = DocumentWatch::new();
         let token = "0123456789abcdef0123456789abcdef";
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
@@ -934,7 +975,7 @@ mod tests {
     /// closed while the design stood still kept the watch counting it for a second or more.
     #[test]
     fn a_closed_connection_leaves_the_watch_at_once() {
-        static WATCH: DesignWatch = DesignWatch::new();
+        static WATCH: DocumentWatch = DocumentWatch::new();
         let token = "0123456789abcdef0123456789abcdef";
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
@@ -1011,7 +1052,7 @@ mod tests {
                 let _ = req.reply.send(json!({"ok": true, "result": null}));
             }
         });
-        let hub = hub(Waits::default(), &DESIGN_WATCH);
+        let hub = hub(Waits::default(), &DOCUMENT_WATCH);
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
                 let (tx, hub) = (tx.clone(), Arc::clone(&hub));

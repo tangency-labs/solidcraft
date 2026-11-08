@@ -49,20 +49,20 @@ pub fn cancelled_chat_response() -> Value {
 
 /// The active design's id and revision for control connections that sent `control.subscribe`
 /// (#6985): the window publishes them each frame while one is subscribed, and each such
-/// connection waits for them to move, then sends a `design.changed` line.
+/// connection waits for them to move, then sends the app's change event (`Protocol::change_event`).
 #[derive(Default)]
-pub struct DesignWatch {
+pub struct DocumentWatch {
     subscribers: AtomicUsize,
     now: Mutex<Option<(String, u64)>>,
     moved: Condvar,
 }
 
-/// The app's [`DesignWatch`].
-pub static DESIGN_WATCH: DesignWatch = DesignWatch::new();
+/// The app's [`DocumentWatch`].
+pub static DOCUMENT_WATCH: DocumentWatch = DocumentWatch::new();
 
-impl DesignWatch {
+impl DocumentWatch {
     pub const fn new() -> Self {
-        DesignWatch { subscribers: AtomicUsize::new(0), now: Mutex::new(None), moved: Condvar::new() }
+        DocumentWatch { subscribers: AtomicUsize::new(0), now: Mutex::new(None), moved: Condvar::new() }
     }
 
     fn now(&self) -> MutexGuard<'_, Option<(String, u64)>> {
@@ -105,8 +105,8 @@ impl DesignWatch {
     }
 }
 
-/// A subscribed connection, counted by its [`DesignWatch`] while this lives.
-pub struct Subscriber(&'static DesignWatch);
+/// A subscribed connection, counted by its [`DocumentWatch`] while this lives.
+pub struct Subscriber(&'static DocumentWatch);
 
 impl Drop for Subscriber {
     fn drop(&mut self) {

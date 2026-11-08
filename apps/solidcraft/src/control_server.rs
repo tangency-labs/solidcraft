@@ -44,6 +44,18 @@ impl Protocol for SolidCraft {
         "design"
     }
 
+    fn change_event(&self) -> &'static str {
+        "design.changed"
+    }
+
+    fn revision_method(&self) -> &'static str {
+        "document.revision"
+    }
+
+    fn docs(&self) -> &'static str {
+        "docs/control-protocol.md"
+    }
+
     /// `param_check`: the levels `engine.execute`, `engine.batch` and `engine.script` take as a
     /// request's own parameter check (#9184).
     fn capabilities(&self) -> Value {
@@ -152,8 +164,13 @@ fn listen_on_listener(listener: TcpListener, token: String, tx: Sender<ControlRe
             )
         }
     }
-    hub(ctx).listen(listener, token, tx, patient);
-    Some(port)
+    match hub(ctx).listen(listener, token, tx, patient) {
+        Ok(()) => Some(port),
+        Err(e) => {
+            solidcraft_engine::note!("solidcraft: control server not started: {e}");
+            None
+        }
+    }
 }
 
 #[cfg(test)]

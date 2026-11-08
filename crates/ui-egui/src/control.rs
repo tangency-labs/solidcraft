@@ -57,12 +57,12 @@ use crate::SolveApp;
 
 // The request, its reply and the design watch are the shared control channel's
 // (`solidcraft_control`); SolidCraft's handlers below answer them.
-pub(crate) use solidcraft_control::{ControlRequest, ControlResponse, DESIGN_WATCH, DesignWatch, cancelled_chat_response, chat_turn_cancelled};
+pub(crate) use solidcraft_control::{ControlRequest, ControlResponse, DOCUMENT_WATCH, DocumentWatch, cancelled_chat_response, chat_turn_cancelled};
 
-/// Publish the active design for subscribed connections ([`DesignWatch`]). Called at the end of
+/// Publish the active design for subscribed connections ([`DocumentWatch`]). Called at the end of
 /// each frame's logic (which runs while the window is hidden too) and of its drawing, so a
 /// change made in either goes out in that frame.
-pub(crate) fn publish_design(app: &mut SolveApp, watch: &DesignWatch) {
+pub(crate) fn publish_design(app: &mut SolveApp, watch: &DocumentWatch) {
     if watch.subscribed() {
         let revision = app.session.design_revision();
         watch.publish(&app.session.document_id, revision);
@@ -763,11 +763,11 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         "document.export" => wrap(crate::documents::export(app)),
         "document.import" => wrap(crate::documents::import(app, p)),
         "document.saved" => wrap(crate::documents::saved(app, p)),
-        // The connection already counts as subscribed (`DesignWatch::join`), and its events start
+        // The connection already counts as subscribed (`DocumentWatch::join`), and its events start
         // from this answer: published first, so no event repeats it and none older follows.
         "control.subscribe" => {
             let revision = app.session.design_revision();
-            DESIGN_WATCH.publish(&app.session.document_id, revision);
+            DOCUMENT_WATCH.publish(&app.session.document_id, revision);
             ok(json!({"document_id": app.session.document_id, "revision": revision}))
         }
         // What the MCP server bridged to this app shapes its output with (Preferences › AI).
@@ -2403,7 +2403,7 @@ mod tests {
     fn subscribed_frames_publish_the_design() {
         use std::sync::atomic::AtomicBool;
         use std::time::Duration;
-        static WATCH: DesignWatch = DesignWatch::new();
+        static WATCH: DocumentWatch = DocumentWatch::new();
         let now = || WATCH.current();
         let mut h = crate::scenario::Harness::new();
         publish_design(&mut h.app, &WATCH);
@@ -2473,7 +2473,7 @@ mod tests {
                 *counts.entry(img.get_pixel(x, 0).0).or_insert(0) += 1;
             }
             let top = counts.into_iter().max_by_key(|(_, n)| *n).map(|(c, _)| c).unwrap();
-            let want = if dark { solidcraft_theme::Tokens::dark() } else { solidcraft_theme::Tokens::light() }.viewport_top;
+            let want = if dark { crate::theme::Tokens::dark() } else { crate::theme::Tokens::light() }.viewport_top;
             let near = top.iter().zip([want.r(), want.g(), want.b()]).all(|(a, b)| a.abs_diff(b) <= 2);
             assert!(near, "{theme}: the render's top row is {top:?}, the view's background {want:?}");
         }
