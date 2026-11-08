@@ -188,6 +188,19 @@ pub fn is_manifold_solid(b: &Brep) -> Result<bool> {
     is_closed_where(b, edge::is_manifold)
 }
 
+/// (Not upstream) Whether `b` is closed and manifold: no shell vertices and only manifold
+/// edges, [`is_manifold_solid`] without its clause that the regions number at least two.
+/// A body of one closed shell whose finite region is not set, or of several lumps, is
+/// closed and manifold whatever its regions say; the offset and shell gates ask this of
+/// what they build, so a regions labelling the executive leaves undone is not a refusal.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id.
+pub fn is_closed_manifold(b: &Brep) -> Result<bool> {
+    closed_where(b, edge::is_manifold)
+}
+
 /// [`is_manifold_solid`]'s walk with its edge test given: at least two regions, no shell
 /// vertices and `edge_ok` for every edge (not upstream: shared with the closed-body tests
 /// that allow other edges, `query::api_queries::brep_is_closed_touching_solids`).
@@ -199,7 +212,12 @@ pub fn is_closed_where(b: &Brep, edge_ok: impl Fn(&Brep, EdgeId) -> Result<bool>
     if brep_regions(b)?.len() < 2 {
         return Ok(false);
     }
+    closed_where(b, edge_ok)
+}
 
+/// No shell vertices and `edge_ok` for every edge: the part of [`is_closed_where`] that
+/// does not look at the regions.
+fn closed_where(b: &Brep, edge_ok: impl Fn(&Brep, EdgeId) -> Result<bool>) -> Result<bool> {
     if !shell_vertices(b, None)?.is_empty() {
         return Ok(false);
     }

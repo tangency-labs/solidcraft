@@ -355,8 +355,8 @@ fn refuse_unsound(k: &mut Kernel, b: &Brep, input: &validation::Standing) -> Res
         // the pointer check failed, so `AssertValid` did not run: the body's geometry is
         // not checked at all, whatever the input's pointer failures were
         Unsoundness::GeometryUnchecked
-    } else if input.manifold && !found.manifold {
-        Unsoundness::NotManifoldSolid
+    } else if let Some(lost) = validation::lost_manifold(found.manifold, || Ok(input.manifold))? {
+        lost
     } else if found.manifold
         && validation::volume(k, &mut copy)?.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater)
     {

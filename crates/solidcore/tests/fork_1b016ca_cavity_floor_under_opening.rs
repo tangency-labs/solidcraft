@@ -28,13 +28,15 @@ mod offset_fixture;
 
 use offset_fixture::{planar_faces_at, volume, Notifications};
 use solidcore::boolean::api_brep::boolean_union;
+use solidcore::error::offset::{OffsetFailure, Unsoundness};
+use solidcore::error::Reason;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::math::Point3;
 use solidcore::offset::offset_executive::p1::OffsetExecutive;
 use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions};
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::query::api_queries::brep_is_manifold_solid;
-use solidcore::{Brep, Kernel};
+use solidcore::{Brep, Kernel, SolidError};
 
 /// The block with the rib `inset` in from its outer wall x = 0.
 fn ribbed(k: &mut Kernel, inset: f64) -> Brep {
@@ -81,11 +83,21 @@ fn crossing(walls_touch: bool) -> UpstreamFixes {
     f
 }
 
-/// Upstream (crossing loops not resolved): the merge returns no manifold solid.
+/// Upstream (crossing loops not resolved): the merge returns no manifold solid (ten
+/// edges that are not manifold, two regions, 23 faces); the shell refuses it
+/// (`OffsetFailure::Unsound`, `NotManifoldSolid`, #3094) instead of returning it.
 #[test]
-fn default_fixes_return_no_solid() {
-    let (manifold, _) = shell(&UpstreamFixes::default(), 0.15).unwrap();
-    assert!(!manifold);
+fn default_fixes_refuse_the_shell_that_is_no_solid() {
+    let error = shell(&UpstreamFixes::default(), 0.15).unwrap_err();
+    let SolidError::Failed(failure) = &error else {
+        panic!("not a refusal: {error}");
+    };
+    assert_eq!(
+        failure.reason,
+        Reason::Offset(OffsetFailure::Unsound {
+            what: Unsoundness::NotManifoldSolid
+        })
+    );
 }
 
 /// The floor under the opening is kept: the shell is the closed form (with and without

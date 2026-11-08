@@ -152,7 +152,7 @@ pub enum OffsetFailure {
     },
 }
 
-/// What a local operation's built body fails ([`OffsetFailure::Unsound`]).
+/// What a local operation's or a solid offset's built body fails ([`OffsetFailure::Unsound`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Unsoundness {
@@ -442,10 +442,9 @@ impl core::fmt::Display for OffsetFailure {
                     "the local operation's body fails its pointer check, so its geometry \
                      cannot be checked: refused, the input unchanged",
                 ),
-                Unsoundness::NotManifoldSolid => f.write_str(
-                    "the local operation's body is not a manifold solid, as its input was: \
-                     refused, the input unchanged",
-                ),
+                Unsoundness::NotManifoldSolid => {
+                    f.write_str("the body built is not a manifold solid, as its input was: refused")
+                }
                 Unsoundness::VolumeNotPositive => f.write_str(
                     "the local operation's body is a manifold solid whose volume is not \
                      positive: refused, the input unchanged",

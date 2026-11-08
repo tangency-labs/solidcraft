@@ -27,13 +27,15 @@ mod offset_fixture;
 
 use offset_fixture::{planar_faces_at, volume, Notifications};
 use solidcore::boolean::api_brep::boolean_difference;
+use solidcore::error::offset::{OffsetFailure, Unsoundness};
+use solidcore::error::Reason;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::math::Point3;
 use solidcore::offset::offset_executive::p1::OffsetExecutive;
 use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions};
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::query::api_queries::brep_is_manifold_solid;
-use solidcore::{Brep, Kernel};
+use solidcore::{Brep, Kernel, SolidError};
 
 /// The frame, the ring cut's top at `ring_top` (2.5: a 0.5 floor under the recess).
 fn frame(k: &mut Kernel, ring_top: f64) -> Brep {
@@ -47,8 +49,8 @@ fn frame(k: &mut Kernel, ring_top: f64) -> Brep {
 }
 
 /// The frame shelled 0.5 inward open at the ring cut's outer wall (x = 18), under
-/// `fixes`: whether the result is a manifold solid, and its volume.
-fn shell(fixes: &UpstreamFixes, ring_top: f64) -> (bool, f64) {
+/// `fixes`: the shell's result.
+fn shell_result(fixes: &UpstreamFixes, ring_top: f64) -> (Kernel, solidcore::Result<Brep>) {
     let mut k = Kernel::default();
     k.fixes.clone_from(fixes);
     let mut part = frame(&mut k, ring_top);
@@ -71,9 +73,17 @@ fn shell(fixes: &UpstreamFixes, ring_top: f64) -> (bool, f64) {
         &open,
         &mut notifications.context(),
     )
-    .result
-    .unwrap();
-    wall.refresh_cached_topology();
+    .result;
+    if let Ok(wall) = wall.as_mut() {
+        wall.refresh_cached_topology();
+    }
+    (k, wall)
+}
+
+/// [`shell_result`]'s body: whether it is a manifold solid, and its volume.
+fn shell(fixes: &UpstreamFixes, ring_top: f64) -> (bool, f64) {
+    let (k, wall) = shell_result(fixes, ring_top);
+    let mut wall = wall.unwrap();
     assert!(solidcore::topology::integrity::check(&wall).is_ok());
     let manifold = brep_is_manifold_solid(&wall).unwrap();
     (manifold, volume(&k, &mut wall).unwrap())
@@ -86,11 +96,22 @@ fn keep_cavity() -> UpstreamFixes {
 }
 
 /// Upstream (flag off): the sliver between the floor's crossing offsets is kept too and
-/// the result is no manifold solid.
+/// the result is no manifold solid (five regions, eight edges that are not manifold); the
+/// shell refuses it (`OffsetFailure::Unsound`, `NotManifoldSolid`, #3094) instead of
+/// returning it.
 #[test]
-fn flag_off_keeps_the_sliver_region() {
-    let (manifold, _) = shell(&UpstreamFixes::default(), 2.5);
-    assert!(!manifold);
+fn flag_off_refuses_the_shell_with_the_sliver_region() {
+    let (_, result) = shell_result(&UpstreamFixes::default(), 2.5);
+    let error = result.unwrap_err();
+    let SolidError::Failed(failure) = &error else {
+        panic!("not a refusal: {error}");
+    };
+    assert_eq!(
+        failure.reason,
+        Reason::Offset(OffsetFailure::Unsound {
+            what: Unsoundness::NotManifoldSolid
+        })
+    );
 }
 
 /// The flag: only the cavity is made manifold; the shell is the closed form.

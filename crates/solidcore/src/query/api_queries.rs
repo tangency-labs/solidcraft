@@ -791,6 +791,12 @@ pub fn brep_is_manifold_solid(brep: &Brep) -> Result<bool> {
     crate::topology::brep::p2::is_manifold_solid(brep)
 }
 
+/// (Not upstream) Whether `brep` is closed and manifold: no shell vertex and only manifold
+/// edges, [`brep_is_manifold_solid`] without its test that the regions number at least two.
+pub fn brep_is_closed_manifold(brep: &Brep) -> Result<bool> {
+    crate::topology::brep::p2::is_closed_manifold(brep)
+}
+
 /// Whether `brep` is a closed body whose solids touch only along edges or at vertices
 /// (not upstream: the result test of a boolean of solids that may touch): at least two
 /// regions, no shell vertex, and every edge closed, neither a wire nor bounding a face
