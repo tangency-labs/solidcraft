@@ -316,11 +316,11 @@ crates/solidcore/src/blend/hcr.rs	-	int-div	1	proven	usize::MAX / 2	constant non
 crates/solidcore/src/blend/law_corners.rs	LawCornerPieces::classify	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore/src/blend/law_corners.rs	sphere_zone	with_capacity	1	proven	Vec::with_capacity(9)	constant capacity
 crates/solidcore/src/blend/law_corners.rs	sphere_zone	with_capacity	2	proven	Vec::with_capacity(9)	constant capacity
-crates/solidcore/src/boolean/merge/p2.rs	MergeState::merge_added_body	Vec::remove	1	open	remove(i)	
+crates/solidcore/src/boolean/merge/p2.rs	MergeState::merge_added_body	Vec::remove	1	proven	remove(i)	i is position() in the same Vec
 crates/solidcore/src/boolean/merge/p4.rs	classify_edge_faces	step_by	1	proven	step_by(2)	constant non-zero step
 crates/solidcore/src/boolean/topology_intersector/p1.rs	TopologyIntersector::face_face_intersect	Vec::insert	1	open	insert((jj + 1).min(faces2.len()), new_face)	
-crates/solidcore/src/boolean/topology_intersector/p2.rs	TopologyIntersector::intersect_topology	with_capacity	1	open	Vec::with_capacity(faces.len())	
-crates/solidcore/src/boolean/topology_intersector/p2.rs	teardown_reads_freed	Vec::remove	1	open	remove(i)	
+crates/solidcore/src/boolean/topology_intersector/p2.rs	TopologyIntersector::intersect_topology	with_capacity	1	proven	Vec::with_capacity(faces.len())	faces.len(), an in-memory slice
+crates/solidcore/src/boolean/topology_intersector/p2.rs	teardown_reads_freed	Vec::remove	1	proven	remove(i)	i is position() in the same Vec
 crates/solidcore/src/curve/composite_curve/p1.rs	CompositeCurve::approximate_curve	Vec::drain	1	proven	drain(..)	full-range drain(..)
 crates/solidcore/src/curve/composite_curve/p1.rs	CompositeCurve::approximate_curve	with_capacity	1	proven	Vec::with_capacity(n)	n = self.segments.len(), an existing Vec of elements larger than &Curve
 crates/solidcore/src/curve/composite_curve/p1.rs	CompositeCurve::approximate_curve	with_capacity	2	proven	Vec::with_capacity(approx_segments.len())	an existing Vec<Curve>; a Curve holds its BSplineCurve inline
@@ -794,17 +794,16 @@ crates/solidcore/src/query/poly.rs	PolyBrep::face_normal	int-rem	3	proven	(ii + 
 crates/solidcore/src/query/poly.rs	PolyBrep::link_radials	int-rem	1	proven	(i + 1) % n	inside edges.iter().enumerate(), so n = edges.len() > 0
 crates/solidcore/src/query/poly.rs	PolyBrep::link_radials	int-rem	2	proven	(i + n - 1) % n	inside edges.iter().enumerate(), so n = edges.len() > 0
 crates/solidcore/src/query/tess.rs	TessSrfCache::implant_uv_segment	Vec::insert	1	proven	insert(0, TessHandle::PolyEdge(segment))	index 0 is never past the end
-crates/solidcore/src/surface/cone/p1.rs	Cone::evaluate	with_capacity	1	open	Vec::with_capacity((hu + 1) * (hv + 1))	
-crates/solidcore/src/surface/cone/p2.rs	ellipse_trim_intervals	int-rem	1	open	(ii + 1) % cnt	
-crates/solidcore/src/surface/cone/p2.rs	ellipse_trim_intervals	int-rem	2	open	(ii + 1) % cnt	
-crates/solidcore/src/surface/cone/p2.rs	ellipse_trim_intervals	int-rem	3	open	(ii + cnt - 1) % cnt	
+crates/solidcore/src/surface/cone/p2.rs	ellipse_trim_intervals	int-rem	1	proven	(ii + 1) % cnt	cnt >= 2: the function returns above when it is less
+crates/solidcore/src/surface/cone/p2.rs	ellipse_trim_intervals	int-rem	2	proven	(ii + 1) % cnt	cnt >= 2: the function returns above when it is less
+crates/solidcore/src/surface/cone/p2.rs	ellipse_trim_intervals	int-rem	3	proven	(ii + cnt - 1) % cnt	cnt >= 2: the function returns above when it is less
 crates/solidcore/src/surface/cone/p2.rs	ellipse_trim_intervals	with_capacity	1	proven	Vec::with_capacity(6)	constant capacity
-crates/solidcore/src/surface/cone/p2.rs	ellipse_trim_intervals	with_capacity	2	open	Vec::with_capacity(cnt)	
-crates/solidcore/src/surface/cone/p3.rs	append_boundary_intersections	Vec::remove	1	open	remove(j)	
-crates/solidcore/src/surface/cone/p3.rs	append_boundary_intersections	Vec::remove	2	open	remove(j)	
-crates/solidcore/src/surface/cone/p3.rs	append_boundary_intersections	Vec::remove	3	open	remove(j)	
-crates/solidcore/src/surface/cone/p3.rs	append_boundary_intersections	Vec::remove	4	open	remove(j)	
-crates/solidcore/src/surface/cone/p3.rs	append_boundary_intersections	Vec::remove	5	open	remove(j)	
+crates/solidcore/src/surface/cone/p2.rs	ellipse_trim_intervals	with_capacity	2	proven	Vec::with_capacity(cnt)	cnt = xsect_angle.len(), an in-memory Vec
+crates/solidcore/src/surface/cone/p3.rs	append_boundary_intersections	Vec::remove	1	proven	remove(j)	j is from enumerate() over the same Vec, with no intervening mutation
+crates/solidcore/src/surface/cone/p3.rs	append_boundary_intersections	Vec::remove	2	proven	remove(j)	a Vec checked above to curves_3d's length; each removal takes one from all five
+crates/solidcore/src/surface/cone/p3.rs	append_boundary_intersections	Vec::remove	3	proven	remove(j)	a Vec checked above to curves_3d's length; each removal takes one from all five
+crates/solidcore/src/surface/cone/p3.rs	append_boundary_intersections	Vec::remove	4	proven	remove(j)	a Vec checked above to curves_3d's length; each removal takes one from all five
+crates/solidcore/src/surface/cone/p3.rs	append_boundary_intersections	Vec::remove	5	proven	remove(j)	a Vec checked above to curves_3d's length; each removal takes one from all five
 crates/solidcore/src/surface/extend/ball.rs	certify_circle	int-div	1	proven	n / 2	constant non-zero divisor
 crates/solidcore/src/surface/extend/ball.rs	certify_circle	int-div	2	proven	n / 2	constant non-zero divisor
 crates/solidcore/src/surface/implicit.rs	lies_on_canal	f64::clamp	1	proven	clamp(0.0, 1.0)	constant bounds, min <= max
@@ -824,8 +823,8 @@ crates/solidcore/src/surface/plane/p1.rs	Plane::plane_overlap	windows	1	proven	w
 crates/solidcore/src/surface/plane/p1.rs	Plane::plane_overlap	with_capacity	1	proven	Vec::with_capacity(5)	constant capacity
 crates/solidcore/src/surface/plane/p1.rs	Plane::surface_overlap	with_capacity	1	open	Vec::with_capacity(bdrys_3d1.len())	
 crates/solidcore/src/surface/plane/p1.rs	transpose	int-div	1	open	a.len() / num_rows	
-crates/solidcore/src/surface/plane/p2.rs	Plane::make_new_plane_ellipse	int-rem	1	open	((ii + count) - 1) % count	
-crates/solidcore/src/surface/plane/p2.rs	Plane::make_new_plane_ellipse	int-rem	2	open	(ii + 1) % count	
+crates/solidcore/src/surface/plane/p2.rs	Plane::make_new_plane_ellipse	int-rem	1	proven	((ii + count) - 1) % count	inside for ii in 0..count, so count > 0
+crates/solidcore/src/surface/plane/p2.rs	Plane::make_new_plane_ellipse	int-rem	2	proven	(ii + 1) % count	inside for ii in 0..count, so count > 0
 crates/solidcore/src/surface/procedural_blend/convert.rs	corner_from_record	with_capacity	1	open	Vec::with_capacity(r.rounds.len())	
 crates/solidcore/src/surface/procedural_blend/convert.rs	non_decreasing	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore/src/surface/procedural_sweep.rs	ProceduralSweep::create	windows	1	proven	windows(2)	constant non-zero size
@@ -851,25 +850,25 @@ crates/solidcore/src/surface/procedural_sweep/path.rs	Spline::derivative	windows
 crates/solidcore/src/surface/procedural_sweep/path.rs	Spline::new	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore/src/surface/procedural_sweep/path.rs	classify	with_capacity	1	proven	Vec::with_capacity(12)	constant capacity
 crates/solidcore/src/surface/procedural_sweep/path.rs	spans_of	windows	1	proven	windows(2)	constant non-zero size
-crates/solidcore/src/surface/srf_in_volume.rs	SrfInVolume::evaluate	chunks	1	open	chunks(ovs)	
+crates/solidcore/src/surface/srf_in_volume.rs	SrfInVolume::evaluate	chunks	1	proven	chunks(ovs)	ovs = hv + 1 >= 1, with hv <= MAX_DERIVS checked above
 crates/solidcore/src/surface/step_window.rs	Bezier::pieces	f64::clamp	1	proven	clamp(1.0, 8.0)	constant bounds, min <= max
 crates/solidcore/src/surface/step_window.rs	derivative	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore/src/surface/step_window.rs	push_every	f64::clamp	1	proven	clamp(0.0, 8.0)	constant bounds, min <= max
-crates/solidcore/src/surface/step_window.rs	split	with_capacity	1	open	Vec::with_capacity(n)	
-crates/solidcore/src/surface/step_window.rs	split	with_capacity	2	open	Vec::with_capacity(n)	
-crates/solidcore/src/surface/step_window.rs	unwind	int-rem	1	open	(start + step) % n	
-crates/solidcore/src/surface/step_window.rs	unwind	int-rem	2	open	(start + step + 1) % n	
+crates/solidcore/src/surface/step_window.rs	split	with_capacity	1	proven	Vec::with_capacity(n)	n = c.len(), an in-memory slice
+crates/solidcore/src/surface/step_window.rs	split	with_capacity	2	proven	Vec::with_capacity(n)	n = c.len(), an in-memory slice
+crates/solidcore/src/surface/step_window.rs	unwind	int-rem	1	proven	(start + step) % n	inside for step in 0..n, so n > 0
+crates/solidcore/src/surface/step_window.rs	unwind	int-rem	2	proven	(start + step + 1) % n	inside for step in 0..n, so n > 0
 crates/solidcore/src/surface/surf_of_extrusion/p1.rs	SurfOfExtrusion::drop_point_fast	f64::clamp	1	proven	clamp(0.0, 1.0)	constant bounds, min <= max
-crates/solidcore/src/surface/surf_of_extrusion/p2.rs	SurfOfExtrusion::intersect_with_plane_on	Vec::remove	1	open	remove(0)	
-crates/solidcore/src/surface/surf_of_extrusion/p2.rs	SurfOfExtrusion::intersect_with_plane_on	Vec::remove	2	open	remove(0)	
-crates/solidcore/src/surface/surf_of_extrusion/p2.rs	SurfOfExtrusion::intersect_with_plane_on	Vec::swap_remove	1	open	swap_remove(0)	
+crates/solidcore/src/surface/surf_of_extrusion/p2.rs	SurfOfExtrusion::intersect_with_plane_on	Vec::remove	1	proven	remove(0)	inside if !...is_empty() on the same Vec
+crates/solidcore/src/surface/surf_of_extrusion/p2.rs	SurfOfExtrusion::intersect_with_plane_on	Vec::remove	2	proven	remove(0)	inside if !...is_empty() on the same Vec
+crates/solidcore/src/surface/surf_of_extrusion/p2.rs	SurfOfExtrusion::intersect_with_plane_on	Vec::swap_remove	1	proven	swap_remove(0)	lines is not empty: the function returns above when it is
 crates/solidcore/src/surface/surf_of_revolution/p1.rs	test_for_iso_circles	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore/src/surface/surface/approximate.rs	Surface::approximate_surface_impl	chunks	1	proven	chunks_exact_mut(4)	constant non-zero size
 crates/solidcore/src/surface/surface/approximate.rs	Surface::approximate_surface_impl	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore/src/surface/surface/approximate.rs	Surface::approximate_surface_impl	windows	2	proven	windows(2)	constant non-zero size
 crates/solidcore/src/surface/surface/approximate.rs	Surface::approximate_surface_impl	windows	3	proven	windows(2)	constant non-zero size
 crates/solidcore/src/surface/surface/approximate.rs	Surface::approximate_surface_impl	windows	4	proven	windows(2)	constant non-zero size
-crates/solidcore/src/surface/surface/assert_valid.rs	grid_non_monotonic	int-div	1	open	size / row_size	
+crates/solidcore/src/surface/surface/assert_valid.rs	grid_non_monotonic	int-div	1	proven	size / row_size	row_size > 0: zero returns an error above
 crates/solidcore/src/surface/surface/p1.rs	StepSurface::knots_of	with_capacity	1	proven	Vec::with_capacity(2)	constant capacity
 crates/solidcore/src/surface/surface/p1.rs	Surface::evaluate_step	chunks	1	open	chunks(highest_v_deriv + 1)	
 crates/solidcore/src/surface/surface/p1.rs	Surface::evaluate_step	chunks	2	open	chunks(highest_v_deriv + 1)	
@@ -905,12 +904,12 @@ crates/solidcore/src/surface/surface_cache/p1.rs	SurfaceCache::build_tree_top	in
 crates/solidcore/src/surface/surface_cache/p1.rs	SurfaceCache::build_tree_top	int-rem	2	proven	num_u % 2	constant non-zero divisor
 crates/solidcore/src/surface/surface_cache/p1.rs	SurfaceCache::build_tree_top	with_capacity	1	open	Vec::with_capacity(curr.len())	
 crates/solidcore/src/surface/surface_cache/p2.rs	SurfaceCache::add_curves_to_cache	Vec::insert	1	proven	insert(0, new_cache)	index 0 is never past the end
-crates/solidcore/src/surface/surface_cache/p2.rs	SurfaceCache::block_from_splits	int-div	1	open	div_ceil(2)	
-crates/solidcore/src/surface/surface_cache/p2.rs	SurfaceCache::block_from_splits	int-div	2	open	div_ceil(2)	
+crates/solidcore/src/surface/surface_cache/p2.rs	SurfaceCache::block_from_splits	int-div	1	proven	div_ceil(2)	constant non-zero divisor
+crates/solidcore/src/surface/surface_cache/p2.rs	SurfaceCache::block_from_splits	int-div	2	proven	div_ceil(2)	constant non-zero divisor
 crates/solidcore/src/surface/surface_cache/p2.rs	SurfaceCache::block_from_splits	int-rem	1	proven	num_v % 2	constant non-zero divisor
 crates/solidcore/src/surface/surface_cache/p2.rs	SurfaceCache::block_from_splits	int-rem	2	proven	num_u % 2	constant non-zero divisor
-crates/solidcore/src/surface/surface_cache/p2.rs	SurfaceCache::block_from_splits	with_capacity	1	open	Vec::with_capacity(base_nodes.len())	
-crates/solidcore/src/surface/surface_cache/p2.rs	create_approximate_bezier_patch_block	with_capacity	1	open	Vec::with_capacity(num_u_spans * num_v_spans)	
+crates/solidcore/src/surface/surface_cache/p2.rs	SurfaceCache::block_from_splits	with_capacity	1	proven	Vec::with_capacity(base_nodes.len())	base_nodes.len(), an in-memory Vec
+crates/solidcore/src/surface/surface_cache/p2.rs	create_approximate_bezier_patch_block	with_capacity	1	proven	Vec::with_capacity(num_u_spans * num_v_spans)	limit_splits keeps at most 6 splits a side, so at most 5 x 5 spans
 crates/solidcore/src/surface/surface_cache/p3.rs	SurfaceCache::build_tree_base_nodes	with_capacity	1	open	Vec::with_capacity(u_count.saturating_mul(v_count))	
 crates/solidcore/src/surface/surface_point_solve/p1.rs	SurfPtGlobalSolver::refine_guess_polygon_leg	f64::clamp	1	proven	clamp(0.0, 0.5)	constant bounds, min <= max
 crates/solidcore/src/surface/trim_srf_cache.rs	TrimSrfCache::implant_poly_edge	Vec::insert	1	proven	insert(0, input.poly_edge)	index 0 is never past the end
