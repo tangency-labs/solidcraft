@@ -126,9 +126,14 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
     }
     s.accept_computed(scratch);
     follow_visibility(s, &old_path, &new_path);
-    // Where the placement is once the design has refreshed: a mirror places its occurrence again
-    // by its parent's first placement, which need not be the one named in `parent_path`.
-    let transform = s.doc.occurrences.iter().find(|x| x.id == id).map_or(transform, |x| x.transform);
+    // A mirrored occurrence: where it is once the design has refreshed. Its mirror places it again
+    // by its parent's first placement, which need not be the one named in `parent_path`. Any
+    // other occurrence replies with the transform worked out for `parent_path`, as before.
+    let transform = if s.doc.assembly.mirrors.iter().any(|m| m.occurrence == id) {
+        s.doc.occurrences.iter().find(|x| x.id == id).map_or(transform, |x| x.transform)
+    } else {
+        transform
+    };
     Ok(json!({"occurrence": id, "parent": to, "path": new_path, "transform": transform}))
 }
 
