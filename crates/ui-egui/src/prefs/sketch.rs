@@ -25,9 +25,9 @@ fn snapping(app: &mut SolveApp, ui: &mut egui::Ui) {
             "prefs.sketch.align_points",
             "prefs.sketch.snap_to_visible_grid",
         ]
-            .into_iter()
-            .map(|id| check_width(ui, app.tr(id), true))
-            .fold(0.0, f32::max);
+        .into_iter()
+        .map(|id| check_width(ui, app.tr(id), true))
+        .fold(0.0, f32::max);
         let controls_width = if available >= figure_width + t.space_14 + labels_width { available - figure_width - t.space_14 } else { available };
         ui.with_layout(egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true), |ui| {
             ui.spacing_mut().item_spacing.x = t.space_14;
