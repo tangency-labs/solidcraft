@@ -7700,7 +7700,7 @@ fn eval_feature(
                 // Picks on bodies of other (moved) components are where those bodies are shown.
                 None => doc.resolve_plane_in(
                     vals,
-                    &construction_planes_in_frame(doc, st, f.component, plane)?,
+                    &*construction_planes_in_frame(doc, st, f.component, plane)?,
                     0,
                     Some(&*construction_state(doc, st, f.component)?),
                 )?,
@@ -8348,7 +8348,7 @@ fn eval_sketch(
             (doc.resolve_plane_in(vals, &sheet_face_plane_in_frame(doc, st, f.component, plane)?, 0, Some(&fst))?, None)
         }
         (None, PlaneRef::Face { plane: picked, at, name, anchor: None }) => face_plane(&fst, picked, *at, name.as_deref())?,
-        (None, other) => (doc.resolve_plane_in(vals, &construction_planes_in_frame(doc, st, f.component, other)?, 0, Some(&fst))?, None),
+        (None, other) => (doc.resolve_plane_in(vals, &*construction_planes_in_frame(doc, st, f.component, other)?, 0, Some(&fst))?, None),
     };
     let mut sk = sketch.clone();
     // A text's outlines are rebuilt from its numbers when the links are refreshed: the
