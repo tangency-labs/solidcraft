@@ -100,11 +100,19 @@ fn parabola_piece_volume() -> f64 {
         + (0.4 * q.powf(2.5) - 2.0 / 3.0 * c * c * q.powf(1.5)) / (4.0 * c * c)
 }
 
+/// The conic edge's pcurve on the cone is fitted: between its knots its image lies up to 4.9e-7
+/// mm off the edge, nearly the 5e-7 mm zone of the file's 1e-6, so the edge's tolerance covers
+/// it. The gap is the reader's, not the file's, so no note (#12757); SMLib's check passes the body.
+fn covers_the_conics_pcurve(imp: &StepImport) {
+    assert!(imp.warnings.is_empty(), "{:?}", imp.warnings);
+    assert_eq!(imp.bodies.len(), 1);
+    crate::validation::check_kept(&imp.bodies[0].body).unwrap_or_else(|e| panic!("{e}"));
+}
+
 fn import_piece(text: &str, want: f64) -> StepImport {
     assert_eq!(step_orientation_errors(text).unwrap(), Vec::<String>::new());
     let imp = step_import(text).unwrap();
-    assert!(imp.warnings.is_empty(), "{:?}", imp.warnings);
-    assert_eq!(imp.bodies.len(), 1);
+    covers_the_conics_pcurve(&imp);
     assert!(imp.bodies[0].closed);
     let m = measure(&imp.bodies[0].body).unwrap();
     assert_eq!(m.faces, 3);
@@ -118,8 +126,7 @@ fn round_trip(imp: &StepImport, want: f64) {
     let text = step_export(&[&imp.bodies[0].body], "conic").unwrap();
     step_validate(&text).unwrap();
     let back = step_import(&text).unwrap();
-    assert!(back.warnings.is_empty(), "{:?}", back.warnings);
-    assert_eq!(back.bodies.len(), 1);
+    covers_the_conics_pcurve(&back);
     assert!(back.bodies[0].closed);
     let v = measure(&back.bodies[0].body).unwrap().volume;
     assert!(rel(v, want) < 1e-4, "round trip volume {v} vs {want}");

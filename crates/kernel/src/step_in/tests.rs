@@ -2211,6 +2211,57 @@ fn edges_written_off_their_spline_face_carry_their_gap_as_their_tolerance() {
     assert!(refused, "{far:?}");
 }
 
+/// The dome of [`dome_with_edges_bowed`] whose four edges are polylines along its flat
+/// boundary, 64 spans each, with one inner point `dz` mm above it: each edge bumps off the dome
+/// over 1/32 of its length, peaking halfway between two of the points the reader
+/// samples its gaps at (#12757).
+fn dome_with_narrow_bumps(dz: f64) -> String {
+    let base = patch_with_edges(0.0, false, false);
+    let sides: [[(usize, usize); 2]; 4] = [[(0, 0), (3, 0)], [(3, 0), (3, 3)], [(3, 3), (0, 3)], [(0, 3), (0, 0)]];
+    let mut t = String::new();
+    for line in base.lines() {
+        // Each side's cubic, #400..#403, is replaced by its polyline (points from #1000).
+        let side = (0..4).find(|k| line.starts_with(&format!("#{}=B_SPLINE_CURVE_WITH_KNOTS", 400 + k)));
+        let Some(k) = side else {
+            t += line;
+            t += "\n";
+            continue;
+        };
+        let [(i0, j0), (i1, j1)] = sides[k];
+        let n = 65;
+        let mut ids = Vec::new();
+        for m in 0..n {
+            let f = m as f64 / (n - 1) as f64;
+            let (x, y) = ((i0 as f64 + (i1 as f64 - i0 as f64) * f) * 10.0, (j0 as f64 + (j1 as f64 - j0 as f64) * f) * 10.0);
+            let id = 1000 + k * 100 + m;
+            t += &format!("#{id}=CARTESIAN_POINT('',({x:.17E},{y:.17E},{:.17E}));\n", if m == 2 { dz } else { 0.0 });
+            ids.push(format!("#{id}"));
+        }
+        let knots: Vec<String> = (0..n).map(|m| format!("{:.17E}", m as f64 / (n - 1) as f64)).collect();
+        let mults: Vec<String> = (0..n).map(|m| if m == 0 || m == n - 1 { "2" } else { "1" }.to_string()).collect();
+        t += &format!(
+            "#{}=B_SPLINE_CURVE_WITH_KNOTS('',1,({}),.UNSPECIFIED.,.F.,.F.,({}),({}),.UNSPECIFIED.);\n",
+            400 + k,
+            ids.join(","),
+            mults.join(","),
+            knots.join(",")
+        );
+    }
+    t
+}
+
+#[test]
+fn an_edges_gap_between_the_points_sampled_is_covered() {
+    // Each edge bumps 2e-5 mm off the dome, narrowly, between two of the reader's samples
+    // (#12757: 15 edges of an imported body lay up to 1.7 times farther off than sampled, and
+    // SMLib refused it, "Bad Gap"). Its tolerance covers the peak, and the body checks.
+    let imp = step_import(&dome_with_narrow_bumps(2e-5)).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let r = imp.bodies[0].body.record();
+    assert!(r.edges.iter().all(|e| e.tolerance >= 2e-5), "{:?}", r.edges.iter().map(|e| e.tolerance).collect::<Vec<_>>());
+    crate::validation::check_kept(&imp.bodies[0].body).unwrap_or_else(|e| panic!("{e}"));
+}
+
 #[test]
 fn spline_edges_off_their_plane_by_less_than_the_file_states_get_their_closed_form() {
     // 0.8e-6 mm off, inside the file's 1e-6 mm but past the half of it a closed-form pcurve is

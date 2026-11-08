@@ -87,8 +87,18 @@ const MAX_TOLERANCE: f64 = 1.0;
 /// SMLib's intersection tolerance, twice the zone (the bridge halves it), and SMLib checks a
 /// vertex's gaps against half its zone, so a vertex covers its gap with margin at twice an edge's.
 const VERTEX_GAP_MARGIN: f64 = 2.0 * pcurve::SURFACE_GAP_MARGIN;
-/// Intervals an edge's curve is measured over against each face's surface it bounds.
+/// Intervals an edge's curve is measured over against each face's surface it bounds, at the
+/// least: each knot span of the edge's curve and pcurve is measured too ([`widest_gap`]).
 const EDGE_GAP_SAMPLES: usize = 16;
+/// Points measured inside each knot span between two breaks ([`widest_gap`]).
+const EDGE_GAP_SPAN_SAMPLES: usize = 4;
+/// Breaks past which an edge's spans are measured at evenly spaced points instead ([`widest_gap`]).
+const EDGE_GAP_MAX_BREAKS: usize = 1024;
+/// Local maxima of the measured gaps refined to the gap's peak ([`widest_gap`]).
+const EDGE_GAP_REFINED: usize = 4;
+/// Golden-section steps refining a local maximum: its bracket shrinks to 0.618^24 = 1e-5 of
+/// the span around it.
+const EDGE_GAP_REFINE_STEPS: usize = 24;
 /// An edge's tolerance over the largest gap measured between its pcurves and its curve: SMLib's
 /// zone (half the record's) covers the gap with margin, as a surface's.
 const EDGE_GAP_MARGIN: f64 = pcurve::SURFACE_GAP_MARGIN;
@@ -533,7 +543,8 @@ struct Builder<'b, 'a> {
     face_ids: HashSet<u64>,
     faces: Vec<FaceB>,
     sense_mismatches: usize,
-    /// Edges whose tolerance was raised to the gap their curve has to a face's surface.
+    /// Edges whose tolerance was raised to a gap of the file's own, or past its uncertainty,
+    /// that their curve has to a face's surface.
     raised_edges: HashSet<u32>,
     /// The largest gap of a raised edge.
     widest_gap: f64,
@@ -624,22 +635,22 @@ impl<'b, 'a> Builder<'b, 'a> {
                     None => (&edge.curve, edge.interval),
                 };
                 let eval = CurveEval::new(curve).map_err(|m| m.to_string())?;
-                let mut gap = 0.0f64;
-                for k in 0..=EDGE_GAP_SAMPLES {
-                    let t = if k == EDGE_GAP_SAMPLES { t1 } else { t0 + (t1 - t0) * (k as f64 / EDGE_GAP_SAMPLES as f64) };
-                    let Some(p) = eval.point(t) else { continue };
+                let gap = widest_gap([t0, t1], &[curve_breaks(curve)], |t| {
+                    let p = eval.point(t)?;
                     // A point with no nearest point is the pcurves' to refuse, with why.
-                    let Some(s) = on.project_with(&starts, p, None, f64::INFINITY).and_then(|q| on.point(q)) else { continue };
-                    gap = gap.max(s.dist(p));
-                }
-                self.cover_edge(e, gap, pcurve::SURFACE_GAP_MARGIN)?;
+                    let s = on.project_with(&starts, p, None, f64::INFINITY).and_then(|q| on.point(q))?;
+                    Some(s.dist(p))
+                });
+                self.cover_edge(e, gap, pcurve::SURFACE_GAP_MARGIN, true)?;
             }
         }
         Ok(())
     }
 
-    /// Edge `e`'s tolerance covers `gap` with `margin`: refused if far off.
-    fn cover_edge(&mut self, e: u32, gap: f64, margin: f64) -> R<()> {
+    /// Edge `e`'s tolerance covers `gap` with `margin`: refused if far off. The solid's notes
+    /// count it when the gap is the file's own (`own`: its curve off its face's surface) or past
+    /// the file's uncertainty; a gap within it to a pcurve the reader made is covered unnoted.
+    fn cover_edge(&mut self, e: u32, gap: f64, margin: f64, own: bool) -> R<()> {
         let Some(x) = self.edges.get_mut(e as usize) else { return Err("edge reference".into()) };
         if margin * gap <= x.tolerance {
             return Ok(());
@@ -649,8 +660,13 @@ impl<'b, 'a> Builder<'b, 'a> {
         }
         x.tolerance = margin * gap;
         let ends = x.vertices;
-        self.raised_edges.insert(e);
-        self.widest_gap = self.widest_gap.max(gap);
+        // A gap within the file's uncertainty to a pcurve this reader made is that pcurve
+        // wandering between its knots, not the file's: covered, but not the user's to hear
+        // about (#12757).
+        if own || gap > self.tol {
+            self.raised_edges.insert(e);
+            self.widest_gap = self.widest_gap.max(gap);
+        }
         // A vertex's tolerance covers every edge that meets it, as in any tolerant record: its
         // gap from the face at the edge's end is the edge's there, checked as a vertex's.
         for v in ends {
@@ -676,16 +692,16 @@ impl<'b, 'a> Builder<'b, 'a> {
                     None => (&edge.curve, edge.interval),
                 };
                 let eval = CurveEval::new(curve).map_err(|m| m.to_string())?;
-                let mut gap = 0.0f64;
-                for k in 0..=EDGE_GAP_SAMPLES {
-                    let t = if k == EDGE_GAP_SAMPLES { t1 } else { t0 + (t1 - t0) * (k as f64 / EDGE_GAP_SAMPLES as f64) };
+                let pc_knots = match c {
+                    Curve2::Spline { knots, .. } | Curve2::RationalSpline { knots, .. } => knots.as_slice(),
+                };
+                let gap = widest_gap([t0, t1], &[curve_breaks(curve), pc_knots], |t| {
                     // A point a pcurve or surface lacks is the record check's to name.
-                    let (Some(q), Some(p)) = (solidcraft_geom::brep::pcurve::eval(c, t), eval.point(t)) else { continue };
-                    if let Some(s) = on.point(q) {
-                        gap = gap.max(s.dist(p));
-                    }
-                }
-                self.cover_edge(e, gap, EDGE_GAP_MARGIN)?;
+                    let q = solidcraft_geom::brep::pcurve::eval(c, t)?;
+                    let p = eval.point(t)?;
+                    Some(on.point(q)?.dist(p))
+                });
+                self.cover_edge(e, gap, EDGE_GAP_MARGIN, false)?;
             }
         }
         Ok(())
@@ -1601,6 +1617,75 @@ fn loop_area(l: &[(u32, bool)], pcs: &[Curve2], periodic: [bool; 2]) -> Option<f
         magnitude += c.abs();
     }
     (area.abs() > 1e-9 * magnitude && magnitude > 0.0).then_some(0.5 * area)
+}
+
+/// The knots of a spline edge curve, where its shape can change; none for a curve in closed form.
+fn curve_breaks(c: &BCurve) -> &[f64] {
+    match c {
+        BCurve::Spline { knots, .. } | BCurve::RationalSpline { knots, .. } => knots,
+        _ => &[],
+    }
+}
+
+/// The widest of `gap(t)` over `[t0, t1]`, as SMLib's check finds it: measured at
+/// [`EDGE_GAP_SAMPLES`] even intervals and at [`EDGE_GAP_SPAN_SAMPLES`] points inside each span
+/// between the `breaks` (knots of the edge's curve and pcurve, where a gap can rise and fall
+/// between two even samples: #12757's edges lay up to 1.7 times farther off than 16 samples
+/// found), then its [`EDGE_GAP_REFINED`] largest local maxima refined by golden section. A `t`
+/// where `gap` has no value is skipped.
+fn widest_gap(interval: [f64; 2], breaks: &[&[f64]], gap: impl Fn(f64) -> Option<f64>) -> f64 {
+    let [t0, t1] = interval;
+    if !(t0 < t1) {
+        return gap(t0).unwrap_or(0.0);
+    }
+    let mut cuts: Vec<f64> = (0..=EDGE_GAP_SAMPLES).map(|k| t0 + (t1 - t0) * (k as f64 / EDGE_GAP_SAMPLES as f64)).collect();
+    let inner: Vec<f64> = breaks.iter().flat_map(|b| b.iter().copied()).filter(|t| *t > t0 && *t < t1).collect();
+    if inner.len() <= EDGE_GAP_MAX_BREAKS {
+        cuts.extend(inner);
+    } else {
+        cuts.extend((1..EDGE_GAP_MAX_BREAKS).map(|k| t0 + (t1 - t0) * (k as f64 / EDGE_GAP_MAX_BREAKS as f64)));
+    }
+    cuts.sort_by(f64::total_cmp);
+    cuts.dedup();
+    let mut ts = Vec::with_capacity(cuts.len() * (EDGE_GAP_SPAN_SAMPLES + 1));
+    for w in cuts.windows(2) {
+        let (a, b) = (w[0], w[1]);
+        ts.extend((0..=EDGE_GAP_SPAN_SAMPLES).map(|k| a + (b - a) * (k as f64 / (EDGE_GAP_SPAN_SAMPLES + 1) as f64)));
+    }
+    ts.push(t1);
+    let samples: Vec<(f64, f64)> = ts.iter().filter_map(|&t| gap(t).map(|g| (t, g))).collect();
+    let mut widest = samples.iter().fold(0.0f64, |m, s| m.max(s.1));
+    // Local maxima, largest first, each refined between its neighbours.
+    let mut peaks: Vec<usize> = (0..samples.len())
+        .filter(|&i| {
+            let g = samples[i].1;
+            g > 0.0 && (i == 0 || samples[i - 1].1 <= g) && samples.get(i + 1).is_none_or(|n| n.1 <= g)
+        })
+        .collect();
+    peaks.sort_by(|a, b| samples[*b].1.total_cmp(&samples[*a].1));
+    const PHI: f64 = 0.618_033_988_749_894_9;
+    for &i in peaks.iter().take(EDGE_GAP_REFINED) {
+        let mut a = if i == 0 { samples[i].0 } else { samples[i - 1].0 };
+        let mut b = samples.get(i + 1).map_or(samples[i].0, |n| n.0);
+        let at = |t: f64| gap(t).unwrap_or(0.0);
+        let (mut c, mut d) = (b - PHI * (b - a), a + PHI * (b - a));
+        let (mut gc, mut gd) = (at(c), at(d));
+        for _ in 0..EDGE_GAP_REFINE_STEPS {
+            if gc >= gd {
+                b = d;
+                (d, gd) = (c, gc);
+                c = b - PHI * (b - a);
+                gc = at(c);
+            } else {
+                a = c;
+                (c, gc) = (d, gd);
+                d = a + PHI * (b - a);
+                gd = at(d);
+            }
+        }
+        widest = widest.max(gc).max(gd);
+    }
+    widest
 }
 
 /// The parameter box around every pcurve's control points, padded a little, within the
