@@ -895,6 +895,53 @@ fn merging_adjacent_regions() {
     assert!(sides.contains(&4) && sides.contains(&3), "{sides:?}");
 }
 
+/// Two regions on either side of an arc whose end is a tangent touch: the sketch splits the
+/// touch into two corners a few hundredths of a micron apart, so each region's copy of the arc
+/// ends at its own corner (#12612, 3e-5 to 6e-5 mm apart). Ends that close are one corner of a
+/// profile ([`ENDPOINT_JOIN_TOL`]), so the arc is a shared boundary and the merged region is the
+/// square without it. Before, the copies were not matched (within 1e-5 mm only) and stayed in the
+/// outline as a slit, out along the arc and back, which SMLib's extrusion refused (status 1005).
+#[test]
+fn regions_sharing_an_arc_whose_tangent_end_is_split_merge_without_a_slit() {
+    let delta = 5e-6; // radians on r 10: 5e-5 mm
+    let q = v(10.0 * delta.cos(), 10.0 * delta.sin());
+    let quarter = solidcore_record::Region2 {
+        outer: solidcore_record::Loop2 {
+            segs: vec![
+                Seg2::Line { a: v(0.0, 0.0), b: v(10.0, 0.0) },
+                Seg2::Arc { center: v(0.0, 0.0), radius: 10.0, start: 0.0, sweep: FRAC_PI_2 },
+                Seg2::Line { a: v(0.0, 10.0), b: v(0.0, 0.0) },
+            ],
+        },
+        holes: vec![],
+    };
+    let rest = solidcore_record::Region2 {
+        outer: solidcore_record::Loop2 {
+            segs: vec![
+                Seg2::Line { a: q, b: v(20.0, 0.0) },
+                Seg2::Line { a: v(20.0, 0.0), b: v(20.0, 20.0) },
+                Seg2::Line { a: v(20.0, 20.0), b: v(0.0, 20.0) },
+                Seg2::Line { a: v(0.0, 20.0), b: v(0.0, 10.0) },
+                Seg2::Arc { center: v(0.0, 0.0), radius: 10.0, start: FRAC_PI_2, sweep: -(FRAC_PI_2 - delta) },
+            ],
+        },
+        holes: vec![],
+    };
+    let m = merge_regions(&[quarter, rest]);
+    assert_eq!(m.len(), 1, "{m:?}");
+    let r = &m[0];
+    assert!(r.holes.is_empty(), "{r:?}");
+    assert!((r.area() - 400.0).abs() < 1e-3, "{}", r.area());
+    assert!(r.outer.segs.iter().all(|s| matches!(s, Seg2::Line { .. })), "the arc is left in the outline: {r:?}");
+    assert_eq!(r.outer.segs.len(), 4, "{r:?}");
+    // Every corner closes exactly: each side starts where the one before it ends.
+    let n = r.outer.segs.len();
+    for i in 0..n {
+        let (s, t) = (r.outer.segs[i], r.outer.segs[(i + 1) % n]);
+        assert_eq!(s.end(), t.start(), "corner {i}: {r:?}");
+    }
+}
+
 /// A sketch holding `text` the way `sketch.text` makes it: one text link of the built-in font's
 /// outlines.
 fn text_sketch(text: &str, at: Vec2, height: f64) -> Sketch {
