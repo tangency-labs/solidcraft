@@ -297,8 +297,11 @@ pub const IDS: &[&str] = &[
     "panel.dismiss",
     "panel.float",
     "panel.focus",
+    "panel.focus.next",
+    "panel.focus.previous",
     "panel.list",
     "panel.move",
+    "panel.move.next_zone",
     "panel.native_close",
     "panel.open",
     "panel.peek",
@@ -306,6 +309,12 @@ pub const IDS: &[&str] = &[
     "panel.reset_pair",
     "panel.resize",
     "panel.resize_pair",
+    "panel.sash.down",
+    "panel.sash.left",
+    "panel.sash.reset",
+    "panel.sash.right",
+    "panel.sash.up",
+    "panel.toggle",
 ];
 
 #[derive(Debug)]
@@ -314,6 +323,7 @@ pub enum PanelCommand {
     Get,
     Open(wire::Open),
     HeaderAction(wire::HeaderAction),
+    Contextual { action: ContextualPanelAction, params: wire::Revision },
     Select { operation: &'static str, params: wire::Select },
     Move { operation: &'static str, params: wire::Move },
     Resize(wire::Resize),
@@ -353,6 +363,11 @@ pub fn parse_command(id: &str, params: &Value) -> PanelResult<PanelCommand> {
     }
     serde_json::to_writer(Counter(0), params).map_err(|_| error(Rule::CollectionLimit, "panel command byte cap"))?;
     let id = crate::find_command(id).map(|s| s.id).ok_or_else(|| error(Rule::MissingTarget, "unknown panel command"))?;
+    if let Some(action) = ContextualPanelAction::from_command_id(id) {
+        let command = PanelCommand::Contextual { action, params: read(params)? };
+        validate_command(&command)?;
+        return Ok(command);
+    }
     let command = match id {
         "panel.list" => {
             let _: wire::Empty = read(params)?;
@@ -810,6 +825,11 @@ pub fn execute_command(command: PanelCommand, context: &mut PanelCommandContext<
     validate_command(&command)?;
     let state = context.sink.inspect();
     match command {
+        PanelCommand::Contextual { action, params } => {
+            revision(params.expected_revision, &state)?;
+            let action = context.sink.resolve_contextual(action)?;
+            return value(execute_layout_action(action, context)?);
+        }
         PanelCommand::List => return value(wire::ListReply { state, kinds: context.registry.specs().cloned().collect() }),
         PanelCommand::Get => return value(wire::GetReply { state, workspaces: context.catalogue.state().summaries() }),
         command @ PanelCommand::HeaderAction(_) => {
@@ -1038,6 +1058,7 @@ pub fn preflight_batch(steps: &[Value], workspace: &WorkspaceId) -> PanelResult<
     let mut replacement = false;
     let mut mutation = false;
     let mut header_action = false;
+    let mut contextual = false;
     for step in steps {
         let id =
             step.get("command").or_else(|| step.get("id")).and_then(Value::as_str).ok_or_else(|| error(Rule::Schema, "batch command required"))?;
@@ -1045,6 +1066,7 @@ pub fn preflight_batch(steps: &[Value], workspace: &WorkspaceId) -> PanelResult<
         match parse_command(id, step.get("params").unwrap_or(&empty))? {
             PanelCommand::List | PanelCommand::Get | PanelCommand::Save(_) => {}
             PanelCommand::HeaderAction(_) => header_action = true,
+            PanelCommand::Contextual { .. } => contextual = true,
             PanelCommand::Apply(_) | PanelCommand::Reset(_) => replacement = true,
             PanelCommand::Workspace(params) => {
                 replacement |= params.workspace != selected;
@@ -1052,6 +1074,9 @@ pub fn preflight_batch(steps: &[Value], workspace: &WorkspaceId) -> PanelResult<
             }
             _ => mutation = true,
         }
+    }
+    if contextual && steps.len() != 1 {
+        return Err(error(Rule::Capability, "contextual panel actions require a standalone transaction"));
     }
     if header_action && steps.len() != 1 {
         return Err(error(Rule::Capability, "header actions require a standalone transaction"));
@@ -1075,7 +1100,7 @@ pub fn execute_batch(steps: &[Value], context: &mut PanelCommandContext<'_>) -> 
             step.get("command").or_else(|| step.get("id")).and_then(Value::as_str).ok_or_else(|| error(Rule::Schema, "batch command required"))?;
         let empty = json!({});
         let command = parse_command(id, step.get("params").unwrap_or(&empty))?;
-        if matches!(&command, PanelCommand::HeaderAction(_)) {
+        if matches!(&command, PanelCommand::HeaderAction(_) | PanelCommand::Contextual { .. }) {
             let result = execute_command(command, context)?;
             return Ok(json!({"completed":1,"results":[result],"undone":0}));
         }

@@ -1298,6 +1298,8 @@ preference_settings! {
     language: String = "system".into(), 0;
     /// Shared workspace composition; system windows and popups retain their purpose.
     layout: crate::shell::LayoutMode = Default::default(), PAGE_LAYOUT;
+    /// Mount existing docked content in the shared layout; Classic stays available.
+    shared_panel_layout: bool = false, PAGE_LAYOUT;
     /// Ordered view controls and their appearance.
     #[serde(default)]
     navigation_bar: crate::navigation_bar::NavigationBar = Default::default(), PAGE_LAYOUT;
@@ -2803,7 +2805,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     match button {
         Some("defaults") => defaults(app, app.prefs_window.section),
-        Some("apply") if app.prefs_window.panel_restore_error.is_none() => app.prefs_window.snapshot = Some(Snapshot::take(app)),
+        Some("apply") if app.prefs_window.panel_restore_error.is_none() => match crate::panel_runtime::sync_production_setting(app) {
+            Ok(()) => app.prefs_window.snapshot = Some(Snapshot::take(app)),
+            Err(reason) => app.prefs_window.panel_restore_error = Some(solidcraft_engine::panels::commands::error_text(reason)),
+        },
         Some("ok") => close(app, false),
         Some("cancel") => close(app, true),
         _ if closed => close(app, true),
@@ -3317,7 +3322,10 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
     match button.as_ref().and_then(|b| b.as_str()) {
         Some("ok") => close(app, false),
         Some("cancel") => close(app, true),
-        Some("apply") if app.prefs_window.panel_restore_error.is_none() => app.prefs_window.snapshot = Some(Snapshot::take(app)),
+        Some("apply") if app.prefs_window.panel_restore_error.is_none() => {
+            crate::panel_runtime::sync_production_setting(app).map_err(solidcraft_engine::panels::commands::error_text)?;
+            app.prefs_window.snapshot = Some(Snapshot::take(app));
+        }
         Some("apply") => {}
         Some("defaults") => defaults(app, app.prefs_window.section),
         Some(b) => return Err(format!("unknown button `{b}` (ok, cancel, apply, defaults)")),
@@ -4290,6 +4298,33 @@ pub(crate) fn reveal_preference(h: &mut crate::scenario::Harness, handle: &str) 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn invalid_legacy_panel_preferences_recover_before_shared_host_setup() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        app.load_prefs(
+            &json!({"preferences":{"browser_width":0.0,"timeline_left_width":-1.0,
+                "agent_chat_width":1e9,"render_browser_width":0.0,"browser_share":2.0}})
+            .to_string(),
+        );
+        let defaults = Prefs::default();
+        assert_eq!(app.preferences.browser_width, 0.0);
+        assert_eq!(crate::browser::browser_width(app.preferences.browser_width), 170.0, "Classic keeps its existing saved-width behavior");
+        app.preferences.shared_panel_layout = true;
+        crate::panel_runtime::sync_production_setting(&mut app).unwrap();
+        assert!(app.panel_runtime().is_some(), "malformed legacy sizes must not leave setup retrying each frame");
+        let imported = crate::panel_runtime::preferences_value(&app).unwrap();
+        for (name, expected) in [
+            ("browser_width", defaults.browser_width),
+            ("history_width", defaults.timeline_left_width),
+            ("assistant_width", defaults.agent_chat_width),
+            ("render_width", defaults.render_browser_width),
+            ("browser_share", defaults.browser_share),
+        ] {
+            assert_eq!(imported["legacy"][name], json!(expected));
+        }
+        assert_eq!((app.preferences.browser_width, app.preferences.browser_share), (0.0, 2.0), "shared import never rewrites Classic preferences");
+    }
+
     #[test]
     fn theme_traits_use_resolved_background_and_maximal_contrast() {
         use theme_picker::{Classification, theme_traits};

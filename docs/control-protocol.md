@@ -48,6 +48,10 @@ Query replies contain no new host effects.
 | `panel.float` | Same as move, requiring a `new_section` with `floating` location. |
 | `panel.popout` | Same as move, requiring a `new_section` with `window` location and return destination. Desktop/headless without native capability refuse; web explicitly lowers to `floating`. |
 | `panel.focus` | `{target:instance,expected_revision?}`. Reopens retained closed state, activates, expands and requests focus. |
+| `panel.focus.next`, `panel.focus.previous` | `{expected_revision?}`. Resolve the next or previous eligible panel from the live host's keyboard context. |
+| `panel.toggle` | `{expected_revision?}`. Collapse or expand the focused panel's section. |
+| `panel.move.next_zone` | `{expected_revision?}`. Move the focused panel to its next permitted zone. |
+| `panel.sash.left`, `panel.sash.right`, `panel.sash.up`, `panel.sash.down`, `panel.sash.reset` | `{expected_revision?}`. Resize or reset the focused sash through the same constrained candidate path as pointer resizing. |
 | `panel.activate` | `{target:instance,expected_revision?}`. Activates an open tab without expanding or requesting focus. |
 | `panel.action` | `{target:instance,action:ControlId,expected_revision?}`. Validates registration, active/open state, availability and owning controller binding, then invokes the real bound action. Returns `LayoutReply`; missing/disabled bindings refuse. |
 | `panel.peek` | `{target:instance,expected_revision?}`. Temporary presentation of a collapsed tab, without persistence changes to size/collapse. |
@@ -60,6 +64,19 @@ Query replies contain no new host effects.
 | `layout.reset` | `{expected_revision?}`. Applies the selected workspace's registered immutable default. User presets and other workspace histories remain. Missing defaults return a capability error. |
 | `layout.get` | `{}` → `{state,workspaces:[{id,title_key,default_preset,has_remembered_layout}]}`. Selection is only `state.layout.workspace`. |
 | `layout.workspace.select` | `{workspace:WorkspaceId,expected_revision?}` → `{previous_workspace,source:"remembered"\|"default_preset"\|"unchanged",state}`. Registered descriptors only; no implicit creation. |
+
+The nine contextual commands above return `LayoutReply`. Their strict input accepts
+only the optional revision, checked before resolving the host context. A headless
+sink without a live context refuses rather than guessing a focused panel or sash.
+Command metadata reports the live availability and a localized disabled reason.
+An atomic batch may contain one contextual command alone; a mixed atomic batch
+refuses before applying any action.
+
+Shortcuts use the existing rebindable keymap. The four sash arrow bindings retain
+their existing defaults; the other contextual commands start unbound. Automatic
+host shortcuts defer to a focused text editor. Explicit contextual command calls
+may target its actually owned panel, but cannot infer a sash from an editor.
+Modal, document, viewport and stale-presentation guards still apply.
 
 Destinations are distinct foundation operations, not aliases:
 
@@ -263,7 +280,7 @@ actual current Session without another service tick. Runtime inspection remains
 read-only. The shared host adds no production command registration beyond the
 application-layout commands above.
 
-For native host evidence, `ui.panel_fixture {enabled?, preset?, remember?, translucency_percent?}` installs bounded
+For native host evidence, `ui.panel_fixture {enabled?, preset?, remember?, translucency_percent?, reduced_motion?}` installs bounded
 synthetic content in the real `SolveApp` workspace host. The normal connection
 authentication applies. It is off by default and ephemeral unless explicitly
 enabled with `remember:true`. It adds no design change, production content
@@ -277,6 +294,7 @@ registration or native panel window.
 | `{"preset":"tabs","remember":true}` | Enable the specimen and its application preference catalogue. Restore a saved record after valid host dimensions are available. |
 | `{"preset":"surfaces","translucency_percent":50}` | Enable declared surface-policy specimens with a runtime-only translucency request (finite 0–100 percent). Readability may raise effective opacity. |
 | `{"translucency_percent":100}` | Change the enabled specimen's request without replacing controllers, drafts or layout. Refuse if no specimen owns the host. |
+| `{"reduced_motion":true}` | Disable specimen host animation without replacing controllers or changing saved preferences or layout. False restores theme-controlled motion. Refuse if no specimen owns the host. |
 | `{"enabled":false}` | Preflight and tear down only the specimen runtime; refusal leaves it intact. |
 
 Presets are `docks` (Left/Right/Bottom, with two Left sections), `tabs` (two groups

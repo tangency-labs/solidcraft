@@ -39,6 +39,19 @@ pub(crate) fn run_transport(app: &mut SolveApp, control: crate::ui_kit::HistoryT
     let _ = app.run_heavy("timeline.roll_to", params);
 }
 
+/// Shared-header actions use the same command availability as History playback.
+pub(crate) fn transport_availability(app: &SolveApp, control: crate::ui_kit::HistoryTransport) -> Result<(), String> {
+    if control == crate::ui_kit::HistoryTransport::Play {
+        if app.timeline_playback.is_some() {
+            return Ok(());
+        }
+        return playback_ready(app);
+    }
+    let command = solidcraft_engine::find_command("timeline.roll_to").ok_or_else(|| crate::i18n::tr("cmd.timeline_roll_to").to_owned())?;
+    let info = command.info(&app.session);
+    if info.enabled { Ok(()) } else { Err(info.disabled_reason.unwrap_or_else(|| info.label.to_owned())) }
+}
+
 /// A click runs a History control; a right-click offers to show or hide the Play button.
 pub(crate) fn transport_response(app: &mut SolveApp, control: crate::ui_kit::HistoryTransport, response: &egui::Response) {
     if response.clicked() {
@@ -894,12 +907,8 @@ pub(crate) fn edit_holes_item(app: &mut SolveApp, ui: &mut egui::Ui, folder: u64
 
 fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
     let t = Tokens::get();
-    let accent = crate::theme::TabAccent::for_tab(&t, &app.ui.tab);
     let r = ui.max_rect();
     let p = ui.painter().clone();
-
-    let n = app.session.doc.features.len();
-    let marker = app.session.doc.marker.unwrap_or(n);
     // Playback controls.
     let mut x = r.left() + t.space_10;
     let grip_rect = Rect::from_center_size(pos2(x + t.space_10 / 2.0, r.center().y), vec2(t.space_10, t.space_16 + t.space_2));
@@ -924,6 +933,22 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
         x += t.space_24 + t.space_2;
     }
     x += 14.0;
+    timeline_strip(app, ui, floating, x);
+}
+
+/// The shared host already supplies the title and declared playback controls.
+pub(crate) fn panel_inline(app: &mut SolveApp, ui: &mut egui::Ui) {
+    crate::browser::sync_reveals(app);
+    timeline_strip(app, ui, true, ui.max_rect().left());
+}
+
+fn timeline_strip(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool, x: f32) {
+    let t = Tokens::get();
+    let accent = crate::theme::TabAccent::for_tab(&t, &app.ui.tab);
+    let r = ui.max_rect();
+    let p = ui.painter().clone();
+    let n = app.session.doc.features.len();
+    let marker = app.session.doc.marker.unwrap_or(n);
     // The feature that made what is under the cursor or picked in the viewport.
     let from_view = [hovered_feature(app), picked_feature(app)];
     // Long runs of one component's features show as one chip (`timeline_fold`). The bar shows the

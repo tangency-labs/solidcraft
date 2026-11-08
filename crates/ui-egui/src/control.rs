@@ -27,7 +27,7 @@
 //!   section the viewport shows (no window needed); the ground grid and the origin's axes as the
 //!   window shows them, unless `grid` or `axes` says
 //! - `ui.icon_audit {reset?, stop?}`: collect/drain requested icon names, resolved masters and placeholder flags;
-//! - `ui.panel_fixture {enabled?, preset?, translucency_percent?}`: opt-in synthetic content in the real panel host;
+//! - `ui.panel_fixture {enabled?, preset?, translucency_percent?, reduced_motion?}`: opt-in synthetic content in the real panel host;
 //!   `{}` observes the current host, probe and Session without ticking or model commands
 //! - `ui.menu {x?, y?, target?, close?}`: open a context menu at a point (the viewport's marking
 //!   menu, or a browser menu with `target: {type: body|sketch|component, …}`); without a point,
@@ -287,6 +287,13 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
             for row in rows.iter_mut().filter_map(Value::as_object_mut) {
                 let key = row.get("id").and_then(Value::as_str).and_then(|id| crate::keymap::effective(app, id));
                 row.insert("shortcut".into(), json!(key));
+                if let Some(action) =
+                    row.get("id").and_then(Value::as_str).and_then(solidcraft_engine::panels::ContextualPanelAction::from_command_id)
+                {
+                    let reason = app.panel_contextual_disabled_reason(action);
+                    row.insert("enabled".into(), json!(reason.is_none()));
+                    row.insert("disabled_reason".into(), json!(reason));
+                }
             }
         }
         return Ok(commands);
@@ -1883,6 +1890,74 @@ mod tests {
     use crate::Services;
 
     #[test]
+    fn contextual_command_metadata_matches_live_focus_without_side_effects() {
+        fn metadata(app: &mut SolveApp, reason_key: Option<&str>) {
+            let enabled = reason_key.is_none();
+            let document = app.session.doc.clone();
+            let model = app.session.model.state();
+            let revision = app.session.revision;
+            let evaluations = app.session.evaluation_count();
+            let undo = app.session.undo.len();
+            let before = crate::panel_runtime::inspect_host_specimen(app).unwrap();
+            let command = solidcraft_engine::find_command("panel.focus.next").unwrap();
+            let interactive = crate::render_workspace::interactive_command_info(app, command);
+            let commands = execute(app, "engine.commands", json!({})).unwrap();
+            let row = commands.as_array().unwrap().iter().find(|row| row["id"] == "panel.focus.next").unwrap();
+            assert_eq!(interactive.enabled, enabled);
+            assert_eq!(row["enabled"], enabled);
+            assert_eq!(row["disabled_reason"], json!(interactive.disabled_reason));
+            assert_eq!(row["disabled_reason"], json!(reason_key.map(|key| app.tr(key))), "each context reports its exact localized refusal");
+            assert_eq!(crate::panel_runtime::inspect_host_specimen(app).unwrap(), before);
+            assert!(std::sync::Arc::ptr_eq(&document, &app.session.doc));
+            assert!(std::sync::Arc::ptr_eq(&model, &app.session.model.state()));
+            assert_eq!(app.session.revision, revision);
+            assert_eq!(app.session.evaluation_count(), evaluations);
+            assert_eq!(app.session.undo.len(), undo);
+        }
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        metadata(&mut h.app, Some("ui.panel_host.rule.availability"));
+        crate::panel_runtime::control_specimen(&mut h.app, &json!({"preset":"docks"})).unwrap();
+        metadata(&mut h.app, Some("ui.panel_host.rule.availability")); // Host exists, but has no presented frame.
+        h.frames(4);
+        let header = h
+            .app
+            .universal_panel_frame()
+            .unwrap()
+            .controls
+            .iter()
+            .find(|control| {
+                control.enabled
+                    && matches!(
+                        control.target,
+                        crate::panel_runtime::HostControlTarget::Pointer(crate::panel_runtime::HostPointerTarget::Header { .. })
+                    )
+            })
+            .unwrap()
+            .clone();
+        h.ctx.memory_mut(|memory| memory.request_focus(header.id));
+        metadata(&mut h.app, None);
+        h.ctx.memory_mut(|memory| memory.request_focus(egui::Id::unique("foreign-contextual-focus")));
+        metadata(&mut h.app, Some("ui.panel_host.rule.availability"));
+        h.ctx.memory_mut(|memory| memory.request_focus(header.id));
+        let old_document_id = h.app.session.document_id.clone();
+        h.app.session.document_id = "metadata-incoming-document".into();
+        metadata(&mut h.app, Some("ui.panel_host.rule.availability"));
+        h.app.session.document_id = old_document_id;
+        metadata(&mut h.app, None);
+        let section = h.app.universal_panel_frame().unwrap().layout.sections[0].section.clone();
+        let stale_revision = h.app.universal_panel_frame().unwrap().layout.revision;
+        h.app
+            .dispatch_panel_layout(solidcraft_engine::panels::LayoutAction::Apply {
+                expected_revision: Some(stale_revision),
+                mutations: vec![solidcraft_engine::panels::Mutation::Collapse { section, collapsed: true }],
+            })
+            .unwrap();
+        assert_ne!(h.app.panel_runtime().unwrap().layout().inspect().revision, stale_revision);
+        metadata(&mut h.app, Some("ui.panel_host.rule.revision"));
+    }
+
+    #[test]
     fn panel_fixture_validates_whole_request_before_activation() {
         let mut app = SolveApp::new(Session::default(), Services::default());
         let doc = app.session.doc.clone();
@@ -1903,6 +1978,9 @@ mod tests {
             json!({"preset":"surfaces","translucency_percent":"50"}),
             json!({"preset":"surfaces","translucency_percent":null}),
             json!({"translucency_percent":50}),
+            json!({"reduced_motion":true}),
+            json!({"preset":"docks","reduced_motion":null}),
+            json!({"enabled":false,"reduced_motion":true}),
             json!({"enabled":false,"translucency_percent":50}),
         ] {
             assert!(crate::panel_runtime::control_specimen(&mut app, &params).is_err(), "{params}");
@@ -2030,6 +2108,60 @@ mod tests {
         }
         h.app.disable_universal_panel_host().unwrap();
         assert!(crate::panel_runtime::control_specimen(&mut h.app, &json!({"translucency_percent":50})).is_err());
+    }
+
+    #[test]
+    fn panel_fixture_language_and_motion_refresh_preserve_layout_controllers_and_session() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.language = "en".into();
+        crate::panel_runtime::control_specimen(&mut h.app, &json!({"preset":"surfaces"})).unwrap();
+        h.frames(4);
+        let runtime = h.app.panel_runtime().unwrap();
+        let instance = runtime.layout().layout().instances.iter().find(|instance| instance.kind.0 == "fixture.editor").unwrap().id.clone();
+        h.app.run("panel.focus", json!({"target":{"type":"instance","id":instance}})).unwrap();
+        h.frames(4);
+        let owner = h.app.panel_runtime().unwrap().instance_owner(&instance).unwrap();
+        let draft_id = egui::Id::unique(("specimen-draft", &instance, &owner));
+        h.ctx.memory_mut(|memory| memory.request_focus(draft_id));
+        h.frame_with(vec![egui::Event::Text("retained locale selection".into())]);
+        let mut state = egui::TextEdit::load_state(&h.ctx, draft_id).unwrap();
+        state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(1), egui::text::CCursor::new(4))));
+        state.store(&h.ctx, draft_id);
+        h.frames(1);
+        let selection = egui::TextEdit::load_state(&h.ctx, draft_id).unwrap().cursor.char_range();
+        assert!(!selection.unwrap().is_empty(), "exercise an actual nonempty draft selection");
+        assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(draft_id));
+        let before = crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap();
+        let document = h.app.session.doc.clone();
+        let model = h.app.session.model.state();
+        let camera = h.app.cam;
+        for (language, expected) in [("ar", "rtl"), ("he", "rtl"), ("en", "ltr")] {
+            h.app.preferences.language = language.into();
+            h.frames(4);
+            assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(draft_id), "locale changes retain the actual focused draft");
+            assert_eq!(egui::TextEdit::load_state(&h.ctx, draft_id).unwrap().cursor.char_range(), selection);
+            let after = crate::panel_runtime::inspect_host_specimen(&mut h.app).unwrap();
+            assert_eq!(after["host"]["direction"], expected);
+            assert_eq!(after["runtime"]["layout"], before["runtime"]["layout"]);
+            for (old, new) in
+                before["runtime"]["probe"]["controllers"].as_array().unwrap().iter().zip(after["runtime"]["probe"]["controllers"].as_array().unwrap())
+            {
+                assert_eq!(new["controller_identity"], old["controller_identity"]);
+                assert_eq!(new["draft"], old["draft"]);
+                assert_eq!(new["transaction_live"], old["transaction_live"]);
+            }
+            assert!(std::sync::Arc::ptr_eq(&document, &h.app.session.doc));
+            assert!(std::sync::Arc::ptr_eq(&model, &h.app.session.model.state()));
+            assert_eq!(h.app.cam, camera);
+        }
+        for reduced in [true, false] {
+            let updated = crate::panel_runtime::control_specimen(&mut h.app, &json!({"reduced_motion":reduced})).unwrap();
+            assert_eq!(updated["runtime"]["reduced_motion"], reduced);
+            assert_eq!(updated["runtime"]["layout"], before["runtime"]["layout"]);
+            h.frames(4);
+            assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(draft_id), "motion updates retain the actual focused draft");
+            assert_eq!(egui::TextEdit::load_state(&h.ctx, draft_id).unwrap().cursor.char_range(), selection);
+        }
     }
 
     #[test]
