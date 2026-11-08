@@ -46,7 +46,7 @@ use solidcore_record::brep::{
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval, face_flux};
 use solidcraft_geom::brep::pcurve::{self, EdgeUse, TrimEdge, TrimFace, TrimUse, Trims};
 
-use crate::geom::{BSplineCurve, BSplineSurface, Curve, P3, Placement, Transform, dot, scale, sub};
+use crate::geom::{BSplineCurve, BSplineSurface, Curve, P3, Placement, Transform, cross, dot, norm, scale, sub};
 use crate::p21::{Entity, Exchange, Param};
 use crate::read::{R, Reader};
 use crate::units;
@@ -1692,6 +1692,9 @@ fn map_bspline_surface(b: &BSplineSurface) -> R<BSurface> {
     if b.points.iter().any(|r| r.len() != nv) {
         return Err("ragged B-spline surface".into());
     }
+    if let Some(plane) = flat_bilinear_plane(b, &u_knots, &v_knots) {
+        return Ok(plane);
+    }
     Ok(match &b.weights {
         None => BSurface::Spline { u_knots, v_knots, points: b.points.clone() },
         Some(w) => {
@@ -1703,6 +1706,36 @@ fn map_bspline_surface(b: &BSplineSurface) -> R<BSurface> {
             BSurface::RationalSpline { u_knots, v_knots, homogeneous }
         }
     })
+}
+
+/// A degree 1 x 1 patch of one span over 2 x 2 control points that form a parallelogram, as
+/// some exporters write a plane (solidcraft#8473's part: knots `0, 0, 0.131, 0.131`): the
+/// record's plane with the patch's own (u, v). The patch is the affine map
+/// `P00 + (u - u0) (P10 - P00) / (u1 - u0) + (v - v0) (P01 - P00) / (v1 - v0)`, which the plane
+/// repeats exactly, so the face's trims stay as they are and its natural normal keeps its
+/// direction. `None` for any other patch (a trapezoid or a skewed quad is a bilinear surface,
+/// not a plane; the corners may close the parallelogram within the schema's 10⁻⁹ of their size),
+/// and for a degenerate one.
+fn flat_bilinear_plane(b: &BSplineSurface, u_knots: &[f64], v_knots: &[f64]) -> Option<BSurface> {
+    if b.weights.is_some() || b.u_degree != 1 || b.v_degree != 1 {
+        return None;
+    }
+    let [u0, u0b, u1, u1b] = <[f64; 4]>::try_from(u_knots).ok()?;
+    let [v0, v0b, v1, v1b] = <[f64; 4]>::try_from(v_knots).ok()?;
+    if u0 != u0b || u1 != u1b || v0 != v0b || v1 != v1b || !(u1 > u0) || !(v1 > v0) {
+        return None;
+    }
+    let [r0, r1] = b.points.as_slice() else { return None };
+    let (&[p00, p01], &[p10, p11]) = (r0.as_slice().try_into().ok()?, r1.as_slice().try_into().ok()?);
+    let (a, c) = (sub(p10, p00), sub(p01, p00));
+    let defect = sub(sub(p11, p10), c);
+    let size = [p00, p01, p10, p11].iter().flatten().fold(1.0f64, |m, x| m.max(x.abs()));
+    if norm(defect) > 1e-9 * size || norm(cross(a, c)) <= 1e-12 * norm(a) * norm(c) {
+        return None;
+    }
+    let (u_axis, v_axis) = (scale(a, 1.0 / (u1 - u0)), scale(c, 1.0 / (v1 - v0)));
+    let origin = sub(sub(p00, scale(u_axis, u0)), scale(v_axis, v0));
+    Some(BSurface::Plane { origin, u_axis, v_axis })
 }
 
 /// A CURVE_REPLICA's curve: the parent (under its SURFACE_CURVE and TRIMMED_CURVE wrappers)
