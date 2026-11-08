@@ -340,7 +340,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
             }
         }
         Kind::Pick(n) => {
-            let hits = pick(app, proj, pos);
+            let hits = curve_operands(tool.cmd, pick(app, proj, pos));
             let entity = hits.iter().find_map(|h| match h {
                 Hit::SketchPoint { id, .. } | Hit::SketchCurve { id, .. } => Some(id.clone()),
                 Hit::Axis { name } => axis_pick(app, &tool, name),
@@ -955,6 +955,20 @@ fn run_pick(app: &mut SolveApp, t: &Tool) {
         _ => json!({"a": k[0], "b": k[1]}),
     };
     let _ = app.run(t.cmd, params);
+}
+
+/// Parallel, Perpendicular, Equal and Collinear constrain two curves, and their commands take no
+/// point. So a click on a curve's end point picks the curve under it, not the point, and a body's
+/// edge is taken rather than its vertex (#12092). Tangent also takes a curve's end point: that
+/// end then lies on the other curve. A body's vertex ends no sketch curve, so Tangent takes the
+/// edge there too.
+fn curve_operands(cmd: &str, hits: Vec<Hit>) -> Vec<Hit> {
+    let points = match cmd {
+        "sketch.constraint.collinear" | "sketch.constraint.equal" | "sketch.constraint.parallel" | "sketch.constraint.perpendicular" => false,
+        "sketch.constraint.tangent" => true,
+        _ => return hits,
+    };
+    hits.into_iter().filter(|h| !matches!(h, Hit::Vertex { .. }) && (points || !matches!(h, Hit::SketchPoint { .. }))).collect()
 }
 
 /// Take back a pending spline point before undo or Backspace reaches the sketch.

@@ -190,6 +190,7 @@ enum HostMenu {
 }
 
 enum HostCommand {
+    Contextual(ContextualPanelAction, egui::Id),
     Layout(LayoutAction),
     Prepared(Box<PreparedHostLayout>),
     Scroll { horizontal: bool, offset: f32, source: egui::Id },
@@ -212,6 +213,28 @@ struct PendingHostCommands {
 struct RegisteredOverlay {
     region: InputRegion,
     layer: Option<egui::LayerId>,
+}
+
+#[derive(Clone)]
+struct ContentFocus {
+    key: ControllerKey,
+    scope: LocalScope,
+    id: egui::Id,
+    visible: egui::Rect,
+    // egui collapses a text selection during an unfocused render. Retain only
+    // the cursor range, never a copy of the editor's undo/IME/scroll state.
+    selection: Option<egui::text::CCursorRange>,
+}
+impl ContentFocus {
+    fn restore_selection(&self, ctx: &egui::Context) {
+        if let Some(selection) = self.selection
+            && let Some(mut state) = egui::TextEdit::load_state(ctx, self.id)
+        {
+            state.cursor.set_char_range(Some(selection));
+            state.store(ctx, self.id);
+            ctx.request_repaint();
+        }
+    }
 }
 
 pub struct WorkspacePanelHost {
@@ -237,13 +260,41 @@ pub struct WorkspacePanelHost {
     focus_request: Option<InstanceId>,
     egui_context: Option<egui::Context>,
     owned_focus: Option<egui::Id>,
+    content_focus: Option<ContentFocus>,
+    content_bookmarks: BTreeMap<ControllerKey, ContentFocus>,
+    content_reports: egui::IdMap<ContentFocus>,
+    restore_content_focus: bool,
+    menu_opener: Option<egui::Id>,
+    menu_entry: Option<egui::Id>,
+    menu_reveal: Option<egui::Id>,
+    menu_items: Vec<egui::Id>,
+    keyboard_shortcuts: Vec<(ContextualPanelAction, egui::KeyboardShortcut)>,
     pending: Option<PendingHostCommands>,
     last_capacity: Option<LogicalRect>,
     last_domain: Option<LogicalRect>,
     last_chrome: Vec<LogicalRect>,
 }
 
+fn validate_requested_opacity(opacity: Option<f32>) -> PanelResult<()> {
+    if opacity.is_some_and(|value| !value.is_finite() || !(0.0..=1.0).contains(&value)) {
+        return Err(error(Rule::Bounds, "invalid requested panel opacity"));
+    }
+    Ok(())
+}
+
 impl WorkspacePanelHost {
+    /// Override host paint opacity for this runtime only, without changing saved layout.
+    pub fn set_requested_opacity(&mut self, opacity: Option<f32>) -> PanelResult<()> {
+        validate_requested_opacity(opacity)?;
+        if self.options.geometry.requested_opacity != opacity {
+            self.invalidate_geometry();
+            self.options.geometry.requested_opacity = opacity;
+            self.options.geometry.surfaces = None;
+            self.options.geometry.surface_alpha = None;
+        }
+        Ok(())
+    }
+
     pub(crate) fn set_gap(&mut self, gap: f32) -> PanelResult<()> {
         let metrics = HostMetrics { gap, ..self.options.metrics };
         metrics.validate()?;
@@ -265,12 +316,7 @@ impl WorkspacePanelHost {
         for section in options.geometry.effective_surfaces.keys() {
             valid_id(&section.0)?;
         }
-        // Declarative transparency/contrast policy belongs to the surface peer.
-        // Appearance follows the existing adaptive Container, including its fill
-        // alpha; this guard does not force an opaque paint override.
-        if !options.geometry.default_opaque || options.geometry.effective_surfaces.values().any(|surface| *surface == PanelSurface::Translucent) {
-            return Err(error(Rule::Capability, "translucent host requires the surface renderer"));
-        }
+        validate_requested_opacity(options.geometry.requested_opacity)?;
         Ok(Self {
             options,
             native_capabilities: HostCapabilities::default(),
@@ -292,12 +338,143 @@ impl WorkspacePanelHost {
             focus_request: None,
             egui_context: None,
             owned_focus: None,
+            content_focus: None,
+            content_bookmarks: BTreeMap::new(),
+            content_reports: egui::IdMap::default(),
+            restore_content_focus: false,
+            menu_opener: None,
+            menu_entry: None,
+            menu_reveal: None,
+            menu_items: Vec::new(),
+            keyboard_shortcuts: [
+                (ContextualPanelAction::ResizeLeft, egui::Key::ArrowLeft),
+                (ContextualPanelAction::ResizeRight, egui::Key::ArrowRight),
+                (ContextualPanelAction::ResizeUp, egui::Key::ArrowUp),
+                (ContextualPanelAction::ResizeDown, egui::Key::ArrowDown),
+            ]
+            .into_iter()
+            .map(|(action, key)| (action, egui::KeyboardShortcut::new(egui::Modifiers::NONE, key)))
+            .collect(),
             pending: None,
             last_capacity: None,
             last_domain: None,
             last_chrome: Vec::new(),
         })
     }
+    pub(crate) fn set_keyboard_shortcuts(&mut self, shortcuts: Vec<(ContextualPanelAction, egui::KeyboardShortcut)>) {
+        self.keyboard_shortcuts = shortcuts.into_iter().take(ContextualPanelAction::ALL.len() * 8).collect();
+    }
+
+    pub(crate) fn contextual_action(&self, runtime: &PanelRuntime, action: ContextualPanelAction) -> PanelResult<LayoutAction> {
+        let frame = self.frame.as_ref().ok_or_else(|| error(Rule::Availability, "panel host is not presented"))?;
+        let reference = self.command_reference(runtime)?;
+        if reference != frame.layout {
+            return Err(error(Rule::Revision, "presented panel geometry is stale"));
+        }
+        self.contextual_in_frame(runtime, frame, action)
+    }
+
+    fn contextual_in_frame(&self, runtime: &PanelRuntime, frame: &HostFrame, action: ContextualPanelAction) -> PanelResult<LayoutAction> {
+        let ctx = self.egui_context.as_ref().ok_or_else(|| error(Rule::Availability, "panel UI context unavailable"))?;
+        if self.scope.as_ref() != Some(&(runtime_scope(runtime), runtime.environment().window.clone()))
+            || frame.layout.revision != runtime.layout().inspect().revision
+            || ui_kit::Container::modal_input_blocked(ctx)
+            || !ctx.input(|input| input.focused)
+        {
+            return Err(error(Rule::Availability, "panel focus context is interrupted"));
+        }
+        let focused = ctx.memory(|memory| memory.focused()).ok_or_else(|| error(Rule::Availability, "no panel control focused"))?;
+        let response = ctx
+            .read_response(focused)
+            .filter(|response| response.enabled() && response.interact_rect.is_positive())
+            .ok_or_else(|| error(Rule::Availability, "focused panel control unavailable"))?;
+        let focus_at = self.content_reports.get(&focused).map_or(response.interact_rect.center(), |report| report.visible.center());
+        if !owns_current_layer_at(ctx, response.layer_id, focus_at) {
+            return Err(error(Rule::Availability, "panel focus layer changed"));
+        }
+        let control = frame.controls.iter().find(|control| control.id == focused && control.enabled);
+        let instance = control
+            .and_then(|control| match &control.target {
+                HostControlTarget::Pointer(target) => pointer_instance(target).cloned(),
+                HostControlTarget::Shared { instance, .. }
+                | HostControlTarget::Content { instance, .. }
+                | HostControlTarget::PanelMenu { instance } => Some(instance.clone()),
+                _ => None,
+            })
+            .or_else(|| {
+                self.content_reports
+                    .get(&focused)
+                    .filter(|report| {
+                        report.scope == runtime_scope(runtime)
+                            && runtime.instance_owner(&report.key.instance).is_ok_and(|owner| owner == report.key.owner)
+                    })
+                    .map(|report| report.key.instance.clone())
+            });
+        use ContextualPanelAction::*;
+        if matches!(action, ResizeLeft | ResizeRight | ResizeUp | ResizeDown | ResetSash) {
+            let target = control
+                .and_then(|control| if let HostControlTarget::Pointer(target) = &control.target { Some(target) } else { None })
+                .ok_or_else(|| error(Rule::Availability, "focused control is not a sash"))?;
+            let candidate = super::interaction::keyboard_resize_action(runtime.layout(), &frame.layout, target, action)?;
+            prepare_host_layout(runtime.layout(), &runtime_scope(runtime), &frame.layout, candidate.clone())?;
+            return Ok(candidate);
+        }
+        let instance = instance.ok_or_else(|| error(Rule::Availability, "focus does not belong to panel content or chrome"))?;
+        runtime.layout().availability(&instance).require()?;
+
+        match action {
+            FocusNext | FocusPrevious => {
+                let eligible: Vec<_> = frame
+                    .layout
+                    .sections
+                    .iter()
+                    .flat_map(|card| runtime.layout().layout().section(&card.section).into_iter().flat_map(|section| section.tabs.iter()))
+                    .filter(|id| runtime.layout().availability(id) == Availability::Available)
+                    .collect();
+                let index =
+                    eligible.iter().position(|id| **id == instance).ok_or_else(|| error(Rule::Availability, "focused panel is not presented"))?;
+                let next = if action == FocusNext { (index + 1) % eligible.len() } else { (index + eligible.len() - 1) % eligible.len() };
+                Ok(apply_action(frame.layout.revision, vec![Mutation::Focus { instance: eligible[next].clone() }]))
+            }
+            Toggle => {
+                let candidate = shared_action(
+                    runtime,
+                    &instance,
+                    &HostSharedAction::Collapse,
+                    &self.native_capabilities,
+                    frame.layout.capacity,
+                    &frame.layout.geometry_policy.identity_reservations,
+                )?;
+                prepare_host_layout(runtime.layout(), &runtime_scope(runtime), &frame.layout, candidate.clone())?;
+                Ok(candidate)
+            }
+            MoveNextZone => {
+                let current = runtime.layout().layout().containing(&instance)?.location.zone();
+                let zones = [Zone::Left, Zone::Right, Zone::Bottom, Zone::Floating];
+                let start = zones.iter().position(|zone| *zone == current).unwrap_or(0);
+                for step in 1..=zones.len() {
+                    let zone = zones[(start + step) % zones.len()];
+                    if zone == current {
+                        continue;
+                    }
+                    if let Ok(candidate) = shared_action(
+                        runtime,
+                        &instance,
+                        &HostSharedAction::Move(zone),
+                        &self.native_capabilities,
+                        frame.layout.capacity,
+                        &frame.layout.geometry_policy.identity_reservations,
+                    ) && prepare_host_layout(runtime.layout(), &runtime_scope(runtime), &frame.layout, candidate.clone()).is_ok()
+                    {
+                        return Ok(candidate);
+                    }
+                }
+                Err(error(Rule::Availability, "panel has no allowed next zone"))
+            }
+            _ => Err(error(Rule::Availability, "unsupported contextual panel action")),
+        }
+    }
+
     pub fn frame(&self) -> Option<&HostFrame> {
         self.frame.as_ref()
     }
@@ -391,8 +568,7 @@ impl WorkspacePanelHost {
         self.interaction.cancel();
         self.pending = None;
         self.frame = None;
-        self.menu = None;
-        self.menu_anchor = None;
+        self.clear_menu();
         self.overlays.clear();
         self.preview_started = None;
         self.pending_escape = false;
@@ -403,6 +579,10 @@ impl WorkspacePanelHost {
     /// Owner/scope loss and application hiding also release owned keyboard input.
     pub(crate) fn invalidate_context(&mut self) {
         self.invalidate_geometry();
+        self.content_focus = None;
+        self.content_bookmarks.clear();
+        self.content_reports.clear();
+        self.restore_content_focus = false;
         self.outcomes.clear();
         self.outcome_frame = None;
         if let (Some(ctx), Some(focused)) = (&self.egui_context, self.owned_focus.take()) {
@@ -461,12 +641,16 @@ impl WorkspacePanelHost {
         self.prepare_in_domain(runtime, capacity, capacity, &[])
     }
 
-    pub(crate) fn note_egui_context(&mut self, ctx: &egui::Context) {
+    pub(crate) fn note_egui_context(&mut self, ctx: &egui::Context, force_opaque: bool) {
         self.egui_context = Some(ctx.clone());
-        let surface_alpha =
-            Some(HostSurfaceAlpha { docked: ui_kit::panel_host_frame(ctx, false).fill.a(), floating: ui_kit::panel_host_frame(ctx, true).fill.a() });
-        if self.options.geometry.surface_alpha != surface_alpha {
+        let surfaces = HostSurfaceStyle::capture(ctx, force_opaque, self.options.geometry.requested_opacity, self.options.geometry.surfaces.as_ref());
+        let surface_alpha = Some(HostSurfaceAlpha {
+            docked: surfaces.appearance(PanelSurface::FollowZone, false).fill.a(),
+            floating: surfaces.appearance(PanelSurface::FollowZone, true).fill.a(),
+        });
+        if self.options.geometry.surfaces.as_ref() != Some(&surfaces) || self.options.geometry.surface_alpha != surface_alpha {
             self.invalidate_geometry();
+            self.options.geometry.surfaces = Some(surfaces);
             self.options.geometry.surface_alpha = surface_alpha;
         }
     }
@@ -495,8 +679,7 @@ impl WorkspacePanelHost {
                 self.last_chrome.clear();
                 self.frame = None;
                 self.interaction.cancel();
-                self.menu = None;
-                self.menu_anchor = None;
+                self.clear_menu();
                 self.overlays.clear();
                 return Err(reason);
             }
@@ -578,6 +761,19 @@ impl WorkspacePanelHost {
         native: &mut dyn NativeHostAdapter,
         services: &mut ContentServices<'_>,
     ) -> PanelResult<()> {
+        self.show_deferred_with_content(ui, runtime, native, services, &mut super::host::ControllerFrameContent)
+    }
+
+    /// Paint using content borrowed only for this frame. Layout, chrome and
+    /// current-pass focus provenance remain owned by the shared host.
+    pub fn show_deferred_with_content(
+        &mut self,
+        ui: &mut egui::Ui,
+        runtime: &mut PanelRuntime,
+        native: &mut dyn NativeHostAdapter,
+        services: &mut ContentServices<'_>,
+        frame_content: &mut dyn FramePanelContent,
+    ) -> PanelResult<()> {
         if !ui.is_visible() || ui.is_sizing_pass() {
             self.invalidate_context();
             return runtime.mount_in_app(&ResolvedLayout::default(), &mut EmptyPanelHost, services);
@@ -621,6 +817,30 @@ impl WorkspacePanelHost {
                 header_icons.insert((instance.id.clone(), action.id.clone()), action.icon.clone());
             }
         }
+        let requested = self.focus_request.clone().or_else(|| {
+            let focused = runtime.layout().interaction().focused.clone();
+            (focused != self.observed_focus).then_some(focused).flatten()
+        });
+        if let Some(instance) = requested.as_ref()
+            && let Some(card) = frame
+                .layout
+                .sections
+                .iter()
+                .find(|card| runtime.layout().layout().section(&card.section).is_ok_and(|section| section.tabs.contains(instance)))
+        {
+            let target = egui_rect(card.header);
+            let visible = egui_rect(frame.layout.capacity);
+            let delta_x = if target.left() < visible.left() { target.left() - visible.left() } else { (target.right() - visible.right()).max(0.0) };
+            let delta_y = if target.top() < visible.top() { target.top() - visible.top() } else { (target.bottom() - visible.bottom()).max(0.0) };
+            if delta_x != 0.0 || delta_y != 0.0 {
+                self.options.geometry.scroll.x =
+                    (self.options.geometry.scroll.x + delta_x).clamp(0.0, (frame.layout.extent.width - frame.layout.capacity.size.width).max(0.0));
+                self.options.geometry.scroll.y =
+                    (self.options.geometry.scroll.y + delta_y).clamp(0.0, (frame.layout.extent.height - frame.layout.capacity.size.height).max(0.0));
+                frame.layout =
+                    resolve_frame_layout(runtime, frame.layout.render_domain, frame.layout.capacity, &frame.layout.chrome_obstacles, &self.options)?;
+            }
+        }
         for control in &frame.layout.controls {
             let target = HostControlTarget::Pointer(control.target.clone());
             let instance = pointer_instance(&control.target);
@@ -648,7 +868,7 @@ impl WorkspacePanelHost {
                             .layout()
                             .instance(id)
                             .and_then(|panel| runtime.layout().registry().get(&panel.kind))
-                            .is_ok_and(|spec| spec.features.collapsible)
+                            .is_ok_and(|spec| spec.collapsible_in(section.location.zone()))
                     })
                 }),
                 _ => true,
@@ -674,16 +894,23 @@ impl WorkspacePanelHost {
         let mut commands = Vec::new();
         let mut pointer_events = Vec::new();
         let mut unpainted = Vec::new();
+        self.content_reports.clear();
         let mut renderer = WorkspaceContentHost {
             ui,
+            frame_content,
             layout: &frame.layout,
             move_source: self.interaction.move_source(),
+            open_menu: self.menu.as_ref(),
             controls: &mut frame.controls,
             metadata: &metadata,
             header_icons: &header_icons,
             scope: &scope,
             window: &window,
             owned_focus: &mut self.owned_focus,
+            content_focus: &mut self.content_focus,
+            content_bookmarks: &mut self.content_bookmarks,
+            content_reports: &mut self.content_reports,
+            motion: runtime.environment().motion,
             commands: &mut commands,
             allow_actions,
             unpainted: &mut unpainted,
@@ -701,6 +928,9 @@ impl WorkspacePanelHost {
                 runtime.repaint_in_app(&frame.layout.resolved, &mut renderer, services)
             }
         });
+        if mount.is_err() {
+            self.content_reports.clear();
+        }
         // An Area's first sizing pass is invisible and non-interactable. Keep
         // the intended resolved geometry, but never publish it as actual paint
         // or an input/occlusion shield, even if no further egui pass is allowed.
@@ -778,8 +1008,48 @@ impl WorkspacePanelHost {
                     .or_else(|| frame.controls.iter().filter(actual).find(|control| matches!(&control.target, HostControlTarget::Pointer(HostPointerTarget::Tab { instance: id }) if id == instance)))
                     .or_else(|| frame.controls.iter().filter(actual).find(|control| control.target == HostControlTarget::Pointer(HostPointerTarget::OverflowAll)));
                 if let Some(control) = target {
-                    ui.memory_mut(|memory| memory.request_focus(control.id));
+                    let bookmark = runtime
+                        .instance_owner(instance)
+                        .ok()
+                        .and_then(|owner| self.content_bookmarks.get(&ControllerKey { instance: instance.clone(), owner }));
+                    let eligible = bookmark.filter(|bookmark| {
+                        bookmark.scope == scope
+                            && frame.layout.sections.iter().any(|section| section.instance == *instance && !section.collapsed)
+                            && self
+                                .content_reports
+                                .get(&bookmark.id)
+                                .is_some_and(|report| report.key == bookmark.key && report.scope == bookmark.scope)
+                    });
+                    // A typed focus request is deliberate. Passive restoration
+                    // below is the path that must yield to foreign focus.
+                    let target = eligible.map_or(control.id, |bookmark| bookmark.id);
+                    if let Some(bookmark) = eligible {
+                        bookmark.restore_selection(ui.ctx());
+                    }
+                    ui.memory_mut(|memory| memory.request_focus(target));
+                    self.owned_focus = Some(target);
                     self.focus_request = None;
+                }
+            }
+        }
+        if self.restore_content_focus && !ui_kit::Container::modal_input_blocked(ui.ctx()) {
+            let current = ui.memory(|memory| memory.focused());
+            let deliberate = current.is_some_and(|id| ui.ctx().read_response(id).is_some_and(|response| response.gained_focus()));
+            if deliberate {
+                self.restore_content_focus = false;
+            } else if current.is_none()
+                && let Some(bookmark) = &self.content_focus
+            {
+                let eligible = bookmark.scope == scope
+                    && runtime.instance_owner(&bookmark.key.instance).is_ok_and(|owner| owner == bookmark.key.owner)
+                    && runtime.layout().availability(&bookmark.key.instance) == Availability::Available
+                    && frame.layout.sections.iter().any(|section| section.instance == bookmark.key.instance && !section.collapsed)
+                    && self.content_reports.get(&bookmark.id).is_some_and(|report| report.key == bookmark.key && report.scope == bookmark.scope);
+                if eligible {
+                    bookmark.restore_selection(ui.ctx());
+                    ui.memory_mut(|memory| memory.request_focus(bookmark.id));
+                    self.owned_focus = Some(bookmark.id);
+                    self.restore_content_focus = false;
                 }
             }
         }
@@ -846,12 +1116,14 @@ impl WorkspacePanelHost {
             frame.preview = None;
             commands.clear();
             pointer_events.clear();
-            self.menu = None;
-            self.menu_anchor = None;
+            self.clear_menu();
             self.pending_escape = false;
             self.preview_started = None;
             self.focus_request = None;
             self.last_input_frame = Some(frame_number);
+            self.restore_content_focus |= self.content_focus.as_ref().is_some_and(|bookmark| {
+                ui.memory(|memory| memory.focused()) == Some(bookmark.id) || ui.memory(|memory| memory.had_focus_last_frame(bookmark.id))
+            });
             let owned = self.owned_focus.take();
             ui.memory_mut(|memory| {
                 if let Some(focused) = memory.focused()
@@ -863,6 +1135,12 @@ impl WorkspacePanelHost {
             // Report what this pass painted; remove private menu/preview state
             // on the next paint without changing viewport reservations.
             ui.ctx().request_repaint();
+        }
+        if !hard_modal
+            && self.restore_content_focus
+            && ui.memory(|memory| memory.focused()).is_some_and(|id| ui.ctx().read_response(id).is_some_and(|response| response.gained_focus()))
+        {
+            self.restore_content_focus = false;
         }
         let allow_actions =
             allow_actions && !stale && mount.is_ok() && ui.is_enabled() && ui.is_visible() && ui.input(|input| input.focused) && !hard_modal;
@@ -891,6 +1169,35 @@ impl WorkspacePanelHost {
                 frame.preview = None;
                 pointer_events.clear();
             }
+            self.menu_keyboard(ui, &frame);
+            for (action, shortcut) in &self.keyboard_shortcuts {
+                let pressed = ui.input(|input| {
+                    input.events.iter().any(|event| {
+                        matches!(event,
+                            egui::Event::Key { key, modifiers, pressed: true, .. }
+                            if *key == shortcut.logical_key && modifiers.matches_logically(shortcut.modifiers)
+                        )
+                    })
+                });
+                if !pressed {
+                    continue;
+                }
+                // TextEdit keeps its own editing chords; explicit registered
+                // panel commands still resolve the same owned content context.
+                if ui.ctx().text_edit_focused() {
+                    break;
+                }
+                let available = self.contextual_in_frame(runtime, &frame, *action);
+                // Editors have already had first refusal. A bounded/no-op split
+                // still owns its axis key; an unrelated context never consumes it.
+                let owned_bound = available.as_ref().err().is_some_and(|reason| reason.rule == Rule::Bounds);
+                if (available.is_ok() || owned_bound)
+                    && ui.input_mut(|input| input.consume_shortcut(shortcut))
+                    && let Some(source) = ui.memory(|memory| memory.focused())
+                {
+                    commands.push(HostCommand::Contextual(*action, source));
+                }
+            }
             self.pointer_input(ui, runtime, &scope, &mut frame, &mut commands, pointer_events);
             for control in &frame.controls {
                 if ui.ctx().read_response(control.id).is_some_and(|response| response.has_focus() && response.gained_focus()) {
@@ -908,13 +1215,9 @@ impl WorkspacePanelHost {
         {
             let now = ui.input(|input| input.time);
             let started = *self.preview_started.get_or_insert(now);
-            let duration = if runtime.environment().motion == Motion::Reduced || ui.style().animation_time <= 0.0 {
-                0.0
-            } else {
-                ui.style().animation_time.clamp(0.12, 0.16)
-            };
+            let duration = crate::theme::panel_motion_duration(ui.ctx(), runtime.environment().motion == Motion::Reduced);
             let progress = if duration <= 0.0 { 1.0 } else { ((now - started) as f32 / duration).clamp(0.0, 1.0) };
-            let opacity = 1.0 - (1.0 - progress).powi(3);
+            let opacity = crate::theme::panel_motion_ease(progress);
             if let Some(projected) = &preview.projected {
                 for section in &projected.sections {
                     if section.outer != preview.bounds
@@ -956,6 +1259,18 @@ impl WorkspacePanelHost {
         let mut dismiss_popup_peek = false;
         for command in commands {
             let (command, source) = match command {
+                HostCommand::Contextual(action, source) => {
+                    if !owns_focused_action(ui.ctx(), source) {
+                        continue;
+                    }
+                    match self.contextual_in_frame(runtime, &frame, action) {
+                        Ok(action) => (HostCommand::Layout(action), Some(source)),
+                        Err(reason) => {
+                            frame.events.push(HostEvent::Rejected { action: None, error: reason });
+                            continue;
+                        }
+                    }
+                }
                 HostCommand::WidgetLayout(action, source) => {
                     if !owns_widget_action(ui.ctx(), source) {
                         continue;
@@ -1034,8 +1349,7 @@ impl WorkspacePanelHost {
                             frame.events.push(HostEvent::PreparedCommitted { reply: reply.clone() });
                             frame.reply = reply;
                             self.last_rejection = None;
-                            self.menu = None;
-                            self.menu_anchor = None;
+                            self.clear_menu();
                             frame.next_layout = resolve_frame_layout(
                                 runtime,
                                 frame.layout.render_domain,
@@ -1075,8 +1389,7 @@ impl WorkspacePanelHost {
                             }
                             frame.events.push(HostEvent::Committed { action, reply: reply.clone() });
                             frame.reply = reply;
-                            self.menu = None;
-                            self.menu_anchor = None;
+                            self.clear_menu();
                             self.interaction.cancel();
                             frame.preview = None;
                             frame.next_layout = resolve_frame_layout(
@@ -1112,13 +1425,22 @@ impl WorkspacePanelHost {
                 }
                 HostCommand::OpenMenu { menu, anchor, source, secondary } => {
                     if allow_actions && !dismiss_menu && owns_menu_action(ui.ctx(), source, secondary) {
+                        // A submenu row replaces its parent menu, so retain the
+                        // live root launcher for Escape while tracking the row
+                        // separately for the next menu's keyboard entry.
+                        let nested = self.menu.is_some() && self.menu_items.contains(&source);
+                        if !nested {
+                            self.menu_opener = Some(source);
+                        }
+                        self.menu_entry = Some(source);
+                        self.menu_reveal = None;
                         self.menu = Some(menu);
                         self.menu_anchor = Some(anchor);
                         // This pass still reports only the menu actually painted.
                         ui.ctx().request_repaint();
                     }
                 }
-                HostCommand::Layout(_) | HostCommand::WidgetLayout(_, _) | HostCommand::Prepared(_) => {}
+                HostCommand::Layout(_) | HostCommand::WidgetLayout(_, _) | HostCommand::Prepared(_) | HostCommand::Contextual(_, _) => {}
             }
         }
         if painted_move_source.as_ref() != self.interaction.move_source() {
@@ -1163,6 +1485,75 @@ impl WorkspacePanelHost {
         self.overlays = overlays;
         self.frame = Some(frame);
         mount
+    }
+
+    fn clear_menu(&mut self) {
+        self.menu = None;
+        self.menu_anchor = None;
+        self.menu_opener = None;
+        self.menu_entry = None;
+        self.menu_reveal = None;
+        self.menu_items.clear();
+    }
+
+    fn menu_keyboard(&mut self, ui: &mut egui::Ui, frame: &HostFrame) {
+        let Some(_bounds) = frame.menu_bounds else {
+            return;
+        };
+        let items: Vec<_> =
+            self.menu_items.iter().copied().filter(|id| ui.ctx().read_response(*id).is_some_and(|response| response.enabled())).collect();
+        if items.is_empty() {
+            return;
+        }
+        let focused = ui.memory(|memory| memory.focused());
+        let index = items.iter().position(|control| Some(*control) == focused);
+        if let Some(source) = self.menu_entry.take()
+            && (focused == Some(source) || focused.is_none())
+        {
+            ui.memory_mut(|memory| memory.request_focus(items[0]));
+            self.menu_reveal = Some(items[0]);
+            ui.ctx().request_repaint();
+        }
+        let focused = ui.memory(|memory| memory.focused());
+        let index = index.or_else(|| items.iter().position(|control| Some(*control) == focused));
+        if let Some(index) = index {
+            ui.memory_mut(|memory| {
+                memory.set_focus_lock_filter(items[index], egui::EventFilter { vertical_arrows: true, escape: true, ..Default::default() })
+            });
+            let destination = ui.input_mut(|input| {
+                if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
+                    Some((index + 1) % items.len())
+                } else if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+                    Some((index + items.len() - 1) % items.len())
+                } else if input.consume_key(egui::Modifiers::NONE, egui::Key::Home) {
+                    Some(0)
+                } else if input.consume_key(egui::Modifiers::NONE, egui::Key::End) {
+                    Some(items.len() - 1)
+                } else {
+                    None
+                }
+            });
+            if let Some(destination) = destination {
+                ui.memory_mut(|memory| memory.request_focus(items[destination]));
+                self.menu_reveal = Some(items[destination]);
+                // The next row paint requests scrolling while its ScrollArea
+                // is active; a request after ScrollArea::show is too late.
+                ui.ctx().request_repaint();
+            }
+            if self.pending_escape || ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+                let opener = self.menu_opener;
+                self.clear_menu();
+                self.pending_escape = false;
+                if let Some(opener) = opener.filter(|opener| {
+                    frame.controls.iter().any(|control| control.id == *opener && control.enabled)
+                        && ui.ctx().read_response(*opener).is_some_and(|response| response.enabled())
+                }) {
+                    ui.memory_mut(|memory| memory.request_focus(opener));
+                    self.owned_focus = Some(opener);
+                }
+                ui.ctx().request_repaint();
+            }
+        }
     }
 
     fn input_rects(&self, frame: &HostFrame) -> Vec<LogicalRect> {
@@ -1275,33 +1666,17 @@ impl WorkspacePanelHost {
         _locale: crate::i18n::Locale,
     ) {
         for control in &frame.controls {
-            let HostControlTarget::Pointer(target @ HostPointerTarget::Sash { .. }) = &control.target else {
+            let HostControlTarget::Pointer(target @ HostPointerTarget::Sash { first, .. }) = &control.target else {
                 continue;
             };
-            let response = ui_kit::panel_host_sash(ui, control.id, egui_rect(control.bounds), &control.accessible_name);
+            let Some(panel) = frame.layout.sections.iter().find(|panel| panel.section == *first) else {
+                continue;
+            };
+            let horizontal = panel.zone != Zone::Bottom;
+            let extent = if horizontal { panel.outer.size.height } else { panel.outer.size.width };
+            let response = ui_kit::panel_host_sash(ui, control.id, egui_rect(control.bounds), &control.accessible_name, horizontal, extent);
             if allow_actions && response.double_clicked() {
                 pointer_events.push((response.id, HostPointerEvent::DoubleClick { target: target.clone() }));
-            }
-            if allow_actions && response.has_focus() && !response.dragged() {
-                let horizontal = control.bounds.size.height > control.bounds.size.width;
-                let delta = ui.input_mut(|input| {
-                    let back = if horizontal { egui::Key::ArrowLeft } else { egui::Key::ArrowUp };
-                    let forward = if horizontal { egui::Key::ArrowRight } else { egui::Key::ArrowDown };
-                    u8::from(input.consume_key(egui::Modifiers::NONE, forward)) as f32
-                        - u8::from(input.consume_key(egui::Modifiers::NONE, back)) as f32
-                });
-                if delta != 0.0 {
-                    let at = center(control.bounds);
-                    let step = crate::theme::Tokens::get().space_8.max(HOST_DRAG_THRESHOLD);
-                    let end = Point { x: at.x + if horizontal { delta * step } else { 0.0 }, y: at.y + if horizontal { 0.0 } else { delta * step } };
-                    for event in [
-                        HostPointerEvent::Press { at, target: Some(target.clone()) },
-                        HostPointerEvent::Move { at: end },
-                        HostPointerEvent::Release { at: end },
-                    ] {
-                        pointer_events.push((response.id, event));
-                    }
-                }
             }
         }
     }
@@ -1339,8 +1714,7 @@ impl WorkspacePanelHost {
         let reserved_escape = std::mem::take(&mut self.pending_escape);
         if reserved_escape {
             if !self.interaction.is_captured() && self.menu.is_some() {
-                self.menu = None;
-                self.menu_anchor = None;
+                self.clear_menu();
             } else {
                 events.push(HostPointerEvent::Escape);
             }
@@ -1352,8 +1726,7 @@ impl WorkspacePanelHost {
                         continue;
                     }
                     if !self.interaction.is_captured() && self.menu.is_some() {
-                        self.menu = None;
-                        self.menu_anchor = None;
+                        self.clear_menu();
                     } else {
                         events.push(HostPointerEvent::Escape);
                     }
@@ -1426,8 +1799,7 @@ impl WorkspacePanelHost {
                                 continue;
                             }
                             if self.menu.is_some() {
-                                self.menu = None;
-                                self.menu_anchor = None;
+                                self.clear_menu();
                             }
                             if body_press || content_control || other_overlay_press {
                                 events.push(HostPointerEvent::OutsidePress { at, inside_owned_overlay: false });
@@ -1571,6 +1943,9 @@ impl PanelLocalServices for HostLocalBridge<'_> {
             self.record_overlay(instance, overlay);
         }
         Ok(())
+    }
+    fn register_focus_response(&mut self, scope: &LocalScope, instance: &InstanceId, response: &egui::Response) -> PanelResult<()> {
+        self.inner.register_focus_response(scope, instance, response)
     }
     fn release(&mut self, scope: &LocalScope, instance: &InstanceId) {
         self.inner.release(scope, instance);
@@ -1780,7 +2155,7 @@ impl PanelHost for EmptyPanelHost {
     }
 }
 
-fn rule_key(rule: Rule) -> &'static str {
+pub(super) fn rule_key(rule: Rule) -> &'static str {
     match rule {
         Rule::Availability => "ui.panel_host.rule.availability",
         Rule::Bounds => "ui.panel_host.rule.bounds",
@@ -1805,14 +2180,20 @@ fn rule_key(rule: Rule) -> &'static str {
 
 struct WorkspaceContentHost<'a> {
     ui: &'a mut egui::Ui,
+    frame_content: &'a mut dyn FramePanelContent,
     layout: &'a HostLayout,
     move_source: Option<&'a InstanceId>,
+    open_menu: Option<&'a HostMenu>,
     controls: &'a mut Vec<HostFrameControl>,
     metadata: &'a BTreeMap<InstanceId, PanelPresentation>,
     header_icons: &'a BTreeMap<(InstanceId, ControlId), String>,
     scope: &'a LocalScope,
     window: &'a HostId,
     owned_focus: &'a mut Option<egui::Id>,
+    content_focus: &'a mut Option<ContentFocus>,
+    content_bookmarks: &'a mut BTreeMap<ControllerKey, ContentFocus>,
+    content_reports: &'a mut egui::IdMap<ContentFocus>,
+    motion: Motion,
     commands: &'a mut Vec<HostCommand>,
     allow_actions: bool,
     unpainted: &'a mut Vec<(egui::LayerId, LogicalRect)>,
@@ -1845,11 +2226,25 @@ impl PanelHost for WorkspaceContentHost<'_> {
         let surface_target = HostControlTarget::Pointer(HostPointerTarget::Surface { instance: geometry.instance.clone() });
         let surface_id = scoped_id(self.scope, self.window, Some(&context.owner), &surface_target);
         let mut failure = None;
+        let wanted_focus = self
+            .content_bookmarks
+            .get(&ControllerKey { instance: context.instance.clone(), owner: context.owner.clone() })
+            .map(|bookmark| bookmark.id);
+        let fallback;
+        let style = if let Some(style) = self.layout.geometry_policy.surfaces.as_ref() {
+            style
+        } else {
+            fallback = HostSurfaceStyle::capture(self.ui.ctx(), false, self.layout.geometry_policy.requested_opacity, None);
+            &fallback
+        };
+        let appearance = style.appearance(section.surface, section.peek || section.zone == Zone::Floating);
         ui_kit::panel_host_surface(
             self.ui,
             section_surface_id(self.scope, self.window, &section.section),
             egui_rect(section.outer),
             section.peek || section.zone == Zone::Floating,
+            appearance.fill,
+            matches!(appearance.contrast, ContrastOutcome::RetainReadableFallback { .. }).then(|| style.palette(appearance)),
             |ui, content_clip| {
                 if (section.peek || section.zone == Zone::Floating) && (!ui.is_visible() || ui.is_sizing_pass()) {
                     self.unpainted.push((ui.layer_id(), section.outer));
@@ -1859,6 +2254,17 @@ impl PanelHost for WorkspaceContentHost<'_> {
                 // painted card; child controls retain their own accessible responses.
                 let response = ui.interact(egui_rect(section.outer), surface_id, egui::Sense::click());
                 response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Unknown, ui.is_enabled(), &presentation.title));
+                if section.tabs.len() + section.hidden_tabs.len() > 1 {
+                    let mut tablist = ui.new_child(
+                        egui::UiBuilder::new()
+                            .id_salt("tablist_semantics")
+                            .scope_id(surface_id.with("tablist"))
+                            .max_rect(egui_rect(section.header))
+                            .accessibility_role(egui::accesskit::Role::TabList)
+                            .accessibility_label(&presentation.title),
+                    );
+                    tablist.set_clip_rect(ui.clip_rect());
+                }
                 for control in self.controls.iter() {
                     let HostControlTarget::Pointer(target) = &control.target else {
                         continue;
@@ -1878,11 +2284,31 @@ impl PanelHost for WorkspaceContentHost<'_> {
                     }
                     let data = pointer_instance(target).and_then(|instance| self.metadata.get(instance));
                     let label = &control.accessible_name;
+                    let mut tab_ui;
+                    let target_ui = if matches!(target, HostPointerTarget::Tab { .. }) {
+                        tab_ui = ui.new_child(
+                            egui::UiBuilder::new()
+                                .id_salt(control.id)
+                                .max_rect(egui_rect(control.bounds))
+                                .accessibility_parent(surface_id.with("tablist")),
+                        );
+                        &mut tab_ui
+                    } else {
+                        &mut *ui
+                    };
                     let response = if matches!(target, HostPointerTarget::Collapse { .. }) {
-                        ui_kit::panel_host_disclosure(ui, control.id, egui_rect(control.bounds), label, control.enabled, section.collapsed)
+                        ui_kit::panel_host_disclosure(
+                            target_ui,
+                            control.id,
+                            egui_rect(control.bounds),
+                            label,
+                            control.enabled,
+                            section.collapsed,
+                            self.motion == Motion::Reduced,
+                        )
                     } else {
                         ui_kit::panel_host_control_label_opacity(
-                            ui,
+                            target_ui,
                             control.id,
                             egui_rect(control.bounds),
                             HostChrome {
@@ -1922,6 +2348,29 @@ impl PanelHost for WorkspaceContentHost<'_> {
                             },
                         )
                     };
+                    ui.ctx().accesskit_node_builder(response.id, |node| match target {
+                        HostPointerTarget::Tab { instance } => {
+                            node.set_role(egui::accesskit::Role::Tab);
+                            node.set_selected(*instance == section.instance);
+                        }
+                        HostPointerTarget::Header { .. } | HostPointerTarget::Collapse { .. } => node.set_expanded(!section.collapsed),
+                        HostPointerTarget::Menu { instance } => {
+                            node.set_has_popup(egui::accesskit::HasPopup::Menu);
+                            node.set_expanded(self.open_menu == Some(&HostMenu::Panel(instance.clone())));
+                        }
+                        HostPointerTarget::TabOverflow { section } => {
+                            node.set_has_popup(egui::accesskit::HasPopup::Menu);
+                            node.set_expanded(self.open_menu == Some(&HostMenu::Tabs(section.clone())));
+                        }
+                        HostPointerTarget::HeaderAction { action, .. } => {
+                            if let Some(pressed) =
+                                data.and_then(|data| data.actions.iter().find(|entry| entry.id == *action)).and_then(|entry| entry.pressed)
+                            {
+                                node.set_toggled(if pressed { egui::accesskit::Toggled::True } else { egui::accesskit::Toggled::False });
+                            }
+                        }
+                        _ => {}
+                    });
                     let clicked = response.clicked();
                     let secondary = response.secondary_clicked();
                     if let Some(status) = data.and_then(|value| value.status.as_deref()) {
@@ -2000,14 +2449,47 @@ impl PanelHost for WorkspaceContentHost<'_> {
                 let content_ui = &mut content_ui;
                 if !section.collapsed && section.inline {
                     if let Some(body) = section.inline_content {
-                        render_slot(content_ui, ContentSlot::Inline, body, context, content, services, &mut failure);
+                        render_slot(
+                            content_ui,
+                            ContentSlot::Inline,
+                            body,
+                            context,
+                            content,
+                            services,
+                            self.frame_content,
+                            self.content_reports,
+                            wanted_focus,
+                            &mut failure,
+                        );
                     }
                 } else if !section.collapsed {
                     if let Some(header) = content_header_bounds(section) {
-                        render_slot(content_ui, ContentSlot::Header, header, context, content, services, &mut failure);
+                        render_slot(
+                            content_ui,
+                            ContentSlot::Header,
+                            header,
+                            context,
+                            content,
+                            services,
+                            self.frame_content,
+                            self.content_reports,
+                            wanted_focus,
+                            &mut failure,
+                        );
                     }
                     if let Some(body) = section.body {
-                        render_slot(content_ui, ContentSlot::Body, body, context, content, services, &mut failure);
+                        render_slot(
+                            content_ui,
+                            ContentSlot::Body,
+                            body,
+                            context,
+                            content,
+                            services,
+                            self.frame_content,
+                            self.content_reports,
+                            wanted_focus,
+                            &mut failure,
+                        );
                     }
                     if let Some(footer) = section.footer {
                         let has_footer_actions = presentation.actions.iter().any(|action| !section.actions.iter().any(|(id, _)| *id == action.id));
@@ -2035,6 +2517,9 @@ impl PanelHost for WorkspaceContentHost<'_> {
                                                 .inner
                                             })
                                             .inner;
+                                        if let Some(pressed) = action.pressed {
+                                            ui.ctx().accesskit_node_builder(response.id, |node| node.set_toggled(pressed.into()));
+                                        }
                                         let visible = response.rect.intersect(ui.clip_rect()).intersect(egui_rect(row));
                                         if visible.is_positive() {
                                             self.controls.push(HostFrameControl {
@@ -2067,6 +2552,9 @@ impl PanelHost for WorkspaceContentHost<'_> {
                             context,
                             content,
                             services,
+                            self.frame_content,
+                            self.content_reports,
+                            wanted_focus,
                             &mut failure,
                         );
                     }
@@ -2074,19 +2562,30 @@ impl PanelHost for WorkspaceContentHost<'_> {
                 // Resize must be above content on the card's actual UI/layer. Its
                 // published bounds and scoped ID remain the layout authority's.
                 for control in self.controls.iter() {
-                    if matches!(&control.target, HostControlTarget::Pointer(HostPointerTarget::Resize { section: id, .. }) if *id == section.section)
+                    if let HostControlTarget::Pointer(HostPointerTarget::Resize { section: id, edge }) = &control.target
+                        && *id == section.section
                     {
-                        ui_kit::panel_host_sash(ui, control.id, egui_rect(control.bounds), &control.accessible_name);
+                        let horizontal = !matches!(edge, HostResizeEdge::Left | HostResizeEdge::Right);
+                        let extent = if horizontal { section.outer.size.height } else { section.outer.size.width };
+                        ui_kit::panel_host_sash(ui, control.id, egui_rect(control.bounds), &control.accessible_name, horizontal, extent);
                     }
                 }
                 if let Some(focused) = ui.memory(|memory| memory.focused())
-                    && ui.ctx().read_response(focused).is_some_and(|response| {
-                        response.layer_id == ui.layer_id()
-                            && response.interact_rect.is_positive()
-                            && egui_rect(section.outer).contains_rect(response.interact_rect)
-                    })
+                    && let Some(bookmark) = self
+                        .content_reports
+                        .get(&focused)
+                        .filter(|report| report.key.instance == context.instance && report.key.owner == context.owner)
+                        .cloned()
                 {
                     *self.owned_focus = Some(focused);
+                    if self.content_bookmarks.len() >= MAX_INSTANCES
+                        && !self.content_bookmarks.contains_key(&bookmark.key)
+                        && let Some(oldest) = self.content_bookmarks.keys().next().cloned()
+                    {
+                        self.content_bookmarks.remove(&oldest);
+                    }
+                    self.content_bookmarks.insert(bookmark.key.clone(), bookmark.clone());
+                    *self.content_focus = Some(bookmark);
                 }
             },
         );
@@ -2094,6 +2593,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_slot(
     ui: &mut egui::Ui,
     slot: ContentSlot,
@@ -2101,6 +2601,9 @@ fn render_slot(
     context: &PanelContext,
     content: &mut dyn PanelController,
     services: &mut ContentServices<'_>,
+    frame_content: &mut dyn FramePanelContent,
+    reports: &mut egui::IdMap<ContentFocus>,
+    wanted_focus: Option<egui::Id>,
     failure: &mut Option<PanelError>,
 ) {
     if failure.is_some() || bounds.size.width <= 0.0 || bounds.size.height <= 0.0 {
@@ -2119,13 +2622,80 @@ fn render_slot(
     // Each owner/instance mounts only once in its complete presentation cohort.
     let mut child = ui.new_child(egui::UiBuilder::new().scope_id(identity).max_rect(inset));
     child.set_clip_rect(clip);
-    let result = if slot == ContentSlot::Inline {
-        content.render_inline(&mut child, context, services)
-    } else {
-        content.render(slot, &mut child, context, services)
+    let mut local = SlotFocusServices {
+        inner: &mut *services.local,
+        scope: LocalScope { workspace: context.workspace.clone(), document: context.document.clone(), viewport: context.viewport.clone() },
+        key: ControllerKey { instance: context.instance.clone(), owner: context.owner.clone() },
+        layer: child.layer_id(),
+        viewport: child.ctx().viewport_id(),
+        clip,
+        wanted_focus,
+        reports,
     };
+    let mut services = ContentServices { models: services.models, commands: &mut *services.commands, local: &mut local };
+    let result = frame_content.render(slot, &mut child, context, content, &mut services);
     if let Err(reason) = result {
         *failure = Some(reason);
+    }
+}
+
+/// The render call supplies provenance directly; no previous-pass widget lookup
+/// can establish that a conditional content control exists in this pass.
+struct SlotFocusServices<'a> {
+    inner: &'a mut dyn PanelLocalServices,
+    scope: LocalScope,
+    key: ControllerKey,
+    layer: egui::LayerId,
+    viewport: egui::ViewportId,
+    clip: egui::Rect,
+    wanted_focus: Option<egui::Id>,
+    reports: &'a mut egui::IdMap<ContentFocus>,
+}
+impl PanelLocalServices for SlotFocusServices<'_> {
+    fn request(&mut self, scope: &LocalScope, request: LocalRequest) -> PanelResult<()> {
+        self.inner.request(scope, request)
+    }
+    fn request_overlay_layer(&mut self, scope: &LocalScope, instance: &InstanceId, region: InputRegion, layer: egui::LayerId) -> PanelResult<()> {
+        self.inner.request_overlay_layer(scope, instance, region, layer)
+    }
+    fn register_focus_response(&mut self, scope: &LocalScope, instance: &InstanceId, response: &egui::Response) -> PanelResult<()> {
+        scope.validate()?;
+        valid_id(&instance.0)?;
+        if scope != &self.scope || instance != &self.key.instance || response.layer_id != self.layer || response.ctx.viewport_id() != self.viewport {
+            return Err(error(Rule::Placement, "focus response differs from current content render"));
+        }
+        let visible = response.interact_rect.intersect(self.clip);
+        if !response.enabled()
+            || !response.sense.is_focusable()
+            || !response.interact_rect.is_finite()
+            || !visible.is_finite()
+            || !visible.is_positive()
+        {
+            return Ok(());
+        }
+        // At most one current and one remembered candidate per mounted owner.
+        let candidate = response.has_focus() || self.wanted_focus == Some(response.id);
+        if candidate {
+            if self.reports.get(&response.id).is_some_and(|report| report.key != self.key || report.scope != self.scope) {
+                return Err(error(Rule::DuplicateId, "content focus response belongs to another owner"));
+            }
+            if self.reports.len() >= MAX_INSTANCES * 2 && !self.reports.contains_key(&response.id) {
+                return Err(error(Rule::CollectionLimit, "content focus response bound"));
+            }
+        }
+        self.inner.register_focus_response(scope, instance, response)?;
+        if candidate {
+            let selection = if response.has_focus() && response.ctx.text_edit_focused() {
+                egui::TextEdit::load_state(&response.ctx, response.id).and_then(|state| state.cursor.char_range())
+            } else {
+                None
+            };
+            self.reports.insert(response.id, ContentFocus { key: self.key.clone(), scope: self.scope.clone(), id: response.id, visible, selection });
+        }
+        Ok(())
+    }
+    fn release(&mut self, scope: &LocalScope, instance: &InstanceId) {
+        self.inner.release(scope, instance);
     }
 }
 
@@ -2221,7 +2791,7 @@ impl WorkspacePanelHost {
             return;
         };
         let Some(bounds) = menu_geometry(frame.layout.capacity, anchor) else {
-            self.menu = None;
+            self.clear_menu();
             return;
         };
         let id = egui::Id::unique((
@@ -2237,6 +2807,7 @@ impl WorkspacePanelHost {
             HostMenu::Panel(instance) => egui::Id::unique(("panel", instance)),
             HostMenu::Tabs(section) => egui::Id::unique(("tabs", section)),
         };
+        self.menu_items.clear();
         ui_kit::panel_host_popup(ui, id, bounds, |ui| {
             if !ui.is_visible() || ui.is_sizing_pass() {
                 return;
@@ -2255,7 +2826,12 @@ impl WorkspacePanelHost {
                                 ui.label(status);
                             }
                         }
-                        let mut actions = vec![HostSharedAction::Focus, HostSharedAction::Collapse];
+                        let mut actions = vec![HostSharedAction::Focus];
+                        if runtime.layout().layout().containing(instance).is_ok_and(|section| {
+                            section_collapsible(runtime.layout().layout(), runtime.layout().registry(), section).unwrap_or(false)
+                        }) {
+                            actions.push(HostSharedAction::Collapse);
+                        }
                         actions.extend([Zone::Left, Zone::Right, Zone::Bottom, Zone::Floating].into_iter().map(HostSharedAction::Move));
                         actions.extend(
                             runtime
@@ -2283,7 +2859,15 @@ impl WorkspacePanelHost {
                                 Ok(action)
                             });
                             let reason = action.as_ref().err().map(|reason| locale.text(rule_key(reason.rule)).to_owned());
-                            let response = menu_row(ui, control_id(runtime, owners, &target), &label, action.is_ok());
+                            let response = menu_row(ui, control_id(runtime, owners, &target), &label, action.is_ok(), &mut self.menu_reveal);
+                            if response.enabled() {
+                                self.menu_items.push(response.id);
+                            }
+                            if shared == HostSharedAction::Collapse {
+                                ui.ctx().accesskit_node_builder(response.id, |node| {
+                                    node.set_expanded(!runtime.layout().layout().containing(instance).is_ok_and(|section| section.collapsed))
+                                });
+                            }
                             record_control(frame, &response, target, &label, action.is_ok(), bounds.intersect(ui.clip_rect()));
                             if allow_actions
                                 && response.clicked()
@@ -2298,7 +2882,14 @@ impl WorkspacePanelHost {
                         if let Some(presentation) = metadata.get(instance) {
                             for action in &presentation.actions {
                                 let target = HostControlTarget::Content { instance: instance.clone(), action: action.id.clone() };
-                                let response = menu_row(ui, control_id(runtime, owners, &target), &action.label, action.enabled);
+                                let response =
+                                    menu_row(ui, control_id(runtime, owners, &target), &action.label, action.enabled, &mut self.menu_reveal);
+                                if response.enabled() {
+                                    self.menu_items.push(response.id);
+                                }
+                                if let Some(pressed) = action.pressed {
+                                    ui.ctx().accesskit_node_builder(response.id, |node| node.set_toggled(pressed.into()));
+                                }
                                 record_control(frame, &response, target, &action.label, action.enabled, bounds.intersect(ui.clip_rect()));
                                 if allow_actions && response.clicked() {
                                     let registered = runtime
@@ -2329,19 +2920,46 @@ impl WorkspacePanelHost {
                         // bounded shared menu, after the selected panel's actions.
                         if let Ok(section) = runtime.layout().layout().containing(instance) {
                             for tab in section.tabs.iter().filter(|tab| *tab != instance) {
-                                menu_instance(ui, runtime, owners, metadata, frame, commands, tab, bounds, allow_actions, locale);
+                                menu_instance(
+                                    ui,
+                                    runtime,
+                                    owners,
+                                    metadata,
+                                    frame,
+                                    commands,
+                                    &mut self.menu_items,
+                                    &mut self.menu_reveal,
+                                    tab,
+                                    bounds,
+                                    allow_actions,
+                                    locale,
+                                );
                             }
                         }
                     }
                     HostMenu::Tabs(section) => {
                         if let Ok(section) = runtime.layout().layout().section(section) {
                             for instance in &section.tabs {
-                                menu_instance(ui, runtime, owners, metadata, frame, commands, instance, bounds, allow_actions, locale);
+                                menu_instance(
+                                    ui,
+                                    runtime,
+                                    owners,
+                                    metadata,
+                                    frame,
+                                    commands,
+                                    &mut self.menu_items,
+                                    &mut self.menu_reveal,
+                                    instance,
+                                    bounds,
+                                    allow_actions,
+                                    locale,
+                                );
                             }
                         }
                     }
                 }
             });
+            self.menu_reveal = None;
         });
     }
 }
@@ -2362,10 +2980,19 @@ fn menu_geometry(capacity: LogicalRect, anchor: LogicalRect) -> Option<egui::Rec
     Some(egui::Rect::from_min_size(egui::pos2(left, top), egui::vec2(width, height)))
 }
 
-fn menu_row(ui: &mut egui::Ui, id: egui::Id, label: &str, enabled: bool) -> egui::Response {
-    ui.push_id(id.with("menu"), |ui| ui.add_enabled_ui(enabled, |ui| ui_kit::button(ui, label, ui_kit::Button::Small)).inner)
-        .inner
-        .on_hover_text(label)
+fn menu_row(ui: &mut egui::Ui, id: egui::Id, label: &str, enabled: bool, reveal: &mut Option<egui::Id>) -> egui::Response {
+    let response = ui.push_id(id.with("menu"), |ui| ui.add_enabled_ui(enabled, |ui| ui_kit::button(ui, label, ui_kit::Button::Small)).inner).inner;
+    ui.ctx().accesskit_node_builder(response.id, |node| node.set_role(egui::accesskit::Role::MenuItem));
+    let requested = *reveal == Some(response.id);
+    if requested {
+        *reveal = None;
+    }
+    // Native Tab/AccessKit can focus during paint; our late keyboard requests
+    // need the explicit one-shot token because gained_focus is false next pass.
+    if response.enabled() && response.has_focus() && (requested || response.gained_focus()) {
+        response.scroll_to_me(None);
+    }
+    response.on_hover_text(label)
 }
 
 fn record_control(frame: &mut HostFrame, response: &egui::Response, target: HostControlTarget, name: &str, enabled: bool, clip: egui::Rect) {
@@ -2390,6 +3017,8 @@ fn menu_instance(
     metadata: &BTreeMap<InstanceId, PanelPresentation>,
     frame: &mut HostFrame,
     commands: &mut Vec<HostCommand>,
+    items: &mut Vec<egui::Id>,
+    reveal: &mut Option<egui::Id>,
     instance: &InstanceId,
     clip: egui::Rect,
     allow_actions: bool,
@@ -2404,9 +3033,13 @@ fn menu_instance(
         let target = HostControlTarget::Shared { instance: instance.clone(), action: HostSharedAction::Focus };
         let action = apply_action(runtime.layout().inspect().revision, vec![Mutation::Focus { instance: instance.clone() }]);
         let check = runtime.layout().prepare(action.clone());
-        let response = menu_row(ui, control_id(runtime, owners, &target), locale.text("ui.panel_host.focus"), check.is_ok());
+        let response = menu_row(ui, control_id(runtime, owners, &target), locale.text("ui.panel_host.focus"), check.is_ok(), reveal);
         let accessible = locale.format("ui.panel_host.focus_target", &[("title", &label)]);
-        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, check.is_ok(), &accessible));
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, check.is_ok() && ui.is_enabled(), &accessible));
+        ui.ctx().accesskit_node_builder(response.id, |node| node.set_role(egui::accesskit::Role::MenuItem));
+        if response.enabled() {
+            items.push(response.id);
+        }
         record_control(frame, &response, target, &accessible, check.is_ok(), clip.intersect(ui.clip_rect()));
         if allow_actions && response.clicked() {
             commands.push(HostCommand::WidgetLayout(action, response.id));
@@ -2415,7 +3048,10 @@ fn menu_instance(
             response.on_disabled_hover_text(locale.text(rule_key(reason.rule)));
         }
         let target = HostControlTarget::PanelMenu { instance: instance.clone() };
-        let response = menu_row(ui, control_id(runtime, owners, &target), locale.text("ui.panel_host.menu"), true);
+        let response = menu_row(ui, control_id(runtime, owners, &target), locale.text("ui.panel_host.menu"), true, reveal);
+        if response.enabled() {
+            items.push(response.id);
+        }
         record_control(frame, &response, target, locale.text("ui.panel_host.menu"), true, clip.intersect(ui.clip_rect()));
         if allow_actions && response.clicked() {
             commands.push(HostCommand::OpenMenu {
