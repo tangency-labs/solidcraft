@@ -119,7 +119,7 @@ pub static COMMANDS: &[CommandSpec] = &[
 
 fn add(s: &mut Session, p: &Value) -> Result<Value> {
     let request: AddParams = crate::schema::read(ADD, p)?;
-    let record = s.drawing(ADD)?.clone();
+    let mut record = Drawing::clone(s.drawing(ADD)?);
     let view = request.view.0;
     record.view(view).ok_or_else(|| bad(ADD, format!("the drawing has no view {}", ids::encode(view))))?;
     crate::drawing_view::refuse_on_exploded(&record, view, "dimensions", ADD)?;
@@ -170,7 +170,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
         override_text: request.override_text,
         choose_diameter,
     };
-    let (dimension, _) = placed(s, &record, ADD, new)?;
+    let (dimension, _) = placed(s, &mut record, ADD, new)?.map_err(Refused::error)?;
     let id = dimension.id;
     s.edit_drawing(ADD, |d| {
         d.add_dimensions([Arc::new(dimension)]);
@@ -192,13 +192,36 @@ pub(crate) struct NewDimension {
     pub choose_diameter: bool,
 }
 
+/// Why [`placed`] won't place a new dimension, as the command would say it.
+pub(crate) enum Refused {
+    /// Its view doesn't draw what it measures.
+    NotDrawn(EngineError),
+    /// Its view can't measure it.
+    Unmeasurable(EngineError),
+}
+
+impl Refused {
+    pub(crate) fn error(self) -> EngineError {
+        match self {
+            Refused::NotDrawn(e) | Refused::Unmeasurable(e) => e,
+        }
+    }
+}
+
 /// `new` as `drawing.dimension.add` places it on `record`, with how it reads, and nothing added:
 /// refused when its view doesn't draw what it measures or can't measure it; a new id; a radial one
 /// a diameter when it is a whole circle, if left to the default; a linear, length or chain one,
-/// with no offset given, on the side away from what it measures. One rule for every command that
-/// adds a dimension.
-pub(crate) fn placed(s: &mut Session, record: &Drawing, cmd: &str, new: NewDimension) -> Result<(Dimension, Option<Resolved>)> {
-    check_drawn(record, new.view, new.kind.paths(), cmd)?;
+/// with no offset given, on the side away from what it measures. It is read on `record` itself,
+/// which is left as it was. One rule for every command that adds a dimension.
+pub(crate) fn placed(
+    s: &mut Session,
+    record: &mut Drawing,
+    cmd: &str,
+    new: NewDimension,
+) -> Result<std::result::Result<(Dimension, Option<Resolved>), Refused>> {
+    if let Err(e) = check_drawn(record, new.view, new.kind.paths(), cmd) {
+        return Ok(Err(Refused::NotDrawn(e)));
+    }
     let id = record.allocate_id(&mut s.ids).map_err(|e| bad(cmd, e.to_string()))?;
     let mut dimension = Dimension {
         id,
@@ -211,12 +234,14 @@ pub(crate) fn placed(s: &mut Session, record: &Drawing, cmd: &str, new: NewDimen
         last_good: None,
         from_model: None,
     };
-    // Read before it is added: a dimension its view can't measure would show nothing.
-    let mut staged = Drawing::clone(record);
-    staged.add_dimensions([Arc::new(dimension.clone())]);
-    let read = s.doc.resolve_dimensions(&s.model, &staged, &[id]).map_err(|e| bad(cmd, e.to_string()))?;
+    // Read before it is added: a dimension its view can't measure would show nothing. Its id is the
+    // newest, so taking it out again leaves the record as it was.
+    record.add_dimensions([Arc::new(dimension.clone())]);
+    let read = s.doc.resolve_dimensions(&s.model, record, &[id]).map_err(|e| bad(cmd, e.to_string()));
+    record.dimensions.retain(|d| d.id != id);
+    let read = read?;
     if let Some(Status::Unmeasurable(why)) = read.first().map(|r| &r.status) {
-        return Err(bad(cmd, why.clone()));
+        return Ok(Err(Refused::Unmeasurable(bad(cmd, why.clone()))));
     }
     if new.choose_diameter
         && let DimensionKind::Radial { diameter, .. } = &mut dimension.kind
@@ -230,7 +255,7 @@ pub(crate) fn placed(s: &mut Session, record: &Drawing, cmd: &str, new: NewDimen
     {
         dimension.offset_mm = DEFAULT_OFFSET_MM * side_by_default(s, record, new.view, *direction, &r.points);
     }
-    Ok((dimension, read.into_iter().next()))
+    Ok(Ok((dimension, read.into_iter().next())))
 }
 
 fn repair(s: &mut Session, p: &Value) -> Result<Value> {

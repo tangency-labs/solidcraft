@@ -388,3 +388,21 @@ fn a_components_sketches_and_features_are_skipped() {
     assert!(kinds.contains(&"sketch") && kinds.contains(&"feature"), "{reply}");
     assert!(skipped(&reply).iter().all(|(_, r)| r == "in_component"), "{reply}");
 }
+
+/// A view that doesn't draw the body a model dimension measures skips it as not drawn, with why
+/// `drawing.dimension.add` would give. The front view draws only the component Bolt, not the plate.
+#[test]
+fn a_body_the_view_leaves_out_is_skipped_as_not_drawn() {
+    let (mut s, _) = plate();
+    run(&mut s, "component.create", json!({"name": "Bolt"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 40, "body_name": "Shank"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let bolt = s.doc.occurrences.first().unwrap().id;
+    let front = view(&mut s, json!("front"), [150.0, 150.0]);
+    run(&mut s, "drawing.view.edit", json!({"view": front, "set": {"source": {"occurrences": [[bolt]]}}}));
+    let reply = brought(&mut s, &front, json!({}));
+    assert_eq!(reply["added"], json!([]), "{reply}");
+    assert_eq!(skipped_for(&reply, "not_drawn"), ["Distance"], "{reply}");
+    let why = reply["skipped"].as_array().unwrap().iter().find(|k| k["reason"] == "not_drawn").unwrap()["why"].as_str().unwrap().to_string();
+    assert!(why.contains("doesn't draw that part: its source draws only the occurrences it chose"), "{why}");
+}

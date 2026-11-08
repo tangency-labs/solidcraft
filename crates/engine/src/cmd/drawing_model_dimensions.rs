@@ -23,8 +23,7 @@ use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{Constraint, ConstraintKind, CurveKind};
 
 use super::CommandSpec;
-use super::drawing_dimension::{NewDimension, placed};
-use super::drawing_view::check_drawn;
+use super::drawing_dimension::{NewDimension, Refused, placed};
 use crate::params::bad;
 use crate::schema::drawing_model_dimensions::{Added, FromModelParams, FromModelResult, ModelSource, SkipReason, Skipped, SourceKind};
 use crate::schema::{TypedContract, output_schema_for};
@@ -103,7 +102,7 @@ fn from_model(s: &mut Session, p: &Value) -> Result<Value> {
                 continue;
             }
         };
-        match place(s, &staged, view, measure) {
+        match place(s, &mut staged, view, measure)? {
             Ok(mut dimension) => {
                 dimension.from_model = Some(candidate.model);
                 let dimension = Arc::new(dimension);
@@ -125,21 +124,24 @@ fn from_model(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// `measure` placed on `view` as `drawing.dimension.add` places a dimension, when its view draws
-/// and measures it and it reads its model dimension's value.
-fn place(s: &mut Session, staged: &Drawing, view: u64, measure: Measure) -> std::result::Result<Dimension, (SkipReason, String)> {
-    check_drawn(staged, view, measure.kind.paths(), FROM_MODEL).map_err(|e| (SkipReason::NotDrawn, e.to_string()))?;
+/// and measures it and it reads its model dimension's value; else why it is skipped.
+fn place(s: &mut Session, staged: &mut Drawing, view: u64, measure: Measure) -> Result<std::result::Result<Dimension, (SkipReason, String)>> {
     let new = NewDimension { view, kind: measure.kind, offset_mm: None, text: None, decimals: None, override_text: None, choose_diameter: false };
-    let (dimension, read) = placed(s, staged, FROM_MODEL, new).map_err(|e| (SkipReason::Unmeasurable, e.to_string()))?;
+    let (dimension, read) = match placed(s, staged, FROM_MODEL, new)? {
+        Ok(placed) => placed,
+        Err(Refused::NotDrawn(e)) => return Ok(Err((SkipReason::NotDrawn, e.to_string()))),
+        Err(Refused::Unmeasurable(e)) => return Ok(Err((SkipReason::Unmeasurable, e.to_string()))),
+    };
     let Some(read) = read.filter(|r| r.status == Status::Ok) else {
-        return Err((SkipReason::NotFound, "what it measures isn't found as one thing on the model".into()));
+        return Ok(Err((SkipReason::NotFound, "what it measures isn't found as one thing on the model".into())));
     };
     let value = read.measured.map_or(f64::NAN, |m| m.value);
     if (value - measure.expected).abs() > AGREES * measure.expected.abs().max(1.0) {
         let shown = |v: f64| if measure.angle { format!("{:.2}°", v.to_degrees()) } else { format!("{v:.2} mm") };
         let why = format!("what it found reads {}, the model dimension is {}", shown(value), shown(measure.expected));
-        return Err((SkipReason::ValueDiffers, why));
+        return Ok(Err((SkipReason::ValueDiffers, why)));
     }
-    Ok(dimension)
+    Ok(Ok(dimension))
 }
 
 /// The model dimensions `request` asks for, in timeline order, then each sketch's own order, each
