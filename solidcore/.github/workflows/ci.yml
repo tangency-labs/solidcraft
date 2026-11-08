@@ -230,6 +230,20 @@ jobs:
       - run: rustup target add wasm32-unknown-unknown
       - run: cargo check -p solidcore --target wasm32-unknown-unknown
 
+  # Each package builds on the Rust release its `rust-version` declares (scripts/ci/
+  # check-rust-version.sh). Downstream users build on older pinned toolchains than
+  # rust-toolchain.toml's, and nothing else here runs one.
+  rust-version:
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> bin"
+      - run: scripts/ci/check-rust-version.sh
+
   # Same packaging check the release workflow runs before publishing (no secrets).
   publish-dry-run:
     needs: changes
