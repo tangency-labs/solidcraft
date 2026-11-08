@@ -144,6 +144,7 @@ mod tests {
     #[test]
     fn export_urdf_opens_the_dialog_with_the_preference() {
         let mut h = crate::scenario::Harness::new();
+        h.app.preferences.urdf_export_dialog = true;
         h.app.preferences.urdf_mimic = false;
         open(&mut h.app);
         assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::UrdfExport(UrdfExport { mimic: false, .. }))));
@@ -164,16 +165,22 @@ mod tests {
     }
 
     #[test]
-    fn with_the_dialog_preference_off_export_goes_straight_to_the_save_picker() {
+    fn by_default_export_goes_straight_to_the_save_picker_and_writes_the_old_urdf() {
         let mut h = crate::scenario::Harness::new();
-        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
-        h.app.preferences.urdf_export_dialog = false;
+        let fresh = SolveApp::new(Default::default(), Default::default());
+        let defaults = &fresh.preferences;
+        assert!(!defaults.urdf_export_dialog && !defaults.urdf_mimic && !defaults.urdf_place_meshes);
+        h.app.preferences.urdf_export_dialog = defaults.urdf_export_dialog;
+        h.app.preferences.urdf_mimic = defaults.urdf_mimic;
+        h.app.preferences.urdf_place_meshes = defaults.urdf_place_meshes;
+        coupled(&mut h);
         let dir = h.dir.clone();
         h.app.services.pick_save = Some(Box::new(move |_, _| Box::pin(std::future::ready(Some(dir.join("r.urdf").to_string_lossy().into_owned())))));
         open(&mut h.app);
         assert!(h.app.dialog.is_none());
         h.settle();
-        assert!(h.dir.join("r.urdf").exists() && h.dir.join("r-base.stl").exists());
+        assert!(h.dir.join("r-H.stl").exists(), "meshes beside the URDF");
+        assert!(!std::fs::read_to_string(h.dir.join("r.urdf")).unwrap().contains("<mimic"));
     }
 
     #[test]
