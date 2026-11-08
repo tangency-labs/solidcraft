@@ -107,6 +107,7 @@ material.inspect                  materials and their properties
 material.list                     materials and their properties
 material.properties.directional   materials and their properties
 material.properties.validate      materials and their properties
+model.body_features               a listing of the model's timeline per body; crates/engine/src/schema/inspect_tests.rs
 model.edges                       a listing of the model's topology
 model.faces                       a listing of the model's topology
 model.threads                     a listing of the model's topology
@@ -293,10 +294,12 @@ sketch.offset                     2D sketch only (the sketch solver and engine t
 sketch.offset.break               2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.paste                      2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.pattern.rectangular        2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.point.divide               2D sketch only; crates/engine/src/cmd/sketch_divide_tests.rs: a_line_divided_in_four_keeps_its_quarters_when_it_grows and a_spline_is_divided_into_equal_lengths_along_it
 sketch.point3d                    2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.polygon.edge               2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.rectangle.three_point      2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.redefine                   2D sketch only (the sketch solver and engine tests); no kernel operation
+sketch.replace                    2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.scale                      2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.slot.arc_center            2D sketch only (the sketch solver and engine tests); no kernel operation
 sketch.slot.arc_three_point       2D sketch only (the sketch solver and engine tests); no kernel operation

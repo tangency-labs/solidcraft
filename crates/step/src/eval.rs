@@ -135,6 +135,7 @@ impl Curve {
             Curve::SurfaceCurve { curve_3d, .. } => curve_3d.point_at(t, depth + 1)?,
             // Needs the basis curve's derivative; not evaluated yet.
             Curve::OffsetCurve3d { .. } => return None,
+            Curve::Replica { parent, transform } => transform.point(parent.point_at(t, depth + 1)?),
         };
         p.iter().all(|x| x.is_finite()).then_some(p)
     }

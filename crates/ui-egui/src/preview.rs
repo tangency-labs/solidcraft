@@ -475,6 +475,7 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
                 | "sketch.pattern.rectangular"
                 | "sketch.pattern.circular"
                 | "sketch.offset"
+                | "sketch.point.divide"
                 | "sketch.fillet"
                 | "sketch.chamfer.equal_distance"
                 | "sketch.chamfer.two_distance"
