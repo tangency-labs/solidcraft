@@ -1,8 +1,10 @@
-//! solidcraft#13085: a revolve cut whose tool has a cylindrical face a hair (1e-10) outside the
-//! wall it is meant to coincide with, meeting it at a torus/cylinder tangent junction. The
-//! boolean builds a body whose loops are out of tolerance (gaps of 5.9e-5 and 2.9e-5 against
-//! 2e-5), or fails in `merge::p2::make_faceuse` for offsets of 1e-9 to 1e-6. With the face
-//! exactly on the wall, or 1e-4 or more away, the cut is right.
+//! solidcraft#13085 (tangency-labs/solidcore#3150): a revolve cut whose tool has a cylindrical
+//! face a hair (1e-10 to 6e-10) outside the wall it is meant to coincide with, meeting it at a
+//! torus/cylinder tangent junction. The intersection curve's hit on the cup's rim is
+//! ill-conditioned there, so the proto vertex at the corner keeps the mean of that hit and the
+//! corner, and the end fit of `SmEdgeDefinition::Imprint` (the imprint flags) stops the rim
+//! edge short of the corner vertex the B-rep already had: loops out of tolerance. With
+//! `imprint_fits_edge_end_to_final_vertex` the end goes to that vertex (WR-753).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -14,7 +16,17 @@ use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use solidcore_ops::boolean::{boolean, BooleanOp};
 use solidcore_ops::sweep::{extrude, revolve, Curve, DraftCorner};
-use solidcore_ops::{Body, CheckLevel};
+use solidcore_ops::{session, Body, CheckLevel};
+
+/// SolidCraft's end-fit flags and the fix under test.
+fn imprint_fixes() {
+    session::set_fixes([
+        "imprint_trims_edge_to_proto_vertex",
+        "imprint_extends_edge_to_proto_vertex",
+        "imprint_fits_edge_end_to_final_vertex",
+    ])
+    .unwrap();
+}
 
 fn line(start: [f64; 3], end: [f64; 3]) -> Curve {
     Curve::Line { start, end }
@@ -113,31 +125,37 @@ fn cut(wall: f64, angle_deg: f64) -> Result<Body, String> {
 /// The tool's vertical face exactly on the cup's outer wall: the cut is right.
 #[test]
 fn a_tool_face_on_the_wall_cuts() {
+    imprint_fixes();
     for angle in [28.0, 36.0] {
         let b = cut(-24.75, angle).unwrap_or_else(|e| panic!("{angle} deg: {e}"));
         let report = b.check(CheckLevel::All).unwrap();
-        assert!(report.is_valid(), "{angle} deg:\n{}", report.text);
+        assert!(
+            report.is_valid(),
+            "{angle} deg:
+{}",
+            report.text
+        );
     }
 }
 
-/// The tool's vertical face 1e-10 outside the wall (a sketch's rounding): the 36 degree cut
-/// fails the check with loops out of tolerance; at 28 degrees the tool's end planes clear the
-/// lug's fillets and the cut is right.
+/// The tool's vertical face a hair outside the wall (the reporter's sketch left it 4e-10
+/// out): at 36 degrees the tool's end planes reach into the lug's fillets and the rim edge
+/// between the fillets' tangent points is rebuilt from the intersection; at 28 degrees they
+/// clear the fillets. Both cuts are right.
 #[test]
 fn a_tool_face_a_hair_outside_the_wall_cuts_too() {
-    for angle in [28.0, 36.0] {
-        let b = cut(-24.75 - 1e-10, angle).unwrap_or_else(|e| panic!("{angle} deg: {e}"));
-        let report = b.check(CheckLevel::All).unwrap();
-        assert!(report.is_valid(), "{angle} deg:\n{}", report.text);
-    }
-}
-
-/// The same a hair outside the wall at the offsets where the boolean fails outright on main.
-#[test]
-fn a_tool_face_a_little_outside_the_wall_cuts_too() {
-    for off in [1e-9, 1e-7, 1e-5] {
-        let b = cut(-24.75 - off, 36.0).unwrap_or_else(|e| panic!("offset {off}: {e}"));
-        let report = b.check(CheckLevel::All).unwrap();
-        assert!(report.is_valid(), "offset {off}:\n{}", report.text);
+    imprint_fixes();
+    for off in [1e-10, 4e-10, 6e-10] {
+        for angle in [28.0, 36.0] {
+            let b = cut(-24.75 - off, angle)
+                .unwrap_or_else(|e| panic!("offset {off}, {angle} deg: {e}"));
+            let report = b.check(CheckLevel::All).unwrap();
+            assert!(
+                report.is_valid(),
+                "offset {off}, {angle} deg:
+{}",
+                report.text
+            );
+        }
     }
 }

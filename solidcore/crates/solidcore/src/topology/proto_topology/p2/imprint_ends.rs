@@ -100,15 +100,22 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     v.final_vertex(1) == Some(vtx1) && v.final_vertex(2) == Some(vtx2)
                 });
             }
-            let pv_pos = if one_vertex {
-                proto.position()
-            } else {
-                let p1 = brep.vertex_point(vtx1)?;
-                let p2 = brep.vertex_point(vtx2)?;
-                if !(p1.distance(p2) <= self.ed_ref(ed)?.raw_tolerance()) {
-                    continue;
-                }
+            // WR-498: the proto vertex's position when it is one vertex in each B-rep, else
+            // the end's own final vertex when the two B-reps agree on it. WR-753 (opt-in): the
+            // final vertex first whenever the B-reps agree on it, since a proto vertex imprinted
+            // onto a vertex the B-rep already had keeps the mean of its definitions' points, not
+            // that vertex's position.
+            let p1 = brep.vertex_point(vtx1)?;
+            let p2 = brep.vertex_point(vtx2)?;
+            let finals_agree = p1.distance(p2) <= self.ed_ref(ed)?.raw_tolerance();
+            let pv_pos = if k.fixes.imprint_fits_edge_end_to_final_vertex && finals_agree {
                 p1
+            } else if one_vertex {
+                proto.position()
+            } else if finals_agree {
+                p1
+            } else {
+                continue;
             };
             let d = self.ed_ref(ed)?;
             let interval = d.xsect_interval();
