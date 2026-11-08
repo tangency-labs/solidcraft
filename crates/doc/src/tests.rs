@@ -1311,6 +1311,7 @@ fn a_sketch_on_the_construction_plane_of_another_component_lies_on_it() {
     let solved = state.sketch(id).unwrap();
     // The sketch is kept in its own component's frame; placed, it lies on the plane where the
     // owner puts it (the owner is not moved): the same origin, axes, normal and line end.
+    use solidcraft_geom::prelude::*;
     let want = Plane::named("XZ").unwrap().offset(60.0);
     let m = doc.component_transform(sketcher);
     let close = |a: Vec3, b: Vec3, what: &str| assert!((a - b).len() < 1e-6, "{what}: {a:?} instead of {b:?}");
