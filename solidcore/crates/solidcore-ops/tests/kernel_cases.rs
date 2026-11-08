@@ -1422,7 +1422,16 @@ fn seam_gaps_are_limited_independently_of_stored_tolerances() {
 
     let body = solidcore_ops::make_box([0.0; 3], [10.0; 3]).unwrap();
     let (mut record, _) = body.to_record().unwrap();
+    // every stored tolerance inflated, not the body's alone: the import keeps each edge's and
+    // vertex's own and takes the body's as the least of them (#3187, as SolidCraft's flat
+    // import does), so a body tolerance alone no longer reaches the edges the grade reads
     record.tolerance = 0.01;
+    for edge in &mut record.edges {
+        edge.tolerance = 0.01;
+    }
+    for vertex in &mut record.vertices {
+        vertex.tolerance = 0.01;
+    }
     for face in &mut record.faces {
         match &mut face.surface {
             Surface::Plane { origin, .. } => {
