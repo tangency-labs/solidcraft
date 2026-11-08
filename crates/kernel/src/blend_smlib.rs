@@ -691,6 +691,33 @@ mod tests {
         }
     }
 
+    /// The reporter's case of #12128: a chamfer wider than the rounds at the corners of a block's
+    /// top edge is refused, naming the largest distance that fits (the rounds' radius), in a
+    /// chamfer's words: no rolling ball, which a chamfer has not.
+    #[test]
+    fn a_chamfer_too_wide_for_the_rounded_corners_is_refused_in_its_own_words() {
+        let block = box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(60.0, 30.0, 10.0)).unwrap();
+        let uprights = [Vec3::new(0.0, 0.0, 5.0), Vec3::new(60.0, 0.0, 5.0), Vec3::new(60.0, 30.0, 5.0), Vec3::new(0.0, 30.0, 5.0)];
+        let rounded = crate::fillet(&block, &uprights, 2.5).unwrap();
+        // The top edge all round: the four straight edges and the four quarter circles.
+        let c = 2.5 - 2.5 * std::f64::consts::FRAC_1_SQRT_2;
+        let top = [
+            Vec3::new(30.0, 0.0, 10.0),
+            Vec3::new(60.0, 15.0, 10.0),
+            Vec3::new(30.0, 30.0, 10.0),
+            Vec3::new(0.0, 15.0, 10.0),
+            Vec3::new(c, c, 10.0),
+            Vec3::new(60.0 - c, c, 10.0),
+            Vec3::new(60.0 - c, 30.0 - c, 10.0),
+            Vec3::new(c, 30.0 - c, 10.0),
+        ];
+        assert!(imp::blend(&rounded, "chamfer", Kind::Chamfer, &top, &[2.0; 8]).is_ok(), "a 2 mm chamfer fits the 2.5 mm rounds");
+        let e = imp::blend(&rounded, "chamfer", Kind::Chamfer, &top, &[3.0; 8]).unwrap_err();
+        let KernelError::TooLarge(text) = &e else { panic!("{e:?}") };
+        assert!(text.contains("the largest distance that fits is 2.5"), "{text}");
+        assert!(!text.contains("ball") && !text.contains("roll"), "{text}");
+    }
+
     #[test]
     fn each_edge_takes_its_own_size() {
         let b = cube();
