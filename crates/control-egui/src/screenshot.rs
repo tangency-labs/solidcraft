@@ -205,6 +205,79 @@ mod tests {
         assert!(shots.queued.is_empty() && shots.pending.is_empty());
     }
 
+    /// One frame of a window that is minimised (`hidden`) or shown, running `f`.
+    fn frame(ctx: &egui::Context, hidden: bool, f: impl FnMut(&egui::Context)) {
+        let mut raw = egui::RawInput::default();
+        let info = egui::ViewportInfo { minimized: Some(hidden), occluded: Some(false), ..Default::default() };
+        raw.viewports.insert(egui::ViewportId::ROOT, info);
+        // No painter takes the frame's textures here.
+        ctx.run_pass(raw, f).textures_delta.clear();
+    }
+
+    /// A frame is asked of egui 150 ms after its request at the earliest and on its third frame;
+    /// a view that keeps moving is taken as it is 500 ms after that.
+    #[test]
+    fn a_frame_is_taken_once_the_view_settles() {
+        let ctx = egui::Context::default();
+        let mut shots = Shots::new(NO_FRAME);
+        let (reply, _answer) = channel();
+        shots.request(&ctx, None, reply.clone(), None, 0.0);
+        shots.issue(&ctx, true, 200.0);
+        shots.issue(&ctx, true, 200.0);
+        assert_eq!(shots.queued.len(), 1, "two frames drawn");
+        shots.issue(&ctx, true, 200.0);
+        assert!(shots.queued.is_empty(), "the third frame is taken");
+
+        shots.request(&ctx, None, reply.clone(), None, 0.0);
+        for _ in 0..3 {
+            shots.issue(&ctx, true, 149.0);
+        }
+        assert_eq!(shots.queued.len(), 1, "too soon");
+        shots.issue(&ctx, true, 150.0);
+        assert!(shots.queued.is_empty());
+
+        shots.request(&ctx, None, reply, None, 0.0);
+        for _ in 0..3 {
+            shots.issue(&ctx, false, 649.0);
+        }
+        assert_eq!(shots.queued.len(), 1, "still moving");
+        shots.issue(&ctx, false, 650.0);
+        assert!(shots.queued.is_empty(), "taken as it is");
+        assert_eq!(shots.pending.len(), 3, "every request still waits for its frame");
+    }
+
+    /// A hidden window refuses a request at once, and answers one that waits when it hides.
+    #[test]
+    fn a_hidden_window_answers_at_once() {
+        let ctx = egui::Context::default();
+        let mut shots = Shots::new(NO_FRAME);
+        let (reply, answer) = channel();
+        frame(&ctx, true, |ctx| shots.request(ctx, None, reply.clone(), None, 0.0));
+        assert_eq!(answer.try_recv().ok(), Some(json!({"ok": false, "hidden": true, "error": NO_FRAME})));
+        assert_eq!((shots.token, shots.queued.len(), shots.pending.len()), (0, 0, 0));
+
+        frame(&ctx, false, |ctx| shots.request(ctx, None, reply.clone(), None, 0.0));
+        frame(&ctx, false, |ctx| {
+            shots.collect(ctx, 1.0, false, |_, _| Value::Null);
+        });
+        assert!(answer.try_recv().is_err(), "shown: still waiting");
+        frame(&ctx, true, |ctx| {
+            shots.collect(ctx, 2.0, false, |_, _| Value::Null);
+        });
+        assert_eq!(answer.try_recv().ok(), Some(json!({"ok": false, "error": NO_FRAME})));
+        assert!(shots.pending.is_empty());
+    }
+
+    /// With nothing waiting, the frames that came are dropped, not kept for a later request.
+    #[test]
+    fn frames_nobody_waits_for_are_dropped() {
+        let ctx = egui::Context::default();
+        let mut shots = Shots::new(NO_FRAME);
+        let _ = shots.tx.send((5, pixel_image()));
+        assert!(shots.collect(&ctx, 0.0, false, |_, _| Value::Null).is_empty());
+        assert!(shots.collect(&ctx, 1.0, true, |_, _| Value::Null).is_empty(), "the frame was dropped");
+    }
+
     /// The saved bytes are the format the path names.
     #[test]
     fn a_png_path_gets_a_png() {
