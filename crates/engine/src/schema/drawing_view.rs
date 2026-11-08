@@ -796,14 +796,15 @@ impl JsonSchema for AccuracyResult {
 /// What a view's lines are and how they were made.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct LinesStatusResult {
-    /// `approximate`: from the meshes, until the exact lines (W06).
+    /// `exact` when no piece is sampled (analytic, or within a proven bound), else `approximate`.
     pub lines: &'static str,
-    /// `mesh_projection`.
+    /// `hidden_lines` (every body drawn from its exact curves and surfaces), `mesh_projection` (every
+    /// body from its mesh) or `hidden_lines_and_mesh_projection`.
     pub provenance: &'static str,
     /// The chord asked for on paper, and of the meshes in model millimetres.
     pub chord_mm: f64,
     pub model_chord_mm: f64,
-    /// Pieces whose visibility couldn't be told (none from the meshes).
+    /// Exact pieces whose visibility couldn't be told, drawn as visible (none from the meshes).
     pub uncertain_pieces: usize,
     /// Pieces drawn where another source lay too.
     pub covered_pieces: usize,
