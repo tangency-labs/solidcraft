@@ -244,8 +244,10 @@ fn local_operation_on(
     // A face's surface is extended as far as its neighbours' new surfaces meet it, and as
     // far again as they moved beside it (not upstream, whose margin is five half-radii of
     // the sphere bounding the box: `local_extension_reach`). The edges whose faces and
-    // vertices' faces all keep their surfaces are kept as they are, not intersected again
-    // (`OffsetExecutive::keeps_edge`).
+    // vertices' faces all keep their surfaces, and whose whole curve is certified clear of
+    // every moved surface (a ball enclosure of each curve cell against the surface's
+    // certified distance bound, rounding counted: `clearance::separated`, #2971), are
+    // kept as they are, not intersected again (`OffsetExecutive::keeps_edge`).
     executive.set_local_surfaces(&all_faces, new_list, &moved);
     // the shell faces get copied without being offset: none
     executive.set_shell_faces(&[]);
@@ -1285,14 +1287,19 @@ mod tests {
         assert!(manifold && (v - 10000.0).abs() <= 1e-9 * 10000.0, "{v}");
     }
 
-    /// Issue 2976: z = x - 1 cuts the two bottom edges y = 0 and y = 2 at
-    /// (1, y, 0), away from their vertices. Those edges bound the bottom and a
-    /// side, and all faces at their vertices are bottom/sides, never the top:
-    /// the old vertex-neighbourhood rule therefore keeps both crossed edges.
-    /// The solid is the triangular prism 1 <= x <= 2, 0 <= z <= x - 1,
-    /// 0 <= y <= 2, with volume 2 * integral_1^2 (x - 1) dx = 1.
+    /// Issue 2976: the top of a 2 x 2 x 2 box becomes the plane z = x + y - 1. It cuts the
+    /// bottom edges y = 0 and x = 0 at (1, 0, 0) and (0, 1, 0), away from their vertices;
+    /// every face at those vertices is the bottom or a side, never the top, so the
+    /// vertex-neighbourhood rule alone kept both crossed edges whole through the cut-off
+    /// corner (`OffsetExecutive::keep_unmoved_edges` now keeps an edge only when
+    /// `clearance::separated` proves it clear of the moved surface; see the unit test
+    /// there for the edges kept). The corner (0, 0, 0) lies above the plane, and the
+    /// vertical edge above it meets the plane's line only at (0, 0, -1), outside the edge:
+    /// the corner's sound solid needs that edge to vanish, which the extended offset does
+    /// not build. The operation therefore refuses the body, and `b` stays as it came in;
+    /// it never returns it with a crossed edge kept.
     #[test]
-    fn a_tilted_top_reintersects_the_unmoved_bottom_edges_it_crosses() {
+    fn a_tilted_top_that_crosses_unmoved_edges_is_refused_not_returned_with_them_kept() {
         let mut k = Kernel::default();
         let mut b = create_box(&mut k, Point3::ZERO, 2.0, 2.0, 2.0).unwrap();
         let top = bp1::faces(&b, None)
@@ -1308,24 +1315,16 @@ mod tests {
             })
             .unwrap();
         let tilted = Surface::from(Plane::from_normal(
-            Vec3::new(1.0, 0.0, 0.0),
-            Vec3::new(-1.0, 0.0, 1.0),
+            Vec3::new(0.0, 0.0, -1.0),
+            Vec3::new(-1.0, -1.0, 1.0),
         ));
-        let result = with_notifications(&mut b, |b, notes| {
-            local_operation(&mut k, b, &[top], vec![tilted], notes)
-        });
+        let why = refused_unchanged_or_returned(&mut k, &mut b, &[top], vec![tilted]);
+        assert!(
+            matches!(why, Some(OffsetFailure::Unsound { .. })),
+            "{why:?}"
+        );
         let (volume, manifold) = volume_and_manifold(&k, &mut b);
-        eprintln!("issue 2976: result={result:?}, volume={volume}, manifold={manifold}; exact=1");
-        result.unwrap();
-        crate::topology::integrity::check(&b).unwrap();
-        let check = validation::check_brep(
-            &mut k,
-            &mut b.clone_standing_for_self().unwrap(),
-            validation::CheckLevel::Level2,
-        )
-        .unwrap();
-        assert!(check.lines().is_empty(), "{:?}", check.lines());
-        assert!(manifold && (volume - 1.0).abs() <= 1e-8, "{volume}");
+        assert!(manifold && (volume - 8.0).abs() <= 1e-9 * 8.0, "{volume}");
     }
 
     #[test]

@@ -12,7 +12,7 @@
 //!
 //! Deviations: no recursion; at most 127 curve cells and six halvings per branch. A kind
 //! without an enclosure, a nonfinite enclosure, or an exhausted budget proves nothing.
-//! NURBS degree is at most 18 here: the factorials in curve_derivs_over are then exact
+//! NURBS degree is at most 18 here: the factorials in `curve_derivs_over` are then exact
 //! binary64 integers. Lines are evaluated on their definition, not a rounded fitted form.
 
 use crate::blend::fillet_section::certificate::{curve_derivs_over, NurbsCurve};
@@ -82,7 +82,10 @@ impl<'a> EnclosedCurve<'a> {
                     let nurb = line.natural_interval();
                     let domain = line.step_interval();
                     let length = Ivl::from(nurb.max()) - Ivl::from(nurb.min());
-                    if !(length.lo > 0.0) || crate::geom::tol::is_zero(nurb.length()) {
+                    if length.lo.is_nan()
+                        || length.lo <= 0.0
+                        || crate::geom::tol::is_zero(nurb.length())
+                    {
                         return Ok(None);
                     }
                     let along = if line.inside_out() {
